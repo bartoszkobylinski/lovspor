@@ -220,11 +220,34 @@ Auto-opened after PR #1 merge (dependabot config kicked in). Ignored until after
 - `astral-sh/setup-uv` → v7
 - pip dev dependencies group
 
-### Sprint 2 (next)
+### Sprint 2 Part A — Lovdata download (PR #6, MERGED 2026-04-22)
 
-Two PRs planned:
-- **Part A:** `LovdataClient.download(filename, dest)` — streaming + `.part` atomic rename + sha256 verification.
-- **Part B:** `src/lovspor/extraction/tarball.py` — `safe_extract_tarball()` using `tarfile.data_filter` (CVE-2007-4559). Plus a malicious fixture testing path-traversal rejection.
+Squashed to `feat: LovdataClient.download with streaming, integrity, and path traversal defense`. Added:
+
+- `DownloadResult` Pydantic model (frozen)
+- `LovdataClient.download(archive, dest_dir)` — streaming 64KB chunks, `.part` + atomic rename, sha256 + size verification, retry on transient failures
+- Two-layer path-traversal defense: `LovdataArchive.filename` Pydantic field_validator at the model boundary, `dest.parent == dest_dir` check at download
+
+Codex rounds: 2 (first found HIGH severity path traversal via `archive.filename`; fixed with two-layer defense).
+
+### Sprint 2 Part B — Safe tarball iteration (PR #7, in review)
+
+Branch `feat/safe-tarball-extraction`. Adds:
+
+- `src/lovspor/extraction/tarball.py` with `iter_tarball_xml(path) -> Iterator[TarballMember]`
+- **Memory posture:** members read fully into memory via `fh.read()`. Lovdata XML files are KB to a few MB each; streaming per-member would add complexity without benefit at this scale. Revisit if members ever grow to hundreds of MB.
+- Never calls `TarFile.extractall()` or `extract()` — uses read-only `extractfile()` so CVE-2007-4559 class is sidestepped entirely. No filesystem writes occur from member-provided paths.
+- Member-name validation rejects null bytes, absolute paths, parent references (POSIX + Windows separators).
+
+### Sprint 3 (planned)
+
+- Deterministic XML normalization + sha256 (hashing layer).
+- Markdown renderer (deterministic, with YAML front matter per `docs/data-model.md`).
+- Manifest read/write (tracks `doc_id -> xml_hash`).
+- Change detector (new / changed / removed / unchanged).
+- Git integration module (commit per changed doc, push to `lovverk`).
+- CLI wiring: `lovspor seed`, `lovspor sync`.
+- Scheduled sync workflow in `.github/workflows/sync.yml`.
 
 ## 13. Naming
 
