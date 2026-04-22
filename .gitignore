@@ -17,8 +17,10 @@ venv/
 .coverage
 .coverage.*
 htmlcov/
+.mutmut-cache
 .mutmut-cache/
 mutmut-stats.json
+html/
 .tox/
 
 # Environment
