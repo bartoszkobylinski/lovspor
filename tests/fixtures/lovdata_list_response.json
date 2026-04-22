@@ -1,0 +1,26 @@
+[
+    {
+        "filename": "gjeldende-lover.tar.bz2",
+        "description": "Gjeldende lover, ajourført med endringer",
+        "sizeBytes": "5844867",
+        "lastModified": "2026-04-22T01:31:00Z"
+    },
+    {
+        "filename": "lovtidend-avd1-2001-2025.tar.bz2",
+        "description": "Norsk Lovtidend avd. I - lover og sentrale forskrifter",
+        "sizeBytes": "69285552",
+        "lastModified": "2026-04-16T01:30:00Z"
+    },
+    {
+        "filename": "gjeldende-sentrale-forskrifter.tar.bz2",
+        "description": "Gjeldende sentrale forskrifter, ajourført med endringer",
+        "sizeBytes": "20996728",
+        "lastModified": "2026-04-22T01:31:00Z"
+    },
+    {
+        "filename": "lovtidend-avd1-2026.tar.bz2",
+        "description": "Norsk Lovtidend avd. I - lover og sentrale forskrifter",
+        "sizeBytes": "528319",
+        "lastModified": "2026-04-22T01:31:00Z"
+    }
+]

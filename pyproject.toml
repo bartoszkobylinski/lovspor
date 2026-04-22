@@ -74,6 +74,7 @@ select = [
 ]
 ignore = [
     "PLR0913",  # too many args — we enforce manually via review
+    "UP047",    # PEP 695 generic syntax — disabled until mutmut 2.x parser supports it
 ]
 
 [tool.ruff.lint.per-file-ignores]

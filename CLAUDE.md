@@ -57,7 +57,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - `tests/unit/` — fast, isolated, one module at a time. Every public function covered.
 - `tests/integration/` — pipeline end-to-end on real fixture tarballs and XML samples.
 - `tests/fixtures/` — real XML/JSON samples from Lovdata, captured once, committed, never regenerated unless source schema changes.
-- Mutation testing: `uv run mutmut run` — before opening PR, review score, fix gaps. Not in pre-commit (too slow). **mutmut 2.x only** — mutmut 3 has open bugs around editable installs and dataclasses.
+- Mutation testing: `uv run mutmut run` — before opening PR, review score, fix gaps. Not in pre-commit (too slow). **mutmut 2.x only** — mutmut 3 has open bugs around editable installs and dataclasses. Consequence: **no PEP 695 type parameter syntax** (`def foo[T](...)`), because mutmut 2's parser predates PEP 695 and crashes. Use `TypeVar` from `typing` instead. Ruff rule `UP047` is globally disabled to prevent accidental reintroduction.
 - HTTP transport mocked with `pytest-httpx` only. Logic is never mocked.
 
 ## Forbidden
