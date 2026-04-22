@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mutmut-cache/
+mutmut-stats.json
+.tox/
+
+# Environment
+.env
+.envrc
+
+# Local data — never commit (see CLAUDE.md and docs/legal-and-sources.md)
+data/cache/
+data/raw/
+data/state/
+*.tar.bz2
+*.tar.gz
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
