@@ -5,6 +5,7 @@ https://api.lovdata.no/v1/publicData/list on 2026-04-22, licensed under
 NLOD 2.0, attributed to Lovdata.
 """
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -15,15 +16,29 @@ import pytest
 from pydantic import ValidationError
 from pytest_httpx import HTTPXMock
 
-from lovspor.errors import ConfigError, NetworkError, ParseError
+from lovspor.errors import ConfigError, ExtractionError, NetworkError, ParseError
 from lovspor.sources.lovdata import (
     DEFAULT_BASE_URL,
+    DownloadResult,
     LovdataArchive,
     LovdataClient,
 )
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 _LIST_URL = f"{DEFAULT_BASE_URL}/list"
+_TEST_FILENAME = "gjeldende-lover.tar.bz2"
+_GET_URL = f"{DEFAULT_BASE_URL}/get/{_TEST_FILENAME}"
+
+
+def _make_archive(size_bytes: int, filename: str = _TEST_FILENAME) -> LovdataArchive:
+    return LovdataArchive.model_validate(
+        {
+            "filename": filename,
+            "description": "test",
+            "sizeBytes": str(size_bytes),
+            "lastModified": "2026-04-22T01:31:00Z",
+        },
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -303,3 +318,184 @@ def test_explicit_zero_timeout_does_not_fall_through_to_env(
     monkeypatch.setenv("LOVSPOR_HTTP_TIMEOUT_SECONDS", "42.0")
     with LovdataClient(timeout_seconds=0.0) as client:
         assert client._client.timeout.connect == 0.0
+
+
+def test_download_result_is_frozen() -> None:
+    result = DownloadResult(
+        filename="x.tar.bz2",
+        path=Path("/tmp/x.tar.bz2"),  # noqa: S108
+        size_bytes=100,
+        sha256="a" * 64,
+    )
+    with pytest.raises(ValidationError):
+        result.filename = "mutated"  # type: ignore[misc]
+
+
+def test_download_result_carries_all_fields() -> None:
+    result = DownloadResult(
+        filename="gjeldende-lover.tar.bz2",
+        path=Path("/tmp/gjeldende-lover.tar.bz2"),  # noqa: S108
+        size_bytes=5844867,
+        sha256="abcdef0123456789" * 4,
+    )
+    assert result.filename == "gjeldende-lover.tar.bz2"
+    assert result.path == Path("/tmp/gjeldende-lover.tar.bz2")  # noqa: S108
+    assert result.size_bytes == 5844867
+    assert result.sha256 == "abcdef0123456789" * 4
+
+
+def test_download_writes_file_and_returns_integrity_data(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    payload = b"hello lovdata" * 100
+    httpx_mock.add_response(url=_GET_URL, content=payload)
+    archive = _make_archive(size_bytes=len(payload))
+    with LovdataClient() as client:
+        result = client.download(archive, tmp_path)
+    assert result.filename == _TEST_FILENAME
+    assert result.path == tmp_path / _TEST_FILENAME
+    assert result.size_bytes == len(payload)
+    assert result.sha256 == hashlib.sha256(payload).hexdigest()
+    assert result.path.read_bytes() == payload
+
+
+def test_download_leaves_no_part_file_on_success(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    payload = b"content"
+    httpx_mock.add_response(url=_GET_URL, content=payload)
+    archive = _make_archive(size_bytes=len(payload))
+    with LovdataClient() as client:
+        client.download(archive, tmp_path)
+    assert not (tmp_path / f"{_TEST_FILENAME}.part").exists()
+
+
+def test_download_does_not_retry_on_4xx(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    httpx_mock.add_response(url=_GET_URL, status_code=404)
+    archive = _make_archive(size_bytes=100)
+    with LovdataClient() as client, pytest.raises(NetworkError):
+        client.download(archive, tmp_path)
+    assert not (tmp_path / _TEST_FILENAME).exists()
+    assert not (tmp_path / f"{_TEST_FILENAME}.part").exists()
+
+
+def test_download_retries_on_5xx_then_succeeds(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    payload = b"after retry"
+    httpx_mock.add_response(url=_GET_URL, status_code=503)
+    httpx_mock.add_response(url=_GET_URL, content=payload)
+    archive = _make_archive(size_bytes=len(payload))
+    with LovdataClient() as client:
+        result = client.download(archive, tmp_path)
+    assert result.path.read_bytes() == payload
+
+
+def test_download_retries_on_connect_error_then_succeeds(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    payload = b"recovered"
+    httpx_mock.add_exception(httpx.ConnectError("reset"))
+    httpx_mock.add_response(url=_GET_URL, content=payload)
+    archive = _make_archive(size_bytes=len(payload))
+    with LovdataClient() as client:
+        result = client.download(archive, tmp_path)
+    assert result.path.read_bytes() == payload
+
+
+def test_download_rejects_size_mismatch_and_cleans_up(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    short_payload = b"too short"
+    for _ in range(3):
+        httpx_mock.add_response(url=_GET_URL, content=short_payload)
+    archive = _make_archive(size_bytes=1000)
+    with LovdataClient() as client, pytest.raises(NetworkError, match="size mismatch"):
+        client.download(archive, tmp_path)
+    assert not (tmp_path / _TEST_FILENAME).exists()
+    assert not (tmp_path / f"{_TEST_FILENAME}.part").exists()
+
+
+def test_download_creates_missing_parent_directory(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    payload = b"x"
+    httpx_mock.add_response(url=_GET_URL, content=payload)
+    archive = _make_archive(size_bytes=1)
+    nested = tmp_path / "cache" / "nested"
+    with LovdataClient() as client:
+        result = client.download(archive, nested)
+    assert result.path == nested / _TEST_FILENAME
+    assert result.path.exists()
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "../escape.tar.bz2",
+        "/etc/passwd",
+        "sub/file.tar.bz2",
+        "foo\\bar.tar.bz2",
+        "..",
+        ".",
+        "",
+        "with\x00null.tar.bz2",
+        "..\\..\\Windows\\System32\\evil",
+    ],
+)
+def test_lovdata_archive_rejects_path_traversal_filenames(hostile: str) -> None:
+    with pytest.raises(ValidationError):
+        LovdataArchive.model_validate(
+            {
+                "filename": hostile,
+                "description": "attack",
+                "sizeBytes": "1",
+                "lastModified": "2026-04-22T01:31:00Z",
+            },
+        )
+
+
+def test_lovdata_archive_accepts_real_filenames() -> None:
+    """Regression guard: the four real Lovdata filenames all pass validation."""
+    real_filenames = [
+        "gjeldende-lover.tar.bz2",
+        "gjeldende-sentrale-forskrifter.tar.bz2",
+        "lovtidend-avd1-2001-2025.tar.bz2",
+        "lovtidend-avd1-2026.tar.bz2",
+    ]
+    for name in real_filenames:
+        archive = LovdataArchive.model_validate(
+            {
+                "filename": name,
+                "description": "ok",
+                "sizeBytes": "1",
+                "lastModified": "2026-04-22T01:31:00Z",
+            },
+        )
+        assert archive.filename == name
+
+
+def test_download_defense_in_depth_rejects_traversal_via_model_construct(
+    tmp_path: Path,
+) -> None:
+    """Defense in depth: if schema validation is bypassed (e.g. via
+    model_construct), the download() method itself must still refuse to
+    write outside dest_dir."""
+    archive = LovdataArchive.model_construct(
+        filename="../escape.tar.bz2",
+        description="bypassed",
+        size_bytes=1,
+        last_modified=datetime.fromisoformat("2026-04-22T01:31:00+00:00"),
+    )
+    with LovdataClient() as client, pytest.raises(ExtractionError, match="outside dest_dir"):
+        client.download(archive, tmp_path)
+    assert not (tmp_path.parent / "escape.tar.bz2").exists()

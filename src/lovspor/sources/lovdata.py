@@ -8,15 +8,23 @@ Data is licensed under NLOD 2.0, attributed to Lovdata. See
 docs/legal-and-sources.md.
 """
 
+import hashlib
 import os
 from datetime import datetime
+from pathlib import Path
 from types import TracebackType
 from typing import Self
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from lovspor.errors import ConfigError, NetworkError, ParseError
+from lovspor.errors import (
+    ConfigError,
+    ExtractionError,
+    LovsporError,
+    NetworkError,
+    ParseError,
+)
 from lovspor.retry import retry_with_backoff
 
 DEFAULT_BASE_URL = "https://api.lovdata.no/v1/publicData"
@@ -27,6 +35,7 @@ _RETRYABLE_HTTP_STATUSES = frozenset({500, 502, 503, 504})
 _HTTP_ERROR_THRESHOLD = 400
 _RETRY_ATTEMPTS = 3
 _RETRY_BASE_DELAY_SECONDS = 1.0
+_DOWNLOAD_CHUNK_BYTES = 64 * 1024
 
 
 class LovdataArchive(BaseModel):
@@ -42,6 +51,44 @@ class LovdataArchive(BaseModel):
     description: str
     size_bytes: int = Field(alias="sizeBytes")
     last_modified: datetime = Field(alias="lastModified")
+
+    @field_validator("filename")
+    @classmethod
+    def _reject_path_traversal(cls, v: str) -> str:
+        """Reject filenames that could escape a download directory.
+
+        Upstream metadata is not trusted for filesystem operations. A
+        filename like ``"../escape.tar.bz2"`` or ``"/etc/passwd"`` must
+        not slip into ``dest_dir / archive.filename``.
+        """
+        if not v:
+            raise ValueError("filename must not be empty")
+        if "\x00" in v:
+            raise ValueError("filename must not contain null bytes")
+        if "/" in v or "\\" in v:
+            raise ValueError(
+                f"filename must not contain path separators: {v!r}",
+            )
+        if v in {".", ".."}:
+            raise ValueError(
+                f"filename must not be a directory reference: {v!r}",
+            )
+        return v
+
+
+class DownloadResult(BaseModel):
+    """Outcome of a successful archive download.
+
+    ``sha256`` is the raw hex digest (64 chars, no ``sha256:`` prefix) of the
+    bytes written to disk. ``size_bytes`` is the actual on-disk size.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    filename: str
+    path: Path
+    size_bytes: int
+    sha256: str
 
 
 class _RetryableNetworkError(NetworkError):
@@ -160,3 +207,81 @@ class LovdataClient:
         _raise_for_status(response, url)
         payload = _parse_json_array(response, url)
         return _parse_archives(payload, url)
+
+    def download(
+        self,
+        archive: LovdataArchive,
+        dest_dir: Path,
+    ) -> DownloadResult:
+        """Stream /get/{filename} to dest_dir/{filename}.
+
+        Atomic: streams to ``{filename}.part``, renames on successful
+        verify. Computes sha256 during streaming. Verifies actual
+        byte count matches ``archive.size_bytes`` (a mismatch is
+        treated as transient transport truncation and retried).
+
+        Retries on transient 5xx, network errors, and size mismatch.
+
+        Raises:
+            NetworkError: non-retryable HTTP status or final retry
+                failure.
+        """
+        return retry_with_backoff(
+            lambda: self._download_once(archive, dest_dir),
+            attempts=_RETRY_ATTEMPTS,
+            base_delay_seconds=_RETRY_BASE_DELAY_SECONDS,
+            retryable=(_RetryableNetworkError,),
+        )
+
+    def _download_once(
+        self,
+        archive: LovdataArchive,
+        dest_dir: Path,
+    ) -> DownloadResult:
+        dest = dest_dir / archive.filename
+        if dest.parent != dest_dir:
+            raise ExtractionError(
+                f"archive filename {archive.filename!r} resolves outside dest_dir {dest_dir}",
+            )
+        part = dest.with_suffix(dest.suffix + ".part")
+        try:
+            size, sha256 = self._stream_to_part(archive, part)
+        except (LovsporError, OSError):
+            part.unlink(missing_ok=True)
+            raise
+        if size != archive.size_bytes:
+            part.unlink(missing_ok=True)
+            url = f"{self._base_url}/get/{archive.filename}"
+            raise _RetryableNetworkError(
+                f"GET {url}: size mismatch; expected {archive.size_bytes}, got {size}",
+            )
+        part.replace(dest)
+        return DownloadResult(
+            filename=archive.filename,
+            path=dest,
+            size_bytes=size,
+            sha256=sha256,
+        )
+
+    def _stream_to_part(
+        self,
+        archive: LovdataArchive,
+        part: Path,
+    ) -> tuple[int, str]:
+        url = f"{self._base_url}/get/{archive.filename}"
+        part.parent.mkdir(parents=True, exist_ok=True)
+        hasher = hashlib.sha256()
+        size = 0
+        try:
+            with self._client.stream("GET", url) as response:
+                _raise_for_status(response, url)
+                with part.open("wb") as fh:
+                    for chunk in response.iter_bytes(_DOWNLOAD_CHUNK_BYTES):
+                        fh.write(chunk)
+                        hasher.update(chunk)
+                        size += len(chunk)
+        except httpx.RequestError as exc:
+            raise _RetryableNetworkError(
+                f"GET {url}: {exc.__class__.__name__}: {exc}",
+            ) from exc
+        return size, hasher.hexdigest()
