@@ -33,7 +33,7 @@ from lxml import etree
 from lovspor.errors import ParseError
 
 
-def _safe_parser() -> etree.XMLParser:
+def safe_parser() -> etree.XMLParser:
     return etree.XMLParser(
         resolve_entities=False,
         no_network=True,
@@ -58,7 +58,7 @@ def canonicalize_xml(xml_bytes: bytes) -> bytes:
             unresolved custom entities that C14N cannot serialize.
     """
     try:
-        tree = etree.parse(BytesIO(xml_bytes), parser=_safe_parser())
+        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
     except etree.XMLSyntaxError as exc:
         raise ParseError(f"malformed XML: {exc}") from exc
     try:
