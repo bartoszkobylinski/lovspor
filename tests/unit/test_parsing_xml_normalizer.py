@@ -129,6 +129,18 @@ def test_canonicalize_rejects_documents_with_external_entities(
     assert "LEAKED_SECRET_CONTENT" not in str(exc_info.value)
 
 
+def test_canonicalize_rejects_excessively_deep_xml() -> None:
+    """Mutation hardening: huge_tree=False protects against XML bombs
+    that exploit deep nesting rather than entity expansion. With our
+    safe_parser config (huge_tree=False), lxml caps nesting at ~256
+    levels. A mutation flipping huge_tree to True would let the same
+    payload through. Codex PR #13 reproducer at depth 256."""
+    depth = 300
+    deep_xml = (b"<r>" * depth) + (b"</r>" * depth)
+    with pytest.raises(ParseError, match="malformed XML"):
+        canonicalize_xml(deep_xml)
+
+
 def test_canonicalize_rejects_billion_laughs_bomb() -> None:
     """Entity expansion bomb does not expand: &lol4; is never resolved
     into its 10000-character payload. ParseError is raised instead."""

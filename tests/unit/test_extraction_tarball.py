@@ -165,6 +165,18 @@ def test_iter_tarball_xml_rejects_absolute_path(tmp_path: Path) -> None:
         list(iter_tarball_xml(archive))
 
 
+def test_iter_tarball_xml_rejects_windows_absolute_path(tmp_path: Path) -> None:
+    """Mutation hardening: leading backslash absolute paths must also be
+    rejected. Without this test, a mutation that drops '\\\\' from the
+    startswith() tuple ('/', '\\\\') would pass on POSIX-style tests."""
+    archive = _build_tarball(
+        tmp_path / "win-absolute.tar.bz2",
+        lambda tar: _add_file(tar, "\\evil.xml", b"<evil/>"),
+    )
+    with pytest.raises(ExtractionError, match="absolute"):
+        list(iter_tarball_xml(archive))
+
+
 def test_check_safe_name_rejects_null_byte() -> None:
     """Python's tarfile truncates names at null bytes on write (POSIX header
     limitation), so we cannot build an integration fixture easily. The

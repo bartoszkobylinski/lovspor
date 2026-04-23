@@ -169,6 +169,35 @@ mutmut 2.5.1 pinned in `pyproject.toml`. mutmut 3.x has open bugs:
 
 When mutmut 3.x stabilizes (track their issue tracker), revisit this constraint.
 
+## 9a. Mutation testing baseline expectations
+
+Decided 2026-04-23 after Sprint 3 PR #11. Codex runs mutmut on every PR review (see CLAUDE.md, §Testing strategy). The kill rate hovers around **75–80%** with **~90–100 surviving mutants** at Sprint 3 close. This is the expected baseline, **not a quality emergency**.
+
+**Why so many survivors?** Categorization based on Codex reports across PR #5 → #11:
+
+| Category | Approx share | Why it survives | Action |
+|---|---|---|---|
+| String content (`"GET {url}"` → `"XXGET {url}XX"` etc.) | ~50% | Tests check structural behavior (exception type, response shape), not exact text. Mutations are semantically equivalent. | Accept. Killing requires brittle exact-text assertions. |
+| Default arg values (`timeout=120.0` → `121.0`) | ~15% | Tests pass explicit values; defaults often unexercised. | Accept unless the default is load-bearing. |
+| CLI metadata (Typer `help="..."`) | ~10% | Pure documentation strings. | Accept — these are not behavior. |
+| TypeVar names (`TypeVar("T")` → `TypeVar("XXT")`) | ~2% | Name is a label only. | Accept — equivalent. |
+| **lxml `no_network` flag** | ~1% | lxml does not expose this flag; `resolve_entities=False` already short-circuits any code path that would attempt network access, making it dead-code from a testability standpoint. | Accept — register, document, move on. |
+| **lxml `huge_tree` flag** | ~1% | **Killable.** `huge_tree=False` enforces a 256-level nesting cap that `huge_tree=True` removes. Test `test_canonicalize_rejects_excessively_deep_xml` (PR #13) parses a 300-level payload and asserts ParseError, killing the mutation. Don't lump this with `no_network`. | **Fix** — added in PR #13 after Codex reviewer caught the misclassification. |
+| **Real critical-path gaps** | ~5–10% | Genuine missing test coverage that lets a real bug pass. | **Fix promptly** — Codex flags these per PR. |
+
+**Policy:**
+
+- Codex flags critical-path survivors per PR; we fix those on the same branch.
+- Equivalent survivors are **registered, not chased**. We do not configure mutmut to filter them out — we want the raw signal so a future regression that adds new equivalent mutants is visible.
+- Survivor count and kill rate are tracked in PR descriptions (Codex always reports them).
+
+**Revisit triggers** (when this decision should be reopened):
+
+1. Survivor count exceeds **150** (project growth makes the noise unmanageable).
+2. Kill rate drops below **70%** (signals genuine test coverage rot).
+3. A real bug ships that mutation testing should have caught (signals our equivalence-class judgment is wrong).
+4. mutmut 3 ships a stable filter API that lets us suppress equivalents cleanly without configuration drift.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:
