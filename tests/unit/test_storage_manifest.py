@@ -58,8 +58,52 @@ def test_manifest_is_frozen() -> None:
         mf.version = 99  # type: ignore[misc]
 
 
-def test_manifest_default_version() -> None:
-    assert _manifest().version == MANIFEST_VERSION
+def test_manifest_default_version_is_literal_one() -> None:
+    """Pin the on-disk manifest version to literal 1 (not the
+    MANIFEST_VERSION constant). A mutation that changes the constant
+    would otherwise pass this test trivially."""
+    assert _manifest().version == 1
+    assert MANIFEST_VERSION == 1
+
+
+def test_manifest_record_status_rejects_unknown_value() -> None:
+    """MEDIUM regression guard: ManifestRecord.status is constrained to
+    'current' | 'removed'. A typo like 'curent' previously slipped
+    through and was silently treated as 'not current' by the change
+    detector, producing false-positive 'new' classifications. Codex
+    PR #11 reproducer."""
+    with pytest.raises(ValidationError):
+        ManifestRecord(
+            doc_type="lov",
+            xml_hash="a",
+            markdown_path="lover/x.md",
+            source_dataset="gjeldende-lover",
+            last_seen=datetime(2026, 4, 22, 1, 31, tzinfo=UTC),
+            status="curent",  # type: ignore[arg-type]
+        )
+
+
+def test_read_manifest_rejects_unknown_status_in_record(tmp_path: Path) -> None:
+    """End-to-end: a manifest file with an invalid status value must
+    fail to load, not silently slip through."""
+    payload = {
+        "version": 1,
+        "generated_at": "2026-04-22T06:00:00+00:00",
+        "documents": {
+            "x": {
+                "doc_type": "lov",
+                "xml_hash": "a",
+                "markdown_path": "lover/x.md",
+                "source_dataset": "gjeldende-lover",
+                "last_seen": "2026-04-22T01:31:00+00:00",
+                "status": "stale",
+            },
+        },
+    }
+    path = tmp_path / "bad-status.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ParseError, match="invalid manifest schema"):
+        read_manifest(path)
 
 
 def test_write_read_round_trip_preserves_data(tmp_path: Path) -> None:

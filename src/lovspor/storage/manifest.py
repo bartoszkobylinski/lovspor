@@ -14,12 +14,14 @@ literally), with a single trailing newline.
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from lovspor.errors import ParseError
 
 MANIFEST_VERSION = 1
+ManifestStatus = Literal["current", "removed"]
 
 
 class ManifestRecord(BaseModel):
@@ -32,7 +34,7 @@ class ManifestRecord(BaseModel):
     markdown_path: str
     source_dataset: str
     last_seen: datetime
-    status: str  # "current" | "removed"
+    status: ManifestStatus
 
 
 class Manifest(BaseModel):
