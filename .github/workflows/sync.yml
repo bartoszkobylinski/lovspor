@@ -1,0 +1,86 @@
+name: Sync legal corpus
+
+# Lovdata publishes nightly tarball drops at ~01:30 UTC (see decisions.md
+# §3). We run at 04:00 UTC = ~05:00–06:00 CET to catch the latest data
+# with comfortable margin. Manual dispatch is also supported for testing
+# and for re-runs after a transient upstream failure.
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+# Engine repo only needs read access to itself; corpus push uses the deploy
+# key configured in repo secrets (LOVVERK_DEPLOY_KEY).
+permissions:
+  contents: read
+
+# Only one sync at a time. A second invocation while one is running would
+# either race or duplicate work; queue with cancel-in-progress=false so
+# the running job finishes before the next starts.
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LOVVERK_PATH: ${{ github.workspace }}/../lovverk
+      LOVSPOR_DATA_DIR: ${{ github.workspace }}/../lovspor-data
+      LOVSPOR_OUTPUT_REPO_PATH: ${{ github.workspace }}/../lovverk
+    steps:
+      - name: Checkout lovspor (engine)
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.10.0"
+          enable-cache: true
+
+      - name: Setup Python
+        run: uv python install 3.12
+
+      - name: Sync engine dependencies
+        run: uv sync --frozen
+
+      - name: Configure SSH for lovverk push
+        env:
+          DEPLOY_KEY: ${{ secrets.LOVVERK_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/lovverk_deploy_key
+          chmod 600 ~/.ssh/lovverk_deploy_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<'EOF'
+          Host github.com
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/lovverk_deploy_key
+            IdentitiesOnly yes
+          EOF
+
+      - name: Clone lovverk corpus
+        run: git clone git@github.com:bartoszkobylinski/lovverk.git "$LOVVERK_PATH"
+
+      - name: Configure git author for sync commits
+        working-directory: ${{ env.LOVVERK_PATH }}
+        run: |
+          git config user.name "lovspor-sync[bot]"
+          git config user.email "lovspor-sync@noreply.github.com"
+          git config commit.gpgsign false
+
+      - name: Run lovspor sync
+        run: uv run lovspor sync
+
+      - name: Push corpus changes if any
+        working-directory: ${{ env.LOVVERK_PATH }}
+        run: |
+          if git log origin/main..HEAD --oneline | grep -q .; then
+            echo "Commits ahead of origin — pushing..."
+            git push origin main
+          else
+            echo "No new commits — nothing to push."
+          fi
