@@ -31,6 +31,7 @@ class LegalDocumentFrontMatter(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: str
+    slug: str
     type: str
     ref_id: str | None
     title: str
@@ -54,6 +55,7 @@ class FrontmatterContext(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     doc_id: str
+    slug: str
     doc_type: str
     xml_hash: str
     source_dataset: str
@@ -68,9 +70,10 @@ def build_frontmatter(
     context: FrontmatterContext,
 ) -> LegalDocumentFrontMatter:
     """Parse Lovdata HTML, extract metadata, and combine with caller context."""
-    extracted = _extract_xml_fields(xml_bytes)
+    extracted = extract_xml_metadata(xml_bytes)
     return LegalDocumentFrontMatter(
         id=context.doc_id,
+        slug=context.slug,
         type=context.doc_type,
         ref_id=extracted["ref_id"],
         title=extracted["title"],
@@ -89,7 +92,7 @@ def build_frontmatter(
     )
 
 
-def _extract_xml_fields(xml_bytes: bytes) -> dict[str, Any]:
+def extract_xml_metadata(xml_bytes: bytes) -> dict[str, Any]:
     try:
         tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
     except etree.XMLSyntaxError as exc:

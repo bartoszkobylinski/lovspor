@@ -25,7 +25,13 @@ ManifestStatus = Literal["current", "removed"]
 
 
 class ManifestRecord(BaseModel):
-    """Per-document state in the manifest."""
+    """Per-document state in the manifest.
+
+    ``slug`` and ``title`` were added in Sprint 4 to support human-readable
+    filenames and auto-generated INDEX pages. Both default to ``None`` for
+    backward compatibility with manifests written by Sprint 3 engines.
+    Records with ``slug is None`` trigger migration on the next sync.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -35,6 +41,8 @@ class ManifestRecord(BaseModel):
     source_dataset: str
     last_seen: datetime
     status: ManifestStatus
+    slug: str | None = None
+    title: str | None = None
 
 
 class Manifest(BaseModel):

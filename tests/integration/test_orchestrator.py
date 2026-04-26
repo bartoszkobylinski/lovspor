@@ -10,6 +10,7 @@ import io
 import json
 import subprocess
 import tarfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,14 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from lovspor.errors import ConfigError
+from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import DEFAULT_BASE_URL
+from lovspor.storage.manifest import (
+    Manifest,
+    ManifestRecord,
+    write_manifest,
+)
 from lovspor.sync.orchestrator import run_sync
 
 
@@ -35,6 +42,25 @@ def _minimal_law_html(doc_id: str, title: str) -> bytes:
         '<main id="dokument">'
         f"<h1>{title}</h1>"
         f'<article class="legalP" id="ledd-1">Body of {title}.</article>'
+        "</main></body></html>"
+    ).encode()
+
+
+def _law_with_extra(title: str, extra_body: str) -> bytes:
+    """Variant of _minimal_law_html that lets the test vary body content
+    independently of the title (so the slug stays stable across runs)."""
+    return (
+        '<!DOCTYPE html><html lang="nb"><head><title>'
+        f"{title}</title></head>"
+        '<body><header class="documentHeader"><dl>'
+        '<dt class="title">Tittel</dt>'
+        f'<dd class="title">{title}</dd>'
+        '<dt class="refid">RefID</dt>'
+        '<dd class="refid">lov/x</dd>'
+        "</dl></header>"
+        '<main id="dokument">'
+        f"<h1>{title}</h1>"
+        f'<article class="legalP" id="ledd-1">{extra_body}</article>'
         "</main></body></html>"
     ).encode()
 
@@ -108,6 +134,35 @@ def _no_real_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("lovspor.retry.time.sleep", lambda _seconds: None)
 
 
+def test_run_sync_writes_index_files_for_both_datasets(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """End-to-end: a successful sync writes lover/INDEX.md and
+    forskrifter/INDEX.md listing every current doc."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_extra("Skatteloven", "body"))],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    lover_index = corpus / "lover" / "INDEX.md"
+    forskrifter_index = corpus / "forskrifter" / "INDEX.md"
+    assert lover_index.exists()
+    assert forskrifter_index.exists()
+    assert "skatteloven" in lover_index.read_text(encoding="utf-8")
+    assert "_0 current documents_" in forskrifter_index.read_text(encoding="utf-8")
+
+
 def test_run_sync_seeds_empty_corpus_with_single_law(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
@@ -135,7 +190,7 @@ def test_run_sync_seeds_empty_corpus_with_single_law(
     assert report.removed_count == 0
     assert report.unchanged_count == 0
 
-    md_path = corpus / "lover" / "lov-19990326-014.md"
+    md_path = corpus / "lover" / "skatteloven.md"
     assert md_path.exists()
     md = md_path.read_text(encoding="utf-8")
     assert 'title: "Skatteloven"' in md
@@ -190,6 +245,252 @@ def test_run_sync_is_idempotent_on_unchanged_state(
     assert status.stdout == ""
 
 
+def test_per_document_commit_mode_creates_one_commit_per_change(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """In per-document mode each changed/new/removed/renamed doc gets
+    its own commit, plus a final 'sync: update manifest' commit."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    body = "Stable body content."
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_extra("First", body)),
+            ("nl/lov-2.xml", _law_with_extra("Second", body)),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        git_commit_mode="per-document",
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)
+
+    # Initial seed: 2 add commits + 1 manifest commit = 3
+    assert _git_commit_count(corpus) == 3
+    log = _git_log_subjects(corpus)
+    assert "add(lov): first" in log
+    assert "add(lov): second" in log
+    assert "sync: update manifest" in log
+
+
+def test_single_commit_mode_creates_one_commit_per_sync(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_extra("Alpha", "body")),
+            ("nl/lov-2.xml", _law_with_extra("Beta", "body")),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        git_commit_mode="single",
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)
+
+    assert _git_commit_count(corpus) == 1
+    log = _git_log_subjects(corpus)
+    assert "sync: 2 new" in log
+
+
+def test_migration_creates_one_bulk_commit_even_in_per_document_mode(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Sprint 3 -> Sprint 4 transition: a manifest with slug=None
+    records triggers a single 'migration: ...' commit, overriding
+    per-document mode."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    body = "Body that does not change."
+    xml = _law_with_extra("Skattie", body)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-x.xml", xml)])
+    _build_tarball(forskrifter_tar, [])
+
+    # Pre-write a Sprint-3-style manifest: same hash, no slug,
+    # markdown_path uses old doc_id naming.
+    legacy_path = corpus / "lover" / "lov-x.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Legacy file\n", encoding="utf-8")
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 25, tzinfo=UTC),
+        documents={
+            "lov-x": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(xml),
+                markdown_path="lover/lov-x.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 25, tzinfo=UTC),
+                status="current",
+                # slug=None and title=None — Sprint 3 record
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "Sprint 3 seed"], cwd=corpus, check=True)
+    commits_before = _git_commit_count(corpus)
+
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        git_commit_mode="per-document",
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)
+
+    # Migration: exactly one new commit covering everything
+    assert _git_commit_count(corpus) == commits_before + 1
+    log = _git_log_subjects(corpus)
+    assert "migration: rename" in log
+
+    assert (corpus / "lover" / "skattie.md").exists()
+    assert not (corpus / "lover" / "lov-x.md").exists()
+
+
+def _git_log_subjects(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "log", "--format=%s"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def test_collision_resolution_is_scoped_per_dataset(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """MEDIUM regression guard: a law and a regulation that slugify to the
+    same name must coexist as lover/<slug>.md and forskrifter/<slug>.md.
+    They live in different subdirectories so there is no real filename
+    conflict. Codex PR #17 reproducer."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    body = "body"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_extra("Skatteloven", body))],
+    )
+    _build_tarball(
+        forskrifter_tar,
+        [("sf/sf-1.xml", _law_with_extra("Skatteloven", body))],
+    )
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    # Both keep bare 'skatteloven' — different subdirs, no conflict.
+    assert (corpus / "lover" / "skatteloven.md").exists()
+    assert (corpus / "forskrifter" / "skatteloven.md").exists()
+    # Confirm no avoidable -2 suffix was applied.
+    assert not (corpus / "lover" / "skatteloven-2.md").exists()
+    assert not (corpus / "forskrifter" / "skatteloven-2.md").exists()
+
+
+def test_tombstone_preserves_slug_and_title_for_audit_trail(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """LOW regression guard: when a doc is removed upstream, its
+    manifest tombstone must keep slug and title (along with the other
+    historical fields) so the audit trail and any downstream INDEX-
+    style historical view remain reconstructable. Codex PR #17
+    reproducer."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-gone.xml", _law_with_extra("Disappearingloven", "body"))],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    _build_tarball(lover_tar, [])  # upstream dropped the doc
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    record = manifest["documents"]["lov-gone"]
+    assert record["status"] == "removed"
+    assert record["slug"] == "disappearingloven"
+    assert record["title"] == "Disappearingloven"
+
+
+def test_run_sync_renames_when_upstream_slug_changes(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """If Lovdata renames a kortform (or fixes a typo in title), the
+    same content gets a different slug. The orchestrator must delete
+    the old path and write the new path even though xml_hash is
+    unchanged. Migration from a Sprint 3 manifest with slug=None goes
+    through the same code path."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    body = "Same body, only the title (and thus slug) changes."
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-x.xml", _law_with_extra("Oldname", body))],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+    assert (corpus / "lover" / "oldname.md").exists()
+
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-x.xml", _law_with_extra("Newname", body))],
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert not (corpus / "lover" / "oldname.md").exists()
+    assert (corpus / "lover" / "newname.md").exists()
+
+
 def test_run_sync_retains_removed_docs_as_tombstones(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
@@ -237,6 +538,9 @@ def test_run_sync_detects_and_commits_changed_document(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
 ) -> None:
+    """Content change with stable slug: same title → same slug → file
+    is overwritten in place (no rename). Verifies that change_detector
+    + orchestrator correctly updates only the file content."""
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -245,26 +549,25 @@ def test_run_sync_detects_and_commits_changed_document(
     forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
     _build_tarball(
         lover_tar,
-        [("nl/lov-x.xml", _minimal_law_html("x", "Version One"))],
+        [("nl/lov-x.xml", _law_with_extra("Stableloven", "First version note."))],
     )
     _build_tarball(forskrifter_tar, [])
 
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
-    # Rebuild tarball with changed content
     _build_tarball(
         lover_tar,
-        [("nl/lov-x.xml", _minimal_law_html("x", "Version Two"))],
+        [("nl/lov-x.xml", _law_with_extra("Stableloven", "Second version note."))],
     )
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
     assert report.changed_count == 1
     assert report.new_count == 0
-    md = (corpus / "lover" / "lov-x.md").read_text(encoding="utf-8")
-    assert "Version Two" in md
-    assert "Version One" not in md
+    md = (corpus / "lover" / "stableloven.md").read_text(encoding="utf-8")
+    assert "Second version note" in md
+    assert "First version note" not in md
 
 
 def test_run_sync_removes_disappearing_document(
@@ -285,14 +588,14 @@ def test_run_sync_removes_disappearing_document(
 
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
-    assert (corpus / "lover" / "lov-gone.md").exists()
+    assert (corpus / "lover" / "to-be-removed.md").exists()
 
     _build_tarball(lover_tar, [])  # upstream dropped the doc
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
     assert report.removed_count == 1
-    assert not (corpus / "lover" / "lov-gone.md").exists()
+    assert not (corpus / "lover" / "to-be-removed.md").exists()
 
 
 def test_run_sync_raises_config_error_when_corpus_not_a_git_repo(

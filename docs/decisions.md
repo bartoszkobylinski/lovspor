@@ -298,16 +298,47 @@ Candidates if we keep going:
 - `lovspor render`, `lovspor validate`, `lovspor stats` CLI commands documented in PR #1's `docs/operations.md` planning.
 - Status badge + workflow runtime stats reporting.
 
-## 12a. git_commit_mode kept as forward declaration
+## 12a. git_commit_mode is now implemented (Sprint 4)
 
-Decided 2026-04-26 after Sprint 3 PR #15. `Settings.git_commit_mode` is validated to `'per-document' | 'single'` but currently only `'single'` is implemented (the orchestrator commits all changed docs in one commit). Codex review of PR #15 noted the field is unread outside settings/tests.
+Originally decided 2026-04-26 to keep `Settings.git_commit_mode` as a forward declaration. Implemented 2026-04-26 in Sprint 4 PR #17. Three policies now wired:
 
-We keep the field rather than remove it because:
-- Removing-then-reintroducing churns the public Settings schema and any `.env` examples.
-- The validation already pins the contract; adding the implementation later is a one-place change in `_commit_staged`.
-- The semantic value (`'per-document' | 'single'`) is the API users would expect from a sync engine.
+- **`per-document` (default)**: one commit per add/update/rename/remove, with conventional-commit messages (`add(lov): skatteloven`, `update(forskrift): trafikkforskriften`, etc.), then a final `sync: update manifest and index` commit.
+- **`single`**: one bulk commit per sync (`sync: N new, M changed, K renamed, L removed`).
+- **Migration override**: when any rename has `prior.slug is None` (Sprint 3 manifest with no slug field), the orchestrator forces a single bulk commit (`migration: rename N documents to slug-based filenames`) regardless of `git_commit_mode`. This keeps the Sprint 3 → Sprint 4 transition as one auditable event in history rather than thousands of individual renames. User decision documented in conversation 2026-04-26 (option A — bulk migration commit).
 
-The unread-field state is registered as known and accepted, not a regression.
+## 12b. Slug-based filenames (Sprint 4)
+
+Decided 2026-04-26. Markdown filenames in `lovverk/lover/` and `lovverk/forskrifter/` use a human-readable slug derived from the law's `short_title` (Lovdata's official kortform), not the opaque `nl-YYYYMMDD-NNN` doc_id from the source XML.
+
+Slug derivation: `short_title` → strip-bracketed `title` → `doc_id` (last-resort fallback). Lowercase, hyphenated, Norwegian Unicode (`æøå`) preserved. Collisions resolved deterministically by `resolve_collisions` (sort by doc_id, append `-2`, `-3`, …).
+
+The Lovdata stable id stays in the manifest as the dict key and in the rendered file's frontmatter as the `id` field. Cross-reference is preserved.
+
+Why slug not full title:
+- Length: full titles are 60–90 chars; slugs are 10–25 chars.
+- Norwegian convention: laws are referred to by their kortform (`Skatteloven`, `Opplæringslova`) not the full descriptive title.
+- Filesystem and URL ergonomics: shorter is better in directory listings, terminal prompts, and URL bars.
+
+Why preserve Norwegian Unicode (`æøå`) instead of ASCII transliteration:
+- Native Norwegian readers expect the real letters; `opplæringslova` is the law's name, not `opplaeringslova`.
+- GitHub UI renders Unicode correctly; modern URL handling supports it.
+- AI ingestion (RAG) handles Unicode without issue.
+
+## 12c. INDEX.md per dataset (Sprint 4)
+
+Decided 2026-04-26. Each dataset subdirectory in `lovverk` now has an auto-generated `INDEX.md` listing every `current` (non-tombstoned) document sorted alphabetically by slug:
+
+```
+# Lover
+
+_4521 current documents_
+
+- [polititjenestepliktloven](polititjenestepliktloven.md) — Lov om tjenesteplikt i politiet [polititjenestepliktloven]
+- [skatteloven](skatteloven.md) — Lov om skatt av formue og inntekt (skatteloven)
+- ...
+```
+
+The INDEX adds discovery on top of the slug-based filenames: a human or AI can browse one file to see the entire corpus rather than scrolling 4500 entries in the GitHub directory listing. Updated on every non-noop sync (committed alongside the manifest in per-document mode, or bundled in the bulk commit in single/migration mode).
 
 ## 13. Naming
 

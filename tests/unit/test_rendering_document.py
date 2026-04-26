@@ -25,6 +25,7 @@ _TINY_XML = (_FIXTURES / "lov-17410217-000.xml").read_bytes()
 def _default_context(**overrides: object) -> FrontmatterContext:
     base = {
         "doc_id": "lov-17410217-000",
+        "slug": "forbud-paa-vimpel-foering",
         "doc_type": "lov",
         "xml_hash": "a" * 64,
         "source_dataset": "gjeldende-lover",
@@ -43,6 +44,7 @@ def test_legal_document_frontmatter_is_frozen() -> None:
 def test_frontmatter_context_has_expected_defaults() -> None:
     ctx = FrontmatterContext(
         doc_id="x",
+        slug="x-slug",
         doc_type="lov",
         xml_hash="y",
         source_dataset="z",

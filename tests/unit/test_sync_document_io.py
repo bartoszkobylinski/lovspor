@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 
 from lovspor.rendering.document import FrontmatterContext
+from lovspor.storage.manifest import Manifest, ManifestRecord
 from lovspor.sync.document_io import (
     delete_document,
     doc_type_for_dataset,
     document_path,
+    generate_index,
     render_full_document,
     write_document,
 )
@@ -20,6 +22,7 @@ _TINY_FIXTURE = (Path(__file__).parent.parent / "fixtures" / "lov-17410217-000.x
 def _context(**overrides: object) -> FrontmatterContext:
     base = {
         "doc_id": "lov-17410217-000",
+        "slug": "forbud-paa-vimpel-foering",
         "doc_type": "lov",
         "xml_hash": "a" * 64,
         "source_dataset": "gjeldende-lover",
@@ -40,17 +43,17 @@ def test_doc_type_for_unknown_dataset_raises() -> None:
 
 
 def test_document_path_for_law(tmp_path: Path) -> None:
-    path = document_path(tmp_path, "gjeldende-lover", "lov-19990326-014")
-    assert path == tmp_path / "lover" / "lov-19990326-014.md"
+    path = document_path(tmp_path, "gjeldende-lover", "skatteloven")
+    assert path == tmp_path / "lover" / "skatteloven.md"
 
 
 def test_document_path_for_regulation(tmp_path: Path) -> None:
     path = document_path(
         tmp_path,
         "gjeldende-sentrale-forskrifter",
-        "sf-20240628-1392",
+        "skogbruksforskriften",
     )
-    assert path == tmp_path / "forskrifter" / "sf-20240628-1392.md"
+    assert path == tmp_path / "forskrifter" / "skogbruksforskriften.md"
 
 
 def test_document_path_for_unknown_dataset_raises(tmp_path: Path) -> None:
@@ -109,3 +112,135 @@ def test_delete_document_noop_on_missing_file(tmp_path: Path) -> None:
     path = tmp_path / "never-existed.md"
     delete_document(path)  # should not raise
     assert not path.exists()
+
+
+def _record(
+    *,
+    slug: str,
+    title: str,
+    source_dataset: str = "gjeldende-lover",
+    status: str = "current",
+) -> ManifestRecord:
+    return ManifestRecord(
+        doc_type="lov" if source_dataset == "gjeldende-lover" else "forskrift",
+        xml_hash="a" * 64,
+        markdown_path=(
+            "lover/" + slug + ".md"
+            if source_dataset == "gjeldende-lover"
+            else "forskrifter/" + slug + ".md"
+        ),
+        source_dataset=source_dataset,
+        last_seen=datetime(2026, 4, 26, tzinfo=UTC),
+        status=status,  # type: ignore[arg-type]
+        slug=slug,
+        title=title,
+    )
+
+
+def _manifest(documents: dict[str, ManifestRecord]) -> Manifest:
+    return Manifest(
+        generated_at=datetime(2026, 4, 26, tzinfo=UTC),
+        documents=documents,
+    )
+
+
+def test_generate_index_writes_to_dataset_subdir(tmp_path: Path) -> None:
+    manifest = _manifest({"id-1": _record(slug="skatteloven", title="Skatteloven")})
+    path = generate_index(tmp_path, "gjeldende-lover", manifest)
+    assert path == tmp_path / "lover" / "INDEX.md"
+    assert path.exists()
+
+
+def test_generate_index_lists_only_matching_dataset(tmp_path: Path) -> None:
+    """Records from other datasets must not appear in this INDEX."""
+    manifest = _manifest(
+        {
+            "lov-1": _record(slug="skatteloven", title="Skatteloven"),
+            "fk-1": _record(
+                slug="trafikkforskriften",
+                title="Forskrift om trafikk",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+        },
+    )
+    path = generate_index(tmp_path, "gjeldende-lover", manifest)
+    text = path.read_text(encoding="utf-8")
+    assert "skatteloven" in text
+    assert "trafikkforskriften" not in text
+
+
+def test_generate_index_excludes_tombstoned_records(tmp_path: Path) -> None:
+    manifest = _manifest(
+        {
+            "lov-here": _record(slug="present", title="Present Law"),
+            "lov-gone": _record(slug="absent", title="Removed Law", status="removed"),
+        },
+    )
+    path = generate_index(tmp_path, "gjeldende-lover", manifest)
+    text = path.read_text(encoding="utf-8")
+    assert "present" in text
+    assert "absent" not in text
+
+
+def test_generate_index_sorts_alphabetically_by_slug(tmp_path: Path) -> None:
+    """Output must sort deterministically regardless of dict insertion order."""
+    manifest = _manifest(
+        {
+            "z-id": _record(slug="zebraloven", title="Zebra"),
+            "a-id": _record(slug="alfaloven", title="Alfa"),
+            "m-id": _record(slug="midtloven", title="Midt"),
+        },
+    )
+    path = generate_index(tmp_path, "gjeldende-lover", manifest)
+    text = path.read_text(encoding="utf-8")
+    assert text.index("alfaloven") < text.index("midtloven") < text.index("zebraloven")
+
+
+def test_generate_index_includes_doc_count_in_header(tmp_path: Path) -> None:
+    manifest = _manifest(
+        {
+            "lov-1": _record(slug="a", title="A"),
+            "lov-2": _record(slug="b", title="B"),
+        },
+    )
+    path = generate_index(tmp_path, "gjeldende-lover", manifest)
+    text = path.read_text(encoding="utf-8")
+    assert "_2 current documents_" in text
+
+
+def test_generate_index_uses_dataset_label_in_header(tmp_path: Path) -> None:
+    lover_path = generate_index(tmp_path, "gjeldende-lover", _manifest({}))
+    forskrift_path = generate_index(
+        tmp_path,
+        "gjeldende-sentrale-forskrifter",
+        _manifest({}),
+    )
+    assert "# Lover" in lover_path.read_text(encoding="utf-8")
+    assert "# Sentrale forskrifter" in forskrift_path.read_text(encoding="utf-8")
+
+
+def test_generate_index_is_byte_deterministic(tmp_path: Path) -> None:
+    """Same manifest -> byte-identical INDEX. Same dict insertion order
+    is not guaranteed by the caller."""
+    manifest = _manifest(
+        {
+            "lov-2": _record(slug="b", title="B"),
+            "lov-1": _record(slug="a", title="A"),
+        },
+    )
+    path_a = generate_index(tmp_path / "a", "gjeldende-lover", manifest)
+    path_b = generate_index(tmp_path / "b", "gjeldende-lover", manifest)
+    assert path_a.read_bytes() == path_b.read_bytes()
+
+
+def test_generate_index_raises_on_unknown_dataset(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown source_dataset"):
+        generate_index(tmp_path, "something-else", _manifest({}))
+
+
+def test_generate_index_format_links_to_md_file(tmp_path: Path) -> None:
+    """Each entry must be a Markdown link of form `- [slug](slug.md) — title`."""
+    manifest = _manifest({"id-1": _record(slug="skatteloven", title="Skatteloven")})
+    path = generate_index(tmp_path, "gjeldende-lover", manifest)
+    text = path.read_text(encoding="utf-8")
+    assert "- [skatteloven](skatteloven.md) — Skatteloven" in text
