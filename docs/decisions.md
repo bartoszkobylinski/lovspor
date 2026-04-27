@@ -339,14 +339,21 @@ End-of-sprint state:
 - First production sync after PR #24 ran 2026-04-27 and executed the Sprint 5 migration commit `0c40d0bf` on `lovverk/main` — one atomic commit producing 1562 lover/history files (781 docs × 2 formats) + 7480 forskrifter/history files (3740 × 2) + manifest with `total_changes` / `last_changed` populated for all current docs.
 - MCP-ready: `history/<slug>.json` is queryable structured data; future Sprint 6 MCP server can answer `get_law_history(slug)`, `list_recent_changes()`, and similar tools with a plain JSON read.
 
-### Sprint 6 (planned) — MCP server
+### Sprint 6 (in progress) — MCP server
 
-User decision 2026-04-27: next sprint stands up an MCP server exposing the `lovverk` corpus to AI consumers (Claude Code, etc.) via the Model Context Protocol. Tools envisaged:
+User decision 2026-04-27: this sprint stands up an MCP server exposing the `lovverk` corpus to AI consumers (Claude Code, Claude Desktop) via the Model Context Protocol. Distribution mode is **stdio + good README** (each user runs their own copy locally) rather than VPS-hosted — that's the dominant pattern in the MCP ecosystem today and avoids the public-API maintenance commitment. See conversation 2026-04-27.
+
+Sprint progress:
+
+- **PR-A** (this PR, in flight 2026-04-27) — `src/lovspor/mcp.py` with the four tools below, FastMCP via Anthropic's `mcp` SDK, stdio transport, CLI entry `lovspor mcp --corpus-path PATH`. CorpusReader is read-only and validates path containment to refuse manifest-driven escapes.
+- **PR-B** (planned) — root README section + `docs/mcp.md` with quickstart, Claude Desktop / Claude Code configuration examples, the four tools documented with input/output samples, troubleshooting, NLOD 2.0 attribution, limitations.
+
+Tools shipped in PR-A:
 
 - `get_law(slug)` — returns the rendered Markdown body + frontmatter for a doc.
 - `get_law_history(slug)` — returns the structured event list from `history/<slug>.json` (Sprint 5 deliverable directly enables this).
-- `list_recent_changes(dataset?, since_date?, limit?)` — sorts manifest by `last_changed` (Sprint 5 metadata field directly enables this).
-- `search_laws(query, dataset?)` — minimum viable: grep INDEX entries; later: full-text or topic taxonomy.
+- `list_recent_changes(dataset?, since?, limit?)` — sorts manifest by `last_changed` (Sprint 5 metadata field directly enables this).
+- `search_laws(query, dataset?)` — substring match on slug + title from manifest; body-text search deferred to a future sprint.
 
 Other Sprint-6 candidates not yet committed (let priorities settle once MCP minimum lands):
 - **Section / § addressing** (`get_section(slug, "5-12")`) — needs a Markdown-section parser; high value for AI but bigger scope.
@@ -355,6 +362,7 @@ Other Sprint-6 candidates not yet committed (let priorities settle once MCP mini
 - **Lovtidend feed integration** — second data source giving "why a law changed"; deserves its own sprint.
 
 ## 12a. git_commit_mode is now implemented (Sprint 4 + Sprint 5 history bundling)
+
 
 Originally decided 2026-04-26 to keep `Settings.git_commit_mode` as a forward declaration. Implemented 2026-04-26 in Sprint 4 PR #17 (three modes wired); Sprint 5 PR #24 added per-act history bundling on top — see §12d for the chicken-and-egg with `git log --follow` that drives the post-Sprint-5 commit topology.
 

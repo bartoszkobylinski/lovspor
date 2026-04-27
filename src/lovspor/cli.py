@@ -1,8 +1,12 @@
 """lovspor command-line interface."""
 
+from pathlib import Path
+from typing import Annotated
+
 import typer
 
 from lovspor import __version__
+from lovspor.mcp import serve as _mcp_serve
 from lovspor.settings import Settings
 from lovspor.sync.orchestrator import run_sync
 
@@ -77,3 +81,26 @@ def sync() -> None:
         f"{report.removed_count} removed, "
         f"{report.unchanged_count} unchanged.",
     )
+
+
+@app.command()
+def mcp(
+    corpus_path: Annotated[
+        Path,
+        typer.Option(
+            "--corpus-path",
+            help="Path to a local clone of the lovverk corpus.",
+            envvar="LOVVERK_CORPUS_PATH",
+        ),
+    ],
+) -> None:
+    """Start the stdio MCP server exposing the lovverk corpus to AI clients.
+
+    Designed to be launched as a subprocess by an MCP client (Claude
+    Desktop, Claude Code, ...). Reads the corpus from ``--corpus-path``;
+    does not pull from GitHub or trigger an engine sync.
+
+    The four tools served are: get_law, get_law_history,
+    list_recent_changes, search_laws.
+    """
+    _mcp_serve(corpus_path.resolve())
