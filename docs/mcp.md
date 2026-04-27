@@ -10,7 +10,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** four read-only, manifest-and-filesystem-only.
+- **Tools:** five read-only, manifest-and-filesystem-only.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -180,6 +180,48 @@ List current laws ordered by most recent change first.
 ]
 ```
 
+### `corpus_status()`
+
+Return current state of the local corpus plus freshness metadata. Call this proactively when other tools return unexpectedly empty results — a stale corpus (user forgot to `git pull`) is indistinguishable from a missing law from the AI's perspective.
+
+**No parameters.**
+
+**Sample call:** `corpus_status()`
+
+**Sample output (fresh corpus):**
+
+```json
+{
+  "manifest_generated_at": "2026-04-27T05:00:00+00:00",
+  "manifest_age_days": 0,
+  "is_stale": false,
+  "total_current_documents": 4522,
+  "head_commit": "0c40d0b",
+  "head_commit_date": "2026-04-27",
+  "head_commit_subject": "migration: generate history for 4522 documents",
+  "refresh_command": "git -C /Users/you/lovverk pull",
+  "notice": "Corpus is current (0 days old)."
+}
+```
+
+**Sample output (stale corpus):**
+
+```json
+{
+  "manifest_generated_at": "2026-04-13T05:00:00+00:00",
+  "manifest_age_days": 14,
+  "is_stale": true,
+  "total_current_documents": 4520,
+  "head_commit": "abc1234",
+  "head_commit_date": "2026-04-13",
+  "head_commit_subject": "sync: 0 new, 5 changed, 0 removed",
+  "refresh_command": "git -C /Users/you/lovverk pull",
+  "notice": "Corpus manifest is 14 days old. Run: git -C /Users/you/lovverk pull to refresh."
+}
+```
+
+`is_stale` flips to `true` when the manifest is more than **7 days old** (one week of skipped syncs). The server itself **never** runs `git pull` or fetches from the network — `refresh_command` is a copy-pasteable command for the user to run manually.
+
 ### `search_laws(query, dataset?)`
 
 Search the corpus for laws whose slug or title contains `query` (case-insensitive substring match against manifest metadata only — no body-text scan).
@@ -217,8 +259,9 @@ A typical AI-assistant interaction with this server follows the same pattern:
 2. **`get_law(slug)`** — pull the full text of the chosen candidate.
 3. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
 4. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
+5. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The four tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
+The five tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
 
 ---
 
@@ -264,16 +307,17 @@ You can also clone `lovspor` and run from source if you want to develop or pin a
 - **No Stortinget enrichment.** Parliamentary metadata (saker, voteringer, publikasjoner) is not surfaced. See [`docs/decisions.md` §3](decisions.md) for the rationale.
 - **No section / paragraph addressing.** `get_law` returns the whole act; there's no `get_section(slug, "5-12")` yet.
 - **History for tombstones is not generated.** A law that was once in the corpus but has since been removed has no `history/<slug>.json` file. The original commits are still in `lovverk`'s git log if you need them.
-- **Corpus freshness depends on the user.** The server reads whatever is in your local `lovverk` clone. If you don't `git pull`, you'll get stale data.
+- **Corpus freshness depends on the user.** The server reads whatever is in your local `lovverk` clone. If you don't `git pull`, you'll get stale data. The `corpus_status()` tool flags this (`is_stale: true` past 7 days) and gives the AI a `refresh_command` to suggest, but the server itself never pulls — that's an explicit user action.
 
 ---
 
 ## Troubleshooting
 
-### "no current law with slug ..."
+### "no current law with slug ..." or "every search returns []"
 
-The slug doesn't exist in the manifest. Common causes:
+The slug doesn't exist in the manifest, or the manifest itself is too old to know about it. Common causes:
 
+- **Stale local clone.** The most common cause. Ask the AI to *"call corpus_status() and tell me if my corpus is current"* — if `is_stale: true` (or `head_commit_date` is many days old), run the suggested `refresh_command` (`git -C /path/to/lovverk pull`) and start a fresh MCP session.
 - The slug includes a Lovdata short-form abbreviation (e.g. Skatteloven is `skatteloven-sktl`, not `skatteloven`). Use `search_laws` to find the exact slug.
 - The law was removed upstream — only `current` records are retrievable via `get_law`. `get_law_history` would also return "no current law" in this MVP (tombstone history is not exposed).
 - Typo / case mismatch — slugs are always lowercase, hyphenated, with Norwegian Unicode preserved (`opplæringslova`, not `opplaeringslova`).

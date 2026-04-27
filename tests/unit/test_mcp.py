@@ -8,7 +8,9 @@ four expected tool names are registered.
 """
 
 import json
-from datetime import UTC, datetime
+import shlex
+import subprocess
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -51,10 +53,14 @@ def _seed_corpus(
     *,
     write_files: bool = True,
     write_history_for: list[str] | None = None,
+    generated_at: datetime | None = None,
 ) -> None:
     root.mkdir(parents=True, exist_ok=True)
     write_manifest(
-        Manifest(generated_at=datetime(2026, 4, 27, tzinfo=UTC), documents=records),
+        Manifest(
+            generated_at=generated_at or datetime.now(UTC),
+            documents=records,
+        ),
         root / "manifest.json",
     )
     if write_files:
@@ -473,6 +479,149 @@ def test_search_laws_rejects_unknown_dataset(tmp_path: Path) -> None:
         CorpusReader(tmp_path).search_laws("anything", dataset="bogus")
 
 
+# ---------- corpus_status ----------
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _git_init_corpus(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    _git("init", "-b", "main", cwd=repo)
+    _git("config", "user.email", "test@example.com", cwd=repo)
+    _git("config", "user.name", "Test", cwd=repo)
+    _git("config", "commit.gpgsign", "false", cwd=repo)
+
+
+def test_corpus_status_reports_fresh_when_manifest_is_recent(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X", last_changed="2026-04-27")},
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["is_stale"] is False
+    assert status["manifest_age_days"] == 0
+    assert status["total_current_documents"] == 1
+    assert "current" in status["notice"]
+    assert status["refresh_command"].endswith(f"{tmp_path} pull")
+
+
+def test_corpus_status_reports_stale_when_manifest_is_old(tmp_path: Path) -> None:
+    """Manifest older than the 7-day threshold flips is_stale and the
+    notice nudges the user toward git pull."""
+    old_date = datetime.now(UTC) - timedelta(days=14)
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        generated_at=old_date,
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["is_stale"] is True
+    assert status["manifest_age_days"] >= 14
+    assert "14 days old" in status["notice"]
+    assert "git -C" in status["notice"]
+
+
+def test_corpus_status_reports_seven_day_boundary_correctly(tmp_path: Path) -> None:
+    """7-day-old manifest is exactly at the threshold (not stale);
+    8-day-old is stale. Pinned by ``> _STALE_THRESHOLD_DAYS``."""
+    fresh_boundary = datetime.now(UTC) - timedelta(days=7, hours=1)
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")}, generated_at=fresh_boundary)
+    assert CorpusReader(tmp_path).corpus_status()["is_stale"] is False
+
+    stale_boundary = datetime.now(UTC) - timedelta(days=8, hours=1)
+    other = tmp_path.parent / f"{tmp_path.name}_b"
+    _seed_corpus(other, {"nl-1": _record(slug="x", title="X")}, generated_at=stale_boundary)
+    assert CorpusReader(other).corpus_status()["is_stale"] is True
+
+
+def test_corpus_status_includes_git_head_info_when_corpus_is_a_git_repo(
+    tmp_path: Path,
+) -> None:
+    """End-to-end with a real tiny git repo: corpus_status() must
+    surface the HEAD commit's short SHA, ISO date, and subject so the
+    AI can show 'last commit was X about Y'."""
+    repo = tmp_path / "lovverk"
+    _git_init_corpus(repo)
+    _seed_corpus(repo, {"nl-1": _record(slug="x", title="X")})
+    _git("add", "manifest.json", cwd=repo)
+    _git("commit", "-m", "sync: 1 new, 0 changed, 0 removed", cwd=repo)
+
+    status = CorpusReader(repo).corpus_status()
+    assert status["head_commit"] is not None
+    assert len(status["head_commit"]) == 7
+    assert status["head_commit_subject"] == "sync: 1 new, 0 changed, 0 removed"
+    assert status["head_commit_date"]
+    assert len(status["head_commit_date"]) == 10  # YYYY-MM-DD
+
+
+def test_corpus_status_handles_non_git_corpus_gracefully(tmp_path: Path) -> None:
+    """Documented contract: a corpus directory that is NOT a git repo
+    still returns a well-shaped status — git fields are None rather
+    than the call raising."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["head_commit"] is None
+    assert status["head_commit_date"] is None
+    assert status["head_commit_subject"] is None
+    # Other fields still populated.
+    assert status["total_current_documents"] == 1
+    assert status["refresh_command"]
+
+
+def test_corpus_status_refresh_command_quotes_path_with_spaces(tmp_path: Path) -> None:
+    """Codex PR-A regression. A corpus path containing spaces would
+    otherwise produce 'git -C /tmp/lovverk test pull', which git parses
+    as -C /tmp/lovverk with 'test' as a positional arg — silently
+    targeting the wrong path. shlex.quote pins the contract: the
+    refresh_command is shell-safe for any valid filesystem path."""
+    spaced = tmp_path / "path with spaces"
+    _seed_corpus(spaced, {"nl-1": _record(slug="x", title="X")})
+    cmd = CorpusReader(spaced).corpus_status()["refresh_command"]
+    # Authoritative test: shlex.split must round-trip the command back
+    # to its intended argv. If the path were unquoted, parts[2] would
+    # be just '/.../path' and 'with' / 'spaces' would become extra
+    # positional args.
+    parts = shlex.split(cmd)
+    assert parts == ["git", "-C", str(spaced), "pull"]
+
+
+def test_corpus_status_clamps_negative_age_for_future_dated_manifest(
+    tmp_path: Path,
+) -> None:
+    """Codex PR-A regression. Clock skew on the user's machine (or a
+    forged/manually-edited manifest) can produce a generated_at in the
+    future. The previous output read 'Corpus is current (-1 days old)'
+    which looks like a tooling bug. Now: clamp manifest_age_days to 0
+    and surface a dedicated clock-skew notice so the AI can quote it
+    verbatim."""
+    future = datetime.now(UTC) + timedelta(days=2)
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        generated_at=future,
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["manifest_age_days"] == 0
+    assert status["is_stale"] is False
+    assert "future" in status["notice"]
+    assert "clock-skew" in status["notice"]
+
+
+def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="alive", title="A"),
+            "nl-2": _record(slug="gone", title="G", status="removed"),
+        },
+        write_files=False,
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["total_current_documents"] == 1
+
+
 # ---------- build_server ----------
 
 
@@ -484,7 +633,13 @@ def test_build_server_registers_four_tools(tmp_path: Path) -> None:
     # via the underlying tool manager.
     tool_names = sorted(server._tool_manager._tools.keys())
     assert tool_names == sorted(
-        ["get_law", "get_law_history", "list_recent_changes", "search_laws"],
+        [
+            "get_law",
+            "get_law_history",
+            "list_recent_changes",
+            "search_laws",
+            "corpus_status",
+        ],
     )
 
 

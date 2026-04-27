@@ -1,6 +1,6 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles four read-only tools over a local clone of the lovverk Markdown
+Bundles five read-only tools over a local clone of the lovverk Markdown
 corpus (produced by the lovspor sync engine). Each tool answers a class
 of question an AI agent would naturally ask about Norwegian law:
 
@@ -8,6 +8,7 @@ of question an AI agent would naturally ask about Norwegian law:
     get_law_history(slug)      -> "What changed in Skatteloven recently?"
     list_recent_changes(...)   -> "Which laws changed last week?"
     search_laws(query, ...)    -> "Are there laws about jernbane?"
+    corpus_status()            -> "Is my local corpus current?"
 
 Data path: the server reads the corpus from disk via the supplied
 ``corpus_path``. It does not pull from GitHub or trigger an engine
@@ -26,7 +27,9 @@ inputs accept either form and normalize internally.
 """
 
 import json
-from datetime import date
+import shlex
+import subprocess
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +37,17 @@ from mcp.server.fastmcp import FastMCP
 
 from lovspor.errors import LovsporError
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
+
+_STALE_THRESHOLD_DAYS = 7
+"""Manifest age beyond which corpus_status() flags the corpus as stale.
+
+Chosen against the daily 04:00 UTC sync cadence: a 7-day-old manifest
+means at least one full week of scheduled syncs failed to land in the
+user's local clone (most likely they simply forgot to ``git pull``).
+Adjustable later if production cadence changes — keep documented in
+docs/mcp.md if changed."""
+
+_GIT_HEAD_FIELDS = 3  # sha + ISO date + subject from the --format string
 
 _DATASET_ALIAS_TO_KEY = {
     "lover": "gjeldende-lover",
@@ -178,6 +192,88 @@ class CorpusReader:
                 results.append(_record_summary(doc_id, record))
         return results
 
+    def corpus_status(self) -> dict[str, Any]:
+        """Return manifest + git HEAD freshness metadata.
+
+        Designed to be called proactively when other tools return
+        unexpectedly empty results (a stale corpus looks like a missing
+        law) and as the answer to "is my corpus current?". The
+        ``refresh_command`` field gives the user a copy-paste command;
+        the server itself never mutates the corpus or fetches anything.
+        """
+        manifest = self.manifest
+        generated_at = manifest.generated_at
+        if generated_at.tzinfo is None:
+            generated_at = generated_at.replace(tzinfo=UTC)
+        raw_age_days = (datetime.now(UTC) - generated_at).days
+        # A negative raw age means the manifest is dated in the future:
+        # either a forged manifest or (more likely) clock skew on the
+        # user's machine. Clamp to 0 so age_days is always sensible,
+        # surface a clock-skew notice instead of "Corpus is current
+        # (-1 days old)" which reads as a tooling bug.
+        is_clock_skew = raw_age_days < 0
+        age_days = max(0, raw_age_days)
+        is_stale = age_days > _STALE_THRESHOLD_DAYS
+        current_docs = sum(
+            1 for record in manifest.documents.values() if record.status == "current"
+        )
+        git_info = self._git_head_info()
+        # shlex.quote handles paths containing spaces or shell metacharacters
+        # (e.g. '/tmp/lovverk test' would otherwise parse as -C /tmp/lovverk
+        # with 'test' as a positional arg, silently targeting the wrong path).
+        refresh_command = f"git -C {shlex.quote(str(self.corpus_path))} pull"
+        if is_clock_skew:
+            notice = (
+                f"Corpus manifest is dated in the future "
+                f"({generated_at.isoformat()}); likely a clock-skew issue on "
+                f"your machine. Treating as fresh."
+            )
+        elif is_stale:
+            notice = f"Corpus manifest is {age_days} days old. Run: {refresh_command} to refresh."
+        else:
+            notice = f"Corpus is current ({age_days} days old)."
+        return {
+            "manifest_generated_at": generated_at.isoformat(),
+            "manifest_age_days": age_days,
+            "is_stale": is_stale,
+            "total_current_documents": current_docs,
+            "head_commit": git_info["commit"],
+            "head_commit_date": git_info["date"],
+            "head_commit_subject": git_info["subject"],
+            "refresh_command": refresh_command,
+            "notice": notice,
+        }
+
+    def _git_head_info(self) -> dict[str, str | None]:
+        """Read the current HEAD commit's sha / date / subject from
+        the corpus's git directory. Returns ``None`` for each field
+        when the corpus is not a git repository (or when ``git`` is
+        unavailable on PATH) — the corpus_status() output stays
+        well-shaped either way."""
+        try:
+            result = subprocess.run(
+                [  # noqa: S607
+                    "git",
+                    "log",
+                    "-1",
+                    "--format=%H%n%aI%n%s",
+                ],
+                cwd=self.corpus_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return {"commit": None, "date": None, "subject": None}
+        lines = result.stdout.strip("\n").split("\n", maxsplit=2)
+        if len(lines) < _GIT_HEAD_FIELDS:
+            return {"commit": None, "date": None, "subject": None}
+        return {
+            "commit": lines[0][:7],
+            "date": lines[1].split("T", maxsplit=1)[0],
+            "subject": lines[2],
+        }
+
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
         for record in self.manifest.documents.values():
             if record.slug == slug and record.status == "current":
@@ -301,6 +397,30 @@ def build_server(corpus_path: Path) -> FastMCP:
         ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
         """
         return reader.search_laws(query, dataset=dataset)
+
+    @mcp.tool()
+    def corpus_status() -> dict[str, Any]:
+        """Return the current state of the local corpus + freshness metadata.
+
+        Call this proactively when:
+        - The user asks "is my corpus current?" or "when was the
+          corpus last updated?".
+        - Other tools (search_laws, list_recent_changes, get_law) return
+          unexpectedly empty or "not found" results — a stale corpus
+          can look indistinguishable from a missing law.
+
+        Returns a dict with: ``manifest_generated_at`` (ISO datetime),
+        ``manifest_age_days`` (int), ``is_stale`` (bool — true if older
+        than 7 days), ``total_current_documents``, ``head_commit`` (short
+        SHA), ``head_commit_date`` (ISO date), ``head_commit_subject``,
+        ``refresh_command`` (a copy-pasteable git command the user can
+        run to refresh), and a human-readable ``notice`` summarizing the
+        status.
+
+        The server itself never mutates the corpus or fetches anything —
+        the user runs the suggested ``refresh_command`` manually.
+        """
+        return reader.corpus_status()
 
     return mcp
 

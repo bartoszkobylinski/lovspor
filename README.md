@@ -31,7 +31,7 @@ Quickstart for Claude Desktop / Claude Code (replace `/path/to/lovverk` with the
 
 This runs the server on demand from this GitHub repo via [`uv`](https://docs.astral.sh/uv/) — no local clone of `lovspor` required, just the corpus.
 
-See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all four tools documented with examples (`get_law`, `get_law_history`, `list_recent_changes`, `search_laws`), troubleshooting, and limitations.
+See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all five tools documented with examples (`get_law`, `get_law_history`, `list_recent_changes`, `search_laws`, `corpus_status`), troubleshooting, and limitations.
 
 ## Sources
 

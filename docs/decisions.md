@@ -361,6 +361,23 @@ Other Sprint-6 candidates not yet committed (let priorities settle once MCP mini
 - **Status badge + workflow runtime stats** — quick wins, do alongside if scope permits.
 - **Lovtidend feed integration** — second data source giving "why a law changed"; deserves its own sprint.
 
+### Sprint 7 (in progress) — Corpus freshness signal for MCP consumers
+
+User decision 2026-04-27, immediately after the Sprint 6 manual integration test in Claude Code surfaced the failure mode: a stale local `lovverk` clone produces silent empty results from every MCP tool, indistinguishable from a missing law. Diagnosis took 10 minutes of back-and-forth — unacceptable UX for downstream adopters.
+
+Sprint 7 PR-A (this PR, in flight) adds a fifth MCP tool, `corpus_status()`, that returns:
+
+- ``manifest_generated_at`` and ``manifest_age_days`` (computed against ``datetime.now(UTC)``).
+- ``is_stale`` boolean — `true` past `_STALE_THRESHOLD_DAYS = 7` (one full week of missed daily syncs).
+- ``total_current_documents``.
+- ``head_commit`` (short SHA), ``head_commit_date``, ``head_commit_subject`` from `git log -1` on the local clone (read-only, gracefully degrades to ``None`` for non-git corpus paths).
+- ``refresh_command`` — a copy-pasteable `git -C <corpus_path> pull` string the user can run.
+- ``notice`` — human-readable summary the AI can quote verbatim.
+
+**Architecture decision: tell, do not do.** The server still has zero network surface and zero write capability against the corpus. `refresh_command` is a *suggestion* the AI relays to the user; the user runs it manually. Considered but rejected: a hypothetical `refresh_corpus()` tool that runs `git pull` itself. Reasoning: keeps the read-only + no-network contract intact; avoids merge-conflict / local-commits edge cases on user repos; matches the dominant MCP-ecosystem pattern of inert read-only consumers.
+
+Tool docstring (visible to AI) explicitly nudges proactive use when other tools return unexpectedly empty results, plus the user-facing "is my corpus current?" pattern. `docs/mcp.md` Troubleshooting section now leads with "ask the AI to call corpus_status()" as the first remediation step for empty results.
+
 ## 12a. git_commit_mode is now implemented (Sprint 4 + Sprint 5 history bundling)
 
 
