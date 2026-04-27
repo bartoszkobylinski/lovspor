@@ -92,7 +92,7 @@ git commit (per-document by default since Sprint 4; see §12a for all three mode
 - **Hash on normalized XML, never on rendered Markdown or HTML.** Rendering is deterministic, but changes in the renderer would otherwise trigger false-positive commits.
 - **Renderer must be byte-identical deterministic.** Tested. Same XML in → same MD out, every time.
 - **Sync is idempotent.** Running twice on same upstream state = 0 file changes = 0 commits.
-- **Commit granularity:** as of Sprint 4 PR #17, the default is `per-document` — one commit per add / update / rename / remove with conventional-commit messages, plus a final `sync: update manifest and index` commit. `single` mode (one bulk commit per sync) and a one-off `migration` override (used for the Sprint 3 → Sprint 4 slug rename) remain wired (see §12a). `git log lovverk/<dataset>/<slug>.md` now shows the amendment history per act.
+- **Commit granularity:** as of Sprint 4 PR #17, the default is `per-document` — one commit per add / update / rename / remove with conventional-commit messages, plus a final `sync: update manifest, index, and history` commit (the "and history" suffix added in Sprint 5 PR-B; `single` and Sprint 4 migration modes split history into a follow-up commit because of the chicken-and-egg with `git log --follow`). See §12a for commit modes and §12d for the history flow. `git log lovverk/<dataset>/<slug>.md` now shows the amendment history per act, and `lovverk/<dataset>/history/<slug>.json` provides the structured per-act event list (§12d).
 
 ### Update cadence
 
@@ -326,33 +326,43 @@ End-of-sprint state:
 - First scheduled cron ran 2026-04-27 and executed an atomic migration commit (4522 renames + manifest + INDEX in one commit) producing the human-readable corpus on `lovverk/main`.
 - Property-testing infrastructure in place; see §9b for next-target modules.
 
-### Sprint 5 (planned) — per-act change history (JSON source + Markdown view)
+### Sprint 5 — Per-act change history layer (PR #23 → #24, MERGED 2026-04-27)
 
-User decision 2026-04-27 (refined later same day after MCP discussion): next sprint produces a per-act change history. For each `lovverk/<dataset>/<slug>.md` we extract the file's git history (`git log --follow`) and write two co-located outputs:
+Closed Sprint 5. Per-act history is now generated for every changed doc on every sync, with JSON as source of truth and Markdown as derived view (see §12d for the design and §12b for the directory rationale). The Sprint 4 slug + INDEX work supplied the discovery layer; Sprint 5 supplies the history layer.
 
-- `lovverk/<dataset>/history/<slug>.json` — **source of truth**, structured event list (date, commit, type, from/to, line stats). Schema-versioned. Designed so a future MCP server can answer queries like `get_law_history(slug)` or `list_recent_changes()` with a plain JSON read.
-- `lovverk/<dataset>/history/<slug>.md` — derived human view, generated from the same JSON. For researchers / journalists / GitHub browsers.
+- **PR #23** `feat(history): per-act change history extractor + writers` — pure module `lovspor.history` with `HistoryEvent` / `HistoryRecord` Pydantic models, `extract_history()` (walks `git log --follow --numstat`), `render_history_markdown()` (deterministic MD view), `write_history()` (writes `<dataset>/history/<slug>.{json,md}` deterministically). Slug carries a path-traversal validator. 39 unit tests + 4 Hypothesis property invariants. Three Codex passes; first found bulk-sync delete misclassification + slug path-traversal + docs/code mismatch on output location, second found bulk-sync rename misclassification, third clean.
+- **PR #24** `feat(sync): generate per-act history during sync + Sprint 5 migration` — wires PR-A into the orchestrator. ManifestRecord gains `total_changes` + `last_changed`. `_commit_with_history` is mode-aware (per-doc bundles into final commit; single + Sprint 4 migration emit a history follow-up). Sprint 5 standalone migration: triggers once on the first sync after PR-B, when the corpus has prior current docs but no `<dataset>/history/` dirs. Three Codex passes; only finding addressed was a mixed-bulk-commit delete-vs-update ambiguity in the bulk-sync heuristic (numstat-only is fundamentally limited; documented trade-off, all post-Sprint-4 commits are per-doc and unambiguous).
 
-Why JSON-first instead of Markdown-only: the Sprint 0 §2 primary use case is AI/RAG ingestion, and a planned Sprint 6 candidate is an MCP server. Building only Markdown would force MCP/AI consumers to parse fragile prose; building only JSON would make GitHub browsing painful. Generating both from one source costs ~30 % more code than Markdown-only and avoids a guaranteed refactor when MCP lands.
+End-of-sprint state:
+- 24 production source files, ~2700 LOC, 99 % coverage.
+- 388 tests across unit + integration + property.
+- First production sync after PR #24 ran 2026-04-27 and executed the Sprint 5 migration commit `0c40d0bf` on `lovverk/main` — one atomic commit producing 1562 lover/history files (781 docs × 2 formats) + 7480 forskrifter/history files (3740 × 2) + manifest with `total_changes` / `last_changed` populated for all current docs.
+- MCP-ready: `history/<slug>.json` is queryable structured data; future Sprint 6 MCP server can answer `get_law_history(slug)`, `list_recent_changes()`, and similar tools with a plain JSON read.
 
-Earlier framing of this section called the output `CHANGELOG/<slug>.md`; the implementation in PR-A (Sprint 5) chose `history/<slug>.{json,md}` to better describe the dual-format reality.
+### Sprint 6 (planned) — MCP server
 
-The Sprint 4 slug + INDEX work supplied the discovery layer; this supplies the history layer.
+User decision 2026-04-27: next sprint stands up an MCP server exposing the `lovverk` corpus to AI consumers (Claude Code, etc.) via the Model Context Protocol. Tools envisaged:
 
-Other candidates considered but not chosen for Sprint 5:
-- **Status badge + workflow runtime stats reporting** — visible signal that the system is alive, but no new value for corpus consumers.
-- **JSONL chunked export for RAG** — explicit AI/RAG use case (§2), but requires upfront chunking-strategy decisions (token counter, overlap, embedding format) that are worth a focused sprint of their own.
-- **Lovtidend feed integration** — gives "why a law changed", potentially massive value, but scope-expansion to a second data source deserves its own dedicated sprint with a separate plan.
-- **`lovspor render` / `validate` / `stats` CLI commands** — operability nice-to-have, not user-visible from the corpus side.
-- **Storting open-data enrichment** — parliamentary metadata layer; defer until corpus surface stabilizes and there is concrete consumer demand.
+- `get_law(slug)` — returns the rendered Markdown body + frontmatter for a doc.
+- `get_law_history(slug)` — returns the structured event list from `history/<slug>.json` (Sprint 5 deliverable directly enables this).
+- `list_recent_changes(dataset?, since_date?, limit?)` — sorts manifest by `last_changed` (Sprint 5 metadata field directly enables this).
+- `search_laws(query, dataset?)` — minimum viable: grep INDEX entries; later: full-text or topic taxonomy.
 
-## 12a. git_commit_mode is now implemented (Sprint 4)
+Other Sprint-6 candidates not yet committed (let priorities settle once MCP minimum lands):
+- **Section / § addressing** (`get_section(slug, "5-12")`) — needs a Markdown-section parser; high value for AI but bigger scope.
+- **JSONL chunked export for RAG** — explicit chunking format for embedding pipelines; complementary to MCP rather than blocking.
+- **Status badge + workflow runtime stats** — quick wins, do alongside if scope permits.
+- **Lovtidend feed integration** — second data source giving "why a law changed"; deserves its own sprint.
 
-Originally decided 2026-04-26 to keep `Settings.git_commit_mode` as a forward declaration. Implemented 2026-04-26 in Sprint 4 PR #17. Three policies now wired:
+## 12a. git_commit_mode is now implemented (Sprint 4 + Sprint 5 history bundling)
 
-- **`per-document` (default)**: one commit per add/update/rename/remove, with conventional-commit messages (`add(lov): skatteloven`, `update(forskrift): trafikkforskriften`, etc.), then a final `sync: update manifest and index` commit.
-- **`single`**: one bulk commit per sync (`sync: N new, M changed, K renamed, L removed`).
-- **Migration override**: when any rename has `prior.slug is None` (Sprint 3 manifest with no slug field), the orchestrator forces a single bulk commit (`migration: rename N documents to slug-based filenames`) regardless of `git_commit_mode`. This keeps the Sprint 3 → Sprint 4 transition as one auditable event in history rather than thousands of individual renames. User decision documented in conversation 2026-04-26 (option A — bulk migration commit).
+Originally decided 2026-04-26 to keep `Settings.git_commit_mode` as a forward declaration. Implemented 2026-04-26 in Sprint 4 PR #17 (three modes wired); Sprint 5 PR #24 added per-act history bundling on top — see §12d for the chicken-and-egg with `git log --follow` that drives the post-Sprint-5 commit topology.
+
+- **`per-document` (default)**: one commit per add / update / rename / remove with conventional-commit messages (`add(lov): skatteloven`, `update(forskrift): trafikkforskriften`, etc.), then a final commit bundling manifest + INDEX + per-act history (`sync: update manifest, index, and history`). Sprint 5 added the `, and history` suffix; the per-doc commits land first so history extraction can see them.
+- **`single`**: one bulk docs+meta commit (`sync: N new, M changed, K renamed, L removed`) followed by a `sync: update history for N documents` follow-up commit. Two commits required because history extraction can only run after the docs commit lands (chicken-and-egg). Sprint 5 added the follow-up; pre-Sprint-5 single mode was a single commit only.
+- **Migration override**: when any rename has `prior.slug is None` (Sprint 3 manifest with no slug field), the orchestrator forces a single bulk commit (`migration: rename N documents to slug-based filenames`) regardless of `git_commit_mode`, plus a `sync: update history for N documents` follow-up (same chicken-and-egg as `single` mode). This keeps the Sprint 3 → Sprint 4 transition as one auditable event in history rather than thousands of individual renames. User decision documented in conversation 2026-04-26 (option A — bulk migration commit); Sprint 5 added the history follow-up.
+
+Sprint 5 also introduced a separate **Sprint 5 history migration** branch in `run_sync` that fires once on the first sync after PR #24 ships and emits a standalone `migration: generate history for N documents` commit before any regular sync work. Triggered when the corpus has prior current docs but no `<dataset>/history/` dirs. See §12d.
 
 ## 12b. Slug-based filenames (Sprint 4)
 
@@ -424,10 +434,19 @@ Both 7 letters, both start with `lov`, ship visibly as siblings.
 
 ## 14. Known open items
 
-End of Sprint 4:
+End of Sprint 5:
 
-- **Dependabot PRs #2 / #3 / #4** still open since Sprint 0. Toolchain-only (`actions/checkout` v6, `setup-uv` v7, dev deps group). Merge as a batch after a quick local check; no functional risk.
-- **Mutation baseline needs a fresh authoritative run.** Codex's PR #18 review noted that the existing `.mutmut-cache` is stale after Sprint 4 changes. The cache currently shows 279 survivors, which exceeds the §9a revisit trigger of 250, but the count is not authoritative until a clean rerun. Next Codex pass on a Sprint 5 PR should include a cache reset and a fresh score before any §9a re-evaluation happens.
+- **Dependabot PRs #2 / #3 / #4 followups** — `actions/checkout` v4 and `setup-uv` v4 are still pinned in `.github/workflows/sync.yml` (PR #2 / #3 only bumped `test.yml`, since `sync.yml` was added later in PR #16). Dependabot's next weekly run will propose new PRs against `sync.yml`; merge those as a batch. No functional risk.
+- **Mutation baseline still pending an authoritative full rerun.** Codex's PR #23 / #24 reviews ran fresh mutmut snapshots but stopped them mid-flight to keep the working tree clean (mutmut mutates files in-place). Latest non-final snapshot: 714 / 1084 killed, 315 survived, 55 untested. The §9a revisit trigger of 250 survivors is still exceeded but the count remains non-authoritative until a clean full run completes. Next Codex pass on a Sprint 6 PR should include a cache reset and a fresh authoritative score before any §9a re-evaluation.
+- **Bracket-stripping in `short_title`** — `derive_slug` strips bracketed content from `title` (e.g. `(skatteloven)`) but not from `short_title`. Lovdata's short_title for some acts includes parenthesized abbreviations like `Skatteloven (sktl)`, so the slug becomes `skatteloven-sktl` rather than `skatteloven`. Acceptable but slightly verbose. Changing this would force another slug migration on the corpus, so only worth doing if researchers ask.
+- **Sprint 5 partial-failure recovery** — `_needs_sprint5_history_migration` only checks for the presence of `<dataset>/history/`, not that every current doc has a populated history file. A migration that crashes mid-bulk-write would not auto-retry on the next sync. Acceptable for a one-time event; recovery is manual rerun or a strengthened detector. See §12d.
+- **Sprint-5 mixed-bulk-commit ambiguity** — `_classify_bulk_sync` cannot distinguish a deleted file from an in-place shrunken update inside the same bulk commit using `--numstat` alone. Deletes mixed with updates are classified as updates. Bounded to legacy bulk-mode commits (post-Sprint-4 default is per-doc, never goes through this branch). Full fix needs `--name-status` parsing; deferred unless real lovverk history shows the misclassification mattering.
+- **Orchestrator branch coverage at 97%** — Sprint 5 PR-B added several new branches (commit-mode dispatch, history follow-up, Sprint 5 migration trigger) without proportional integration coverage. Codex flagged but did not classify as a bug.
+
+Resolved during Sprint 5:
+- ~~Sprint 5 history layer planned but not implemented~~ — shipped in PR #23 + #24 (§12d). Production migration commit `0c40d0bf` populated history for all 4522 current docs.
+- ~~Stale mutmut cache from Sprint 4~~ — Codex re-ran fresh snapshots in PR #23 / #24 reviews; current numbers reflect Sprint 5 surface.
+- ~~Dependabot mutmut major bump~~ — `chore(dependabot)` in PR #20 added an `ignore` rule for `mutmut` semver-major updates (decisions.md §9 reasoning).
 
 Resolved during Sprint 4:
 - ~~Per-document commit mode deferred~~ — implemented in PR #17 (§12a).
