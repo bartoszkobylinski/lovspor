@@ -4,7 +4,7 @@ Single source of truth for why this project looks the way it does. Every non-obv
 
 Update this file whenever a new decision lands.
 
-Last updated: 2026-04-22
+Last updated: 2026-04-27
 
 ---
 
@@ -84,7 +84,7 @@ render changed docs → Markdown
         ↓
 write to lovverk repo (sibling clone)
         ↓
-git commit (single commit per sync run; see §12a for per-doc deferred)
+git commit (per-document by default since Sprint 4; see §12a for all three modes)
 ```
 
 ### Key invariants
@@ -92,7 +92,7 @@ git commit (single commit per sync run; see §12a for per-doc deferred)
 - **Hash on normalized XML, never on rendered Markdown or HTML.** Rendering is deterministic, but changes in the renderer would otherwise trigger false-positive commits.
 - **Renderer must be byte-identical deterministic.** Tested. Same XML in → same MD out, every time.
 - **Sync is idempotent.** Running twice on same upstream state = 0 file changes = 0 commits.
-- **Commit granularity:** as of Sprint 3 close, one commit per *sync run* (single mode), not per document. The `git_commit_mode='per-document'` configuration value is validated but not yet implemented; see §12a. When that lands, `git log <file>.md` will show amendment history per act; for now history is per-sync.
+- **Commit granularity:** as of Sprint 4 PR #17, the default is `per-document` — one commit per add / update / rename / remove with conventional-commit messages, plus a final `sync: update manifest and index` commit. `single` mode (one bulk commit per sync) and a one-off `migration` override (used for the Sprint 3 → Sprint 4 slug rename) remain wired (see §12a). `git log lovverk/<dataset>/<slug>.md` now shows the amendment history per act.
 
 ### Update cadence
 
@@ -109,20 +109,20 @@ github.com/bartoszkobylinski/lovspor/   ← engine (Python)
 
 github.com/bartoszkobylinski/lovverk/   ← corpus (data)
   lover/
-    <id>.md
+    <slug>.md      ← Sprint 4: human-readable slug, e.g. skatteloven.md
+    INDEX.md       ← Sprint 4: alphabetical discovery list
   forskrifter/
-    <id>.md
+    <slug>.md
+    INDEX.md
   manifest.json
   README.md, LICENSE
 ```
 
-The engine pushes to the corpus via deploy key (to be configured in Sprint 3 when sync is functional).
+The engine pushes to the corpus via the `LOVVERK_DEPLOY_KEY` deploy key (configured Sprint 3 PR #16; runbook in `docs/operations.md` §Deploy key setup).
 
 Local layout:
 - `~/Programming/Python/lovspor/` — engine repo + `.venv/` in project
 - `~/Programming/Python/lovverk/` — corpus repo (no venv, pure data)
-
-`~/Programming/Python/norsk_loven/` is an empty leftover directory. Can be deleted.
 
 ## 7. Toolchain
 
@@ -313,13 +313,29 @@ End-of-sprint state:
 - Idempotency contract enforced by tests: no upstream changes ⇒ no commits.
 - Conservative legal posture preserved: only NLOD 2.0 tarballs, never raw XML in git.
 
-### Sprint 4 (potential, not committed)
+### Sprint 4 — Corpus UX polish (PR #17 → #18, MERGED 2026-04-26 → 2026-04-27)
 
-Candidates if we keep going:
-- Per-document commit mode for `git_commit_mode` (currently single only; field declared but unread — keep as forward declaration).
-- Optional Storting open-data enrichment for parliamentary metadata.
-- `lovspor render`, `lovspor validate`, `lovspor stats` CLI commands documented in PR #1's `docs/operations.md` planning.
-- Status badge + workflow runtime stats reporting.
+Closed Sprint 4. Filenames are now human-readable, the corpus is browsable via INDEX, per-document commit history is wired, and a slug length cap protects against NAME_MAX overflow on EU implementation forskrifter.
+
+- **PR #17** `feat(corpus): slug-based filenames, INDEX.md, per-document commits` — slug derivation (§12b) + collision resolution + rename detection + three commit policies (§12a) + per-dataset INDEX generation (§12c). Codex round 2 found cross-dataset slug collision scoping bug and tombstone slug/title loss; both fixed.
+- **PR #18** `fix(rendering): cap slug at 200 UTF-8 bytes (production hotfix)` — slug length cap after the first scheduled migration sync crashed with `OSError: File name too long` on a 290-character EU forskrift title. Adds `tests/property/` with 5 Hypothesis invariants on slug derivation (§9b). Codex round 2 found a docs/behavior mismatch on the no-hyphen edge case; fixed by narrowing the documented contract instead of changing runtime behavior.
+
+End-of-sprint state:
+- 23 production source files, ~2200 LOC, 99% coverage.
+- 321 tests across unit + integration + property.
+- First scheduled cron ran 2026-04-27 and executed an atomic migration commit (4522 renames + manifest + INDEX in one commit) producing the human-readable corpus on `lovverk/main`.
+- Property-testing infrastructure in place; see §9b for next-target modules.
+
+### Sprint 5 (planned) — per-act CHANGELOG.md
+
+User decision 2026-04-27: next sprint produces a human-readable per-act change history. For each `lovverk/<dataset>/<slug>.md` we generate a sibling `lovverk/<dataset>/CHANGELOG/<slug>.md` from `git log --follow` so non-technical consumers (researchers, AI ingestion, journalists) can see "this law changed N times: 2026-04-15 § 5-12 updated, 2025-08-01 added, …" without running git themselves. The Sprint 4 slug + INDEX work supplied the discovery layer; this supplies the history layer.
+
+Other candidates considered but not chosen for Sprint 5:
+- **Status badge + workflow runtime stats reporting** — visible signal that the system is alive, but no new value for corpus consumers.
+- **JSONL chunked export for RAG** — explicit AI/RAG use case (§2), but requires upfront chunking-strategy decisions (token counter, overlap, embedding format) that are worth a focused sprint of their own.
+- **Lovtidend feed integration** — gives "why a law changed", potentially massive value, but scope-expansion to a second data source deserves its own dedicated sprint with a separate plan.
+- **`lovspor render` / `validate` / `stats` CLI commands** — operability nice-to-have, not user-visible from the corpus side.
+- **Storting open-data enrichment** — parliamentary metadata layer; defer until corpus surface stabilizes and there is concrete consumer demand.
 
 ## 12a. git_commit_mode is now implemented (Sprint 4)
 
@@ -380,12 +396,16 @@ Both 7 letters, both start with `lov`, ship visibly as siblings.
 
 ## 14. Known open items
 
-End of Sprint 3:
+End of Sprint 4:
 
-- **Dependabot PRs #2 / #3 / #4** still open. Need a review pass after Sprint 3 to merge or close. Updates are toolchain-only (actions/checkout v6, setup-uv v7, dev deps group).
-- **`norsk_loven/` stale directory** on local disk — safe to delete; not in git.
-- **Per-document commit mode** in orchestrator deferred (see §12a). `git_commit_mode='per-document'` validates but is treated as `'single'` in `_commit_staged`.
-- **First real production sync** has not yet run. The workflow is scheduled but the very first scheduled run will be the integration smoke test. Watch the Actions tab the morning after merge.
+- **Dependabot PRs #2 / #3 / #4** still open since Sprint 0. Toolchain-only (`actions/checkout` v6, `setup-uv` v7, dev deps group). Merge as a batch after a quick local check; no functional risk.
+- **Mutation baseline needs a fresh authoritative run.** Codex's PR #18 review noted that the existing `.mutmut-cache` is stale after Sprint 4 changes. The cache currently shows 279 survivors, which exceeds the §9a revisit trigger of 250, but the count is not authoritative until a clean rerun. Next Codex pass on a Sprint 5 PR should include a cache reset and a fresh score before any §9a re-evaluation happens.
+
+Resolved during Sprint 4:
+- ~~Per-document commit mode deferred~~ — implemented in PR #17 (§12a).
+- ~~First real production sync has not yet run~~ — ran 2026-04-26 (manual seed, 4522 docs) and 2026-04-27 (scheduled migration commit, atomic 4522 renames + manifest + INDEX).
+- ~~`norsk_loven/` stale directory~~ — deleted from local disk 2026-04-27.
+- ~~Slug NAME_MAX overflow on monster forskrift titles~~ — fixed in PR #18 (§12b, §9b).
 
 Resolved during Sprint 3:
 - ~~Duplicate commit `2def5a6`~~ — squashed away by PR #5 merge.
