@@ -18,10 +18,22 @@ characters with hyphens, and collapses runs of hyphens. Norwegian
 and GitHub UI both render them correctly, and Norwegian readers
 expect them.
 
-Slug collisions across the same dataset are rare but possible. They
-are resolved by ``resolve_collisions`` deterministically: docs are
-sorted by ``doc_id``, the first occurrence keeps the bare slug,
-subsequent occurrences get ``-2``, ``-3``, …
+The result is then capped at ``_MAX_SLUG_BYTES`` UTF-8 bytes so the
+final filename (slug + ``.md`` + collision suffix) stays under POSIX
+NAME_MAX (255 bytes). EU implementation forskrifter sometimes have
+250-500 character titles with no ``short_title``; without a cap the
+slug overflows and sync crashes with ``OSError: File name too long``
+on Linux/macOS filesystems (observed in production 2026-04-27).
+Truncation prefers a hyphen boundary when one exists in the byte-
+truncated prefix; for the theoretical case of a single token longer
+than 200 bytes with no internal hyphen (not observed in real Lovdata
+data), the raw byte-truncated form is used.
+
+Slug collisions across the same dataset are rare but possible (and
+become more likely once truncation is in play). They are resolved by
+``resolve_collisions`` deterministically: docs are sorted by
+``doc_id``, the first occurrence keeps the bare slug, subsequent
+occurrences get ``-2``, ``-3``, …
 """
 
 import re
@@ -30,6 +42,14 @@ _BRACKET_CONTENT = re.compile(r"[\[(].*?[\])]")
 _NON_SLUG_CHAR = re.compile(r"[^a-z0-9æøåäöü]+")
 _HYPHEN_RUN = re.compile(r"-+")
 
+_MAX_SLUG_BYTES = 200
+"""UTF-8 byte cap on slugs.
+
+POSIX NAME_MAX is 255. We reserve 55 bytes of headroom for the ``.md``
+extension (3 bytes), a collision suffix like ``-99`` (3 bytes), and
+comfortable margin for any future filename-suffix conventions.
+"""
+
 
 def derive_slug(short_title: str | None, title: str, doc_id: str) -> str:
     """Compute the base slug for a single document.
@@ -37,9 +57,12 @@ def derive_slug(short_title: str | None, title: str, doc_id: str) -> str:
     The result is non-empty: if every preferred source slugifies to the
     empty string (e.g., title is only punctuation), ``doc_id`` is the
     final fallback so the slug is always usable as a filename.
+
+    The result is also length-capped at ``_MAX_SLUG_BYTES`` UTF-8 bytes.
     """
     candidate = short_title or _strip_brackets(title) or doc_id
-    return _slugify(candidate.strip()) or doc_id
+    slug = _slugify(candidate.strip()) or doc_id
+    return _cap_length(slug) or doc_id
 
 
 def resolve_collisions(slugs_by_doc: dict[str, str]) -> dict[str, str]:
@@ -67,3 +90,27 @@ def _slugify(text: str) -> str:
     text = _NON_SLUG_CHAR.sub("-", text)
     text = _HYPHEN_RUN.sub("-", text)
     return text.strip("-")
+
+
+def _cap_length(slug: str) -> str:
+    """Cap ``slug`` at ``_MAX_SLUG_BYTES`` UTF-8 bytes.
+
+    When the byte-truncated prefix contains a hyphen at position > 0,
+    trim back to it so the filename ends at a word boundary. When no
+    such hyphen exists (single long token — not observed in real
+    Lovdata data but well-defined here), the raw byte-truncated form
+    is returned as-is.
+
+    Why bytes not characters: POSIX NAME_MAX is 255 *bytes* regardless
+    of encoding. Norwegian ``æøå`` are 2 UTF-8 bytes each, so a
+    char-based cap over-counts the safe budget and still risks overflow
+    on heavily Unicode titles.
+    """
+    encoded = slug.encode("utf-8")
+    if len(encoded) <= _MAX_SLUG_BYTES:
+        return slug
+    truncated = encoded[:_MAX_SLUG_BYTES].decode("utf-8", errors="ignore")
+    last_hyphen = truncated.rfind("-")
+    if last_hyphen > 0:
+        truncated = truncated[:last_hyphen]
+    return truncated.strip("-")

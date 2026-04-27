@@ -60,6 +60,61 @@ def test_derive_slug_handles_empty_short_title_string() -> None:
     assert derive_slug("", "Skatteloven", "nl-x") == "skatteloven"
 
 
+def test_derive_slug_caps_long_title_at_200_utf8_bytes() -> None:
+    """Production regression 2026-04-27: an EU-implementation forskrift
+    with no short_title and a 290-character title crashed sync with
+    ``OSError: File name too long``. Cap at 200 UTF-8 bytes leaves
+    headroom under POSIX NAME_MAX (255) for ``.md`` + collision suffix.
+    """
+    monster_title = (
+        "Forskrift om gjennomføring av kommisjonsforordning (EU) "
+        "2020/420 av 16. mars 2020 om endring av den tyske språkversjonen "
+        "av forordning (EU) 2016/919 om den tekniske spesifikasjonen for "
+        "samtrafikkevne for delsystemet styring, kontroll og signal i "
+        "Den europeiske unions jernbanesystem"
+    )
+    slug = derive_slug(None, monster_title, "sf-fallback")
+    assert len(slug.encode("utf-8")) <= 200
+
+
+def test_derive_slug_truncates_capped_slug_at_hyphen_boundary() -> None:
+    """A truncated slug should not end mid-word — cut back to the last
+    hyphen so the visible filename remains a clean prefix of the title."""
+    long = "lang-tittel-" * 50
+    slug = derive_slug(None, long, "x")
+    assert len(slug.encode("utf-8")) <= 200
+    assert "-" in slug
+    assert not slug.endswith("lan")
+    assert not slug.endswith("titt")
+
+
+def test_derive_slug_norwegian_chars_counted_as_bytes_not_chars() -> None:
+    """``ø`` (and other Norwegian Unicode) is 2 UTF-8 bytes. The cap
+    is bytes, not characters, so a 250-character all-``ø`` title still
+    fits under the 200-byte budget after truncation."""
+    long_norwegian_title = "ø" * 250  # 500 UTF-8 bytes
+    slug = derive_slug(None, long_norwegian_title, "x")
+    assert len(slug.encode("utf-8")) <= 200
+
+
+def test_derive_slug_short_title_under_cap_is_unchanged() -> None:
+    """Sanity: the cap is not over-eager. Sub-cap slugs pass through."""
+    assert derive_slug("Skatteloven", "x", "nl-x") == "skatteloven"
+    assert len(b"skatteloven") < 200
+
+
+def test_derive_slug_no_hyphen_in_prefix_falls_back_to_byte_truncation() -> None:
+    """Documented behavior: when the byte-truncated prefix has no hyphen
+    at position > 0 (theoretical single-token slug ≥ 200 bytes), the
+    raw byte-truncated form is returned. Real Lovdata titles always
+    contain spaces that become hyphens during slugify, so this branch
+    is never hit in production — but the contract must hold."""
+    monolithic = "a" * 500
+    slug = derive_slug(monolithic, "", "x")
+    assert len(slug.encode("utf-8")) == 200
+    assert slug == "a" * 200
+
+
 def test_resolve_collisions_returns_bare_slug_when_unique() -> None:
     result = resolve_collisions({"a": "skatteloven", "b": "opplæringslova"})
     assert result == {"a": "skatteloven", "b": "opplæringslova"}

@@ -40,6 +40,7 @@ dev = [
     "mutmut==2.5.1",
     "pre-commit>=4.0.0",
     "lxml-stubs>=0.5.1",
+    "hypothesis>=6.115.0",
 ]
 
 [build-system]

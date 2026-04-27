@@ -198,6 +198,29 @@ Decided 2026-04-23 after Sprint 3 PR #11; baseline numbers updated 2026-04-26 af
 3. A real bug ships that mutation testing should have caught (signals our equivalence-class judgment is wrong).
 4. mutmut 3 ships a stable filter API that lets us suppress equivalents cleanly without configuration drift.
 
+## 9b. Property-based testing with Hypothesis
+
+Added 2026-04-27 after the first scheduled migration sync crashed in production with `OSError: File name too long`. Root cause was a 290-character forskrift title slugifying past POSIX NAME_MAX (see §12b). Codex's PR #17 review missed it; mutation testing missed it; both because every unit + integration test used synthetic titles ≤ 50 characters.
+
+**Lesson:** synthetic test data does not exercise the long-tail distribution of real Lovdata content. Hand-coded edge cases (`""`, `"x" * 1000`) catch some of this but not all — they presuppose the writer thought of the failure mode. Property testing flips it: declare an invariant, let Hypothesis search for counterexamples.
+
+**Where:** `tests/property/test_slug_properties.py`. Five invariants on `derive_slug` and `resolve_collisions`:
+
+- slug ≤ 200 UTF-8 bytes (the production guard)
+- slug is non-empty (filename usability)
+- slug is a pure function of inputs (change-detection contract)
+- `resolve_collisions` is a bijection (no document silently dropped)
+- `resolve_collisions` is input-order independent (determinism)
+
+**Strategies:** Latin + Latin-1 Supplement + Latin Extended-A (`0x20`–`0x017F`), titles up to 500 characters, dictionaries up to 20 entries. Lovdata never emits scripts outside that range for legal text, so this gives realistic coverage without generating CJK or emoji that the slugify rules would just collapse to hyphens.
+
+**Where to add property tests next** (when motivation strikes, not as urgent work):
+- `extraction/tarball.py` — member-name validation invariants (no path traversal escapes for any input).
+- `parsing/xml_normalizer.py` — canonicalization round-trip (parse + canonicalize + parse should be a fixed point).
+- `storage/manifest.py` — JSON round-trip determinism for arbitrary valid manifests.
+
+**Cost:** `hypothesis` added to dev dependencies (`pyproject.toml`). Default 100 examples per test × 5 tests ≈ < 1 s in local CI. Negligible.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:
@@ -323,6 +346,13 @@ Why preserve Norwegian Unicode (`æøå`) instead of ASCII transliteration:
 - Native Norwegian readers expect the real letters; `opplæringslova` is the law's name, not `opplaeringslova`.
 - GitHub UI renders Unicode correctly; modern URL handling supports it.
 - AI ingestion (RAG) handles Unicode without issue.
+
+Length cap (added 2026-04-27 after first scheduled migration sync crashed):
+- Slugs are capped at **200 UTF-8 bytes**. POSIX NAME_MAX is 255 bytes; we reserve 55 bytes of headroom for `.md` (3) + collision suffix `-99` (3) + future filename conventions.
+- ~1009 of 4522 documents (22%) have `short_title: null` and fall through to the `title`. ~96 of those titles exceed 200 bytes (longest 428 chars), mostly EU implementation forskrifter with names like `Forskrift om gjennomføring av kommisjonsforordning (EU) …`. Without the cap, slug+`.md` overflows NAME_MAX and `pathlib.write_text` raises `OSError: File name too long`.
+- Truncation prefers a hyphen boundary when one exists in the byte-truncated prefix. For the theoretical case of a single token longer than 200 bytes with no internal hyphen (not observed in real Lovdata data — every legal title has spaces that become hyphens during slugify), the raw byte-truncated form is returned. Behavior is well-defined and tested.
+- Collisions induced by truncation are resolved by the existing `resolve_collisions` (`-2`, `-3`, …).
+- Codex did not catch this in PR #17 review because all unit + integration tests used synthetic titles ≤50 chars. Lesson captured in §9b (property-based testing now in place).
 
 ## 12c. INDEX.md per dataset (Sprint 4)
 
