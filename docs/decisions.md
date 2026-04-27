@@ -326,9 +326,18 @@ End-of-sprint state:
 - First scheduled cron ran 2026-04-27 and executed an atomic migration commit (4522 renames + manifest + INDEX in one commit) producing the human-readable corpus on `lovverk/main`.
 - Property-testing infrastructure in place; see §9b for next-target modules.
 
-### Sprint 5 (planned) — per-act CHANGELOG.md
+### Sprint 5 (planned) — per-act change history (JSON source + Markdown view)
 
-User decision 2026-04-27: next sprint produces a human-readable per-act change history. For each `lovverk/<dataset>/<slug>.md` we generate a sibling `lovverk/<dataset>/CHANGELOG/<slug>.md` from `git log --follow` so non-technical consumers (researchers, AI ingestion, journalists) can see "this law changed N times: 2026-04-15 § 5-12 updated, 2025-08-01 added, …" without running git themselves. The Sprint 4 slug + INDEX work supplied the discovery layer; this supplies the history layer.
+User decision 2026-04-27 (refined later same day after MCP discussion): next sprint produces a per-act change history. For each `lovverk/<dataset>/<slug>.md` we extract the file's git history (`git log --follow`) and write two co-located outputs:
+
+- `lovverk/<dataset>/history/<slug>.json` — **source of truth**, structured event list (date, commit, type, from/to, line stats). Schema-versioned. Designed so a future MCP server can answer queries like `get_law_history(slug)` or `list_recent_changes()` with a plain JSON read.
+- `lovverk/<dataset>/history/<slug>.md` — derived human view, generated from the same JSON. For researchers / journalists / GitHub browsers.
+
+Why JSON-first instead of Markdown-only: the Sprint 0 §2 primary use case is AI/RAG ingestion, and a planned Sprint 6 candidate is an MCP server. Building only Markdown would force MCP/AI consumers to parse fragile prose; building only JSON would make GitHub browsing painful. Generating both from one source costs ~30 % more code than Markdown-only and avoids a guaranteed refactor when MCP lands.
+
+Earlier framing of this section called the output `CHANGELOG/<slug>.md`; the implementation in PR-A (Sprint 5) chose `history/<slug>.{json,md}` to better describe the dual-format reality.
+
+The Sprint 4 slug + INDEX work supplied the discovery layer; this supplies the history layer.
 
 Other candidates considered but not chosen for Sprint 5:
 - **Status badge + workflow runtime stats reporting** — visible signal that the system is alive, but no new value for corpus consumers.
