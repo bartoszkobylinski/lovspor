@@ -292,6 +292,39 @@ def test_classify_bulk_sync_content_only_removal_stays_updated() -> None:
     assert event.type == "updated"
 
 
+def test_classify_bulk_sync_mixed_changes_and_removals_defaults_to_updated() -> None:
+    """Codex PR-B regression guard. When a bulk commit claims BOTH
+    'M changed > 0' AND 'L removed > 0', the same numstat row pattern
+    (additions=0, removals>0) could mean either a delete or an
+    in-place shrinkage update. Without name-status we cannot tell —
+    so we default to 'updated' (the more common case in this codebase)
+    rather than 'removed'. The misclassification window is bounded:
+    no commit type in the post-Sprint-4 codebase produces ambiguous
+    bulk-mode subjects."""
+    event = _classify_commit(
+        "abc1234deadbeef",
+        "2026-04-27T10:15:00+02:00",
+        "sync: 0 new, 1 changed, 0 renamed, 1 removed",
+        ["0\t100\tlover/skatteloven.md"],
+    )
+    assert event is not None
+    assert event.type == "updated"
+
+
+def test_classify_bulk_sync_pure_delete_still_classified_as_removed() -> None:
+    """The fix above must NOT regress the pure-delete case: a bulk
+    commit with 'M changed == 0' and 'L removed > 0' still classifies
+    a 0-additions file as removed."""
+    event = _classify_commit(
+        "abc1234",
+        "2026-04-27T10:15:00Z",
+        "sync: 0 new, 0 changed, 0 renamed, 1 removed",
+        ["0\t42\tlover/skatteloven.md"],
+    )
+    assert event is not None
+    assert event.type == "removed"
+
+
 def test_classify_unknown_subject_falls_back_to_added() -> None:
     """Initial seed commit ('chore: initialize corpus repository') has no
     per-doc info; we still want an entry rather than dropping the commit."""

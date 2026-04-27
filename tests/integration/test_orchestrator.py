@@ -283,10 +283,16 @@ def test_per_document_commit_mode_creates_one_commit_per_change(
     assert "sync: update manifest" in log
 
 
-def test_single_commit_mode_creates_one_commit_per_sync(
+def test_single_commit_mode_creates_bulk_commit_plus_history_followup(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
 ) -> None:
+    """Single mode produces TWO commits in Sprint 5+: the bulk
+    docs+meta commit (the "single" semantic, unchanged) and a
+    follow-up commit that adds per-act history. The follow-up is
+    required because history extraction needs the docs commit to
+    exist before ``git log`` can see it (chicken-and-egg). See
+    decisions.md §12d."""
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -310,18 +316,22 @@ def test_single_commit_mode_creates_one_commit_per_sync(
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     run_sync(settings)
 
-    assert _git_commit_count(corpus) == 1
+    assert _git_commit_count(corpus) == 2
     log = _git_log_subjects(corpus)
     assert "sync: 2 new" in log
+    assert "sync: update history for 2 documents" in log
 
 
-def test_migration_creates_one_bulk_commit_even_in_per_document_mode(
+def test_migration_creates_bulk_commit_plus_history_followup_in_per_document_mode(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
 ) -> None:
     """Sprint 3 -> Sprint 4 transition: a manifest with slug=None
-    records triggers a single 'migration: ...' commit, overriding
-    per-document mode."""
+    records triggers a single 'migration: rename ...' commit covering
+    all renames + manifest + INDEX, overriding per-document mode.
+    Sprint 5 PR-B added a second commit ('sync: update history for N
+    documents') because history extraction has to wait for the
+    migration commit to land before ``git log`` can see it."""
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -365,10 +375,11 @@ def test_migration_creates_one_bulk_commit_even_in_per_document_mode(
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     run_sync(settings)
 
-    # Migration: exactly one new commit covering everything
-    assert _git_commit_count(corpus) == commits_before + 1
+    # Migration commit + history follow-up commit = 2 new commits.
+    assert _git_commit_count(corpus) == commits_before + 2
     log = _git_log_subjects(corpus)
     assert "migration: rename" in log
+    assert "sync: update history for 1 documents" in log
 
     assert (corpus / "lover" / "skattie.md").exists()
     assert not (corpus / "lover" / "lov-x.md").exists()
@@ -646,3 +657,156 @@ def test_run_sync_raises_config_error_on_missing_upstream_archive(
     settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus)
     with pytest.raises(ConfigError, match="missing expected archive"):
         run_sync(settings)
+
+
+# ---------- Sprint 5: per-act history generation ----------
+
+
+def test_history_files_generated_for_added_doc_in_per_document_mode(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """A normal incremental sync in per-doc mode (default) writes
+    history/<slug>.json + history/<slug>.md alongside the doc, and
+    bundles them into the final 'sync: update manifest, index, and
+    history' commit."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_extra("Skattie", "body"))])
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    history_json = corpus / "lover" / "history" / "skattie.json"
+    history_md = corpus / "lover" / "history" / "skattie.md"
+    assert history_json.exists()
+    assert history_md.exists()
+
+    payload = json.loads(history_json.read_text(encoding="utf-8"))
+    assert payload["slug"] == "skattie"
+    assert payload["doc_id"] == "lov-1"
+    assert payload["schema_version"] == 1
+    assert len(payload["events"]) >= 1
+    assert payload["events"][0]["type"] == "added"
+
+    log = _git_log_subjects(corpus)
+    assert "sync: update manifest, index, and history" in log
+
+
+def test_manifest_records_total_changes_and_last_changed_after_sync(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """After a sync that adds a doc, the manifest record for that doc
+    carries Sprint 5 history metadata so future MCP-style queries
+    (e.g. list_recent_changes) can sort without loading every
+    history.json."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_extra("Skattie", "body"))])
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    record = manifest["documents"]["lov-1"]
+    assert record["total_changes"] >= 1
+    # last_changed is an ISO date string like "2026-04-27"
+    assert isinstance(record["last_changed"], str)
+    assert len(record["last_changed"]) == 10
+    assert record["last_changed"][4] == "-"
+
+
+def test_sprint5_history_migration_triggers_on_first_sync_after_prb(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """A pre-Sprint-5 corpus (manifest with current docs but no
+    history/ dirs anywhere) gets a one-time 'migration: generate
+    history for N documents' commit on the first sync after PR-B
+    ships, before any regular sync work for that day."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    body = "Body that does not change."
+    xml = _law_with_extra("Skattie", body)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", xml)])
+    _build_tarball(forskrifter_tar, [])
+
+    # Pre-write a Sprint-4-style manifest: slug populated but no
+    # history/ directory on disk.
+    legacy_path = corpus / "lover" / "skattie.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Existing file\n", encoding="utf-8")
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 27, tzinfo=UTC),
+        documents={
+            "lov-1": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(xml),
+                markdown_path="lover/skattie.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 27, tzinfo=UTC),
+                status="current",
+                slug="skattie",
+                title="Skattie",
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "Sprint 4 seed"], cwd=corpus, check=True)
+    commits_before = _git_commit_count(corpus)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    # Migration commit fired (upstream is unchanged so no regular sync
+    # commit follows) — exactly one new commit on top of the Sprint 4
+    # baseline.
+    assert _git_commit_count(corpus) == commits_before + 1
+    log = _git_log_subjects(corpus)
+    assert "migration: generate history for 1 documents" in log
+    assert (corpus / "lover" / "history" / "skattie.json").exists()
+
+
+def test_sprint5_history_migration_skipped_when_history_dirs_already_exist(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """A Sprint-5-ready corpus (history/ already populated) must NOT
+    re-run the migration on every sync — the no-op contract from
+    decisions.md §5 still holds when upstream is unchanged."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_extra("Skattie", "body"))])
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus)
+    run_sync(settings)  # first sync populates history/ for both datasets
+    commits_after_first = _git_commit_count(corpus)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)  # second sync: upstream unchanged, history exists
+
+    assert _git_commit_count(corpus) == commits_after_first
+    log = _git_log_subjects(corpus)
+    assert "migration: generate history" not in log

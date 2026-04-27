@@ -395,6 +395,25 @@ _4521 current documents_
 
 The INDEX adds discovery on top of the slug-based filenames: a human or AI can browse one file to see the entire corpus rather than scrolling 4500 entries in the GitHub directory listing. Updated on every non-noop sync (committed alongside the manifest in per-document mode, or bundled in the bulk commit in single/migration mode).
 
+## 12d. History generation in sync (Sprint 5)
+
+Implemented in PR-B 2026-04-27. The orchestrator generates per-act history (`history/<slug>.json` source-of-truth + `history/<slug>.md` derived view, see §12b for the directory rationale) for every doc that changed in the current sync. Manifest records gain `total_changes` and `last_changed` so future MCP-style queries can sort and filter without loading every history.json.
+
+**Commit topology** (chicken-and-egg constraint: history reads `git log --follow`, which can only see commits that already exist):
+
+- `per-document` mode (default): per-doc commits land first, then history is generated, then one final commit bundles manifest + INDEX + history (`sync: update manifest, index, and history`). Single final commit, matching user decision Q1 = same-commit (2026-04-27 chat).
+- `single` mode: docs+meta commit first (the "single" semantic, unchanged), then a follow-up commit `sync: update history for N documents`. Two commits required.
+- Sprint 4 migration override: rename + meta commit first, then history follow-up. Same two-commit pattern as single mode.
+- Sprint 5 standalone migration: when the corpus has prior current docs but no `<dataset>/history/` dir, `run_sync` first emits `migration: generate history for N documents` BEFORE any regular sync work. Triggers once on the first sync after PR-B; subsequent syncs see populated dirs and skip.
+
+**Frontmatter is intentionally untouched.** Sprint 5 metadata lives only in the manifest and in `history/`, never in `<slug>.md`. Adding `last_change_commit:` to per-doc frontmatter would force a one-time re-render of all 4522 docs (false-positive change). User decision Q2 = 2b (2026-04-27 chat).
+
+**Tombstones are skipped.** Docs with `status: removed` are not given a `history/` file in this sprint — `git log --follow` on a deleted file returns empty without `--all`, and reconstructing via `--all` would expand scope. User decision Q3 = A (2026-04-27 chat). Documented gap; revisit when researchers ask for "what happened to this law before it was deleted".
+
+**Performance.** Sprint 5 migration is sequential: one `git log` subprocess per current doc (~50 ms each × 4522 docs ≈ 4 minutes). Within the GitHub Actions 30-minute workflow timeout. User decision Q4 = sequential (2026-04-27 chat). If this becomes a bottleneck, a follow-up PR can batch via `git log --all --name-only` over the whole repo and bucket by file.
+
+**Partial-failure risk on Sprint 5 migration.** If the migration crashes mid-bulk-write, the dir exists but only some docs have history.json. The detector (`_needs_sprint5_history_migration`) only checks dir presence, so the migration will not auto-retry on the next sync. Acceptable for a one-time event; if it ever fires in production and fails midway, manual rerun or a strengthened detector that checks per-doc presence is the recovery path.
+
 ## 13. Naming
 
 Norwegian, deliberately:

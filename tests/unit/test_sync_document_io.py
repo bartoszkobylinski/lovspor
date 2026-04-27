@@ -8,6 +8,7 @@ import pytest
 from lovspor.rendering.document import FrontmatterContext
 from lovspor.storage.manifest import Manifest, ManifestRecord
 from lovspor.sync.document_io import (
+    dataset_dir,
     delete_document,
     doc_type_for_dataset,
     document_path,
@@ -40,6 +41,18 @@ def test_doc_type_for_known_datasets() -> None:
 def test_doc_type_for_unknown_dataset_raises() -> None:
     with pytest.raises(ValueError, match="unknown source_dataset"):
         doc_type_for_dataset("something-else")
+
+
+def test_dataset_dir_for_known_datasets(tmp_path: Path) -> None:
+    """Sprint 5 helper: dataset_dir returns the on-disk subdir for
+    sibling outputs (history/, INDEX.md)."""
+    assert dataset_dir(tmp_path, "gjeldende-lover") == tmp_path / "lover"
+    assert dataset_dir(tmp_path, "gjeldende-sentrale-forskrifter") == tmp_path / "forskrifter"
+
+
+def test_dataset_dir_for_unknown_dataset_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown source_dataset"):
+        dataset_dir(tmp_path, "something-else")
 
 
 def test_document_path_for_law(tmp_path: Path) -> None:

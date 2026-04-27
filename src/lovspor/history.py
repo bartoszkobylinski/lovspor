@@ -47,6 +47,7 @@ _PER_DOC_SUBJECT = re.compile(
 _MIGRATION_SUBJECT = re.compile(r"^migration: ")
 _BULK_SYNC_SUBJECT = re.compile(r"^sync: \d+ new, \d+ changed")
 _BULK_SYNC_REMOVED_COUNT = re.compile(r"(?P<count>\d+) removed")
+_BULK_SYNC_CHANGED_COUNT = re.compile(r"(?P<count>\d+) changed")
 _RENAME_BRACE = re.compile(r"^(?P<prefix>.*)\{(?P<old>[^{}]*) => (?P<new>[^{}]*)\}(?P<suffix>.*)$")
 _VERB_TO_TYPE: dict[str, EventType] = {
     "add": "added",
@@ -251,18 +252,33 @@ def _classify_bulk_sync(
     """Resolve event type for a pre-Sprint-4 bulk-sync commit.
 
     Subject form is ``sync: N new, M changed, [K renamed,] L removed``.
-    For *this* file's row in numstat we know its add/remove counts; we
-    cross-reference with the subject's removed-count to distinguish a
-    file that was *deleted* in the commit (additions=0 AND the bulk
-    subject claims removals) from one that was merely *updated* by
-    removing lines (additions=0 but the bulk subject claims no
-    removals). Without this disambiguation we used to misclassify
-    pure deletes as updates.
+    For *this* file's numstat row we know its add/remove counts; we
+    cross-reference with the subject to disambiguate.
+
+    Limitations of the numstat-only signal: a file showing
+    ``additions=0, removals>0`` could be either *deleted* in this
+    commit or *shortened in place* (an update that only removed
+    lines). To tell them apart we'd need ``git log --name-status``
+    too, which is more parsing complexity than this codepath warrants
+    (per-doc commits — the post-Sprint-4 default — never go through
+    this branch). The heuristic therefore:
+
+    - Classifies as ``removed`` only when the bulk subject claims
+      removals AND the same commit had no updates (``M changed == 0``).
+      This catches pure-delete bulk commits.
+    - When the bulk subject claims BOTH updates AND removals in the
+      same commit, we can't distinguish; default to ``updated`` (the
+      more common case — line shrinkage in place rather than a delete).
+      A mixed-mode pure-delete is therefore misclassified as updated;
+      the misclassification is bounded to legacy bulk-mode history
+      since no current commit type produces this ambiguity.
     """
     bulk_removed_match = _BULK_SYNC_REMOVED_COUNT.search(subject)
     bulk_removed_count = int(bulk_removed_match.group("count")) if bulk_removed_match else 0
+    bulk_changed_match = _BULK_SYNC_CHANGED_COUNT.search(subject)
+    bulk_changed_count = int(bulk_changed_match.group("count")) if bulk_changed_match else 0
     file_was_only_removed = (added is None or added == 0) and (removed is not None and removed > 0)
-    if bulk_removed_count > 0 and file_was_only_removed:
+    if bulk_removed_count > 0 and bulk_changed_count == 0 and file_was_only_removed:
         return "removed"
     if removed is not None and removed > 0:
         return "updated"

@@ -52,6 +52,32 @@ def test_manifest_record_is_frozen() -> None:
         rec.xml_hash = "changed"  # type: ignore[misc]
 
 
+def test_manifest_record_history_fields_default_to_none() -> None:
+    """Sprint 5 history metadata fields are optional and default to
+    None so manifests written by Sprint 4 engines still load without
+    a migration."""
+    rec = _record()
+    assert rec.total_changes is None
+    assert rec.last_changed is None
+
+
+def test_manifest_record_accepts_history_fields_when_provided() -> None:
+    rec = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a",
+        markdown_path="lover/skatteloven.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 27, 5, 0, tzinfo=UTC),
+        status="current",
+        slug="skatteloven",
+        title="Skatteloven",
+        total_changes=12,
+        last_changed="2026-04-27",
+    )
+    assert rec.total_changes == 12
+    assert rec.last_changed == "2026-04-27"
+
+
 def test_manifest_is_frozen() -> None:
     mf = _manifest()
     with pytest.raises(ValidationError):

@@ -27,10 +27,15 @@ ManifestStatus = Literal["current", "removed"]
 class ManifestRecord(BaseModel):
     """Per-document state in the manifest.
 
-    ``slug`` and ``title`` were added in Sprint 4 to support human-readable
-    filenames and auto-generated INDEX pages. Both default to ``None`` for
-    backward compatibility with manifests written by Sprint 3 engines.
-    Records with ``slug is None`` trigger migration on the next sync.
+    Sprint 4 added ``slug`` and ``title`` to support human-readable
+    filenames and auto-generated INDEX pages. Sprint 5 added
+    ``total_changes`` and ``last_changed`` so future MCP-style tools
+    (e.g. ``list_recent_changes``) can sort and filter on history
+    metadata without loading each ``history/<slug>.json`` file.
+
+    All four are ``None``-defaulted for backward compatibility:
+    manifests written by Sprint 3 still load (no slug/title), and
+    manifests written by Sprint 4 still load (no history fields).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -43,6 +48,8 @@ class ManifestRecord(BaseModel):
     status: ManifestStatus
     slug: str | None = None
     title: str | None = None
+    total_changes: int | None = None
+    last_changed: str | None = None
 
 
 class Manifest(BaseModel):

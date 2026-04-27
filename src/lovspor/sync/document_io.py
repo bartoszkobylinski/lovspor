@@ -40,6 +40,19 @@ def doc_type_for_dataset(source_dataset: str) -> str:
         ) from exc
 
 
+def dataset_dir(corpus_root: Path, source_dataset: str) -> Path:
+    """Return the dataset's on-disk subdirectory (``corpus/lover``,
+    ``corpus/forskrifter``). Used by callers that need to write
+    siblings of the per-act files (history/, INDEX.md)."""
+    try:
+        subdir = _DATASET_TO_SUBDIR[source_dataset]
+    except KeyError as exc:
+        raise ValueError(
+            f"unknown source_dataset: {source_dataset!r}",
+        ) from exc
+    return corpus_root / subdir
+
+
 def document_path(
     corpus_root: Path,
     source_dataset: str,
