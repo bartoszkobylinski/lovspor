@@ -1,10 +1,37 @@
 # lovspor
 
-Norwegian law change tracker. Engine that produces the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) corpus from Lovdata's public-data API.
+Norwegian law change tracker. Engine that produces the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) corpus from Lovdata's public-data API and serves it to AI assistants over MCP (Model Context Protocol).
 
 ## Status
 
-Early scaffold. Not functional yet.
+**Production.** A scheduled GitHub Actions workflow runs daily at 04:00 UTC, pulls the latest tarballs from Lovdata, classifies each document as new / updated / renamed / removed, renders the changes to Markdown, and pushes the diff to `lovverk` as conventional-commit history. The corpus currently mirrors **4 522 acts** (≈ 781 lover + ≈ 3 741 forskrifter) with a structured per-act change history under each `<dataset>/history/<slug>.json`.
+
+See [`docs/decisions.md`](docs/decisions.md) for the full architecture and design rationale.
+
+## MCP server
+
+`lovspor` ships an MCP server that exposes the `lovverk` corpus to AI assistants like Claude Desktop and Claude Code. Once configured, you can ask things like *"what changed in Skatteloven this year?"* or *"are there forskrifter about jernbane?"* and the assistant fetches the answer from the corpus directly.
+
+Quickstart for Claude Desktop / Claude Code (replace `/path/to/lovverk` with the location of your local clone):
+
+```jsonc
+{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
+        "lovspor", "mcp",
+        "--corpus-path", "/path/to/lovverk"
+      ]
+    }
+  }
+}
+```
+
+This runs the server on demand from this GitHub repo via [`uv`](https://docs.astral.sh/uv/) — no local clone of `lovspor` required, just the corpus.
+
+See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all four tools documented with examples (`get_law`, `get_law_history`, `list_recent_changes`, `search_laws`), troubleshooting, and limitations.
 
 ## Sources
 
@@ -21,4 +48,4 @@ The legal text produced by this engine is published in the [`lovverk`](https://g
 
 ## Related work
 
-- [`cloveras/lovdata2`](https://github.com/cloveras/lovdata2) — JSON tooling and MCP server for the same Lovdata public data. `lovspor` is complementary, focused on Markdown rendering and Git-based change tracking.
+- [`cloveras/lovdata2`](https://github.com/cloveras/lovdata2) — JSON tooling and MCP server for the same Lovdata public data. `lovspor` is complementary, focused on Markdown rendering, Git-based change tracking, and an MCP server scoped to the `lovverk` corpus shape.

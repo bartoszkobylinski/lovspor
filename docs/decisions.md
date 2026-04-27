@@ -346,7 +346,7 @@ User decision 2026-04-27: this sprint stands up an MCP server exposing the `lovv
 Sprint progress:
 
 - **PR-A** (this PR, in flight 2026-04-27) — `src/lovspor/mcp.py` with the four tools below, FastMCP via Anthropic's `mcp` SDK, stdio transport, CLI entry `lovspor mcp --corpus-path PATH`. CorpusReader is read-only and validates path containment to refuse manifest-driven escapes.
-- **PR-B** (planned) — root README section + `docs/mcp.md` with quickstart, Claude Desktop / Claude Code configuration examples, the four tools documented with input/output samples, troubleshooting, NLOD 2.0 attribution, limitations.
+- **PR-B** (this PR, in flight 2026-04-27) — root `README.md` section + new `docs/mcp.md` (full adoption guide). Covers prerequisites, two-client quickstart with copy-paste config, every tool documented with sample input + sample response, discovery flow, limitations, troubleshooting walkthrough, and NLOD 2.0 attribution. Also refreshes the README's "Status" block from "Early scaffold" to the current production state.
 
 Tools shipped in PR-A:
 
