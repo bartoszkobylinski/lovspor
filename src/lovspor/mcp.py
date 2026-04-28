@@ -1,10 +1,11 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles six read-only tools over a local clone of the lovverk Markdown
+Bundles seven read-only tools over a local clone of the lovverk Markdown
 corpus (produced by the lovspor sync engine). Each tool answers a class
 of question an AI agent would naturally ask about Norwegian law:
 
     get_law(slug)              -> "Show me Skatteloven"
+    get_section(slug, "5-12")  -> "Show me just § 5-12 of Skatteloven"
     get_law_history(slug)      -> "What changed in Skatteloven recently?"
     list_recent_changes(...)   -> "Which laws changed last week?"
     search_laws(query, ...)    -> "Are there laws about jernbane?" (metadata)
@@ -28,6 +29,7 @@ inputs accept either form and normalize internally.
 """
 
 import json
+import re
 import shlex
 import subprocess
 from datetime import UTC, date, datetime
@@ -49,6 +51,22 @@ Adjustable later if production cadence changes — keep documented in
 docs/mcp.md if changed."""
 
 _GIT_HEAD_FIELDS = 3  # sha + ISO date + subject from the --format string
+
+_SECTION_HEADING = re.compile(r"^### § ([\d-]+[a-z]?)\.\s+(.+?)\s*$")
+"""Matches a Norwegian-law section heading produced by the lovspor
+renderer. Captures the section id (e.g. ``5-12``, ``1``, ``5-12a``)
+and the section title (everything after the dot)."""
+
+_CHAPTER_HEADING = re.compile(r"^## (.+?)\s*$")
+"""Matches a chapter heading (``## Kapittel N. Title``). Captured for
+the ``parent_chapter`` field returned by ``get_section`` so the AI has
+context for where in the act the section lives."""
+
+_SUBSECTION_HEADING_PREFIX = "### "
+"""Any ``### `` heading that does NOT match _SECTION_HEADING (e.g. a
+plain subsection grouping like ``### Hvem som har skatteplikt``) acts
+as a boundary that closes the current section without starting a new
+one — same boundary semantics as the next ``### §`` or ``## ``."""
 
 _SNIPPET_CONTEXT_CHARS = 50
 """Characters of context on each side of a body-search match in the
@@ -114,6 +132,49 @@ class CorpusReader:
                 f"run 'git pull' in the corpus to refresh",
             )
         return path.read_text(encoding="utf-8")
+
+    def get_section(self, slug: str, section_id: str) -> dict[str, Any]:
+        """Return a single ``§`` section of an act.
+
+        ``section_id`` is the bare numeric / hyphenated identifier
+        (``"5-12"`` or ``"1"`` — no ``§`` prefix, no trailing dot).
+
+        The section body runs from the heading line to the next
+        ``###`` or ``##`` heading. ``parent_chapter`` carries the
+        most recent ``## Kapittel N. ...`` heading so the AI has
+        structural context.
+
+        Raises ``CorpusNotFoundError`` if the slug is unknown OR the
+        section is absent — the error message lists the act's
+        available section ids in natural order so the AI can recover
+        without a separate get_law call.
+
+        Reuses the cached body index from ``search_body``: the body
+        text is already frontmatter / H1 stripped, so the section
+        parser only sees the legal content.
+        """
+        record = self._find_current_by_slug(slug)
+        # _find_current_by_slug only returns records whose slug == the
+        # query slug, so record.slug is non-None here even though the
+        # type annotation allows None.
+        body = self._load_body_index().get(record.slug or "", "")
+        sections = _parse_sections(body)
+        if section_id not in sections:
+            available = ", ".join(
+                f"§ {sid}" for sid in sorted(sections.keys(), key=_natural_section_key)
+            )
+            raise CorpusNotFoundError(
+                f"section {section_id!r} not found in {slug!r}; "
+                f"available: {available or '(no sections in this act)'}",
+            )
+        section = sections[section_id]
+        return {
+            "slug": record.slug,
+            "section_id": section_id,
+            "heading": section["heading"],
+            "parent_chapter": section["parent_chapter"],
+            "body": section["body"],
+        }
 
     def get_law_history(self, slug: str) -> dict[str, Any]:
         """Return the parsed ``history/<slug>.json`` for ``slug``."""
@@ -433,6 +494,73 @@ class CorpusReader:
         return target
 
 
+def _parse_sections(body: str) -> dict[str, dict[str, str]]:
+    """Walk a frontmatter-stripped body and return a section map.
+
+    Output shape: ``{section_id: {heading, parent_chapter, body}}``.
+
+    Boundary rules (every transition closes the current section, if
+    any, before opening the new context):
+
+    - ``## Kapittel ...`` updates ``parent_chapter`` for subsequent
+      sections; does not itself open a section.
+    - ``### § N-M. ...`` closes the previous section (if open) and
+      opens a new one keyed by ``N-M``.
+    - ``### <other text>`` (subsection grouping without ``§``) closes
+      the previous section but does not open a new one — the lines
+      that follow are not attributed to any section until the next
+      ``### § ...``.
+
+    The body of a section is the text strictly between its heading
+    line and the next boundary heading (``###`` or ``##``), stripped
+    of leading / trailing whitespace.
+    """
+    sections: dict[str, dict[str, str]] = {}
+    current_chapter = ""
+    current_id: str | None = None
+    current_data: dict[str, Any] | None = None
+
+    def _close() -> None:
+        if current_id is not None and current_data is not None:
+            current_data["body"] = "\n".join(current_data.pop("body_lines")).strip()
+            sections[current_id] = current_data
+
+    for line in body.split("\n"):
+        chapter = _CHAPTER_HEADING.match(line)
+        if chapter:
+            _close()
+            current_id = None
+            current_data = None
+            current_chapter = chapter.group(1)
+            continue
+        section = _SECTION_HEADING.match(line)
+        if section:
+            _close()
+            current_id = section.group(1)
+            current_data = {
+                "heading": f"§ {current_id}. {section.group(2)}",
+                "parent_chapter": current_chapter,
+                "body_lines": [],
+            }
+            continue
+        if line.startswith(_SUBSECTION_HEADING_PREFIX):
+            _close()
+            current_id = None
+            current_data = None
+            continue
+        if current_data is not None:
+            current_data["body_lines"].append(line)
+    _close()
+    return sections
+
+
+def _natural_section_key(section_id: str) -> tuple[Any, ...]:
+    """Sort key that orders ``5-2``, ``5-10``, ``5-11`` numerically
+    rather than lexicographically. Falls back to string for any non-
+    numeric component (e.g. trailing letter suffix in ``5-12a``)."""
+    return tuple(int(p) if p.isdigit() else p for p in section_id.split("-"))
+
+
 def _strip_frontmatter_and_h1(text: str) -> str:
     """Remove the YAML frontmatter block and the leading H1 title from
     a rendered lovspor Markdown file, leaving only the legal body.
@@ -542,6 +670,33 @@ def build_server(corpus_path: Path) -> FastMCP:
         dates, license, ...) followed by the legal text in Markdown.
         """
         return reader.get_law(slug)
+
+    @mcp.tool()
+    def get_section(slug: str, section_id: str) -> dict[str, Any]:
+        """Return a single ``§`` section of a Norwegian law or regulation.
+
+        Use this when the user asks about a specific paragraph of an
+        act (e.g. *"What does § 5-12 of Skatteloven say?"*) instead
+        of fetching the whole law via ``get_law``. Cheaper for the
+        AI's context window when the user wants surgical access.
+
+        ``slug``: the act's slug (same as for ``get_law``).
+        ``section_id``: the bare numeric / hyphenated identifier
+        WITHOUT the ``§`` prefix or trailing dot — e.g. ``"5-12"``,
+        ``"1"``, ``"5-12a"``. Norwegian acts use ``§ N`` for single-
+        chapter acts and ``§ N-M`` (chapter N, section M) for
+        multi-chapter acts; both are accepted.
+
+        Returns ``slug``, ``section_id``, ``heading`` (the full
+        ``§ N-M. Title`` line), ``parent_chapter`` (the most recent
+        ``Kapittel`` heading for structural context), and ``body``
+        (the section's text up to the next section / chapter
+        boundary). Raises if the slug or the section is unknown —
+        the error message lists the act's available section ids in
+        natural order so the AI can recover without a separate
+        ``get_law`` call.
+        """
+        return reader.get_section(slug, section_id)
 
     @mcp.tool()
     def get_law_history(slug: str) -> dict[str, Any]:

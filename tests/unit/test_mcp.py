@@ -710,6 +710,228 @@ def test_search_body_ignores_frontmatter_and_title_heading(tmp_path: Path) -> No
     assert reader.search_body("Skatteloven") == []
 
 
+# ---------- get_section ----------
+
+
+_SAMPLE_BODY_WITH_SECTIONS = """\
+## Kapittel 1. Alminnelige bestemmelser
+
+### § 1-1. Virkeområde
+
+(1) Denne lov gjelder formuesskatt til stat og kommune.
+
+(2) Stortinget kan fastsette unntak.
+
+### § 1-2. Hvem som pålegger skatt
+
+Denne paragraf regulerer skattepliktens omfang.
+
+## Kapittel 5. Alminnelig inntekt og fradragene
+
+### Subsection grouping without section
+### § 5-12. Boligsparing for ungdom
+
+(1) Skattefradraget gis for sparing til bolig.
+
+(2) Fradraget reduseres ved utbetaling.
+
+### § 5-13. Annet
+Innhold for § 5-13.
+"""
+
+
+def test_get_section_returns_expected_fields(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    section = CorpusReader(tmp_path).get_section("skatteloven", "5-12")
+    assert section["slug"] == "skatteloven"
+    assert section["section_id"] == "5-12"
+    assert section["heading"] == "§ 5-12. Boligsparing for ungdom"
+    assert section["parent_chapter"] == "Kapittel 5. Alminnelig inntekt og fradragene"
+    assert "Skattefradraget gis for sparing til bolig" in section["body"]
+    assert "Fradraget reduseres ved utbetaling" in section["body"]
+
+
+def test_get_section_body_excludes_next_section(tmp_path: Path) -> None:
+    """Section body must end at the next ### or ## heading. § 5-12's
+    body must NOT contain content from § 5-13 that follows."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    section = CorpusReader(tmp_path).get_section("skatteloven", "5-12")
+    assert "Annet" not in section["body"]
+    assert "§ 5-13" not in section["body"]
+    assert "Innhold for § 5-13" not in section["body"]
+
+
+def test_get_section_body_excludes_next_chapter(tmp_path: Path) -> None:
+    """Section body must end at the next ## chapter heading too."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    section = CorpusReader(tmp_path).get_section("skatteloven", "1-2")
+    assert "Kapittel 5" not in section["body"]
+    assert "Skattefradraget" not in section["body"]
+
+
+def test_get_section_handles_single_number_section(tmp_path: Path) -> None:
+    """Acts with a single chapter use plain ``§ N`` (e.g.
+    ``§ 1. Lovens virkeområde`` in Statsforetaksloven)."""
+    body = (
+        "## Kapittel 1.\n\n"
+        "### § 1. Lovens virkeområde\n\n"
+        "Denne lov gjelder statsforetak.\n\n"
+        "### § 2. Definisjoner\n\n"
+        "I denne lov forstås.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="statsforetaksloven", title="Statsforetaksloven")},
+        body_for={"statsforetaksloven": body},
+    )
+    section = CorpusReader(tmp_path).get_section("statsforetaksloven", "1")
+    assert section["section_id"] == "1"
+    assert "Denne lov gjelder statsforetak" in section["body"]
+
+
+def test_get_section_handles_letter_suffix(tmp_path: Path) -> None:
+    """Some sections use a letter suffix (e.g. ``§ 5-12a``) when the
+    legislator inserted a section without renumbering siblings."""
+    body = (
+        "## Kapittel 5.\n\n"
+        "### § 5-12. Original\nOriginal content.\n\n"
+        "### § 5-12a. Inserted later\n\nLetter suffix content.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": body},
+    )
+    section = CorpusReader(tmp_path).get_section("skatteloven", "5-12a")
+    assert section["heading"] == "§ 5-12a. Inserted later"
+    assert "Letter suffix content" in section["body"]
+
+
+def test_get_section_subsection_grouping_is_boundary(tmp_path: Path) -> None:
+    """A ``### Title`` heading without ``§`` (e.g. a subsection
+    grouping) closes the previous section but does not open a new
+    one. Content between the grouping and the next ``### §`` is not
+    attributed to any section."""
+    body = (
+        "## Kapittel 2.\n\n"
+        "### § 2-5. Foo\nFoo body.\n\n"
+        "### Subsection grouping\n"
+        "Orphan content here.\n\n"
+        "### § 2-10. Bar\nBar body.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": body},
+    )
+    reader = CorpusReader(tmp_path)
+    foo = reader.get_section("x", "2-5")
+    assert foo["body"] == "Foo body."
+    bar = reader.get_section("x", "2-10")
+    assert bar["body"] == "Bar body."
+    # Orphan content was attributed to neither section.
+    assert "Orphan" not in foo["body"]
+    assert "Orphan" not in bar["body"]
+
+
+def test_get_section_handles_empty_body(tmp_path: Path) -> None:
+    """A section with no content between its heading and the next
+    boundary returns an empty body, not a crash."""
+    body = (
+        "## Kapittel 1.\n\n### § 1-1. Heading only\n\n### § 1-2. Has content\nReal content here.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": body},
+    )
+    section = CorpusReader(tmp_path).get_section("x", "1-1")
+    assert section["body"] == ""
+    assert section["heading"] == "§ 1-1. Heading only"
+
+
+def test_get_section_raises_with_available_list_when_section_missing(
+    tmp_path: Path,
+) -> None:
+    """Codex-suggested UX: error message lists available section ids
+    in natural order so the AI can recover without a separate
+    get_law call."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_section("skatteloven", "5-99")
+    msg = str(exc_info.value)
+    assert "5-99" in msg
+    assert "skatteloven" in msg
+    assert "§ 1-1" in msg
+    assert "§ 5-12" in msg
+
+
+def test_get_section_natural_order_in_error_message(tmp_path: Path) -> None:
+    """Available list must order ``5-2``, ``5-10``, ``5-11`` numerically
+    rather than lexicographically — otherwise '5-10' would sort before
+    '5-2' and confuse the AI."""
+    body = (
+        "## Kapittel 5.\n\n"
+        "### § 5-1. A\nA.\n"
+        "### § 5-2. B\nB.\n"
+        "### § 5-10. C\nC.\n"
+        "### § 5-11. D\nD.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": body},
+    )
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_section("x", "5-99")
+    msg = str(exc_info.value)
+    assert msg.index("§ 5-2") < msg.index("§ 5-10")
+    assert msg.index("§ 5-10") < msg.index("§ 5-11")
+
+
+def test_get_section_raises_for_unknown_slug(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="real", title="Real")})
+    with pytest.raises(CorpusNotFoundError, match="no current law"):
+        CorpusReader(tmp_path).get_section("not-a-slug", "1-1")
+
+
+def test_get_section_uses_cached_body_index_without_frontmatter(
+    tmp_path: Path,
+) -> None:
+    """get_section reuses _load_body_index, so the parser only sees
+    body content (frontmatter + H1 already stripped). A frontmatter
+    field that happened to look like a section heading must not be
+    parsed as one."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    raw = (tmp_path / "lover" / "skatteloven.md").read_text(encoding="utf-8")
+    # Inject a fake section heading INTO the frontmatter — must not be
+    # picked up by the section parser.
+    patched = raw.replace("id: x\n", "id: x\n### § 99-99. Fake\n")
+    (tmp_path / "lover" / "skatteloven.md").write_text(patched, encoding="utf-8")
+    with pytest.raises(CorpusNotFoundError):
+        CorpusReader(tmp_path).get_section("skatteloven", "99-99")
+
+
 def test_search_body_match_count_is_non_overlapping(tmp_path: Path) -> None:
     """Pin the str.count semantics: 'aaaa'.count('aa') returns 2,
     not 3 — non-overlapping matches. Documented behavior, not an
@@ -993,7 +1215,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_six_tools(tmp_path: Path) -> None:
+def test_build_server_registers_seven_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -1003,6 +1225,7 @@ def test_build_server_registers_six_tools(tmp_path: Path) -> None:
     assert tool_names == sorted(
         [
             "get_law",
+            "get_section",
             "get_law_history",
             "list_recent_changes",
             "search_laws",

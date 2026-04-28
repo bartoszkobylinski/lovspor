@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets six read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets seven read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 This document covers the full setup: prerequisites, configuration for two common clients, every tool with sample input and output, the typical discovery flow, troubleshooting, limitations, and legal attribution.
 
@@ -10,7 +10,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** six read-only, manifest-and-filesystem-only.
+- **Tools:** seven read-only, manifest-and-filesystem-only.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -76,7 +76,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All six are read-only. None mutate the corpus, trigger a sync, or reach the network.
+All seven are read-only. None mutate the corpus, trigger a sync, or reach the network.
 
 ### `get_law(slug)`
 
@@ -112,6 +112,29 @@ source_license: NLOD 2.0
 ```
 
 The frontmatter carries the law's metadata and provenance; the body is the legal text rendered as Markdown.
+
+### `get_section(slug, section_id)`
+
+Return a single ``§`` section of an act — the surgical alternative to `get_law` when the user wants just one paragraph (e.g. *"What does § 5-12 of Skatteloven say?"*). Cheaper for the AI's context window than fetching the whole law.
+
+- **`slug`** — the act's slug (same as for `get_law`).
+- **`section_id`** — the bare numeric / hyphenated identifier WITHOUT the `§` prefix or trailing dot. Examples: `"5-12"`, `"1"`, `"5-12a"`. Norwegian acts use `§ N` for single-chapter acts and `§ N-M` (chapter N, section M) for multi-chapter acts; both work.
+
+**Sample call:** `get_section(slug="skatteloven-sktl", section_id="5-12")`
+
+**Sample output:**
+
+```json
+{
+  "slug": "skatteloven-sktl",
+  "section_id": "5-12",
+  "heading": "§ 5-12. Boligsparing for ungdom",
+  "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+  "body": "(1) Skattefradraget gis for sparing til bolig...\n\n(2) Fradraget reduseres ved utbetaling..."
+}
+```
+
+If the section is unknown the error message lists the act's available section ids in natural order (so `5-2` < `5-10`, not lexicographic) — the AI can recover without an extra `get_law` call.
 
 ### `get_law_history(slug)`
 
@@ -310,11 +333,12 @@ A typical AI-assistant interaction with this server follows the same pattern:
 1. **`search_laws("topic")`** — find candidates by slug + title metadata. Fast, manifest-only.
 2. **`search_body("topic")`** — when the topic doesn't appear in any title (e.g., concepts like *"kryptovaluta"*), scan the body text instead. Heavier but catches semantic matches.
 3. **`get_law(slug)`** — pull the full text of the chosen candidate.
-4. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
-5. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
-6. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
+4. **`get_section(slug, "N-M")`** — when the user wants ONE paragraph, not the whole act. Surgical, cheaper on context window. Reuses the same body cache as `search_body`.
+5. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
+6. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
+7. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The six tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
+The seven tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
 
 ---
 
