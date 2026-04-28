@@ -4,7 +4,7 @@ Single source of truth for why this project looks the way it does. Every non-obv
 
 Update this file whenever a new decision lands.
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 ---
 
@@ -339,44 +339,40 @@ End-of-sprint state:
 - First production sync after PR #24 ran 2026-04-27 and executed the Sprint 5 migration commit `0c40d0bf` on `lovverk/main` — one atomic commit producing 1562 lover/history files (781 docs × 2 formats) + 7480 forskrifter/history files (3740 × 2) + manifest with `total_changes` / `last_changed` populated for all current docs.
 - MCP-ready: `history/<slug>.json` is queryable structured data; future Sprint 6 MCP server can answer `get_law_history(slug)`, `list_recent_changes()`, and similar tools with a plain JSON read.
 
-### Sprint 6 (in progress) — MCP server
+### Sprint 6 — MCP server stdio (PR #26 → #27, MERGED 2026-04-27)
 
-User decision 2026-04-27: this sprint stands up an MCP server exposing the `lovverk` corpus to AI consumers (Claude Code, Claude Desktop) via the Model Context Protocol. Distribution mode is **stdio + good README** (each user runs their own copy locally) rather than VPS-hosted — that's the dominant pattern in the MCP ecosystem today and avoids the public-API maintenance commitment. See conversation 2026-04-27.
+Closed Sprint 6. Stdio MCP server exposing the `lovverk` corpus to AI consumers (Claude Desktop, Claude Code) is live, plus full adoption documentation. Distribution mode is **stdio + good README** (each user runs their own copy locally) rather than VPS-hosted — dominant MCP-ecosystem pattern, avoids public-API maintenance commitment.
 
-Sprint progress:
+- **PR #26** `feat(mcp): stdio MCP server for the lovverk corpus` — new `src/lovspor/mcp.py` with four read-only tools, FastMCP via Anthropic's `mcp` SDK, stdio transport, `CorpusReader` with path-traversal defense (`_safe_join`), CLI entry `lovspor mcp --corpus-path PATH`. Three Codex passes; first found 1 HIGH (path traversal in `markdown_path`/`slug` joins), 1 MEDIUM (since-date validation didn't normalize alternate ISO forms), 2 LOW (negative limit slicing, stale `docs/mcp.md` reference); all fixed.
+- **PR #27** `docs(mcp): README + full docs/mcp.md adoption guide` — new `docs/mcp.md` (317 lines), README MCP section with copy-paste Claude Desktop / Claude Code config, four-tool reference with samples, troubleshooting, NLOD 2.0 attribution. Replaced the outdated "Early scaffold" Status block with the production reality. One Codex pass found a §12 Sprint 6 status drift; fixed.
 
-- **PR-A** (this PR, in flight 2026-04-27) — `src/lovspor/mcp.py` with the four tools below, FastMCP via Anthropic's `mcp` SDK, stdio transport, CLI entry `lovspor mcp --corpus-path PATH`. CorpusReader is read-only and validates path containment to refuse manifest-driven escapes.
-- **PR-B** (this PR, in flight 2026-04-27) — root `README.md` section + new `docs/mcp.md` (full adoption guide). Covers prerequisites, two-client quickstart with copy-paste config, every tool documented with sample input + sample response, discovery flow, limitations, troubleshooting walkthrough, and NLOD 2.0 attribution. Also refreshes the README's "Status" block from "Early scaffold" to the current production state.
-
-Tools shipped in PR-A:
+Tools shipped:
 
 - `get_law(slug)` — returns the rendered Markdown body + frontmatter for a doc.
 - `get_law_history(slug)` — returns the structured event list from `history/<slug>.json` (Sprint 5 deliverable directly enables this).
 - `list_recent_changes(dataset?, since?, limit?)` — sorts manifest by `last_changed` (Sprint 5 metadata field directly enables this).
 - `search_laws(query, dataset?)` — substring match on slug + title from manifest; body-text search deferred to a future sprint.
 
-Other Sprint-6 candidates not yet committed (let priorities settle once MCP minimum lands):
+Other Sprint-6 candidates not committed (still open for later sprints if user demand surfaces):
 - **Section / § addressing** (`get_section(slug, "5-12")`) — needs a Markdown-section parser; high value for AI but bigger scope.
 - **JSONL chunked export for RAG** — explicit chunking format for embedding pipelines; complementary to MCP rather than blocking.
 - **Status badge + workflow runtime stats** — quick wins, do alongside if scope permits.
 - **Lovtidend feed integration** — second data source giving "why a law changed"; deserves its own sprint.
 
-### Sprint 7 (in progress) — Corpus freshness signal for MCP consumers
+### Sprint 7 — Corpus freshness signal for MCP consumers (PR #28 → #29, MERGED 2026-04-27 → 2026-04-28)
 
-User decision 2026-04-27, immediately after the Sprint 6 manual integration test in Claude Code surfaced the failure mode: a stale local `lovverk` clone produces silent empty results from every MCP tool, indistinguishable from a missing law. Diagnosis took 10 minutes of back-and-forth — unacceptable UX for downstream adopters.
+Closed Sprint 7. Validated end-to-end with real Claude Code: a stale or schema-incompatible corpus now produces a clear AI-driven "run this command to refresh" diagnosis in one tool call instead of 5+ minutes of guessing.
 
-Sprint 7 PR-A (this PR, in flight) adds a fifth MCP tool, `corpus_status()`, that returns:
+Trigger: the Sprint 6 manual integration test surfaced a silent-empty-results failure mode — a stale local `lovverk` clone makes every MCP search/get return `[]`, indistinguishable from a missing law. The Sprint 7 fix gives the AI a fifth tool to diagnose this without manifest spelunking.
 
-- ``manifest_generated_at`` and ``manifest_age_days`` (computed against ``datetime.now(UTC)``).
-- ``is_stale`` boolean — `true` past `_STALE_THRESHOLD_DAYS = 7` (one full week of missed daily syncs).
-- ``total_current_documents``.
-- ``head_commit`` (short SHA), ``head_commit_date``, ``head_commit_subject`` from `git log -1` on the local clone (read-only, gracefully degrades to ``None`` for non-git corpus paths).
-- ``refresh_command`` — a copy-pasteable `git -C <corpus_path> pull` string the user can run.
-- ``notice`` — human-readable summary the AI can quote verbatim.
+- **PR #28** `feat(mcp): corpus_status() tool for proactive freshness signal` — new `corpus_status()` returning manifest age + git HEAD info + `is_stale` (date-based, 7-day threshold) + `refresh_command` (shlex-quoted) + `notice` (human-readable). Tool docstring nudges proactive use. Three Codex passes; first found 1 MEDIUM (refresh_command shell-unsafe for paths with spaces) + 1 LOW (negative `manifest_age_days` on clock skew); fixed.
+- **PR #29** `fix(mcp): schema-staleness detection in corpus_status (recovery)` — second-half of Sprint 7 that **almost shipped invisible**. After the manual integration test in Claude Code revealed that the date-based `is_stale` signal misses pre-Sprint-4 manifests (records have `slug=None` so every search returns empty even with a "fresh" manifest), `corpus_status` was extended with `schema_compatible` boolean and a dedicated notice variant. The follow-up commits were Codex-reviewed clean **but never merged** — PR #28's squash had captured the pre-extension state, and the post-merge push for the schema commits created a new orphan branch with the same name that nobody re-merged. Discovered when the second manual test still hit the original failure mode; cherry-picked onto a fresh branch as PR #29 plus a notice-priority fix Codex caught (schema-stale must win over clock-skew in the notice slot to avoid the "is_stale=true but notice says 'Treating as fresh'" contradiction).
 
-**Architecture decision: tell, do not do.** The server still has zero network surface and zero write capability against the corpus. `refresh_command` is a *suggestion* the AI relays to the user; the user runs it manually. Considered but rejected: a hypothetical `refresh_corpus()` tool that runs `git pull` itself. Reasoning: keeps the read-only + no-network contract intact; avoids merge-conflict / local-commits edge cases on user repos; matches the dominant MCP-ecosystem pattern of inert read-only consumers.
+**Architecture decision: tell, do not do.** Server stays read-only and no-network. `refresh_command` is a suggestion the AI relays; user runs `git pull` manually. Rejected `refresh_corpus()` tool that would shell out to `git pull` (would invalidate read-only contract; merge-conflict / local-commit edge cases on user repos; mismatches the inert-read-only MCP-ecosystem norm).
 
-Tool docstring (visible to AI) explicitly nudges proactive use when other tools return unexpectedly empty results, plus the user-facing "is my corpus current?" pattern. `docs/mcp.md` Troubleshooting section now leads with "ask the AI to call corpus_status()" as the first remediation step for empty results.
+End-of-sprint validation in Claude Code (2026-04-28): user prompt *"Use the lovverk MCP to find a Norwegian law about boligkjøp"* on a pre-Sprint-4 checkout produces a single `search_laws` → empty → single `corpus_status` → AI quotes the schema-stale notice and gives the exact `git -C <path> pull` command. Same prompt on a fresh checkout produces a single `search_laws` → hit → structured answer with no `corpus_status` overhead. AI uses the diagnostic tool only when the data path looks broken — exactly the design intent.
+
+**Lesson recorded for §14:** PRs that get follow-up commits after Codex's "No findings" need a verification that the follow-up actually went to the same branch ref on origin. After a squash-merge, GitHub deletes the source branch; subsequent pushes silently create a new branch with the same name and re-trigger Codex without ever connecting back to a PR. See PR #29 origin story.
 
 ## 12a. git_commit_mode is now implemented (Sprint 4 + Sprint 5 history bundling)
 
@@ -459,14 +455,23 @@ Both 7 letters, both start with `lov`, ship visibly as siblings.
 
 ## 14. Known open items
 
-End of Sprint 5:
+End of Sprint 7:
 
 - **Dependabot PRs #2 / #3 / #4 followups** — `actions/checkout` v4 and `setup-uv` v4 are still pinned in `.github/workflows/sync.yml` (PR #2 / #3 only bumped `test.yml`, since `sync.yml` was added later in PR #16). Dependabot's next weekly run will propose new PRs against `sync.yml`; merge those as a batch. No functional risk.
-- **Mutation baseline still pending an authoritative full rerun.** Codex's PR #23 / #24 reviews ran fresh mutmut snapshots but stopped them mid-flight to keep the working tree clean (mutmut mutates files in-place). Latest non-final snapshot: 714 / 1084 killed, 315 survived, 55 untested. The §9a revisit trigger of 250 survivors is still exceeded but the count remains non-authoritative until a clean full run completes. Next Codex pass on a Sprint 6 PR should include a cache reset and a fresh authoritative score before any §9a re-evaluation.
+- **Mutation baseline still pending an authoritative full rerun.** Codex's PR #23–#29 reviews ran fresh mutmut snapshots but stopped them mid-flight to keep the working tree clean (mutmut mutates files in-place). Latest non-final snapshot from PR #29: 851 / 1299 killed, 357 survived, 91 untested. The §9a revisit trigger of 250 survivors is still exceeded but the count remains non-authoritative until a clean full run completes. Next Codex pass on a Sprint 8+ PR should include a cache reset and a fresh authoritative score before any §9a re-evaluation.
 - **Bracket-stripping in `short_title`** — `derive_slug` strips bracketed content from `title` (e.g. `(skatteloven)`) but not from `short_title`. Lovdata's short_title for some acts includes parenthesized abbreviations like `Skatteloven (sktl)`, so the slug becomes `skatteloven-sktl` rather than `skatteloven`. Acceptable but slightly verbose. Changing this would force another slug migration on the corpus, so only worth doing if researchers ask.
 - **Sprint 5 partial-failure recovery** — `_needs_sprint5_history_migration` only checks for the presence of `<dataset>/history/`, not that every current doc has a populated history file. A migration that crashes mid-bulk-write would not auto-retry on the next sync. Acceptable for a one-time event; recovery is manual rerun or a strengthened detector. See §12d.
 - **Sprint-5 mixed-bulk-commit ambiguity** — `_classify_bulk_sync` cannot distinguish a deleted file from an in-place shrunken update inside the same bulk commit using `--numstat` alone. Deletes mixed with updates are classified as updates. Bounded to legacy bulk-mode commits (post-Sprint-4 default is per-doc, never goes through this branch). Full fix needs `--name-status` parsing; deferred unless real lovverk history shows the misclassification mattering.
 - **Orchestrator branch coverage at 97%** — Sprint 5 PR-B added several new branches (commit-mode dispatch, history follow-up, Sprint 5 migration trigger) without proportional integration coverage. Codex flagged but did not classify as a bug.
+- **Stale `uvx` cache after lovspor pushes (operational gotcha)** — Adopters who configured the MCP server via `uvx --from "git+https://github.com/.../lovspor.git" lovspor mcp ...` may continue to see an older lovspor build after the upstream main moves, because `uvx`'s git-source cache does not refresh aggressively. Diagnosis: call `corpus_status()` and check whether the `schema_compatible` field is present. If absent → cached pre-PR-#29 build is in play. Fix: `uvx --refresh --from "git+..." ...` once (or `uv cache clean lovspor`) and restart the MCP client. Worth a one-line note in `docs/mcp.md` Troubleshooting if a real adopter reports it.
+- **PR-merge follow-up branch detection** — discovered during PR #29: when a PR has Codex-reviewed follow-up commits after the initial "No findings", a squash-merge of the PR deletes the source branch on origin; any subsequent push to the same branch name silently creates a new orphan branch and re-triggers Codex without ever connecting back to a PR. We almost shipped Sprint 7 with the schema-detection invisible because of this. Mitigation: after a squash-merge, **always** verify a follow-up branch's existence via `git ls-remote origin <branch>` before assuming a re-Codex-pass means the work is on main. Worth automating into the PR-merge skill flow.
+
+Resolved during Sprint 7:
+- ~~Stale-corpus failure surfaces as silent empty results~~ — `corpus_status()` now flags both age-staleness and schema-staleness with a copy-pasteable refresh command. Validated end-to-end in Claude Code 2026-04-28.
+
+Resolved during Sprint 6:
+- ~~MCP server planned but not implemented~~ — shipped in PR #26 + #27. Validated in Claude Code with all four (later five) tools.
+- ~~README "Early scaffold. Not functional yet."~~ — Status block rewritten to production reality in PR #27.
 
 Resolved during Sprint 5:
 - ~~Sprint 5 history layer planned but not implemented~~ — shipped in PR #23 + #24 (§12d). Production migration commit `0c40d0bf` populated history for all 4522 current docs.
