@@ -213,22 +213,50 @@ class CorpusReader:
         # (-1 days old)" which reads as a tooling bug.
         is_clock_skew = raw_age_days < 0
         age_days = max(0, raw_age_days)
-        is_stale = age_days > _STALE_THRESHOLD_DAYS
         current_docs = sum(
             1 for record in manifest.documents.values() if record.status == "current"
         )
+        # Schema-staleness: pre-Sprint-4 manifests stored records without
+        # a ``slug`` field. The MCP tools (search_laws, get_law,
+        # get_law_history) all key off slug, so a manifest in that schema
+        # silently breaks every tool while the date-based ``is_stale``
+        # signal stays false (the manifest itself was written by an old
+        # engine version, but its generated_at can be recent if the user
+        # is on an older checkout). Detect this case explicitly so the
+        # AI can quote a clear remediation instead of guessing.
+        docs_without_slug = sum(
+            1
+            for record in manifest.documents.values()
+            if record.status == "current" and record.slug is None
+        )
+        schema_compatible = docs_without_slug == 0
+        is_age_stale = age_days > _STALE_THRESHOLD_DAYS
+        is_stale = is_age_stale or not schema_compatible
         git_info = self._git_head_info()
         # shlex.quote handles paths containing spaces or shell metacharacters
         # (e.g. '/tmp/lovverk test' would otherwise parse as -C /tmp/lovverk
         # with 'test' as a positional arg, silently targeting the wrong path).
         refresh_command = f"git -C {shlex.quote(str(self.corpus_path))} pull"
-        if is_clock_skew:
+        # Notice priority is intentional: schema-stale > clock-skew >
+        # age-stale > fresh. Schema-staleness is the only signal that
+        # makes the MCP tools unusable, so it must dominate. Clock-skew
+        # alone says "treating as fresh" — that wording would directly
+        # contradict is_stale=true if a future-dated manifest also had
+        # the pre-Sprint-4 schema, so schema-stale has to win first.
+        if not schema_compatible:
+            notice = (
+                f"Corpus manifest is on the pre-Sprint-4 schema "
+                f"({docs_without_slug} of {current_docs} current documents have "
+                f"no slug field). MCP search/get tools cannot operate on this "
+                f"schema. Run: {refresh_command} to refresh."
+            )
+        elif is_clock_skew:
             notice = (
                 f"Corpus manifest is dated in the future "
                 f"({generated_at.isoformat()}); likely a clock-skew issue on "
                 f"your machine. Treating as fresh."
             )
-        elif is_stale:
+        elif is_age_stale:
             notice = f"Corpus manifest is {age_days} days old. Run: {refresh_command} to refresh."
         else:
             notice = f"Corpus is current ({age_days} days old)."
@@ -236,6 +264,7 @@ class CorpusReader:
             "manifest_generated_at": generated_at.isoformat(),
             "manifest_age_days": age_days,
             "is_stale": is_stale,
+            "schema_compatible": schema_compatible,
             "total_current_documents": current_docs,
             "head_commit": git_info["commit"],
             "head_commit_date": git_info["date"],
@@ -410,12 +439,18 @@ def build_server(corpus_path: Path) -> FastMCP:
           can look indistinguishable from a missing law.
 
         Returns a dict with: ``manifest_generated_at`` (ISO datetime),
-        ``manifest_age_days`` (int), ``is_stale`` (bool — true if older
-        than 7 days), ``total_current_documents``, ``head_commit`` (short
-        SHA), ``head_commit_date`` (ISO date), ``head_commit_subject``,
+        ``manifest_age_days`` (int, clamped to 0 for future-dated
+        manifests), ``is_stale`` (bool — true when EITHER the manifest
+        is older than 7 days OR the schema is pre-Sprint-4),
+        ``schema_compatible`` (bool — false when any current record
+        has no slug field, meaning the manifest pre-dates Sprint 4 and
+        the search/get tools cannot operate on it),
+        ``total_current_documents``, ``head_commit`` (short SHA),
+        ``head_commit_date`` (ISO date), ``head_commit_subject``,
         ``refresh_command`` (a copy-pasteable git command the user can
-        run to refresh), and a human-readable ``notice`` summarizing the
-        status.
+        run to refresh), and a human-readable ``notice`` summarizing
+        the status (covers four cases: clock-skew, schema-stale,
+        age-stale, fresh).
 
         The server itself never mutates the corpus or fetches anything —
         the user runs the suggested ``refresh_command`` manually.

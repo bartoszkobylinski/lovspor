@@ -587,6 +587,129 @@ def test_corpus_status_refresh_command_quotes_path_with_spaces(tmp_path: Path) -
     assert parts == ["git", "-C", str(spaced), "pull"]
 
 
+def test_corpus_status_flags_pre_sprint_4_manifest_as_schema_stale(
+    tmp_path: Path,
+) -> None:
+    """Manual-test regression. A manifest whose current docs have
+    ``slug=None`` is on the pre-Sprint-4 schema. The MCP search/get
+    tools all key off slug, so they silently return empty for every
+    query — but the date-based is_stale signal would be False (the
+    manifest itself was written recently by an older engine, e.g.
+    when the user has an older checkout). Detect explicitly and
+    surface a dedicated notice so the AI doesn't have to guess why
+    everything returns empty."""
+    legacy = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/nl-19990326-014.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime.now(UTC),
+        status="current",
+        # slug + title default to None — pre-Sprint-4 record shape
+    )
+    write_manifest(
+        Manifest(generated_at=datetime.now(UTC), documents={"nl-1": legacy}),
+        tmp_path / "manifest.json",
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["schema_compatible"] is False
+    assert status["is_stale"] is True
+    assert "pre-Sprint-4" in status["notice"]
+    assert "1 of 1" in status["notice"]
+    assert "git -C" in status["notice"]
+
+
+def test_corpus_status_reports_schema_compatible_for_modern_manifest(
+    tmp_path: Path,
+) -> None:
+    """Positive control: every record produced by the modern engine
+    carries a slug, so schema_compatible is True."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["schema_compatible"] is True
+
+
+def test_corpus_status_schema_stale_wins_over_clock_skew_in_notice(
+    tmp_path: Path,
+) -> None:
+    """Codex regression. When the manifest is BOTH future-dated
+    (clock skew) AND on the pre-Sprint-4 schema, the previous notice
+    chain put clock-skew first and ended with 'Treating as fresh',
+    contradicting is_stale=True. Schema-staleness is the only
+    actionable signal here (the MCP tools cannot work on the schema
+    regardless of clock state) so it wins the notice slot."""
+    legacy = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/nl-19990326-014.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime.now(UTC),
+        status="current",
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC) + timedelta(days=2),
+            documents={"nl-1": legacy},
+        ),
+        tmp_path / "manifest.json",
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["is_stale"] is True
+    assert status["schema_compatible"] is False
+    assert "pre-Sprint-4" in status["notice"]
+    assert "Treating as fresh" not in status["notice"]
+
+
+def test_corpus_status_mixed_slug_population_is_schema_stale(tmp_path: Path) -> None:
+    """A manifest where SOME current records have slugs and others
+    don't is still schema-incompatible — search/get on the slug-less
+    ones would fail. Any non-zero count of current records without
+    slug flips schema_compatible to false."""
+    modern = _record(slug="modern", title="M")
+    legacy = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/nl-legacy.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime.now(UTC),
+        status="current",
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={"nl-1": modern, "nl-2": legacy},
+        ),
+        tmp_path / "manifest.json",
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["schema_compatible"] is False
+    assert "1 of 2" in status["notice"]
+
+
+def test_corpus_status_tombstones_only_is_schema_compatible(tmp_path: Path) -> None:
+    """A manifest containing ONLY tombstones (no current docs) is
+    vacuously schema_compatible — there are no current records to
+    fail the slug check."""
+    tombstone = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/nl-gone.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime.now(UTC),
+        status="removed",
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={"nl-1": tombstone},
+        ),
+        tmp_path / "manifest.json",
+    )
+    status = CorpusReader(tmp_path).corpus_status()
+    assert status["schema_compatible"] is True
+    assert status["total_current_documents"] == 0
+
+
 def test_corpus_status_clamps_negative_age_for_future_dated_manifest(
     tmp_path: Path,
 ) -> None:

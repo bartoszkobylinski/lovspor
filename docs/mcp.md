@@ -195,6 +195,7 @@ Return current state of the local corpus plus freshness metadata. Call this proa
   "manifest_generated_at": "2026-04-27T05:00:00+00:00",
   "manifest_age_days": 0,
   "is_stale": false,
+  "schema_compatible": true,
   "total_current_documents": 4522,
   "head_commit": "0c40d0b",
   "head_commit_date": "2026-04-27",
@@ -211,6 +212,7 @@ Return current state of the local corpus plus freshness metadata. Call this proa
   "manifest_generated_at": "2026-04-13T05:00:00+00:00",
   "manifest_age_days": 14,
   "is_stale": true,
+  "schema_compatible": true,
   "total_current_documents": 4520,
   "head_commit": "abc1234",
   "head_commit_date": "2026-04-13",
@@ -220,7 +222,28 @@ Return current state of the local corpus plus freshness metadata. Call this proa
 }
 ```
 
-`is_stale` flips to `true` when the manifest is more than **7 days old** (one week of skipped syncs). The server itself **never** runs `git pull` or fetches from the network — `refresh_command` is a copy-pasteable command for the user to run manually.
+**Sample output (pre-Sprint-4 schema):**
+
+```json
+{
+  "manifest_generated_at": "2026-04-26T19:05:00+00:00",
+  "manifest_age_days": 1,
+  "is_stale": true,
+  "schema_compatible": false,
+  "total_current_documents": 4522,
+  "head_commit": "57c3052",
+  "head_commit_date": "2026-04-26",
+  "head_commit_subject": "sync: 4522 new, 0 changed, 0 removed",
+  "refresh_command": "git -C /Users/you/lovverk pull",
+  "notice": "Corpus manifest is on the pre-Sprint-4 schema (4522 of 4522 current documents have no slug field). MCP search/get tools cannot operate on this schema. Run: git -C /Users/you/lovverk pull to refresh."
+}
+```
+
+`is_stale` flips to `true` when **either**:
+- the manifest is more than **7 days old** (one week of skipped syncs), or
+- `schema_compatible` is false (manifest pre-dates Sprint 4 — no slug fields on records, every search/get tool returns empty even though the corpus has thousands of files).
+
+The server itself **never** runs `git pull` or fetches from the network — `refresh_command` is a copy-pasteable command for the user to run manually.
 
 ### `search_laws(query, dataset?)`
 
