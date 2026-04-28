@@ -911,6 +911,56 @@ def test_get_section_raises_for_unknown_slug(tmp_path: Path) -> None:
         CorpusReader(tmp_path).get_section("not-a-slug", "1-1")
 
 
+def test_get_section_handles_untitled_legal_article_heading(tmp_path: Path) -> None:
+    """Codex PR-B regression. Lovdata's source XML sometimes ships
+    a ``legalArticleValue`` with no accompanying ``title`` field,
+    in which case the renderer emits a bare ``### § N`` heading
+    (no dot, no title text). The previous regex required ``\\.\\s+title``
+    so these sections were invisible to get_section even though they
+    exist in the rendered Markdown."""
+    body = "## Kapittel 1.\n\n### § 5\n\nBody text here.\n\n### § 6\n\nMore body.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": body},
+    )
+    section = CorpusReader(tmp_path).get_section("x", "5")
+    assert section["section_id"] == "5"
+    assert section["heading"] == "§ 5"
+    assert section["body"] == "Body text here."
+
+
+def test_get_section_available_list_with_letter_suffix_siblings_does_not_crash(
+    tmp_path: Path,
+) -> None:
+    """Codex PR-B regression. When an act contains both ``§ 5-12``
+    (numeric tail) and ``§ 5-12a`` (letter-suffix tail) and the AI
+    asks for a missing section, the available-sections recovery
+    message used to crash with TypeError because the natural-key
+    sort mixed (5, 12) with (5, '12a'). The fix tags each segment
+    with a numeric / string discriminator so comparisons stay
+    type-homogeneous; numbers always sort before strings within a
+    chapter."""
+    body = (
+        "## Kapittel 5.\n\n"
+        "### § 5-2. Foo\nFoo.\n"
+        "### § 5-12. Bar\nBar.\n"
+        "### § 5-12a. Inserted\nInserted.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": body},
+    )
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_section("x", "5-99")
+    msg = str(exc_info.value)
+    # Order pinned: 5-2 < 5-12 (numeric) < 5-12a (letter suffix sorts last
+    # within the same chapter because string > int under our key).
+    assert msg.index("§ 5-2") < msg.index("§ 5-12")
+    assert msg.index("§ 5-12") < msg.index("§ 5-12a")
+
+
 def test_get_section_uses_cached_body_index_without_frontmatter(
     tmp_path: Path,
 ) -> None:

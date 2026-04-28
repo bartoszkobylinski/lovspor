@@ -52,10 +52,16 @@ docs/mcp.md if changed."""
 
 _GIT_HEAD_FIELDS = 3  # sha + ISO date + subject from the --format string
 
-_SECTION_HEADING = re.compile(r"^### § ([\d-]+[a-z]?)\.\s+(.+?)\s*$")
+_SECTION_HEADING = re.compile(r"^### § ([\d-]+[a-z]?)(?:\.\s+(.+?))?\s*$")
 """Matches a Norwegian-law section heading produced by the lovspor
 renderer. Captures the section id (e.g. ``5-12``, ``1``, ``5-12a``)
-and the section title (everything after the dot)."""
+and the optional section title (everything after the dot).
+
+The title group is OPTIONAL because Lovdata's source XML sometimes
+ships a ``legalArticleValue`` with no accompanying ``title`` field,
+in which case the renderer emits a bare ``### § 5`` heading. We must
+match those too — otherwise the section becomes invisible to
+``get_section`` even though it exists in the rendered Markdown."""
 
 _CHAPTER_HEADING = re.compile(r"^## (.+?)\s*$")
 """Matches a chapter heading (``## Kapittel N. Title``). Captured for
@@ -537,8 +543,14 @@ def _parse_sections(body: str) -> dict[str, dict[str, str]]:
         if section:
             _close()
             current_id = section.group(1)
+            section_title = section.group(2)
+            heading = (
+                f"§ {current_id}. {section_title}"
+                if section_title is not None
+                else f"§ {current_id}"
+            )
             current_data = {
-                "heading": f"§ {current_id}. {section.group(2)}",
+                "heading": heading,
                 "parent_chapter": current_chapter,
                 "body_lines": [],
             }
@@ -554,11 +566,22 @@ def _parse_sections(body: str) -> dict[str, dict[str, str]]:
     return sections
 
 
-def _natural_section_key(section_id: str) -> tuple[Any, ...]:
+def _natural_section_key(section_id: str) -> tuple[tuple[int, int | str], ...]:
     """Sort key that orders ``5-2``, ``5-10``, ``5-11`` numerically
     rather than lexicographically. Falls back to string for any non-
-    numeric component (e.g. trailing letter suffix in ``5-12a``)."""
-    return tuple(int(p) if p.isdigit() else p for p in section_id.split("-"))
+    numeric component (e.g. trailing letter suffix in ``5-12a``).
+
+    Each segment becomes a ``(kind, value)`` pair where ``kind`` is
+    ``0`` for numeric and ``1`` for string. This keeps comparisons
+    type-homogeneous: a numeric segment always sorts before a string
+    segment (so ``5-12 < 5-12a``), and within either kind the natural
+    int / str comparison applies. Without the kind tag, mixing
+    ``(5, 12)`` and ``(5, '12a')`` in the same sort raises
+    ``TypeError`` in Python 3 — exactly the crash that turned the
+    available-sections recovery message into an unhelpful traceback
+    on acts that contain both ``§ 5-12`` and ``§ 5-12a``.
+    """
+    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in section_id.split("-"))
 
 
 def _strip_frontmatter_and_h1(text: str) -> str:
