@@ -374,7 +374,27 @@ End-of-sprint validation in Claude Code (2026-04-28): user prompt *"Use the lovv
 
 **Lesson recorded for §14:** PRs that get follow-up commits after Codex's "No findings" need a verification that the follow-up actually went to the same branch ref on origin. After a squash-merge, GitHub deletes the source branch; subsequent pushes silently create a new branch with the same name and re-trigger Codex without ever connecting back to a PR. See PR #29 origin story.
 
-## 12a. git_commit_mode is now implemented (Sprint 4 + Sprint 5 history bundling)
+### Sprint 8 (in progress) — Tool surface deepening (closing the gap vs. polish-law-mcp)
+
+User decision 2026-04-28, after surveying the polish-law-mcp ecosystem (Ansvar Systems' polish-law-mcp + numikel's law-scrapper-mcp + janisz's sejm-mcp). Those projects offer ~13 tools each vs. our six; concrete gaps worth closing:
+
+1. **Full-text body search** — `search_laws` matches manifest only (slug + title). Polish equivalents do BM25 / FTS5 across full body text; users searching for "kryptovaluta" or "kunstig intelligens" hit nothing in our search even though the term appears in body text.
+2. **Section / § addressing** — `get_law` returns the entire act. Polish equivalents support `get_provision(act_id, "Art. 5")` for surgical access. Norwegian `§` numbering is structurally equivalent.
+3. **Citation validation** — Ansvar's "zero-hallucination" feature: confirm a cited reference (e.g. "§ 5-12 skatteloven") actually exists before letting the AI use it.
+4. **EU cross-references** — Lovdata XML carries EU directive references (`<dd class="ref-eu">`) for laws implementing EU acts (GDPR, NIS2, eIDAS, AI Act). We currently extract the doc's own metadata but not these outbound EU links.
+
+**Sprint 8 PR breakdown** (decided 2026-04-28; ordered low-risk-first):
+
+- **PR-A** `feat(mcp): search_body for full-text body search` — MCP-only, lazy in-memory index of all current Markdown bodies on first call (~45 MB resident, ~3-5 s cold load), substring case-insensitive scan, returns slug / doc_id / title / dataset / `match_count` / `snippet` (~100-char window around first match). Sorted by match_count descending. **This PR.**
+- **PR-B** `feat(mcp): get_section for §-level addressing` — MCP-only, parses Markdown body for `### § N-M.` headings, returns the section text + parent chapter. Reuses cached body index from PR-A.
+- **PR-C** `feat(mcp): validate_citation for zero-hallucination references` — MCP-only, parses citation strings (e.g. "§ 5-12 skatteloven"), checks slug exists + section exists. Reuses PR-B parser.
+- **PR-D** `feat(sync): extract EU cross-references` — **engine + corpus migration**. Updates `lovspor.rendering.document` to capture `ref-eu` field, adds `eu_basis: list[str] | None = None` to ManifestRecord, forces a corpus-wide re-render to populate (analogous to Sprint 4 / Sprint 5 migrations). New MCP tools `get_eu_basis(slug)` + `search_eu_implementations(eu_doc_id)`.
+
+**Architecture decisions for Sprint 8:**
+- **In-memory body index for search_body** (Q1=A 2026-04-28). Rejected: SQLite FTS5 index committed to lovverk (would add ~50 MB git blob per sync; complex pipeline change); SQLite at MCP startup (extra deps, marginal speedup). 4500 docs × ~10 KB each = 45 MB RAM is acceptable for a long-lived stdio process.
+- **Substring case-insensitive matching** (Q2=substring) for the MVP. No tokenization, no stemming. Word-based / stemmed indexing is a follow-up if real use shows it matters; documented as a limitation in `docs/mcp.md`.
+- **Two separate tools** (`search_laws` vs `search_body`, Q4=dwa-toole) rather than one with a `body: bool` flag. AI tool selection is clearer when names encode intent.
+- **Limit-only, no offset** (Q5=limit-only). AI consumers rarely paginate; they refine queries instead.
 
 
 Originally decided 2026-04-26 to keep `Settings.git_commit_mode` as a forward declaration. Implemented 2026-04-26 in Sprint 4 PR #17 (three modes wired); Sprint 5 PR #24 added per-act history bundling on top — see §12d for the chicken-and-egg with `git log --follow` that drives the post-Sprint-5 commit topology.

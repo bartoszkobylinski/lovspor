@@ -1,13 +1,14 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles five read-only tools over a local clone of the lovverk Markdown
+Bundles six read-only tools over a local clone of the lovverk Markdown
 corpus (produced by the lovspor sync engine). Each tool answers a class
 of question an AI agent would naturally ask about Norwegian law:
 
     get_law(slug)              -> "Show me Skatteloven"
     get_law_history(slug)      -> "What changed in Skatteloven recently?"
     list_recent_changes(...)   -> "Which laws changed last week?"
-    search_laws(query, ...)    -> "Are there laws about jernbane?"
+    search_laws(query, ...)    -> "Are there laws about jernbane?" (metadata)
+    search_body(query, ...)    -> "Which laws mention boligkjøpsmodeller?" (body text)
     corpus_status()            -> "Is my local corpus current?"
 
 Data path: the server reads the corpus from disk via the supplied
@@ -49,6 +50,12 @@ docs/mcp.md if changed."""
 
 _GIT_HEAD_FIELDS = 3  # sha + ISO date + subject from the --format string
 
+_SNIPPET_CONTEXT_CHARS = 50
+"""Characters of context on each side of a body-search match in the
+returned snippet. 50 chars on each side + match length ~= 100-130 chars
+total, which fits a single AI message line and gives enough context
+to judge relevance without overwhelming the response."""
+
 _DATASET_ALIAS_TO_KEY = {
     "lover": "gjeldende-lover",
     "gjeldende-lover": "gjeldende-lover",
@@ -85,6 +92,11 @@ class CorpusReader:
             )
         self.corpus_path = corpus_path
         self._manifest: Manifest | None = None
+        # Body-text index for search_body; lazy-loaded on first call so
+        # MCP server startup stays fast for clients that only query
+        # metadata. ~45 MB resident once populated for the production
+        # 4522-doc corpus — acceptable for a long-lived stdio process.
+        self._body_index: dict[str, str] | None = None
 
     @property
     def manifest(self) -> Manifest:
@@ -191,6 +203,94 @@ class CorpusReader:
             if needle in haystack:
                 results.append(_record_summary(doc_id, record))
         return results
+
+    def search_body(
+        self,
+        query: str,
+        dataset: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Substring-match ``query`` against the rendered Markdown body
+        of every current doc (case-insensitive).
+
+        Complement to ``search_laws``: that one matches manifest
+        metadata only (slug + title); this one scans the full legal
+        text. Returns slug, doc_id, title, dataset, ``match_count``
+        (occurrences of the substring across the body), and a
+        ``snippet`` (~100 char window around the FIRST match). Sorted
+        by match_count descending, then by slug for stable ordering.
+
+        ``limit`` caps the result count and must be non-negative.
+        ``dataset`` accepts ``lover`` / ``forskrifter`` (or the full
+        Lovdata key).
+
+        The body index is loaded lazily on the first call (~45 MB
+        resident for the production 4522-doc corpus, ~3-5 s cold
+        load) so server startup stays fast for clients that only
+        query metadata.
+        """
+        if limit < 0:
+            raise ValueError(
+                f"limit must be non-negative, got {limit}",
+            )
+        if not query.strip():
+            return []
+        needle = query.lower()
+        dataset_key = _resolve_dataset(dataset) if dataset is not None else None
+        index = self._load_body_index()
+        results: list[dict[str, Any]] = []
+        for doc_id, record in self.manifest.documents.items():
+            if record.status != "current" or record.slug is None:
+                continue
+            if dataset_key is not None and record.source_dataset != dataset_key:
+                continue
+            body = index.get(record.slug)
+            if body is None:
+                continue
+            haystack = body.lower()
+            count = haystack.count(needle)
+            if count == 0:
+                continue
+            first_match = haystack.find(needle)
+            results.append(
+                {
+                    "slug": record.slug,
+                    "doc_id": doc_id,
+                    "title": record.title,
+                    "dataset": _subdir_for_dataset(record.source_dataset),
+                    "match_count": count,
+                    "snippet": _snippet(body, first_match, len(query)),
+                },
+            )
+        results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
+        return results[:limit]
+
+    def _load_body_index(self) -> dict[str, str]:
+        """Lazy-build the slug -> body-text dict for ``search_body``.
+
+        Reads every current doc's Markdown file once on first call,
+        strips the YAML frontmatter and the leading H1 title (both are
+        metadata already searchable via ``search_laws`` — see
+        ``_strip_frontmatter_and_h1``), caches the dict for the rest
+        of the server's lifetime. Files that fail the path-containment
+        check or are missing on disk are silently skipped — the same
+        defensive posture as ``get_law``.
+        """
+        if self._body_index is None:
+            index: dict[str, str] = {}
+            for record in self.manifest.documents.values():
+                if record.status != "current" or record.slug is None:
+                    continue
+                try:
+                    path = self._safe_join(record.markdown_path)
+                except CorpusNotFoundError:
+                    continue
+                if not path.exists():
+                    continue
+                raw = path.read_text(encoding="utf-8")
+                index[record.slug] = _strip_frontmatter_and_h1(raw)
+            self._body_index = index
+        return self._body_index
 
     def corpus_status(self) -> dict[str, Any]:
         """Return manifest + git HEAD freshness metadata.
@@ -333,6 +433,62 @@ class CorpusReader:
         return target
 
 
+def _strip_frontmatter_and_h1(text: str) -> str:
+    """Remove the YAML frontmatter block and the leading H1 title from
+    a rendered lovspor Markdown file, leaving only the legal body.
+
+    Lovspor's renderer always produces files in this exact shape:
+
+        ---
+        <YAML frontmatter>
+        ---
+
+        # <Title that duplicates the title: frontmatter field>
+
+        ## <Chapter heading>
+        ### § <Section heading>
+        <paragraph text>
+
+    The frontmatter and the H1 are metadata — both fields are already
+    surfaced via ``search_laws`` (slug + title). ``search_body`` is
+    contractually a *body* search, so frontmatter / H1 hits would be
+    false positives that contradict its docstring. Strip them once at
+    cache-load time so every subsequent scan operates on body text only.
+
+    Tolerant of files that do not match the expected shape (e.g. a
+    file without frontmatter or without an H1): return the input
+    unchanged in that case rather than raising. The render pipeline
+    is deterministic so production files always have the shape, but
+    we still defend against malformed corpus content.
+    """
+    if text.startswith("---\n"):
+        closing = text.find("\n---\n", 4)
+        if closing > 0:
+            text = text[closing + len("\n---\n") :]
+    text = text.lstrip("\n")
+    if text.startswith("# "):
+        line_end = text.find("\n")
+        if line_end > 0:
+            text = text[line_end + 1 :]
+    return text.lstrip("\n")
+
+
+def _snippet(body: str, match_idx: int, match_len: int) -> str:
+    """Extract a ``~100`` char window around ``match_idx`` in ``body``.
+
+    Whitespace (including newlines) is collapsed to single spaces so
+    the snippet renders as a single readable line in the AI's response.
+    Adds leading ``...`` if not at the start, trailing ``...`` if not
+    at the end, so the AI can see the snippet is a fragment.
+    """
+    start = max(0, match_idx - _SNIPPET_CONTEXT_CHARS)
+    end = min(len(body), match_idx + match_len + _SNIPPET_CONTEXT_CHARS)
+    snippet = " ".join(body[start:end].split())
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(body) else ""
+    return f"{prefix}{snippet}{suffix}"
+
+
 def _record_summary(doc_id: str, record: ManifestRecord) -> dict[str, Any]:
     """Public-facing summary of a manifest record (for AI consumers)."""
     return {
@@ -426,6 +582,36 @@ def build_server(corpus_path: Path) -> FastMCP:
         ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
         """
         return reader.search_laws(query, dataset=dataset)
+
+    @mcp.tool()
+    def search_body(
+        query: str,
+        dataset: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Search the corpus body text (full Markdown) for ``query``.
+
+        Complement to ``search_laws``: that tool matches manifest
+        metadata only (slug + title); this one scans the actual legal
+        text. Use it when the user asks about a topic that may not
+        appear in any law's title — e.g. "boligkjøpsmodeller",
+        "kryptovaluta", "kunstig intelligens".
+
+        Substring match, case-insensitive. Returns slug, doc_id,
+        title, dataset, ``match_count`` (occurrences across the body),
+        and a ``snippet`` (~100 char context window around the FIRST
+        match). Sorted by match_count descending, then by slug.
+
+        ``dataset`` (optional): ``lover`` or ``forskrifter`` (or the
+        full Lovdata key) to restrict the scan.
+        ``limit``: max results (default 20). Must be non-negative.
+
+        Performance note: the body index is loaded lazily on the first
+        call (~3-5 s for the production 4522-doc corpus, ~45 MB
+        resident); subsequent calls are O(N) substring scans (~100-
+        200 ms typical).
+        """
+        return reader.search_body(query, dataset=dataset, limit=limit)
 
     @mcp.tool()
     def corpus_status() -> dict[str, Any]:

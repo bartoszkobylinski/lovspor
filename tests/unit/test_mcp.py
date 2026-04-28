@@ -54,6 +54,7 @@ def _seed_corpus(
     write_files: bool = True,
     write_history_for: list[str] | None = None,
     generated_at: datetime | None = None,
+    body_for: dict[str, str] | None = None,
 ) -> None:
     root.mkdir(parents=True, exist_ok=True)
     write_manifest(
@@ -67,8 +68,10 @@ def _seed_corpus(
         for record in records.values():
             doc_path = root / record.markdown_path
             doc_path.parent.mkdir(parents=True, exist_ok=True)
+            custom_body = (body_for or {}).get(record.slug or "")
+            body = custom_body if custom_body is not None else f"# {record.title}\n"
             doc_path.write_text(
-                f"---\nid: x\ntitle: {record.title}\n---\n\n# {record.title}\n",
+                f"---\nid: x\ntitle: {record.title}\n---\n\n{body}",
                 encoding="utf-8",
             )
     if write_history_for:
@@ -479,6 +482,248 @@ def test_search_laws_rejects_unknown_dataset(tmp_path: Path) -> None:
         CorpusReader(tmp_path).search_laws("anything", dataset="bogus")
 
 
+# ---------- search_body ----------
+
+
+def test_search_body_finds_substring_in_body_text(tmp_path: Path) -> None:
+    body = "# Skatteloven\n\n§ 1. Skattefradrag for boligkjøp er regulert her.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": body},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+    assert len(rows) == 1
+    assert rows[0]["slug"] == "skatteloven"
+    assert rows[0]["match_count"] == 1
+    assert "boligkjøp" in rows[0]["snippet"].lower()
+
+
+def test_search_body_returns_match_count_for_repeated_substring(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "skatte skatte SKATTE Skatte"},
+    )
+    rows = CorpusReader(tmp_path).search_body("skatte")
+    assert rows[0]["match_count"] == 4
+
+
+def test_search_body_snippet_includes_context_around_first_match(tmp_path: Path) -> None:
+    body = "lorem ipsum " * 20 + "TARGET" + " dolor sit amet" * 20
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": body},
+    )
+    snippet = CorpusReader(tmp_path).search_body("target")[0]["snippet"]
+    assert "TARGET" in snippet
+    assert snippet.startswith("...")
+    assert snippet.endswith("...")
+    # Snippet collapses whitespace and stays roughly bounded.
+    assert len(snippet) < 200
+
+
+def test_search_body_is_case_insensitive(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "JERNBANE"},
+    )
+    assert CorpusReader(tmp_path).search_body("jernbane")
+    assert CorpusReader(tmp_path).search_body("Jernbane")
+    assert CorpusReader(tmp_path).search_body("jERnBaNE")
+
+
+def test_search_body_empty_query_returns_empty(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    reader = CorpusReader(tmp_path)
+    assert reader.search_body("") == []
+    assert reader.search_body("   ") == []
+
+
+def test_search_body_no_matches_returns_empty(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "irrelevant content"},
+    )
+    assert CorpusReader(tmp_path).search_body("boligkjøp") == []
+
+
+def test_search_body_filters_by_dataset(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="lovact", title="Lov"),
+            "sf-1": _record(
+                slug="forskact",
+                title="Forskrift",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+        },
+        body_for={"lovact": "common term here", "forskact": "common term here too"},
+    )
+    reader = CorpusReader(tmp_path)
+    assert [r["slug"] for r in reader.search_body("common", dataset="lover")] == ["lovact"]
+    assert [r["slug"] for r in reader.search_body("common", dataset="forskrifter")] == ["forskact"]
+
+
+def test_search_body_excludes_tombstones(tmp_path: Path) -> None:
+    """Tombstoned doc has no body file on disk anymore — search must
+    skip it rather than raise."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="alive", title="A"),
+            "nl-2": _record(slug="gone", title="G", status="removed"),
+        },
+        body_for={"alive": "boligkjøp matched here"},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+    assert [r["slug"] for r in rows] == ["alive"]
+
+
+def test_search_body_skips_records_without_slug(tmp_path: Path) -> None:
+    """Pre-Sprint-4 records have slug=None; search_body must silently
+    skip them rather than raise."""
+    legacy = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/nl-legacy.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime.now(UTC),
+        status="current",
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={"nl-1": legacy},
+        ),
+        tmp_path / "manifest.json",
+    )
+    assert CorpusReader(tmp_path).search_body("anything") == []
+
+
+def test_search_body_respects_limit(tmp_path: Path) -> None:
+    records = {f"nl-{i}": _record(slug=f"s{i}", title=f"S{i}") for i in range(50)}
+    _seed_corpus(
+        tmp_path,
+        records,
+        body_for={f"s{i}": "needle" for i in range(50)},
+    )
+    rows = CorpusReader(tmp_path).search_body("needle", limit=5)
+    assert len(rows) == 5
+
+
+def test_search_body_rejects_negative_limit(tmp_path: Path) -> None:
+    """Same contract as list_recent_changes — Python's negative-slice
+    semantics ('all but the last N') is unambiguously not what an AI
+    caller intends."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    with pytest.raises(ValueError, match="limit must be non-negative"):
+        CorpusReader(tmp_path).search_body("anything", limit=-1)
+
+
+def test_search_body_zero_limit_returns_empty(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "match here"},
+    )
+    assert CorpusReader(tmp_path).search_body("match", limit=0) == []
+
+
+def test_search_body_orders_by_match_count_descending(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="few", title="F"),
+            "nl-2": _record(slug="many", title="M"),
+            "nl-3": _record(slug="some", title="S"),
+        },
+        body_for={
+            "few": "needle",
+            "many": "needle needle needle needle needle",
+            "some": "needle needle",
+        },
+    )
+    rows = CorpusReader(tmp_path).search_body("needle")
+    assert [r["slug"] for r in rows] == ["many", "some", "few"]
+
+
+def test_search_body_lazy_loads_index_only_once(tmp_path: Path) -> None:
+    """Body index is loaded on first call and cached; subsequent calls
+    reuse the cached dict (verified by deleting one of the source
+    files between calls — the second call still finds the deleted
+    doc's content because the index was cached)."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="cached", title="C")},
+        body_for={"cached": "kryptovaluta er regulert"},
+    )
+    reader = CorpusReader(tmp_path)
+    first = reader.search_body("kryptovaluta")
+    assert len(first) == 1
+    # Pull the rug from under the file system after the first scan.
+    (tmp_path / "lover" / "cached.md").unlink()
+    second = reader.search_body("kryptovaluta")
+    assert second == first  # cached, not re-scanned
+
+
+def test_search_body_rejects_unknown_dataset(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    with pytest.raises(CorpusNotFoundError, match="unknown dataset"):
+        CorpusReader(tmp_path).search_body("anything", dataset="bogus")
+
+
+def test_search_body_ignores_frontmatter_and_title_heading(tmp_path: Path) -> None:
+    """Codex PR-A regression. The contract is 'scan body text only'.
+    Without stripping frontmatter / H1, search_body would return false
+    positives for terms that appear only in metadata (e.g. ministry,
+    license, source_provider, or the title-duplicating H1 line).
+    Both kinds of metadata are already surfaced via search_laws +
+    get_law metadata, so a body hit on them is wrong by contract."""
+    # Body text mentions only 'paragraph_term', frontmatter only
+    # 'frontmatter_term', H1 only the title 'Skatteloven'.
+    body_md = "## Kapittel 1.\n\n### § 1. Virkeområde\n\nparagraph_term explained here.\n"
+    # Override the file contents directly to control frontmatter shape.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": body_md},
+    )
+    raw = (tmp_path / "lover" / "skatteloven.md").read_text(encoding="utf-8")
+    # Confirm the seeded file actually has frontmatter that contains
+    # 'frontmatter_term' so the test would catch a regression — patch
+    # the seeded file to inject the term into the frontmatter block.
+    patched = raw.replace("id: x\n", "id: x\nministry: frontmatter_term\n")
+    (tmp_path / "lover" / "skatteloven.md").write_text(patched, encoding="utf-8")
+
+    reader = CorpusReader(tmp_path)
+    # Body term IS findable.
+    assert [r["slug"] for r in reader.search_body("paragraph_term")] == ["skatteloven"]
+    # Frontmatter term is NOT findable via search_body (frontmatter stripped).
+    assert reader.search_body("frontmatter_term") == []
+    # H1 title is NOT findable via search_body (H1 stripped); search_laws
+    # is the right tool for title matching.
+    assert reader.search_body("Skatteloven") == []
+
+
+def test_search_body_match_count_is_non_overlapping(tmp_path: Path) -> None:
+    """Pin the str.count semantics: 'aaaa'.count('aa') returns 2,
+    not 3 — non-overlapping matches. Documented behavior, not an
+    accident, so a regression here would surface as silent under-
+    count rather than a crash."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "## H\n\naaaa"},
+    )
+    rows = CorpusReader(tmp_path).search_body("aa")
+    assert rows[0]["match_count"] == 2
+
+
 # ---------- corpus_status ----------
 
 
@@ -748,7 +993,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_four_tools(tmp_path: Path) -> None:
+def test_build_server_registers_six_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -761,6 +1006,7 @@ def test_build_server_registers_four_tools(tmp_path: Path) -> None:
             "get_law_history",
             "list_recent_changes",
             "search_laws",
+            "search_body",
             "corpus_status",
         ],
     )

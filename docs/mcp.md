@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets four read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets six read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 This document covers the full setup: prerequisites, configuration for two common clients, every tool with sample input and output, the typical discovery flow, troubleshooting, limitations, and legal attribution.
 
@@ -10,7 +10,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** five read-only, manifest-and-filesystem-only.
+- **Tools:** six read-only, manifest-and-filesystem-only.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -76,7 +76,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All four are read-only. None mutate the corpus, trigger a sync, or reach the network.
+All six are read-only. None mutate the corpus, trigger a sync, or reach the network.
 
 ### `get_law(slug)`
 
@@ -180,6 +180,35 @@ List current laws ordered by most recent change first.
 ]
 ```
 
+### `search_body(query, dataset?, limit?)`
+
+Search the **full Markdown body** of every current law for a substring (case-insensitive). Complement to `search_laws`: that one matches only manifest metadata (`slug` + `title`); `search_body` scans the actual legal text. Use it when the user asks about a topic that may not appear in any law's title — e.g. *"kryptovaluta"*, *"boligkjøpsmodeller"*, *"kunstig intelligens"*.
+
+- **`query`** — substring to match. Empty / whitespace-only queries return `[]`.
+- **`dataset`** *(optional)* — `lover` or `forskrifter` (or the full Lovdata key) to restrict the scan.
+- **`limit`** *(default 20)* — max results. Must be non-negative.
+
+**Sample call:** `search_body(query="kryptovaluta", dataset="lover", limit=3)`
+
+**Sample output:**
+
+```json
+[
+  {
+    "slug": "verdipapirhandelloven-vphl",
+    "doc_id": "nl-20070629-075",
+    "title": "Lov om verdipapirhandel",
+    "dataset": "lover",
+    "match_count": 4,
+    "snippet": "...for kryptovaluta og andre virtuelle eiendeler er regulert i denne paragrafen..."
+  }
+]
+```
+
+Sorted by `match_count` descending, then by `slug` for stable ordering. The snippet is a ~100-char window around the **first** match (whitespace collapsed, leading/trailing `...` if not at the document boundaries).
+
+**Performance:** the body index is loaded lazily on the first call (~3-5 s for the production 4522-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
+
 ### `corpus_status()`
 
 Return current state of the local corpus plus freshness metadata. Call this proactively when other tools return unexpectedly empty results — a stale corpus (user forgot to `git pull`) is indistinguishable from a missing law from the AI's perspective.
@@ -278,13 +307,14 @@ Use `get_law(slug)` to fetch the full text of any result.
 
 A typical AI-assistant interaction with this server follows the same pattern:
 
-1. **`search_laws("topic")`** — find candidates. Returns a list of `{slug, title, ...}` summaries.
-2. **`get_law(slug)`** — pull the full text of the chosen candidate.
-3. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
-4. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
-5. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
+1. **`search_laws("topic")`** — find candidates by slug + title metadata. Fast, manifest-only.
+2. **`search_body("topic")`** — when the topic doesn't appear in any title (e.g., concepts like *"kryptovaluta"*), scan the body text instead. Heavier but catches semantic matches.
+3. **`get_law(slug)`** — pull the full text of the chosen candidate.
+4. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
+5. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
+6. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The five tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
+The six tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
 
 ---
 
@@ -326,11 +356,12 @@ You can also clone `lovspor` and run from source if you want to develop or pin a
 
 - **Current laws only.** The corpus mirrors `gjeldende-lover` and `gjeldende-sentrale-forskrifter` — laws and central regulations as currently in force. No historical point-in-time reconstruction (a law's text as of 2018-06-01 is *not* directly retrievable; only the current text plus a per-act change-event history are available).
 - **No local or municipal regulations.** Only `sentrale forskrifter` are tracked.
-- **No body-text search.** `search_laws` matches against the manifest's `slug` and `title` fields only. A law mentioning "klima" in its body but not its title or slug will not be found via `search_laws("klima")`. Body-text indexing is a future sprint.
+- **`search_laws` matches metadata only.** A law mentioning "klima" in its body but not its title or slug will not be found via `search_laws("klima")` — use `search_body` for that. (The two tools are complementary; `search_laws` is fast, `search_body` is thorough.)
 - **No Stortinget enrichment.** Parliamentary metadata (saker, voteringer, publikasjoner) is not surfaced. See [`docs/decisions.md` §3](decisions.md) for the rationale.
 - **No section / paragraph addressing.** `get_law` returns the whole act; there's no `get_section(slug, "5-12")` yet.
 - **History for tombstones is not generated.** A law that was once in the corpus but has since been removed has no `history/<slug>.json` file. The original commits are still in `lovverk`'s git log if you need them.
 - **Corpus freshness depends on the user.** The server reads whatever is in your local `lovverk` clone. If you don't `git pull`, you'll get stale data. The `corpus_status()` tool flags this (`is_stale: true` past 7 days) and gives the AI a `refresh_command` to suggest, but the server itself never pulls — that's an explicit user action.
+- **Body-text search uses substring matching, not BM25 / stemming.** Sprint 8 PR-A added `search_body` which scans full body text — a law mentioning "klima" only in its body IS findable via `search_body("klima")`. But matching is case-insensitive substring only: `search_body("skattefradrag")` will not find docs that only say "skattefradraget" (no stemming). Word-based / stemmed indexing is a follow-up if real use shows it matters.
 
 ---
 
