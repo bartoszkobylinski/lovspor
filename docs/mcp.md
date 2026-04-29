@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets seven read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets eight read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 This document covers the full setup: prerequisites, configuration for two common clients, every tool with sample input and output, the typical discovery flow, troubleshooting, limitations, and legal attribution.
 
@@ -10,7 +10,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** seven read-only, manifest-and-filesystem-only.
+- **Tools:** eight read-only, manifest-and-filesystem-only.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -76,7 +76,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All seven are read-only. None mutate the corpus, trigger a sync, or reach the network.
+All eight are read-only. None mutate the corpus, trigger a sync, or reach the network.
 
 ### `get_law(slug)`
 
@@ -232,6 +232,40 @@ Sorted by `match_count` descending, then by `slug` for stable ordering. The snip
 
 **Performance:** the body index is loaded lazily on the first call (~3-5 s for the production 4522-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
 
+### `validate_citation(citation)`
+
+Verify that a Norwegian-law citation string actually resolves in the corpus. **Zero-hallucination guard** — call this before quoting a citation in a final answer to confirm both the act and the section exist.
+
+- **`citation`** — a free-form citation string. The parser is permissive about order: `"§ 5-12 skatteloven-sktl"`, `"skatteloven-sktl § 5-12"`, `"§ 5-12 i skatteloven-sktl"`, `"§5-12 skatteloven-sktl"` all work.
+
+**Sample call:** `validate_citation(citation="§ 5-12 skatteloven-sktl")`
+
+**Sample output (valid):**
+
+```json
+{
+  "valid": true,
+  "slug": "skatteloven-sktl",
+  "section_id": "5-12",
+  "heading": "§ 5-12. Boligsparing for ungdom",
+  "reason": null
+}
+```
+
+**Sample output (invalid — slug not in canonical form):**
+
+```json
+{
+  "valid": false,
+  "slug": null,
+  "section_id": "5-12",
+  "heading": null,
+  "reason": "ambiguous citation: § 5-12 found but no act identifier; many acts have a section by that id"
+}
+```
+
+The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. AI consumers should use canonical slugs from `search_laws`.
+
 ### `corpus_status()`
 
 Return current state of the local corpus plus freshness metadata. Call this proactively when other tools return unexpectedly empty results — a stale corpus (user forgot to `git pull`) is indistinguishable from a missing law from the AI's perspective.
@@ -336,9 +370,10 @@ A typical AI-assistant interaction with this server follows the same pattern:
 4. **`get_section(slug, "N-M")`** — when the user wants ONE paragraph, not the whole act. Surgical, cheaper on context window. Reuses the same body cache as `search_body`.
 5. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
 6. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
-7. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
+7. **`validate_citation(citation)`** — zero-hallucination guard. Before quoting a citation in a final answer ("per § 5-12 of Skatteloven..."), call this to confirm both the act and the section actually exist in the corpus. Returns a `valid` bool plus a human-readable `reason` field the AI can quote.
+8. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The seven tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
+The eight tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
 
 ---
 

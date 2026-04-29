@@ -982,6 +982,198 @@ def test_get_section_uses_cached_body_index_without_frontmatter(
         CorpusReader(tmp_path).get_section("skatteloven", "99-99")
 
 
+# ---------- validate_citation ----------
+
+
+def _seed_for_citation(tmp_path: Path) -> CorpusReader:
+    """Set up a corpus with skatteloven-sktl + opplaeringslova having
+    real sections, so citation validation has something to resolve
+    against."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug="opplaeringslova", title="Opplæringslova"),
+        },
+        body_for={
+            "skatteloven-sktl": (
+                "## Kapittel 5.\n\n### § 5-12. Boligsparing\nContent.\n### § 5-13. Annet\nMore.\n"
+            ),
+            "opplaeringslova": ("## Kapittel 1.\n\n### § 1-1. Virkeområde\nContent.\n"),
+        },
+    )
+    return CorpusReader(tmp_path)
+
+
+def test_validate_citation_valid_with_slug_and_section(tmp_path: Path) -> None:
+    result = _seed_for_citation(tmp_path).validate_citation("§ 5-12 skatteloven-sktl")
+    assert result["valid"] is True
+    assert result["slug"] == "skatteloven-sktl"
+    assert result["section_id"] == "5-12"
+    assert result["heading"] == "§ 5-12. Boligsparing"
+    assert result["reason"] is None
+
+
+def test_validate_citation_accepts_reverse_order(tmp_path: Path) -> None:
+    """Citation with slug FIRST then § id — Norwegian convention varies."""
+    result = _seed_for_citation(tmp_path).validate_citation("skatteloven-sktl § 5-12")
+    assert result["valid"] is True
+    assert result["slug"] == "skatteloven-sktl"
+    assert result["section_id"] == "5-12"
+
+
+def test_validate_citation_accepts_norwegian_filler_word(tmp_path: Path) -> None:
+    """``§ 5-12 i skatteloven-sktl`` — Norwegian for 'in'."""
+    result = _seed_for_citation(tmp_path).validate_citation(
+        "§ 5-12 i skatteloven-sktl",
+    )
+    assert result["valid"] is True
+
+
+def test_validate_citation_accepts_no_space_between_paragraph_and_id(
+    tmp_path: Path,
+) -> None:
+    """``§5-12`` (no space) is also valid Norwegian shorthand."""
+    result = _seed_for_citation(tmp_path).validate_citation("§5-12 skatteloven-sktl")
+    assert result["valid"] is True
+    assert result["section_id"] == "5-12"
+
+
+def test_validate_citation_slug_only_is_valid(tmp_path: Path) -> None:
+    """A bare slug (no §) is valid as long as the slug is known —
+    the user is referring to the whole act."""
+    result = _seed_for_citation(tmp_path).validate_citation("skatteloven-sktl")
+    assert result["valid"] is True
+    assert result["slug"] == "skatteloven-sktl"
+    assert result["section_id"] is None
+    assert result["heading"] is None
+
+
+def test_validate_citation_unknown_slug_is_invalid(tmp_path: Path) -> None:
+    """Strict slug match: 'skatteloven' (without -sktl) does NOT
+    fuzzy-match production slug 'skatteloven-sktl'. Per Q2=A
+    decision: cleaner contract, AI should use canonical slugs from
+    search_laws."""
+    result = _seed_for_citation(tmp_path).validate_citation("§ 5-12 skatteloven")
+    assert result["valid"] is False
+    assert result["slug"] is None
+    assert result["section_id"] == "5-12"
+    assert "ambiguous" in result["reason"].lower()
+
+
+def test_validate_citation_paragraph_only_is_ambiguous(tmp_path: Path) -> None:
+    """``§ 5-12`` without an act identifier is invalid because many
+    acts have a section by that id — the AI can't be confirmed
+    referring to a specific one."""
+    result = _seed_for_citation(tmp_path).validate_citation("§ 5-12")
+    assert result["valid"] is False
+    assert result["slug"] is None
+    assert result["section_id"] == "5-12"
+    assert "ambiguous" in result["reason"].lower()
+
+
+def test_validate_citation_unparseable_returns_invalid(tmp_path: Path) -> None:
+    """No § and no known slug → can't parse anything useful."""
+    result = _seed_for_citation(tmp_path).validate_citation("just some prose")
+    assert result["valid"] is False
+    assert result["slug"] is None
+    assert result["section_id"] is None
+    assert "could not parse" in result["reason"].lower()
+
+
+def test_validate_citation_unknown_section_returns_helpful_error(
+    tmp_path: Path,
+) -> None:
+    """Section that doesn't exist in the matched act → invalid +
+    available-sections list quoted from get_section."""
+    result = _seed_for_citation(tmp_path).validate_citation(
+        "§ 5-99 skatteloven-sktl",
+    )
+    assert result["valid"] is False
+    assert result["slug"] == "skatteloven-sktl"
+    assert result["section_id"] == "5-99"
+    assert "5-99" in result["reason"]
+    assert "§ 5-12" in result["reason"]
+
+
+def test_validate_citation_picks_longest_slug_match(tmp_path: Path) -> None:
+    """If multiple manifest slugs appear as substrings of the
+    citation, pick the LONGEST one (most specific)."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="loven", title="Loven"),
+            "nl-2": _record(slug="loven-extension", title="Loven Extension"),
+        },
+        body_for={
+            "loven-extension": "## K\n### § 1. T\nC.\n",
+        },
+    )
+    # Citation matches both slugs as substrings; longest wins.
+    result = CorpusReader(tmp_path).validate_citation("§ 1 loven-extension")
+    assert result["slug"] == "loven-extension"
+
+
+def test_validate_citation_rejects_slug_with_extra_suffix_characters(
+    tmp_path: Path,
+) -> None:
+    """Codex PR-C regression. Plain ``slug in citation`` substring
+    match was too lax: ``'skatteloven-sktl' in 'skatteloven-sktlX'``
+    is True, so a citation with garbage trailing characters silently
+    validated. The strict contract requires token-boundary matching;
+    the trailing ``X`` is itself a slug character so the right end of
+    the match is not at a boundary."""
+    reader = _seed_for_citation(tmp_path)
+
+    plain = reader.validate_citation("skatteloven-sktlX")
+    assert plain["valid"] is False
+    assert plain["slug"] is None
+
+    with_section = reader.validate_citation("§ 5-12 skatteloven-sktlX")
+    assert with_section["valid"] is False
+    assert with_section["slug"] is None
+    # The § id is still extracted, but slug match is rejected so the
+    # citation falls into the 'ambiguous: no act identifier' branch.
+    assert with_section["section_id"] == "5-12"
+    assert "ambiguous" in with_section["reason"].lower()
+
+
+def test_validate_citation_rejects_slug_inside_longer_word(tmp_path: Path) -> None:
+    """Same defense for the LEFT boundary: a slug appearing inside a
+    longer alphanumeric run (e.g. ``preskatteloven-sktl``) must not
+    match — the leading ``pre`` keeps the start of the match
+    boundary-less."""
+    result = _seed_for_citation(tmp_path).validate_citation(
+        "preskatteloven-sktl",
+    )
+    assert result["valid"] is False
+    assert result["slug"] is None
+
+
+def test_validate_citation_finds_slug_after_punctuation(tmp_path: Path) -> None:
+    """Punctuation around a slug counts as a token boundary, so
+    citations like ``'§ 5-12, skatteloven-sktl.'`` (with comma /
+    period delimiters) still resolve."""
+    result = _seed_for_citation(tmp_path).validate_citation(
+        "§ 5-12, skatteloven-sktl.",
+    )
+    assert result["valid"] is True
+    assert result["slug"] == "skatteloven-sktl"
+
+
+def test_validate_citation_excludes_tombstones(tmp_path: Path) -> None:
+    """A removed law's slug must not match — only current docs are
+    valid citation targets."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="goneloven", title="Gone", status="removed")},
+        write_files=False,
+    )
+    result = CorpusReader(tmp_path).validate_citation("goneloven")
+    assert result["valid"] is False
+    assert result["slug"] is None
+
+
 def test_search_body_match_count_is_non_overlapping(tmp_path: Path) -> None:
     """Pin the str.count semantics: 'aaaa'.count('aa') returns 2,
     not 3 — non-overlapping matches. Documented behavior, not an
@@ -1265,7 +1457,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_seven_tools(tmp_path: Path) -> None:
+def test_build_server_registers_eight_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -1280,6 +1472,7 @@ def test_build_server_registers_seven_tools(tmp_path: Path) -> None:
             "list_recent_changes",
             "search_laws",
             "search_body",
+            "validate_citation",
             "corpus_status",
         ],
     )

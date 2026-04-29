@@ -1,16 +1,17 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles seven read-only tools over a local clone of the lovverk Markdown
+Bundles eight read-only tools over a local clone of the lovverk Markdown
 corpus (produced by the lovspor sync engine). Each tool answers a class
 of question an AI agent would naturally ask about Norwegian law:
 
-    get_law(slug)              -> "Show me Skatteloven"
-    get_section(slug, "5-12")  -> "Show me just § 5-12 of Skatteloven"
-    get_law_history(slug)      -> "What changed in Skatteloven recently?"
-    list_recent_changes(...)   -> "Which laws changed last week?"
-    search_laws(query, ...)    -> "Are there laws about jernbane?" (metadata)
-    search_body(query, ...)    -> "Which laws mention boligkjøpsmodeller?" (body text)
-    corpus_status()            -> "Is my local corpus current?"
+    get_law(slug)                  -> "Show me Skatteloven"
+    get_section(slug, "5-12")      -> "Show me just § 5-12 of Skatteloven"
+    get_law_history(slug)          -> "What changed in Skatteloven recently?"
+    list_recent_changes(...)       -> "Which laws changed last week?"
+    search_laws(query, ...)        -> "Are there laws about jernbane?" (metadata)
+    search_body(query, ...)        -> "Which laws mention boligkjøpsmodeller?"
+    validate_citation(citation)    -> "Does '§ 5-12 skatteloven' actually exist?"
+    corpus_status()                -> "Is my local corpus current?"
 
 Data path: the server reads the corpus from disk via the supplied
 ``corpus_path``. It does not pull from GitHub or trigger an engine
@@ -51,6 +52,25 @@ Adjustable later if production cadence changes — keep documented in
 docs/mcp.md if changed."""
 
 _GIT_HEAD_FIELDS = 3  # sha + ISO date + subject from the --format string
+
+_CITATION_SECTION_ID = re.compile(r"§\s*([\d-]+[a-z]?)")
+"""Permissive matcher for the ``§ N-M`` part of a citation string.
+
+Allows whitespace between ``§`` and the id; matches anywhere in the
+input. Citations occur in many forms in real AI prompts —
+``§ 5-12 skatteloven``, ``skatteloven § 5-12``, ``§ 5-12 i skatteloven``,
+``§5-12``, etc. — so the parser doesn't pin a fixed order; it extracts
+each component independently from wherever it appears."""
+
+_SLUG_CHARACTER = re.compile(r"[a-z0-9æøåäöü-]")
+"""Single character that could be part of a lovspor-rendered slug.
+
+Used by ``_slug_token_in_citation`` to detect token boundaries: a
+slug match is valid only when neither the character before nor the
+character after the match is itself a slug character. Without this,
+``record.slug in citation_lower`` accepts garbage like
+``"skatteloven-sktlX"`` because the trailing X is appended to the
+slug, contradicting the strict-match contract."""
 
 _SECTION_HEADING = re.compile(r"^### § ([\d-]+[a-z]?)(?:\.\s+(.+?))?\s*$")
 """Matches a Norwegian-law section heading produced by the lovspor
@@ -180,6 +200,106 @@ class CorpusReader:
             "heading": section["heading"],
             "parent_chapter": section["parent_chapter"],
             "body": section["body"],
+        }
+
+    def validate_citation(self, citation: str) -> dict[str, Any]:
+        """Verify that a citation string actually resolves in the corpus.
+
+        Permissive parser: extracts ``§ N-M`` and slug components from
+        anywhere in the input — citation order is not pinned because
+        AI prompts produce many forms (``§ 5-12 skatteloven``,
+        ``skatteloven § 5-12``, ``§ 5-12 i skatteloven``, etc.).
+
+        Slug match is strict: the cited slug must equal a known
+        manifest slug (case-insensitive substring on the slug field).
+        ``"skatteloven"`` will not match production slug
+        ``"skatteloven-sktl"`` — return ``valid: false`` with a
+        descriptive ``reason`` instead. Strict because the slug is the
+        authoritative id and AI consumers should be using results from
+        ``search_laws`` (which returns canonical slugs) rather than
+        guessing.
+
+        Returns ``{valid, slug, section_id, heading, reason}``. ``valid``
+        is true only when both the slug and (if present) the section
+        resolve. Slug-only citations are valid as long as the slug is
+        known. ``§``-only citations are ambiguous (many acts have
+        ``§ 5-12``) — flagged invalid with a reason. Unparseable
+        citations likewise return invalid + reason.
+        """
+        section_match = _CITATION_SECTION_ID.search(citation)
+        section_id = section_match.group(1) if section_match else None
+
+        # Find slug-shaped TOKEN in citation (token = word-boundaried
+        # substring; not a substring inside a longer alphanumeric run).
+        # Plain ``record.slug in citation_lower`` is too lax: 'skatteloven-
+        # sktl' would match inside 'skatteloven-sktlX', contradicting the
+        # strict-match contract. _slug_token_in_citation rejects that.
+        # Pick the LONGEST among token-matching candidates so canonical
+        # 'skatteloven-sktl' wins over a hypothetical shorter slug that
+        # happens to also be a separate token in the same citation.
+        citation_lower = citation.lower()
+        candidates = [
+            record.slug
+            for record in self.manifest.documents.values()
+            if record.status == "current"
+            and record.slug is not None
+            and _slug_token_in_citation(record.slug, citation_lower)
+        ]
+        matched_slug = max(candidates, key=len) if candidates else None
+
+        if matched_slug is None and section_id is None:
+            return {
+                "valid": False,
+                "slug": None,
+                "section_id": None,
+                "heading": None,
+                "reason": (
+                    f"could not parse citation {citation!r}: no § id and no known slug found"
+                ),
+            }
+
+        if matched_slug is None:
+            return {
+                "valid": False,
+                "slug": None,
+                "section_id": section_id,
+                "heading": None,
+                "reason": (
+                    f"ambiguous citation: § {section_id} found but no act "
+                    f"identifier; many acts have a section by that id"
+                ),
+            }
+
+        if section_id is None:
+            # Slug-only citation: valid if the slug is known (it is —
+            # we matched it from the manifest).
+            return {
+                "valid": True,
+                "slug": matched_slug,
+                "section_id": None,
+                "heading": None,
+                "reason": None,
+            }
+
+        # Both slug and section_id present — delegate to get_section
+        # for the section-existence check. Reuses its body-index cache
+        # and natural-order error message.
+        try:
+            section = self.get_section(matched_slug, section_id)
+        except CorpusNotFoundError as exc:
+            return {
+                "valid": False,
+                "slug": matched_slug,
+                "section_id": section_id,
+                "heading": None,
+                "reason": str(exc),
+            }
+        return {
+            "valid": True,
+            "slug": matched_slug,
+            "section_id": section_id,
+            "heading": section["heading"],
+            "reason": None,
         }
 
     def get_law_history(self, slug: str) -> dict[str, Any]:
@@ -500,6 +620,40 @@ class CorpusReader:
         return target
 
 
+def _slug_token_in_citation(slug: str, citation_lower: str) -> bool:
+    """Find ``slug`` as a token (word-boundaried substring) in
+    ``citation_lower``.
+
+    A token boundary exists at position N when:
+
+    - ``N == 0`` (start of citation), or
+    - ``N == len(citation_lower)`` (end of citation), or
+    - ``citation_lower[N]`` is not a slug character (per
+      ``_SLUG_CHARACTER`` — i.e. not in ``[a-z0-9æøåäøåäöü-]``).
+
+    The slug matches as a token only when both ends of its occurrence
+    are at boundaries. This rejects ``"skatteloven-sktl"`` matching
+    inside ``"skatteloven-sktlX"`` — the trailing ``X`` is itself a
+    slug character so the right end is not at a boundary.
+
+    Walks all occurrences of ``slug`` in ``citation_lower`` because
+    the first occurrence may not be a token (e.g. ``"presskatteloven-
+    sktl notes about skatteloven-sktl"`` — first match is inside a
+    longer word, second is a real token).
+    """
+    idx = citation_lower.find(slug)
+    while idx >= 0:
+        before_ok = idx == 0 or not _SLUG_CHARACTER.match(citation_lower[idx - 1])
+        after_pos = idx + len(slug)
+        after_ok = after_pos == len(citation_lower) or not _SLUG_CHARACTER.match(
+            citation_lower[after_pos],
+        )
+        if before_ok and after_ok:
+            return True
+        idx = citation_lower.find(slug, idx + 1)
+    return False
+
+
 def _parse_sections(body: str) -> dict[str, dict[str, str]]:
     """Walk a frontmatter-stripped body and return a section map.
 
@@ -790,6 +944,38 @@ def build_server(corpus_path: Path) -> FastMCP:
         200 ms typical).
         """
         return reader.search_body(query, dataset=dataset, limit=limit)
+
+    @mcp.tool()
+    def validate_citation(citation: str) -> dict[str, Any]:
+        """Verify that a Norwegian-law citation string actually resolves.
+
+        Use this before quoting a citation in a final answer to the
+        user — *zero-hallucination* guard. If the AI is about to
+        write *"per § 5-12 of Skatteloven, ..."*, calling
+        ``validate_citation("§ 5-12 skatteloven-sktl")`` first
+        confirms both the act and the section exist in the corpus.
+
+        Accepts permissive citation forms (``"§ 5-12 skatteloven-sktl"``,
+        ``"skatteloven-sktl § 5-12"``, ``"§ 5-12 i skatteloven-sktl"``).
+        Returns:
+
+        - ``valid`` — bool, true only when both slug and (if present)
+          section resolve.
+        - ``slug`` — the matched canonical slug or null.
+        - ``section_id`` — extracted ``§`` id or null.
+        - ``heading`` — full ``§ N-M. Title`` line if both slug and
+          section resolved; null otherwise.
+        - ``reason`` — null when valid; otherwise a human-readable
+          explanation (unknown slug, missing section + available list,
+          ``§``-only ambiguity, unparseable input). The AI can quote
+          this verbatim to explain to the user why the citation
+          couldn't be confirmed.
+
+        Slug-only citations (``"skatteloven-sktl"``) are valid as long
+        as the slug is known. ``§``-only citations (``"§ 5-12"``) are
+        invalid because the section id is non-unique across acts.
+        """
+        return reader.validate_citation(citation)
 
     @mcp.tool()
     def corpus_status() -> dict[str, Any]:
