@@ -1,0 +1,120 @@
+personas:
+  - id: anne
+    name: Anne Solberg
+    age: 28
+    location: Bergen
+    role: Junior corporate lawyer
+    knowledge_level: legal_professional
+    domains: [arbeidsmiljoloven, avtaleloven, kjopsloven]
+    typical_queries: |
+      Specific section lookups under time pressure, usually starting from a client question and ending in a citation she can paste into a memo or contract comment.
+    frustrations: |
+      Wrong act returned, ambiguous section ids, and section-only answers that do not show enough neighboring structure to confirm she picked the right paragraph.
+    expected_tool_usage_pattern: |
+      search_laws -> search_body -> get_section -> validate_citation
+    gap_to_reveal: get_section UX under time pressure
+
+  - id: erik
+    name: Erik Hansen
+    age: 45
+    location: Oslo
+    role: Tax accountant
+    knowledge_level: legal_adjacent
+    domains: [skatteloven, skatteforvaltningsloven, merverdiavgiftsloven]
+    typical_queries: |
+      Canonical tax section lookups, validation of client-facing citations, and quick checks of what changed in recent tax updates.
+    frustrations: |
+      History answers stop at event metadata and do not reconstruct what the law text actually said at a historical date.
+    expected_tool_usage_pattern: |
+      search_laws -> get_section -> validate_citation -> get_law_history
+    gap_to_reveal: history depth
+
+  - id: maria
+    name: Maria Berg
+    age: 35
+    location: Trondheim
+    role: Compliance officer at a fintech
+    knowledge_level: legal_professional
+    domains: [finansforetaksloven, hvitvaskingsloven, personopplysningsloven]
+    typical_queries: |
+      EU-to-Norway implementation checks for GDPR, PSD2, AMLD, MiCA, and adjacent compliance obligations.
+    frustrations: |
+      CELEX-only lookup is precise but brittle when the user starts from an acronym, article number, or regulatory nickname.
+    expected_tool_usage_pattern: |
+      search_eu_implementations -> get_eu_basis -> search_body -> get_section
+    gap_to_reveal: EU cross-reference accuracy
+
+  - id: lars
+    name: Lars Ødegård
+    age: 52
+    location: Oslo
+    role: Professor of law, UiO
+    knowledge_level: legal_professional
+    domains: [skatteloven, husleieloven, naboloven, avtaleloven]
+    typical_queries: |
+      Historical, comparative, and doctrinal research questions that ask what a law said at a specific point in time.
+    frustrations: |
+      Current-state tools and event history do not answer point-in-time law-text questions or version-to-version diffs.
+    expected_tool_usage_pattern: |
+      search_laws -> get_law_history -> get_section
+    gap_to_reveal: time-machine gap
+
+  - id: ingrid
+    name: Ingrid Lie
+    age: 30
+    location: Bergen
+    role: Startup founder doing her own legal research
+    knowledge_level: layperson
+    domains: [avtaleloven, kjopsloven, personopplysningsloven, hvitvaskingsloven]
+    typical_queries: |
+      Plain-language searches and citation validation before she puts legal claims into pitch decks, sales material, or investor updates.
+    frustrations: |
+      Ambiguous law names, section-only citations, and non-canonical act aliases fail without much guidance.
+    expected_tool_usage_pattern: |
+      search_body -> search_laws -> validate_citation -> get_section
+    gap_to_reveal: validate_citation reliability under realistic ambiguous citations
+
+  - id: magnus
+    name: Magnus Pedersen
+    age: 42
+    location: Stavanger
+    role: Regnskapsfører for ENK/AS clients
+    knowledge_level: legal_adjacent
+    domains: [bokforingsloven, merverdiavgiftsloven, skatteforvaltningsloven]
+    typical_queries: |
+      Bookkeeping, VAT, tax-return, and penalty citations for small-business clients, often with confident but informal section references.
+    frustrations: |
+      Non-existing sections and everyday aliases like MVA-loven need explicit validation before he repeats them to clients.
+    expected_tool_usage_pattern: |
+      search_body -> get_section -> validate_citation
+    gap_to_reveal: validate_citation behavior for nonexistent sections
+
+  - id: ola
+    name: Ola Nordmann
+    age: 35
+    location: Oslo
+    role: Software engineer with a rental dispute
+    knowledge_level: layperson
+    domains: [husleieloven]
+    typical_queries: |
+      Everyday Norwegian questions about being forced out of an apartment, written without legal terms like oppsigelse or fravikelse.
+    frustrations: |
+      Substring search misses colloquial language that maps to formal legal vocabulary.
+    expected_tool_usage_pattern: |
+      search_body -> search_laws -> get_section
+    gap_to_reveal: semantic search gap
+
+  - id: kari
+    name: Kari Nordmann
+    age: 67
+    location: Tromsø
+    role: Retired person with a neighbor-boundary dispute
+    knowledge_level: layperson
+    domains: [naboloven, grannelova, plan-og-bygningsloven]
+    typical_queries: |
+      Long conversational questions about fences, trees, boundaries, old maps, municipal decisions, and what to do next.
+    frustrations: |
+      Empty search results are a dead end unless the assistant can suggest legal synonyms, adjacent acts, or next-step tools.
+    expected_tool_usage_pattern: |
+      search_laws -> search_body -> get_section -> validate_citation
+    gap_to_reveal: dead-end UX when search_laws returns nothing

@@ -1,0 +1,201 @@
+scenarios:
+  - id: ingrid_001
+    persona: ingrid
+    intent: Find a plain-language contract fairness rule
+    user_query: |
+      Can an unfair contract term be ignored in Norway?
+    expected_tool_calls:
+      - tool: search_body
+        query: urimelig
+        query_contains: [urimelig]
+      - tool: get_section
+        slug_match: avtaleloven
+        section_id: "36"
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_body
+        slug: avtaleloven
+      - kind: response_contains
+        target: settes til side
+    failure_modes:
+      - Searches only law titles and misses contract text.
+      - Gives generic advice without citation.
+    reveals_gap: null
+
+  - id: ingrid_002
+    persona: ingrid
+    intent: Validate a correct avtaleloven citation
+    user_query: |
+      Is avtaleloven § 36 a real citation?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "avtaleloven § 36"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: Urimelige avtaler
+    failure_modes:
+      - Rejects a valid single-number section.
+      - Requires the section before the slug.
+    reveals_gap: null
+
+  - id: ingrid_003
+    persona: ingrid
+    intent: Catch a vague citation before a pitch deck
+    user_query: |
+      I wrote avtale § 36 on a slide. Is that good enough?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "avtale § 36"
+    success_criteria:
+      - kind: citation_invalid
+      - kind: response_contains
+        target: no act identifier
+    failure_modes:
+      - Fuzzy-matches avtale to avtaleloven without saying so.
+      - Returns valid despite a noncanonical act identifier.
+    reveals_gap: null
+
+  - id: ingrid_004
+    persona: ingrid
+    intent: Search for the privacy act from a product question
+    user_query: |
+      We process user data in the app. Which law mentions personopplysninger?
+    expected_tool_calls:
+      - tool: search_body
+        query: personopplysninger
+        query_contains: [personopplysninger]
+      - tool: get_section
+        slug_match: personopplysningsloven
+        section_id: "2"
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_body
+        slug: personopplysningsloven
+      - kind: response_contains
+        target: automatiserte hjelpemidler
+    failure_modes:
+      - Searches only for GDPR in law titles.
+      - Does not fetch the actual Norwegian section.
+    reveals_gap: null
+
+  - id: ingrid_005
+    persona: ingrid
+    intent: Validate personopplysningsloven citation
+    user_query: |
+      Can I cite personopplysningsloven § 2 for app data processing?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "personopplysningsloven § 2"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: Saklig virkeområde
+    failure_modes:
+      - Fails on a single-number section.
+      - Validates only the act and ignores the section.
+    reveals_gap: null
+
+  - id: ingrid_006
+    persona: ingrid
+    intent: Search for virtual-currency AML obligations
+    user_query: |
+      We may touch virtual currency. Does any law mention virtuell valuta?
+    expected_tool_calls:
+      - tool: search_body
+        query: virtuell valuta
+        query_contains: [virtuell, valuta]
+      - tool: get_section
+        slug_match: hvitvaskingsloven
+        section_id: "4"
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_body
+        slug: hvitvaskingsloven
+      - kind: response_contains
+        target: virtuell valuta
+    failure_modes:
+      - Searches for kryptovaluta only and misses the fixture wording.
+      - Returns fintech marketing advice without law text.
+    reveals_gap: null
+
+  - id: ingrid_007
+    persona: ingrid
+    intent: Reject a nonexistent kjøpsloven section
+    user_query: |
+      Does kjopsloven § 99 exist?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "kjopsloven § 99"
+    success_criteria:
+      - kind: citation_invalid
+      - kind: response_contains
+        target: section '99' not found
+    failure_modes:
+      - Accepts the act-level match as enough.
+      - Does not explain recoverable section ids.
+    reveals_gap: null
+
+  - id: ingrid_008
+    persona: ingrid
+    intent: Ask for privacy law using lay vocabulary
+    user_query: |
+      Which law tells me what I can do with customer info in my app?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_body
+        query: customer info app
+        query_contains: [customer, info, app]
+      - tool: search_laws
+        query: customer info
+        query_contains: [customer, info]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - Substring search does not bridge customer info to personopplysninger.
+      - Empty results give no synonym suggestions.
+    reveals_gap: no semantic search
+    roadmap_class: C1
+
+  - id: ingrid_009
+    persona: ingrid
+    intent: Ask whether GDPR compliance follows from Article 6
+    user_query: |
+      If we have GDPR Article 6 consent, which Norwegian section proves that?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_eu_basis
+        slug_match: personopplysningsloven
+      - tool: search_body
+        query: Article 6 consent
+        query_contains: [Article, 6, consent]
+    success_criteria:
+      - kind: tool_called
+        tool: get_eu_basis
+    failure_modes:
+      - Act-level CELEX basis does not map GDPR articles to Norwegian sections.
+      - English legal vocabulary misses Norwegian body text.
+    reveals_gap: no article-level EU implementation cross-reference graph
+    roadmap_class: A2
+
+  - id: ingrid_010
+    persona: ingrid
+    intent: Use a common spelling of kjøpsloven in a citation
+    user_query: |
+      Is kjøpsloven § 32 valid?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "kjøpsloven § 32"
+      - tool: search_laws
+        query: kjøpsloven
+        query_contains: [kjøpsloven]
+    success_criteria:
+      - kind: tool_called
+        tool: validate_citation
+    failure_modes:
+      - search_laws can find the title, but validate_citation requires the ASCII slug kjopsloven.
+      - The assistant must recover from the alias mismatch.
+    reveals_gap: no fuzzy or alias-aware slug matching
+    roadmap_class: C2

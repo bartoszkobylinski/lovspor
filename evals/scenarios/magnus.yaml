@@ -1,0 +1,203 @@
+scenarios:
+  - id: magnus_001
+    persona: magnus
+    intent: Look up bookkeeping retention period
+    user_query: |
+      Hvor lenge må jeg oppbevare regnskapsmateriale etter bokføringsloven?
+    expected_tool_calls:
+      - tool: search_body
+        query: oppbevares
+        query_contains: [oppbevares]
+      - tool: get_section
+        slug_match: bokforingsloven
+        section_id: "13"
+    success_criteria:
+      - kind: response_contains
+        target: fem år
+      - kind: no_hallucinated_section
+        slug_match: bokforingsloven
+        section_id: "13"
+    failure_modes:
+      - Returns tax-retention advice without a citation.
+      - Misses bokføringsloven because of ø/oe spelling.
+    reveals_gap: null
+
+  - id: magnus_002
+    persona: magnus
+    intent: Confirm ordinary VAT liability
+    user_query: |
+      Which MVA rule says sales of goods and services have VAT?
+    expected_tool_calls:
+      - tool: search_body
+        query: varer og tjenester
+        query_contains: [varer, tjenester]
+      - tool: get_section
+        slug_match: merverdiavgiftsloven
+        section_id: "3-1"
+    success_criteria:
+      - kind: response_contains
+        target: beregnes merverdiavgift
+      - kind: no_hallucinated_section
+        slug_match: merverdiavgiftsloven
+        section_id: "3-1"
+    failure_modes:
+      - Confuses VAT liability with export exemption.
+      - Uses MVA-loven as a noncanonical slug.
+    reveals_gap: null
+
+  - id: magnus_003
+    persona: magnus
+    intent: Find the tax-return obligation
+    user_query: |
+      Where does skatteforvaltningsloven talk about skattemelding?
+    expected_tool_calls:
+      - tool: search_body
+        query: skattemelding
+        query_contains: [skattemelding]
+      - tool: get_section
+        slug_match: skatteforvaltningsloven
+        section_id: "8-1"
+    success_criteria:
+      - kind: response_contains
+        target: riktige og fullstendige opplysninger
+      - kind: no_hallucinated_section
+        slug_match: skatteforvaltningsloven
+        section_id: "8-1"
+    failure_modes:
+      - Returns skatteloven due to tax vocabulary.
+      - Misses the administrative reporting act.
+    reveals_gap: null
+
+  - id: magnus_004
+    persona: magnus
+    intent: Reject a nonexistent bookkeeping citation
+    user_query: |
+      Client wrote bokforingsloven § 99. Does it exist?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "bokforingsloven § 99"
+    success_criteria:
+      - kind: citation_invalid
+      - kind: response_contains
+        target: section '99' not found
+    failure_modes:
+      - Validates the act but not the section.
+      - Fails without a clear reason.
+    reveals_gap: null
+
+  - id: magnus_005
+    persona: magnus
+    intent: Validate an addition-tax citation
+    user_query: |
+      Is skatteforvaltningsloven § 14-3 the right citation for tilleggsskatt?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "skatteforvaltningsloven § 14-3"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: Tilleggsskatt
+    failure_modes:
+      - Fails on hyphenated section ids.
+      - Confuses the act with skatteloven.
+    reveals_gap: null
+
+  - id: magnus_006
+    persona: magnus
+    intent: Find retention period by exact phrase
+    user_query: |
+      Search for fem år in bookkeeping rules.
+    expected_tool_calls:
+      - tool: search_body
+        query: fem år
+        query_contains: [fem, år]
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_body
+        slug: bokforingsloven
+      - kind: response_contains
+        target: Regnskapsmateriale
+    failure_modes:
+      - Search strips Norwegian characters incorrectly.
+      - Returns no snippet.
+    reveals_gap: null
+
+  - id: magnus_007
+    persona: magnus
+    intent: Confirm VAT export exemption for a client invoice
+    user_query: |
+      Is export exempt under merverdiavgiftsloven?
+    expected_tool_calls:
+      - tool: get_section
+        slug_match: merverdiavgiftsloven
+        section_id: "6-1"
+      - tool: validate_citation
+        citation: "merverdiavgiftsloven § 6-1"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: utlandet
+    failure_modes:
+      - Returns ordinary VAT liability instead of export exemption.
+      - Does not validate the citation.
+    reveals_gap: null
+
+  - id: magnus_008
+    persona: magnus
+    intent: Validate the everyday MVA-loven alias
+    user_query: |
+      Is MVA-loven § 3-1 valid?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "MVA-loven § 3-1"
+      - tool: search_laws
+        query: MVA-loven
+        query_contains: [MVA-loven]
+    success_criteria:
+      - kind: tool_called
+        tool: validate_citation
+    failure_modes:
+      - search_laws can find the alias in the title, but validate_citation cannot resolve it.
+      - Users naturally cite MVA-loven instead of merverdiavgiftsloven.
+    reveals_gap: no fuzzy or alias-aware slug matching
+    roadmap_class: C2
+
+  - id: magnus_009
+    persona: magnus
+    intent: Reject a nonexistent penalty section
+    user_query: |
+      Does skatteforvaltningsloven § 14-99 exist?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "skatteforvaltningsloven § 14-99"
+    success_criteria:
+      - kind: citation_invalid
+      - kind: response_contains
+        target: section '14-99' not found
+    failure_modes:
+      - Accepts the act-level match only.
+      - Does not list valid nearby section ids.
+    reveals_gap: null
+
+  - id: magnus_010
+    persona: magnus
+    intent: Ask which regulations under bokføringsloven cover SAF-T
+    user_query: |
+      Which forskrift under bokføringsloven tells clients about SAF-T exports?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_body
+        query: SAF-T
+        query_contains: [SAF-T]
+      - tool: get_section
+        slug_match: bokforingsloven
+        section_id: "13"
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - The current MCP surface has no forskrift-to-lov authority mapping.
+      - Empty body search cannot distinguish missing vocabulary from missing corpus coverage.
+    reveals_gap: no forskrift-to-lov mapping
+    roadmap_class: A1

@@ -1,0 +1,204 @@
+scenarios:
+  - id: ola_001
+    persona: ola
+    intent: Find the formal landlord-termination rule
+    user_query: |
+      Hva sier husleieloven om oppsigelse fra utleier?
+    expected_tool_calls:
+      - tool: search_body
+        query: oppsigelse fra utleier
+        query_contains: [oppsigelse, utleier]
+      - tool: get_section
+        slug_match: husleieloven
+        section_id: "9-5"
+    success_criteria:
+      - kind: response_contains
+        target: skriftlig og begrunnet
+      - kind: no_hallucinated_section
+        slug_match: husleieloven
+        section_id: "9-5"
+    failure_modes:
+      - Returns a generic housing answer without a section.
+      - Misses the formal term oppsigelse.
+    reveals_gap: null
+
+  - id: ola_002
+    persona: ola
+    intent: Find the formal eviction-vacating rule
+    user_query: |
+      Hva betyr fravikelse i husleieloven?
+    expected_tool_calls:
+      - tool: search_body
+        query: fravikelse
+        query_contains: [fravikelse]
+      - tool: get_section
+        slug_match: husleieloven
+        section_id: "9-7"
+    success_criteria:
+      - kind: response_contains
+        target: tvangsgrunnlag
+      - kind: no_hallucinated_section
+        slug_match: husleieloven
+        section_id: "9-7"
+    failure_modes:
+      - Treats fravikelse as ordinary moving out.
+      - Returns no section body.
+    reveals_gap: null
+
+  - id: ola_003
+    persona: ola
+    intent: Validate the landlord-termination citation
+    user_query: |
+      Er husleieloven § 9-5 en ekte paragraf?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "husleieloven § 9-5"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: Utleierens oppsigelse
+    failure_modes:
+      - Fails on hyphenated section ids.
+      - Validates only the act.
+    reveals_gap: null
+
+  - id: ola_004
+    persona: ola
+    intent: Discover the tenancy act from a law-name search
+    user_query: |
+      Finn husleieloven.
+    expected_tool_calls:
+      - tool: search_laws
+        query: husleie
+        query_contains: [husleie]
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_laws
+        slug: husleieloven
+    failure_modes:
+      - Metadata search fails on a substring in the title.
+      - Returns unrelated property acts first.
+    reveals_gap: null
+
+  - id: ola_005
+    persona: ola
+    intent: Fetch full tenancy act for context
+    user_query: |
+      Show me the current husleieloven text.
+    expected_tool_calls:
+      - tool: get_law
+        slug_match: husleieloven
+    success_criteria:
+      - kind: response_contains
+        target: Lov om husleieavtaler
+      - kind: response_contains
+        target: § 9-5
+    failure_modes:
+      - Requires a section id when the user wants the full act.
+      - Fetches a history file instead of current law.
+    reveals_gap: null
+
+  - id: ola_006
+    persona: ola
+    intent: Use the exact formal phrase for written termination
+    user_query: |
+      Må oppsigelse fra utleier være skriftlig?
+    expected_tool_calls:
+      - tool: search_body
+        query: skriftlig
+        query_contains: [skriftlig]
+      - tool: get_section
+        slug_match: husleieloven
+        section_id: "9-5"
+    success_criteria:
+      - kind: response_contains
+        target: protestere skriftlig innen én måned
+      - kind: no_hallucinated_section
+        slug_match: husleieloven
+        section_id: "9-5"
+    failure_modes:
+      - Misses the section because the query is short.
+      - Returns only the snippet.
+    reveals_gap: null
+
+  - id: ola_007
+    persona: ola
+    intent: Ask eviction question in everyday language
+    user_query: |
+      Kan utleier kaste meg ut midt på vinteren?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_body
+        query: kaste meg ut midt på vinteren
+        query_contains: [kaste, ut, vinteren]
+      - tool: search_laws
+        query: kaste meg ut
+        query_contains: [kaste, ut]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - Substring search misses the legal terms oppsigelse and fravikelse.
+      - Empty results give no synonym bridge.
+    reveals_gap: no semantic search
+    roadmap_class: C1
+
+  - id: ola_008
+    persona: ola
+    intent: Ask immediate-move-out question without legal vocabulary
+    user_query: |
+      Må jeg flytte med en gang når jeg får lapp fra huseier?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_body
+        query: flytte med en gang lapp fra huseier
+        query_contains: [flytte, huseier]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - Formal text uses oppsigelse, protest and fravikelse.
+      - The tool cannot rank semantically related sections.
+    reveals_gap: no semantic search
+    roadmap_class: C1
+
+  - id: ola_009
+    persona: ola
+    intent: Ask about changed locks using everyday words
+    user_query: |
+      Kan huseier bare bytte låsen før saken er ferdig?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_body
+        query: bytte låsen
+        query_contains: [bytte, låsen]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - Relevant legal concepts are not expressed as lås or bytte in the fixture.
+      - There is no semantic fallback or case-law corpus.
+    reveals_gap: no semantic search
+    roadmap_class: C1
+
+  - id: ola_010
+    persona: ola
+    intent: Ask for renter rights in nonlegal vocabulary
+    user_query: |
+      Hva er rettighetene mine når eieren sier jeg må ut?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_body
+        query: rettighetene mine eieren sier jeg må ut
+        query_contains: [rettighetene, eieren]
+      - tool: search_laws
+        query: eieren må ut
+        query_contains: [eieren]
+    success_criteria:
+      - kind: tool_called
+        tool: search_laws
+    failure_modes:
+      - Lay vocabulary does not match formal tenancy terms.
+      - No tool suggests trying husleieloven, oppsigelse, or fravikelse.
+    reveals_gap: no semantic search
+    roadmap_class: C1

@@ -1,0 +1,203 @@
+scenarios:
+  - id: maria_001
+    persona: maria
+    intent: Confirm the GDPR basis for personopplysningsloven
+    user_query: |
+      Which EU regulation does personopplysningsloven implement?
+    expected_tool_calls:
+      - tool: get_eu_basis
+        slug_match: personopplysningsloven
+    success_criteria:
+      - kind: eu_basis_contains
+        tool: get_eu_basis
+        celex: 32016R0679
+      - kind: response_contains
+        target: 32016R0679
+    failure_modes:
+      - Says GDPR without returning the CELEX id.
+      - Treats missing EU basis as an empty answer.
+    reveals_gap: null
+
+  - id: maria_002
+    persona: maria
+    intent: Reverse lookup Norwegian GDPR implementation
+    user_query: |
+      Which Norwegian laws implement GDPR?
+    expected_tool_calls:
+      - tool: search_eu_implementations
+        eu_doc_id: 32016R0679
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_eu_implementations
+        slug: personopplysningsloven
+      - kind: result_count_at_least
+        tool: search_eu_implementations
+        count: 1
+    failure_modes:
+      - Searches body text for GDPR instead of using CELEX reverse lookup.
+      - Returns non-implementing acts.
+    reveals_gap: null
+
+  - id: maria_003
+    persona: maria
+    intent: Confirm AMLD basis for hvitvaskingsloven
+    user_query: |
+      Which EU directive is hvitvaskingsloven based on?
+    expected_tool_calls:
+      - tool: get_eu_basis
+        slug_match: hvitvaskingsloven
+    success_criteria:
+      - kind: eu_basis_contains
+        tool: get_eu_basis
+        celex: 32015L0849
+      - kind: response_contains
+        target: hvitvaskingsloven
+    failure_modes:
+      - Drops the CELEX id.
+      - Confuses AMLD with GDPR.
+    reveals_gap: null
+
+  - id: maria_004
+    persona: maria
+    intent: Find PSD2 implementation in Norwegian law
+    user_query: |
+      What implements PSD2 in this fixture?
+    expected_tool_calls:
+      - tool: search_eu_implementations
+        eu_doc_id: 32015L2366
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_eu_implementations
+        slug: finansforetaksloven
+    failure_modes:
+      - Requires a body-text search even when CELEX is known.
+      - Misses finance-sector acts.
+    reveals_gap: null
+
+  - id: maria_005
+    persona: maria
+    intent: Inspect the Norwegian text that makes GDPR part of local law
+    user_query: |
+      Show me where personopplysningsloven says GDPR applies as Norwegian law.
+    expected_tool_calls:
+      - tool: search_body
+        query: personvernforordningen GDPR
+        query_contains: [personvernforordningen, GDPR]
+      - tool: get_section
+        slug_match: personopplysningsloven
+        section_id: "1"
+    success_criteria:
+      - kind: response_contains
+        target: gjelder som norsk lov
+      - kind: no_hallucinated_section
+        slug_match: personopplysningsloven
+        section_id: "1"
+    failure_modes:
+      - Stops at get_eu_basis without fetching implementing text.
+      - Uses an article number as a Norwegian section id.
+    reveals_gap: null
+
+  - id: maria_006
+    persona: maria
+    intent: Find the customer-due-diligence rule in the AML act
+    user_query: |
+      Kundetiltak in hvitvaskingsloven, please.
+    expected_tool_calls:
+      - tool: search_body
+        query: kundetiltak
+        query_contains: [kundetiltak]
+      - tool: get_section
+        slug_match: hvitvaskingsloven
+        section_id: "12"
+    success_criteria:
+      - kind: response_contains
+        target: etablering av kundeforhold
+      - kind: no_hallucinated_section
+        slug_match: hvitvaskingsloven
+        section_id: "12"
+    failure_modes:
+      - Returns the reporting obligation instead of customer due diligence.
+      - Misses single-number sections.
+    reveals_gap: null
+
+  - id: maria_007
+    persona: maria
+    intent: Confirm finance-act capital requirements and EU basis
+    user_query: |
+      Does finansforetaksloven have EU basis and a capital requirement section?
+    expected_tool_calls:
+      - tool: get_eu_basis
+        slug_match: finansforetaksloven
+      - tool: get_section
+        slug_match: finansforetaksloven
+        section_id: "13-5"
+    success_criteria:
+      - kind: eu_basis_contains
+        tool: get_eu_basis
+        celex: 32013L0036
+      - kind: response_contains
+        target: ansvarlig kapital
+    failure_modes:
+      - Returns only CELEX metadata with no Norwegian section.
+      - Misses CRD-style basis.
+    reveals_gap: null
+
+  - id: maria_008
+    persona: maria
+    intent: Validate a GDPR citation before sending a policy update
+    user_query: |
+      Can I cite personopplysningsloven § 1 for GDPR incorporation?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "personopplysningsloven § 1"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: Gjennomføring av personvernforordningen
+    failure_modes:
+      - Requires a chapter-number style id and rejects § 1.
+      - Fails to validate single-number sections.
+    reveals_gap: null
+
+  - id: maria_009
+    persona: maria
+    intent: Ask for MiCA implementation by acronym
+    user_query: |
+      Which Norwegian laws implement MiCA?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_laws
+        query: MiCA
+        query_contains: [MiCA]
+      - tool: search_body
+        query: MiCA
+        query_contains: [MiCA]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - CELEX reverse lookup needs the user to know 32023R1114.
+      - Acronym search does not map MiCA to its EU document id.
+    reveals_gap: no EU acronym-to-CELEX resolver
+    roadmap_class: C1
+
+  - id: maria_010
+    persona: maria
+    intent: Map a specific GDPR article to Norwegian implementing text
+    user_query: |
+      Where is GDPR Article 6 implemented in personopplysningsloven?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_eu_basis
+        slug_match: personopplysningsloven
+      - tool: get_section
+        slug_match: personopplysningsloven
+        section_id: "1"
+    success_criteria:
+      - kind: tool_called
+        tool: get_eu_basis
+    failure_modes:
+      - get_eu_basis is act-level, not EU-article-to-section mapping.
+      - get_section cannot answer article-level implementation relationships.
+    reveals_gap: no article-level EU implementation cross-reference graph
+    roadmap_class: A2

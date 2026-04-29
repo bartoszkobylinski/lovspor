@@ -1,0 +1,211 @@
+scenarios:
+  - id: kari_001
+    persona: kari
+    intent: Discover naboloven by common title
+    user_query: |
+      Kan du finne naboloven for meg?
+    expected_tool_calls:
+      - tool: search_laws
+        query: naboloven
+        query_contains: [naboloven]
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_laws
+        slug: naboloven
+    failure_modes:
+      - Metadata search misses the title alias.
+      - Returns plan- og bygningsloven only.
+    reveals_gap: null
+
+  - id: kari_002
+    persona: kari
+    intent: Read neighbor nuisance rule
+    user_query: |
+      Hva sier naboloven om urimelig ulempe for naboen?
+    expected_tool_calls:
+      - tool: search_body
+        query: ulempe
+        query_contains: [ulempe]
+      - tool: get_section
+        slug_match: naboloven
+        section_id: "2"
+    success_criteria:
+      - kind: response_contains
+        target: granneeigedom
+      - kind: no_hallucinated_section
+        slug_match: naboloven
+        section_id: "2"
+    failure_modes:
+      - Misses nynorsk text because the user writes bokmål.
+      - Returns only a search result.
+    reveals_gap: null
+
+  - id: kari_003
+    persona: kari
+    intent: Check trees and hedge section
+    user_query: |
+      Hvilken paragraf handler om hekk og trær hos naboen?
+    expected_tool_calls:
+      - tool: search_body
+        query: hekk
+        query_contains: [hekk]
+      - tool: get_section
+        slug_match: naboloven
+        section_id: "3"
+    success_criteria:
+      - kind: response_contains
+        target: Tre, hekk og planting
+      - kind: no_hallucinated_section
+        slug_match: naboloven
+        section_id: "3"
+    failure_modes:
+      - Treats it as a building-law question only.
+      - Misses single-number sections.
+    reveals_gap: null
+
+  - id: kari_004
+    persona: kari
+    intent: Find the building-distance rule
+    user_query: |
+      Hvor nær nabogrensen kan noen bygge?
+    expected_tool_calls:
+      - tool: search_body
+        query: nabogrense
+        query_contains: [nabogrense]
+      - tool: get_section
+        slug_match: plan-og-bygningsloven
+        section_id: "29-4"
+    success_criteria:
+      - kind: response_contains
+        target: minst fire meter
+      - kind: no_hallucinated_section
+        slug_match: plan-og-bygningsloven
+        section_id: "29-4"
+    failure_modes:
+      - Returns only naboloven.
+      - Misses plan- og bygningsloven due hyphenated slug.
+    reveals_gap: null
+
+  - id: kari_005
+    persona: kari
+    intent: Validate a naboloven citation
+    user_query: |
+      Er naboloven § 3 en ordentlig henvisning?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "naboloven § 3"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: Tre, hekk og planting
+    failure_modes:
+      - Fails on single-number sections.
+      - Validates the law title but not the section.
+    reveals_gap: null
+
+  - id: kari_006
+    persona: kari
+    intent: Fetch full plan and building act for municipal context
+    user_query: |
+      Vis meg plan- og bygningsloven så jeg kan se sammenhengen.
+    expected_tool_calls:
+      - tool: get_law
+        slug_match: plan-og-bygningsloven
+    success_criteria:
+      - kind: response_contains
+        target: Lov om planlegging og byggesaksbehandling
+      - kind: response_contains
+        target: § 29-4
+    failure_modes:
+      - Requires the user to know a section id.
+      - Returns naboloven instead.
+    reveals_gap: null
+
+  - id: kari_007
+    persona: kari
+    intent: Ask long boundary-fence question with no legal terms
+    user_query: |
+      Naboen har flyttet gjerdet litt inn på min tomt, og jeg skjønner ikke hvilke ord jeg skal søke etter.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_laws
+        query: gjerdet flyttet inn på min tomt
+        query_contains: [gjerdet, tomt]
+      - tool: search_body
+        query: gjerdet flyttet inn på min tomt
+        query_contains: [gjerdet, tomt]
+    success_criteria:
+      - kind: tool_called
+        tool: search_laws
+    failure_modes:
+      - Both searches return nothing and provide no next-step suggestions.
+      - Useful nearby terms could be grense, granne, nabogrense, or retting.
+    reveals_gap: dead-end UX for empty search
+    roadmap_class: C1
+
+  - id: kari_008
+    persona: kari
+    intent: Ask about roof snow and nuisance colloquially
+    user_query: |
+      Snøen fra naboens tak raser ned på min side hver vinter. Hva kan jeg gjøre?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_body
+        query: snøen fra taket raser vinter
+        query_contains: [snøen, taket, vinter]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - Formal nuisance vocabulary is skade, ulempe, and granneeigedom.
+      - Empty substring results look like no law applies.
+    reveals_gap: no semantic search
+    roadmap_class: C1
+
+  - id: kari_009
+    persona: kari
+    intent: Ask municipality boundary-map question
+    user_query: |
+      Kommunen har gamle kart, naboen sier grensen går et annet sted, og jeg vil vite hvilken lov jeg skal begynne med.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_laws
+        query: gamle kart grensen kommunen
+        query_contains: [kart, grensen, kommunen]
+      - tool: search_body
+        query: gamle kart grensen kommunen
+        query_contains: [kart, grensen, kommunen]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+    failure_modes:
+      - Search cannot suggest adjacent legal domains when exact words miss.
+      - Local regulations and cadastral materials are outside the current corpus.
+    reveals_gap: no semantic search or local-regulation coverage
+    roadmap_class: C1
+
+  - id: kari_010
+    persona: kari
+    intent: Ask for a next step after no search results
+    user_query: |
+      Jeg søker på nabokrangel og får ingenting. Hva burde verktøyet prøve videre?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: search_laws
+        query: nabokrangel
+        query_contains: [nabokrangel]
+      - tool: search_body
+        query: nabokrangel
+        query_contains: [nabokrangel]
+    success_criteria:
+      - kind: result_count_equals
+        tool: search_laws
+        count: 0
+      - kind: result_count_equals
+        tool: search_body
+        count: 0
+    failure_modes:
+      - MCP tools return empty arrays without synonym suggestions.
+      - The assistant has to invent recovery steps outside the tool response.
+    reveals_gap: dead-end UX for empty search
+    roadmap_class: C1

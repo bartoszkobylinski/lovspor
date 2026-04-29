@@ -1,0 +1,213 @@
+scenarios:
+  - id: erik_001
+    persona: erik
+    intent: Look up the main taxable-income rule
+    user_query: |
+      Show me skatteloven § 5-1 on skattepliktig inntekt.
+    expected_tool_calls:
+      - tool: search_laws
+        query: skatteloven
+        query_contains: [skatteloven]
+      - tool: get_section
+        slug_match: skatteloven
+        section_id: "5-1"
+    success_criteria:
+      - kind: response_contains
+        target: skattepliktig inntekt
+      - kind: no_hallucinated_section
+        slug_match: skatteloven
+        section_id: "5-1"
+    failure_modes:
+      - Returns skatteforvaltningsloven instead of skatteloven.
+      - Cites a tax section without fetching it.
+    reveals_gap: null
+
+  - id: erik_002
+    persona: erik
+    intent: Confirm the general deduction rule and validate the citation
+    user_query: |
+      Need the general fradrag section in skatteloven for a client note.
+    expected_tool_calls:
+      - tool: search_body
+        query: fradrag
+        query_contains: [fradrag]
+      - tool: get_section
+        slug_match: skatteloven
+        section_id: "6-1"
+      - tool: validate_citation
+        citation: "skatteloven § 6-1"
+    success_criteria:
+      - kind: citation_valid
+      - kind: response_contains
+        target: erverve, vedlikeholde eller sikre
+    failure_modes:
+      - Uses a noncanonical act alias and fails validation.
+      - Returns only the search snippet.
+    reveals_gap: null
+
+  - id: erik_003
+    persona: erik
+    intent: Check recent change history for skatteloven
+    user_query: |
+      What changed recently in skatteloven?
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: skatteloven
+    success_criteria:
+      - kind: history_event_count_at_least
+        tool: get_law_history
+        count: 3
+      - kind: history_contains_type
+        tool: get_law_history
+        event_type: updated
+      - kind: response_contains
+        target: 2026-04-27
+    failure_modes:
+      - Treats manifest last_changed as full history.
+      - Omits rename history.
+    reveals_gap: null
+
+  - id: erik_004
+    persona: erik
+    intent: Find tax laws changed in April 2026
+    user_query: |
+      Which current tax-related laws changed this month?
+    expected_tool_calls:
+      - tool: list_recent_changes
+        dataset: lover
+        since: "2026-04-01"
+        limit: 10
+    success_criteria:
+      - kind: list_contains_slug
+        tool: list_recent_changes
+        slug: skatteloven
+      - kind: list_contains_slug
+        tool: list_recent_changes
+        slug: skatteforvaltningsloven
+    failure_modes:
+      - Ignores the since filter.
+      - Sorts by title instead of recent change.
+    reveals_gap: null
+
+  - id: erik_005
+    persona: erik
+    intent: Find the addition-tax rule in skatteforvaltningsloven
+    user_query: |
+      Where is tilleggsskatt regulated in skatteforvaltningsloven?
+    expected_tool_calls:
+      - tool: search_body
+        query: tilleggsskatt
+        query_contains: [tilleggsskatt]
+      - tool: get_section
+        slug_match: skatteforvaltningsloven
+        section_id: "14-3"
+    success_criteria:
+      - kind: response_contains
+        target: uriktige eller ufullstendige
+      - kind: no_hallucinated_section
+        slug_match: skatteforvaltningsloven
+        section_id: "14-3"
+    failure_modes:
+      - Returns skatteloven because the query is tax-related.
+      - Misses the administrative-law act.
+    reveals_gap: null
+
+  - id: erik_006
+    persona: erik
+    intent: Confirm VAT export exemption
+    user_query: |
+      Which MVA section covers export exemption?
+    expected_tool_calls:
+      - tool: search_body
+        query: eksport
+        query_contains: [eksport]
+      - tool: get_section
+        slug_match: merverdiavgiftsloven
+        section_id: "6-1"
+    success_criteria:
+      - kind: response_contains
+        target: fritatt for merverdiavgift
+      - kind: no_hallucinated_section
+        slug_match: merverdiavgiftsloven
+        section_id: "6-1"
+    failure_modes:
+      - Uses the MVA-loven nickname as a slug.
+      - Confuses export exemption with ordinary VAT liability.
+    reveals_gap: null
+
+  - id: erik_007
+    persona: erik
+    intent: Reject a nonexistent skatteloven citation
+    user_query: |
+      Client wrote skatteloven § 9-99. Is that real?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "skatteloven § 9-99"
+    success_criteria:
+      - kind: citation_invalid
+      - kind: response_contains
+        target: section '9-99' not found
+    failure_modes:
+      - Accepts the citation because the act exists.
+      - Fails to show available sections.
+    reveals_gap: null
+
+  - id: erik_008
+    persona: erik
+    intent: Ask what the taxable-income rule said in 2020
+    user_query: |
+      What did skatteloven § 5-1 say for income year 2020?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: skatteloven
+      - tool: get_section
+        slug_match: skatteloven
+        section_id: "5-1"
+    success_criteria:
+      - kind: tool_called
+        tool: get_law_history
+    failure_modes:
+      - History shows events but not the historical section text.
+      - Current get_section returns only today's text.
+    reveals_gap: no time-machine tool
+    roadmap_class: B1
+
+  - id: erik_009
+    persona: erik
+    intent: Diff two versions of the deduction rule
+    user_query: |
+      Diff skatteloven § 6-1 between 2024 and 2026.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: skatteloven
+      - tool: get_section
+        slug_match: skatteloven
+        section_id: "6-1"
+    success_criteria:
+      - kind: tool_called
+        tool: get_law_history
+    failure_modes:
+      - No diff_law_versions tool exists.
+      - Manual diffing current text against event metadata is not enough.
+    reveals_gap: no law-version diff tool
+    roadmap_class: B2
+
+  - id: erik_010
+    persona: erik
+    intent: List all historical versions of a tax act
+    user_query: |
+      List every content version of skatteforvaltningsloven.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: skatteforvaltningsloven
+    success_criteria:
+      - kind: tool_called
+        tool: get_law_history
+    failure_modes:
+      - Event history is not the same as distinct content snapshots.
+      - No list_law_versions tool exists.
+    reveals_gap: no law-version listing tool
+    roadmap_class: B1

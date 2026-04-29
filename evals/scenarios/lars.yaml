@@ -1,0 +1,199 @@
+scenarios:
+  - id: lars_001
+    persona: lars
+    intent: Read the current naboloven nuisance rule
+    user_query: |
+      Give me the current text of naboloven § 2.
+    expected_tool_calls:
+      - tool: get_section
+        slug_match: naboloven
+        section_id: "2"
+    success_criteria:
+      - kind: response_contains
+        target: urimeleg
+      - kind: no_hallucinated_section
+        slug_match: naboloven
+        section_id: "2"
+    failure_modes:
+      - Misses single-number nynorsk sections.
+      - Uses plan- og bygningsloven instead.
+    reveals_gap: null
+
+  - id: lars_002
+    persona: lars
+    intent: Inspect current change events for naboloven
+    user_query: |
+      Show the change history for naboloven.
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: naboloven
+    success_criteria:
+      - kind: history_event_count_at_least
+        tool: get_law_history
+        count: 2
+      - kind: response_contains
+        target: "update(lov): naboloven"
+    failure_modes:
+      - Treats history as unavailable because the act is old.
+      - Returns only current text.
+    reveals_gap: null
+
+  - id: lars_003
+    persona: lars
+    intent: Search for the old-form nuisance vocabulary
+    user_query: |
+      Which act uses the word urimeleg in neighbor disputes?
+    expected_tool_calls:
+      - tool: search_body
+        query: urimeleg
+        query_contains: [urimeleg]
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_body
+        slug: naboloven
+      - kind: response_contains
+        target: Urimeleg skade
+    failure_modes:
+      - Normalizes away nynorsk vocabulary incorrectly.
+      - Searches only titles.
+    reveals_gap: null
+
+  - id: lars_004
+    persona: lars
+    intent: Find recent current-law changes for comparative context
+    user_query: |
+      List laws changed since March 2026.
+    expected_tool_calls:
+      - tool: list_recent_changes
+        dataset: lover
+        since: "2026-03-01"
+        limit: 20
+    success_criteria:
+      - kind: list_contains_slug
+        tool: list_recent_changes
+        slug: skatteloven
+      - kind: list_contains_slug
+        tool: list_recent_changes
+        slug: arbeidsmiljoloven
+    failure_modes:
+      - Includes removed laws.
+      - Sorts unstably across runs.
+    reveals_gap: null
+
+  - id: lars_005
+    persona: lars
+    intent: Validate the common Grannelova name
+    user_query: |
+      Does grannelova § 2 resolve?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "grannelova § 2"
+      - tool: search_laws
+        query: grannelova
+        query_contains: [grannelova]
+    success_criteria:
+      - kind: tool_called
+        tool: validate_citation
+    failure_modes:
+      - search_laws finds the title alias, but validate_citation requires the canonical slug naboloven.
+      - The assistant must bridge aliases manually.
+    reveals_gap: no fuzzy or alias-aware slug matching
+    roadmap_class: C2
+
+  - id: lars_006
+    persona: lars
+    intent: Ask what husleieloven said in 2018
+    user_query: |
+      What did husleieloven § 9-5 say on 2018-01-01?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: husleieloven
+      - tool: get_section
+        slug_match: husleieloven
+        section_id: "9-5"
+    success_criteria:
+      - kind: tool_called
+        tool: get_law_history
+    failure_modes:
+      - Current text is not a historical snapshot.
+      - Event history does not expose file contents as of a date.
+    reveals_gap: no time-machine tool
+    roadmap_class: B1
+
+  - id: lars_007
+    persona: lars
+    intent: Diff neighbor-law text between two dates
+    user_query: |
+      Compare naboloven § 2 in 2018 and 2026.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: naboloven
+      - tool: get_section
+        slug_match: naboloven
+        section_id: "2"
+    success_criteria:
+      - kind: tool_called
+        tool: get_law_history
+    failure_modes:
+      - No diff tool exists.
+      - History metadata cannot show textual changes.
+    reveals_gap: no law-version diff tool
+    roadmap_class: B2
+
+  - id: lars_008
+    persona: lars
+    intent: List all versions of skatteloven for a research appendix
+    user_query: |
+      Give me the distinct versions of skatteloven since 2025.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: skatteloven
+    success_criteria:
+      - kind: tool_called
+        tool: get_law_history
+    failure_modes:
+      - Event list is not a version index.
+      - There is no list_law_versions tool.
+    reveals_gap: no law-version listing tool
+    roadmap_class: B1
+
+  - id: lars_009
+    persona: lars
+    intent: Find preparatory works for avtaleloven § 36
+    user_query: |
+      Which preparatory works explain avtaleloven § 36?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_section
+        slug_match: avtaleloven
+        section_id: "36"
+    success_criteria:
+      - kind: tool_called
+        tool: get_section
+    failure_modes:
+      - The corpus does not include forarbeider.
+      - Current section text cannot answer legislative-intent research.
+    reveals_gap: no forarbeider corpus
+    roadmap_class: D3
+
+  - id: lars_010
+    persona: lars
+    intent: Ask for a pre-rename historical snapshot
+    user_query: |
+      Show me what skatteloven looked like before the slug migration in 2025.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law_history
+        slug_match: skatteloven
+    success_criteria:
+      - kind: tool_called
+        tool: get_law_history
+    failure_modes:
+      - Rename metadata is not a historical content snapshot.
+      - No get_law_at tool exists for retrieving the file at a date.
+    reveals_gap: no time-machine tool
+    roadmap_class: B1

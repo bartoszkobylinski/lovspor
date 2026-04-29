@@ -1,0 +1,224 @@
+scenarios:
+  - id: anne_001
+    persona: anne
+    intent: Find the statutory notice period for an employee resignation
+    user_query: |
+      What's the notice period if an employee resigns?
+    expected_tool_calls:
+      - tool: search_laws
+        query: arbeidsmiljo
+        query_contains: [arbeidsmiljo]
+      - tool: get_section
+        slug_match: arbeidsmiljoloven
+        section_id: "15-3"
+    success_criteria:
+      - kind: tool_called
+        tool: get_section
+      - kind: response_contains
+        target: oppsigelsestid
+      - kind: no_hallucinated_section
+        slug_match: arbeidsmiljoloven
+        section_id: "15-3"
+    failure_modes:
+      - AI guesses a notice-period section without checking the act.
+      - Returns a vacation-law answer instead of arbeidsmiljøloven.
+    reveals_gap: null
+
+  - id: anne_002
+    persona: anne
+    intent: Confirm the unfair-dismissal rule before drafting a memo
+    user_query: |
+      I need the rule on usaklig oppsigelse in arbeidsmiljøloven.
+    expected_tool_calls:
+      - tool: search_body
+        query: usaklig oppsigelse
+        query_contains: [usaklig, oppsigelse]
+      - tool: get_section
+        slug_match: arbeidsmiljoloven
+        section_id: "15-7"
+      - tool: validate_citation
+        citation: "§ 15-7 arbeidsmiljoloven"
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_body
+        slug: arbeidsmiljoloven
+      - kind: citation_valid
+      - kind: response_contains
+        target: saklig begrunnet
+    failure_modes:
+      - Treats dismissal as contract termination under avtaleloven.
+      - Quotes § 15-7 without validating the citation.
+    reveals_gap: null
+
+  - id: anne_003
+    persona: anne
+    intent: Check whether an unreasonable contract clause can be set aside
+    user_query: |
+      Which avtaleloven section lets a court set aside an unreasonable clause?
+    expected_tool_calls:
+      - tool: search_laws
+        query: avtaleloven
+        query_contains: [avtaleloven]
+      - tool: get_section
+        slug_match: avtaleloven
+        section_id: "36"
+    success_criteria:
+      - kind: response_contains
+        target: urimelig
+      - kind: response_contains
+        target: settes til side
+      - kind: no_hallucinated_section
+        slug_match: avtaleloven
+        section_id: "36"
+    failure_modes:
+      - Searches only current-law metadata and misses the section text.
+      - Confuses avtaleloven with kjøpsloven.
+    reveals_gap: null
+
+  - id: anne_004
+    persona: anne
+    intent: Find the buyer's complaint deadline in a sale of goods matter
+    user_query: |
+      Client asks about reklamasjon under kjøpsloven. Which section should I cite?
+    expected_tool_calls:
+      - tool: search_body
+        query: reklamasjon
+        query_contains: [reklamasjon]
+      - tool: get_section
+        slug_match: kjopsloven
+        section_id: "32"
+    success_criteria:
+      - kind: list_contains_slug
+        tool: search_body
+        slug: kjopsloven
+      - kind: response_contains
+        target: rimelig tid
+      - kind: no_hallucinated_section
+        slug_match: kjopsloven
+        section_id: "32"
+    failure_modes:
+      - Returns forbrukerkjøpsloven even though only kjøpsloven is in scope.
+      - Misses the formal spelling because the user wrote kjøpsloven.
+    reveals_gap: null
+
+  - id: anne_005
+    persona: anne
+    intent: Locate the temporary-employment rule quickly
+    user_query: |
+      Where is midlertidig ansettelse regulated?
+    expected_tool_calls:
+      - tool: search_body
+        query: midlertidig ansettelse
+        query_contains: [midlertidig, ansettelse]
+      - tool: get_section
+        slug_match: arbeidsmiljoloven
+        section_id: "14-9"
+    success_criteria:
+      - kind: response_contains
+        target: hovedregel ansettes fast
+      - kind: no_hallucinated_section
+        slug_match: arbeidsmiljoloven
+        section_id: "14-9"
+    failure_modes:
+      - Returns the dismissal chapter instead of chapter 14.
+      - Gives only a search result with no section body.
+    reveals_gap: null
+
+  - id: anne_006
+    persona: anne
+    intent: Distinguish avskjed from ordinary dismissal
+    user_query: |
+      I need the arbeidsmiljøloven section on avskjed for gross breach.
+    expected_tool_calls:
+      - tool: search_body
+        query: grovt pliktbrudd
+        query_contains: [grovt, pliktbrudd]
+      - tool: get_section
+        slug_match: arbeidsmiljoloven
+        section_id: "15-14"
+    success_criteria:
+      - kind: response_contains
+        target: øyeblikkelig fratreden
+      - kind: no_hallucinated_section
+        slug_match: arbeidsmiljoloven
+        section_id: "15-14"
+    failure_modes:
+      - Treats avskjed as the same as oppsigelse.
+      - Cites § 15-7 instead of § 15-14.
+    reveals_gap: null
+
+  - id: anne_007
+    persona: anne
+    intent: Validate an ambiguous section-only citation
+    user_query: |
+      My draft says § 36. Can you check if that citation is safe?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "§ 36"
+    success_criteria:
+      - kind: citation_invalid
+      - kind: response_contains
+        target: ambiguous citation
+    failure_modes:
+      - Treats § 36 as avtaleloven without an act identifier.
+      - Returns valid even though many acts can have § 36.
+    reveals_gap: null
+
+  - id: anne_008
+    persona: anne
+    intent: Catch a mistyped arbeidsmiljøloven section
+    user_query: |
+      I wrote arbeidsmiljøloven § 15-99 in a hurry. Does that exist?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "arbeidsmiljoloven § 15-99"
+      - tool: get_section
+        slug_match: arbeidsmiljoloven
+        section_id: "15-99"
+    success_criteria:
+      - kind: citation_invalid
+      - kind: tool_error_contains
+        tool: get_section
+        target: available
+      - kind: response_contains
+        target: § 15-14
+    failure_modes:
+      - Hallucinates a nearby section.
+      - Fails without listing recoverable section ids.
+    reveals_gap: null
+
+  - id: anne_009
+    persona: anne
+    intent: Retrieve only second ledd of the notice-period section
+    user_query: |
+      Give me only second ledd of arbeidsmiljøloven § 15-3, not the whole section.
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_section
+        slug_match: arbeidsmiljoloven
+        section_id: "15-3"
+    success_criteria:
+      - kind: tool_called
+        tool: get_section
+    failure_modes:
+      - Tool can only return the whole section, so the assistant must parse ledd itself.
+    reveals_gap: no subsection-level structural AST
+    roadmap_class: A1
+
+  - id: anne_010
+    persona: anne
+    intent: List all chapter 15 sections before choosing the right one
+    user_query: |
+      I know this is in chapter 15, but which arbeidsmiljøloven sections are in that chapter?
+    expected_outcome: gap_revealed
+    expected_tool_calls:
+      - tool: get_law
+        slug_match: arbeidsmiljoloven
+    success_criteria:
+      - kind: tool_called
+        tool: get_law
+    failure_modes:
+      - Full-law fetch is heavy and leaves the assistant to infer a table of contents.
+      - There is no get_law_toc, get_chapter, or list_sections tool.
+    reveals_gap: no chapter or table-of-contents tool
+    roadmap_class: A1

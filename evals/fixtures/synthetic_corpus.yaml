@@ -1,0 +1,544 @@
+generated_at: "2026-04-29T00:00:00+00:00"
+documents:
+  - doc_id: lov-2005-06-17-062
+    slug: arbeidsmiljoloven
+    title: Lov om arbeidsmiljø, arbeidstid og stillingsvern mv. (arbeidsmiljøloven)
+    dataset: lover
+    last_changed: "2026-04-20"
+    total_changes: 3
+    eu_basis: []
+    body: |
+      ## Kapittel 14. Ansettelse mv.
+
+      ### § 14-9. Fast og midlertidig ansettelse
+
+      Arbeidstaker skal som hovedregel ansettes fast. Midlertidig ansettelse kan bare avtales når lovens vilkår er oppfylt.
+
+      ## Kapittel 15. Opphør av arbeidsforhold
+
+      ### § 15-1. Drøfting før beslutning om oppsigelse
+
+      Før arbeidsgiver fatter beslutning om oppsigelse, skal spørsmålet så langt det er praktisk mulig drøftes med arbeidstaker.
+
+      ### § 15-3. Oppsigelsesfrister
+
+      Hvis ikke annet er skriftlig avtalt eller fastsatt i tariffavtale, gjelder en gjensidig oppsigelsesfrist på en måned. Oppsigelsestid regnes fra og med første dag i måneden etter at oppsigelsen fant sted.
+
+      ### § 15-7. Vern mot usaklig oppsigelse
+
+      Arbeidstaker kan ikke sies opp uten at det er saklig begrunnet i virksomhetens, arbeidsgiverens eller arbeidstakerens forhold.
+
+      ### § 15-11. Virkninger av usaklig oppsigelse
+
+      Ved tvist om oppsigelse kan arbeidstaker etter nærmere vilkår fortsette i stillingen mens saken behandles.
+
+      ### § 15-14. Avskjed
+
+      Arbeidsgiver kan avskjedige arbeidstaker med påbud om øyeblikkelig fratreden dersom arbeidstaker har gjort seg skyldig i grovt pliktbrudd.
+    history:
+      - date: "2026-04-20"
+        commit: a150003
+        type: updated
+        subject: "update(lov): arbeidsmiljoloven"
+        lines_added: 14
+        lines_removed: 3
+      - date: "2025-12-15"
+        commit: a150002
+        type: updated
+        subject: "update(lov): arbeidsmiljoloven"
+        lines_added: 5
+        lines_removed: 2
+      - date: "2025-04-22"
+        commit: a150001
+        type: added
+        subject: "add(lov): arbeidsmiljoloven"
+        lines_added: 80
+        lines_removed: 0
+
+  - doc_id: lov-1918-05-31-004
+    slug: avtaleloven
+    title: Lov om avslutning av avtaler, om fuldmagt og om ugyldige viljeserklæringer (avtaleloven)
+    dataset: lover
+    last_changed: "2026-03-10"
+    total_changes: 2
+    eu_basis: []
+    body: |
+      ## Kapittel 3. Om ugyldige viljeserklæringer
+
+      ### § 30. Tvang
+
+      En viljeserklæring er ikke bindende når den er fremkalt ved rettsstridig tvang.
+
+      ### § 31. Svik
+
+      Er en viljeserklæring fremkalt ved svik, er den ikke bindende for den som ble ført bak lyset.
+
+      ### § 36. Urimelige avtaler
+
+      En avtale kan helt eller delvis settes til side eller endres for så vidt det ville virke urimelig eller være i strid med god forretningsskikk å gjøre den gjeldende.
+    history:
+      - date: "2026-03-10"
+        commit: av36002
+        type: updated
+        subject: "update(lov): avtaleloven"
+        lines_added: 4
+        lines_removed: 1
+      - date: "2025-04-22"
+        commit: av36001
+        type: added
+        subject: "add(lov): avtaleloven"
+        lines_added: 45
+        lines_removed: 0
+
+  - doc_id: lov-1988-05-13-027
+    slug: kjopsloven
+    title: Lov om kjøp (kjøpsloven)
+    dataset: lover
+    last_changed: "2026-02-18"
+    total_changes: 2
+    eu_basis: []
+    body: |
+      ## Kapittel IV. Varens egenskaper
+
+      ### § 17. Tingens egenskaper
+
+      Tingen skal være i samsvar med de krav til art, mengde, kvalitet og andre egenskaper som følger av avtalen.
+
+      ## Kapittel VI. Kjøperens krav
+
+      ### § 30. Kjøperens krav ved kontraktbrudd
+
+      Dersom det foreligger mangel eller forsinkelse, kan kjøperen kreve retting, omlevering, prisavslag, heving og erstatning.
+
+      ### § 32. Reklamasjon
+
+      Kjøperen taper sin rett til å gjøre en mangel gjeldende dersom kjøperen ikke innen rimelig tid etter at han oppdaget eller burde ha oppdaget mangelen, gir selgeren melding.
+
+      ### § 40. Heving
+
+      Kjøperen kan heve kjøpet når kontraktbruddet er vesentlig.
+    history:
+      - date: "2026-02-18"
+        commit: kjo3202
+        type: updated
+        subject: "update(lov): kjopsloven"
+        lines_added: 7
+        lines_removed: 2
+      - date: "2025-04-22"
+        commit: kjo3201
+        type: added
+        subject: "add(lov): kjopsloven"
+        lines_added: 52
+        lines_removed: 0
+
+  - doc_id: lov-1999-03-26-014
+    slug: skatteloven
+    title: Lov om skatt av formue og inntekt (skatteloven)
+    dataset: lover
+    last_changed: "2026-04-27"
+    total_changes: 4
+    eu_basis: []
+    body: |
+      ## Kapittel 5. Alminnelig inntekt
+
+      ### § 5-1. Hovedregel om skattepliktig inntekt
+
+      Som skattepliktig inntekt anses enhver fordel vunnet ved arbeid, kapital eller virksomhet.
+
+      ### § 5-12. Fordel vunnet ved arbeid
+
+      Fordel vunnet ved arbeid omfatter lønn, naturalytelser og annen godtgjørelse fra arbeidsgiver.
+
+      ## Kapittel 6. Fradrag
+
+      ### § 6-1. Hovedregel om fradrag
+
+      Det gis fradrag for kostnad som er pådratt for å erverve, vedlikeholde eller sikre skattepliktig inntekt.
+
+      ## Kapittel 10. Selskaper
+
+      ### § 10-11. Skatteplikt for utbytte
+
+      Utbytte til personlig aksjonær regnes som skattepliktig inntekt etter reglene i denne paragrafen.
+    history:
+      - date: "2026-04-27"
+        commit: skt4004
+        type: updated
+        subject: "update(lov): skatteloven"
+        lines_added: 22
+        lines_removed: 9
+      - date: "2026-01-02"
+        commit: skt4003
+        type: updated
+        subject: "update(lov): skatteloven"
+        lines_added: 11
+        lines_removed: 4
+      - date: "2025-09-30"
+        commit: skt4002
+        type: renamed
+        subject: "rename(lov): skatteloven"
+        from_path: lover/lov-1999-03-26-014.md
+        to_path: lover/skatteloven.md
+      - date: "2025-04-22"
+        commit: skt4001
+        type: added
+        subject: "add(lov): skatteloven"
+        lines_added: 100
+        lines_removed: 0
+
+  - doc_id: lov-2016-05-27-014
+    slug: skatteforvaltningsloven
+    title: Lov om skatteforvaltning (skatteforvaltningsloven)
+    dataset: lover
+    last_changed: "2026-04-10"
+    total_changes: 3
+    eu_basis: []
+    body: |
+      ## Kapittel 8. Opplysningsplikt
+
+      ### § 8-1. Skattemelding
+
+      Den som har plikt til å gi opplysninger, skal levere skattemelding med riktige og fullstendige opplysninger.
+
+      ## Kapittel 9. Fastsetting
+
+      ### § 9-4. Endring av skattefastsetting
+
+      Skattemyndighetene kan endre enhver skattefastsetting når fastsettingen er uriktig.
+
+      ## Kapittel 14. Tilleggsskatt
+
+      ### § 14-3. Tilleggsskatt
+
+      Tilleggsskatt ilegges skattepliktig som gir uriktige eller ufullstendige opplysninger.
+
+      ### § 14-5. Unnskyldelige forhold
+
+      Tilleggsskatt fastsettes ikke når skattepliktiges forhold må anses unnskyldelig.
+    history:
+      - date: "2026-04-10"
+        commit: sfv3003
+        type: updated
+        subject: "update(lov): skatteforvaltningsloven"
+        lines_added: 9
+        lines_removed: 2
+      - date: "2025-11-01"
+        commit: sfv3002
+        type: updated
+        subject: "update(lov): skatteforvaltningsloven"
+        lines_added: 6
+        lines_removed: 2
+      - date: "2025-04-22"
+        commit: sfv3001
+        type: added
+        subject: "add(lov): skatteforvaltningsloven"
+        lines_added: 70
+        lines_removed: 0
+
+  - doc_id: lov-2009-06-19-058
+    slug: merverdiavgiftsloven
+    title: Lov om merverdiavgift (merverdiavgiftsloven, mva-loven)
+    dataset: lover
+    last_changed: "2026-04-05"
+    total_changes: 2
+    eu_basis: []
+    body: |
+      ## Kapittel 3. Avgiftspliktig omsetning
+
+      ### § 3-1. Varer og tjenester
+
+      Det skal beregnes merverdiavgift ved omsetning av varer og tjenester.
+
+      ## Kapittel 6. Fritak
+
+      ### § 6-1. Eksport
+
+      Omsetning av varer og tjenester til utlandet er fritatt for merverdiavgift når vilkårene for eksport er oppfylt.
+
+      ## Kapittel 15. Oppgaver og dokumentasjon
+
+      ### § 15-10. Dokumentasjon
+
+      Dokumentasjon av merverdiavgift skal oppbevares etter bokføringsreglene.
+    history:
+      - date: "2026-04-05"
+        commit: mva2002
+        type: updated
+        subject: "update(lov): merverdiavgiftsloven"
+        lines_added: 3
+        lines_removed: 1
+      - date: "2025-04-22"
+        commit: mva2001
+        type: added
+        subject: "add(lov): merverdiavgiftsloven"
+        lines_added: 61
+        lines_removed: 0
+
+  - doc_id: lov-2015-04-10-017
+    slug: finansforetaksloven
+    title: Lov om finansforetak og finanskonsern (finansforetaksloven)
+    dataset: lover
+    last_changed: "2026-04-15"
+    total_changes: 3
+    eu_basis: [32013L0036, 32015L2366, 32019R2033]
+    body: |
+      ## Kapittel 2. Tillatelse
+
+      ### § 2-7. Konsesjon
+
+      Finansforetak kan ikke drive konsesjonspliktig virksomhet uten tillatelse fra departementet eller Finanstilsynet.
+
+      ## Kapittel 13. Kapitalkrav
+
+      ### § 13-5. Kapitalkrav
+
+      Foretaket skal til enhver tid oppfylle krav til ansvarlig kapital og forsvarlig virksomhetsstyring.
+    history:
+      - date: "2026-04-15"
+        commit: fin3003
+        type: updated
+        subject: "update(lov): finansforetaksloven"
+        lines_added: 13
+        lines_removed: 5
+      - date: "2025-10-01"
+        commit: fin3002
+        type: updated
+        subject: "update(lov): finansforetaksloven"
+        lines_added: 8
+        lines_removed: 1
+      - date: "2025-04-22"
+        commit: fin3001
+        type: added
+        subject: "add(lov): finansforetaksloven"
+        lines_added: 77
+        lines_removed: 0
+
+  - doc_id: lov-2018-06-01-023
+    slug: hvitvaskingsloven
+    title: Lov om tiltak mot hvitvasking og terrorfinansiering (hvitvaskingsloven)
+    dataset: lover
+    last_changed: "2026-04-09"
+    total_changes: 3
+    eu_basis: [32015L0849]
+    body: |
+      ## Kapittel 1. Innledende bestemmelser
+
+      ### § 4. Virkeområde
+
+      Loven gjelder rapporteringspliktige som tilbyr finansielle tjenester, betalingsformidling og tjenester knyttet til virtuell valuta.
+
+      ## Kapittel 3. Kundetiltak
+
+      ### § 12. Kundetiltak
+
+      Rapporteringspliktige skal gjennomføre kundetiltak ved etablering av kundeforhold og ved mistanke om hvitvasking.
+
+      ## Kapittel 5. Undersøkelse og rapportering
+
+      ### § 25. Undersøkelsesplikt
+
+      Rapporteringspliktige skal foreta nærmere undersøkelser når det avdekkes forhold som kan indikere hvitvasking.
+
+      ### § 26. Rapporteringsplikt
+
+      Dersom undersøkelser ikke avkrefter mistanke, skal opplysninger oversendes Økokrim.
+    history:
+      - date: "2026-04-09"
+        commit: hvv3003
+        type: updated
+        subject: "update(lov): hvitvaskingsloven"
+        lines_added: 10
+        lines_removed: 2
+      - date: "2025-08-12"
+        commit: hvv3002
+        type: updated
+        subject: "update(lov): hvitvaskingsloven"
+        lines_added: 6
+        lines_removed: 0
+      - date: "2025-04-22"
+        commit: hvv3001
+        type: added
+        subject: "add(lov): hvitvaskingsloven"
+        lines_added: 68
+        lines_removed: 0
+
+  - doc_id: lov-2018-06-15-038
+    slug: personopplysningsloven
+    title: Lov om behandling av personopplysninger (personopplysningsloven)
+    dataset: lover
+    last_changed: "2026-04-12"
+    total_changes: 3
+    eu_basis: [32016R0679]
+    body: |
+      ## Kapittel 1. Gjennomføring av personvernforordningen
+
+      ### § 1. Gjennomføring av personvernforordningen
+
+      EØS-avtalens vedlegg XI nr. 5e, forordning (EU) 2016/679, personvernforordningen GDPR, gjelder som norsk lov.
+
+      ### § 2. Saklig virkeområde
+
+      Loven og personvernforordningen gjelder ved behandling av personopplysninger helt eller delvis med automatiserte hjelpemidler.
+    history:
+      - date: "2026-04-12"
+        commit: pol3003
+        type: updated
+        subject: "update(lov): personopplysningsloven"
+        lines_added: 4
+        lines_removed: 1
+      - date: "2025-07-01"
+        commit: pol3002
+        type: updated
+        subject: "update(lov): personopplysningsloven"
+        lines_added: 3
+        lines_removed: 0
+      - date: "2025-04-22"
+        commit: pol3001
+        type: added
+        subject: "add(lov): personopplysningsloven"
+        lines_added: 50
+        lines_removed: 0
+
+  - doc_id: lov-2004-11-19-073
+    slug: bokforingsloven
+    title: Lov om bokføring (bokføringsloven)
+    dataset: lover
+    last_changed: "2026-03-31"
+    total_changes: 2
+    eu_basis: []
+    body: |
+      ## Kapittel 2. Grunnleggende bokføringsprinsipper
+
+      ### § 5. Spesifikasjoner
+
+      Bokførte opplysninger skal kunne spesifiseres etter pliktig regnskapsrapportering.
+
+      ### § 7. Dokumentasjon av bokførte opplysninger
+
+      Bokførte opplysninger skal være dokumentert på en måte som viser grunnlaget for registreringen.
+
+      ## Kapittel 4. Oppbevaring
+
+      ### § 13. Oppbevaring
+
+      Regnskapsmateriale skal oppbevares i Norge i fem år etter regnskapsårets slutt, med mindre annet følger av forskrift.
+    history:
+      - date: "2026-03-31"
+        commit: bok2002
+        type: updated
+        subject: "update(lov): bokforingsloven"
+        lines_added: 4
+        lines_removed: 1
+      - date: "2025-04-22"
+        commit: bok2001
+        type: added
+        subject: "add(lov): bokforingsloven"
+        lines_added: 44
+        lines_removed: 0
+
+  - doc_id: lov-1999-03-26-017
+    slug: husleieloven
+    title: Lov om husleieavtaler (husleieloven)
+    dataset: lover
+    last_changed: "2026-03-27"
+    total_changes: 2
+    eu_basis: []
+    body: |
+      ## Kapittel 9. Opphør av leieavtaler
+
+      ### § 9-5. Utleierens oppsigelse av tidsubestemt leieavtale
+
+      Oppsigelse fra utleier skal være skriftlig og begrunnet. Oppsigelsen skal opplyse om at leieren kan protestere skriftlig innen én måned.
+
+      ### § 9-7. Fravikelse
+
+      Leieren plikter å fravike husrommet når leieavtalen er opphørt og det foreligger tvangsgrunnlag.
+
+      ### § 9-8. Leierens død
+
+      Ved leierens død gjelder særlige regler om hvem som kan tre inn i leieavtalen.
+    history:
+      - date: "2026-03-27"
+        commit: hus2002
+        type: updated
+        subject: "update(lov): husleieloven"
+        lines_added: 5
+        lines_removed: 1
+      - date: "2025-04-22"
+        commit: hus2001
+        type: added
+        subject: "add(lov): husleieloven"
+        lines_added: 46
+        lines_removed: 0
+
+  - doc_id: lov-1961-06-16-015
+    slug: naboloven
+    title: Lov um rettshøve mellom grannar (grannelova, naboloven)
+    dataset: lover
+    last_changed: "2026-02-20"
+    total_changes: 2
+    eu_basis: []
+    body: |
+      ## Kapittel I. Ålmenn føresegner
+
+      ### § 2. Urimeleg skade eller ulempe
+
+      Ingen må ha, gjera eller setja i verk noko som urimeleg eller uturvande er til skade eller ulempe på granneeigedom.
+
+      ### § 3. Tre, hekk og planting
+
+      Tre, hekk og anna planting må ikkje vera til urimeleg skade eller særleg ulempe for granne.
+
+      ### § 7. Grannevarsel
+
+      Den som vil setja i gang tiltak som kan verta til skade eller ulempe, skal gje granne rimeleg varsel.
+
+      ### § 10. Retting
+
+      Tilstand eller tiltak i strid med lova kan krevjast retta så langt det er rimeleg.
+    history:
+      - date: "2026-02-20"
+        commit: nab2002
+        type: updated
+        subject: "update(lov): naboloven"
+        lines_added: 4
+        lines_removed: 1
+      - date: "2025-04-22"
+        commit: nab2001
+        type: added
+        subject: "add(lov): naboloven"
+        lines_added: 40
+        lines_removed: 0
+
+  - doc_id: lov-2008-06-27-071
+    slug: plan-og-bygningsloven
+    title: Lov om planlegging og byggesaksbehandling (plan- og bygningsloven)
+    dataset: lover
+    last_changed: "2026-03-18"
+    total_changes: 2
+    eu_basis: []
+    body: |
+      ## Kapittel 20. Søknadsplikt
+
+      ### § 20-1. Tiltak som omfattes av byggesaksbestemmelsene
+
+      Oppføring, tilbygg, påbygg, vesentlig endring og bruksendring av tiltak krever søknad og tillatelse.
+
+      ## Kapittel 29. Krav til tiltaket
+
+      ### § 29-4. Byggverkets plassering, høyde og avstand fra nabogrense
+
+      Byggverkets plassering skal godkjennes av kommunen. Hvis ikke annet er bestemt, skal byggverk ha avstand fra nabogrense minst fire meter.
+    history:
+      - date: "2026-03-18"
+        commit: pbl2002
+        type: updated
+        subject: "update(lov): plan-og-bygningsloven"
+        lines_added: 7
+        lines_removed: 2
+      - date: "2025-04-22"
+        commit: pbl2001
+        type: added
+        subject: "add(lov): plan-og-bygningsloven"
+        lines_added: 50
+        lines_removed: 0
