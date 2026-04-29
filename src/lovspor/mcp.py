@@ -1,17 +1,19 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles eight read-only tools over a local clone of the lovverk Markdown
+Bundles ten read-only tools over a local clone of the lovverk Markdown
 corpus (produced by the lovspor sync engine). Each tool answers a class
 of question an AI agent would naturally ask about Norwegian law:
 
-    get_law(slug)                  -> "Show me Skatteloven"
-    get_section(slug, "5-12")      -> "Show me just § 5-12 of Skatteloven"
-    get_law_history(slug)          -> "What changed in Skatteloven recently?"
-    list_recent_changes(...)       -> "Which laws changed last week?"
-    search_laws(query, ...)        -> "Are there laws about jernbane?" (metadata)
-    search_body(query, ...)        -> "Which laws mention boligkjøpsmodeller?"
-    validate_citation(citation)    -> "Does '§ 5-12 skatteloven' actually exist?"
-    corpus_status()                -> "Is my local corpus current?"
+    get_law(slug)                       -> "Show me Skatteloven"
+    get_section(slug, "5-12")           -> "Show me just § 5-12 of Skatteloven"
+    get_law_history(slug)               -> "What changed in Skatteloven recently?"
+    list_recent_changes(...)            -> "Which laws changed last week?"
+    search_laws(query, ...)             -> "Are there laws about jernbane?" (metadata)
+    search_body(query, ...)             -> "Which laws mention boligkjøpsmodeller?"
+    validate_citation(citation)         -> "Does '§ 5-12 skatteloven' actually exist?"
+    get_eu_basis(slug)                  -> "Which EU dirs does Personopplysningsloven implement?"
+    search_eu_implementations(celex)    -> "Which Norwegian laws implement GDPR?"
+    corpus_status()                     -> "Is my local corpus current?"
 
 Data path: the server reads the corpus from disk via the supplied
 ``corpus_path``. It does not pull from GitHub or trigger an engine
@@ -451,6 +453,90 @@ class CorpusReader:
             )
         results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
         return results[:limit]
+
+    def get_eu_basis(self, slug: str) -> dict[str, Any]:
+        """Return the EU / EEA CELEX identifiers a Norwegian act implements.
+
+        ``slug`` is the act's kortform (same as for ``get_law``).
+        Returns ``{slug, doc_id, title, dataset, eu_basis}`` where
+        ``eu_basis`` is the list of CELEX ids stored in the manifest
+        (e.g. ``["32016R0679", "32014L0090"]``). Empty list when the
+        act has no EEA references or only an EØS-avtalen annex link
+        without specific directives / regulations.
+
+        Raises ``CorpusNotFoundError`` if the slug is unknown OR the
+        manifest record predates the Sprint 8 PR-D backfill (i.e.
+        ``eu_basis is None``) — that signal is corpus-staleness, not
+        a missing field, so the AI should suggest ``corpus_status``
+        + ``git pull`` to remediate rather than treating the field
+        as 'unset'.
+        """
+        for doc_id, record in self.manifest.documents.items():
+            if record.slug == slug and record.status == "current":
+                # eu_basis is None signals a pre-Sprint-8 manifest record.
+                # The backfill migration runs on the next sync, but until
+                # then the MCP server has no authoritative answer to give.
+                # Returning [] would be a silent lie ("we know there's no
+                # EU basis"); raising is the honest answer.
+                if record.eu_basis is None:
+                    raise CorpusNotFoundError(
+                        f"eu_basis is unknown for {slug!r}; corpus predates Sprint 8 PR-D. "
+                        f"Run 'git pull' in the corpus to refresh.",
+                    )
+                return {
+                    "slug": record.slug,
+                    "doc_id": doc_id,
+                    "title": record.title,
+                    "dataset": _subdir_for_dataset(record.source_dataset),
+                    "eu_basis": list(record.eu_basis),
+                }
+        raise CorpusNotFoundError(
+            f"no current law with slug {slug!r}; "
+            f"use search_laws or list_recent_changes to discover slugs",
+        )
+
+    def search_eu_implementations(self, eu_doc_id: str) -> list[dict[str, Any]]:
+        """Reverse lookup: list Norwegian acts that implement a given EU
+        document.
+
+        ``eu_doc_id`` is a CELEX identifier (e.g. ``"32016R0679"`` for
+        GDPR). Match is case-insensitive — Lovdata stores CELEX values
+        lowercase but EU canonical form is uppercase, and lovspor
+        normalizes to uppercase on extraction; we accept either form
+        from the caller and compare in uppercase.
+
+        Returns one row per implementing act: ``{slug, doc_id, title,
+        dataset}``, sorted by slug for stable output. Empty list when
+        no current act references the given CELEX.
+
+        Records with ``eu_basis is None`` (pre-Sprint-8 manifest) are
+        skipped silently — the migration will populate them on the
+        next sync. Tombstones are skipped because removed acts no
+        longer 'implement' anything; an EU document that was
+        previously implemented by a now-removed Norwegian act should
+        not appear in current results.
+        """
+        if not eu_doc_id.strip():
+            return []
+        needle = eu_doc_id.strip().upper()
+        results: list[dict[str, Any]] = []
+        for doc_id, record in self.manifest.documents.items():
+            if record.status != "current":
+                continue
+            if record.eu_basis is None:
+                continue
+            if needle not in record.eu_basis:
+                continue
+            results.append(
+                {
+                    "slug": record.slug,
+                    "doc_id": doc_id,
+                    "title": record.title,
+                    "dataset": _subdir_for_dataset(record.source_dataset),
+                },
+            )
+        results.sort(key=lambda hit: hit["slug"] or "")
+        return results
 
     def _load_body_index(self) -> dict[str, str]:
         """Lazy-build the slug -> body-text dict for ``search_body``.
@@ -976,6 +1062,58 @@ def build_server(corpus_path: Path) -> FastMCP:
         invalid because the section id is non-unique across acts.
         """
         return reader.validate_citation(citation)
+
+    @mcp.tool()
+    def get_eu_basis(slug: str) -> dict[str, Any]:
+        """Return the EU / EEA legal basis of a Norwegian law or regulation.
+
+        Use this when the user asks about a Norwegian act's relationship
+        to EU / EEA law — e.g. *"Which EU directives does
+        Personopplysningsloven implement?"* — or when an answer needs
+        to anchor a Norwegian act in its EU origin (GDPR, MiFID II,
+        REACH, etc.).
+
+        ``slug``: the act's slug (same as for ``get_law``).
+
+        Returns ``slug``, ``doc_id``, ``title``, ``dataset``, and
+        ``eu_basis`` — a list of CELEX identifiers
+        (e.g. ``["32016R0679", "32014L0090"]``). Empty list when the
+        act has no EEA references in Lovdata's source XML.
+
+        CELEX format: ``3<year><type-letter><number>`` — type letter
+        ``R`` for regulation, ``L`` for directive, ``D`` for decision,
+        etc. Example: ``32016R0679`` is Regulation 2016/679 (GDPR);
+        ``32014L0090`` is Directive 2014/90/EU.
+
+        Raises ``CorpusNotFoundError`` if the slug is unknown OR the
+        corpus predates Sprint 8 PR-D — in the second case the manifest
+        carries ``eu_basis: null``; suggest the user run the
+        ``refresh_command`` from ``corpus_status`` to refresh.
+        """
+        return reader.get_eu_basis(slug)
+
+    @mcp.tool()
+    def search_eu_implementations(eu_doc_id: str) -> list[dict[str, Any]]:
+        """Reverse-lookup Norwegian acts that implement a given EU document.
+
+        Complement to ``get_eu_basis``: that one goes Norwegian-act
+        -> EU-basis; this one goes EU-document -> Norwegian acts.
+        Use when the user asks *"Which Norwegian laws implement
+        GDPR?"* or *"What did Norway do about Directive 2014/90?"*.
+
+        ``eu_doc_id``: a CELEX identifier (e.g. ``"32016R0679"`` for
+        GDPR, ``"32014L0090"`` for Directive 2014/90/EU). Case-
+        insensitive — uppercase / lowercase / mixed all match.
+
+        Returns one row per implementing current act: ``slug``,
+        ``doc_id``, ``title``, ``dataset``. Sorted by slug for stable
+        output. Empty list when no current act references the given
+        CELEX.
+
+        Use the returned slugs with ``get_law`` or ``get_section`` to
+        fetch the implementing text.
+        """
+        return reader.search_eu_implementations(eu_doc_id)
 
     @mcp.tool()
     def corpus_status() -> dict[str, Any]:

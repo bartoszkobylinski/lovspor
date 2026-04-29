@@ -47,6 +47,13 @@ class LegalDocumentFrontMatter(BaseModel):
     source_license: str
     retrieved_at: datetime
     status: str
+    eu_basis: list[str] = []
+    """EU / EEA legal documents this Norwegian act implements, as
+    CELEX identifiers (e.g. ``["32016R0679", "32014L0090"]``).
+    Sourced from Lovdata's ``<dd class="eeaReferences">`` block. Empty
+    list when the act has no EEA references or only the EØS-avtalen
+    (EEA agreement) annex reference without specific directives /
+    regulations."""
 
 
 class FrontmatterContext(BaseModel):
@@ -89,6 +96,7 @@ def build_frontmatter(
         source_license=context.source_license,
         retrieved_at=context.retrieved_at,
         status=context.status,
+        eu_basis=extracted["eu_basis"],
     )
 
 
@@ -115,6 +123,7 @@ def extract_xml_metadata(xml_bytes: bytes) -> dict[str, Any]:
             _find_dd(dl, "lastChangeInForce"),
         ),
         "last_updated": _parse_date(_find_dd(dl, "lastupdated")),
+        "eu_basis": _find_eu_basis(dl),
     }
 
 
@@ -135,6 +144,35 @@ def _find_dd_list(dl: etree._Element, cls: str) -> list[str]:
         text = etree.tostring(dd, method="text", encoding="unicode").strip()
         return [text] if text else []
     return [etree.tostring(li, method="text", encoding="unicode").strip() for li in items]
+
+
+def _find_eu_basis(dl: etree._Element) -> list[str]:
+    """Extract EU CELEX identifiers from the ``<dd class='eeaReferences'>``
+    block. Lovdata renders each implemented EU document as
+    ``<a href="eu/<celex>">label</a>`` inside the EEA references block.
+
+    CELEX format: ``3<year><type-letter><number>`` (e.g. ``32016R0679``
+    for Regulation 679/2016 = GDPR; ``32014L0090`` for Directive
+    2014/90/EU). Lovdata stores them lowercase; we normalize to
+    uppercase to match the EU canonical form.
+
+    Deduplicated in source order so the first occurrence wins. Empty
+    list when there is no ``eeaReferences`` block, or it contains only
+    the EØS-avtalen annex link without any specific EU document
+    references (per Sprint 8 PR-D Q3=A).
+    """
+    dd = dl.find("./dd[@class='eeaReferences']")
+    if dd is None:
+        return []
+    seen: list[str] = []
+    for anchor in dd.findall(".//a"):
+        href = anchor.get("href") or ""
+        if not href.startswith("eu/"):
+            continue
+        celex = href[len("eu/") :].upper()
+        if celex and celex not in seen:
+            seen.append(celex)
+    return seen
 
 
 def _parse_date(raw: str | None) -> str | None:

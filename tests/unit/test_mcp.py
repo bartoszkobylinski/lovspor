@@ -31,6 +31,7 @@ def _record(
     status: str = "current",
     last_changed: str | None = None,
     total_changes: int | None = None,
+    eu_basis: list[str] | None = None,
 ) -> ManifestRecord:
     subdir = "lover" if source_dataset == "gjeldende-lover" else "forskrifter"
     return ManifestRecord(
@@ -44,6 +45,7 @@ def _record(
         title=title,
         last_changed=last_changed,
         total_changes=total_changes,
+        eu_basis=eu_basis,
     )
 
 
@@ -1457,7 +1459,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_eight_tools(tmp_path: Path) -> None:
+def test_build_server_registers_ten_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -1473,6 +1475,8 @@ def test_build_server_registers_eight_tools(tmp_path: Path) -> None:
             "search_laws",
             "search_body",
             "validate_citation",
+            "get_eu_basis",
+            "search_eu_implementations",
             "corpus_status",
         ],
     )
@@ -1482,3 +1486,198 @@ def test_build_server_raises_eagerly_on_bad_corpus(tmp_path: Path) -> None:
     """Misconfigured corpus path fails at server startup, not first call."""
     with pytest.raises(CorpusNotFoundError):
         build_server(tmp_path / "nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8 PR-D: EU / EEA cross-reference tools
+# ---------------------------------------------------------------------------
+
+
+def test_get_eu_basis_returns_celex_list_for_known_slug(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-pol": _record(
+                slug="personopplysningsloven",
+                title="Personopplysningsloven",
+                eu_basis=["32016R0679"],
+            ),
+        },
+    )
+    result = CorpusReader(tmp_path).get_eu_basis("personopplysningsloven")
+    assert result == {
+        "slug": "personopplysningsloven",
+        "doc_id": "nl-pol",
+        "title": "Personopplysningsloven",
+        "dataset": "lover",
+        "eu_basis": ["32016R0679"],
+    }
+
+
+def test_get_eu_basis_returns_empty_list_for_act_without_eu_links(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="straffeloven", title="Straffeloven", eu_basis=[])},
+    )
+    result = CorpusReader(tmp_path).get_eu_basis("straffeloven")
+    assert result["eu_basis"] == []
+
+
+def test_get_eu_basis_unknown_slug_raises(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="known", title="Known", eu_basis=[])},
+    )
+    with pytest.raises(CorpusNotFoundError, match="no current law with slug 'ghost'"):
+        CorpusReader(tmp_path).get_eu_basis("ghost")
+
+
+def test_get_eu_basis_pre_sprint8_record_raises_corpus_stale(tmp_path: Path) -> None:
+    """A manifest record with eu_basis=None signals the corpus predates
+    Sprint 8 PR-D — return a remediation message instead of returning
+    an empty list (which would be a silent lie)."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="legacy", title="Legacy", eu_basis=None)},
+    )
+    with pytest.raises(CorpusNotFoundError, match="corpus predates Sprint 8 PR-D"):
+        CorpusReader(tmp_path).get_eu_basis("legacy")
+
+
+def test_get_eu_basis_skips_tombstone(tmp_path: Path) -> None:
+    """A removed record is not 'current' — get_eu_basis should treat
+    the slug as unknown (same as other lookup tools)."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(
+                slug="oldlaw",
+                title="Oldlaw",
+                eu_basis=["32016R0679"],
+                status="removed",
+            ),
+        },
+        write_files=False,
+    )
+    with pytest.raises(CorpusNotFoundError, match="no current law with slug 'oldlaw'"):
+        CorpusReader(tmp_path).get_eu_basis("oldlaw")
+
+
+def test_search_eu_implementations_finds_matching_acts(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-pol": _record(
+                slug="personopplysningsloven",
+                title="Personopplysningsloven",
+                eu_basis=["32016R0679"],
+            ),
+            "nl-other": _record(
+                slug="ekomloven",
+                title="Ekomloven",
+                eu_basis=["32016R0679", "32018L1972"],
+            ),
+            "nl-unrelated": _record(
+                slug="straffeloven",
+                title="Straffeloven",
+                eu_basis=[],
+            ),
+        },
+    )
+    result = CorpusReader(tmp_path).search_eu_implementations("32016R0679")
+    assert [hit["slug"] for hit in result] == ["ekomloven", "personopplysningsloven"]
+    assert result[0] == {
+        "slug": "ekomloven",
+        "doc_id": "nl-other",
+        "title": "Ekomloven",
+        "dataset": "lover",
+    }
+
+
+def test_search_eu_implementations_is_case_insensitive(tmp_path: Path) -> None:
+    """Lovdata stores CELEX lowercase; lovspor normalizes to uppercase
+    at extraction time. The MCP tool accepts either form from callers."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-pol": _record(
+                slug="personopplysningsloven",
+                title="Personopplysningsloven",
+                eu_basis=["32016R0679"],
+            ),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+    assert len(reader.search_eu_implementations("32016r0679")) == 1
+    assert len(reader.search_eu_implementations("32016R0679")) == 1
+    assert len(reader.search_eu_implementations("  32016R0679  ")) == 1
+
+
+def test_search_eu_implementations_empty_query_returns_empty_list(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="x", title="X", eu_basis=["32016R0679"]),
+        },
+    )
+    assert CorpusReader(tmp_path).search_eu_implementations("") == []
+    assert CorpusReader(tmp_path).search_eu_implementations("   ") == []
+
+
+def test_search_eu_implementations_no_matches_returns_empty_list(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="x", title="X", eu_basis=["32016R0679"]),
+        },
+    )
+    assert CorpusReader(tmp_path).search_eu_implementations("32099Z9999") == []
+
+
+def test_search_eu_implementations_skips_tombstones(tmp_path: Path) -> None:
+    """A removed Norwegian act no longer 'implements' anything, so it
+    must not appear in current EU-implementation results."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-current": _record(
+                slug="alive",
+                title="Alive",
+                eu_basis=["32016R0679"],
+            ),
+            "nl-old": _record(
+                slug="dead",
+                title="Dead",
+                eu_basis=["32016R0679"],
+                status="removed",
+            ),
+        },
+        write_files=False,
+    )
+    result = CorpusReader(tmp_path).search_eu_implementations("32016R0679")
+    assert [hit["slug"] for hit in result] == ["alive"]
+
+
+def test_search_eu_implementations_skips_pre_sprint8_records(tmp_path: Path) -> None:
+    """Records with eu_basis=None (legacy schema) are silently skipped
+    rather than raising. The migration will populate them on the
+    next sync; in the meantime the reverse-lookup answer is partial
+    but not wrong (we return the records we have authoritative
+    answers for)."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-known": _record(
+                slug="known",
+                title="Known",
+                eu_basis=["32016R0679"],
+            ),
+            "nl-legacy": _record(
+                slug="legacy",
+                title="Legacy",
+                eu_basis=None,
+            ),
+        },
+    )
+    result = CorpusReader(tmp_path).search_eu_implementations("32016R0679")
+    assert [hit["slug"] for hit in result] == ["known"]

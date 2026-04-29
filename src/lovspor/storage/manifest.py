@@ -32,10 +32,15 @@ class ManifestRecord(BaseModel):
     ``total_changes`` and ``last_changed`` so future MCP-style tools
     (e.g. ``list_recent_changes``) can sort and filter on history
     metadata without loading each ``history/<slug>.json`` file.
+    Sprint 8 PR-D added ``eu_basis`` for the EU / EEA cross-references
+    that the new ``get_eu_basis`` and ``search_eu_implementations``
+    MCP tools answer over.
 
-    All four are ``None``-defaulted for backward compatibility:
-    manifests written by Sprint 3 still load (no slug/title), and
-    manifests written by Sprint 4 still load (no history fields).
+    All five are ``None``-defaulted for backward compatibility:
+    manifests written by Sprint 3 still load (no slug/title), Sprint 4
+    manifests still load (no history fields), Sprint 5 / Sprint 6 / 7
+    manifests still load (no eu_basis). A record with ``eu_basis is
+    None`` triggers the Sprint 8 backfill migration on next sync.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -50,6 +55,7 @@ class ManifestRecord(BaseModel):
     title: str | None = None
     total_changes: int | None = None
     last_changed: str | None = None
+    eu_basis: list[str] | None = None
 
 
 class Manifest(BaseModel):

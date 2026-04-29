@@ -193,3 +193,94 @@ def test_build_frontmatter_raises_when_header_dl_missing() -> None:
     </body></html>"""
     with pytest.raises(ParseError, match="no <header><dl>"):
         build_frontmatter(xml, _default_context())
+
+
+# ---------------------------------------------------------------------------
+# Sprint 8 PR-D: EU / EEA cross-reference extraction
+# ---------------------------------------------------------------------------
+
+
+def test_eu_basis_empty_when_no_eea_references_block() -> None:
+    """An act without a <dd class='eeaReferences'> block has eu_basis=[]."""
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.eu_basis == []
+
+
+def test_eu_basis_extracts_celex_from_eea_references_anchors() -> None:
+    """Lovdata renders implemented EU docs as <a href='eu/<celex>'>label</a>
+    inside the eeaReferences <dd>. Extract every such href and normalize
+    the CELEX to uppercase (Lovdata stores them lowercase)."""
+    xml = """<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    <dt class="eeaReferences">EØS</dt>
+    <dd class="eeaReferences">
+      <a href="avtale/avt-1992-05-02-1-v19">EØS-avtalen vedlegg XIX</a>
+      <br />
+      nr. 7a (direktiv <a href="eu/31993l0013">93/13/EØF</a>).
+    </dd>
+    </dl></header><main><h1>T</h1></main></body></html>""".encode()
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.eu_basis == ["31993L0013"]
+
+
+def test_eu_basis_deduplicates_repeated_celex_in_source_order() -> None:
+    """Same CELEX may appear multiple times in the eeaReferences block
+    (e.g. once in the annex link, once in the inline directive
+    paragraph). Keep first occurrence; drop duplicates."""
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    <dd class="eeaReferences">
+      <a href="eu/32016r0679">GDPR</a>
+      <a href="eu/32014l0090">Dir 2014/90</a>
+      <a href="eu/32016r0679">GDPR again</a>
+    </dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.eu_basis == ["32016R0679", "32014L0090"]
+
+
+def test_eu_basis_skips_non_eu_anchors_in_eea_block() -> None:
+    """The eeaReferences block also contains the <a href='avtale/...'>
+    EØS-avtalen annex link, which is not itself an EU document — only
+    extract anchors whose href starts with 'eu/'."""
+    xml = """<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    <dd class="eeaReferences">
+      <a href="avtale/avt-1992-05-02-1-v19">EØS-avtalen vedlegg XIX</a>
+    </dd>
+    </dl></header><main><h1>T</h1></main></body></html>""".encode()
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.eu_basis == []
+
+
+def test_eu_basis_handles_multiple_celex_in_one_block() -> None:
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    <dd class="eeaReferences">
+      <a href="eu/32016r0679">GDPR</a>
+      <a href="eu/32014l0090">Dir 2014/90</a>
+      <a href="eu/32018l1972">EECC</a>
+    </dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.eu_basis == ["32016R0679", "32014L0090", "32018L1972"]
+
+
+def test_legal_document_frontmatter_default_eu_basis_is_empty_list() -> None:
+    """Backward-compat: callers that don't supply eu_basis (e.g. older
+    rendering paths) get an empty list — matching the shape that the
+    Sprint 8 manifest field guarantees post-migration."""
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.eu_basis == []

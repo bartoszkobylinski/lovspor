@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets eight read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets ten read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 This document covers the full setup: prerequisites, configuration for two common clients, every tool with sample input and output, the typical discovery flow, troubleshooting, limitations, and legal attribution.
 
@@ -10,7 +10,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** eight read-only, manifest-and-filesystem-only.
+- **Tools:** ten read-only, manifest-and-filesystem-only.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -266,6 +266,59 @@ Verify that a Norwegian-law citation string actually resolves in the corpus. **Z
 
 The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. AI consumers should use canonical slugs from `search_laws`.
 
+### `get_eu_basis(slug)`
+
+Return the EU / EEA legal basis of a Norwegian act — the list of CELEX identifiers (EU document ids) the act implements. Sourced from Lovdata's `<dd class="eeaReferences">` block at extraction time, normalized to uppercase, deduplicated in source order.
+
+- **`slug`** — the act's kortform (same as for `get_law`).
+
+**Sample call:** `get_eu_basis(slug="personopplysningsloven")`
+
+**Sample output:**
+
+```json
+{
+  "slug": "personopplysningsloven",
+  "doc_id": "lov-2018-06-15-38",
+  "title": "Lov om behandling av personopplysninger",
+  "dataset": "lover",
+  "eu_basis": ["32016R0679"]
+}
+```
+
+CELEX format: `3<year><type-letter><number>`. Type letter `R` for regulation, `L` for directive, `D` for decision, etc. Examples:
+
+- `32016R0679` — Regulation 2016/679 (GDPR)
+- `32014L0090` — Directive 2014/90/EU
+- `31993L0013` — Directive 93/13/EEC
+
+`eu_basis` is `[]` (empty list) for acts with no EEA references, or only an `EØS-avtalen` annex link without specific directives / regulations. The tool raises `corpus predates Sprint 8 PR-D` if the manifest record carries `eu_basis: null` (legacy schema) — in that case suggest the user run the `refresh_command` from `corpus_status` to refresh.
+
+### `search_eu_implementations(eu_doc_id)`
+
+Reverse-lookup: which Norwegian acts implement a given EU document. Complement to `get_eu_basis` (Norwegian act → EU basis); this one goes EU document → Norwegian acts.
+
+- **`eu_doc_id`** — a CELEX identifier. Case-insensitive (`"32016R0679"` and `"32016r0679"` are equivalent; lovspor stores them uppercase).
+
+**Sample call:** `search_eu_implementations(eu_doc_id="32016R0679")`
+
+**Sample output:**
+
+```json
+[
+  {
+    "slug": "personopplysningsloven",
+    "doc_id": "lov-2018-06-15-38",
+    "title": "Lov om behandling av personopplysninger",
+    "dataset": "lover"
+  }
+]
+```
+
+Sorted by slug for stable output. Empty list when no current act references the given CELEX. Tombstones (removed acts) are excluded — they no longer "implement" anything for current-state queries. Records with `eu_basis: null` (legacy schema, awaiting Sprint 8 backfill) are silently skipped — the result is a partial answer, not an error; the migration will populate them on the next sync.
+
+Use the returned `slug` values with `get_law` or `get_section` to fetch the implementing text.
+
 ### `corpus_status()`
 
 Return current state of the local corpus plus freshness metadata. Call this proactively when other tools return unexpectedly empty results — a stale corpus (user forgot to `git pull`) is indistinguishable from a missing law from the AI's perspective.
@@ -371,9 +424,11 @@ A typical AI-assistant interaction with this server follows the same pattern:
 5. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
 6. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
 7. **`validate_citation(citation)`** — zero-hallucination guard. Before quoting a citation in a final answer ("per § 5-12 of Skatteloven..."), call this to confirm both the act and the section actually exist in the corpus. Returns a `valid` bool plus a human-readable `reason` field the AI can quote.
-8. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
+8. **`get_eu_basis(slug)`** — when the user asks about a Norwegian act's EU origin ("does Personopplysningsloven implement GDPR?"), pull the list of CELEX identifiers the act implements.
+9. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
+10. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The eight tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
+The ten tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
 
 ---
 

@@ -103,6 +103,7 @@ class _UpstreamDoc:
     xml_hash: str
     slug: str
     title: str
+    eu_basis: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -152,6 +153,25 @@ def run_sync(settings: Settings) -> SyncReport:
     cache_dir = settings.data_dir / "cache" / "archives"
     cache_dir.mkdir(parents=True, exist_ok=True)
     upstream = _collect_upstream(settings, cache_dir)
+
+    # Sprint 8 PR-D eu_basis backfill: triggers once when the prior
+    # manifest has any current record with eu_basis=None (Sprint 7-or-
+    # earlier schema). Re-renders every current doc to populate the
+    # new frontmatter field + manifest field, single bulk commit
+    # BEFORE the regular sync flow runs. Subsequent syncs see all
+    # records carrying eu_basis (possibly empty list) and skip this
+    # branch. Runs after Sprint 5 history migration because the
+    # backfill commit produces fresh history events that next sync
+    # can pick up via the normal per-doc history regeneration path.
+    if _needs_sprint8_eu_basis_migration(prior):
+        prior = _run_sprint8_eu_basis_migration(
+            settings,
+            manifest_path,
+            prior,
+            upstream,
+            datetime.now(UTC),
+        )
+
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
     changes = detect_changes(upstream_hashes, prior)
 
@@ -312,6 +332,7 @@ def _with_slug(doc: _UpstreamDoc, slug: str) -> _UpstreamDoc:
         xml_hash=doc.xml_hash,
         slug=slug,
         title=doc.title,
+        eu_basis=doc.eu_basis,
     )
 
 
@@ -344,6 +365,7 @@ def _index_tarball(tar_path: Path, dataset: str) -> list[_UpstreamDoc]:
                 xml_hash=hash_normalized_xml(member.content),
                 slug=base_slug,
                 title=metadata["title"],
+                eu_basis=tuple(metadata["eu_basis"]),
             ),
         )
     return docs
@@ -378,6 +400,7 @@ def _write_one(
         status="current",
         slug=upstream.slug,
         title=upstream.title,
+        eu_basis=list(upstream.eu_basis),
     )
     return record, path
 
@@ -644,6 +667,94 @@ def _run_sprint5_history_migration(
         git_commit_msg(
             repo,
             f"migration: generate history for {len(current_doc_ids)} documents",
+        )
+    return new_manifest
+
+
+def _needs_sprint8_eu_basis_migration(prior: Manifest) -> bool:
+    """True if any current record has ``eu_basis is None`` AND a
+    populated ``slug``. Triggers once on the first sync after Sprint 8
+    PR-D ships; once every current record carries ``eu_basis:
+    list[str]`` (possibly empty), the trigger goes false and never
+    fires again.
+
+    Records with ``slug is None`` (legacy Sprint-3 manifest) are
+    deliberately ignored here: those get handled by the Sprint 4
+    rename migration in the normal sync flow, which calls
+    ``_write_one`` and populates ``eu_basis`` along the way. Trying
+    to backfill them in Sprint 8 first would orphan the legacy
+    ``<doc_id>.md`` files because Sprint 8 writes to the new slug
+    path without deleting the old one.
+    """
+    if not prior.documents:
+        return False
+    return any(
+        record.status == "current" and record.slug is not None and record.eu_basis is None
+        for record in prior.documents.values()
+    )
+
+
+def _run_sprint8_eu_basis_migration(
+    settings: Settings,
+    manifest_path: Path,
+    prior: Manifest,
+    upstream: dict[str, _UpstreamDoc],
+    now: datetime,
+) -> Manifest:
+    """Re-render every current doc to populate ``eu_basis`` in the
+    manifest record AND in the file's YAML frontmatter. Single bulk
+    commit ``migration: backfill eu_basis for N documents``.
+
+    Why re-render: the new ``eu_basis`` field is part of the
+    LegalDocumentFrontMatter, so populating it changes the rendered
+    Markdown content even when the underlying XML hash is unchanged.
+    Standard sync flow only re-renders when xml_hash changes; this
+    migration overrides that to do a one-time corpus-wide refresh.
+
+    Tombstones (``status='removed'``) are skipped because their files
+    don't exist on disk anymore. Slug-less records (legacy Sprint-3
+    manifest) are also skipped; they get backfilled as a side effect
+    of the Sprint 4 rename migration in the normal sync flow.
+
+    Records whose upstream slug differs from the prior manifest slug
+    are also skipped: writing them here would update
+    ``markdown_path`` to the new slug without deleting the old file,
+    and the subsequent rename detector would then see
+    ``prior.slug == upstream.slug`` (because we just changed it) and
+    skip the rename, orphaning the old ``<old-slug>.md`` on disk.
+    The regular rename flow handles those records correctly — its
+    ``_write_one`` call also populates ``eu_basis`` as a side effect,
+    so they end up backfilled too, just via a different commit.
+    """
+    new_records: dict[str, ManifestRecord] = {}
+    written_paths: list[Path] = []
+    for doc_id, record in prior.documents.items():
+        if record.status != "current" or record.slug is None:
+            new_records[doc_id] = record
+            continue
+        upstream_doc = upstream.get(doc_id)
+        if upstream_doc is None:
+            # Doc disappeared upstream between fetch and migration; let
+            # the normal sync flow handle it as a removal next.
+            new_records[doc_id] = record
+            continue
+        if upstream_doc.slug != record.slug:
+            # Slug changed upstream. Defer to the rename flow so the
+            # old file gets deleted; otherwise we'd orphan it.
+            new_records[doc_id] = record
+            continue
+        new_record, path = _write_one(settings, upstream_doc, now)
+        new_records[doc_id] = new_record
+        written_paths.append(path)
+    if not written_paths:
+        return prior
+    new_manifest = Manifest(generated_at=now, documents=new_records)
+    write_manifest(new_manifest, manifest_path)
+    git_add(settings.lovverk_repo_path, [manifest_path, *written_paths])
+    if has_staged_changes(settings.lovverk_repo_path):
+        git_commit_msg(
+            settings.lovverk_repo_path,
+            f"migration: backfill eu_basis for {len(written_paths)} documents",
         )
     return new_manifest
 

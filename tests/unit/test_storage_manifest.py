@@ -78,6 +78,46 @@ def test_manifest_record_accepts_history_fields_when_provided() -> None:
     assert rec.last_changed == "2026-04-27"
 
 
+def test_manifest_record_eu_basis_defaults_to_none() -> None:
+    """Sprint 8 PR-D added eu_basis as an optional field defaulting to
+    None so pre-Sprint-8 manifests still load. The None value is what
+    the orchestrator's Sprint 8 backfill migration trigger looks for."""
+    rec = _record()
+    assert rec.eu_basis is None
+
+
+def test_manifest_record_accepts_eu_basis_list() -> None:
+    rec = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a",
+        markdown_path="lover/personopplysningsloven.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 27, 5, 0, tzinfo=UTC),
+        status="current",
+        slug="personopplysningsloven",
+        title="Personopplysningsloven",
+        eu_basis=["32016R0679"],
+    )
+    assert rec.eu_basis == ["32016R0679"]
+
+
+def test_manifest_record_accepts_empty_eu_basis_list() -> None:
+    """Empty list is the canonical 'no EEA references' value — distinct
+    from None (pre-Sprint-8 unknown)."""
+    rec = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a",
+        markdown_path="lover/straffeloven.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 27, 5, 0, tzinfo=UTC),
+        status="current",
+        slug="straffeloven",
+        title="Straffeloven",
+        eu_basis=[],
+    )
+    assert rec.eu_basis == []
+
+
 def test_manifest_is_frozen() -> None:
     mf = _manifest()
     with pytest.raises(ValidationError):

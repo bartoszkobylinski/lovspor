@@ -774,12 +774,14 @@ def test_sprint5_history_migration_triggers_on_first_sync_after_prb(
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
-    # Migration commit fired (upstream is unchanged so no regular sync
-    # commit follows) — exactly one new commit on top of the Sprint 4
-    # baseline.
-    assert _git_commit_count(corpus) == commits_before + 1
+    # Two migrations fire on this Sprint-4 baseline: Sprint 5 backfills
+    # history (no history/ dir on disk), Sprint 8 backfills eu_basis
+    # (no eu_basis field on the seeded record). Upstream is unchanged
+    # so no regular sync commit follows.
+    assert _git_commit_count(corpus) == commits_before + 2
     log = _git_log_subjects(corpus)
     assert "migration: generate history for 1 documents" in log
+    assert "migration: backfill eu_basis for 1 documents" in log
     assert (corpus / "lover" / "history" / "skattie.json").exists()
 
 
@@ -810,3 +812,333 @@ def test_sprint5_history_migration_skipped_when_history_dirs_already_exist(
     assert _git_commit_count(corpus) == commits_after_first
     log = _git_log_subjects(corpus)
     assert "migration: generate history" not in log
+
+
+def _law_with_eea(title: str, celex_list: list[str]) -> bytes:
+    """Variant of _minimal_law_html that adds a <dd class='eeaReferences'>
+    block with one anchor per CELEX. Used by Sprint 8 PR-D tests so the
+    fake upstream XML matches Lovdata's actual EEA-references shape."""
+    anchors = "".join(f'<a href="eu/{celex.lower()}">label</a>' for celex in celex_list)
+    return (
+        '<!DOCTYPE html><html lang="nb"><head><title>'
+        f"{title}</title></head>"
+        '<body><header class="documentHeader"><dl>'
+        '<dt class="title">Tittel</dt>'
+        f'<dd class="title">{title}</dd>'
+        '<dt class="refid">RefID</dt>'
+        '<dd class="refid">lov/x</dd>'
+        f'<dd class="eeaReferences">{anchors}</dd>'
+        "</dl></header>"
+        '<main id="dokument">'
+        f"<h1>{title}</h1>"
+        '<article class="legalP" id="ledd-1">body.</article>'
+        "</main></body></html>"
+    ).encode()
+
+
+def test_sprint8_eu_basis_migration_backfills_existing_corpus(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """A Sprint-7-or-earlier corpus (manifest with eu_basis=None on every
+    current record) gets a one-time
+    'migration: backfill eu_basis for N documents' commit on the first
+    sync after PR-D ships. Re-renders the markdown so frontmatter
+    carries the new field too. Subsequent syncs see populated
+    eu_basis (possibly []) and skip the migration."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    xml = _law_with_eea("Skattie", ["32016R0679"])
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", xml)])
+    _build_tarball(forskrifter_tar, [])
+
+    # Pre-write a Sprint-7-style manifest: slug + history fields populated
+    # but eu_basis omitted (defaults to None). Also seed history/ so
+    # the Sprint 5 migration does not also fire.
+    legacy_path = corpus / "lover" / "skattie.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Existing file\n", encoding="utf-8")
+    history_dir = corpus / "lover" / "history"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    (history_dir / "skattie.json").write_text("{}", encoding="utf-8")
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 27, tzinfo=UTC),
+        documents={
+            "lov-1": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(xml),
+                markdown_path="lover/skattie.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 27, tzinfo=UTC),
+                status="current",
+                slug="skattie",
+                title="Skattie",
+                total_changes=1,
+                last_changed="2026-04-27",
+                # eu_basis omitted -> None -> Sprint 8 trigger
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Sprint 7 seed"],
+        cwd=corpus,
+        check=True,
+    )
+    commits_before = _git_commit_count(corpus)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    # Sprint 8 migration emits exactly one new commit; upstream xml_hash
+    # matches the seeded manifest record so no regular sync work
+    # follows.
+    assert _git_commit_count(corpus) == commits_before + 1
+    log = _git_log_subjects(corpus)
+    assert "migration: backfill eu_basis for 1 documents" in log
+
+    # Manifest record now carries the extracted CELEX.
+    written = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    assert written["documents"]["lov-1"]["eu_basis"] == ["32016R0679"]
+
+    # Frontmatter of the rendered markdown also carries it (re-render
+    # is the whole point of the migration — manifest alone is not
+    # enough; downstream MCP / search tools may read either source).
+    body = (corpus / "lover" / "skattie.md").read_text(encoding="utf-8")
+    assert "eu_basis:" in body
+    assert "32016R0679" in body
+
+
+def test_sprint8_eu_basis_migration_skipped_when_already_backfilled(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """After the first sync post-PR-D, every record carries eu_basis
+    (possibly []). Subsequent syncs with unchanged upstream must not
+    re-fire the backfill — the no-op contract from decisions.md §5
+    still holds."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_eea("Skattie", ["32016R0679"]))],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus)
+    run_sync(settings)  # initial sync populates eu_basis from upstream
+    commits_after_first = _git_commit_count(corpus)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)  # second sync: upstream unchanged
+
+    assert _git_commit_count(corpus) == commits_after_first
+    log = _git_log_subjects(corpus)
+    assert "migration: backfill eu_basis" not in log
+
+
+def test_sprint8_eu_basis_migration_records_empty_list_when_no_eea_block(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Acts whose upstream XML has no <dd class='eeaReferences'> block
+    must still get eu_basis populated — as an empty list. Empty list
+    is the canonical 'no EU basis' value; only None means 'pre-Sprint-8
+    record, unknown'."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    xml = _law_with_extra("Skattie", "body")  # no eeaReferences block
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", xml)])
+    _build_tarball(forskrifter_tar, [])
+
+    legacy_path = corpus / "lover" / "skattie.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Existing\n", encoding="utf-8")
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 27, tzinfo=UTC),
+        documents={
+            "lov-1": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(xml),
+                markdown_path="lover/skattie.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 27, tzinfo=UTC),
+                status="current",
+                slug="skattie",
+                title="Skattie",
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=corpus, check=True)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    written = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    assert written["documents"]["lov-1"]["eu_basis"] == []
+
+
+def test_sprint8_eu_basis_migration_preserves_tombstones(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Removed records keep their pre-migration shape (eu_basis=None
+    stays None) because their files do not exist on disk and the
+    migration cannot re-render them. Reverse-lookup tools skip None
+    records; dropping the record entirely would lose audit trail."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    xml = _law_with_eea("Skattie", ["32016R0679"])
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", xml)])
+    _build_tarball(forskrifter_tar, [])
+
+    legacy_path = corpus / "lover" / "skattie.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Existing\n", encoding="utf-8")
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 27, tzinfo=UTC),
+        documents={
+            "lov-1": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(xml),
+                markdown_path="lover/skattie.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 27, tzinfo=UTC),
+                status="current",
+                slug="skattie",
+                title="Skattie",
+            ),
+            "lov-old": ManifestRecord(
+                doc_type="lov",
+                xml_hash="b" * 64,
+                markdown_path="lover/old.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 27, tzinfo=UTC),
+                status="removed",
+                slug="old",
+                title="Old",
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed"], cwd=corpus, check=True)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    written = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    # Current doc gets backfilled.
+    assert written["documents"]["lov-1"]["eu_basis"] == ["32016R0679"]
+    # Tombstone keeps its pre-migration shape — eu_basis omitted entirely
+    # (Pydantic excludes None defaults from model_dump unless asked
+    # otherwise) or null.
+    tombstone = written["documents"]["lov-old"]
+    assert tombstone.get("eu_basis") is None
+
+
+def test_sprint8_eu_basis_migration_defers_slug_renames_to_rename_flow(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """MEDIUM regression guard: when a pre-Sprint-8 record has both
+    eu_basis=None AND an upstream slug change (Lovdata renamed the
+    kortform), the backfill must NOT rewrite the file at the new slug
+    path — that would update prior.markdown_path to the new path and
+    the subsequent rename detector would see prior.slug already
+    matching upstream.slug and skip the rename, orphaning the old
+    <old-slug>.md on disk.
+
+    Expected behavior: Sprint 8 migration skips the record (defers to
+    the rename flow), the rename flow writes the new path AND deletes
+    the old, and _write_one populates eu_basis as a side effect.
+    Codex PR-D round 1 reproducer.
+    """
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    # Upstream XML derives slug "newskattie" from its title.
+    xml = _law_with_eea("Newskattie", ["32016R0679"])
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", xml)])
+    _build_tarball(forskrifter_tar, [])
+
+    # Seed a Sprint-7 manifest with the OLD slug "oldskattie" but the
+    # SAME xml_hash that the upstream XML produces (Lovdata changed
+    # the kortform, not the body).
+    legacy_path = corpus / "lover" / "oldskattie.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Legacy old-slug file\n", encoding="utf-8")
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 27, tzinfo=UTC),
+        documents={
+            "lov-1": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(xml),
+                markdown_path="lover/oldskattie.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 27, tzinfo=UTC),
+                status="current",
+                slug="oldskattie",
+                title="Oldskattie",
+                # eu_basis omitted -> None -> would have triggered the
+                # buggy Sprint 8 rewrite at the new slug path.
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Sprint 7 seed (slug-renamed upstream)"],
+        cwd=corpus,
+        check=True,
+    )
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    # Old slug file is gone; new slug file exists.
+    assert not (corpus / "lover" / "oldskattie.md").exists()
+    assert (corpus / "lover" / "newskattie.md").exists()
+
+    # Manifest record carries the new slug AND the extracted CELEX —
+    # rename flow's _write_one populated eu_basis as a side effect.
+    written = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    record = written["documents"]["lov-1"]
+    assert record["slug"] == "newskattie"
+    assert record["markdown_path"] == "lover/newskattie.md"
+    assert record["eu_basis"] == ["32016R0679"]
+
+    # No standalone backfill commit — the rename flow handled it.
+    log = _git_log_subjects(corpus)
+    assert "migration: backfill eu_basis" not in log
+    assert "rename(lov): newskattie" in log
