@@ -21,6 +21,17 @@ dependencies = [
     "typer>=0.12.5",
     "python-dotenv>=1.0.1",
     "mcp>=1.0.0",
+    "numpy>=1.26.0",
+]
+
+[project.optional-dependencies]
+embeddings = [
+    # Required at runtime when actually computing embeddings (sync
+    # engine + semantic_search MCP tool). Pulled in via the
+    # ``[embeddings]`` extra so the lightweight ``uvx lovspor mcp``
+    # path used by clients that only call metadata tools does not
+    # have to download torch + transformers (~500 MB).
+    "sentence-transformers>=3.0.0",
 ]
 
 [project.urls]
@@ -109,6 +120,13 @@ check_untyped_defs = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+# sentence-transformers ships no stubs and is an optional [embeddings]
+# extra, so CI without --extra embeddings would otherwise fail mypy
+# strict. The lazy import inside JinaModel keeps this safe at runtime.
+module = "sentence_transformers"
+ignore_missing_imports = true
 
 # ---------- Pytest ----------
 [tool.pytest.ini_options]
