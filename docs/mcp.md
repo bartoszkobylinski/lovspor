@@ -76,7 +76,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All eight are read-only. None mutate the corpus, trigger a sync, or reach the network.
+All ten are read-only. None mutate the corpus, trigger a sync, or reach the network.
 
 ### `get_law(slug)`
 
