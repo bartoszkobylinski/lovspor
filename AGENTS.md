@@ -34,6 +34,21 @@ Run `uv run mutmut run` and report the score. Investigate any survived mutants i
 
 For survived mutants in critical paths, propose additional tests that would kill them.
 
+## Pre-push verification
+
+Match the CI environment exactly. CI runs `uv sync --frozen` (no extras), then the full quality gate. Verifying with `--all-extras` or `--extra X` hides import errors and dependency-availability issues that CI catches.
+
+Run, in order:
+
+1. `uv sync --frozen` — match CI's dependency set
+2. `uv run ruff check`
+3. `uv run ruff format --check`
+4. `uv run mypy src/`
+5. `uv run pytest --cov`
+6. `uv run coverage report --fail-under=90`
+
+If a feature requires an optional extra, ensure mypy strict still passes without it (lazy imports + a `[[tool.mypy.overrides]]` block for the missing module).
+
 ## What NOT to do
 
 - Do not change function signatures.
@@ -41,7 +56,7 @@ For survived mutants in critical paths, propose additional tests that would kill
 - Do not change rendering output format.
 - Do not add new product features.
 - Do not change `CLAUDE.md` or `AGENTS.md`.
-- Do not modify dependencies.
+- Do not modify dependencies. Adding an optional extra requires a matching `[[tool.mypy.overrides]]` block; verify `uv sync --frozen` followed by `uv run mypy src/` is green before flagging the PR ready.
 - Do not commit. Open a PR with your additions instead.
 
 ## Report format
