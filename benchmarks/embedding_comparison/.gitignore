@@ -1,0 +1,2 @@
+# Embedding caches — large binary blobs, regenerate on demand
+.cache/
