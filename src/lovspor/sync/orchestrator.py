@@ -125,7 +125,7 @@ class _DocAction:
         return f"{self.action}({self.doc_type}): {self.slug}"
 
 
-def run_sync(settings: Settings) -> SyncReport:
+def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
     """Execute a full sync cycle against the configured lovverk repo.
 
     If upstream has no new / changed / removed documents, the manifest
@@ -188,10 +188,21 @@ def run_sync(settings: Settings) -> SyncReport:
     new_records = _carry_unchanged(prior, changes.unchanged)
     actions: list[_DocAction] = []
 
+    # All paths written by ANY action this sync. The two delete sites
+    # below — changed-with-slug-change and the renamed phase 2 —
+    # consult this set before deleting, so an old_path that another
+    # action has just written to (or will overwrite) is preserved.
+    # This prevents path-cascade data corruption across action types,
+    # not just within the renamed loop. Codex PR #43 round 1 caught
+    # the update+rename variant of the same class as the production
+    # crash 2026-04-30 (rename+rename). Both variants now handled.
+    written_paths: set[Path] = set()
+
     for doc_id in changes.new:
         upstream_doc = upstream[doc_id]
         record, path = _write_one(settings, upstream_doc, now)
         new_records[doc_id] = record
+        written_paths.add(path)
         actions.append(
             _DocAction(
                 action="add",
@@ -208,9 +219,13 @@ def run_sync(settings: Settings) -> SyncReport:
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
         record, new_path = _write_one(settings, upstream_doc, now)
         new_records[doc_id] = record
+        written_paths.add(new_path)
         paths: tuple[Path, ...]
         if old_path != new_path:
-            delete_document(old_path)
+            # Skip delete when another action has written (or will
+            # write) here; deleting would wipe their content.
+            if old_path not in written_paths:
+                delete_document(old_path)
             paths = (old_path, new_path)
         else:
             paths = (new_path,)
@@ -224,19 +239,45 @@ def run_sync(settings: Settings) -> SyncReport:
             ),
         )
 
+    # Renames are processed in two phases to prevent path-cascade
+    # corruption: when one doc's new_path equals another doc's old_path
+    # (slug swap, or cyclic slug shuffle when collision-resolution
+    # assignments shift), the naive delete-then-write loop has the
+    # second iteration's delete wipe out the first iteration's write.
+    # Production crash 2026-04-30 in CI:
+    #   git add lover/vass-og-avlopsanleggslova.md exited 128:
+    #   pathspec did not match any files
+    # Triggered by two acts cycling between bare slug and -2 suffix.
+    #
+    # Phase 1: write all new_paths (writes are safe — upstream content
+    # is fully in memory, no need for old disk content). Each written
+    # path joins ``written_paths`` so the changed loop's earlier delete
+    # path-protection extends here too.
+    # Phase 2: delete old_paths that are NOT reused as ANY action's
+    # new_path. The set already includes new + changed + rename
+    # writes, so update→rename collisions (Codex PR #43 round 1) are
+    # also caught.
+    rename_plan: list[tuple[str, Path, Path, ManifestRecord]] = []
     for doc_id in renamed:
         upstream_doc = upstream[doc_id]
         prior_record = prior.documents[doc_id]
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
-        delete_document(old_path)
         record, new_path = _write_one(settings, upstream_doc, now)
         new_records[doc_id] = record
+        written_paths.add(new_path)
+        rename_plan.append((doc_id, old_path, new_path, record))
+
+    for _, old_path, _, _ in rename_plan:
+        if old_path not in written_paths:
+            delete_document(old_path)
+
+    for doc_id, old_path, new_path, record in rename_plan:
         actions.append(
             _DocAction(
                 action="rename",
                 doc_type=record.doc_type,
                 doc_id=doc_id,
-                slug=upstream_doc.slug,
+                slug=upstream[doc_id].slug,
                 paths=(old_path, new_path),
             ),
         )
@@ -263,6 +304,7 @@ def run_sync(settings: Settings) -> SyncReport:
         new_records=new_records,
         now=now,
         is_sprint4_migration=_is_migration(prior, renamed),
+        force_bulk_commit=_has_rename_path_overlap(actions),
     )
 
     return SyncReport(
@@ -476,6 +518,34 @@ def _is_migration(prior: Manifest, renamed: list[str]) -> bool:
     return any(prior.documents[doc_id].slug is None for doc_id in renamed)
 
 
+def _has_rename_path_overlap(actions: list[_DocAction]) -> bool:
+    """True when any path-changing action's new_path equals another
+    path-changing action's old_path.
+
+    In that case per-doc commits would corrupt: the first commit
+    removes a file from the index, the second commit then tries to
+    ``git add`` the same path which is now neither tracked nor on
+    disk and git errors with ``pathspec did not match any files``.
+    Bulk commit records all moves in one diff and sidesteps the
+    ordering problem. Production crash 2026-04-30 reproducer was
+    rename+rename; Codex PR #43 round 1 found the update+rename
+    variant has the same shape, so this detector covers both
+    ``rename`` and ``update`` actions whose paths are
+    ``(old, new)`` (i.e. updates whose slug changed).
+    """
+    # The function name kept its rename-prefix for git-blame
+    # continuity even though it now also considers update actions.
+    min_for_overlap = 2
+    qualifying = [
+        a for a in actions if a.action in ("rename", "update") and len(a.paths) >= min_for_overlap
+    ]
+    if len(qualifying) < min_for_overlap:
+        return False
+    old_paths = {a.paths[0] for a in qualifying}
+    new_paths = {a.paths[1] for a in qualifying}
+    return bool(old_paths & new_paths)
+
+
 def _commit_with_history(
     settings: Settings,
     *,
@@ -485,6 +555,7 @@ def _commit_with_history(
     new_records: dict[str, ManifestRecord],
     now: datetime,
     is_sprint4_migration: bool,
+    force_bulk_commit: bool = False,
 ) -> None:
     """Mode-aware commit pipeline that bundles per-act history.
 
@@ -498,13 +569,21 @@ def _commit_with_history(
     ``sync: update history for N documents`` once history catches up.
     The follow-up rewrites the manifest with the now-known
     ``total_changes`` / ``last_changed`` fields.
+
+    ``force_bulk_commit`` overrides per-document mode for renames whose
+    paths overlap (one rename's new_path equals another rename's
+    old_path). Per-doc commits cannot handle that case: the first
+    commit removes a file from the index that the second commit then
+    fails to stage with ``pathspec did not match any files``. Bulk
+    commit avoids the issue by recording all renames as one atomic
+    diff. Production crash 2026-04-30 reproducer.
     """
     if not actions:
         return  # pragma: no cover - run_sync early-returns when nothing changed
 
     target_doc_ids = [a.doc_id for a in actions if a.action != "remove"]
 
-    if is_sprint4_migration or settings.git_commit_mode == "single":
+    if is_sprint4_migration or force_bulk_commit or settings.git_commit_mode == "single":
         message = _migration_message(actions) if is_sprint4_migration else _single_message(actions)
         manifest = Manifest(generated_at=now, documents=new_records)
         write_manifest(manifest, manifest_path)

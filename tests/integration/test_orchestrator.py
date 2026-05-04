@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from pytest_httpx import HTTPXMock
 
+import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.errors import ConfigError
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.settings import Settings
@@ -26,7 +27,15 @@ from lovspor.storage.manifest import (
     ManifestRecord,
     write_manifest,
 )
-from lovspor.sync.orchestrator import run_sync
+from lovspor.sync.orchestrator import (
+    _commit_with_history,
+    _DocAction,
+    _has_rename_path_overlap,
+    run_sync,
+)
+
+_COLLISION_TITLE = "Vass og avlopsanleggslova"
+_COLLISION_SLUG = "vass-og-avlopsanleggslova"
 
 
 def _minimal_law_html(doc_id: str, title: str) -> bytes:
@@ -128,10 +137,715 @@ def _register_lovdata_mocks(
     )
 
 
+def _action(action: str, doc_id: str, *paths: str) -> _DocAction:
+    return _DocAction(
+        action=action,
+        doc_type="lov",
+        doc_id=doc_id,
+        slug=doc_id,
+        paths=tuple(Path(path) for path in paths),
+    )
+
+
+def _seed_collision_manifest(
+    corpus: Path,
+    xml_by_doc_id: dict[str, bytes],
+    prior_slugs: dict[str, str],
+) -> None:
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+
+    records: dict[str, ManifestRecord] = {}
+    for doc_id, prior_slug in prior_slugs.items():
+        old_path = corpus / "lover" / f"{prior_slug}.md"
+        old_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.write_text(f"# Prior {doc_id}\n", encoding="utf-8")
+        records[doc_id] = ManifestRecord(
+            doc_type="lov",
+            xml_hash=hash_normalized_xml(xml_by_doc_id[doc_id]),
+            markdown_path=f"lover/{prior_slug}.md",
+            source_dataset="gjeldende-lover",
+            last_seen=datetime(2026, 4, 30, tzinfo=UTC),
+            status="current",
+            slug=prior_slug,
+            title=_COLLISION_TITLE,
+            eu_basis=[],
+        )
+
+    write_manifest(
+        Manifest(generated_at=datetime(2026, 4, 30, tzinfo=UTC), documents=records),
+        corpus / "manifest.json",
+    )
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed collision state"], cwd=corpus, check=True)
+
+
 @pytest.fixture(autouse=True)
 def _no_real_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep retry sleeps out of integration runs."""
     monkeypatch.setattr("lovspor.retry.time.sleep", lambda _seconds: None)
+
+
+@pytest.mark.parametrize(
+    ("actions", "expected"),
+    [
+        (
+            [
+                _action("rename", "a", "lover/x.md", "lover/y.md"),
+                _action("rename", "b", "lover/y.md", "lover/x.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("rename", "a", "lover/x.md", "lover/y.md"),
+                _action("rename", "b", "lover/y.md", "lover/z.md"),
+                _action("rename", "c", "lover/z.md", "lover/x.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("rename", "a", "lover/a1.md", "lover/a2.md"),
+                _action("rename", "b", "lover/b1.md", "lover/b2.md"),
+            ],
+            False,
+        ),
+        ([_action("rename", "a", "lover/x.md", "lover/y.md")], False),
+        ([], False),
+        ([_action("rename", "a", "lover/x.md")], False),
+        (
+            # update+rename overlap: an update with a slug change has
+            # paths=(old, new) just like a rename. The detector now
+            # catches this variant too (Codex PR-43 round 1 finding).
+            [
+                _action("update", "a", "lover/x.md", "lover/y.md"),
+                _action("rename", "b", "lover/y.md", "lover/z.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("update", "a", "lover/x.md", "lover/y.md"),
+                _action("update", "b", "lover/y.md", "lover/x.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("rename", "a", "lover/x.md", "lover/y.md"),
+                _action("update", "b", "lover/y.md", "lover/z.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("add", "a", "lover/y.md"),
+                _action("rename", "b", "lover/y.md", "lover/z.md"),
+            ],
+            False,
+        ),
+        (
+            [
+                _action("add", "a", "lover/x.md", "lover/y.md"),
+                _action("rename", "b", "lover/y.md", "lover/z.md"),
+            ],
+            False,
+        ),
+    ],
+)
+def test_has_rename_path_overlap_cases(
+    actions: list[_DocAction],
+    expected: bool,
+) -> None:
+    assert _has_rename_path_overlap(actions) is expected
+
+
+@pytest.mark.parametrize(
+    (
+        "git_commit_mode",
+        "is_sprint4_migration",
+        "force_bulk_commit",
+        "expected_call",
+        "expected_message",
+    ),
+    [
+        (
+            "per-document",
+            False,
+            True,
+            "bulk",
+            "sync: 0 new, 0 changed, 1 renamed, 0 removed",
+        ),
+        (
+            "per-document",
+            True,
+            False,
+            "bulk",
+            "migration: rename 1 documents to slug-based filenames",
+        ),
+        (
+            "single",
+            False,
+            False,
+            "bulk",
+            "sync: 0 new, 0 changed, 1 renamed, 0 removed",
+        ),
+        ("per-document", False, False, "per-doc", None),
+        (
+            "per-document",
+            True,
+            True,
+            "bulk",
+            "migration: rename 1 documents to slug-based filenames",
+        ),
+    ],
+)
+def test_commit_with_history_routing_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    git_commit_mode: str,
+    is_sprint4_migration: bool,
+    force_bulk_commit: bool,
+    expected_call: str,
+    expected_message: str | None,
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    def record_bulk(
+        _repo: Path,
+        _actions: list[_DocAction],
+        _extra_paths: list[Path],
+        message: str,
+    ) -> None:
+        calls.append(("bulk", message))
+
+    def record_per_doc(_repo: Path, _actions: list[_DocAction]) -> None:
+        calls.append(("per-doc", None))
+
+    def record_history(
+        _repo: Path,
+        _manifest_path: Path,
+        _new_records: dict[str, ManifestRecord],
+        _target_doc_ids: list[str],
+        _now: datetime,
+    ) -> None:
+        calls.append(("history", None))
+
+    monkeypatch.setattr(orchestrator_module, "_commit_bulk", record_bulk)
+    monkeypatch.setattr(orchestrator_module, "_commit_per_doc_actions_only", record_per_doc)
+    monkeypatch.setattr(orchestrator_module, "_commit_history_followup", record_history)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_generate_and_apply_history",
+        lambda _repo, records, _target_doc_ids: (records, []),
+    )
+    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "generate_index",
+        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+    )
+    monkeypatch.setattr(orchestrator_module, "git_add", lambda _repo, _paths: None)
+    monkeypatch.setattr(orchestrator_module, "has_staged_changes", lambda _repo: False)
+
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "lovverk",
+        git_commit_mode=git_commit_mode,
+    )
+    record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/y.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 30, tzinfo=UTC),
+        status="current",
+        slug="y",
+        title="Y",
+        eu_basis=[],
+    )
+
+    _commit_with_history(
+        settings,
+        repo=settings.lovverk_repo_path,
+        manifest_path=settings.lovverk_repo_path / "manifest.json",
+        actions=[_action("rename", "lov-a", "lover/x.md", "lover/y.md")],
+        new_records={"lov-a": record},
+        now=datetime(2026, 4, 30, tzinfo=UTC),
+        is_sprint4_migration=is_sprint4_migration,
+        force_bulk_commit=force_bulk_commit,
+    )
+
+    assert calls[0] == (expected_call, expected_message)
+    if expected_call == "bulk":
+        assert calls[1:] == [("history", None)]
+
+
+def test_commit_with_history_default_force_bulk_commit_keeps_per_doc_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        orchestrator_module, "_commit_per_doc_actions_only", lambda *_args: calls.append("per-doc")
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_generate_and_apply_history",
+        lambda _repo, records, _target_doc_ids: (records, []),
+    )
+    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "generate_index",
+        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+    )
+    monkeypatch.setattr(orchestrator_module, "git_add", lambda _repo, _paths: None)
+    monkeypatch.setattr(orchestrator_module, "has_staged_changes", lambda _repo: False)
+
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "lovverk",
+        git_commit_mode="per-document",
+    )
+    record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/y.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 30, tzinfo=UTC),
+        status="current",
+        slug="y",
+        title="Y",
+        eu_basis=[],
+    )
+
+    _commit_with_history(
+        settings,
+        repo=settings.lovverk_repo_path,
+        manifest_path=settings.lovverk_repo_path / "manifest.json",
+        actions=[_action("rename", "lov-a", "lover/x.md", "lover/y.md")],
+        new_records={"lov-a": record},
+        now=datetime(2026, 4, 30, tzinfo=UTC),
+        is_sprint4_migration=False,
+    )
+
+    assert calls == ["per-doc"]
+
+
+def test_commit_with_history_bulk_stages_manifest_and_both_indexes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_extra_paths: list[Path] = []
+
+    def record_bulk(
+        _repo: Path,
+        _actions: list[_DocAction],
+        extra_paths: list[Path],
+        _message: str,
+    ) -> None:
+        captured_extra_paths.extend(extra_paths)
+
+    monkeypatch.setattr(orchestrator_module, "_commit_bulk", record_bulk)
+    monkeypatch.setattr(orchestrator_module, "_commit_history_followup", lambda *_args: None)
+    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "generate_index",
+        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+    )
+
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "lovverk",
+        git_commit_mode="per-document",
+    )
+    record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/y.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 30, tzinfo=UTC),
+        status="current",
+        slug="y",
+        title="Y",
+        eu_basis=[],
+    )
+
+    _commit_with_history(
+        settings,
+        repo=settings.lovverk_repo_path,
+        manifest_path=settings.lovverk_repo_path / "manifest.json",
+        actions=[_action("rename", "lov-a", "lover/x.md", "lover/y.md")],
+        new_records={"lov-a": record},
+        now=datetime(2026, 4, 30, tzinfo=UTC),
+        is_sprint4_migration=False,
+        force_bulk_commit=True,
+    )
+
+    assert captured_extra_paths == [
+        settings.lovverk_repo_path / "manifest.json",
+        settings.lovverk_repo_path / "gjeldende-lover" / "INDEX.md",
+        settings.lovverk_repo_path / "gjeldende-sentrale-forskrifter" / "INDEX.md",
+    ]
+
+
+def test_commit_with_history_bulk_excludes_removed_docs_from_history_followup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_target_doc_ids: list[str] = []
+
+    def record_history(
+        _repo: Path,
+        _manifest_path: Path,
+        _new_records: dict[str, ManifestRecord],
+        target_doc_ids: list[str],
+        _now: datetime,
+    ) -> None:
+        captured_target_doc_ids.extend(target_doc_ids)
+
+    monkeypatch.setattr(orchestrator_module, "_commit_bulk", lambda *_args: None)
+    monkeypatch.setattr(orchestrator_module, "_commit_history_followup", record_history)
+    monkeypatch.setattr(orchestrator_module, "write_manifest", lambda _manifest, _path: None)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "generate_index",
+        lambda repo, dataset, _manifest: repo / dataset / "INDEX.md",
+    )
+
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "lovverk",
+        git_commit_mode="per-document",
+    )
+    record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/added.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 30, tzinfo=UTC),
+        status="current",
+        slug="added",
+        title="Added",
+        eu_basis=[],
+    )
+
+    _commit_with_history(
+        settings,
+        repo=settings.lovverk_repo_path,
+        manifest_path=settings.lovverk_repo_path / "manifest.json",
+        actions=[
+            _action("add", "lov-added", "lover/added.md"),
+            _action("remove", "lov-removed", "lover/removed.md"),
+        ],
+        new_records={"lov-added": record},
+        now=datetime(2026, 4, 30, tzinfo=UTC),
+        is_sprint4_migration=False,
+        force_bulk_commit=True,
+    )
+
+    assert captured_target_doc_ids == ["lov-added"]
+
+
+def test_run_sync_changed_slug_delete_skips_path_written_by_new_doc(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+
+    old_alpha_xml = _law_with_extra("Alpha", "Old A body.")
+    new_alpha_xml = _law_with_extra("Alpha", "New doc body.")
+    changed_beta_xml = _law_with_extra("Beta", "Changed A body.")
+    legacy_path = corpus / "lover" / "alpha.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Prior alpha\n", encoding="utf-8")
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 30, tzinfo=UTC),
+        documents={
+            "lov-a": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(old_alpha_xml),
+                markdown_path="lover/alpha.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 30, tzinfo=UTC),
+                status="current",
+                slug="alpha",
+                title="Alpha",
+                eu_basis=[],
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed alpha"], cwd=corpus, check=True)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-a.xml", changed_beta_xml),
+            ("nl/lov-new.xml", new_alpha_xml),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    calls: list[tuple[str, str]] = []
+
+    def tracking_write(path: Path, content: str) -> None:
+        calls.append(("write", path.name))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def tracking_delete(path: Path) -> None:
+        calls.append(("delete", path.name))
+        path.unlink(missing_ok=True)
+
+    monkeypatch.setattr(orchestrator_module, "write_document", tracking_write)
+    monkeypatch.setattr(orchestrator_module, "delete_document", tracking_delete)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", lambda *_args, **_kwargs: None)
+
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert ("write", "alpha.md") in calls
+    assert ("write", "beta.md") in calls
+    assert ("delete", "alpha.md") not in calls
+    assert "New doc body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    assert "Changed A body." in (corpus / "lover" / "beta.md").read_text(encoding="utf-8")
+
+
+def test_run_sync_removed_delete_is_not_gated_by_written_paths(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+
+    old_alpha_xml = _law_with_extra("Alpha", "Removed doc body.")
+    new_alpha_xml = _law_with_extra("Alpha", "Replacement doc body.")
+    legacy_path = corpus / "lover" / "alpha.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Prior alpha\n", encoding="utf-8")
+    manifest = Manifest(
+        generated_at=datetime(2026, 4, 30, tzinfo=UTC),
+        documents={
+            "lov-old": ManifestRecord(
+                doc_type="lov",
+                xml_hash=hash_normalized_xml(old_alpha_xml),
+                markdown_path="lover/alpha.md",
+                source_dataset="gjeldende-lover",
+                last_seen=datetime(2026, 4, 30, tzinfo=UTC),
+                status="current",
+                slug="alpha",
+                title="Alpha",
+                eu_basis=[],
+            ),
+        },
+    )
+    write_manifest(manifest, corpus / "manifest.json")
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed removed alpha"], cwd=corpus, check=True)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-new.xml", new_alpha_xml)])
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    calls: list[tuple[str, str]] = []
+
+    def tracking_write(path: Path, content: str) -> None:
+        calls.append(("write", path.name))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def tracking_delete(path: Path) -> None:
+        calls.append(("delete", path.name))
+        path.unlink(missing_ok=True)
+
+    monkeypatch.setattr(orchestrator_module, "write_document", tracking_write)
+    monkeypatch.setattr(orchestrator_module, "delete_document", tracking_delete)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", lambda *_args, **_kwargs: None)
+
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert calls == [("write", "alpha.md"), ("delete", "alpha.md")]
+    assert not (corpus / "lover" / "alpha.md").exists()
+
+
+def test_run_sync_writes_all_rename_targets_before_deleting_old_paths(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    xml_by_doc_id = {
+        "lov-a": _law_with_extra(_COLLISION_TITLE, "Current A body."),
+        "lov-b": _law_with_extra(_COLLISION_TITLE, "Current B body."),
+        "lov-c": _law_with_extra(_COLLISION_TITLE, "Current C body."),
+    }
+    prior_slugs = {
+        "lov-a": f"{_COLLISION_SLUG}-2",
+        "lov-b": f"{_COLLISION_SLUG}-3",
+        "lov-c": f"{_COLLISION_SLUG}-4",
+    }
+    _seed_collision_manifest(corpus, xml_by_doc_id, prior_slugs)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [(f"nl/{doc_id}.xml", xml) for doc_id, xml in xml_by_doc_id.items()],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    calls: list[tuple[str, str]] = []
+
+    def tracking_write(path: Path, content: str) -> None:
+        calls.append(("write", path.name))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def tracking_delete(path: Path) -> None:
+        calls.append(("delete", path.name))
+        path.unlink(missing_ok=True)
+
+    monkeypatch.setattr(orchestrator_module, "write_document", tracking_write)
+    monkeypatch.setattr(orchestrator_module, "delete_document", tracking_delete)
+
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert calls == [
+        ("write", f"{_COLLISION_SLUG}.md"),
+        ("write", f"{_COLLISION_SLUG}-2.md"),
+        ("write", f"{_COLLISION_SLUG}-3.md"),
+        ("delete", f"{_COLLISION_SLUG}-4.md"),
+    ]
+
+
+def test_run_sync_handles_two_way_collision_suffix_swap_with_bulk_commit(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    xml_by_doc_id = {
+        "lov-a": _law_with_extra(_COLLISION_TITLE, "Current A body."),
+        "lov-b": _law_with_extra(_COLLISION_TITLE, "Current B body."),
+    }
+    _seed_collision_manifest(
+        corpus,
+        xml_by_doc_id,
+        {
+            "lov-a": f"{_COLLISION_SLUG}-2",
+            "lov-b": _COLLISION_SLUG,
+        },
+    )
+    commits_before = _git_commit_count(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [(f"nl/{doc_id}.xml", xml) for doc_id, xml in xml_by_doc_id.items()],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    report = run_sync(
+        Settings(
+            data_dir=data_dir,
+            lovverk_repo_path=corpus,
+            git_commit_mode="per-document",
+        ),
+    )
+
+    assert report.new_count == 0
+    assert report.changed_count == 0
+    assert report.removed_count == 0
+    assert report.unchanged_count == 2
+
+    base_path = corpus / "lover" / f"{_COLLISION_SLUG}.md"
+    suffixed_path = corpus / "lover" / f"{_COLLISION_SLUG}-2.md"
+    assert "Current A body." in base_path.read_text(encoding="utf-8")
+    assert "Current B body." in suffixed_path.read_text(encoding="utf-8")
+
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["documents"]["lov-a"]["markdown_path"] == (f"lover/{_COLLISION_SLUG}.md")
+    assert manifest["documents"]["lov-b"]["markdown_path"] == (f"lover/{_COLLISION_SLUG}-2.md")
+    assert _git_commit_count(corpus) == commits_before + 2
+    log = _git_log_subjects(corpus)
+    assert "sync: 0 new, 0 changed, 2 renamed, 0 removed" in log
+    assert "sync: update history for 2 documents" in log
+    assert f"rename(lov): {_COLLISION_SLUG}" not in log
+
+
+def test_run_sync_handles_changed_slug_overlapping_rename_old_path(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    old_alpha_xml = _law_with_extra("Alpha", "Old A body.")
+    new_beta_xml = _law_with_extra("Beta", "New A body.")
+    gamma_xml = _law_with_extra("Gamma", "Stable B body.")
+    _seed_collision_manifest(
+        corpus,
+        {
+            "lov-a": old_alpha_xml,
+            "lov-b": gamma_xml,
+        },
+        {
+            "lov-a": "alpha",
+            "lov-b": "beta",
+        },
+    )
+    commits_before = _git_commit_count(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-a.xml", new_beta_xml),
+            ("nl/lov-b.xml", gamma_xml),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert "New A body." in (corpus / "lover" / "beta.md").read_text(encoding="utf-8")
+    assert "Stable B body." in (corpus / "lover" / "gamma.md").read_text(encoding="utf-8")
+    assert _git_commit_count(corpus) == commits_before + 2
+    log = _git_log_subjects(corpus)
+    assert "sync: 0 new, 1 changed, 1 renamed, 0 removed" in log
+    assert "sync: update history for 2 documents" in log
+    assert "update(lov): beta" not in log
+    assert "rename(lov): gamma" not in log
 
 
 def test_run_sync_writes_index_files_for_both_datasets(
