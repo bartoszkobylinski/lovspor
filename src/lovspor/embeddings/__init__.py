@@ -2,7 +2,7 @@
 
 This package provides:
 
-- ``model``    — lazy singleton loader for the Norwegian-tuned embedding model
+- ``model``    — OpenAI text-embedding-3-large client with token-aware truncation
 - ``sections`` — extract ``### § N-M.`` sections from rendered Markdown
 - ``quantize`` — float32 ↔ int8 round-trip with per-batch scale
 - ``store``    — binary file format read/write (see ``docs/embeddings.md``)
@@ -12,7 +12,7 @@ The pipeline at sync time:
 
     rendered Markdown
       -> sections.iter_sections (split on ### § headings)
-      -> model.encode (jina-embeddings-v2-base-no, 768-dim, normalized)
+      -> model.encode (OpenAI text-embedding-3-large, 3072-dim, normalized)
       -> quantize.quantize_int8 (~99% similarity preserved at 1/4 storage)
       -> store.write_embeddings (per-doc <slug>.bin alongside the .md)
 
@@ -23,12 +23,18 @@ The pipeline at MCP query time:
       -> search.top_k (cosine sim against loaded index)
       -> dict[slug, section_id, score, snippet]
 
-The store and search modules carry no dependency on PyTorch or
-sentence-transformers, so they import cheaply at MCP server startup.
-The model module imports sentence-transformers lazily on first use.
+Model choice rationale: the empirical benchmark in
+``benchmarks/embedding_comparison/results-2026-04-30.md`` showed
+``text-embedding-3-large`` beating Norwegian-tuned alternatives by
++24% Recall@5 over 47 realistic queries on the lovverk corpus.
 """
 
-from lovspor.embeddings.model import EmbeddingModel, JinaModel, get_default_model, set_model
+from lovspor.embeddings.model import (
+    DEFAULT_DIMENSION,
+    DEFAULT_MODEL_NAME,
+    EmbeddingModel,
+    OpenAIEmbedder,
+)
 from lovspor.embeddings.quantize import dequantize_int8, quantize_int8
 from lovspor.embeddings.search import SearchHit, top_k_cosine
 from lovspor.embeddings.sections import EmbeddingSection, iter_sections
@@ -40,18 +46,18 @@ from lovspor.embeddings.store import (
 )
 
 __all__ = [
+    "DEFAULT_DIMENSION",
+    "DEFAULT_MODEL_NAME",
     "EMBEDDING_DIM",
     "EmbeddingFile",
     "EmbeddingModel",
     "EmbeddingSection",
-    "JinaModel",
+    "OpenAIEmbedder",
     "SearchHit",
     "dequantize_int8",
-    "get_default_model",
     "iter_sections",
     "quantize_int8",
     "read_embeddings",
-    "set_model",
     "top_k_cosine",
     "write_embeddings",
 ]

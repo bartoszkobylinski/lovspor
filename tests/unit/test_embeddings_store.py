@@ -35,8 +35,11 @@ def test_write_and_read_embeddings_round_trip(tmp_path: Path) -> None:
     np.testing.assert_array_equal(result.sections[1][1], sections[1][1])
 
 
-def test_native_embedding_dimension_is_jina_base_no_dimension() -> None:
-    assert EMBEDDING_DIM == 768
+def test_native_embedding_dimension_matches_text_embedding_3_large() -> None:
+    """Sprint 9 PR-B pivoted from nb-sbert-v2-large (1024) to OpenAI
+    text-embedding-3-large (3072) based on the empirical benchmark
+    in benchmarks/embedding_comparison/results-2026-04-30.md."""
+    assert EMBEDDING_DIM == 3072
 
 
 def test_write_embeddings_is_byte_deterministic(tmp_path: Path) -> None:

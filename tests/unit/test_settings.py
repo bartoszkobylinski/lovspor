@@ -14,6 +14,8 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(__import__("os").environ):
         if key.startswith("LOVSPOR_"):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_APIKEY", raising=False)
 
 
 def test_from_env_reads_required_vars(
@@ -77,6 +79,8 @@ def test_from_env_uses_defaults_when_optional_absent(
     assert settings.git_commit_mode == "per-document"
     assert settings.log_level == "INFO"
     assert settings.http_timeout_seconds == 120.0
+    assert settings.http_user_agent == "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"
+    assert settings.openai_api_key is None
 
 
 def test_from_env_explicit_override_beats_env(
@@ -157,3 +161,45 @@ def test_explicit_zero_timeout_override_wins_over_env(
     monkeypatch.setenv("LOVSPOR_HTTP_TIMEOUT_SECONDS", "999.0")
     settings = Settings.from_env(http_timeout_seconds=0.0)
     assert settings.http_timeout_seconds == 0.0
+
+
+def test_from_env_reads_openai_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("LOVSPOR_OUTPUT_REPO_PATH", str(tmp_path / "lovverk"))
+    monkeypatch.setenv("OPENAI_API_KEY", "canonical-key")
+
+    settings = Settings.from_env()
+
+    assert settings.openai_api_key == "canonical-key"
+
+
+def test_from_env_reads_legacy_openai_api_key_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("LOVSPOR_OUTPUT_REPO_PATH", str(tmp_path / "lovverk"))
+    monkeypatch.setenv("OPENAI_APIKEY", "legacy-key")
+
+    settings = Settings.from_env()
+
+    assert settings.openai_api_key == "legacy-key"
+
+
+def test_from_env_openai_api_key_override_beats_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("LOVSPOR_OUTPUT_REPO_PATH", str(tmp_path / "lovverk"))
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+
+    settings = Settings.from_env(openai_api_key="override-key")
+
+    assert settings.openai_api_key == "override-key"

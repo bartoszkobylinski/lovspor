@@ -37,6 +37,15 @@ class Settings(BaseModel):
     http_timeout_seconds: float = 120.0
     http_user_agent: str = "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"
     log_level: str = "INFO"
+    openai_api_key: str | None = None
+    """OpenAI API key for the text-embedding-3-large embedder.
+
+    Required for the engine sync (``_write_one`` writes per-doc
+    embeddings) and for the MCP ``semantic_search`` tool. Read from
+    ``OPENAI_API_KEY`` env var or accepts ``OPENAI_APIKEY`` as
+    fallback (some users have it without underscore from older
+    docs).
+    """
 
     @field_validator("git_commit_mode")
     @classmethod
@@ -65,6 +74,7 @@ class Settings(BaseModel):
             LOVSPOR_HTTP_TIMEOUT_SECONDS  (float)
             LOVSPOR_HTTP_USER_AGENT       (str)
             LOVSPOR_LOG_LEVEL             (DEBUG | INFO | WARNING | ERROR)
+            OPENAI_API_KEY                (str — also reads OPENAI_APIKEY)
         """
         _ensure_env_loaded()
         data: dict[str, object] = {}
@@ -102,6 +112,14 @@ class Settings(BaseModel):
                 raise ConfigError(
                     f"LOVSPOR_HTTP_TIMEOUT_SECONDS must be a float, got: {raw_timeout!r}",
                 ) from exc
+
+        # OpenAI key: try the canonical env var first, then the
+        # underscore-less variant some users have. Override always wins.
+        raw_key = overrides.get("openai_api_key")
+        if raw_key is None:
+            raw_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_APIKEY")
+        if raw_key is not None:
+            data["openai_api_key"] = str(raw_key)
 
         return cls.model_validate(data)
 

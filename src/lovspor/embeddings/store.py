@@ -42,11 +42,19 @@ _HEADER_SIZE = 16
 _MAX_SECTIONS = 65535
 _MAX_SECTION_ID_LEN = 255
 
-EMBEDDING_DIM = 768
-"""Native dimensionality of jina-embeddings-v2-base-no.
+EMBEDDING_DIM = 3072
+"""Native dimensionality of OpenAI ``text-embedding-3-large``.
 
-If a future Sprint changes the model, the dim is recorded in each
-file's header so old and new files can coexist during a migration.
+Bumped from 768 (the placeholder for the abandoned jina-v2-base-no
+candidate) to 3072 in Sprint 9 PR-B after the empirical benchmark
+(``benchmarks/embedding_comparison/results-2026-04-30.md``) showed
+``text-embedding-3-large`` beating Norwegian-tuned alternatives by
++24% Recall@5.
+
+Each file's header records ``dim`` so old and new files can coexist
+during a migration. A future model change would bump this constant
+again and fire a Sprint-9-style backfill against the existing
+records.
 """
 
 
