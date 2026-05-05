@@ -376,22 +376,39 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
 
     for doc_id in changes.removed:
         prior_record = prior.documents[doc_id]
-        path = _delete_one(settings, prior, doc_id)
+        prior_path = settings.lovverk_repo_path / prior_record.markdown_path
         new_records[doc_id] = _tombstone(prior_record)
-        # Delete the embedding sidecar so the corpus stays consistent
-        # — a removed doc has no replacement so there is no path
-        # protection to consider here. ``_delete_embeddings`` returns
-        # None when nothing existed (sync without a key), so we only
-        # add the path to ``sidecar_paths`` when a real deletion
-        # happened.
+        # Production crash 2026-05-05 reproducer: a doc is removed
+        # while another action (rename/update/add) has just written
+        # to the SAME path (collision-resolution slug shuffle moves
+        # someone else into the slot). Without this protection,
+        # ``_delete_one`` would wipe the new owner's content AND
+        # the resulting per-doc commit would crash with
+        # ``pathspec did not match any files``. When the slot is
+        # already taken, the tombstone is a manifest-only update —
+        # no git op for the path from this action.
+        remove_paths: tuple[Path, ...]
+        if prior_path in written_paths:
+            remove_paths = ()
+        else:
+            delete_document(prior_path)
+            remove_paths = (prior_path,)
+        # Same protection for the embedding sidecar — if another
+        # action wrote a sidecar at this slug's slot, preserve it.
         remove_sidecar: tuple[Path, ...]
         if prior_record.slug is not None:
-            old_sidecar = _delete_embeddings(
+            sidecar_path = _embeddings_path(
                 settings.lovverk_repo_path,
                 prior_record.source_dataset,
                 prior_record.slug,
             )
-            remove_sidecar = (old_sidecar,) if old_sidecar is not None else ()
+            if sidecar_path in written_paths:
+                remove_sidecar = ()
+            elif sidecar_path.exists():
+                delete_document(sidecar_path)
+                remove_sidecar = (sidecar_path,)
+            else:
+                remove_sidecar = ()
         else:
             remove_sidecar = ()
         actions.append(
@@ -400,7 +417,7 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
                 doc_type=prior_record.doc_type,
                 doc_id=doc_id,
                 slug=prior_record.slug or doc_id,
-                paths=(path,),
+                paths=remove_paths,
                 sidecar_paths=remove_sidecar,
             ),
         )
@@ -761,31 +778,40 @@ def _is_migration(prior: Manifest, renamed: list[str]) -> bool:
 
 
 def _has_rename_path_overlap(actions: list[_DocAction]) -> bool:
-    """True when any path-changing action's new_path equals another
-    path-changing action's old_path.
+    """True when ANY path appears in two distinct actions.
 
-    In that case per-doc commits would corrupt: the first commit
-    removes a file from the index, the second commit then tries to
-    ``git add`` the same path which is now neither tracked nor on
-    disk and git errors with ``pathspec did not match any files``.
-    Bulk commit records all moves in one diff and sidesteps the
-    ordering problem. Production crash 2026-04-30 reproducer was
-    rename+rename; Codex PR #43 round 1 found the update+rename
-    variant has the same shape, so this detector covers both
-    ``rename`` and ``update`` actions whose paths are
-    ``(old, new)`` (i.e. updates whose slug changed).
+    This is the universal collision detector. Per-doc commits cannot
+    handle a shared path because the first commit removes that path
+    from the index, the second commit's ``git add`` then errors with
+    ``pathspec did not match any files``. Bulk commit records all
+    touches in one atomic diff and sidesteps the ordering problem.
+
+    Earlier revisions of this function only considered
+    ``rename``/``update`` actions and only their (old, new) pair.
+    That was a partial detector — it missed:
+
+    - **rename+remove** where rename's new_path equals remove's
+      prior_path (production crash 2026-05-05:
+      ``forskrifter/endr-i-utlendingsforskriften-2.md``)
+    - **update+remove** with the same shape
+    - **add+remove** where the new doc takes the path of a removed
+      doc
+
+    All three slipped through and produced the same ``pathspec did
+    not match any files`` failure in production CI. Function name
+    kept for git-blame continuity even though the detector now
+    considers every action type.
     """
-    # The function name kept its rename-prefix for git-blame
-    # continuity even though it now also considers update actions.
-    min_for_overlap = 2
-    qualifying = [
-        a for a in actions if a.action in ("rename", "update") and len(a.paths) >= min_for_overlap
-    ]
-    if len(qualifying) < min_for_overlap:
-        return False
-    old_paths = {a.paths[0] for a in qualifying}
-    new_paths = {a.paths[1] for a in qualifying}
-    return bool(old_paths & new_paths)
+    seen: dict[Path, str] = {}
+    for action in actions:
+        # Dedupe within an action — a single rename has paths=(old,
+        # new) which are by definition different, but defensive.
+        for path in set(action.paths):
+            owner = seen.get(path)
+            if owner is not None and owner != action.doc_id:
+                return True
+            seen[path] = action.doc_id
+    return False
 
 
 def _commit_with_history(

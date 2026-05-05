@@ -361,13 +361,12 @@ def _sidecar_action_scenarios(
     )
     old_by_doc = dict(zip(prior_doc_ids, old_slugs, strict=True))
 
-    # A removed document has no replacement in the sync contract, so
-    # generated upstream slugs deliberately avoid removed-doc old slots.
-    removed_slugs = {old_by_doc[doc_id] for doc_id in prior_doc_ids if kinds[doc_id] == "remove"}
-    available_new_slugs = [slug for slug in _SIDECAR_PROPERTY_SLUGS if slug not in removed_slugs]
+    # PR #45 allows remove collisions: another action may take over a
+    # removed doc's old slot, and the removed action must not double-stage
+    # or delete that new owner.
     new_slugs = draw(
         st.lists(
-            st.sampled_from(available_new_slugs),
+            st.sampled_from(_SIDECAR_PROPERTY_SLUGS),
             min_size=len(upstream_doc_ids),
             max_size=len(upstream_doc_ids),
             unique=True,
@@ -765,6 +764,32 @@ def test_delete_embeddings_returns_path_and_deletes_existing_sidecar(tmp_path: P
     assert not path.exists()
 
 
+def test_delete_one_deletes_manifest_path_and_returns_it(tmp_path: Path) -> None:
+    corpus = tmp_path / "lovverk"
+    path = corpus / "lover" / "legacy.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# Legacy\n", encoding="utf-8")
+    manifest = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "lov-legacy": _current_law_record(
+                xml=_law_with_section("Legacy", "Body."),
+                slug="legacy",
+                title="Legacy",
+            ),
+        },
+    )
+
+    result = orchestrator_module._delete_one(
+        Settings(data_dir=tmp_path / "data", lovverk_repo_path=corpus),
+        manifest,
+        "lov-legacy",
+    )
+
+    assert result == path
+    assert not path.exists()
+
+
 def test_maybe_delete_old_embeddings_returns_none_for_absent_sidecar(
     tmp_path: Path,
 ) -> None:
@@ -954,16 +979,50 @@ def test_needs_sprint9_embeddings_migration_filters_to_current_slugged_docs(
             True,
         ),
         (
+            # add+rename overlap: production crash 2026-05-05 (rename+remove)
+            # showed the partial detector missed cross-type collisions. The
+            # universal detector now catches add+rename too — add.new_path
+            # equals rename.old_path means per-doc commits would corrupt.
             [
                 _action("add", "a", "lover/y.md"),
                 _action("rename", "b", "lover/y.md", "lover/z.md"),
             ],
-            False,
+            True,
         ),
         (
+            # Malformed add with two paths colliding with a rename: same
+            # collision class as above, detector still catches it.
             [
                 _action("add", "a", "lover/x.md", "lover/y.md"),
                 _action("rename", "b", "lover/y.md", "lover/z.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("rename", "a", "lover/x.md", "lover/y.md"),
+                _action("remove", "b", "lover/y.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("update", "a", "lover/x.md", "lover/y.md"),
+                _action("remove", "b", "lover/y.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("add", "a", "lover/y.md"),
+                _action("remove", "b", "lover/y.md"),
+            ],
+            True,
+        ),
+        (
+            [
+                _action("add", "a", "lover/x.md"),
+                _action("remove", "b", "lover/y.md"),
             ],
             False,
         ),
@@ -1388,11 +1447,21 @@ def test_run_sync_changed_slug_delete_skips_path_written_by_new_doc(
     assert "Changed A body." in (corpus / "lover" / "beta.md").read_text(encoding="utf-8")
 
 
-def test_run_sync_removed_delete_is_not_gated_by_written_paths(
+def test_run_sync_removed_delete_is_gated_by_written_paths(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Production crash 2026-05-05 reproducer + regression guard.
+
+    A doc is removed while another action writes a new doc to the
+    SAME path (collision-resolution slug shuffle). Earlier behaviour
+    deleted the path unconditionally and then the per-doc commit
+    crashed with ``pathspec did not match any files``. The fix
+    consults ``written_paths`` in the removed loop: when the slot
+    is already taken by another action, the tombstone is purely a
+    manifest update, no FS delete and no path in action.paths.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1447,8 +1516,222 @@ def test_run_sync_removed_delete_is_not_gated_by_written_paths(
 
     run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
-    assert calls == [("write", "alpha.md"), ("delete", "alpha.md")]
-    assert not (corpus / "lover" / "alpha.md").exists()
+    # Only the new doc's write happens. The removed loop sees alpha.md
+    # in written_paths and skips the delete to preserve the new content.
+    assert calls == [("write", "alpha.md")]
+    assert (corpus / "lover" / "alpha.md").exists()
+    assert "Replacement doc body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+
+
+def test_run_sync_add_remove_path_collision_commits_manifest_without_remove_path(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+
+    removed_xml = _law_with_section("Alpha", "Removed body.")
+    replacement_xml = _law_with_section("Alpha", "Replacement body.")
+    _write_markdown_with_section(corpus / "lover" / "alpha.md", "Alpha", "Removed body.")
+    write_manifest(
+        Manifest(
+            generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+            documents={
+                "lov-removed": _current_law_record(
+                    xml=removed_xml,
+                    slug="alpha",
+                    title="Alpha",
+                ),
+            },
+        ),
+        corpus / "manifest.json",
+    )
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed removed alpha"], cwd=corpus, check=True)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-added.xml", replacement_xml)])
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert report.new_count == 1
+    assert report.removed_count == 1
+    assert "Replacement body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["documents"]["lov-added"]["status"] == "current"
+    assert manifest["documents"]["lov-removed"]["status"] == "removed"
+    subjects = _git_log_subjects(corpus)
+    assert "add(lov): alpha" in subjects
+    assert "remove(lov): alpha" not in subjects
+    assert "sync: update manifest, index, and history" in subjects
+
+
+def test_run_sync_rename_remove_path_collision_preserves_renamed_doc(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+
+    removed_xml = _law_with_section("Alpha", "Removed A body.")
+    renamed_xml = _law_with_section("Alpha", "Renamed B body.")
+    _write_markdown_with_section(corpus / "lover" / "alpha.md", "Alpha", "Removed A body.")
+    _write_markdown_with_section(corpus / "lover" / "alpha-2.md", "Alpha", "Renamed B body.")
+    write_manifest(
+        Manifest(
+            generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+            documents={
+                "lov-removed": _current_law_record(
+                    xml=removed_xml,
+                    slug="alpha",
+                    title="Alpha",
+                ),
+                "lov-renamed": _current_law_record(
+                    xml=renamed_xml,
+                    slug="alpha-2",
+                    title="Alpha",
+                ),
+            },
+        ),
+        corpus / "manifest.json",
+    )
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed alpha collision"], cwd=corpus, check=True)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-renamed.xml", renamed_xml)])
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert report.removed_count == 1
+    assert report.unchanged_count == 1
+    assert "Renamed B body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    assert not (corpus / "lover" / "alpha-2.md").exists()
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["documents"]["lov-renamed"]["markdown_path"] == "lover/alpha.md"
+    assert manifest["documents"]["lov-removed"]["status"] == "removed"
+
+
+def test_run_sync_removed_path_collision_preserves_new_embedding_sidecar(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+    _install_fake_embedder(monkeypatch)
+
+    removed_xml = _law_with_section("Alpha", "Removed body.")
+    replacement_xml = _law_with_section("Alpha", "Replacement body.")
+    _write_markdown_with_section(corpus / "lover" / "alpha.md", "Alpha", "Removed body.")
+    _write_seed_embedding(_embedding_path(corpus, "alpha"), marker=1)
+    write_manifest(
+        Manifest(
+            generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+            documents={
+                "lov-removed": _current_law_record(
+                    xml=removed_xml,
+                    slug="alpha",
+                    title="Alpha",
+                ),
+            },
+        ),
+        corpus / "manifest.json",
+    )
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed removed alpha sidecar"], cwd=corpus, check=True)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-added.xml", replacement_xml)])
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    run_sync(
+        Settings(
+            data_dir=data_dir,
+            lovverk_repo_path=corpus,
+            openai_api_key="sk-test",
+        ),
+    )
+
+    sidecar = _embedding_path(corpus, "alpha")
+    markdown = (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    assert sidecar.exists()
+    _assert_embedding_matches_markdown(sidecar, markdown)
+    add_commit = _git_show_name_status(corpus, "HEAD~1")
+    assert "lover/embeddings/alpha.bin" in add_commit
+
+
+def test_run_sync_removed_slugless_doc_builds_remove_action_without_sidecars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    corpus = tmp_path / "lovverk"
+    data_dir = tmp_path / "data"
+    legacy_path = corpus / "lover" / "lov-legacy.md"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_text("# Legacy\n", encoding="utf-8")
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "lov-legacy": _current_law_record(
+                xml=_law_with_section("Legacy", "Body."),
+                slug=None,
+                markdown_path="lover/lov-legacy.md",
+                title="Legacy",
+            ),
+        },
+    )
+    captured_actions: list[_DocAction] = []
+
+    def capture_commit(*_args: object, **kwargs: object) -> None:
+        captured_actions.extend(kwargs["actions"])
+
+    monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _path: None)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_needs_sprint5_history_migration",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_needs_sprint8_eu_basis_migration",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_needs_sprint9_embeddings_migration",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert len(captured_actions) == 1
+    action = captured_actions[0]
+    assert action.action == "remove"
+    assert action.slug == "lov-legacy"
+    assert action.paths == (legacy_path,)
+    assert action.sidecar_paths == ()
+    assert not legacy_path.exists()
 
 
 def test_run_sync_writes_all_rename_targets_before_deleting_old_paths(
