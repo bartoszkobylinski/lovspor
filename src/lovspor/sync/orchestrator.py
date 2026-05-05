@@ -46,6 +46,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder
+from lovspor.embeddings.quantize import quantize_int8
+from lovspor.embeddings.sections import iter_sections, strip_frontmatter
+from lovspor.embeddings.store import write_embeddings
 from lovspor.errors import ConfigError
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_history, write_history
@@ -82,6 +86,13 @@ _TRACKED_DATASETS = (
     "gjeldende-sentrale-forskrifter",
 )
 _MANIFEST_FILENAME = "manifest.json"
+_EMBEDDINGS_SUBDIR = "embeddings"
+"""Per-dataset directory holding ``<slug>.bin`` embedding files.
+
+Lives under each ``<dataset>/`` so the existing INDEX, history, and
+Markdown structure is untouched: e.g. ``lover/embeddings/skatteloven-
+sktl.bin`` sits next to ``lover/skatteloven-sktl.md`` and
+``lover/history/skatteloven-sktl.json``."""
 
 
 class SyncReport(BaseModel):
@@ -112,6 +123,18 @@ class _DocAction:
 
     ``doc_id`` lets the post-commit history phase look up the matching
     manifest record without having to re-scan all upstream metadata.
+
+    ``paths`` carries the canonical Markdown paths involved in this
+    action's "move" (length 1 for add / update-no-slug-change /
+    remove; length 2 for rename / update-with-slug-change as
+    ``(old_md, new_md)``). ``_has_rename_path_overlap`` uses this
+    convention to detect cycles.
+
+    ``sidecar_paths`` carries the embedding ``.bin`` files that
+    parallel ``paths``: same length, same order. ``git_add`` stages
+    both lists together so a doc's Markdown and embeddings land in
+    the same commit. Empty when no embedder is configured (sync
+    works without an OpenAI key).
     """
 
     action: str  # "add" | "update" | "rename" | "remove"
@@ -119,10 +142,16 @@ class _DocAction:
     doc_id: str
     slug: str
     paths: tuple[Path, ...]
+    sidecar_paths: tuple[Path, ...] = ()
 
     @property
     def commit_message(self) -> str:
         return f"{self.action}({self.doc_type}): {self.slug}"
+
+    @property
+    def all_paths_to_stage(self) -> tuple[Path, ...]:
+        """All paths to pass to ``git_add`` for this action."""
+        return (*self.paths, *self.sidecar_paths)
 
 
 def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
@@ -172,6 +201,26 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
             datetime.now(UTC),
         )
 
+    # Sprint 9 PR-B2 embeddings backfill: triggers once when any
+    # current record lacks an embedding ``.bin`` sidecar on disk.
+    # Reads existing Markdown from disk (no re-render — embeddings
+    # are derived from the rendered output, not the raw XML), runs
+    # them through the configured embedder, writes one binary file
+    # per doc under ``<dataset>/embeddings/<slug>.bin``, and emits a
+    # single bulk ``migration: backfill embeddings for N documents``
+    # commit BEFORE the regular sync flow runs. Skipped entirely
+    # when no OpenAI key is configured.
+    sprint9_embedder = _load_embedder(settings)
+    if sprint9_embedder is not None and _needs_sprint9_embeddings_migration(
+        prior,
+        settings.lovverk_repo_path,
+    ):
+        _run_sprint9_embeddings_migration(
+            settings,
+            prior,
+            sprint9_embedder,
+        )
+
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
     changes = detect_changes(upstream_hashes, prior)
 
@@ -187,6 +236,7 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
     now = datetime.now(UTC)
     new_records = _carry_unchanged(prior, changes.unchanged)
     actions: list[_DocAction] = []
+    embedder = _load_embedder(settings)
 
     # All paths written by ANY action this sync. The two delete sites
     # below — changed-with-slug-change and the renamed phase 2 —
@@ -200,35 +250,88 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
 
     for doc_id in changes.new:
         upstream_doc = upstream[doc_id]
-        record, path = _write_one(settings, upstream_doc, now)
+        record, paths_written = _write_one(settings, upstream_doc, now, embedder)
+        md_path = paths_written[0]
+        sidecar = tuple(paths_written[1:])
         new_records[doc_id] = record
-        written_paths.add(path)
+        written_paths.add(md_path)
+        written_paths.update(sidecar)
         actions.append(
             _DocAction(
                 action="add",
                 doc_type=record.doc_type,
                 doc_id=doc_id,
                 slug=upstream_doc.slug,
-                paths=(path,),
+                paths=(md_path,),
+                sidecar_paths=sidecar,
             ),
         )
 
+    # The changed and renamed loops both write a new_path then need
+    # to delete an old_path. Per-loop two-phase splits are not enough
+    # — Codex PR #44 round 2 caught a cross-loop variant where a
+    # changed action's old-sidecar delete fires BEFORE a renamed
+    # action's phase 1 writes to the same slot. The fix is to
+    # interleave: do PHASE 1 for both groups (all writes), then
+    # PHASE 2 for both groups (all delete-with-protection + action
+    # build) so ``written_paths`` is fully populated before any
+    # delete-protection check runs.
+    changed_plan: list[tuple[str, Path, Path, tuple[Path, ...], ManifestRecord]] = []
+    rename_plan: list[tuple[str, Path, Path, tuple[Path, ...], ManifestRecord]] = []
+
+    # Phase 1a: write all changed docs.
     for doc_id in changes.changed:
         upstream_doc = upstream[doc_id]
         prior_record = prior.documents[doc_id]
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
-        record, new_path = _write_one(settings, upstream_doc, now)
+        record, paths_written = _write_one(settings, upstream_doc, now, embedder)
+        new_path = paths_written[0]
+        new_sidecar = tuple(paths_written[1:])
         new_records[doc_id] = record
         written_paths.add(new_path)
+        written_paths.update(new_sidecar)
+        changed_plan.append((doc_id, old_path, new_path, new_sidecar, record))
+
+    # Phase 1b: write all renamed docs. Done BEFORE phase 2 of the
+    # changed loop so changed actions' sidecar-delete checks see
+    # the renamed writes.
+    for doc_id in renamed:
+        upstream_doc = upstream[doc_id]
+        prior_record = prior.documents[doc_id]
+        old_path = settings.lovverk_repo_path / prior_record.markdown_path
+        record, paths_written = _write_one(settings, upstream_doc, now, embedder)
+        new_path = paths_written[0]
+        new_sidecar = tuple(paths_written[1:])
+        new_records[doc_id] = record
+        written_paths.add(new_path)
+        written_paths.update(new_sidecar)
+        rename_plan.append((doc_id, old_path, new_path, new_sidecar, record))
+
+    # Phase 2a: changed-action deletes + action build. ``written_paths``
+    # now reflects every write from new + changed + rename loops, so
+    # any old_path that another action took over is correctly skipped.
+    for doc_id, old_path, new_path, new_sidecar, record in changed_plan:
+        upstream_doc = upstream[doc_id]
+        prior_record = prior.documents[doc_id]
         paths: tuple[Path, ...]
+        sidecar_paths: tuple[Path, ...]
         if old_path != new_path:
-            # Skip delete when another action has written (or will
-            # write) here; deleting would wipe their content.
             if old_path not in written_paths:
                 delete_document(old_path)
             paths = (old_path, new_path)
+            old_sidecar = _maybe_delete_old_embeddings(
+                settings.lovverk_repo_path,
+                prior_record.source_dataset,
+                prior_record.slug or "",
+                written_paths,
+            )
+            sidecar_paths = (
+                *((old_sidecar,) if old_sidecar is not None else ()),
+                *new_sidecar,
+            )
         else:
             paths = (new_path,)
+            sidecar_paths = new_sidecar
         actions.append(
             _DocAction(
                 action="update",
@@ -236,42 +339,30 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
                 doc_id=doc_id,
                 slug=upstream_doc.slug,
                 paths=paths,
+                sidecar_paths=sidecar_paths,
             ),
         )
 
-    # Renames are processed in two phases to prevent path-cascade
-    # corruption: when one doc's new_path equals another doc's old_path
-    # (slug swap, or cyclic slug shuffle when collision-resolution
-    # assignments shift), the naive delete-then-write loop has the
-    # second iteration's delete wipe out the first iteration's write.
-    # Production crash 2026-04-30 in CI:
-    #   git add lover/vass-og-avlopsanleggslova.md exited 128:
-    #   pathspec did not match any files
-    # Triggered by two acts cycling between bare slug and -2 suffix.
-    #
-    # Phase 1: write all new_paths (writes are safe — upstream content
-    # is fully in memory, no need for old disk content). Each written
-    # path joins ``written_paths`` so the changed loop's earlier delete
-    # path-protection extends here too.
-    # Phase 2: delete old_paths that are NOT reused as ANY action's
-    # new_path. The set already includes new + changed + rename
-    # writes, so update→rename collisions (Codex PR #43 round 1) are
-    # also caught.
-    rename_plan: list[tuple[str, Path, Path, ManifestRecord]] = []
-    for doc_id in renamed:
-        upstream_doc = upstream[doc_id]
-        prior_record = prior.documents[doc_id]
-        old_path = settings.lovverk_repo_path / prior_record.markdown_path
-        record, new_path = _write_one(settings, upstream_doc, now)
-        new_records[doc_id] = record
-        written_paths.add(new_path)
-        rename_plan.append((doc_id, old_path, new_path, record))
-
-    for _, old_path, _, _ in rename_plan:
+    # Phase 2b: rename old-Markdown deletes (skip-if-reused) + action
+    # build with protected sidecar deletes. Mirrors the changed
+    # branch, but kept distinct because rename has no "slug-same"
+    # subcase — every rename has paths=(old, new).
+    for _, old_path, _, _, _ in rename_plan:
         if old_path not in written_paths:
             delete_document(old_path)
 
-    for doc_id, old_path, new_path, record in rename_plan:
+    for doc_id, old_path, new_path, new_sidecar, record in rename_plan:
+        prior_record = prior.documents[doc_id]
+        old_sidecar = _maybe_delete_old_embeddings(
+            settings.lovverk_repo_path,
+            prior_record.source_dataset,
+            prior_record.slug or "",
+            written_paths,
+        )
+        sidecar_paths = (
+            *((old_sidecar,) if old_sidecar is not None else ()),
+            *new_sidecar,
+        )
         actions.append(
             _DocAction(
                 action="rename",
@@ -279,6 +370,7 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
                 doc_id=doc_id,
                 slug=upstream[doc_id].slug,
                 paths=(old_path, new_path),
+                sidecar_paths=sidecar_paths,
             ),
         )
 
@@ -286,6 +378,22 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
         prior_record = prior.documents[doc_id]
         path = _delete_one(settings, prior, doc_id)
         new_records[doc_id] = _tombstone(prior_record)
+        # Delete the embedding sidecar so the corpus stays consistent
+        # — a removed doc has no replacement so there is no path
+        # protection to consider here. ``_delete_embeddings`` returns
+        # None when nothing existed (sync without a key), so we only
+        # add the path to ``sidecar_paths`` when a real deletion
+        # happened.
+        remove_sidecar: tuple[Path, ...]
+        if prior_record.slug is not None:
+            old_sidecar = _delete_embeddings(
+                settings.lovverk_repo_path,
+                prior_record.source_dataset,
+                prior_record.slug,
+            )
+            remove_sidecar = (old_sidecar,) if old_sidecar is not None else ()
+        else:
+            remove_sidecar = ()
         actions.append(
             _DocAction(
                 action="remove",
@@ -293,6 +401,7 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
                 doc_id=doc_id,
                 slug=prior_record.slug or doc_id,
                 paths=(path,),
+                sidecar_paths=remove_sidecar,
             ),
         )
 
@@ -417,7 +526,23 @@ def _write_one(
     settings: Settings,
     upstream: _UpstreamDoc,
     now: datetime,
-) -> tuple[ManifestRecord, Path]:
+    embedder: EmbeddingModel | None = None,
+) -> tuple[ManifestRecord, list[Path]]:
+    """Render the Markdown for a doc and (when ``embedder`` is provided)
+    write its sidecar embeddings binary.
+
+    Returns ``(record, paths)`` where ``paths`` is the list of files
+    created on disk: always the Markdown file, plus the embeddings
+    file when ``embedder`` is non-None. Callers stage every entry of
+    ``paths`` with ``git_add`` so the embedded sidecar lands in the
+    same commit as the rendered Markdown.
+
+    Sprint 5 / Sprint 8 migration paths call without an embedder
+    (their re-render purpose is unrelated to embeddings); the Sprint 9
+    backfill migration has its own dedicated helper that reads
+    Markdown back from disk and computes embeddings without
+    re-rendering.
+    """
     path = document_path(
         settings.lovverk_repo_path,
         upstream.source_dataset,
@@ -432,7 +557,20 @@ def _write_one(
         source_dataset=upstream.source_dataset,
         retrieved_at=now,
     )
-    write_document(path, render_full_document(upstream.xml_bytes, context))
+    rendered = render_full_document(upstream.xml_bytes, context)
+    write_document(path, rendered)
+
+    written_paths: list[Path] = [path]
+    if embedder is not None:
+        embed_path = _write_embeddings_for_doc(
+            settings.lovverk_repo_path,
+            upstream.source_dataset,
+            upstream.slug,
+            rendered,
+            embedder,
+        )
+        written_paths.append(embed_path)
+
     record = ManifestRecord(
         doc_type=doc_type,
         xml_hash=upstream.xml_hash,
@@ -444,7 +582,111 @@ def _write_one(
         title=upstream.title,
         eu_basis=list(upstream.eu_basis),
     )
-    return record, path
+    return record, written_paths
+
+
+def _load_embedder(settings: Settings) -> EmbeddingModel | None:
+    """Return an ``OpenAIEmbedder`` when an API key is configured, else ``None``.
+
+    ``None`` means embeddings are skipped for this sync — the engine
+    still produces Markdown and runs the rest of the pipeline
+    normally. The only casualty is that the ``semantic_search`` MCP
+    tool will not have up-to-date vectors for documents added or
+    changed in this run; the next sync with a key set picks them up
+    via the Sprint 9 backfill migration.
+    """
+    if not settings.openai_api_key:
+        return None
+    return OpenAIEmbedder(api_key=settings.openai_api_key)
+
+
+def _embeddings_path(corpus_root: Path, dataset: str, slug: str) -> Path:
+    """Resolve the on-disk ``.bin`` path for a doc's embeddings."""
+    return dataset_dir(corpus_root, dataset) / _EMBEDDINGS_SUBDIR / f"{slug}.bin"
+
+
+def _write_embeddings_for_doc(
+    corpus_root: Path,
+    dataset: str,
+    slug: str,
+    rendered_markdown: str,
+    embedder: EmbeddingModel,
+) -> Path:
+    """Compute and write embeddings for one document.
+
+    Parses sections out of the rendered Markdown (frontmatter +
+    leading H1 stripped, ``### §`` headings split into units), encodes
+    them with the model, int8-quantizes, and writes one binary file.
+    Returns the written path.
+
+    A doc with zero embedding-eligible sections (very short act with
+    only chapter headers, or a malformed render) gets an empty file
+    with a valid header. Empty is intentional — it lets the
+    existence check in ``_needs_sprint9_embeddings_migration`` flip
+    to False and stop re-triggering on every sync.
+    """
+    body = strip_frontmatter(rendered_markdown)
+    sections = iter_sections(body)
+    path = _embeddings_path(corpus_root, dataset, slug)
+    if not sections:
+        write_embeddings(path, [], scale=1.0)
+        return path
+    texts = [s.text for s in sections]
+    matrix = embedder.encode(texts)
+    quantized, scale = quantize_int8(matrix)
+    pairs = [(s.section_id, quantized[i]) for i, s in enumerate(sections)]
+    write_embeddings(path, pairs, scale)
+    return path
+
+
+def _delete_embeddings(corpus_root: Path, dataset: str, slug: str) -> Path | None:
+    """Remove a doc's embedding sidecar if it exists.
+
+    Returns the path so the caller can stage the deletion, or ``None``
+    when the sidecar never existed (e.g., a sync without an OpenAI
+    key configured). Returning ``None`` lets callers omit the path
+    from ``git_add`` and avoid the ``pathspec did not match any
+    files`` error on untracked + absent paths.
+
+    For removed-doc deletions there is no path-collision risk (the
+    doc has no replacement), so this helper does not consult
+    ``written_paths``. Callers that DO need the protection (changed
+    or renamed actions reusing a sidecar slot) must use
+    :func:`_maybe_delete_old_embeddings` instead.
+    """
+    path = _embeddings_path(corpus_root, dataset, slug)
+    if not path.exists():
+        return None
+    delete_document(path)
+    return path
+
+
+def _maybe_delete_old_embeddings(
+    corpus_root: Path,
+    dataset: str,
+    slug: str,
+    written_paths: set[Path],
+) -> Path | None:
+    """Delete an old embedding sidecar unless another action has just
+    written to the same path.
+
+    Mirrors the ``written_paths`` protection that the changed and
+    renamed Markdown delete sites already use (see PR #43 hotfix).
+    Without this check, a slug swap between two docs would delete
+    the very sidecar that the other rename's phase 1 just wrote.
+    Codex PR #44 round 1 reproducer; same root cause class as the
+    production crash 2026-04-30.
+
+    Returns the deleted path (caller stages the removal via
+    ``git_add``), or ``None`` when no deletion happened — either
+    the sidecar was absent or it was protected because another
+    action owns the slot now.
+    """
+    path = _embeddings_path(corpus_root, dataset, slug)
+    if not path.exists() or path in written_paths:
+        return None
+    delete_document(path)
+    return path
 
 
 def _delete_one(
@@ -635,7 +877,7 @@ def _commit_per_doc_actions_only(
     caller does the final commit after generating history (which needs
     these per-doc commits to exist before ``git log`` can see them)."""
     for action in actions:
-        git_add(repo, list(action.paths))
+        git_add(repo, list(action.all_paths_to_stage))
         if has_staged_changes(repo):
             git_commit_msg(repo, action.commit_message)
 
@@ -646,7 +888,7 @@ def _commit_bulk(
     extra_paths: list[Path],
     message: str,
 ) -> None:
-    all_paths = [p for action in actions for p in action.paths]
+    all_paths = [p for action in actions for p in action.all_paths_to_stage]
     all_paths.extend(extra_paths)
     git_add(repo, all_paths)
     if not has_staged_changes(repo):  # pragma: no cover - defensive
@@ -822,9 +1064,14 @@ def _run_sprint8_eu_basis_migration(
             # old file gets deleted; otherwise we'd orphan it.
             new_records[doc_id] = record
             continue
-        new_record, path = _write_one(settings, upstream_doc, now)
+        # Sprint 8 migration intentionally does NOT compute embeddings
+        # here. Sprint 9 has its own dedicated backfill path that
+        # reads Markdown back from disk; mixing the two would slow
+        # the eu_basis re-render and would fail entirely if no
+        # OpenAI key is configured.
+        new_record, paths_written = _write_one(settings, upstream_doc, now)
         new_records[doc_id] = new_record
-        written_paths.append(path)
+        written_paths.append(paths_written[0])
     if not written_paths:
         return prior
     new_manifest = Manifest(generated_at=now, documents=new_records)
@@ -836,6 +1083,72 @@ def _run_sprint8_eu_basis_migration(
             f"migration: backfill eu_basis for {len(written_paths)} documents",
         )
     return new_manifest
+
+
+def _needs_sprint9_embeddings_migration(prior: Manifest, repo_path: Path) -> bool:
+    """True if any current record lacks its ``<slug>.bin`` sidecar on disk.
+
+    Triggers once on the first sync after Sprint 9 PR-B2 ships with a
+    configured OpenAI key. The migration reads existing Markdown,
+    computes embeddings, and writes the binary files. After it
+    completes every current record has its sidecar; subsequent
+    syncs see all sidecars present and skip this branch.
+
+    Tombstones (``status='removed'``) and slug-less records are
+    skipped — their files don't exist and the legacy schema is the
+    Sprint 4 rename migration's concern.
+    """
+    for record in prior.documents.values():
+        if record.status != "current" or record.slug is None:
+            continue
+        if not _embeddings_path(repo_path, record.source_dataset, record.slug).exists():
+            return True
+    return False
+
+
+def _run_sprint9_embeddings_migration(
+    settings: Settings,
+    prior: Manifest,
+    embedder: EmbeddingModel,
+) -> None:
+    """Backfill embedding sidecars for every current doc that lacks one.
+
+    Reads existing Markdown from disk and computes embeddings without
+    re-rendering. The Markdown is unchanged so the manifest is also
+    unchanged (no ``Manifest`` rewrite, no INDEX update). One bulk
+    commit records every newly-written sidecar.
+    """
+    repo = settings.lovverk_repo_path
+    written: list[Path] = []
+    for record in prior.documents.values():
+        if record.status != "current" or record.slug is None:
+            continue
+        embed_path = _embeddings_path(repo, record.source_dataset, record.slug)
+        if embed_path.exists():
+            continue
+        markdown_path = repo / record.markdown_path
+        if not markdown_path.exists():
+            # Stale manifest entry — record claims a Markdown file
+            # that is missing on disk. Skip rather than raise; the
+            # next regular sync flow will surface the inconsistency.
+            continue
+        rendered = markdown_path.read_text(encoding="utf-8")
+        new_path = _write_embeddings_for_doc(
+            repo,
+            record.source_dataset,
+            record.slug,
+            rendered,
+            embedder,
+        )
+        written.append(new_path)
+    if not written:
+        return
+    git_add(repo, written)
+    if has_staged_changes(repo):
+        git_commit_msg(
+            repo,
+            f"migration: backfill embeddings for {len(written)} documents",
+        )
 
 
 def _migration_message(actions: list[_DocAction]) -> str:
