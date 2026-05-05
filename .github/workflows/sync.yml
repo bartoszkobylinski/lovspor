@@ -31,10 +31,10 @@ jobs:
       LOVSPOR_OUTPUT_REPO_PATH: ${{ github.workspace }}/../lovverk
     steps:
       - name: Checkout lovspor (engine)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.10.0"
           enable-cache: true
