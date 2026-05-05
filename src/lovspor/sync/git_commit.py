@@ -62,6 +62,20 @@ def add(repo: Path, paths: Sequence[Path | str]) -> None:
     may be relative (e.g. ``Path("./lovverk")``); it is resolved to
     absolute before computing the relative-to comparison so that
     relative-repo + absolute-path combinations work correctly.
+
+    Orphan paths — those that are neither on disk nor tracked in the
+    current ``HEAD`` — are silently dropped. This is robust
+    engineering against state inconsistency: previous syncs that
+    crashed mid-way can leave the manifest claiming a path that no
+    longer exists in the working tree or the index. Without this
+    filter, the next sync's per-doc commit fails with
+    ``pathspec 'X' did not match any files`` and the corpus stays
+    stuck. The filter lets the sync make forward progress and the
+    inconsistency self-heals through subsequent action passes.
+    Production crash 2026-05-05 (third occurrence in the
+    path-cascade class) was the orphan-path variant; PR #45's
+    universal collision detector handles within-sync collisions but
+    cannot remediate manifest-vs-tree drift left by prior crashes.
     """
     if not paths:
         return
@@ -73,7 +87,36 @@ def add(repo: Path, paths: Sequence[Path | str]) -> None:
             rel.append(str(path.relative_to(repo_abs)))
         else:
             rel.append(str(path))
+    rel = _drop_orphan_paths(repo_abs, rel)
+    if not rel:
+        return
     _run(["add", "--", *rel], cwd=repo)
+
+
+def _drop_orphan_paths(repo_abs: Path, rel_paths: list[str]) -> list[str]:
+    """Return only paths that are either present on disk or tracked
+    in the current HEAD. Orphan references (manifest claims them but
+    they are gone from both the working tree and the index) are
+    dropped — staging them would crash with ``pathspec did not match
+    any files``.
+
+    Real ``git ls-files`` failures (e.g. ``repo_abs`` is not a git
+    repository, or git itself errors) propagate as
+    :class:`GitCommandError` via :func:`_run` — silently swallowing
+    them would mask configuration problems behind a no-op ``add``.
+    Plain ``ls-files`` (no ``--error-unmatch``) is used so unknown
+    paths produce empty output rather than a non-zero exit, letting
+    the orphan filter do its job in the success path.
+    """
+    if not rel_paths:
+        return rel_paths
+    result = _run(["ls-files", "--", *rel_paths], cwd=repo_abs)
+    tracked = set(result.stdout.splitlines())
+    kept: list[str] = []
+    for p in rel_paths:
+        if p in tracked or (repo_abs / p).exists():
+            kept.append(p)
+    return kept
 
 
 def has_staged_changes(repo: Path) -> bool:

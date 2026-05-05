@@ -74,9 +74,66 @@ def test_add_handles_relative_repo_with_absolute_file(
     assert has_staged_changes(relative_repo)
 
 
-def test_add_raises_git_command_error_on_unknown_path(repo: Path) -> None:
-    with pytest.raises(GitCommandError, match="exited"):
-        add(repo, ["does-not-exist.txt"])
+def test_add_silently_drops_orphan_paths(repo: Path) -> None:
+    """A path that exists in neither the working tree nor HEAD is dropped
+    instead of raising. Production crash 2026-05-05 (third occurrence in
+    the path-cascade class) was a manifest-vs-tree drift left by a prior
+    crashed sync — the manifest still claimed a markdown_path but the
+    file was gone from both the index and HEAD. Old behavior: ``git add``
+    surfaced ``pathspec did not match`` and the corpus got stuck. New
+    behavior: orphan paths are filtered before the add invocation so the
+    sync makes forward progress and the inconsistency self-heals."""
+    add(repo, ["does-not-exist.txt"])
+    assert not has_staged_changes(repo)
+
+
+def test_add_stages_existing_path_when_mixed_with_orphan_path(repo: Path) -> None:
+    (repo / "kept.txt").write_text("keep")
+
+    add(repo, ["kept.txt", "does-not-exist.txt"])
+
+    status = status_porcelain(repo)
+    assert "kept.txt" in status
+    assert "does-not-exist.txt" not in status
+
+
+def test_add_stages_deletion_for_tracked_missing_path(repo: Path) -> None:
+    tracked = repo / "tracked.txt"
+    tracked.write_text("tracked")
+    add(repo, ["tracked.txt"])
+    commit(repo, "seed tracked file")
+    tracked.unlink()
+
+    add(repo, ["tracked.txt"])
+
+    assert status_porcelain(repo) == "D  tracked.txt\n"
+
+
+def test_add_stages_deletion_for_dash_prefixed_tracked_path(repo: Path) -> None:
+    tracked = repo / "-tracked.txt"
+    tracked.write_text("tracked")
+    add(repo, ["-tracked.txt"])
+    commit(repo, "seed dash-prefixed file")
+    tracked.unlink()
+
+    add(repo, ["-tracked.txt"])
+
+    assert status_porcelain(repo) == "D  -tracked.txt\n"
+
+
+def test_add_drops_absolute_orphan_path_inside_repo(repo: Path) -> None:
+    add(repo, [repo / "missing-absolute.txt"])
+
+    assert not has_staged_changes(repo)
+
+
+def test_add_raises_git_command_error_when_repo_is_not_git_repo(tmp_path: Path) -> None:
+    with pytest.raises(GitCommandError) as exc_info:
+        add(tmp_path, ["missing.txt"])
+
+    message = str(exc_info.value)
+    assert "ls-files" in message
+    assert "exited" in message
 
 
 def test_has_staged_changes_false_on_clean_repo(repo: Path) -> None:
@@ -200,15 +257,15 @@ def test_push_defaults_to_main_branch(tmp_path: Path) -> None:
 
 
 def test_push_raises_on_unknown_remote(repo: Path) -> None:
+    """``push`` surfaces git's stderr in the raised ``GitCommandError`` so the
+    operator can see *why* the push failed (this is the canonical witness
+    for the ``_run`` stderr-inclusion contract — when ``add`` used to fail
+    on missing paths, that was the original witness; orphan-path filtering
+    moved the witness here)."""
     (repo / "a.txt").write_text("hi")
     add(repo, ["a.txt"])
     commit(repo, "init")
-    with pytest.raises(GitCommandError, match="exited"):
-        push(repo, remote="missing-remote", branch="main")
-
-
-def test_command_error_includes_stderr_in_message(repo: Path) -> None:
-    """Surface git's stderr so the operator can see why the command failed."""
     with pytest.raises(GitCommandError) as exc_info:
-        add(repo, ["completely-missing.txt"])
-    assert "completely-missing.txt" in str(exc_info.value)
+        push(repo, remote="missing-remote", branch="main")
+    assert "exited" in str(exc_info.value)
+    assert "missing-remote" in str(exc_info.value)
