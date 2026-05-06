@@ -923,20 +923,88 @@ def test_semantic_search_continues_after_wrong_dimension_file(
     assert rows[0]["section_id"] == "2"
 
 
+@pytest.mark.parametrize("stale_count", [1, 2])
 def test_semantic_search_raises_when_all_embedding_files_have_wrong_dimension(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    stale_count: int,
 ) -> None:
-    _seed_corpus(tmp_path, {"nl-1": _record(slug="legacy", title="Legacy")})
-    _write_embedding_file(tmp_path, "lover", "legacy", [("1", [10, 0])])
+    records = {
+        f"nl-{idx}": _record(slug=f"legacy-{idx}", title=f"Legacy {idx}")
+        for idx in range(1, stale_count + 1)
+    }
+    _seed_corpus(tmp_path, records)
+    for idx in range(1, stale_count + 1):
+        _write_embedding_file(
+            tmp_path,
+            "lover",
+            f"legacy-{idx}",
+            [(str(idx), [10, 0])],
+        )
 
-    with pytest.raises(CorpusNotFoundError, match=r"all 1 \.bin file"):
+    expected_message = (
+        f"no usable embeddings: all {stale_count} .bin file(s) are from an older "
+        "model with a different dim. The corpus needs to be re-embedded — run "
+        "'lovspor sync' (which will overwrite every .bin with the current model), "
+        "then 'git pull' in the corpus to refresh."
+    )
+    with pytest.raises(CorpusNotFoundError, match=rf"all {stale_count} \.bin file") as exc_info:
         CorpusReader(
             tmp_path,
             embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
         ).semantic_search("query")
 
-    assert "skipping legacy.bin with dim 2" in capsys.readouterr().err
+    assert str(exc_info.value) == expected_message
+    stderr = capsys.readouterr().err
+    for idx in range(1, stale_count + 1):
+        assert f"skipping legacy-{idx}.bin with dim 2" in stderr
+
+
+def test_semantic_search_no_embedding_files_uses_bootstrap_message(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
+
+    assert reader._stale_bin_count == 0
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        reader.semantic_search("query")
+
+    message = str(exc_info.value)
+    assert "no embeddings found in corpus" in message
+    assert "populate per-document .bin files" in message
+    assert "older model" not in message
+    assert reader._stale_bin_count == 0
+
+
+def test_semantic_search_reuses_cached_embedding_index_and_stale_count(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="legacy", title="Legacy"),
+            "nl-2": _record(slug="current", title="Current"),
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "legacy", [("1", [10, 0])])
+    current_path = tmp_path / "lover" / "embeddings" / "current.bin"
+    _write_embedding_file(tmp_path, "lover", "current", [("2", [10, 0, 0])])
+    embedder = _FakeEmbedder([1.0, 0.0, 0.0])
+    reader = CorpusReader(tmp_path, embedder=embedder)
+
+    first_rows = reader.semantic_search("first")
+    assert [row["slug"] for row in first_rows] == ["current"]
+    assert first_rows[0]["section_id"] == "2"
+    assert reader._stale_bin_count == 1
+
+    current_path.unlink()
+    second_rows = reader.semantic_search("second")
+
+    assert [row["slug"] for row in second_rows] == ["current"]
+    assert second_rows[0]["section_id"] == "2"
+    assert reader._stale_bin_count == 1
+    assert embedder.queries == ["first", "second"]
 
 
 def test_semantic_search_empty_query_and_zero_limit_return_empty(tmp_path: Path) -> None:
