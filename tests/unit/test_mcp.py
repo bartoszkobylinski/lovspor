@@ -13,8 +13,10 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pytest
 
+from lovspor.embeddings import write_embeddings
 from lovspor.mcp import (
     CorpusNotFoundError,
     CorpusReader,
@@ -100,6 +102,35 @@ def _seed_corpus(
                 ),
                 encoding="utf-8",
             )
+
+
+class _FakeEmbedder:
+    def __init__(self, vector: list[float]) -> None:
+        self.vector = np.asarray(vector, dtype=np.float32)
+        self.queries: list[str] = []
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        self.queries.extend(texts)
+        return np.asarray([self.vector for _ in texts], dtype=np.float32)
+
+    def get_dimension(self) -> int:
+        return int(self.vector.shape[0])
+
+
+def _write_embedding_file(
+    root: Path,
+    dataset_subdir: str,
+    slug: str,
+    sections: list[tuple[str, list[int]]],
+    *,
+    scale: float = 1.0,
+) -> None:
+    write_embeddings(
+        root / dataset_subdir / "embeddings" / f"{slug}.bin",
+        [(section_id, np.asarray(vector, dtype=np.int8)) for section_id, vector in sections],
+        scale=scale,
+        dim=len(sections[0][1]) if sections else 3,
+    )
 
 
 # ---------- CorpusReader construction ----------
@@ -712,6 +743,220 @@ def test_search_body_ignores_frontmatter_and_title_heading(tmp_path: Path) -> No
     assert reader.search_body("Skatteloven") == []
 
 
+# ---------- semantic_search ----------
+
+
+def test_semantic_search_requires_embedder(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+
+    with pytest.raises(CorpusNotFoundError, match="OPENAI_API_KEY"):
+        CorpusReader(tmp_path).semantic_search("bolig")
+
+
+def test_semantic_search_returns_ranked_hits_with_metadata(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="husleieloven", title="Husleieloven"),
+            "nl-2": _record(slug="skatteloven", title="Skatteloven"),
+        },
+    )
+    _write_embedding_file(
+        tmp_path,
+        "lover",
+        "husleieloven",
+        [("2-10", [10, 0, 0])],
+    )
+    _write_embedding_file(
+        tmp_path,
+        "lover",
+        "skatteloven",
+        [("5-12", [0, 10, 0])],
+    )
+    embedder = _FakeEmbedder([1.0, 0.0, 0.0])
+
+    rows = CorpusReader(tmp_path, embedder=embedder).semantic_search("leierettigheter")
+
+    assert embedder.queries == ["leierettigheter"]
+    assert rows[0] == {
+        "slug": "husleieloven",
+        "section_id": "2-10",
+        "score": 1.0,
+        "title": "Husleieloven",
+        "dataset": "lover",
+        "citation_hint": "§ 2-10 husleieloven",
+    }
+    assert rows[1]["slug"] == "skatteloven"
+    assert rows[1]["score"] == 0.0
+
+
+def test_semantic_search_filters_by_dataset(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="lovact", title="Lov"),
+            "sf-1": _record(
+                slug="forskact",
+                title="Forskrift",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "lovact", [("1", [10, 0, 0])])
+    _write_embedding_file(tmp_path, "forskrifter", "forskact", [("2", [10, 0, 0])])
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
+
+    assert [r["slug"] for r in reader.semantic_search("common", dataset="lover")] == ["lovact"]
+    assert [r["slug"] for r in reader.semantic_search("common", dataset="forskrifter")] == [
+        "forskact",
+    ]
+
+
+def test_semantic_search_raises_when_no_embeddings_found(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+
+    with pytest.raises(CorpusNotFoundError, match="no embeddings found"):
+        CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0])).semantic_search("query")
+
+
+def test_semantic_search_rejects_unknown_dataset(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    _write_embedding_file(tmp_path, "lover", "x", [("1", [10, 0, 0])])
+
+    with pytest.raises(CorpusNotFoundError, match="unknown dataset"):
+        CorpusReader(
+            tmp_path,
+            embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+        ).semantic_search("query", dataset="bogus")
+
+
+def test_semantic_search_does_not_call_embedder_when_dataset_filter_has_no_hits(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    _write_embedding_file(tmp_path, "lover", "x", [("1", [10, 0, 0])])
+    embedder = _FakeEmbedder([1.0, 0.0, 0.0])
+
+    assert (
+        CorpusReader(tmp_path, embedder=embedder).semantic_search(
+            "query",
+            dataset="forskrifter",
+        )
+        == []
+    )
+    assert embedder.queries == []
+
+
+def test_semantic_search_skips_corrupt_embedding_files(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="bad", title="Bad"),
+            "nl-2": _record(slug="good", title="Good"),
+        },
+    )
+    bad_path = tmp_path / "lover" / "embeddings" / "bad.bin"
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_bytes(b"not an embedding file")
+    _write_embedding_file(tmp_path, "lover", "good", [("1", [10, 0, 0])])
+
+    rows = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("query")
+
+    assert [r["slug"] for r in rows] == ["good"]
+    assert "skipping corrupt bad.bin" in capsys.readouterr().err
+
+
+def test_semantic_search_skips_embedding_files_with_wrong_dimension(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="current", title="Current"),
+            "nl-2": _record(slug="legacy", title="Legacy"),
+        },
+    )
+    good_vector = [10] + [0] * 3071
+    _write_embedding_file(tmp_path, "lover", "current", [("1", good_vector)])
+    _write_embedding_file(tmp_path, "lover", "legacy", [("2", [10, 0])])
+
+    rows = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0] + [0.0] * 3071),
+    ).semantic_search("query")
+
+    assert [r["slug"] for r in rows] == ["current"]
+    assert rows[0]["section_id"] == "1"
+    stderr = capsys.readouterr().err
+    assert "skipping legacy.bin with dim 2" in stderr
+    assert "embedder expects 3072" in stderr
+    assert "file is from an older model and will be re-embedded on next sync" in stderr
+    assert stderr.rstrip().endswith("next sync")
+
+
+def test_semantic_search_continues_after_wrong_dimension_file(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="legacy", title="Legacy"),
+            "nl-2": _record(slug="current", title="Current"),
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "legacy", [("1", [10, 0])])
+    _write_embedding_file(tmp_path, "lover", "current", [("2", [10, 0, 0])])
+
+    rows = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("query")
+
+    assert [r["slug"] for r in rows] == ["current"]
+    assert rows[0]["section_id"] == "2"
+
+
+def test_semantic_search_raises_when_all_embedding_files_have_wrong_dimension(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="legacy", title="Legacy")})
+    _write_embedding_file(tmp_path, "lover", "legacy", [("1", [10, 0])])
+
+    with pytest.raises(CorpusNotFoundError, match=r"all 1 \.bin file"):
+        CorpusReader(
+            tmp_path,
+            embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+        ).semantic_search("query")
+
+    assert "skipping legacy.bin with dim 2" in capsys.readouterr().err
+
+
+def test_semantic_search_empty_query_and_zero_limit_return_empty(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
+
+    assert reader.semantic_search("") == []
+    assert reader.semantic_search("query", limit=0) == []
+
+
+def test_semantic_search_rejects_negative_limit(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+
+    with pytest.raises(ValueError, match="limit must be non-negative"):
+        CorpusReader(
+            tmp_path,
+            embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+        ).semantic_search("query", limit=-1)
+
+
 # ---------- get_section ----------
 
 
@@ -1190,6 +1435,90 @@ def test_search_body_match_count_is_non_overlapping(tmp_path: Path) -> None:
     assert rows[0]["match_count"] == 2
 
 
+# ---------- verify_quote ----------
+
+
+def test_verify_quote_accepts_case_and_whitespace_differences(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={
+            "skatteloven": (
+                "## Kapittel 1.\n\n"
+                "### § 1-1. Virkeområde\n\n"
+                "Dette er første\nlinje med tekst.\n\n"
+                "### § 1-2. Annet\n\nAndre regler.\n"
+            ),
+        },
+    )
+
+    result = CorpusReader(tmp_path).verify_quote(
+        "skatteloven",
+        "1-1",
+        "DETTE er første linje med tekst.",
+    )
+
+    assert result == {
+        "verified": True,
+        "slug": "skatteloven",
+        "section_id": "1-1",
+        "reason": None,
+    }
+
+
+def test_verify_quote_rejects_text_from_different_section(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={
+            "skatteloven": (
+                "## Kapittel 1.\n\n"
+                "### § 1-1. Virkeområde\n\n"
+                "Riktig tekst.\n\n"
+                "### § 1-2. Annet\n\n"
+                "Tekst fra annen paragraf.\n"
+            ),
+        },
+    )
+
+    result = CorpusReader(tmp_path).verify_quote(
+        "skatteloven",
+        "1-1",
+        "Tekst fra annen paragraf.",
+    )
+
+    assert result["verified"] is False
+    assert "quote not found" in result["reason"]
+
+
+def test_verify_quote_empty_quote_returns_false(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+
+    result = CorpusReader(tmp_path).verify_quote("x", "1", "  ")
+
+    assert result == {
+        "verified": False,
+        "slug": "x",
+        "section_id": "1",
+        "reason": "quote is empty",
+    }
+
+
+def test_verify_quote_unknown_section_returns_false_with_reason(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "## Kapittel 1.\n\n### § 1-1. Virkeområde\n\nTekst.\n"},
+    )
+
+    result = CorpusReader(tmp_path).verify_quote("skatteloven", "9-9", "Tekst.")
+
+    assert result["verified"] is False
+    assert result["slug"] == "skatteloven"
+    assert result["section_id"] == "9-9"
+    assert "section '9-9' not found" in result["reason"]
+
+
 # ---------- corpus_status ----------
 
 
@@ -1459,7 +1788,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_ten_tools(tmp_path: Path) -> None:
+def test_build_server_registers_twelve_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -1474,7 +1803,9 @@ def test_build_server_registers_ten_tools(tmp_path: Path) -> None:
             "list_recent_changes",
             "search_laws",
             "search_body",
+            "semantic_search",
             "validate_citation",
+            "verify_quote",
             "get_eu_basis",
             "search_eu_implementations",
             "corpus_status",

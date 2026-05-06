@@ -1,6 +1,6 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles ten read-only tools over a local clone of the lovverk Markdown
+Bundles twelve read-only tools over a local clone of the lovverk Markdown
 corpus (produced by the lovspor sync engine). Each tool answers a class
 of question an AI agent would naturally ask about Norwegian law:
 
@@ -10,7 +10,9 @@ of question an AI agent would naturally ask about Norwegian law:
     list_recent_changes(...)            -> "Which laws changed last week?"
     search_laws(query, ...)             -> "Are there laws about jernbane?" (metadata)
     search_body(query, ...)             -> "Which laws mention boligkjøpsmodeller?"
+    semantic_search(query, ...)         -> "Which sections are about renter rights?"
     validate_citation(citation)         -> "Does '§ 5-12 skatteloven' actually exist?"
+    verify_quote(slug, section, quote)  -> "Did this section actually say that?"
     get_eu_basis(slug)                  -> "Which EU dirs does Personopplysningsloven implement?"
     search_eu_implementations(celex)    -> "Which Norwegian laws implement GDPR?"
     corpus_status()                     -> "Is my local corpus current?"
@@ -32,15 +34,19 @@ inputs accept either form and normalize internally.
 """
 
 import json
+import os
 import re
 import shlex
 import subprocess
+import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from mcp.server.fastmcp import FastMCP
 
+from lovspor.embeddings import EmbeddingModel, OpenAIEmbedder, read_embeddings, top_k_cosine
 from lovspor.errors import LovsporError
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 
@@ -126,7 +132,11 @@ class CorpusReader:
     short-lived (one launch per MCP client session).
     """
 
-    def __init__(self, corpus_path: Path) -> None:
+    def __init__(
+        self,
+        corpus_path: Path,
+        embedder: EmbeddingModel | None = None,
+    ) -> None:
         if not corpus_path.exists():
             raise CorpusNotFoundError(
                 f"corpus path does not exist: {corpus_path}",
@@ -137,12 +147,34 @@ class CorpusReader:
                 f"corpus path is missing manifest.json: {corpus_path}",
             )
         self.corpus_path = corpus_path
+        self._embedder = embedder
+        # Pin the expected embedding dimension at construction time so
+        # _load_embedding_index can drop .bin files written by an older
+        # model (different dim). Without this filter top_k_cosine would
+        # raise ``shapes not aligned`` deep inside numpy when the query
+        # vector and a stale .bin disagree on dim, taking the whole
+        # search down for one orphan file from a prior model migration.
+        self._expected_dim: int | None = embedder.get_dimension() if embedder else None
         self._manifest: Manifest | None = None
         # Body-text index for search_body; lazy-loaded on first call so
         # MCP server startup stays fast for clients that only query
         # metadata. ~45 MB resident once populated for the production
         # 4522-doc corpus — acceptable for a long-lived stdio process.
         self._body_index: dict[str, str] | None = None
+        # Per-section int8 embedding index for semantic_search; lazy-
+        # loaded on first call. ~200 MB resident for the production
+        # corpus at 3072-dim int8. Kept separate from _body_index
+        # because the two indices have very different load profiles
+        # (binary parse vs. text strip) and most consumers will use
+        # only one of them.
+        self._embedding_index: list[tuple[str, str, np.ndarray, float]] | None = None
+        # Count of .bin files dropped due to dim mismatch during the
+        # last index build. Surfaced in semantic_search error messages
+        # so an all-stale corpus (post-model-migration state) gets a
+        # clearer "needs re-embedding" hint rather than the generic
+        # "no embeddings found" message that fits an empty-corpus
+        # bootstrap state instead.
+        self._stale_bin_count: int = 0
 
     @property
     def manifest(self) -> Manifest:
@@ -538,6 +570,228 @@ class CorpusReader:
         results.sort(key=lambda hit: hit["slug"] or "")
         return results
 
+    def semantic_search(
+        self,
+        query: str,
+        dataset: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Top-K cosine semantic search over per-section embeddings.
+
+        Returns hits ranked by cosine similarity to ``query``. Each hit
+        carries ``slug``, ``section_id``, ``score`` (similarity in
+        [-1, 1] but in practice [0.2, 0.95] for any usable result),
+        ``title``, ``dataset``, and ``citation_hint`` (a paste-in
+        ``§ <id> <slug>`` string the AI can quote next to a claim).
+
+        Score is a *similarity*, NOT a relevance proof. A high score
+        means the section discusses semantically similar content; it
+        does not mean the section answers the user's question. Treat
+        results as candidates that need verification — the
+        recommended pattern is:
+
+        1. ``semantic_search(query)`` -> top candidates
+        2. ``get_section(slug, section_id)`` for each top hit ->
+           read the actual text
+        3. (optional) ``verify_quote(...)`` if you quote anything
+           verbatim before answering the user
+
+        Raises ``CorpusNotFoundError`` when ``OPENAI_API_KEY`` was not
+        set at server startup (the embedder is unavailable) or when
+        the corpus has no per-doc ``.bin`` files yet (early bootstrap;
+        run ``lovspor sync`` to populate them).
+        """
+        if self._embedder is None:
+            raise CorpusNotFoundError(
+                "semantic_search is unavailable: OPENAI_API_KEY was not set "
+                "at MCP server startup. Set the environment variable and "
+                "restart the server.",
+            )
+        if limit < 0:
+            raise ValueError(
+                f"limit must be non-negative, got {limit}",
+            )
+        if not query.strip() or limit == 0:
+            return []
+
+        index = self._load_embedding_index()
+        if not index:
+            if self._stale_bin_count > 0:
+                raise CorpusNotFoundError(
+                    f"no usable embeddings: all {self._stale_bin_count} .bin file(s) "
+                    f"are from an older model with a different dim. The corpus needs "
+                    f"to be re-embedded — run 'lovspor sync' (which will overwrite "
+                    f"every .bin with the current model), then 'git pull' in the "
+                    f"corpus to refresh.",
+                )
+            raise CorpusNotFoundError(
+                "no embeddings found in corpus; run 'lovspor sync' to "
+                "populate per-document .bin files, then 'git pull' in the "
+                "corpus to refresh.",
+            )
+
+        dataset_key = _resolve_dataset(dataset) if dataset is not None else None
+        slug_meta: dict[str, tuple[str | None, str]] = {}
+        allowed_slugs: set[str] | None = None
+        if dataset_key is not None:
+            allowed_slugs = set()
+        for record in self.manifest.documents.values():
+            if record.status != "current" or record.slug is None:
+                continue
+            try:
+                subdir = _subdir_for_dataset(record.source_dataset)
+            except CorpusNotFoundError:
+                continue
+            slug_meta[record.slug] = (record.title, subdir)
+            if allowed_slugs is not None and record.source_dataset == dataset_key:
+                allowed_slugs.add(record.slug)
+
+        searchable = (
+            [(s, sid, v, sc) for s, sid, v, sc in index if s in allowed_slugs]
+            if allowed_slugs is not None
+            else index
+        )
+        if not searchable:
+            return []
+
+        query_vector = self._embedder.encode([query])[0]
+        hits = top_k_cosine(query_vector, searchable, k=limit)
+        results: list[dict[str, Any]] = []
+        for hit in hits:
+            title, subdir = slug_meta.get(hit.slug, (None, ""))
+            results.append(
+                {
+                    "slug": hit.slug,
+                    "section_id": hit.section_id,
+                    "score": hit.score,
+                    "title": title,
+                    "dataset": subdir,
+                    "citation_hint": f"§ {hit.section_id} {hit.slug}",
+                },
+            )
+        return results
+
+    def verify_quote(
+        self,
+        slug: str,
+        section_id: str,
+        quote: str,
+    ) -> dict[str, Any]:
+        """Verify that ``quote`` is verbatim text from ``§ section_id`` of ``slug``.
+
+        Anti-hallucination guard for the AI: before claiming *"§ 5-12
+        of Skatteloven says X"*, call this with the verbatim text of
+        X. Returns ``{verified, slug, section_id, reason}``. ``verified``
+        is true only when the quote, after lowercase + whitespace
+        normalization, appears as a substring of the section body.
+
+        Catches the most common citation hallucination — the AI quotes
+        words that are NOT in the section it cites (often pulled from
+        a different section, paraphrased from memory, or invented).
+        Does NOT catch paraphrases that genuinely capture the legal
+        meaning; for those the AI must fall back to ``get_section``
+        and present the original Norwegian text.
+
+        Raises only on explicit programming errors (missing slug, etc.
+        — surfaced via ``get_section``). Empty quote returns
+        verified=False with a clear reason rather than raising.
+        """
+        if not quote.strip():
+            return {
+                "verified": False,
+                "slug": slug,
+                "section_id": section_id,
+                "reason": "quote is empty",
+            }
+        try:
+            section = self.get_section(slug, section_id)
+        except CorpusNotFoundError as exc:
+            return {
+                "verified": False,
+                "slug": slug,
+                "section_id": section_id,
+                "reason": str(exc),
+            }
+        section_normalized = _normalize_for_quote_match(section["body"])
+        quote_normalized = _normalize_for_quote_match(quote)
+        if quote_normalized in section_normalized:
+            return {
+                "verified": True,
+                "slug": slug,
+                "section_id": section_id,
+                "reason": None,
+            }
+        return {
+            "verified": False,
+            "slug": slug,
+            "section_id": section_id,
+            "reason": (
+                f"quote not found in § {section_id} of {slug!r} after lowercase "
+                f"and whitespace normalization. The quote may be from a different "
+                f"section, paraphrased rather than verbatim, or hallucinated. "
+                f"Call get_section({slug!r}, {section_id!r}) to read the actual text."
+            ),
+        }
+
+    def _load_embedding_index(self) -> list[tuple[str, str, np.ndarray, float]]:
+        """Lazy-build the per-section embedding index for ``semantic_search``.
+
+        Walks every current manifest record and tries to load
+        ``<dataset_subdir>/embeddings/<slug>.bin``. Missing files are
+        silently skipped — the corpus may be partially backfilled
+        (Sprint 9 PR-B2 onwards every sync writes embeddings, but
+        documents older than that bootstrap point have no .bin until
+        the migration touches them).
+
+        Corrupt .bin files are also skipped (parse error caught) so
+        one bad file cannot block ``semantic_search`` from working
+        across the rest of the corpus. The cost of the silent skip:
+        a stale .bin produces zero hits for that doc instead of a
+        loud crash. Loud crash is worse here because production has
+        ~4500 docs and any single corrupt file would take the whole
+        tool offline.
+        """
+        if self._embedding_index is None:
+            index: list[tuple[str, str, np.ndarray, float]] = []
+            stale = 0
+            for record in self.manifest.documents.values():
+                if record.status != "current" or record.slug is None:
+                    continue
+                try:
+                    subdir = _subdir_for_dataset(record.source_dataset)
+                except CorpusNotFoundError:
+                    continue
+                try:
+                    bin_path = self._safe_join(subdir, "embeddings", f"{record.slug}.bin")
+                except CorpusNotFoundError:
+                    continue
+                if not bin_path.exists():
+                    continue
+                try:
+                    embedding_file = read_embeddings(bin_path)
+                except (ValueError, OSError) as exc:
+                    print(
+                        f"semantic_search: skipping corrupt {bin_path.name}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    continue
+                if self._expected_dim is not None and embedding_file.dim != self._expected_dim:
+                    print(
+                        f"semantic_search: skipping {bin_path.name} with dim "
+                        f"{embedding_file.dim} (embedder expects {self._expected_dim}); "
+                        f"file is from an older model and will be re-embedded on next sync",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    stale += 1
+                    continue
+                for section_id, vector in embedding_file.sections:
+                    index.append((record.slug, section_id, vector, embedding_file.scale))
+            self._embedding_index = index
+            self._stale_bin_count = stale
+        return self._embedding_index
+
     def _load_body_index(self) -> dict[str, str]:
         """Lazy-build the slug -> body-text dict for ``search_body``.
 
@@ -880,6 +1134,26 @@ def _snippet(body: str, match_idx: int, match_len: int) -> str:
     return f"{prefix}{snippet}{suffix}"
 
 
+def _normalize_for_quote_match(text: str) -> str:
+    """Normalize text for ``verify_quote`` substring matching.
+
+    Lowercases the text and collapses every whitespace run (spaces,
+    tabs, newlines) to a single space. This rejects two false-
+    negative classes that would otherwise plague legitimate quotes:
+
+    - Case differences between AI-generated text and source text
+      (Norwegian legal text uses sentence case; AIs sometimes
+      capitalize for emphasis).
+    - Newline / tab differences from copy-paste through different
+      AI client UIs that re-wrap text.
+
+    Does NOT strip punctuation or accents — those are semantically
+    significant in Norwegian legal text (``§`` is not the same as
+    ``$``, ``§ 5-12`` is not the same as ``§ 512``).
+    """
+    return " ".join(text.lower().split())
+
+
 def _record_summary(doc_id: str, record: ManifestRecord) -> dict[str, Any]:
     """Public-facing summary of a manifest record (for AI consumers)."""
     return {
@@ -910,14 +1184,43 @@ def _resolve_dataset(dataset: str) -> str:
         ) from exc
 
 
+def _build_embedder() -> EmbeddingModel | None:
+    """Instantiate the OpenAI embedder if ``OPENAI_API_KEY`` is set,
+    otherwise log a warning and return None. Reads either
+    ``OPENAI_API_KEY`` or the underscore-less ``OPENAI_APIKEY`` to
+    match what ``Settings.from_env`` accepts on the engine side."""
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_APIKEY")
+    if not api_key:
+        print(
+            "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
+            "but the other eleven tools work normally. Set OPENAI_API_KEY and "
+            "restart to enable semantic search.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    return OpenAIEmbedder(api_key=api_key)
+
+
 def build_server(corpus_path: Path) -> FastMCP:
     """Build a FastMCP server bound to ``corpus_path``.
 
     The reader is constructed eagerly so configuration errors (missing
     corpus, missing manifest) surface at server startup rather than
     on the first tool invocation.
+
+    The embedder for ``semantic_search`` is constructed lazily-eager:
+    if ``OPENAI_API_KEY`` is set in the environment we instantiate
+    the OpenAI embedder at startup (so a malformed key surfaces
+    immediately, not on the first tool call); if it is not set we
+    log a warning and disable ``semantic_search`` with a clear
+    runtime error. The other eleven tools do not need the embedder
+    so they continue to work without an OpenAI key — refusing to
+    start the whole server over one optional dependency would be
+    user-hostile.
     """
-    reader = CorpusReader(corpus_path)
+    embedder = _build_embedder()
+    reader = CorpusReader(corpus_path, embedder=embedder)
     mcp = FastMCP("lovverk")
 
     @mcp.tool()
@@ -1032,6 +1335,43 @@ def build_server(corpus_path: Path) -> FastMCP:
         return reader.search_body(query, dataset=dataset, limit=limit)
 
     @mcp.tool()
+    def semantic_search(
+        query: str,
+        dataset: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Semantic search by meaning, not by substring match.
+
+        Use when the user's question uses different vocabulary than
+        the law text — e.g. "what are renter's rights when the
+        landlord doesn't fix things?" finds husleieloven sections
+        about *manglende vedlikehold* even though the user said
+        "rights" and "fix" rather than the Norwegian legal terms.
+        Complement to ``search_body`` (keyword) and ``search_laws``
+        (title/slug).
+
+        IMPORTANT — score is similarity, not relevance. A high score
+        means the section is *about a similar topic*; it does not
+        prove the section answers the user's question. Always
+        ``get_section`` the top hits to read the actual text before
+        quoting. If you quote anything verbatim, run ``verify_quote``
+        as a final safety check.
+
+        Returns a list of hits with: ``slug``, ``section_id``,
+        ``score`` (cosine similarity in [-1, 1]; useful matches are
+        usually > 0.4), ``title``, ``dataset``, and ``citation_hint``
+        (a paste-ready ``§ <id> <slug>`` string).
+
+        ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
+        ``limit``: max results, default 20, must be non-negative.
+
+        Raises if ``OPENAI_API_KEY`` was not set when the server
+        started, or if the corpus has no per-doc ``.bin`` files
+        yet (early bootstrap state — run ``lovspor sync``).
+        """
+        return reader.semantic_search(query, dataset=dataset, limit=limit)
+
+    @mcp.tool()
     def validate_citation(citation: str) -> dict[str, Any]:
         """Verify that a Norwegian-law citation string actually resolves.
 
@@ -1062,6 +1402,36 @@ def build_server(corpus_path: Path) -> FastMCP:
         invalid because the section id is non-unique across acts.
         """
         return reader.validate_citation(citation)
+
+    @mcp.tool()
+    def verify_quote(slug: str, section_id: str, quote: str) -> dict[str, Any]:
+        """Verify a verbatim quote actually appears in a specific section.
+
+        Anti-hallucination guard. Before answering with text like
+        *"§ 5-12 of Skatteloven says: 'Pracodawca ma obowiązek...'"*
+        call this with the verbatim quote you intend to attribute to
+        that section. Returns ``{verified, slug, section_id, reason}``.
+
+        Match is case-insensitive and whitespace-tolerant (Norwegian
+        legal text is sentence case but AIs sometimes capitalize for
+        emphasis; copy-paste through different clients can re-wrap
+        whitespace). Punctuation and accents are NOT normalized —
+        ``§`` is not the same as ``$`` and ``§ 5-12`` is not the
+        same as ``§ 512``.
+
+        Catches the most common citation hallucination: AI quotes
+        words that are NOT in the section it cites (often pulled
+        from a different section, paraphrased from memory, or
+        outright invented). Does NOT catch faithful paraphrases —
+        for those you must fall back to ``get_section`` and quote
+        the original.
+
+        Empty quote returns ``verified=false`` with a clear reason
+        rather than raising. Unknown slug or section returns
+        ``verified=false`` with the get_section error message in
+        ``reason`` (which already lists available sections).
+        """
+        return reader.verify_quote(slug, section_id, quote)
 
     @mcp.tool()
     def get_eu_basis(slug: str) -> dict[str, Any]:
