@@ -18,8 +18,11 @@ import pytest
 
 from lovspor.embeddings import write_embeddings
 from lovspor.mcp import (
+    _CROSS_REF_SECTION,
     CorpusNotFoundError,
     CorpusReader,
+    _compute_match_owner_starts,
+    _extract_cross_references,
     build_server,
 )
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
@@ -1061,13 +1064,433 @@ def test_get_section_returns_expected_fields(tmp_path: Path) -> None:
         {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
         body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
     )
-    section = CorpusReader(tmp_path).get_section("skatteloven", "5-12")
+    reader = CorpusReader(tmp_path)
+    section = reader.get_section("skatteloven", "5-12")
     assert section["slug"] == "skatteloven"
     assert section["section_id"] == "5-12"
     assert section["heading"] == "§ 5-12. Boligsparing for ungdom"
     assert section["parent_chapter"] == "Kapittel 5. Alminnelig inntekt og fradragene"
     assert "Skattefradraget gis for sparing til bolig" in section["body"]
     assert "Fradraget reduseres ved utbetaling" in section["body"]
+    assert section["cross_references"] == []
+    assert reader._sections_by_slug is None
+
+
+def test_get_section_extracts_same_act_cross_references(tmp_path: Path) -> None:
+    body = (
+        "## Kapittel 1.\n\n"
+        "### § 1-1. Main\n\n"
+        "Se § 1-2 for definisjonen. Se også § 1-99 og deretter § 1-2 igjen.\n\n"
+        "### § 1-2. Defined\n\n"
+        "Target body.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="egen-lov", title="Egen lov")},
+        body_for={"egen-lov": body},
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 1-2",
+            "target_slug": "egen-lov",
+            "target_section_id": "1-2",
+            "valid": True,
+            "reason": None,
+        },
+        {
+            "text": "§ 1-99",
+            "target_slug": "egen-lov",
+            "target_section_id": "1-99",
+            "valid": False,
+            "reason": "§ 1-99 not found in 'egen-lov'",
+        },
+    ]
+
+
+def test_get_section_extracts_cross_act_references_from_slug_window(
+    tmp_path: Path,
+) -> None:
+    current_body = (
+        "## Kapittel 1.\n\n"
+        "### § 1-1. Main\n\n"
+        "Se § 2-1 i annen-lov. Brudd på § 9-9 i annen-lov er ugyldig.\n"
+    )
+    target_body = "## Kapittel 2.\n\n### § 2-1. Target\n\nTarget body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "annen-lov": target_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 2-1",
+            "target_slug": "annen-lov",
+            "target_section_id": "2-1",
+            "valid": True,
+            "reason": None,
+        },
+        {
+            "text": "§ 9-9",
+            "target_slug": "annen-lov",
+            "target_section_id": "9-9",
+            "valid": False,
+            "reason": "§ 9-9 not found in 'annen-lov'",
+        },
+    ]
+
+
+def test_get_section_keeps_adjacent_reference_contexts_separate(
+    tmp_path: Path,
+) -> None:
+    current_body = (
+        "## Kapittel 5.\n\n"
+        "### § 5-12. Main\n\n"
+        "Se § 5-13. Likevel kan det iht. § 9-3 i annen-lov gjelde unntak.\n\n"
+        "### § 5-13. Same act target\n\n"
+        "Same act body.\n"
+    )
+    target_body = "## Kapittel 9.\n\n### § 9-3. Cross act target\n\nCross act body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "annen-lov": target_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "5-12")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 5-13",
+            "target_slug": "egen-lov",
+            "target_section_id": "5-13",
+            "valid": True,
+            "reason": None,
+        },
+        {
+            "text": "§ 9-3",
+            "target_slug": "annen-lov",
+            "target_section_id": "9-3",
+            "valid": True,
+            "reason": None,
+        },
+    ]
+
+
+def test_get_section_slug_before_next_reference_does_not_leak_backward(
+    tmp_path: Path,
+) -> None:
+    current_body = (
+        "## Kapittel 5.\n\n"
+        "### § 5-12. Main\n\n"
+        "Se § 5-13. Etter annen-lov § 9-3.\n\n"
+        "### § 5-13. Same act target\n\n"
+        "Same act body.\n"
+    )
+    target_body = "## Kapittel 9.\n\n### § 9-3. Cross act target\n\nCross act body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "annen-lov": target_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "5-12")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 5-13",
+            "target_slug": "egen-lov",
+            "target_section_id": "5-13",
+            "valid": True,
+            "reason": None,
+        },
+        {
+            "text": "§ 9-3",
+            "target_slug": "annen-lov",
+            "target_section_id": "9-3",
+            "valid": True,
+            "reason": None,
+        },
+    ]
+
+
+def test_get_section_keeps_three_reference_contexts_separate(
+    tmp_path: Path,
+) -> None:
+    current_body = (
+        "## Kapittel 5.\n\n"
+        "### § 5-12. Main\n\n"
+        "Se § 5-13. Likevel kan § 9-3 i annen-lov gjelde. "
+        f"{'fylltekst ' * 12}Se også § 5-14.\n\n"
+        "### § 5-13. First same act target\n\n"
+        "First target body.\n\n"
+        "### § 5-14. Second same act target\n\n"
+        "Second target body.\n"
+    )
+    target_body = "## Kapittel 9.\n\n### § 9-3. Cross act target\n\nCross act body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "annen-lov": target_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "5-12")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 5-13",
+            "target_slug": "egen-lov",
+            "target_section_id": "5-13",
+            "valid": True,
+            "reason": None,
+        },
+        {
+            "text": "§ 9-3",
+            "target_slug": "annen-lov",
+            "target_section_id": "9-3",
+            "valid": True,
+            "reason": None,
+        },
+        {
+            "text": "§ 5-14",
+            "target_slug": "egen-lov",
+            "target_section_id": "5-14",
+            "valid": True,
+            "reason": None,
+        },
+    ]
+
+
+def test_get_section_cross_ref_context_excludes_eighty_first_char(
+    tmp_path: Path,
+) -> None:
+    current_body = (
+        "## Kapittel 1.\n\n"
+        "### § 1-1. Main\n\n"
+        f"x{' ' * 80}§ 1-2 omtales her.\n\n"
+        "### § 1-2. Same act target\n\n"
+        "Target body.\n"
+    )
+    other_body = "## Kapittel 1.\n\n### § 9-9. Other target\n\nOther body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="x", title="X"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "x": other_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 1-2",
+            "target_slug": "egen-lov",
+            "target_section_id": "1-2",
+            "valid": True,
+            "reason": None,
+        },
+    ]
+
+
+def test_get_section_first_reference_context_can_start_at_body_start(
+    tmp_path: Path,
+) -> None:
+    current_body = "## Kapittel 1.\n\n### § 1-1. Main\n\nx § 9-9 omtales her.\n"
+    other_body = "## Kapittel 9.\n\n### § 9-9. Other target\n\nOther body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="x", title="X"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "x": other_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 9-9",
+            "target_slug": "x",
+            "target_section_id": "9-9",
+            "valid": True,
+            "reason": None,
+        },
+    ]
+
+
+def test_get_section_second_reference_does_not_scan_before_previous_ref(
+    tmp_path: Path,
+) -> None:
+    current_body = "## Kapittel 1.\n\n### § 1-1. Main\n\nannen-lov § 5-13. Se § 9-3 i kort-lov.\n"
+    first_target_body = "## Kapittel 5.\n\n### § 5-13. First target\n\nFirst body.\n"
+    second_target_body = "## Kapittel 9.\n\n### § 9-3. Second target\n\nSecond body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+            "nl-3": _record(slug="kort-lov", title="Kort lov"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "annen-lov": first_target_body,
+            "kort-lov": second_target_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+    second_ref = next(
+        ref for ref in section["cross_references"] if ref["target_section_id"] == "9-3"
+    )
+
+    assert second_ref == {
+        "text": "§ 9-3",
+        "target_slug": "kort-lov",
+        "target_section_id": "9-3",
+        "valid": True,
+        "reason": None,
+    }
+
+
+def test_get_section_prefers_longest_slug_token_in_reference_window(
+    tmp_path: Path,
+) -> None:
+    current_body = "## Kapittel 1.\n\n### § 1-1. Main\n\nSe § 9-1 i lov lang-lov.\n"
+    short_body = "## Kapittel 9.\n\n### § 9-2. Short target\n\nShort body.\n"
+    long_body = "## Kapittel 9.\n\n### § 9-1. Long target\n\nLong body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="lov", title="Lov"),
+            "nl-3": _record(slug="lang-lov", title="Lang lov"),
+        },
+        body_for={
+            "egen-lov": current_body,
+            "lov": short_body,
+            "lang-lov": long_body,
+        },
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 9-1",
+            "target_slug": "lang-lov",
+            "target_section_id": "9-1",
+            "valid": True,
+            "reason": None,
+        },
+    ]
+
+
+def test_get_section_reuses_cached_sections_index_for_cross_references(
+    tmp_path: Path,
+) -> None:
+    body = "## Kapittel 1.\n\n### § 1-1. Main\n\nSe § 1-2.\n\n### § 1-2. Target\n\nTarget body.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="egen-lov", title="Egen lov")},
+        body_for={"egen-lov": body},
+    )
+    reader = CorpusReader(tmp_path)
+
+    first_section = reader.get_section("egen-lov", "1-1")
+    sections_index = reader._sections_by_slug
+    assert first_section["cross_references"][0]["valid"] is True
+    assert sections_index is not None
+
+    second_section = reader.get_section("egen-lov", "1-1")
+
+    assert second_section["cross_references"] == first_section["cross_references"]
+    assert reader._sections_by_slug is sections_index
+
+
+def test_extract_cross_references_reports_unknown_current_slug() -> None:
+    assert _extract_cross_references("Se § 1-1.", "missing-lov", {}) == [
+        {
+            "text": "§ 1-1",
+            "target_slug": "missing-lov",
+            "target_section_id": "1-1",
+            "valid": False,
+            "reason": "slug 'missing-lov' unknown",
+        },
+    ]
+
+
+def test_compute_match_owner_starts_detects_first_adjacent_slug_owner() -> None:
+    body = "Se § 5-13. Etter annen-lov § 9-3."
+    matches = list(_CROSS_REF_SECTION.finditer(body))
+
+    owners = _compute_match_owner_starts(body.lower(), matches, {"annen-lov"})
+
+    assert owners == {0: body.index("annen-lov")}
+
+
+def test_compute_match_owner_starts_ignores_unknown_slug_shaped_filler() -> None:
+    body = "Se § 5-13 samt § 9-3."
+    matches = list(_CROSS_REF_SECTION.finditer(body))
+
+    owners = _compute_match_owner_starts(body.lower(), matches, {"annen-lov"})
+
+    assert owners == {}
+
+
+def test_compute_match_owner_starts_continues_after_pair_without_owner() -> None:
+    body = "Se § 1-1 og § 2-1. Deretter annen-lov § 9-3."
+    matches = list(_CROSS_REF_SECTION.finditer(body))
+
+    owners = _compute_match_owner_starts(body.lower(), matches, {"annen-lov"})
+
+    assert owners == {1: body.index("annen-lov")}
+
+
+def test_compute_match_owner_starts_requires_owner_immediately_before_section() -> None:
+    body = "Se § 5-13. Etter annen-lov gjelder § 9-3."
+    matches = list(_CROSS_REF_SECTION.finditer(body))
+
+    owners = _compute_match_owner_starts(body.lower(), matches, {"annen-lov"})
+
+    assert owners == {}
 
 
 def test_get_section_body_excludes_next_section(tmp_path: Path) -> None:

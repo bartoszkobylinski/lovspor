@@ -108,6 +108,30 @@ returned snippet. 50 chars on each side + match length ~= 100-130 chars
 total, which fits a single AI message line and gives enough context
 to judge relevance without overwhelming the response."""
 
+_CROSS_REF_SECTION = re.compile(r"§\s*(\d+(?:-[\da-z]+)?)")
+"""Detect ``§ N-M`` (or just ``§ N``) section references inside a
+section body for cross-reference extraction. Captures the bare
+section_id (no ``§`` prefix). Permissive about whitespace between
+``§`` and the id, covering all section_id shapes the renderer
+produces: plain integer, chapter-section, trailing letter."""
+
+_CROSS_REF_CONTEXT_CHARS = 80
+"""Characters of context on each side of a ``§`` match to scan for
+slug tokens during cross-reference resolution. 80 chars typically
+captures a cue word (``i``, ``jf.``, ``iht.``) plus the slug
+token; longer windows risk picking up an unrelated slug from the
+previous sentence and false-positively classifying a same-act
+ref as cross-act."""
+
+_SLUG_TOKEN_PATTERN = re.compile(r"[a-z0-9æøåäöü-]+")
+"""Tokenize text by sequences of slug-class characters.
+
+Used by ``_resolve_slug_in_window`` for fast cross-act resolution:
+extract every slug-shaped token from the window once, then look
+each up against the current-slug set in O(1). Cheaper than
+walking 4500 manifest slugs per ``§`` match and running
+``_slug_token_in_citation`` on each."""
+
 _DATASET_ALIAS_TO_KEY = {
     "lover": "gjeldende-lover",
     "gjeldende-lover": "gjeldende-lover",
@@ -175,6 +199,13 @@ class CorpusReader:
         # "no embeddings found" message that fits an empty-corpus
         # bootstrap state instead.
         self._stale_bin_count: int = 0
+        # ``slug -> {section_ids}`` index for cross-reference
+        # validation in get_section. Lazy-built on the first
+        # get_section call that has at least one ``§`` pattern in
+        # its body. Holds set-of-strings per slug, much smaller
+        # than the body text itself (~100-500 KB resident across
+        # the production corpus).
+        self._sections_by_slug: dict[str, set[str]] | None = None
 
     @property
     def manifest(self) -> Manifest:
@@ -204,6 +235,16 @@ class CorpusReader:
         most recent ``## Kapittel N. ...`` heading so the AI has
         structural context.
 
+        ``cross_references`` lists every ``§ N-M`` pattern detected
+        in the body, deduplicated by target, with each entry already
+        validated against the manifest. Each entry is
+        ``{text, target_slug, target_section_id, valid, reason}``;
+        ``target_slug`` defaults to the current act when no other
+        slug appears within ``±_CROSS_REF_CONTEXT_CHARS`` of the
+        match. The field is empty when the body has no ``§``
+        patterns. See ``_extract_cross_references`` for the parser
+        contract and its deliberate MVP limitations.
+
         Raises ``CorpusNotFoundError`` if the slug is unknown OR the
         section is absent — the error message lists the act's
         available section ids in natural order so the AI can recover
@@ -228,12 +269,23 @@ class CorpusReader:
                 f"available: {available or '(no sections in this act)'}",
             )
         section = sections[section_id]
+        # Skip the sections-index build for sections with no ``§``
+        # patterns at all — most short sections have none, and the
+        # build is non-trivial (parse every act's sections once).
+        cross_references: list[dict[str, Any]] = []
+        if _CROSS_REF_SECTION.search(section["body"]):
+            cross_references = _extract_cross_references(
+                section["body"],
+                record.slug or "",
+                self._load_sections_index(),
+            )
         return {
             "slug": record.slug,
             "section_id": section_id,
             "heading": section["heading"],
             "parent_chapter": section["parent_chapter"],
             "body": section["body"],
+            "cross_references": cross_references,
         }
 
     def validate_citation(self, citation: str) -> dict[str, Any]:
@@ -792,6 +844,28 @@ class CorpusReader:
             self._stale_bin_count = stale
         return self._embedding_index
 
+    def _load_sections_index(self) -> dict[str, set[str]]:
+        """Build ``slug -> {section_ids}`` for cross-reference validation.
+
+        Triggered on the first ``get_section`` call that finds at
+        least one ``§`` pattern in the section body — sections
+        without any cross-references skip this work entirely so
+        the cost is paid only by callers that actually need it.
+
+        Reuses the body-index cache (``_load_body_index``) so the
+        underlying file I/O happens at most once across the two
+        indices. Each value is a ``set`` to keep membership checks
+        O(1) — cross-ref validation is the only consumer and only
+        needs ``section_id in target_sections``.
+        """
+        if self._sections_by_slug is None:
+            body_index = self._load_body_index()
+            index: dict[str, set[str]] = {}
+            for slug, body_text in body_index.items():
+                index[slug] = set(_parse_sections(body_text).keys())
+            self._sections_by_slug = index
+        return self._sections_by_slug
+
     def _load_body_index(self) -> dict[str, str]:
         """Lazy-build the slug -> body-text dict for ``search_body``.
 
@@ -1134,6 +1208,157 @@ def _snippet(body: str, match_idx: int, match_len: int) -> str:
     return f"{prefix}{snippet}{suffix}"
 
 
+def _compute_match_owner_starts(
+    body_lower: str,
+    matches: list[re.Match[str]],
+    known_slugs: set[str],
+) -> dict[int, int]:
+    """For each adjacent pair ``(matches[i-1], matches[i])`` detect a
+    known slug-token immediately preceding ``matches[i]`` (whitespace
+    only between the token and the ``§``). When found, that token
+    "belongs to" ``matches[i]`` and the previous match's AFTER-window
+    must stop at the token's start, not at ``matches[i].start()``.
+
+    Returns ``{prev_match_idx: owner_start_pos_in_body}``. Codex round-1
+    on PR #50 caught the bug this closes: a body like
+    ``"Se § 5-13. Etter annen-lov § 9-3."`` would resolve § 5-13 to
+    ``annen-lov`` because that slug fell inside § 5-13's AFTER-window
+    even though the slug clearly attaches to the next ``§ 9-3``
+    (slug-before-§ pattern).
+
+    Restriction to known slugs intentional: ``samt`` / ``også`` /
+    ``videre`` etc. are slug-shaped tokens but not actual slugs;
+    treating them as owners would over-trim windows and cause new
+    false negatives elsewhere.
+    """
+    owners: dict[int, int] = {}
+    for i in range(1, len(matches)):
+        prev = matches[i - 1]
+        curr = matches[i]
+        between = body_lower[prev.end() : curr.start()]
+        last_known: re.Match[str] | None = None
+        for token_match in _SLUG_TOKEN_PATTERN.finditer(between):
+            if token_match.group(0) in known_slugs:
+                last_known = token_match
+        if last_known is None:
+            continue
+        if between[last_known.end() :].strip() == "":
+            owners[i - 1] = prev.end() + last_known.start()
+    return owners
+
+
+def _extract_cross_references(
+    body: str,
+    current_slug: str,
+    sections_by_slug: dict[str, set[str]],
+) -> list[dict[str, Any]]:
+    """Extract validated cross-references from a section body.
+
+    Walks the body for ``§ N-M`` patterns. For each match, scans a
+    ``±_CROSS_REF_CONTEXT_CHARS`` window for slug tokens; if a token
+    matches a current manifest slug different from ``current_slug``,
+    the reference is treated as cross-act. Otherwise it is treated
+    as a same-act reference (validated against ``current_slug``'s
+    section set).
+
+    Output is deduplicated by ``(target_slug, target_section_id)``
+    so a section that mentions ``§ 5-12`` three times produces one
+    entry. The first occurrence's verbatim ``text`` is kept.
+
+    Output entries: ``text`` (verbatim ``§ N-M`` substring as it
+    appears in the body), ``target_slug`` (resolved act, defaults
+    to ``current_slug`` when no other slug appears in the window),
+    ``target_section_id`` (the parsed id), ``valid`` (bool —
+    target section exists in target slug's section set), ``reason``
+    (null when valid; otherwise human-readable).
+
+    Limitations (deliberate MVP scope, deferred to a possible
+    follow-up):
+
+    - References by descriptive name (``i lov om X`` without a
+      canonical slug) are silently treated as same-act and may
+      false-positive validate against the current act.
+    - Chapter / part references (``kapittel 4``, ``del III``)
+      are not extracted.
+    - Paragraph qualifiers (``første ledd``) are stripped — only
+      the section_id is reported. A consumer that needs to verify
+      a paragraph-level quote falls back to ``verify_quote``.
+    """
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    body_lower = body.lower()
+    known_slugs = set(sections_by_slug.keys())
+    matches = list(_CROSS_REF_SECTION.finditer(body))
+    owner_starts = _compute_match_owner_starts(body_lower, matches, known_slugs)
+    for idx, match in enumerate(matches):
+        section_id = match.group(1)
+        # Bound the slug-resolution window by the surrounding ``§``
+        # matches so adjacent refs do not share context. Without this
+        # bound, ``"jf. § 5-13. Likevel kan det iht. § 9-3 i annen-
+        # lov"`` would resolve § 5-13 to ``annen-lov`` (which sits
+        # in § 9-3's clause) and falsely classify a same-act ref as
+        # cross-act. ``owner_starts`` further trims the AFTER-window
+        # when the next ``§`` has a slug owner that precedes it
+        # (slug-before-§ pattern, e.g. ``"annen-lov § 9-3"``);
+        # without that trim, the slug owner of the next ``§`` would
+        # leak backward into the current ``§``'s window.
+        prev_end = matches[idx - 1].end() if idx > 0 else 0
+        next_start = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
+        if idx in owner_starts:
+            next_start = min(next_start, owner_starts[idx])
+        start = max(prev_end, match.start() - _CROSS_REF_CONTEXT_CHARS)
+        end = min(next_start, match.end() + _CROSS_REF_CONTEXT_CHARS)
+        target_slug = _resolve_slug_in_window(
+            body_lower[start:end],
+            current_slug,
+            known_slugs,
+        )
+        target_sections = sections_by_slug.get(target_slug, set())
+        valid = section_id in target_sections
+        reason: str | None = None
+        if not valid:
+            reason = (
+                f"§ {section_id} not found in {target_slug!r}"
+                if target_slug in known_slugs
+                else f"slug {target_slug!r} unknown"
+            )
+        key = (target_slug, section_id)
+        if key not in seen:
+            seen[key] = {
+                "text": match.group(0),
+                "target_slug": target_slug,
+                "target_section_id": section_id,
+                "valid": valid,
+                "reason": reason,
+            }
+    return list(seen.values())
+
+
+def _resolve_slug_in_window(
+    window_lower: str,
+    current_slug: str,
+    known_slugs: set[str],
+) -> str:
+    """Return the cross-act target slug for a ``§`` match's
+    surrounding window, or ``current_slug`` if no other slug
+    appears.
+
+    Strategy: extract every slug-shaped token from the window in a
+    single regex pass, sort longest-first so canonical multi-
+    segment slugs (``skatteloven-sktl``) win over plain prefixes
+    (``skatteloven``) when both appear, then return the first
+    token that matches a known slug AND is not equal to the
+    current slug. Equal-to-current matches are skipped so a
+    same-act ref that mentions its own slug in prose is not
+    misclassified as cross-act.
+    """
+    tokens: list[str] = _SLUG_TOKEN_PATTERN.findall(window_lower)
+    tokens.sort(key=len, reverse=True)
+    for token in tokens:
+        if token != current_slug and token in known_slugs:
+            return token
+    return current_slug
+
+
 def _normalize_for_quote_match(text: str) -> str:
     """Normalize text for ``verify_quote`` substring matching.
 
@@ -1255,12 +1480,23 @@ def build_server(corpus_path: Path) -> FastMCP:
 
         Returns ``slug``, ``section_id``, ``heading`` (the full
         ``§ N-M. Title`` line), ``parent_chapter`` (the most recent
-        ``Kapittel`` heading for structural context), and ``body``
-        (the section's text up to the next section / chapter
-        boundary). Raises if the slug or the section is unknown —
-        the error message lists the act's available section ids in
-        natural order so the AI can recover without a separate
-        ``get_law`` call.
+        ``Kapittel`` heading for structural context), ``body`` (the
+        section's text up to the next section / chapter boundary),
+        and ``cross_references`` — a deduplicated list of every
+        ``§ N-M`` reference in the body, already validated against
+        the manifest. Each cross-ref carries ``text`` (verbatim
+        substring as it appears in the body), ``target_slug``
+        (defaults to the current act when no other slug appears in
+        the surrounding ~80 chars), ``target_section_id``, ``valid``
+        (true only when the target section exists), and ``reason``
+        (null when valid; otherwise a short explanation). Use this
+        list to decide whether a referenced section is safe to
+        quote without a follow-up ``validate_citation`` call.
+
+        Raises if the slug or the section is unknown — the error
+        message lists the act's available section ids in natural
+        order so the AI can recover without a separate ``get_law``
+        call.
         """
         return reader.get_section(slug, section_id)
 
