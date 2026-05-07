@@ -6,6 +6,8 @@ Norwegian law change tracker. Engine that produces the [`lovverk`](https://githu
 
 **Production.** A scheduled GitHub Actions workflow runs daily at 04:00 UTC, pulls the latest tarballs from Lovdata, classifies each document as new / updated / renamed / removed, renders the changes to Markdown, and pushes the diff to `lovverk` as conventional-commit history. The corpus currently mirrors **4 522 acts** (≈ 781 lover + ≈ 3 741 forskrifter) with a structured per-act change history under each `<dataset>/history/<slug>.json`.
 
+Sprint 9 (MERGED 2026-05-06) added per-section embeddings to the corpus and a four-layer anti-hallucination story to the MCP surface: `semantic_search` (cosine over embeddings), `verify_quote` (verbatim-citation guard), validated `cross_references` on `get_section`, and `validate_citation` as the off-ramp for ambiguous citations.
+
 See [`docs/decisions.md`](docs/decisions.md) for the full architecture and design rationale.
 
 ## MCP server
@@ -31,7 +33,7 @@ Quickstart for Claude Desktop / Claude Code (replace `/path/to/lovverk` with the
 
 This runs the server on demand from this GitHub repo via [`uv`](https://docs.astral.sh/uv/) — no local clone of `lovspor` required, just the corpus.
 
-See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all ten tools documented with examples (`get_law`, `get_section`, `get_law_history`, `list_recent_changes`, `search_laws`, `search_body`, `validate_citation`, `get_eu_basis`, `search_eu_implementations`, `corpus_status`), troubleshooting, and limitations.
+See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all twelve tools documented with examples (`get_law`, `get_section`, `get_law_history`, `list_recent_changes`, `search_laws`, `search_body`, `semantic_search`, `validate_citation`, `verify_quote`, `get_eu_basis`, `search_eu_implementations`, `corpus_status`), troubleshooting, and limitations. The binary embedding format that powers `semantic_search` is documented in [`docs/embeddings.md`](docs/embeddings.md).
 
 Persona-driven offline evals for the MCP tool surface live in [`evals/`](evals/). Run them with `uv run lovspor-eval`.
 

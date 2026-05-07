@@ -100,7 +100,11 @@ def mcp(
     Desktop, Claude Code, ...). Reads the corpus from ``--corpus-path``;
     does not pull from GitHub or trigger an engine sync.
 
-    The four tools served are: get_law, get_law_history,
-    list_recent_changes, search_laws.
+    Twelve read-only tools are served — see ``docs/mcp.md`` for the
+    full list, sample inputs/outputs, and the Sprint 9 anti-
+    hallucination flow (semantic_search → get_section + cross_references
+    → verify_quote → validate_citation). ``OPENAI_API_KEY`` is optional;
+    missing key disables only ``semantic_search``, the other eleven
+    tools work normally.
     """
     _mcp_serve(corpus_path.resolve())
