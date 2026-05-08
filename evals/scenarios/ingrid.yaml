@@ -141,22 +141,21 @@ scenarios:
     intent: Ask for privacy law using lay vocabulary
     user_query: |
       Which law tells me what I can do with customer info in my app?
-    expected_outcome: gap_revealed
     expected_tool_calls:
-      - tool: search_body
-        query: customer info app
+      - tool: semantic_search
+        query: Which law tells me what I can do with customer info in my app
         query_contains: [customer, info, app]
-      - tool: search_laws
-        query: customer info
-        query_contains: [customer, info]
+        dataset: lover
     success_criteria:
       - kind: tool_called
-        tool: search_body
+        tool: semantic_search
+      - kind: list_contains_slug
+        tool: semantic_search
+        slug: personopplysningsloven
     failure_modes:
       - Substring search does not bridge customer info to personopplysninger.
-      - Empty results give no synonym suggestions.
-    reveals_gap: no semantic search
-    roadmap_class: C1
+      - semantic_search ranks privacy-law sections without the user knowing the Norwegian term.
+    reveals_gap: null
 
   - id: ingrid_009
     persona: ingrid

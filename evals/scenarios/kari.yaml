@@ -148,19 +148,21 @@ scenarios:
     intent: Ask about roof snow and nuisance colloquially
     user_query: |
       Snøen fra naboens tak raser ned på min side hver vinter. Hva kan jeg gjøre?
-    expected_outcome: gap_revealed
     expected_tool_calls:
-      - tool: search_body
-        query: snøen fra taket raser vinter
-        query_contains: [snøen, taket, vinter]
+      - tool: semantic_search
+        query: Snøen fra naboens tak raser ned på min side hver vinter
+        query_contains: [snøen, tak, vinter]
+        dataset: lover
     success_criteria:
       - kind: tool_called
-        tool: search_body
+        tool: semantic_search
+      - kind: list_contains_slug
+        tool: semantic_search
+        slug: grannelova-gl
     failure_modes:
       - Formal nuisance vocabulary is skade, ulempe, and granneeigedom.
-      - Empty substring results look like no law applies.
-    reveals_gap: no semantic search
-    roadmap_class: C1
+      - Substring search would miss; semantic_search bridges the colloquial-to-legal vocabulary gap.
+    reveals_gap: null
 
   - id: kari_009
     persona: kari
@@ -169,20 +171,17 @@ scenarios:
       Kommunen har gamle kart, naboen sier grensen går et annet sted, og jeg vil vite hvilken lov jeg skal begynne med.
     expected_outcome: gap_revealed
     expected_tool_calls:
-      - tool: search_laws
-        query: gamle kart grensen kommunen
-        query_contains: [kart, grensen, kommunen]
-      - tool: search_body
-        query: gamle kart grensen kommunen
+      - tool: semantic_search
+        query: kommunen gamle kart naboen grensen
         query_contains: [kart, grensen, kommunen]
     success_criteria:
       - kind: tool_called
-        tool: search_body
+        tool: semantic_search
     failure_modes:
-      - Search cannot suggest adjacent legal domains when exact words miss.
-      - Local regulations and cadastral materials are outside the current corpus.
-    reveals_gap: no semantic search or local-regulation coverage
-    roadmap_class: C1
+      - semantic_search closes the lay-vocabulary gap but cadastral materials and local regulations are still outside the corpus.
+      - Sentral lover hits do not cover municipal map disputes end-to-end.
+    reveals_gap: no local-regulation or cadastral coverage
+    roadmap_class: D1
 
   - id: kari_010
     persona: kari

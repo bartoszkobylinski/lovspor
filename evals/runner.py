@@ -6,6 +6,7 @@ import argparse
 import difflib
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,10 @@ from typing import Any, Literal, cast
 
 import yaml  # type: ignore[import-untyped]
 
+from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder
+from lovspor.embeddings.quantize import quantize_int8
+from lovspor.embeddings.sections import iter_sections
+from lovspor.embeddings.store import write_embeddings
 from lovspor.mcp import CorpusReader
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 
@@ -101,11 +106,15 @@ def run(argv: Sequence[str] | None = None) -> int:
     scenarios = _load_scenarios(persona=args.persona)
     _validate_suite(personas, scenarios, filtered_persona=args.persona)
 
+    embedder = _load_embedder()
     with tempfile.TemporaryDirectory(prefix="lovspor-eval-") as tmp:
         corpus_path = Path(tmp) / "lovverk"
-        _build_synthetic_corpus(corpus_path, fixture)
-        reader = CorpusReader(corpus_path)
-        results = [_run_scenario(reader, scenario) for scenario in scenarios]
+        _build_synthetic_corpus(corpus_path, fixture, embedder=embedder)
+        reader = CorpusReader(corpus_path, embedder=embedder)
+        results = [
+            _run_scenario(reader, scenario, embedder_available=embedder is not None)
+            for scenario in scenarios
+        ]
 
     checksum = _fixture_checksum(fixture)
     output_path = args.output or RESULTS_DIR / f"{args.run_date}.md"
@@ -224,7 +233,34 @@ def _validate_suite(
         raise ValueError(f"scenarios reference unknown personas: {', '.join(unknown_personas)}")
 
 
-def _build_synthetic_corpus(corpus_path: Path, fixture: dict[str, Any]) -> None:
+def _load_embedder() -> EmbeddingModel | None:
+    """Return a real ``OpenAIEmbedder`` when ``OPENAI_API_KEY`` is set,
+    otherwise ``None``.
+
+    No mocks (per project rule) — we either run the eval suite against
+    the real embedder or skip the semantic_search scenarios cleanly.
+    Reads either ``OPENAI_API_KEY`` or the underscore-less
+    ``OPENAI_APIKEY`` to match what ``Settings.from_env`` accepts on
+    the engine side.
+    """
+    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_APIKEY")
+    if not api_key:
+        print(
+            "lovspor-eval: OPENAI_API_KEY not set; semantic_search scenarios "
+            "will be reported as gap-revealed (skipped). Set the key and rerun "
+            "to exercise them against the real OpenAI embedder.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    return OpenAIEmbedder(api_key=api_key)
+
+
+def _build_synthetic_corpus(
+    corpus_path: Path,
+    fixture: dict[str, Any],
+    embedder: EmbeddingModel | None = None,
+) -> None:
     if corpus_path.exists():
         shutil.rmtree(corpus_path)
     corpus_path.mkdir(parents=True)
@@ -237,11 +273,41 @@ def _build_synthetic_corpus(corpus_path: Path, fixture: dict[str, Any]) -> None:
         records[cast(str, document["doc_id"])] = record
         _write_markdown(corpus_path, document)
         _write_history(corpus_path, document)
+        if embedder is not None:
+            _write_embeddings(corpus_path, document, embedder)
 
     write_manifest(
         Manifest(generated_at=generated_at, documents=records),
         corpus_path / "manifest.json",
     )
+
+
+def _write_embeddings(
+    corpus_path: Path,
+    document: dict[str, Any],
+    embedder: EmbeddingModel,
+) -> None:
+    """Write the per-doc ``.bin`` file for the synthetic corpus by
+    embedding every ``### §`` section through the real OpenAI
+    embedder. Mirrors the production
+    ``lovspor.sync.orchestrator._write_embeddings_for_doc`` flow so
+    the synthetic-vs-production drift PR #54 prevented for slugs is
+    not reintroduced for embeddings file format.
+    """
+    dataset_dir = cast(str, document["dataset"])
+    slug = cast(str, document["slug"])
+    body = cast(str, document["body"])
+    bin_path = corpus_path / dataset_dir / "embeddings" / f"{slug}.bin"
+    bin_path.parent.mkdir(parents=True, exist_ok=True)
+    sections = iter_sections(body)
+    if not sections:
+        write_embeddings(bin_path, [], scale=1.0)
+        return
+    texts = [section.text for section in sections]
+    matrix = embedder.encode(texts)
+    quantized, scale = quantize_int8(matrix)
+    pairs = [(section.section_id, quantized[index]) for index, section in enumerate(sections)]
+    write_embeddings(bin_path, pairs, scale)
 
 
 def _manifest_record(document: dict[str, Any], generated_at: datetime) -> ManifestRecord:
@@ -311,8 +377,30 @@ def _write_history(corpus_path: Path, document: dict[str, Any]) -> None:
     )
 
 
-def _run_scenario(reader: CorpusReader, scenario: dict[str, Any]) -> ScenarioResult:
+def _run_scenario(
+    reader: CorpusReader,
+    scenario: dict[str, Any],
+    embedder_available: bool = True,
+) -> ScenarioResult:
     call_specs = cast(list[dict[str, Any]], scenario.get("expected_tool_calls", []))
+    if not embedder_available and any(spec.get("tool") == "semantic_search" for spec in call_specs):
+        # Inject a synthetic gap label so the no-key report does not
+        # rank ``None`` as the top roadmap gap when retrofitted
+        # scenarios (with reveals_gap: null) hit the skip path.
+        # ``env-config`` is the roadmap class so operators see this
+        # is an environment issue, not a missing product feature.
+        skipped_scenario = {
+            **scenario,
+            "reveals_gap": "semantic_search disabled (OPENAI_API_KEY not set)",
+            "roadmap_class": "env-config",
+        }
+        return ScenarioResult(
+            scenario=skipped_scenario,
+            calls=[],
+            criteria=[],
+            status="gap-revealed",
+            note="skipped: semantic_search requires OPENAI_API_KEY",
+        )
     calls = [_invoke_tool(reader, spec) for spec in call_specs]
     criteria = [
         _evaluate_criterion(cast(dict[str, Any], criterion), calls)
@@ -387,17 +475,23 @@ def _tool_args(spec: dict[str, Any]) -> dict[str, Any]:
             "slug": spec.get("slug") or spec.get("slug_match"),
             "section_id": spec["section_id"],
         }
-    elif tool in {"search_laws", "search_body"}:
+    elif tool in {"search_laws", "search_body", "semantic_search"}:
         query = spec.get("query")
         if query is None:
             query = " ".join(cast(list[str], spec.get("query_contains", [])))
         args = {"query": query}
         if "dataset" in spec:
             args["dataset"] = spec["dataset"]
-        if tool == "search_body" and "limit" in spec:
+        if tool in {"search_body", "semantic_search"} and "limit" in spec:
             args["limit"] = spec["limit"]
     elif tool == "validate_citation":
         args = {"citation": spec["citation"]}
+    elif tool == "verify_quote":
+        args = {
+            "slug": spec.get("slug") or spec.get("slug_match"),
+            "section_id": spec["section_id"],
+            "quote": spec["quote"],
+        }
     elif tool == "search_eu_implementations":
         args = {"eu_doc_id": str(spec["eu_doc_id"])}
     elif tool == "list_recent_changes":
@@ -435,7 +529,17 @@ def _call_reader(reader: CorpusReader, tool: str, args: dict[str, Any]) -> Any:
             dataset=cast(str | None, args.get("dataset")),
             limit=cast(int, args.get("limit", 20)),
         ),
+        "semantic_search": lambda: reader.semantic_search(
+            cast(str, args["query"]),
+            dataset=cast(str | None, args.get("dataset")),
+            limit=cast(int, args.get("limit", 20)),
+        ),
         "validate_citation": lambda: reader.validate_citation(cast(str, args["citation"])),
+        "verify_quote": lambda: reader.verify_quote(
+            cast(str, args["slug"]),
+            cast(str, args["section_id"]),
+            cast(str, args["quote"]),
+        ),
         "get_eu_basis": lambda: reader.get_eu_basis(cast(str, args["slug"])),
         "search_eu_implementations": lambda: reader.search_eu_implementations(
             cast(str, args["eu_doc_id"]),

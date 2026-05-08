@@ -126,79 +126,81 @@ scenarios:
     intent: Ask eviction question in everyday language
     user_query: |
       Kan utleier kaste meg ut midt på vinteren?
-    expected_outcome: gap_revealed
     expected_tool_calls:
-      - tool: search_body
-        query: kaste meg ut midt på vinteren
+      - tool: semantic_search
+        query: Kan utleier kaste meg ut midt på vinteren
         query_contains: [kaste, ut, vinteren]
-      - tool: search_laws
-        query: kaste meg ut
-        query_contains: [kaste, ut]
+        dataset: lover
     success_criteria:
       - kind: tool_called
-        tool: search_body
+        tool: semantic_search
+      - kind: list_contains_slug
+        tool: semantic_search
+        slug: husleieloven
     failure_modes:
-      - Substring search misses the legal terms oppsigelse and fravikelse.
-      - Empty results give no synonym bridge.
-    reveals_gap: no semantic search
-    roadmap_class: C1
+      - Substring search would miss the legal terms oppsigelse and fravikelse.
+      - semantic_search bridges colloquial "kaste ut" to formal eviction vocabulary.
+    reveals_gap: null
 
   - id: ola_008
     persona: ola
     intent: Ask immediate-move-out question without legal vocabulary
     user_query: |
       Må jeg flytte med en gang når jeg får lapp fra huseier?
-    expected_outcome: gap_revealed
     expected_tool_calls:
-      - tool: search_body
-        query: flytte med en gang lapp fra huseier
+      - tool: semantic_search
+        query: Må jeg flytte med en gang når jeg får lapp fra huseier
         query_contains: [flytte, huseier]
+        dataset: lover
     success_criteria:
       - kind: tool_called
-        tool: search_body
+        tool: semantic_search
+      - kind: list_contains_slug
+        tool: semantic_search
+        slug: husleieloven
     failure_modes:
       - Formal text uses oppsigelse, protest and fravikelse.
-      - The tool cannot rank semantically related sections.
-    reveals_gap: no semantic search
-    roadmap_class: C1
+      - semantic_search ranks tenancy sections without the user knowing those terms.
+    reveals_gap: null
 
   - id: ola_009
     persona: ola
     intent: Ask about changed locks using everyday words
     user_query: |
       Kan huseier bare bytte låsen før saken er ferdig?
-    expected_outcome: gap_revealed
     expected_tool_calls:
-      - tool: search_body
-        query: bytte låsen
+      - tool: semantic_search
+        query: Kan huseier bare bytte låsen før saken er ferdig
         query_contains: [bytte, låsen]
+        dataset: lover
     success_criteria:
       - kind: tool_called
-        tool: search_body
+        tool: semantic_search
+      - kind: list_contains_slug
+        tool: semantic_search
+        slug: husleieloven
     failure_modes:
-      - Relevant legal concepts are not expressed as lås or bytte in the fixture.
-      - There is no semantic fallback or case-law corpus.
-    reveals_gap: no semantic search
-    roadmap_class: C1
+      - Relevant legal concepts are not expressed as lås or bytte in the fixture body.
+      - semantic_search ranks the tenancy act sections by topic, not by literal token match.
+    reveals_gap: null
 
   - id: ola_010
     persona: ola
     intent: Ask for renter rights in nonlegal vocabulary
     user_query: |
       Hva er rettighetene mine når eieren sier jeg må ut?
-    expected_outcome: gap_revealed
     expected_tool_calls:
-      - tool: search_body
-        query: rettighetene mine eieren sier jeg må ut
+      - tool: semantic_search
+        query: Hva er rettighetene mine når eieren sier jeg må ut
         query_contains: [rettighetene, eieren]
-      - tool: search_laws
-        query: eieren må ut
-        query_contains: [eieren]
+        dataset: lover
     success_criteria:
       - kind: tool_called
-        tool: search_laws
+        tool: semantic_search
+      - kind: list_contains_slug
+        tool: semantic_search
+        slug: husleieloven
     failure_modes:
       - Lay vocabulary does not match formal tenancy terms.
-      - No tool suggests trying husleieloven, oppsigelse, or fravikelse.
-    reveals_gap: no semantic search
-    roadmap_class: C1
+      - semantic_search surfaces husleieloven without the user typing oppsigelse / fravikelse.
+    reveals_gap: null
