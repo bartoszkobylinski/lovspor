@@ -1,6 +1,8 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets ten read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets twelve read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+
+Sprint 9 added a four-layer anti-hallucination story for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
 This document covers the full setup: prerequisites, configuration for two common clients, every tool with sample input and output, the typical discovery flow, troubleshooting, limitations, and legal attribution.
 
@@ -10,7 +12,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** ten read-only, manifest-and-filesystem-only.
+- **Tools:** twelve read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below).
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -34,6 +36,8 @@ This document covers the full setup: prerequisites, configuration for two common
 2. **`uv`** (or `uvx`) installed locally — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server via `uvx`, which fetches and runs `lovspor` directly from this GitHub repo without you needing to clone or install it manually.
 
    No PyPI publish required (yet). If you prefer `pip install`, see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
+
+3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other eleven keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit) below for the trade-off and cost.
 
 ---
 
@@ -76,7 +80,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All ten are read-only. None mutate the corpus, trigger a sync, or reach the network.
+All twelve are read-only. None mutate the corpus or trigger a sync. Eleven are pure local (manifest + filesystem); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
 
 ### `get_law(slug)`
 
@@ -130,9 +134,24 @@ Return a single ``§`` section of an act — the surgical alternative to `get_la
   "section_id": "5-12",
   "heading": "§ 5-12. Boligsparing for ungdom",
   "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
-  "body": "(1) Skattefradraget gis for sparing til bolig...\n\n(2) Fradraget reduseres ved utbetaling..."
+  "body": "(1) Skattefradraget gis for sparing til bolig...\n\n(2) Fradraget reduseres ved utbetaling...",
+  "cross_references": [
+    {
+      "text": "§ 9-3",
+      "target_slug": "skatteloven-sktl",
+      "target_section_id": "9-3",
+      "valid": true,
+      "reason": null
+    }
+  ]
 }
 ```
+
+The `cross_references` field (Sprint 9 PR-B3.5) lists every `§ N-M` reference detected in the body, deduplicated by target, with each entry already validated against the manifest. `target_slug` defaults to the current act when no other slug appears within ~80 chars of the match (a same-act ref); a different slug means the resolver picked it up as a cross-act ref. `valid` is true only when the target section actually exists in the target act, and `reason` carries a short explanation when invalid.
+
+Use this list to decide whether a referenced section is safe to quote without a follow-up `validate_citation` call. The field is an empty list when the body has no `§` patterns.
+
+Limitations: descriptive name references (*"i lov om X"* without a canonical slug) silently fall back to same-act and may false-positive validate. Chapter references (`kapittel 4`) and paragraph qualifiers (`første ledd`) are not extracted. `validate_citation` remains the off-ramp for ambiguous cases.
 
 If the section is unknown the error message lists the act's available section ids in natural order (so `5-2` < `5-10`, not lexicographic) — the AI can recover without an extra `get_law` call.
 
@@ -232,6 +251,53 @@ Sorted by `match_count` descending, then by `slug` for stable ordering. The snip
 
 **Performance:** the body index is loaded lazily on the first call (~3-5 s for the production 4522-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
 
+### `semantic_search(query, dataset?, limit?)`
+
+Top-K cosine semantic search over per-section embeddings. Use when the user's question uses different vocabulary than the law text — e.g. *"renter rights when the landlord doesn't fix things"* finds husleieloven sections about *manglende vedlikehold* even though the user said "rights" and "fix" rather than the Norwegian legal terms. Complement to `search_body` (substring) and `search_laws` (title/slug).
+
+**Important — score is similarity, not relevance.** A high score means the section is *about a similar topic*; it does not prove the section answers the user's question. Always `get_section` the top hits and read the actual text before quoting. If you quote anything verbatim, run `verify_quote` as the final safety check. The recommended pattern is:
+
+1. `semantic_search(query)` → top candidates
+2. `get_section(slug, section_id)` for each top hit → read actual text + see `cross_references`
+3. `verify_quote(slug, section_id, quote)` if you quote anything verbatim
+
+- **`query`** — natural-language query string. Empty / whitespace-only queries return `[]`.
+- **`dataset`** *(optional)* — `lover` or `forskrifter` to filter.
+- **`limit`** *(default 20)* — max results. Must be non-negative.
+
+**Sample call:** `semantic_search(query="renter rights when landlord refuses repairs", limit=3)`
+
+**Sample output:**
+
+```json
+[
+  {
+    "slug": "husleieloven",
+    "section_id": "5-3",
+    "score": 0.71,
+    "title": "Lov om husleieavtaler",
+    "dataset": "lover",
+    "citation_hint": "§ 5-3 husleieloven"
+  },
+  {
+    "slug": "husleieloven",
+    "section_id": "5-7",
+    "score": 0.62,
+    "title": "Lov om husleieavtaler",
+    "dataset": "lover",
+    "citation_hint": "§ 5-7 husleieloven"
+  }
+]
+```
+
+Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `citation_hint` is a paste-ready `§ <id> <slug>` string for quoting next to a claim.
+
+**Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other eleven keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
+
+**Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a brute-force cosine scan (~50 ms). Per-call OpenAI cost is fractions of a cent.
+
+If the corpus has no `.bin` files (early bootstrap state) or every `.bin` is from an older model with a different dim (post-migration state), `semantic_search` raises with a remediation message — different errors for different states so the operator sees what to do.
+
 ### `validate_citation(citation)`
 
 Verify that a Norwegian-law citation string actually resolves in the corpus. **Zero-hallucination guard** — call this before quoting a citation in a final answer to confirm both the act and the section exist.
@@ -265,6 +331,44 @@ Verify that a Norwegian-law citation string actually resolves in the corpus. **Z
 ```
 
 The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. AI consumers should use canonical slugs from `search_laws`.
+
+### `verify_quote(slug, section_id, quote)`
+
+Anti-hallucination guard for verbatim citations. Before answering with text like *"§ 5-12 of Skatteloven says: 'Skattefradraget gis for...'"* call this with the verbatim quote you intend to attribute to that section. Returns `{verified, slug, section_id, reason}`.
+
+- **`slug`** — the act's slug.
+- **`section_id`** — the bare numeric id (same form as for `get_section`).
+- **`quote`** — the verbatim string to verify against the section body.
+
+Match is **case-insensitive and whitespace-tolerant** (Norwegian legal text is sentence case but AIs sometimes capitalize for emphasis; copy-paste through different clients can re-wrap whitespace). Punctuation and accents are NOT normalized — `§` is not the same as `$`, and `§ 5-12` is not the same as `§ 512`.
+
+**Sample call:** `verify_quote(slug="skatteloven-sktl", section_id="5-12", quote="Skattefradraget gis for sparing til bolig")`
+
+**Sample output (verified):**
+
+```json
+{
+  "verified": true,
+  "slug": "skatteloven-sktl",
+  "section_id": "5-12",
+  "reason": null
+}
+```
+
+**Sample output (not verified — quote not in section):**
+
+```json
+{
+  "verified": false,
+  "slug": "skatteloven-sktl",
+  "section_id": "5-12",
+  "reason": "quote not found in § 5-12 of 'skatteloven-sktl' after lowercase and whitespace normalization. The quote may be from a different section, paraphrased rather than verbatim, or hallucinated. Call get_section('skatteloven-sktl', '5-12') to read the actual text."
+}
+```
+
+Catches the most common citation hallucination: AI quotes words that are NOT in the section it cites (often pulled from a different section, paraphrased from memory, or invented). Does NOT catch faithful paraphrases — for those fall back to `get_section` and quote the original Norwegian.
+
+Empty quote returns `verified=false` with a clear reason. Unknown slug or section returns `verified=false` with the `get_section` error message in `reason` (which already lists available sections).
 
 ### `get_eu_basis(slug)`
 
@@ -418,17 +522,19 @@ Use `get_law(slug)` to fetch the full text of any result.
 A typical AI-assistant interaction with this server follows the same pattern:
 
 1. **`search_laws("topic")`** — find candidates by slug + title metadata. Fast, manifest-only.
-2. **`search_body("topic")`** — when the topic doesn't appear in any title (e.g., concepts like *"kryptovaluta"*), scan the body text instead. Heavier but catches semantic matches.
-3. **`get_law(slug)`** — pull the full text of the chosen candidate.
-4. **`get_section(slug, "N-M")`** — when the user wants ONE paragraph, not the whole act. Surgical, cheaper on context window. Reuses the same body cache as `search_body`.
-5. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
-6. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
-7. **`validate_citation(citation)`** — zero-hallucination guard. Before quoting a citation in a final answer ("per § 5-12 of Skatteloven..."), call this to confirm both the act and the section actually exist in the corpus. Returns a `valid` bool plus a human-readable `reason` field the AI can quote.
-8. **`get_eu_basis(slug)`** — when the user asks about a Norwegian act's EU origin ("does Personopplysningsloven implement GDPR?"), pull the list of CELEX identifiers the act implements.
-9. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
-10. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
+2. **`search_body("topic")`** — when the topic doesn't appear in any title (e.g., concepts like *"kryptovaluta"*), scan the body text by substring.
+3. **`semantic_search("question phrased naturally")`** — when the user's wording differs from the law's vocabulary (e.g. *"renter rights"* vs *manglende vedlikehold*), substring search misses but cosine-similarity over per-section embeddings finds the right section. Always follow up with `get_section` before quoting — score is similarity, not relevance proof.
+4. **`get_law(slug)`** — pull the full text of the chosen candidate.
+5. **`get_section(slug, "N-M")`** — when the user wants ONE paragraph, not the whole act. Surgical, cheaper on context window. Returns the section body plus `cross_references` (every internal `§` ref already validated) so the AI sees broken refs inline.
+6. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
+7. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
+8. **`validate_citation(citation)`** — pre-quote guard. Before quoting a citation in a final answer ("per § 5-12 of Skatteloven..."), call this to confirm both the act and the section actually exist in the corpus. Returns a `valid` bool plus a human-readable `reason` field the AI can quote.
+9. **`verify_quote(slug, section_id, quote)`** — anti-hallucination final check. After writing a verbatim quote attributed to a section, call this to confirm the quote actually appears in that section. Catches the most common citation hallucination (AI quotes words that are not in the cited section).
+10. **`get_eu_basis(slug)`** — when the user asks about a Norwegian act's EU origin ("does Personopplysningsloven implement GDPR?"), pull the list of CELEX identifiers the act implements.
+11. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
+12. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The ten tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`.
+The twelve tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything.
 
 ---
 
@@ -472,7 +578,9 @@ You can also clone `lovspor` and run from source if you want to develop or pin a
 - **No local or municipal regulations.** Only `sentrale forskrifter` are tracked.
 - **`search_laws` matches metadata only.** A law mentioning "klima" in its body but not its title or slug will not be found via `search_laws("klima")` — use `search_body` for that. (The two tools are complementary; `search_laws` is fast, `search_body` is thorough.)
 - **No Stortinget enrichment.** Parliamentary metadata (saker, voteringer, publikasjoner) is not surfaced. See [`docs/decisions.md` §3](decisions.md) for the rationale.
-- **No body-level analytics beyond search + section access.** `search_body` finds substrings; `get_section` retrieves a specific `§ N-M` (Sprint 8 PR-B). Cross-act analytics (e.g. "find every act citing Skatteloven", topic clustering, semantic similarity) are not in scope for this MVP and would need a richer index than the current Markdown corpus.
+- **Limited body-level analytics.** `search_body` finds substrings; `semantic_search` (Sprint 9) finds section-level cosine matches; `get_section` retrieves one `§ N-M` and lists its internal cross-references. Cross-act analytics that go beyond per-section retrieval — e.g. "find every act citing Skatteloven", topic clustering across the whole corpus — are not in scope and would need a richer index than the current per-doc binary embedding files.
+- **No paraphrase verification.** `verify_quote` confirms a verbatim string appears in a section; it does NOT verify that a paraphrase faithfully captures legal meaning. For semantic faithfulness the AI consumer must ground in `get_section` and quote the original Norwegian text directly.
+- **`get_section` cross-references resolve canonical slugs only.** Descriptive name references in section bodies (*"i lov om X"* without a canonical slug) silently fall back to same-act in the `cross_references` list and may false-positive validate. `validate_citation` is the off-ramp for ambiguous cases.
 - **History for tombstones is not generated.** A law that was once in the corpus but has since been removed has no `history/<slug>.json` file. The original commits are still in `lovverk`'s git log if you need them.
 - **Corpus freshness depends on the user.** The server reads whatever is in your local `lovverk` clone. If you don't `git pull`, you'll get stale data. The `corpus_status()` tool flags this (`is_stale: true` past 7 days) and gives the AI a `refresh_command` to suggest, but the server itself never pulls — that's an explicit user action.
 - **Body-text search uses substring matching, not BM25 / stemming.** Sprint 8 PR-A added `search_body` which scans full body text — a law mentioning "klima" only in its body IS findable via `search_body("klima")`. But matching is case-insensitive substring only: `search_body("skattefradrag")` will not find docs that only say "skattefradraget" (no stemming). Word-based / stemmed indexing is a follow-up if real use shows it matters.
