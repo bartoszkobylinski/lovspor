@@ -110,11 +110,19 @@ def run(argv: Sequence[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="lovspor-eval-") as tmp:
         corpus_path = Path(tmp) / "lovverk"
         _build_synthetic_corpus(corpus_path, fixture, embedder=embedder)
-        reader = CorpusReader(corpus_path, embedder=embedder)
-        results = [
-            _run_scenario(reader, scenario, embedder_available=embedder is not None)
-            for scenario in scenarios
-        ]
+        if args.llm_driven:
+            _ensure_llm_driver_available()
+            mcp_config_path = _write_llm_mcp_config(Path(tmp), corpus_path)
+            results = [
+                _run_scenario_llm_driven(scenario, mcp_config_path, args.llm_model)
+                for scenario in scenarios
+            ]
+        else:
+            reader = CorpusReader(corpus_path, embedder=embedder)
+            results = [
+                _run_scenario(reader, scenario, embedder_available=embedder is not None)
+                for scenario in scenarios
+            ]
 
     checksum = _fixture_checksum(fixture)
     output_path = args.output or RESULTS_DIR / f"{args.run_date}.md"
@@ -162,6 +170,24 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--output",
         type=Path,
         help="Write report to a custom path instead of evals/results/<date>.md.",
+    )
+    parser.add_argument(
+        "--llm-driven",
+        action="store_true",
+        help=(
+            "Drive each scenario via a real Claude Code subprocess (claude -p) "
+            "with the lovverk MCP server. Default is the deterministic runner "
+            "that invokes tools directly from each scenario's expected_tool_calls."
+        ),
+    )
+    parser.add_argument(
+        "--llm-model",
+        default="opus",
+        help=(
+            "Model alias passed to claude -p when --llm-driven is set. "
+            "Cost approximations on 10 scenarios: haiku ~$0.60, sonnet ~$1.80, "
+            "opus ~$9. Default opus targets the production-fidelity end."
+        ),
     )
     return parser.parse_args(argv)
 
@@ -1003,6 +1029,272 @@ def _lovspor_commit() -> str:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"
     return f"{head}+dirty" if dirty else head
+
+
+_LLM_DRIVER_TIMEOUT_SECONDS = 300
+"""Per-scenario subprocess timeout for ``claude -p``. Five minutes is
+generous — a scenario that needs longer is almost certainly stuck on
+an MCP server crash or rate-limit retry storm; better to mark it
+failed than block the whole suite indefinitely."""
+
+_LLM_DRIVER_MCP_TOOL_PREFIX = "mcp__lovverk__"
+"""When the spawned Claude calls a lovverk MCP tool, the event in the
+``stream-json`` output names it ``mcp__lovverk__<tool>`` because that is
+how MCP servers expose tools to a model. Strip the prefix so the
+captured trace matches the scenario's bare ``tool: <tool>`` field."""
+
+_LLM_DRIVER_PROMPT_TEMPLATE = (
+    "You are simulating a Norwegian-law user. Use the lovverk MCP tools to research\n"
+    "and answer the question below. Stay grounded in the corpus.\n"
+    "\n"
+    "User question:\n"
+    "{user_query}\n"
+    "\n"
+    "Tool usage guidance:\n"
+    "- Use semantic_search when the user's wording differs from the law's vocabulary.\n"
+    "- Use search_laws / search_body for keyword discovery.\n"
+    "- Use get_section to read the verbatim text of one section. The response includes\n"
+    "  a validated cross_references list — heed it.\n"
+    "- Before quoting any verbatim text in your final answer, call verify_quote to\n"
+    "  confirm it appears in the cited section.\n"
+    "- Use validate_citation if you cite a specific 'section N-M slug' reference.\n"
+    "\n"
+    "Answer the user concisely after grounding your response."
+)
+
+
+def _ensure_llm_driver_available() -> None:
+    """Refuse to start an --llm-driven run when the prerequisites are
+    missing. Each prerequisite has a distinct error message so the
+    operator sees what to fix rather than an opaque subprocess failure
+    halfway through the suite."""
+    if shutil.which("claude") is None:
+        raise SystemExit(
+            "lovspor-eval: --llm-driven requires the `claude` CLI on PATH. "
+            "Install Claude Code or fall back to the deterministic runner.",
+        )
+    repo_pyproject = REPO_ROOT / "pyproject.toml"
+    if not repo_pyproject.exists():
+        raise SystemExit(
+            f"lovspor-eval: cannot locate the lovspor source tree at {REPO_ROOT} "
+            "(needed so the spawned MCP server can resolve `uv run lovspor mcp`).",
+        )
+
+
+def _write_llm_mcp_config(workdir: Path, corpus_path: Path) -> Path:
+    """Write a fresh ``mcp.json`` pointing the spawned Claude at the
+    in-memory synthetic corpus. ``--strict-mcp-config`` then forces
+    Claude to use *only* this server, so the eval never accidentally
+    hits the operator's production lovverk MCP server registered
+    globally in ``~/.claude/settings.json``."""
+    config = {
+        "mcpServers": {
+            "lovverk": {
+                "command": "uv",
+                "args": [
+                    "run",
+                    "--project",
+                    str(REPO_ROOT),
+                    "lovspor",
+                    "mcp",
+                    "--corpus-path",
+                    str(corpus_path),
+                ],
+            },
+        },
+    }
+    path = workdir / "mcp.json"
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    return path
+
+
+def _run_scenario_llm_driven(
+    scenario: dict[str, Any],
+    mcp_config_path: Path,
+    model: str,
+) -> ScenarioResult:
+    """Spawn ``claude -p`` for one scenario and translate the captured
+    ``stream-json`` event stream back into ``ToolCallResult`` objects
+    so the existing success-criteria evaluators apply unchanged.
+
+    Sequential by design: 10 scenarios at ~30 s each is a five-minute
+    run, and avoiding parallel ``uv run`` startups keeps both the
+    subprocess error model and the cost estimate predictable.
+    """
+    user_query = cast(str, scenario.get("user_query", "")).strip()
+    prompt = _LLM_DRIVER_PROMPT_TEMPLATE.format(user_query=user_query)
+    cmd = [
+        "claude",
+        "-p",
+        "--output-format=stream-json",
+        "--verbose",
+        "--no-session-persistence",
+        "--disable-slash-commands",
+        "--exclude-dynamic-system-prompt-sections",
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(mcp_config_path),
+        "--permission-mode",
+        "bypassPermissions",
+        "--model",
+        model,
+    ]
+    try:
+        completed = subprocess.run(  # noqa: S603
+            cmd,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=_LLM_DRIVER_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return ScenarioResult(
+            scenario=scenario,
+            calls=[],
+            criteria=[],
+            status="fail",
+            note=f"llm-driven scenario timed out after {_LLM_DRIVER_TIMEOUT_SECONDS}s",
+        )
+    calls = _parse_llm_driver_stream(completed.stdout)
+    # Codex round-1 PR #56 fix: a nonzero claude exit always fails the
+    # scenario, even when some tool calls were already captured. The
+    # captured trace stays visible for diagnostics, but a partial run
+    # that crashed mid-stream is not a pass — the previous gating on
+    # ``not calls and returncode != 0`` produced false positives when
+    # claude exited 2 after a single tool call.
+    if completed.returncode != 0:
+        return ScenarioResult(
+            scenario=scenario,
+            calls=calls,
+            criteria=[],
+            status="fail",
+            note=f"claude -p exited {completed.returncode}: {completed.stderr.strip()[:200]}",
+        )
+    criteria = [
+        _evaluate_criterion(cast(dict[str, Any], criterion), calls)
+        for criterion in cast(list[dict[str, Any]], scenario.get("success_criteria", []))
+    ]
+    # Mirror the deterministic runner's unexpected-tool-error check.
+    # Codex round-1 PR #56 fix: an MCP tool returning ``is_error=true``
+    # was previously invisible to the LLM-driven branch — a scenario
+    # that only asserted ``tool_called`` (without a matching
+    # ``tool_error_contains`` criterion) reported pass even when the
+    # tool itself failed. Match the deterministic semantics so both
+    # runners surface tool errors the same way.
+    expected_error_tools = {
+        cast(str, criterion.get("tool"))
+        for criterion in cast(list[dict[str, Any]], scenario.get("success_criteria", []))
+        if criterion.get("kind") == "tool_error_contains" and isinstance(criterion.get("tool"), str)
+    }
+    unexpected_errors = [
+        call for call in calls if not call.ok and call.tool not in expected_error_tools
+    ]
+    if scenario.get("expected_outcome") == "gap_revealed":
+        return ScenarioResult(
+            scenario=scenario,
+            calls=calls,
+            criteria=criteria,
+            status="gap-revealed",
+            note=f"gap revealed: {scenario.get('reveals_gap')}",
+        )
+    if unexpected_errors:
+        first = unexpected_errors[0]
+        return ScenarioResult(
+            scenario=scenario,
+            calls=calls,
+            criteria=criteria,
+            status="fail",
+            note=f"unexpected {first.tool} error: {_response_text(first.response)}",
+        )
+    failed = [criterion for criterion in criteria if not criterion.passed]
+    if not failed:
+        return ScenarioResult(
+            scenario=scenario,
+            calls=calls,
+            criteria=criteria,
+            status="pass",
+            note="all criteria passed",
+        )
+    status: Status = "partial" if len(failed) < len(criteria) else "fail"
+    return ScenarioResult(
+        scenario=scenario,
+        calls=calls,
+        criteria=criteria,
+        status=status,
+        note=f"{len(failed)} criteria failed",
+    )
+
+
+def _parse_llm_driver_stream(stdout: str) -> list[ToolCallResult]:
+    """Walk the ``stream-json`` output one line at a time and pair
+    each ``tool_use`` block with the matching ``tool_result`` block
+    so the captured trace looks identical in shape to what the
+    deterministic runner produces."""
+    pending: dict[str, dict[str, Any]] = {}
+    results: list[ToolCallResult] = []
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        event_type = event.get("type")
+        message = event.get("message") or {}
+        content = message.get("content") or []
+        if event_type == "assistant":
+            for block in content:
+                if block.get("type") != "tool_use":
+                    continue
+                pending[cast(str, block["id"])] = {
+                    "name": cast(str, block.get("name", "")),
+                    "input": cast(dict[str, Any], block.get("input") or {}),
+                }
+        elif event_type == "user":
+            for block in content:
+                if block.get("type") != "tool_result":
+                    continue
+                tool_use_id = cast(str, block.get("tool_use_id", ""))
+                spec = pending.pop(tool_use_id, None)
+                if spec is None:
+                    continue
+                tool_name = spec["name"]
+                if tool_name.startswith(_LLM_DRIVER_MCP_TOOL_PREFIX):
+                    tool_name = tool_name[len(_LLM_DRIVER_MCP_TOOL_PREFIX) :]
+                results.append(
+                    ToolCallResult(
+                        tool=tool_name,
+                        args=spec["input"],
+                        ok=not block.get("is_error", False),
+                        response=_decode_tool_result_payload(block.get("content")),
+                    ),
+                )
+    return results
+
+
+def _decode_tool_result_payload(content: Any) -> Any:
+    """``tool_result.content`` arrives as a list of typed blocks
+    (``[{"type": "text", "text": "<json>"}]``). Decode the inner JSON
+    when possible so downstream criteria like ``list_contains_slug``
+    can pattern-match on dict / list payloads exactly the way they
+    do for the deterministic runner."""
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = cast(str, block.get("text", ""))
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    return text
+        return content
+    if isinstance(content, str):
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return content
+    return content
 
 
 if __name__ == "__main__":

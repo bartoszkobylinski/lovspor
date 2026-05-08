@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -237,6 +238,16 @@ def test_eval_runner_tool_args_preserves_existing_search_tools() -> None:
             "limit": 7,
         },
     ) == {"query": "oppsigelse", "dataset": "lover", "limit": 7}
+
+
+def test_eval_runner_llm_args_defaults_and_overrides() -> None:
+    args = eval_runner._parse_args(["--llm-driven"])
+    assert args.llm_driven is True
+    assert args.llm_model == "opus"
+
+    args = eval_runner._parse_args(["--llm-driven", "--llm-model", "sonnet"])
+    assert args.llm_driven is True
+    assert args.llm_model == "sonnet"
 
 
 def test_load_embedder_accepts_both_openai_env_spellings(
@@ -484,6 +495,753 @@ def test_eval_runner_dispatches_semantic_search_default_limit() -> None:
 
     assert response == [{"slug": "husleieloven", "section_id": "9-5"}]
     assert reader.semantic_calls == [("renter rights", "lover", 20)]
+
+
+def test_llm_mcp_config_points_claude_at_synthetic_corpus(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "lovverk"
+
+    config_path = eval_runner._write_llm_mcp_config(tmp_path, corpus_path)
+
+    assert config_path == tmp_path / "mcp.json"
+    expected_config = {
+        "mcpServers": {
+            "lovverk": {
+                "command": "uv",
+                "args": [
+                    "run",
+                    "--project",
+                    str(eval_runner.REPO_ROOT),
+                    "lovspor",
+                    "mcp",
+                    "--corpus-path",
+                    str(corpus_path),
+                ],
+            },
+        },
+    }
+    assert config_path.read_text(encoding="utf-8") == json.dumps(expected_config, indent=2)
+    config = cast(dict[str, Any], yaml.safe_load(config_path.read_text(encoding="utf-8")))
+    assert config == expected_config
+
+
+def test_llm_driver_availability_rejects_missing_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_which(name: str) -> str | None:
+        return None if name == "claude" else "/bin/not-claude"
+
+    monkeypatch.setattr(eval_runner.shutil, "which", fake_which)
+
+    with pytest.raises(SystemExit) as exc_info:
+        eval_runner._ensure_llm_driver_available()
+
+    assert str(exc_info.value) == (
+        "lovspor-eval: --llm-driven requires the `claude` CLI on PATH. "
+        "Install Claude Code or fall back to the deterministic runner."
+    )
+
+
+def test_llm_driver_availability_rejects_missing_source_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(eval_runner.shutil, "which", lambda name: "/bin/claude")
+    monkeypatch.setattr(eval_runner, "REPO_ROOT", tmp_path)
+
+    with pytest.raises(SystemExit) as exc_info:
+        eval_runner._ensure_llm_driver_available()
+
+    assert str(exc_info.value) == (
+        f"lovspor-eval: cannot locate the lovspor source tree at {tmp_path} "
+        "(needed so the spawned MCP server can resolve `uv run lovspor mcp`)."
+    )
+
+
+def test_llm_driver_availability_accepts_claude_and_source_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'lovspor'\n", encoding="utf-8")
+    monkeypatch.setattr(eval_runner.shutil, "which", lambda name: "/bin/claude")
+    monkeypatch.setattr(eval_runner, "REPO_ROOT", tmp_path)
+
+    eval_runner._ensure_llm_driver_available()
+
+
+def test_llm_driver_stream_pairs_tool_calls_and_decodes_payload() -> None:
+    stdout = "\n".join(
+        [
+            "not json",
+            "",
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "checking corpus"},
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "mcp__lovverk__semantic_search",
+                                "input": {"query": "snø fra tak", "limit": 2},
+                            },
+                        ],
+                    },
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": "tool result follows"},
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "unknown",
+                                "content": "ignored",
+                            },
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": json.dumps(
+                                            [{"slug": "grannelova-gl", "section_id": "2"}],
+                                        ),
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                },
+            ),
+        ],
+    )
+
+    calls = eval_runner._parse_llm_driver_stream(stdout)
+
+    assert len(calls) == 1
+    assert calls[0].tool == "semantic_search"
+    assert calls[0].args == {"query": "snø fra tak", "limit": 2}
+    assert calls[0].ok is True
+    assert calls[0].response == [{"slug": "grannelova-gl", "section_id": "2"}]
+
+
+def test_llm_driver_stream_preserves_error_flag_and_empty_defaults() -> None:
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "",
+                                "input": {},
+                            },
+                        ],
+                    },
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "is_error": True,
+                                "content": [{"type": "text"}],
+                            },
+                        ],
+                    },
+                },
+            ),
+        ],
+    )
+
+    calls = eval_runner._parse_llm_driver_stream(stdout)
+
+    assert len(calls) == 1
+    assert calls[0].tool == ""
+    assert calls[0].args == {}
+    assert calls[0].ok is False
+    assert calls[0].response == ""
+
+
+def test_llm_driver_payload_decode_preserves_non_json_content() -> None:
+    assert eval_runner._decode_tool_result_payload("plain text") == "plain text"
+    assert (
+        eval_runner._decode_tool_result_payload([{"type": "text", "text": "not json"}])
+        == "not json"
+    )
+    opaque_blocks = [{"type": "image", "source": {"type": "base64"}}]
+    assert eval_runner._decode_tool_result_payload(opaque_blocks) == opaque_blocks
+
+
+def test_run_llm_driven_writes_mcp_config_and_uses_llm_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    embedder = object()
+    scenario = {"id": "p_001", "persona": "p", "expected_tool_calls": []}
+    fixture = {"generated_at": "2026-05-08T00:00:00+00:00", "documents": []}
+    calls: dict[str, Any] = {}
+
+    def fake_build_synthetic_corpus(
+        corpus_path: Path,
+        fixture_arg: dict[str, Any],
+        embedder: object | None = None,
+    ) -> None:
+        calls["build_path"] = corpus_path
+        calls["build_fixture"] = fixture_arg
+        calls["build_embedder"] = embedder
+
+    def fake_write_llm_mcp_config(workdir: Path, corpus_path: Path) -> Path:
+        calls["mcp_workdir"] = workdir
+        calls["mcp_corpus_path"] = corpus_path
+        return tmp_path / "mcp.json"
+
+    def fake_run_scenario_llm_driven(
+        scenario_arg: dict[str, Any],
+        mcp_config_path: Path,
+        model: str,
+    ) -> eval_runner.ScenarioResult:
+        calls["scenario"] = scenario_arg
+        calls["mcp_config_path"] = mcp_config_path
+        calls["model"] = model
+        return eval_runner.ScenarioResult(
+            scenario=scenario_arg,
+            calls=[],
+            criteria=[],
+            status="pass",
+            note="ok",
+        )
+
+    def fake_render_report(
+        *,
+        personas: dict[str, dict[str, Any]],
+        results: list[eval_runner.ScenarioResult],
+        run_date: str,
+        fixture_checksum: str,
+    ) -> str:
+        assert personas == {"p": {"name": "Persona"}}
+        assert len(results) == 1
+        assert results[0].status == "pass"
+        assert run_date == "2026-05-08"
+        assert fixture_checksum
+        return "report\n"
+
+    monkeypatch.setattr(eval_runner, "_load_personas", lambda: {"p": {"name": "Persona"}})
+    monkeypatch.setattr(eval_runner, "_load_mapping", lambda _path: fixture)
+    monkeypatch.setattr(eval_runner, "_load_scenarios", lambda *, persona: [scenario])
+    monkeypatch.setattr(eval_runner, "_validate_suite", lambda *args, **kwargs: None)
+    monkeypatch.setattr(eval_runner, "_load_embedder", lambda: embedder)
+    monkeypatch.setattr(eval_runner, "_build_synthetic_corpus", fake_build_synthetic_corpus)
+    monkeypatch.setattr(eval_runner, "_ensure_llm_driver_available", lambda: None)
+    monkeypatch.setattr(eval_runner, "_write_llm_mcp_config", fake_write_llm_mcp_config)
+    monkeypatch.setattr(eval_runner, "_run_scenario_llm_driven", fake_run_scenario_llm_driven)
+    monkeypatch.setattr(eval_runner, "_render_report", fake_render_report)
+    monkeypatch.setattr(
+        eval_runner,
+        "CorpusReader",
+        lambda *args, **kwargs: pytest.fail("llm-driven run must not build CorpusReader"),
+    )
+
+    output_path = tmp_path / "report.md"
+    assert (
+        eval_runner.run(
+            [
+                "--llm-driven",
+                "--llm-model",
+                "haiku",
+                "--date",
+                "2026-05-08",
+                "--output",
+                str(output_path),
+            ],
+        )
+        == 0
+    )
+
+    assert calls["build_embedder"] is embedder
+    assert calls["build_fixture"] is fixture
+    assert calls["mcp_corpus_path"] == calls["build_path"]
+    assert calls["scenario"] is scenario
+    assert calls["mcp_config_path"] == tmp_path / "mcp.json"
+    assert calls["model"] == "haiku"
+    assert output_path.read_text(encoding="utf-8") == "report\n"
+
+
+def test_llm_driven_scenario_invokes_claude_and_evaluates_tool_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "mcp__lovverk__semantic_search",
+                                "input": {"query": "depositum", "limit": 3},
+                            },
+                        ],
+                    },
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": json.dumps(
+                                    [{"slug": "husleieloven", "section_id": "3-5"}],
+                                ),
+                            },
+                        ],
+                    },
+                },
+            ),
+        ],
+    )
+    recorded: dict[str, Any] = {}
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> object:
+        recorded["cmd"] = cmd
+        recorded.update(kwargs)
+        return eval_runner.subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+    scenario = {
+        "id": "ola_001",
+        "persona": "ola",
+        "user_query": "Kan jeg holde tilbake depositum?",
+        "success_criteria": [
+            {"kind": "tool_called", "tool": "semantic_search"},
+            {"kind": "list_contains_slug", "tool": "semantic_search", "slug": "husleieloven"},
+        ],
+    }
+
+    result = eval_runner._run_scenario_llm_driven(scenario, tmp_path / "mcp.json", "haiku")
+
+    assert result.status == "pass"
+    assert result.note == "all criteria passed"
+    assert result.calls[0].tool == "semantic_search"
+    assert recorded["cmd"] == [
+        "claude",
+        "-p",
+        "--output-format=stream-json",
+        "--verbose",
+        "--no-session-persistence",
+        "--disable-slash-commands",
+        "--exclude-dynamic-system-prompt-sections",
+        "--strict-mcp-config",
+        "--mcp-config",
+        str(tmp_path / "mcp.json"),
+        "--permission-mode",
+        "bypassPermissions",
+        "--model",
+        "haiku",
+    ]
+    assert recorded["input"] == (
+        "You are simulating a Norwegian-law user. Use the lovverk MCP tools to research\n"
+        "and answer the question below. Stay grounded in the corpus.\n"
+        "\n"
+        "User question:\n"
+        "Kan jeg holde tilbake depositum?\n"
+        "\n"
+        "Tool usage guidance:\n"
+        "- Use semantic_search when the user's wording differs from the law's vocabulary.\n"
+        "- Use search_laws / search_body for keyword discovery.\n"
+        "- Use get_section to read the verbatim text of one section. The response includes\n"
+        "  a validated cross_references list — heed it.\n"
+        "- Before quoting any verbatim text in your final answer, call verify_quote to\n"
+        "  confirm it appears in the cited section.\n"
+        "- Use validate_citation if you cite a specific 'section N-M slug' reference.\n"
+        "\n"
+        "Answer the user concisely after grounding your response."
+    )
+    assert recorded["capture_output"] is True
+    assert recorded["text"] is True
+    assert recorded["timeout"] == eval_runner._LLM_DRIVER_TIMEOUT_SECONDS
+    assert recorded["check"] is False
+
+
+def test_llm_driven_scenario_missing_user_query_uses_blank_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded: dict[str, Any] = {}
+
+    def fake_run(cmd: list[str], **kwargs: Any) -> object:
+        recorded.update(kwargs)
+        return eval_runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+
+    result = eval_runner._run_scenario_llm_driven(
+        {"id": "ola_001", "persona": "ola"},
+        tmp_path / "mcp.json",
+        "haiku",
+    )
+
+    assert result.status == "pass"
+    assert "\nUser question:\n\n\nTool usage guidance:\n" in recorded["input"]
+
+
+def test_llm_driven_scenario_timeout_is_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(cmd: list[str], **kwargs: Any) -> object:
+        raise eval_runner.subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+
+    result = eval_runner._run_scenario_llm_driven(
+        {"id": "ola_001", "persona": "ola", "user_query": "Hei"},
+        tmp_path / "mcp.json",
+        "haiku",
+    )
+
+    assert result.status == "fail"
+    assert result.calls == []
+    assert result.criteria == []
+    assert result.note == "llm-driven scenario timed out after 300s"
+
+
+def test_llm_driven_scenario_nonzero_without_tool_calls_is_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(cmd: list[str], **_kwargs: Any) -> object:
+        return eval_runner.subprocess.CompletedProcess(
+            cmd,
+            1,
+            stdout="",
+            stderr="rate limited by provider",
+        )
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+
+    result = eval_runner._run_scenario_llm_driven(
+        {"id": "ola_001", "persona": "ola", "user_query": "Hei"},
+        tmp_path / "mcp.json",
+        "haiku",
+    )
+
+    assert result.status == "fail"
+    assert result.calls == []
+    assert result.note == "claude -p exited 1: rate limited by provider"
+
+
+def test_llm_driven_scenario_truncates_nonzero_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stderr = "x" * 250
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> object:
+        return eval_runner.subprocess.CompletedProcess(cmd, 2, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+
+    result = eval_runner._run_scenario_llm_driven(
+        {"id": "ola_001", "persona": "ola", "user_query": "Hei"},
+        tmp_path / "mcp.json",
+        "haiku",
+    )
+
+    assert result.status == "fail"
+    assert result.note == f"claude -p exited 2: {'x' * 200}"
+
+
+def test_llm_driven_gap_revealed_scenario_keeps_gap_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(cmd: list[str], **_kwargs: Any) -> object:
+        return eval_runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+    scenario = {
+        "id": "ola_001",
+        "persona": "ola",
+        "user_query": "Hei",
+        "expected_outcome": "gap_revealed",
+        "reveals_gap": "needs time-machine search",
+        "success_criteria": [{"kind": "tool_called", "tool": "search_laws"}],
+    }
+
+    result = eval_runner._run_scenario_llm_driven(scenario, tmp_path / "mcp.json", "haiku")
+
+    assert result.status == "gap-revealed"
+    assert result.criteria[0].passed is False
+    assert result.note == "gap revealed: needs time-machine search"
+
+
+def test_llm_driven_scenario_reports_partial_and_fail_statuses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "mcp__lovverk__search_laws",
+                                "input": {"query": "husleie"},
+                            },
+                        ],
+                    },
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": json.dumps([{"slug": "husleieloven"}]),
+                            },
+                        ],
+                    },
+                },
+            ),
+        ],
+    )
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> object:
+        return eval_runner.subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+    partial_result = eval_runner._run_scenario_llm_driven(
+        {
+            "id": "ola_001",
+            "persona": "ola",
+            "user_query": "Finn husleieloven",
+            "success_criteria": [
+                {"kind": "tool_called", "tool": "search_laws"},
+                {"kind": "tool_called", "tool": "get_section"},
+            ],
+        },
+        tmp_path / "mcp.json",
+        "haiku",
+    )
+    fail_result = eval_runner._run_scenario_llm_driven(
+        {
+            "id": "ola_002",
+            "persona": "ola",
+            "user_query": "Finn en paragraf",
+            "success_criteria": [{"kind": "tool_called", "tool": "get_section"}],
+        },
+        tmp_path / "mcp.json",
+        "haiku",
+    )
+
+    assert partial_result.status == "partial"
+    assert partial_result.note == "1 criteria failed"
+    assert fail_result.status == "fail"
+    assert fail_result.note == "1 criteria failed"
+
+
+def test_llm_driven_nonzero_exit_fails_even_after_tool_trace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "mcp__lovverk__search_laws",
+                                "input": {"query": "husleie"},
+                            },
+                        ],
+                    },
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "content": json.dumps([{"slug": "husleieloven"}]),
+                            },
+                        ],
+                    },
+                },
+            ),
+        ],
+    )
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> object:
+        return eval_runner.subprocess.CompletedProcess(
+            cmd,
+            2,
+            stdout=stdout,
+            stderr="provider error after partial stream",
+        )
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+    scenario = {
+        "id": "ola_001",
+        "persona": "ola",
+        "user_query": "Finn husleieloven",
+        "success_criteria": [{"kind": "tool_called", "tool": "search_laws"}],
+    }
+
+    result = eval_runner._run_scenario_llm_driven(scenario, tmp_path / "mcp.json", "haiku")
+
+    assert result.status == "fail"
+    assert [call.tool for call in result.calls] == ["search_laws"]
+    assert result.criteria == []
+    assert result.note == "claude -p exited 2: provider error after partial stream"
+
+
+def test_llm_driven_unexpected_tool_error_fails_like_deterministic_runner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "mcp__lovverk__get_section",
+                                "input": {"slug": "missing", "section_id": "1"},
+                            },
+                        ],
+                    },
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "is_error": True,
+                                "content": "section not found",
+                            },
+                        ],
+                    },
+                },
+            ),
+        ],
+    )
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> object:
+        return eval_runner.subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+    scenario = {
+        "id": "ola_001",
+        "persona": "ola",
+        "user_query": "Les manglende paragraf",
+        "success_criteria": [{"kind": "tool_called", "tool": "get_section"}],
+    }
+
+    result = eval_runner._run_scenario_llm_driven(scenario, tmp_path / "mcp.json", "haiku")
+
+    assert result.status == "fail"
+    assert result.note == "unexpected get_section error: section not found"
+
+
+def test_llm_driven_expected_tool_error_can_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stdout = "\n".join(
+        [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "toolu_1",
+                                "name": "mcp__lovverk__get_section",
+                                "input": {"slug": "missing", "section_id": "1"},
+                            },
+                        ],
+                    },
+                },
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "toolu_1",
+                                "is_error": True,
+                                "content": "section not found",
+                            },
+                        ],
+                    },
+                },
+            ),
+        ],
+    )
+
+    def fake_run(cmd: list[str], **_kwargs: Any) -> object:
+        return eval_runner.subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(eval_runner.subprocess, "run", fake_run)
+    scenario = {
+        "id": "ola_001",
+        "persona": "ola",
+        "user_query": "Les manglende paragraf",
+        "success_criteria": [
+            {"kind": "tool_called", "tool": "get_section"},
+            {
+                "kind": "tool_error_contains",
+                "tool": "get_section",
+                "target": "section not found",
+            },
+        ],
+    }
+
+    result = eval_runner._run_scenario_llm_driven(scenario, tmp_path / "mcp.json", "haiku")
+
+    assert result.status == "pass"
+    assert result.note == "all criteria passed"
+    assert [criterion.passed for criterion in result.criteria] == [True, True]
 
 
 def test_build_synthetic_corpus_writes_embeddings_when_embedder_is_present(
