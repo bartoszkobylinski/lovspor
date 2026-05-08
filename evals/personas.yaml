@@ -118,3 +118,18 @@ personas:
     expected_tool_usage_pattern: |
       search_laws -> search_body -> get_section -> validate_citation
     gap_to_reveal: dead-end UX when search_laws returns nothing
+
+  - id: frida
+    name: Frida Lindqvist
+    age: 38
+    location: Oslo
+    role: Senior legal-affairs journalist at a national newspaper
+    knowledge_level: legal_adjacent
+    domains: [husleieloven, skatteloven, personopplysningsloven, grannelova]
+    typical_queries: |
+      Pre-publication fact-checks: "is this quote actually in the section?", "does this citation resolve?", "are the cross-references in this section still valid?", "is the corpus current enough to publish on?". Frida is the post-Sprint-9 anti-hallucination persona — every scenario exercises one of the four guardrails (semantic_search, get_section + cross_references, verify_quote, validate_citation) on a query that would otherwise tempt an AI assistant into a hallucinated citation.
+    frustrations: |
+      An editor who does not trust AI citations means Frida cannot ship a story until every quote, every section reference, and every cross-act link is verified against the live corpus. Generic "AI summarised" answers are useless to her.
+    expected_tool_usage_pattern: |
+      semantic_search -> get_section -> verify_quote -> validate_citation
+    gap_to_reveal: null

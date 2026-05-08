@@ -42,7 +42,7 @@ DOC_TYPE_BY_DIR = {
     "forskrifter": "forskrift",
 }
 Status = Literal["pass", "fail", "partial", "gap-revealed"]
-EXPECTED_PERSONAS = 8
+EXPECTED_PERSONAS = 9
 EXPECTED_SCENARIOS_PER_PERSONA = 10
 MIN_GAP_SCENARIOS = 16
 CriterionHandler = Callable[[str, dict[str, Any], list["ToolCallResult"]], "CriterionResult"]
@@ -238,7 +238,7 @@ def _validate_suite(
     filtered_persona: str | None,
 ) -> None:
     if filtered_persona is None and len(personas) != EXPECTED_PERSONAS:
-        raise ValueError(f"expected 8 personas, found {len(personas)}")
+        raise ValueError(f"expected {EXPECTED_PERSONAS} personas, found {len(personas)}")
     scenario_counts = Counter(cast(str, scenario.get("persona")) for scenario in scenarios)
     if filtered_persona is None:
         missing = sorted(set(personas) - set(scenario_counts))

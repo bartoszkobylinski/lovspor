@@ -185,6 +185,105 @@ def test_naboloven_scenarios_use_production_canonical_slug() -> None:
         assert "naboloven" not in canonical_references
 
 
+def test_frida_phase3_persona_has_exact_anti_hallucination_scenarios() -> None:
+    personas = eval_runner._load_personas()
+    frida_scenarios = [
+        scenario for scenario in _load_scenarios() if scenario.get("persona") == "frida"
+    ]
+
+    assert personas["frida"]["knowledge_level"] == "legal_adjacent"
+    assert [scenario["id"] for scenario in frida_scenarios] == [
+        "frida_001",
+        "frida_002",
+        "frida_003",
+        "frida_004",
+        "frida_005",
+        "frida_006",
+        "frida_007",
+        "frida_008",
+        "frida_009",
+        "frida_010",
+    ]
+    assert {scenario.get("reveals_gap") for scenario in frida_scenarios} == {None}
+    assert {
+        scenario["id"]: [
+            tool_call["tool"]
+            for tool_call in cast(list[dict[str, Any]], scenario["expected_tool_calls"])
+        ]
+        for scenario in frida_scenarios
+    } == {
+        "frida_001": ["get_section", "verify_quote"],
+        "frida_002": ["verify_quote"],
+        "frida_003": ["get_section"],
+        "frida_004": ["validate_citation"],
+        "frida_005": ["verify_quote"],
+        "frida_006": ["corpus_status"],
+        "frida_007": ["search_eu_implementations", "get_eu_basis"],
+        "frida_008": ["search_body"],
+        "frida_009": ["get_section"],
+        "frida_010": ["semantic_search", "get_section", "verify_quote"],
+    }
+
+
+def test_eval_suite_persona_count_includes_frida() -> None:
+    personas = eval_runner._load_personas()
+    scenarios = _load_scenarios()
+
+    assert eval_runner.EXPECTED_PERSONAS == 9
+    eval_runner._validate_suite(personas, scenarios, filtered_persona=None)
+
+    personas_without_frida = dict(personas)
+    personas_without_frida.pop("frida")
+    with pytest.raises(ValueError) as exc_info:
+        eval_runner._validate_suite(
+            personas_without_frida,
+            scenarios,
+            filtered_persona=None,
+        )
+    assert str(exc_info.value) == "expected 9 personas, found 8"
+
+
+def test_frida_phase3_non_semantic_scenarios_pass_against_synthetic_corpus(
+    tmp_path: Path,
+) -> None:
+    fixture = _load_yaml(FIXTURE_PATH)
+    _build_synthetic_corpus(tmp_path, fixture)
+    reader = CorpusReader(tmp_path)
+    frida_scenarios = [
+        scenario for scenario in _load_scenarios() if scenario.get("persona") == "frida"
+    ]
+
+    results = {
+        cast(str, scenario["id"]): _run_scenario(
+            reader,
+            scenario,
+            embedder_available=False,
+        )
+        for scenario in frida_scenarios
+    }
+
+    assert {
+        scenario_id: result.status
+        for scenario_id, result in results.items()
+        if scenario_id != "frida_010"
+    } == {
+        "frida_001": "pass",
+        "frida_002": "pass",
+        "frida_003": "pass",
+        "frida_004": "pass",
+        "frida_005": "pass",
+        "frida_006": "pass",
+        "frida_007": "pass",
+        "frida_008": "pass",
+        "frida_009": "pass",
+    }
+    assert results["frida_010"].status == "gap-revealed"
+    assert (
+        results["frida_010"].scenario["reveals_gap"]
+        == "semantic_search disabled (OPENAI_API_KEY not set)"
+    )
+
+
 def test_eval_runner_tool_args_supports_semantic_search_and_verify_quote() -> None:
     assert _tool_args(
         {

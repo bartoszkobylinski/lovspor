@@ -1,0 +1,227 @@
+scenarios:
+  - id: frida_001
+    persona: frida
+    intent: Verify a verbatim quote before citing it in an article
+    user_query: |
+      Bekreft at husleieloven § 9-5 inneholder ordlyden "protestere skriftlig innen én måned" før jeg siterer paragrafen i artikkelen.
+    expected_tool_calls:
+      - tool: get_section
+        slug_match: husleieloven
+        section_id: "9-5"
+      - tool: verify_quote
+        slug: husleieloven
+        section_id: "9-5"
+        quote: "protestere skriftlig innen én måned"
+    success_criteria:
+      - kind: tool_called
+        tool: get_section
+      - kind: tool_called
+        tool: verify_quote
+      - kind: response_contains
+        target: "verified"
+      - kind: response_contains
+        target: "protestere skriftlig innen én måned"
+    failure_modes:
+      - get_section returned the section but verify_quote was skipped before publication.
+      - The verbatim quote is paraphrased and verify_quote silently passes.
+    reveals_gap: null
+
+  - id: frida_002
+    persona: frida
+    intent: Catch a quote misattributed to the wrong section
+    user_query: |
+      Bekreft at husleieloven § 9-7 inneholder ordlyden "protestere skriftlig innen én måned" - en kollega har sitert paragrafen slik i et utkast.
+    expected_tool_calls:
+      - tool: verify_quote
+        slug: husleieloven
+        section_id: "9-7"
+        quote: "protestere skriftlig innen én måned"
+    success_criteria:
+      - kind: tool_called
+        tool: verify_quote
+      - kind: response_contains
+        target: "quote not found"
+      - kind: response_contains
+        target: "9-7"
+    failure_modes:
+      - verify_quote silently returns verified=true because the quote text appears elsewhere in the act.
+      - The misattribution to § 9-7 is not flagged and the article ships with the wrong reference.
+    reveals_gap: null
+
+  - id: frida_003
+    persona: frida
+    intent: Inspect get_section cross_references before paraphrasing
+    user_query: |
+      Hva refererer skatteloven § 6-1 til? Jeg trenger en oversikt over alle interne henvisninger før jeg parafraserer paragrafen.
+    expected_tool_calls:
+      - tool: get_section
+        slug_match: skatteloven
+        section_id: "6-1"
+    success_criteria:
+      - kind: tool_called
+        tool: get_section
+      - kind: response_contains
+        target: "cross_references"
+      - kind: response_contains
+        target: "5-1"
+    failure_modes:
+      - cross_references field is missing from the response.
+      - Internal § references are reported but not validated against the manifest.
+    reveals_gap: null
+
+  - id: frida_004
+    persona: frida
+    intent: Use validate_citation as the off-ramp for an ambiguous citation
+    user_query: |
+      En kilde har sendt meg sitatet "§ 5-12" uten å nevne hvilken lov det gjelder. Kan denne henvisningen bekreftes som den står?
+    expected_tool_calls:
+      - tool: validate_citation
+        citation: "§ 5-12"
+    success_criteria:
+      - kind: tool_called
+        tool: validate_citation
+      - kind: response_contains
+        target: "ambiguous"
+    failure_modes:
+      - validate_citation guesses an act and returns valid=true, sending Frida down the wrong path.
+      - The reason field does not explain why the citation cannot be confirmed.
+    reveals_gap: null
+
+  - id: frida_005
+    persona: frida
+    intent: Catch a hallucinated verbatim quote
+    user_query: |
+      En AI-assistent påstår at skatteloven § 5-12 inneholder setningen "every taxpayer must file by January 1". Bekreft sitatet før jeg bruker det.
+    expected_tool_calls:
+      - tool: verify_quote
+        slug: skatteloven
+        section_id: "5-12"
+        quote: "every taxpayer must file by January 1"
+    success_criteria:
+      - kind: tool_called
+        tool: verify_quote
+      - kind: response_contains
+        target: "quote not found"
+    failure_modes:
+      - verify_quote returns verified=true on a hallucinated quote.
+      - The hallucinated English text is treated as a valid Norwegian-law citation.
+    reveals_gap: null
+
+  - id: frida_006
+    persona: frida
+    intent: Confirm corpus freshness before publishing on a current-state claim
+    user_query: |
+      Redaktøren spør om korpuset er ferskt nok til å publisere en artikkel om gjeldende rett i dag. Sjekk status og bekreft.
+    expected_tool_calls:
+      - tool: corpus_status
+    success_criteria:
+      - kind: tool_called
+        tool: corpus_status
+      - kind: response_contains
+        target: "manifest_age_days"
+      - kind: response_contains
+        target: "is_stale"
+    failure_modes:
+      - The story is published from a stale corpus without flagging the age to the editor.
+      - corpus_status output is summarized in prose instead of returning the structured freshness signal.
+    reveals_gap: null
+
+  - id: frida_007
+    persona: frida
+    intent: Map an EU regulation citation to the Norwegian implementing act
+    user_query: |
+      For en artikkel om GDPR (forordning 2016/679) trenger jeg å bekrefte hvilke norske lover implementerer den.
+    expected_tool_calls:
+      - tool: search_eu_implementations
+        eu_doc_id: "32016R0679"
+      - tool: get_eu_basis
+        slug_match: personopplysningsloven
+    success_criteria:
+      - kind: tool_called
+        tool: search_eu_implementations
+      - kind: tool_called
+        tool: get_eu_basis
+      - kind: list_contains_slug
+        tool: search_eu_implementations
+        slug: personopplysningsloven
+      - kind: response_contains
+        target: "32016R0679"
+    failure_modes:
+      - The article cites the wrong implementing act because the CELEX lookup was skipped.
+      - Direction is reversed (Norwegian act → EU basis only) without confirming the implementation pair.
+    reveals_gap: null
+
+  - id: frida_008
+    persona: frida
+    intent: Handle an empty body-search result gracefully without inventing law
+    user_query: |
+      Finnes det noen norsk lov som regulerer "kvantedatamaskinregulering" i dette korpuset? Hvis ikke, si det rett ut.
+    expected_tool_calls:
+      - tool: search_body
+        query: kvantedatamaskinregulering
+        query_contains: [kvantedatamaskinregulering]
+    success_criteria:
+      - kind: tool_called
+        tool: search_body
+      - kind: result_count_equals
+        tool: search_body
+        count: 0
+    failure_modes:
+      - The empty result is glossed over and an unrelated act is cited instead.
+      - search_body silently rewrites the query and returns false-positive matches.
+    reveals_gap: null
+
+  - id: frida_009
+    persona: frida
+    intent: Recognize a broken internal cross-reference in a section body
+    user_query: |
+      Sjekk om alle § referanser i skatteloven § 6-1 er gyldige før jeg bruker paragrafen som kilde.
+    expected_tool_calls:
+      - tool: get_section
+        slug_match: skatteloven
+        section_id: "6-1"
+    success_criteria:
+      - kind: tool_called
+        tool: get_section
+      - kind: response_contains
+        target: "999-99"
+      - kind: response_contains
+        target: "false"
+    failure_modes:
+      - get_section returns cross_references but the broken § 999-99 reference is reported as valid.
+      - The article republishes a broken cross-reference under the assumption that the corpus already validated it.
+    reveals_gap: null
+
+  - id: frida_010
+    persona: frida
+    intent: Run the full Sprint 9 anti-hallucination chain end-to-end before publishing
+    user_query: |
+      Skriv et avsnitt om utleiers oppsigelsesfrist i Norge. Bruk kun verifiserte sitater og oppgi paragrafen.
+    expected_tool_calls:
+      - tool: semantic_search
+        query: utleiers oppsigelsesfrist
+        query_contains: [oppsigelse, frist]
+        dataset: lover
+      - tool: get_section
+        slug_match: husleieloven
+        section_id: "9-5"
+      - tool: verify_quote
+        slug: husleieloven
+        section_id: "9-5"
+        quote: "Oppsigelse fra utleier skal være skriftlig og begrunnet"
+    success_criteria:
+      - kind: tool_called
+        tool: semantic_search
+      - kind: tool_called
+        tool: get_section
+      - kind: tool_called
+        tool: verify_quote
+      - kind: list_contains_slug
+        tool: semantic_search
+        slug: husleieloven
+      - kind: response_contains
+        target: "verified"
+    failure_modes:
+      - One step in the chain is skipped (e.g., verify_quote omitted) and a verbatim quote ships unverified.
+      - semantic_search returns the right candidate but the AI quotes from memory instead of reading the section text.
+    reveals_gap: null
