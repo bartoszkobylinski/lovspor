@@ -6,13 +6,13 @@ scenarios:
       Give me the current text of naboloven § 2.
     expected_tool_calls:
       - tool: get_section
-        slug_match: naboloven
+        slug_match: grannelova-gl
         section_id: "2"
     success_criteria:
       - kind: response_contains
         target: urimeleg
       - kind: no_hallucinated_section
-        slug_match: naboloven
+        slug_match: grannelova-gl
         section_id: "2"
     failure_modes:
       - Misses single-number nynorsk sections.
@@ -26,13 +26,13 @@ scenarios:
       Show the change history for naboloven.
     expected_tool_calls:
       - tool: get_law_history
-        slug_match: naboloven
+        slug_match: grannelova-gl
     success_criteria:
       - kind: history_event_count_at_least
         tool: get_law_history
         count: 2
       - kind: response_contains
-        target: "update(lov): naboloven"
+        target: "update(lov): grannelova-gl"
     failure_modes:
       - Treats history as unavailable because the act is old.
       - Returns only current text.
@@ -50,7 +50,7 @@ scenarios:
     success_criteria:
       - kind: list_contains_slug
         tool: search_body
-        slug: naboloven
+        slug: grannelova-gl
       - kind: response_contains
         target: Urimeleg skade
     failure_modes:
@@ -96,7 +96,7 @@ scenarios:
       - kind: tool_called
         tool: validate_citation
     failure_modes:
-      - search_laws finds the title alias, but validate_citation requires the canonical slug naboloven.
+      - search_laws finds the title alias, but validate_citation requires the canonical slug grannelova-gl.
       - The assistant must bridge aliases manually.
     reveals_gap: no fuzzy or alias-aware slug matching
     roadmap_class: C2
@@ -130,9 +130,9 @@ scenarios:
     expected_outcome: gap_revealed
     expected_tool_calls:
       - tool: get_law_history
-        slug_match: naboloven
+        slug_match: grannelova-gl
       - tool: get_section
-        slug_match: naboloven
+        slug_match: grannelova-gl
         section_id: "2"
     success_criteria:
       - kind: tool_called

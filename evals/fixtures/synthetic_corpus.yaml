@@ -472,8 +472,8 @@ documents:
         lines_removed: 0
 
   - doc_id: lov-1961-06-16-015
-    slug: naboloven
-    title: Lov um rettshøve mellom grannar (grannelova, naboloven)
+    slug: grannelova-gl
+    title: Lov om rettshøve mellom grannar (grannelova)
     dataset: lover
     last_changed: "2026-02-20"
     total_changes: 2
@@ -500,13 +500,13 @@ documents:
       - date: "2026-02-20"
         commit: nab2002
         type: updated
-        subject: "update(lov): naboloven"
+        subject: "update(lov): grannelova-gl"
         lines_added: 4
         lines_removed: 1
       - date: "2025-04-22"
         commit: nab2001
         type: added
-        subject: "add(lov): naboloven"
+        subject: "add(lov): grannelova-gl"
         lines_added: 40
         lines_removed: 0
 

@@ -6,12 +6,12 @@ scenarios:
       Kan du finne naboloven for meg?
     expected_tool_calls:
       - tool: search_laws
-        query: naboloven
-        query_contains: [naboloven]
+        query: grannelova
+        query_contains: [grannelova]
     success_criteria:
       - kind: list_contains_slug
         tool: search_laws
-        slug: naboloven
+        slug: grannelova-gl
     failure_modes:
       - Metadata search misses the title alias.
       - Returns plan- og bygningsloven only.
@@ -27,13 +27,13 @@ scenarios:
         query: ulempe
         query_contains: [ulempe]
       - tool: get_section
-        slug_match: naboloven
+        slug_match: grannelova-gl
         section_id: "2"
     success_criteria:
       - kind: response_contains
         target: granneeigedom
       - kind: no_hallucinated_section
-        slug_match: naboloven
+        slug_match: grannelova-gl
         section_id: "2"
     failure_modes:
       - Misses nynorsk text because the user writes bokmål.
@@ -50,13 +50,13 @@ scenarios:
         query: hekk
         query_contains: [hekk]
       - tool: get_section
-        slug_match: naboloven
+        slug_match: grannelova-gl
         section_id: "3"
     success_criteria:
       - kind: response_contains
         target: Tre, hekk og planting
       - kind: no_hallucinated_section
-        slug_match: naboloven
+        slug_match: grannelova-gl
         section_id: "3"
     failure_modes:
       - Treats it as a building-law question only.
@@ -93,7 +93,7 @@ scenarios:
       Er naboloven § 3 en ordentlig henvisning?
     expected_tool_calls:
       - tool: validate_citation
-        citation: "naboloven § 3"
+        citation: "grannelova-gl § 3"
     success_criteria:
       - kind: citation_valid
       - kind: response_contains
