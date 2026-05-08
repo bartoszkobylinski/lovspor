@@ -24,24 +24,22 @@
 - Full git history. Time-travel "as of date" already exists for free — just not yet exposed.
 - Manifest as the single source of truth for change detection.
 
-### MCP server (12 tools)
+### MCP server (10 tools)
 | Tool | Purpose |
 |---|---|
 | `get_law` | full Markdown of an act |
-| `get_section` | one `§` with parent chapter + validated `cross_references` |
+| `get_section` | one `§` with parent chapter for context |
 | `get_law_history` | structured change events |
 | `list_recent_changes` | sorted by `last_changed` |
 | `search_laws` | slug + title metadata search |
 | `search_body` | full-text body search, lazy 45 MB index |
-| `semantic_search` | top-K cosine over per-section embeddings (Sprint 9) |
 | `validate_citation` | zero-hallucination guard for citations |
-| `verify_quote` | verbatim-quote anti-hallucination check (Sprint 9) |
 | `get_eu_basis` | Norwegian act → CELEX list |
 | `search_eu_implementations` | CELEX → list of acts |
 | `corpus_status` | freshness / staleness signal |
 
 ### Positioning
-Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 12 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`).
+Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 10 tools versus their ~13.
 
 ---
 
@@ -61,9 +59,9 @@ Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). Th
 - **No forskrift→lov mapping.** Each forskrift is issued under specific legal authority encoded in the source XML; this relationship is not exposed.
 
 ### Search quality
-- **Substring matching only** in `search_body`. A search for `"kryptovaluta"` misses `"virtuell valuta"` — both terms appear in Norwegian tax guidance for the same concept. No tokenization, no Norwegian morphology (Norwegian inflects heavily — `skatteyteren` / `skatteytere` / `skatteyterne` is one term), no BM25 ranking. (Sprint 9 added `semantic_search` for cross-vocabulary matching, which addresses this from a different angle but does not replace BM25 / morphology for keyword queries.)
+- **Substring matching only** in `search_body`. A search for `"kryptovaluta"` misses `"virtuell valuta"` — both terms appear in Norwegian tax guidance for the same concept. No tokenization, no Norwegian morphology (Norwegian inflects heavily — `skatteyteren` / `skatteytere` / `skatteyterne` is one term), no BM25 ranking.
 - **45 MB body index in RAM** is acceptable for 4500 docs but would scale to ~500 MB once local regulations are added. No SQLite FTS5 fallback.
-- **No reranker on `semantic_search` results.** Top-K is raw cosine similarity; a domain-tuned reranker (cross-encoder) could filter "close-but-wrong" matches further. Deferred until eval shows a need.
+- **No embeddings.** Semantic search does not exist.
 - **No fuzzy slug match.** Callers must hit the canonical slug exactly.
 
 ### Operational
@@ -129,11 +127,13 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 
 ### Class C: Search quality
 
-**C1. Semantic search via embeddings — SHIPPED in Sprint 9 (PR #41 → #50, MERGED 2026-04-30 → 2026-05-06)**
-- Per-section embeddings via `text-embedding-3-large` (3072-dim, int8-quantized, ~99% similarity preserved at 1/4 storage). Model chosen empirically — beat Norwegian-tuned alternatives by +24% Recall@5 on a 47-query benchmark.
-- Storage: per-doc `<dataset>/embeddings/<slug>.bin` files, LSPE binary format. See [`docs/embeddings.md`](embeddings.md). Chosen over monolithic parquet/SQLite because per-doc sharding preserves git diff per-section semantics.
-- New tools: `semantic_search(query, dataset?, limit?)` returns top-K with `score` + `citation_hint`; `verify_quote(slug, section_id, quote)` is the matching anti-hallucination guard for verbatim citations; `get_section` response gained a `cross_references` field listing every internal `§ N-M` ref already validated.
-- See [`docs/decisions.md` Sprint 9 entry](decisions.md) for the full breakdown including the path-cascade hotfix train (#43-#46) that closed an entire bug class during the migration rollout.
+**C1. Semantic search via embeddings**
+- Precompute embeddings per section (`jina-embeddings-v2-base-no` locally, or OpenAI `text-embedding-3-small`).
+- Storage: `lovverk/embeddings.parquet` or SQLite + `sqlite-vss`.
+- New tool: `semantic_search(query, k=10)` returns top-k sections by cosine similarity.
+- **Leverage:** high. Substring matching fundamentally cannot capture semantics.
+- **Effort:** medium. Model choice + indexing + persistence.
+- **Cost:** ~$10 one-time for OpenAI; free locally with a slower indexing pass.
 
 **C2. SQLite FTS5 + Norwegian stemmer**
 - Norwegian Snowball stemmer + FTS5 + BM25.
@@ -214,14 +214,14 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 Top three by **value × novelty**:
 
 1. **Time-machine + diff tool** (Class B). Cheapest in cost-per-impact (~3 days). Unique — no competitor has a git-based architecture. Answers a real legal-research question: "what did this law say in 2018?". Builds on infrastructure already present.
-2. **AST + cross-reference graph** (Classes A1, A2). A larger investment, but unblocks many later sprints. The AST enables: better `get_section`, structural diffs (complementing class B), navigation tools, and a richer `cross_references` field on `get_section` (currently regex-based, B-tier scope).
-3. **Domsregister** (Class D2). The most valuable domain expansion — without case law, legal AI is weak. Sprint 9 closed the semantic-search gap (C1), so the next major leverage move is in domain coverage rather than search quality.
+2. **AST + cross-reference graph** (Classes A1, A2). A larger investment, but unblocks many later sprints. Closes the polish-law-mcp parity gap. The AST enables: better `get_section`, structural diffs (complementing class B), navigation tools.
+3. **Semantic search via embeddings** (Class C1). `search_body`'s substring matching cannot capture `"kryptovaluta"` and `"virtuell valuta"` as the same concept, or `"kunstig intelligens"` and `"maskinlæring"` as related concepts. Embeddings are the standard fix. ~50 MB parquet artifact in the corpus repo, a one-time cost.
 
 Top three by **adoption × reach**:
 
 4. **PyPI publish** (Class E1). One day of work, opens the project to mass adoption.
-5. **Public docs site + showcase** (Class E2). Discoverability.
-6. **Local regulations** (D1). Concrete audience (municipal lawyers, urban planners); separate corpus repo to avoid bloating the main one.
+5. **Domsregister** (Class D2). The most valuable domain expansion — without case law, legal AI is weak.
+6. **Public docs site + showcase** (Class E2). Discoverability.
 
 ---
 
@@ -234,4 +234,4 @@ Top three by **adoption × reach**:
 
 ---
 
-*Last reviewed: 2026-05-07 (post-Sprint-9 update). Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
+*Last reviewed: 2026-04-29. Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*

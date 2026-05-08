@@ -374,7 +374,7 @@ End-of-sprint validation in Claude Code (2026-04-28): user prompt *"Use the lovv
 
 **Lesson recorded for §14:** PRs that get follow-up commits after Codex's "No findings" need a verification that the follow-up actually went to the same branch ref on origin. After a squash-merge, GitHub deletes the source branch; subsequent pushes silently create a new branch with the same name and re-trigger Codex without ever connecting back to a PR. See PR #29 origin story.
 
-### Sprint 8 — Tool surface deepening (PR #31 → #34, MERGED 2026-04-28 → 2026-04-29)
+### Sprint 8 (in progress) — Tool surface deepening (closing the gap vs. polish-law-mcp)
 
 User decision 2026-04-28, after surveying the polish-law-mcp ecosystem (Ansvar Systems' polish-law-mcp + numikel's law-scrapper-mcp + janisz's sejm-mcp). Those projects offer ~13 tools each vs. our six; concrete gaps worth closing:
 
@@ -395,37 +395,6 @@ User decision 2026-04-28, after surveying the polish-law-mcp ecosystem (Ansvar S
 - **Substring case-insensitive matching** (Q2=substring) for the MVP. No tokenization, no stemming. Word-based / stemmed indexing is a follow-up if real use shows it matters; documented as a limitation in `docs/mcp.md`.
 - **Two separate tools** (`search_laws` vs `search_body`, Q4=dwa-toole) rather than one with a `body: bool` flag. AI tool selection is clearer when names encode intent.
 - **Limit-only, no offset** (Q5=limit-only). AI consumers rarely paginate; they refine queries instead.
-
-### Sprint 9 — Semantic search + anti-hallucination stack (PR #41 → #50, MERGED 2026-04-30 → 2026-05-06)
-
-User decision 2026-04-29, after Sprint 8 closed the keyword-search gap: substring matching cannot relate semantically equivalent phrasings (*"renter rights"* ↔ *manglende vedlikehold*). Sprint 9 adds embeddings plus the matching anti-hallucination grounding layer that makes the new fuzzy retrieval safe for AI consumers.
-
-**Model pivot (PR #41 benchmark → PR #42 implementation).** Empirical benchmark (`benchmarks/embedding_comparison/results-2026-04-30.md`) over 8 personas × 47 realistic queries compared `text-embedding-3-large`, `text-embedding-3-small`, `nb-sbert-v2-large`, and `nb-sbert-v2-base`. `text-embedding-3-large` won by **+24% Recall@5** over the best Norwegian-tuned alternative. Counter-intuitive — generalist beating domain-tuned — but the benchmark was strict and queries were realistic AI-consumer phrasings. Trade-off accepted: paid API + network dependency vs ~$5-15/year cost on a hobby project where Norwegian law text is publicly available under NLOD 2.0 (no privacy concern), in exchange for the Recall@5 gain.
-
-**Sprint 9 PR breakdown:**
-
-- **PR-A** (PR #42, MERGED 2026-04-30) — embeddings model layer: `OpenAIEmbedder` with `tiktoken`-aware truncation, retry on `TransportError`/429/5xx, and index-aligned response extraction (the API can return embeddings in different order than input; aligning by the `index` field prevents silent section-vector misalignment at storage time).
-- **PR-B1 / PR-B2** (PR #44, MERGED 2026-04-30) — orchestrator wire-in via `_write_one`. Sprint 9 backfill migration that re-renders every current doc to populate `.bin` files on first sync after PR-B1, similar in shape to the Sprint 4 slug rename and Sprint 5 history backfills.
-- **Path-cascade hotfix train** (PR #43, PR #44 rounds 2-3, PR #45, PR #46) — production CI sync crashed three times during the embedding migration with `pathspec did not match any files`. Class of bugs progressively closed: rename + rename collision → atomic rename phase (#43); changed + rename and cross-loop interleaving (#44 rounds); universal within-sync collision detector (#45); cross-sync manifest-vs-tree drift orphan-path filter so a stale manifest entry no longer crashes `git add` (#46). The class is now structurally closed across both within-sync (any action-type combo) and cross-sync (orphan paths from prior crashes) failure modes.
-- **PR-B3** (PR #48, MERGED 2026-05-05) — `semantic_search` and `verify_quote` MCP tools (10 → 12). Eager OpenAIEmbedder construction at server start when `OPENAI_API_KEY` is set so a malformed key fails fast; missing key warns to stderr and disables only `semantic_search`, keeping the other 11 tools alive (graceful degradation — original eager fail-fast plan reverted because crashing the whole server over one optional dependency is user-hostile). Codex round-1 caught a real correctness bug: `_load_embedding_index` accepted `.bin` files of any dim, then `top_k_cosine` raised `shapes not aligned` when a stale-dim file met the current-dim query vector. Fix added per-file dim filtering with operator-visible stderr log; round-2 added a distinct error message for the all-stale-corpus state (post-migration) vs the no-bin-files state (cold bootstrap).
-- **PR-B3.5** (PR #50, MERGED 2026-05-06) — `cross_references` field on `get_section` response. Every `§ N-M` reference in the body is parsed once, validated against the manifest, deduplicated by target. Closes the cross-citation hallucination vector PR-B3 left open: AI sees broken internal refs inline rather than needing a follow-up `validate_citation` call. Codex round-1 caught a slug-leak bug in the bounded-window resolution where the next `§`'s slug-before-`§` owner could bleed backward into the current `§`'s window; fix added `_compute_match_owner_starts` to detect known-slug tokens immediately preceding the next match (whitespace-only between token and `§`) and trim the previous match's AFTER-window at the token's start. Restricted to known slugs so non-slug fillers like *samt* / *også* don't over-trim.
-
-**Anti-hallucination layered story** (the design intent across Sprint 9 PR-B3 and PR-B3.5):
-
-1. `semantic_search` returns candidates with `score` and `citation_hint`.
-2. `get_section` returns verbatim text plus `cross_references` so the AI sees broken internal refs inline.
-3. `verify_quote` confirms verbatim text matches the cited section before the AI quotes anything.
-4. `validate_citation` is the off-ramp for ambiguous citations the other three can't resolve.
-
-None of the four prevent paraphrase hallucination — that requires the AI client itself to ground in `get_section` and quote the original Norwegian. The stack covers what the tooling layer can cover.
-
-**Architecture decisions for Sprint 9:**
-- **Per-doc binary sharding** (Q1=A 2026-04-29). Rejected: monolithic `embeddings.parquet` or `lovverk/embeddings.sqlite` (would rewrite end-to-end on any sync, producing 200+ MB git blobs and burying real legal-text changes under embedding churn). Per-doc `.bin` files preserve git diff per-section semantics; ~200 MB total at 3072-dim int8 across 4500 docs is acceptable for a long-lived stdio process.
-- **int8 quantization with per-batch scale** (Q2=int8). ~99% similarity preserved at 1/4 storage cost vs float32. Per-file scale (not corpus-wide) because section vectors within one act share a tighter magnitude distribution.
-- **Brute-force `top_k_cosine`** (Q3=brute-force). Rejected: ANN index (faiss, hnswlib). At corpus scale a brute-force scan is ~50 ms per query — well within an interactive budget — and avoids the determinism risk plus extra ops complexity ANN indexes introduce.
-- **Graceful key-missing degradation** (Q4=warn-and-degrade). Rejected: original eager fail-fast at server start. Only 1 of 12 tools needs the key; refusing to start the whole server over one optional dependency is user-hostile.
-- **B-tier scope for `cross_references`** (Q5=B). Canonical slugs only. Descriptive name resolution (*"i lov om X"* → looking up `skatteloven-sktl` from a free-text title) deferred as a possible C-tier follow-up; `validate_citation` remains the off-ramp.
-- **Bounded-window slug resolution with owner-trim** (Q6=bounded+owner-trim, decided 2026-05-06 after Codex round-1 on PR #50). Each `§` match's slug-resolution window is bounded by surrounding `§` matches AND further trimmed when the next `§` has a slug-before-`§` owner. Without owner-trim, a body like *"Se § 5-13. Etter annen-lov § 9-3."* resolves § 5-13 to `annen-lov` because that slug falls inside § 5-13's AFTER-window even though it clearly attaches to the next § 9-3.
 
 
 Originally decided 2026-04-26 to keep `Settings.git_commit_mode` as a forward declaration. Implemented 2026-04-26 in Sprint 4 PR #17 (three modes wired); Sprint 5 PR #24 added per-act history bundling on top — see §12d for the chicken-and-egg with `git log --follow` that drives the post-Sprint-5 commit topology.
