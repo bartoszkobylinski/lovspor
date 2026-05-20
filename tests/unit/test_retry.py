@@ -1,5 +1,6 @@
 import pytest
 
+from lovspor import retry
 from lovspor.retry import retry_with_backoff
 
 
@@ -69,6 +70,17 @@ def test_attempts_zero_raises_value_error() -> None:
 
     with pytest.raises(ValueError, match="attempts must be"):
         retry_with_backoff(func, attempts=0, base_delay_seconds=0)
+
+
+def test_attempts_error_message_is_exact() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        retry_with_backoff(lambda: 1, attempts=0, base_delay_seconds=0)
+
+    assert str(exc_info.value) == "attempts must be >= 1"
+
+
+def test_retry_typevar_has_expected_runtime_name() -> None:
+    assert retry.T.__name__ == "T"
 
 
 def test_backoff_delays_follow_exponential_schedule(

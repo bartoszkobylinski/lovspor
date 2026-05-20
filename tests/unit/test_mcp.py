@@ -10,7 +10,7 @@ four expected tool names are registered.
 import json
 import shlex
 import subprocess
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -21,11 +21,21 @@ from lovspor.mcp import (
     _CROSS_REF_SECTION,
     CorpusNotFoundError,
     CorpusReader,
+    _build_embedder,
     _compute_match_owner_starts,
     _extract_cross_references,
+    _normalize_for_quote_match,
+    _record_summary,
+    _resolve_dataset,
+    _resolve_slug_in_window,
+    _slug_token_in_citation,
+    _snippet,
+    _strip_frontmatter_and_h1,
+    _subdir_for_dataset,
     build_server,
 )
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
+from lovspor.timetravel import RevisionNotFoundError
 
 
 def _record(
@@ -120,6 +130,99 @@ class _FakeEmbedder:
         return int(self.vector.shape[0])
 
 
+def test_mcp_low_level_helpers_have_stable_public_contracts() -> None:
+    record = _record(
+        slug="skatteloven-sktl",
+        title="Skatteloven",
+        last_changed="2026-04-27",
+        total_changes=3,
+    )
+
+    assert _slug_token_in_citation(
+        "skatteloven-sktl",
+        "presskatteloven-sktl og skatteloven-sktl.",
+    )
+    assert not _slug_token_in_citation("skatteloven-sktl", "skatteloven-sktlx")
+    assert (
+        _resolve_slug_in_window(
+            "jf. kort-lov og lang-lov-med-navn § 1",
+            "kort-lov",
+            {"kort-lov", "lang-lov-med-navn"},
+        )
+        == "lang-lov-med-navn"
+    )
+    assert _normalize_for_quote_match("  Dette\nER\tTekst  ") == "dette er tekst"
+    assert _record_summary("nl-1", record) == {
+        "slug": "skatteloven-sktl",
+        "doc_id": "nl-1",
+        "title": "Skatteloven",
+        "dataset": "lover",
+        "last_changed": "2026-04-27",
+        "total_changes": 3,
+    }
+    assert _subdir_for_dataset("gjeldende-sentrale-forskrifter") == "forskrifter"
+    assert _resolve_dataset("lover") == "gjeldende-lover"
+    assert _resolve_dataset("gjeldende-sentrale-forskrifter") == ("gjeldende-sentrale-forskrifter")
+    with pytest.raises(CorpusNotFoundError, match="unknown source_dataset"):
+        _subdir_for_dataset("bogus")
+    with pytest.raises(CorpusNotFoundError, match="use one of: lover, forskrifter"):
+        _resolve_dataset("bogus")
+
+
+def test_strip_frontmatter_h1_and_snippet_boundaries_are_stable() -> None:
+    rendered = (
+        "---\ntitle: Skatteloven\n---\n\n# Skatteloven\n\n## Kapittel 1\n### § 1. Start\nBody text."
+    )
+    assert _strip_frontmatter_and_h1(rendered) == ("## Kapittel 1\n### § 1. Start\nBody text.")
+    assert _strip_frontmatter_and_h1("plain text") == "plain text"
+
+    body = "a" * 60 + "TARGET" + "b" * 60
+    snippet = _snippet(body, 60, len("TARGET"))
+    assert snippet == "..." + ("a" * 50) + "TARGET" + ("b" * 50) + "..."
+
+
+def test_corpus_reader_constructor_and_safe_join_errors_are_specific(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path / "missing")
+    assert str(exc_info.value) == f"corpus path does not exist: {missing}"
+
+    tmp_path.mkdir(exist_ok=True)
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path)
+    assert str(exc_info.value) == f"corpus path is missing manifest.json: {tmp_path}"
+
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+    )
+    reader = CorpusReader(tmp_path)
+    with pytest.raises(CorpusNotFoundError, match="escapes corpus root"):
+        reader._safe_join("..", "outside.md")
+
+
+def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    created: list[str] = []
+
+    class FakeOpenAIEmbedder:
+        def __init__(self, api_key: str) -> None:
+            created.append(api_key)
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_APIKEY", raising=False)
+    monkeypatch.setattr("lovspor.mcp.OpenAIEmbedder", FakeOpenAIEmbedder)
+
+    assert _build_embedder() is None
+    assert "semantic_search will be disabled" in capsys.readouterr().err
+
+    monkeypatch.setenv("OPENAI_APIKEY", "sk-compact")
+    assert _build_embedder().__class__ is FakeOpenAIEmbedder
+    assert created == ["sk-compact"]
+
+
 def _write_embedding_file(
     root: Path,
     dataset_subdir: str,
@@ -192,8 +295,12 @@ def test_get_law_raises_when_manifest_references_missing_file(tmp_path: Path) ->
         {"nl-1": _record(slug="x", title="X")},
         write_files=False,
     )
-    with pytest.raises(CorpusNotFoundError, match="file is missing"):
+    with pytest.raises(CorpusNotFoundError) as exc_info:
         CorpusReader(tmp_path).get_law("x")
+    assert str(exc_info.value) == (
+        "manifest references 'lover/x.md' but file is missing; "
+        "run 'git pull' in the corpus to refresh"
+    )
 
 
 def test_get_law_refuses_path_escape_via_markdown_path(tmp_path: Path) -> None:
@@ -251,8 +358,11 @@ def test_get_law_history_returns_parsed_json(tmp_path: Path) -> None:
 def test_get_law_history_raises_when_history_file_missing(tmp_path: Path) -> None:
     """Pre-Sprint-5 corpus has no history files yet."""
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
-    with pytest.raises(CorpusNotFoundError, match="history file missing"):
+    with pytest.raises(CorpusNotFoundError) as exc_info:
         CorpusReader(tmp_path).get_law_history("x")
+    assert str(exc_info.value) == (
+        "history file missing for 'x'; corpus may predate the Sprint 5 history layer"
+    )
 
 
 def test_get_law_history_raises_for_unknown_slug(tmp_path: Path) -> None:
@@ -285,6 +395,20 @@ def test_list_recent_changes_respects_limit(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, bulk)
     rows = CorpusReader(tmp_path).list_recent_changes(limit=5)
     assert len(rows) == 5
+
+
+def test_list_recent_changes_default_limit_is_twenty(tmp_path: Path) -> None:
+    bulk = {
+        f"nl-{i:02d}": _record(
+            slug=f"s{i:02d}",
+            title=f"S{i}",
+            last_changed=f"2026-04-{(i % 28) + 1:02d}",
+        )
+        for i in range(25)
+    }
+    _seed_corpus(tmp_path, bulk)
+
+    assert len(CorpusReader(tmp_path).list_recent_changes()) == 20
 
 
 def test_list_recent_changes_filters_by_dataset_alias(tmp_path: Path) -> None:
@@ -339,8 +463,9 @@ def test_list_recent_changes_rejects_negative_limit(tmp_path: Path) -> None:
         tmp_path,
         {"nl-1": _record(slug="x", title="X", last_changed="2026-04-27")},
     )
-    with pytest.raises(ValueError, match="limit must be non-negative"):
+    with pytest.raises(ValueError) as exc_info:
         CorpusReader(tmp_path).list_recent_changes(limit=-1)
+    assert str(exc_info.value) == "limit must be non-negative, got -1"
 
 
 def test_list_recent_changes_zero_limit_is_empty(tmp_path: Path) -> None:
@@ -379,8 +504,9 @@ def test_list_recent_changes_rejects_malformed_since_date(tmp_path: Path) -> Non
         tmp_path,
         {"nl-1": _record(slug="x", title="X", last_changed="2026-04-27")},
     )
-    with pytest.raises(ValueError, match="ISO date YYYY-MM-DD"):
+    with pytest.raises(ValueError) as exc_info:
         CorpusReader(tmp_path).list_recent_changes(since="not a date")
+    assert str(exc_info.value) == "since must be ISO date YYYY-MM-DD, got 'not a date'"
 
 
 def test_list_recent_changes_accepts_full_lovdata_dataset_keys(tmp_path: Path) -> None:
@@ -657,8 +783,20 @@ def test_search_body_rejects_negative_limit(tmp_path: Path) -> None:
     semantics ('all but the last N') is unambiguously not what an AI
     caller intends."""
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
-    with pytest.raises(ValueError, match="limit must be non-negative"):
+    with pytest.raises(ValueError) as exc_info:
         CorpusReader(tmp_path).search_body("anything", limit=-1)
+    assert str(exc_info.value) == "limit must be non-negative, got -1"
+
+
+def test_search_body_default_limit_is_twenty(tmp_path: Path) -> None:
+    records = {f"nl-{i:02d}": _record(slug=f"s{i:02d}", title=f"S{i}") for i in range(25)}
+    _seed_corpus(
+        tmp_path,
+        records,
+        body_for={f"s{i:02d}": "needle" for i in range(25)},
+    )
+
+    assert len(CorpusReader(tmp_path).search_body("needle")) == 20
 
 
 def test_search_body_zero_limit_returns_empty(tmp_path: Path) -> None:
@@ -1614,10 +1752,24 @@ def test_get_section_raises_with_available_list_when_section_missing(
     with pytest.raises(CorpusNotFoundError) as exc_info:
         CorpusReader(tmp_path).get_section("skatteloven", "5-99")
     msg = str(exc_info.value)
-    assert "5-99" in msg
-    assert "skatteloven" in msg
-    assert "§ 1-1" in msg
-    assert "§ 5-12" in msg
+    assert msg == (
+        "section '5-99' not found in 'skatteloven'; available: § 1-1, § 1-2, § 5-12, § 5-13"
+    )
+
+
+def test_get_section_missing_message_when_act_has_no_sections(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "## Kapittel uten paragrafer\nBare tekst."},
+    )
+
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_section("x", "1-1")
+
+    assert str(exc_info.value) == (
+        "section '1-1' not found in 'x'; available: (no sections in this act)"
+    )
 
 
 def test_get_section_natural_order_in_error_message(tmp_path: Path) -> None:
@@ -1785,6 +1937,8 @@ def test_validate_citation_slug_only_is_valid(tmp_path: Path) -> None:
     assert result["slug"] == "skatteloven-sktl"
     assert result["section_id"] is None
     assert result["heading"] is None
+    assert set(result) == {"valid", "slug", "section_id", "heading", "reason"}
+    assert result["reason"] is None
 
 
 def test_validate_citation_unknown_slug_is_invalid(tmp_path: Path) -> None:
@@ -1807,7 +1961,12 @@ def test_validate_citation_paragraph_only_is_ambiguous(tmp_path: Path) -> None:
     assert result["valid"] is False
     assert result["slug"] is None
     assert result["section_id"] == "5-12"
-    assert "ambiguous" in result["reason"].lower()
+    assert set(result) == {"valid", "slug", "section_id", "heading", "reason"}
+    assert result["heading"] is None
+    assert result["reason"] == (
+        "ambiguous citation: § 5-12 found but no act identifier; "
+        "many acts have a section by that id"
+    )
 
 
 def test_validate_citation_unparseable_returns_invalid(tmp_path: Path) -> None:
@@ -1816,7 +1975,11 @@ def test_validate_citation_unparseable_returns_invalid(tmp_path: Path) -> None:
     assert result["valid"] is False
     assert result["slug"] is None
     assert result["section_id"] is None
-    assert "could not parse" in result["reason"].lower()
+    assert set(result) == {"valid", "slug", "section_id", "heading", "reason"}
+    assert result["heading"] is None
+    assert result["reason"] == (
+        "could not parse citation 'just some prose': no § id and no known slug found"
+    )
 
 
 def test_validate_citation_unknown_section_returns_helpful_error(
@@ -1830,6 +1993,8 @@ def test_validate_citation_unknown_section_returns_helpful_error(
     assert result["valid"] is False
     assert result["slug"] == "skatteloven-sktl"
     assert result["section_id"] == "5-99"
+    assert set(result) == {"valid", "slug", "section_id", "heading", "reason"}
+    assert result["heading"] is None
     assert "5-99" in result["reason"]
     assert "§ 5-12" in result["reason"]
 
@@ -2008,6 +2173,249 @@ def test_verify_quote_unknown_section_returns_false_with_reason(tmp_path: Path) 
     assert result["slug"] == "skatteloven"
     assert result["section_id"] == "9-9"
     assert "section '9-9' not found" in result["reason"]
+
+
+# ---------- time-machine tools ----------
+
+
+def test_get_law_at_passes_manifest_path_and_parsed_date_to_timetravel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    seen: dict[str, object] = {}
+
+    def fake_get_law_at_revision(
+        repo_path: Path,
+        current_path: str,
+        target_date: date,
+    ) -> str:
+        seen["args"] = (repo_path, current_path, target_date)
+        return "historical markdown"
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fake_get_law_at_revision)
+
+    result = CorpusReader(tmp_path).get_law_at("skatteloven", "2026-04-27")
+
+    assert result == "historical markdown"
+    assert seen["args"] == (
+        tmp_path,
+        "lover/skatteloven.md",
+        date(2026, 4, 27),
+    )
+
+
+def test_get_law_at_rejects_non_iso_date_before_manifest_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fail_if_called(*_args: object) -> str:
+        raise AssertionError("timetravel lookup should not run")
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fail_if_called)
+
+    with pytest.raises(
+        ValueError,
+        match=r"^target_date must be ISO date YYYY-MM-DD, got '27-04-2026'$",
+    ):
+        CorpusReader(tmp_path).get_law_at("skatteloven", "27-04-2026")
+
+
+def test_get_law_at_allows_todays_utc_date(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    today = datetime.now(UTC).date()
+
+    def fake_get_law_at_revision(
+        _repo_path: Path,
+        _current_path: str,
+        target_date: date,
+    ) -> str:
+        assert target_date == today
+        return "today markdown"
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fake_get_law_at_revision)
+
+    assert CorpusReader(tmp_path).get_law_at("skatteloven", today.isoformat()) == ("today markdown")
+
+
+def test_get_law_at_rejects_future_date_before_manifest_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fail_if_called(*_args: object) -> str:
+        raise AssertionError("timetravel lookup should not run")
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fail_if_called)
+
+    today = datetime.now(UTC).date()
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^target_date 2999-01-01 is in the future "
+            rf"\(today is {today.isoformat()}\); "
+            r"use get_law for the current version$"
+        ),
+    ):
+        CorpusReader(tmp_path).get_law_at("skatteloven", "2999-01-01")
+
+
+def test_get_law_at_translates_missing_revision_to_corpus_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fake_get_law_at_revision(*_args: object) -> str:
+        raise RevisionNotFoundError("too early")
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fake_get_law_at_revision)
+
+    with pytest.raises(
+        CorpusNotFoundError,
+        match=(
+            r"^law 'skatteloven' did not exist in the corpus on 2020-01-01; "
+            r"call get_law_history\('skatteloven'\) to see when it first appeared$"
+        ),
+    ):
+        CorpusReader(tmp_path).get_law_at("skatteloven", "2020-01-01")
+
+
+def test_list_law_versions_filters_content_events_and_sorts_oldest_first(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        write_history_for=["skatteloven"],
+    )
+    history_path = tmp_path / "lover" / "history" / "skatteloven.json"
+    history_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "slug": "skatteloven",
+                "doc_id": "nl-1",
+                "events": [
+                    {
+                        "date": "2026-04-29",
+                        "commit": "upd2222",
+                        "type": "updated",
+                        "subject": "update(lov): skatteloven",
+                        "lines_added": 5,
+                        "lines_removed": 2,
+                    },
+                    {
+                        "date": "2026-04-28",
+                        "commit": "ren1111",
+                        "type": "renamed",
+                        "subject": "rename(lov): skatteloven",
+                        "lines_added": 0,
+                        "lines_removed": 0,
+                    },
+                    {
+                        "date": "2026-04-27",
+                        "commit": "add0000",
+                        "type": "added",
+                        "subject": "add(lov): skatteloven",
+                    },
+                    {
+                        "date": "2026-04-30",
+                        "commit": "rem3333",
+                        "type": "removed",
+                        "subject": "remove(lov): skatteloven",
+                    },
+                ],
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    versions = CorpusReader(tmp_path).list_law_versions("skatteloven")
+
+    assert versions == [
+        {
+            "date": "2026-04-27",
+            "commit": "add0000",
+            "type": "added",
+            "lines_added": None,
+            "lines_removed": None,
+        },
+        {
+            "date": "2026-04-29",
+            "commit": "upd2222",
+            "type": "updated",
+            "lines_added": 5,
+            "lines_removed": 2,
+        },
+    ]
+
+
+def test_list_law_versions_coalesces_same_day_content_changes(
+    tmp_path: Path,
+) -> None:
+    """Two content changes on one UTC date collapse to a single entry.
+
+    get_law_at() resolves a date with end-of-day semantics, so it can
+    only reach the latest commit on that day; the earlier same-day
+    version is dropped from the listing rather than implying an
+    addressability the date interface does not provide.
+    """
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        write_history_for=["skatteloven"],
+    )
+    history_path = tmp_path / "lover" / "history" / "skatteloven.json"
+    history_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "slug": "skatteloven",
+                "doc_id": "nl-1",
+                # get_law_history yields events newest-first, intra-day
+                # included: the afternoon commit precedes the morning one.
+                "events": [
+                    {
+                        "date": "2026-04-29",
+                        "commit": "late999",
+                        "type": "updated",
+                        "subject": "update(lov): skatteloven (afternoon)",
+                        "lines_added": 8,
+                        "lines_removed": 1,
+                    },
+                    {
+                        "date": "2026-04-29",
+                        "commit": "early11",
+                        "type": "updated",
+                        "subject": "update(lov): skatteloven (morning)",
+                        "lines_added": 3,
+                        "lines_removed": 0,
+                    },
+                    {
+                        "date": "2026-04-27",
+                        "commit": "add0000",
+                        "type": "added",
+                        "subject": "add(lov): skatteloven",
+                    },
+                ],
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    versions = CorpusReader(tmp_path).list_law_versions("skatteloven")
+
+    assert [v["date"] for v in versions] == ["2026-04-27", "2026-04-29"]
+    same_day = next(v for v in versions if v["date"] == "2026-04-29")
+    assert same_day["commit"] == "late999"
+    assert same_day["lines_added"] == 8
 
 
 # ---------- corpus_status ----------
@@ -2279,7 +2687,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_twelve_tools(tmp_path: Path) -> None:
+def test_build_server_registers_fourteen_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -2289,6 +2697,8 @@ def test_build_server_registers_twelve_tools(tmp_path: Path) -> None:
     assert tool_names == sorted(
         [
             "get_law",
+            "get_law_at",
+            "list_law_versions",
             "get_section",
             "get_law_history",
             "list_recent_changes",

@@ -3,7 +3,7 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 
-from lovspor.embeddings.search import SearchHit, top_k_cosine
+from lovspor.embeddings.search import SearchHit, _HeapEntry, top_k_cosine
 
 
 def _int8_vector(values: list[int]) -> np.ndarray:
@@ -82,6 +82,15 @@ def test_top_k_cosine_sorts_equal_scores_deterministically() -> None:
         ("slug-b", "1"),
         ("slug-b", "2"),
     ]
+
+
+def test_heap_entry_strict_comparison_contract() -> None:
+    same = _HeapEntry(score=1.0, slug="a", section_id="1")
+    equal = _HeapEntry(score=1.0, slug="a", section_id="1")
+    assert not same < equal
+    assert _HeapEntry(score=0.5, slug="a", section_id="1") < same
+    assert _HeapEntry(score=1.0, slug="b", section_id="1") < same
+    assert _HeapEntry(score=1.0, slug="a", section_id="2") < same
 
 
 def test_top_k_cosine_skips_zero_vectors_and_keeps_scanning() -> None:

@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets twelve read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets fourteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 Sprint 9 added a four-layer anti-hallucination story for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
@@ -12,7 +12,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** twelve read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below).
+- **Tools:** fourteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Two of the fourteen (`get_law_at`, `list_law_versions`) are time-machine tools added in Sprint 10 that read past versions of acts directly from the corpus's git history.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -37,7 +37,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
    No PyPI publish required (yet). If you prefer `pip install`, see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
 
-3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other eleven keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit) below for the trade-off and cost.
+3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other thirteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit) below for the trade-off and cost.
 
 ---
 
@@ -80,7 +80,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All twelve are read-only. None mutate the corpus or trigger a sync. Eleven are pure local (manifest + filesystem); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
+All fourteen are read-only. None mutate the corpus or trigger a sync. Thirteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
 
 ### `get_law(slug)`
 
@@ -188,6 +188,56 @@ Return the per-act change history as structured JSON. Each event has `date`, `co
 }
 ```
 
+### `get_law_at(slug, target_date)`
+
+Time-machine companion to `get_law`: returns the full Markdown of a law as it stood on a given calendar date. Use it when the user asks *"what did Skatteloven say in 2018?"*, or when an answer needs to anchor to the version of an act in force at a specific historical moment (case decided 2019-03-12 → relevant § as it stood on 2019-03-12).
+
+- **`slug`** — the act's *current* slug. Even if the kortform was different in the past, you pass today's slug — the corpus's git history is rename-aware and traces predecessors automatically (Sprint-4 slug migration, any subsequent Lovdata kortform change).
+- **`target_date`** — ISO date `YYYY-MM-DD`. End-of-day UTC semantics: `"2026-04-15"` returns the version current at 23:59:59 UTC on April 15. Future dates are refused with a `ValueError` because they are almost always typos; use `get_law(slug)` for the current version.
+
+Output mirrors `get_law`: YAML frontmatter (as it was at that revision — `retrieved_at`, `xml_hash`, `eu_basis`-or-absent reflect that point in time, not today's manifest) followed by the legal text in Markdown.
+
+**Sample call:** `get_law_at("skatteloven-sktl", "2026-04-26")`
+
+**Sample output** (truncated; pre-Sprint-4 era — note the absence of the `slug:` field that the Sprint 4 migration added):
+
+```markdown
+---
+id: "nl-19990326-014"
+type: "lov"
+ref_id: "lov/1999-03-26-14"
+title: "Lov om skatt av formue og inntekt (skatteloven)"
+short_title: "Skatteloven – sktl"
+language: "nb"
+...
+```
+
+Raises if the slug is unknown or if the act first appeared in the corpus *after* `target_date` — the error message points to `get_law_history` so the AI can find the earliest available date.
+
+### `list_law_versions(slug)`
+
+Companion to `get_law_at`: lists the dates on which the act had distinct content versions. Each entry is a moment when the act's content actually changed — pure filename renames are filtered out because they don't yield different `get_law_at` output.
+
+Returns oldest-first so the AI can reason about the timeline naturally (initial appearance → updates → today). Each entry has `date` (ISO `YYYY-MM-DD` — feed straight into `get_law_at`), `commit` (short SHA), `type` (`added` | `updated`), and `lines_added` / `lines_removed` (may be `null` for legacy bulk-mode commits).
+
+**Sample call:** `list_law_versions("skatteloven-sktl")`
+
+**Sample output:**
+
+```json
+[
+  {
+    "date": "2026-04-26",
+    "commit": "57c3052",
+    "type": "added",
+    "lines_added": 3867,
+    "lines_removed": 0
+  }
+]
+```
+
+Raises if the slug is unknown or if the corpus pre-dates the Sprint 5 history layer (no `history/<slug>.json`).
+
 ### `list_recent_changes(dataset?, since?, limit?)`
 
 List current laws ordered by most recent change first.
@@ -292,7 +342,7 @@ Top-K cosine semantic search over per-section embeddings. Use when the user's qu
 
 Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `citation_hint` is a paste-ready `§ <id> <slug>` string for quoting next to a claim.
 
-**Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other eleven keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
+**Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other thirteen keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
 
 **Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a brute-force cosine scan (~50 ms). Per-call OpenAI cost is fractions of a cent.
 
@@ -534,7 +584,7 @@ A typical AI-assistant interaction with this server follows the same pattern:
 11. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
 12. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The twelve tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything.
+The fourteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. Sprint 10's time-machine pair (`get_law_at` + `list_law_versions`) extends the same surface to historical research: the AI can answer "what did Skatteloven say in 2018?" by walking the corpus's git history without any extra plumbing.
 
 ---
 

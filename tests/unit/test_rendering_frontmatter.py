@@ -54,6 +54,12 @@ def test_serialize_escapes_quote_and_backslash_in_string() -> None:
     assert r'title: "a\"b\\c"' in out
 
 
+def test_serialize_escapes_control_characters_in_string() -> None:
+    out = serialize_frontmatter(_Simple(title="line1\nline2\rTabbed\tEnd", count=0))
+
+    assert out == '---\ntitle: "line1\\nline2\\rTabbed\\tEnd"\ncount: 0\n---\n'
+
+
 def test_serialize_emits_int_without_quotes() -> None:
     out = serialize_frontmatter(_Simple(title="x", count=1234))
     assert "count: 1234" in out

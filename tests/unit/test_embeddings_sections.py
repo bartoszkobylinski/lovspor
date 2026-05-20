@@ -97,6 +97,25 @@ def test_iter_sections_returns_empty_when_no_section_headings() -> None:
     assert iter_sections("# Lov\n\n## Kapittel\n\nVanlig tekst.") == []
 
 
+def test_iter_sections_continues_after_non_section_heading() -> None:
+    body = "\n".join(
+        [
+            "### § 1. Første",
+            "Første tekst.",
+            "### Merknad",
+            "Ignored.",
+            "### § 2. Andre",
+            "Andre tekst.",
+            "### Annet",
+            "Ignored again.",
+            "### § 3. Tredje",
+            "Tredje tekst.",
+        ],
+    )
+
+    assert [section.section_id for section in iter_sections(body)] == ["1", "2", "3"]
+
+
 def test_embedding_section_is_immutable() -> None:
     section = EmbeddingSection(section_id="1", text="tekst")
 

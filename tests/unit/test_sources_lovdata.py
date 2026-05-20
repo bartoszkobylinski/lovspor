@@ -18,10 +18,17 @@ from pytest_httpx import HTTPXMock
 
 from lovspor.errors import ConfigError, ExtractionError, NetworkError, ParseError
 from lovspor.sources.lovdata import (
+    _DOWNLOAD_CHUNK_BYTES,
     DEFAULT_BASE_URL,
+    DEFAULT_TIMEOUT_SECONDS,
+    DEFAULT_USER_AGENT,
     DownloadResult,
     LovdataArchive,
     LovdataClient,
+    _parse_archives,
+    _parse_json_array,
+    _raise_for_status,
+    _RetryableNetworkError,
 )
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -39,6 +46,37 @@ def _make_archive(size_bytes: int, filename: str = _TEST_FILENAME) -> LovdataArc
             "lastModified": "2026-04-22T01:31:00Z",
         },
     )
+
+
+class _FakeStreamResponse:
+    status_code = 200
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+        self.requested_chunk_size: int | None = None
+
+    def __enter__(self) -> "_FakeStreamResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def iter_bytes(self, chunk_size: int) -> list[bytes]:
+        self.requested_chunk_size = chunk_size
+        return self.chunks
+
+
+class _FakeHttpClient:
+    def __init__(self, response: _FakeStreamResponse) -> None:
+        self.response = response
+        self.calls: list[tuple[str, str]] = []
+
+    def stream(self, method: str, url: str) -> _FakeStreamResponse:
+        self.calls.append((method, url))
+        return self.response
+
+    def close(self) -> None:
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -165,6 +203,16 @@ def test_list_datasets_calls_official_lovdata_endpoint(
     assert len(archives) == 4
 
 
+def test_client_uses_default_timeout_and_user_agent() -> None:
+    with LovdataClient() as client:
+        assert client._client.timeout.connect == DEFAULT_TIMEOUT_SECONDS == 120.0
+        assert (
+            client._client.headers["User-Agent"]
+            == DEFAULT_USER_AGENT
+            == "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"
+        )
+
+
 def test_list_datasets_sends_accept_application_json_header(
     httpx_mock: HTTPXMock,
     list_payload: list[dict[str, Any]],
@@ -174,6 +222,36 @@ def test_list_datasets_sends_accept_application_json_header(
         client.list_datasets()
     request = httpx_mock.get_requests()[0]
     assert request.headers.get("Accept") == "application/json"
+
+
+def test_list_datasets_uses_retry_policy_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_retry_with_backoff(
+        fn: object,
+        *,
+        attempts: int,
+        base_delay_seconds: float,
+        retryable: tuple[type[BaseException], ...],
+    ) -> list[LovdataArchive]:
+        captured.update(
+            {
+                "fn": fn,
+                "attempts": attempts,
+                "base_delay_seconds": base_delay_seconds,
+                "retryable": retryable,
+            },
+        )
+        return []
+
+    monkeypatch.setattr("lovspor.sources.lovdata.retry_with_backoff", fake_retry_with_backoff)
+
+    with LovdataClient() as client:
+        assert client.list_datasets() == []
+
+    assert captured["attempts"] == 3
+    assert captured["base_delay_seconds"] == 1.0
+    assert captured["retryable"] == (_RetryableNetworkError,)
 
 
 def test_list_datasets_raises_network_error_after_exhausting_retries(
@@ -189,7 +267,7 @@ def test_list_datasets_raises_parse_error_on_non_json(
     httpx_mock: HTTPXMock,
 ) -> None:
     httpx_mock.add_response(url=_LIST_URL, content=b"<html>nope</html>")
-    with LovdataClient() as client, pytest.raises(ParseError):
+    with LovdataClient() as client, pytest.raises(ParseError, match="returned non-JSON body"):
         client.list_datasets()
 
 
@@ -197,8 +275,25 @@ def test_list_datasets_raises_parse_error_on_non_array(
     httpx_mock: HTTPXMock,
 ) -> None:
     httpx_mock.add_response(url=_LIST_URL, json={"not": "an array"})
-    with LovdataClient() as client, pytest.raises(ParseError):
+    with (
+        LovdataClient() as client,
+        pytest.raises(
+            ParseError,
+            match="expected JSON array, got dict",
+        ),
+    ):
         client.list_datasets()
+
+
+def test_parse_json_array_error_messages_are_specific() -> None:
+    url = "https://example.test/list"
+    with pytest.raises(ParseError) as exc_info:
+        _parse_json_array(httpx.Response(200, content=b"not-json"), url)
+    assert str(exc_info.value) == "GET https://example.test/list returned non-JSON body"
+
+    with pytest.raises(ParseError) as exc_info:
+        _parse_json_array(httpx.Response(200, json={"not": "array"}), url)
+    assert str(exc_info.value) == ("GET https://example.test/list expected JSON array, got dict")
 
 
 def test_list_datasets_raises_parse_error_on_invalid_schema(
@@ -208,7 +303,7 @@ def test_list_datasets_raises_parse_error_on_invalid_schema(
         url=_LIST_URL,
         json=[{"unknown_field": "value"}],
     )
-    with LovdataClient() as client, pytest.raises(ParseError):
+    with LovdataClient() as client, pytest.raises(ParseError, match="schema validation failed"):
         client.list_datasets()
 
 
@@ -240,6 +335,18 @@ def test_lovdata_archive_is_frozen() -> None:
     )
     with pytest.raises(ValidationError):
         archive.filename = "mutated.tar.bz2"  # type: ignore[misc]
+
+
+def test_lovdata_archive_accepts_field_names_when_constructing_in_python() -> None:
+    archive = LovdataArchive(
+        filename="x.tar.bz2",
+        description="x",
+        size_bytes=1,
+        last_modified=datetime.fromisoformat("2026-04-22T01:31:00+00:00"),
+    )
+
+    assert archive.size_bytes == 1
+    assert archive.last_modified.isoformat() == "2026-04-22T01:31:00+00:00"
 
 
 def test_client_strips_trailing_slash_from_base_url(
@@ -302,8 +409,11 @@ def test_malformed_timeout_env_var_raises_config_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LOVSPOR_HTTP_TIMEOUT_SECONDS", "not-a-number")
-    with pytest.raises(ConfigError, match="must be a float"):
+    with pytest.raises(ConfigError) as exc_info:
         LovdataClient()
+    assert str(exc_info.value) == (
+        "LOVSPOR_HTTP_TIMEOUT_SECONDS must be a float, got: 'not-a-number'"
+    )
 
 
 def test_explicit_zero_timeout_does_not_fall_through_to_env(
@@ -358,6 +468,66 @@ def test_download_writes_file_and_returns_integrity_data(
     assert result.size_bytes == len(payload)
     assert result.sha256 == hashlib.sha256(payload).hexdigest()
     assert result.path.read_bytes() == payload
+
+
+def test_download_uses_retry_policy_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    archive = _make_archive(size_bytes=1)
+
+    def fake_retry_with_backoff(
+        fn: object,
+        *,
+        attempts: int,
+        base_delay_seconds: float,
+        retryable: tuple[type[BaseException], ...],
+    ) -> DownloadResult:
+        captured.update(
+            {
+                "fn": fn,
+                "attempts": attempts,
+                "base_delay_seconds": base_delay_seconds,
+                "retryable": retryable,
+            },
+        )
+        return DownloadResult(
+            filename=archive.filename,
+            path=tmp_path / archive.filename,
+            size_bytes=1,
+            sha256="a" * 64,
+        )
+
+    monkeypatch.setattr("lovspor.sources.lovdata.retry_with_backoff", fake_retry_with_backoff)
+
+    with LovdataClient() as client:
+        result = client.download(archive, tmp_path)
+
+    assert result.filename == archive.filename
+    assert captured["attempts"] == 3
+    assert captured["base_delay_seconds"] == 1.0
+    assert captured["retryable"] == (_RetryableNetworkError,)
+
+
+def test_download_once_passes_exact_part_path_to_stream(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive = _make_archive(size_bytes=3)
+    seen_parts: list[Path] = []
+
+    def fake_stream_to_part(_archive: LovdataArchive, part: Path) -> tuple[int, str]:
+        seen_parts.append(part)
+        part.write_bytes(b"abc")
+        return 3, hashlib.sha256(b"abc").hexdigest()
+
+    with LovdataClient() as client:
+        monkeypatch.setattr(client, "_stream_to_part", fake_stream_to_part)
+        result = client._download_once(archive, tmp_path)
+
+    assert seen_parts == [tmp_path / f"{_TEST_FILENAME}.part"]
+    assert result.path == tmp_path / _TEST_FILENAME
 
 
 def test_download_leaves_no_part_file_on_success(
@@ -424,6 +594,24 @@ def test_download_rejects_size_mismatch_and_cleans_up(
     assert not (tmp_path / f"{_TEST_FILENAME}.part").exists()
 
 
+def test_download_size_mismatch_cleans_up_even_when_part_was_not_created(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    archive = _make_archive(size_bytes=1000)
+
+    def fake_stream_to_part(_archive: LovdataArchive, _part: Path) -> tuple[int, str]:
+        return 3, "a" * 64
+
+    with LovdataClient() as client:
+        monkeypatch.setattr(client, "_stream_to_part", fake_stream_to_part)
+        with pytest.raises(_RetryableNetworkError) as exc_info:
+            client._download_once(archive, tmp_path)
+    assert str(exc_info.value) == (
+        f"GET {DEFAULT_BASE_URL}/get/{_TEST_FILENAME}: size mismatch; expected 1000, got 3"
+    )
+
+
 def test_download_creates_missing_parent_directory(
     httpx_mock: HTTPXMock,
     tmp_path: Path,
@@ -436,6 +624,22 @@ def test_download_creates_missing_parent_directory(
         result = client.download(archive, nested)
     assert result.path == nested / _TEST_FILENAME
     assert result.path.exists()
+
+
+def test_stream_to_part_uses_get_chunk_size_and_accumulates_size(tmp_path: Path) -> None:
+    response = _FakeStreamResponse([b"abc", b"defgh"])
+    fake_client = _FakeHttpClient(response)
+    archive = _make_archive(size_bytes=8)
+
+    with LovdataClient() as client:
+        client._client = fake_client  # type: ignore[assignment]
+        size, sha256 = client._stream_to_part(archive, tmp_path / "archive.part")
+
+    assert fake_client.calls == [("GET", _GET_URL)]
+    assert response.requested_chunk_size == _DOWNLOAD_CHUNK_BYTES == 64 * 1024
+    assert size == 8
+    assert sha256 == hashlib.sha256(b"abcdefgh").hexdigest()
+    assert (tmp_path / "archive.part").read_bytes() == b"abcdefgh"
 
 
 @pytest.mark.parametrize(
@@ -453,7 +657,7 @@ def test_download_creates_missing_parent_directory(
     ],
 )
 def test_lovdata_archive_rejects_path_traversal_filenames(hostile: str) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         LovdataArchive.model_validate(
             {
                 "filename": hostile,
@@ -462,6 +666,35 @@ def test_lovdata_archive_rejects_path_traversal_filenames(hostile: str) -> None:
                 "lastModified": "2026-04-22T01:31:00Z",
             },
         )
+    message = str(exc_info.value)
+    if hostile == "":
+        assert "filename must not be empty" in message
+    elif "\x00" in hostile:
+        assert "filename must not contain null bytes" in message
+    elif "/" in hostile or "\\" in hostile:
+        assert "filename must not contain path separators" in message
+    elif hostile in {".", ".."}:
+        assert "filename must not be a directory reference" in message
+
+
+def test_lovdata_archive_validation_messages_are_exact() -> None:
+    cases = {
+        "": "filename must not be empty",
+        "with\x00null.tar.bz2": "filename must not contain null bytes",
+        "sub/file.tar.bz2": "filename must not contain path separators: 'sub/file.tar.bz2'",
+        ".": "filename must not be a directory reference: '.'",
+    }
+    for filename, expected in cases.items():
+        with pytest.raises(ValidationError) as exc_info:
+            LovdataArchive.model_validate(
+                {
+                    "filename": filename,
+                    "description": "attack",
+                    "sizeBytes": "1",
+                    "lastModified": "2026-04-22T01:31:00Z",
+                },
+            )
+        assert expected in str(exc_info.value)
 
 
 def test_lovdata_archive_accepts_real_filenames() -> None:
@@ -496,6 +729,65 @@ def test_download_defense_in_depth_rejects_traversal_via_model_construct(
         size_bytes=1,
         last_modified=datetime.fromisoformat("2026-04-22T01:31:00+00:00"),
     )
-    with LovdataClient() as client, pytest.raises(ExtractionError, match="outside dest_dir"):
+    with LovdataClient() as client, pytest.raises(ExtractionError) as exc_info:
         client.download(archive, tmp_path)
+    assert str(exc_info.value) == (
+        f"archive filename '../escape.tar.bz2' resolves outside dest_dir {tmp_path}"
+    )
     assert not (tmp_path.parent / "escape.tar.bz2").exists()
+
+
+def test_raise_for_status_messages_are_specific() -> None:
+    retryable = httpx.Response(503)
+    with pytest.raises(_RetryableNetworkError) as exc_info:
+        _raise_for_status(retryable, "https://example.test")
+    assert str(exc_info.value) == "GET https://example.test returned 503 (retryable)"
+
+    non_retryable = httpx.Response(404)
+    with pytest.raises(NetworkError) as exc_info:
+        _raise_for_status(non_retryable, "https://example.test")
+    assert str(exc_info.value) == "GET https://example.test returned 404"
+
+
+def test_parse_archives_schema_error_message_is_specific() -> None:
+    with pytest.raises(ParseError) as exc_info:
+        _parse_archives([{"unknown": "field"}], "https://example.test/list")
+
+    assert str(exc_info.value).startswith(
+        "GET https://example.test/list schema validation failed: ",
+    )
+
+
+def test_fetch_list_request_error_message_is_specific(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeClient:
+        def get(self, url: str) -> httpx.Response:
+            raise httpx.ConnectError("boom")
+
+        def close(self) -> None:
+            return None
+
+    with LovdataClient(base_url="https://example.test") as client:
+        client._client = FakeClient()  # type: ignore[assignment]
+        with pytest.raises(_RetryableNetworkError) as exc_info:
+            client._fetch_list()
+
+    assert str(exc_info.value) == "GET https://example.test/list: ConnectError: boom"
+
+
+def test_stream_to_part_request_error_message_is_specific(tmp_path: Path) -> None:
+    class FakeClient:
+        def stream(self, method: str, url: str) -> object:
+            assert method == "GET"
+            raise httpx.ReadTimeout("too slow")
+
+        def close(self) -> None:
+            return None
+
+    with LovdataClient(base_url="https://example.test") as client:
+        client._client = FakeClient()  # type: ignore[assignment]
+        with pytest.raises(_RetryableNetworkError) as exc_info:
+            client._stream_to_part(_make_archive(size_bytes=1), tmp_path / "x.part")
+
+    assert str(exc_info.value) == (
+        f"GET https://example.test/get/{_TEST_FILENAME}: ReadTimeout: too slow"
+    )

@@ -2,7 +2,7 @@
 
 import pytest
 
-from lovspor.rendering.slug import derive_slug, resolve_collisions
+from lovspor.rendering.slug import _cap_length, _slugify, derive_slug, resolve_collisions
 
 
 def test_derive_slug_uses_short_title_when_present() -> None:
@@ -26,8 +26,13 @@ def test_derive_slug_collapses_consecutive_non_slug_chars() -> None:
     assert derive_slug("foo!!!bar???", "x", "nl-x") == "foo-bar"
 
 
+def test_derive_slug_collapses_consecutive_hyphens() -> None:
+    assert derive_slug("foo---bar", "x", "nl-x") == "foo-bar"
+
+
 def test_derive_slug_strips_leading_trailing_hyphens() -> None:
     assert derive_slug("...skatt...", "x", "nl-x") == "skatt"
+    assert derive_slug("---skatt---", "x", "nl-x") == "skatt"
 
 
 def test_derive_slug_falls_back_to_title_when_short_title_missing() -> None:
@@ -103,6 +108,13 @@ def test_derive_slug_short_title_under_cap_is_unchanged() -> None:
     assert len(b"skatteloven") < 200
 
 
+def test_derive_slug_exactly_at_byte_cap_is_unchanged() -> None:
+    slug = derive_slug("a" * 200, "", "x")
+
+    assert slug == "a" * 200
+    assert len(slug.encode("utf-8")) == 200
+
+
 def test_derive_slug_no_hyphen_in_prefix_falls_back_to_byte_truncation() -> None:
     """Documented behavior: when the byte-truncated prefix has no hyphen
     at position > 0 (theoretical single-token slug ≥ 200 bytes), the
@@ -113,6 +125,35 @@ def test_derive_slug_no_hyphen_in_prefix_falls_back_to_byte_truncation() -> None
     slug = derive_slug(monolithic, "", "x")
     assert len(slug.encode("utf-8")) == 200
     assert slug == "a" * 200
+
+
+def test_derive_slug_ignores_split_multibyte_character_at_byte_cap() -> None:
+    slug = derive_slug(("a" * 199) + "ø" + "suffix", "", "x")
+
+    assert slug == "a" * 199
+    assert len(slug.encode("utf-8")) == 199
+
+
+def test_derive_slug_keeps_single_long_token_even_when_hyphen_after_cap() -> None:
+    slug = derive_slug(("a" * 200) + "-after", "", "x")
+
+    assert slug == "a" * 200
+
+
+def test_slugify_strips_literal_hyphens_after_replacement() -> None:
+    assert _slugify("---alpha---") == "alpha"
+
+
+def test_cap_length_trims_at_last_literal_hyphen_boundary() -> None:
+    slug = ("a" * 150) + "-" + ("b" * 150)
+
+    assert _cap_length(slug) == "a" * 150
+
+
+def test_cap_length_does_not_trim_for_leading_hyphen_boundary() -> None:
+    slug = "-" + ("a" * 250)
+
+    assert _cap_length(slug) == "a" * 199
 
 
 def test_resolve_collisions_returns_bare_slug_when_unique() -> None:

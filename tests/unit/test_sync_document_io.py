@@ -39,7 +39,10 @@ def test_doc_type_for_known_datasets() -> None:
 
 
 def test_doc_type_for_unknown_dataset_raises() -> None:
-    with pytest.raises(ValueError, match="unknown source_dataset"):
+    with pytest.raises(
+        ValueError,
+        match=r"^unknown source_dataset: 'something-else'$",
+    ):
         doc_type_for_dataset("something-else")
 
 
@@ -51,7 +54,10 @@ def test_dataset_dir_for_known_datasets(tmp_path: Path) -> None:
 
 
 def test_dataset_dir_for_unknown_dataset_raises(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="unknown source_dataset"):
+    with pytest.raises(
+        ValueError,
+        match=r"^unknown source_dataset: 'something-else'$",
+    ):
         dataset_dir(tmp_path, "something-else")
 
 
@@ -70,7 +76,10 @@ def test_document_path_for_regulation(tmp_path: Path) -> None:
 
 
 def test_document_path_for_unknown_dataset_raises(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="unknown source_dataset"):
+    with pytest.raises(
+        ValueError,
+        match=r"^unknown source_dataset: 'unknown-dataset'$",
+    ):
         document_path(tmp_path, "unknown-dataset", "x")
 
 
@@ -247,7 +256,10 @@ def test_generate_index_is_byte_deterministic(tmp_path: Path) -> None:
 
 
 def test_generate_index_raises_on_unknown_dataset(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="unknown source_dataset"):
+    with pytest.raises(
+        ValueError,
+        match=r"^unknown source_dataset: 'something-else'$",
+    ):
         generate_index(tmp_path, "something-else", _manifest({}))
 
 
@@ -257,3 +269,67 @@ def test_generate_index_format_links_to_md_file(tmp_path: Path) -> None:
     path = generate_index(tmp_path, "gjeldende-lover", manifest)
     text = path.read_text(encoding="utf-8")
     assert "- [skatteloven](skatteloven.md) — Skatteloven" in text
+
+
+def test_generate_index_empty_file_has_exact_layout(tmp_path: Path) -> None:
+    path = generate_index(tmp_path, "gjeldende-lover", _manifest({}))
+
+    assert path.read_text(encoding="utf-8") == ("# Lover\n\n_0 current documents_\n\n")
+
+
+def test_generate_index_entry_file_has_exact_layout(tmp_path: Path) -> None:
+    manifest = _manifest({"id-1": _record(slug="skatteloven", title="Skatteloven")})
+    path = generate_index(tmp_path, "gjeldende-lover", manifest)
+
+    assert path.read_text(encoding="utf-8") == (
+        "# Lover\n\n_1 current documents_\n\n- [skatteloven](skatteloven.md) — Skatteloven\n"
+    )
+
+
+def test_generate_index_falls_back_to_markdown_stem_and_no_title(tmp_path: Path) -> None:
+    record = _record(slug="ignored", title="ignored")
+    record = ManifestRecord(
+        doc_type=record.doc_type,
+        xml_hash=record.xml_hash,
+        markdown_path="lover/fallback-slug.md",
+        source_dataset=record.source_dataset,
+        last_seen=record.last_seen,
+        status=record.status,
+        slug=None,
+        title=None,
+    )
+    path = generate_index(tmp_path, "gjeldende-lover", _manifest({"id": record}))
+
+    assert "- [fallback-slug](fallback-slug.md) — (no title)" in path.read_text(
+        encoding="utf-8",
+    )
+
+
+def test_generate_index_sorts_missing_slug_by_markdown_path(tmp_path: Path) -> None:
+    z_record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/zeta.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 26, tzinfo=UTC),
+        status="current",
+        slug=None,
+        title="Zeta",
+    )
+    a_record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="b" * 64,
+        markdown_path="lover/alfa.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 26, tzinfo=UTC),
+        status="current",
+        slug=None,
+        title="Alfa",
+    )
+    manifest = _manifest({"z": z_record, "a": a_record})
+
+    text = generate_index(tmp_path, "gjeldende-lover", manifest).read_text(
+        encoding="utf-8",
+    )
+
+    assert text.index("alfa") < text.index("zeta")

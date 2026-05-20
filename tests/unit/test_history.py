@@ -12,6 +12,7 @@ from lovspor.history import (
     HISTORY_SCHEMA_VERSION,
     HistoryEvent,
     HistoryRecord,
+    _classify_bulk_sync,
     _classify_commit,
     _parse_events,
     _parse_line_stats,
@@ -56,6 +57,20 @@ def test_history_event_rejects_extra_fields() -> None:
         )
 
 
+def test_history_event_optional_fields_default_to_none() -> None:
+    event = HistoryEvent(
+        date=date(2026, 4, 27),
+        commit="abc1234",
+        type="added",
+        subject="add(lov): skatteloven",
+    )
+
+    assert event.from_path is None
+    assert event.to_path is None
+    assert event.lines_added is None
+    assert event.lines_removed is None
+
+
 def test_history_record_default_schema_version_is_one() -> None:
     record = HistoryRecord(slug="x", doc_id="nl-x", events=[])
     assert record.schema_version == HISTORY_SCHEMA_VERSION == 1
@@ -82,8 +97,30 @@ def test_history_record_is_frozen() -> None:
 def test_history_record_rejects_unsafe_slug(bad_slug: str) -> None:
     """Path-traversal defense: slug must be a safe basename, otherwise
     write_history could write outside the intended history/ directory."""
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         HistoryRecord(slug=bad_slug, doc_id="nl-x", events=[])
+    message = str(exc_info.value)
+    if bad_slug == "":
+        assert "slug must not be empty" in message
+    elif "/" in bad_slug or "\\" in bad_slug:
+        assert "slug must not contain path separators" in message
+    elif ".." in bad_slug:
+        assert "slug must not contain parent references" in message
+    elif "\x00" in bad_slug:
+        assert "slug must not contain null bytes" in message
+
+
+def test_history_record_slug_validation_messages_are_exact() -> None:
+    cases = {
+        "": "slug must not be empty",
+        "subdir/x": "slug must not contain path separators: 'subdir/x'",
+        "with..dots": "slug must not contain parent references: 'with..dots'",
+        "with\x00null": "slug must not contain null bytes",
+    }
+    for bad_slug, expected in cases.items():
+        with pytest.raises(ValidationError) as exc_info:
+            HistoryRecord(slug=bad_slug, doc_id="nl-x", events=[])
+        assert expected in str(exc_info.value)
 
 
 def test_history_record_accepts_realistic_lovdata_slugs() -> None:
@@ -98,6 +135,14 @@ def test_history_record_accepts_realistic_lovdata_slugs() -> None:
 def test_parse_line_stats_sums_added_and_removed() -> None:
     lines = ["52\t18\tlover/skatteloven.md"]
     assert _parse_line_stats(lines) == (52, 18)
+
+
+def test_parse_line_stats_accepts_numstat_without_path() -> None:
+    assert _parse_line_stats(["52\t18"]) == (52, 18)
+
+
+def test_parse_line_stats_rejects_non_numeric_added_column() -> None:
+    assert _parse_line_stats(["x\t18\tlover/skatteloven.md"]) == (None, None)
 
 
 def test_parse_line_stats_sums_across_multiple_files() -> None:
@@ -141,6 +186,18 @@ def test_parse_rename_paths_plain_form() -> None:
 def test_parse_rename_paths_no_rename_in_stats() -> None:
     lines = ["52\t18\tlover/skatteloven.md"]
     assert _parse_rename_paths(lines) == (None, None)
+
+
+def test_parse_rename_paths_skips_non_rename_then_finds_later_rename() -> None:
+    lines = [
+        "52\t18\tlover/skatteloven.md",
+        "0\t0\tlover/{old.md => new.md}",
+    ]
+    assert _parse_rename_paths(lines) == ("lover/old.md", "lover/new.md")
+
+
+def test_parse_rename_paths_ignores_two_column_numstat() -> None:
+    assert _parse_rename_paths(["0\t0"]) == (None, None)
 
 
 def test_parse_rename_paths_empty_input() -> None:
@@ -217,6 +274,19 @@ def test_classify_migration_subject_is_renamed() -> None:
     assert event is not None
     assert event.type == "renamed"
     assert event.from_path == "lover/nl-19990326-014.md"
+
+
+def test_classify_migration_without_numstat_is_renamed() -> None:
+    event = _classify_commit(
+        "3dddeca",
+        "2026-04-27T05:00:00Z",
+        "migration: rename documents",
+        [],
+    )
+    assert event is not None
+    assert event.type == "renamed"
+    assert event.from_path is None
+    assert event.to_path is None
 
 
 def test_classify_bulk_sync_no_removals_is_added() -> None:
@@ -325,6 +395,20 @@ def test_classify_bulk_sync_pure_delete_still_classified_as_removed() -> None:
     assert event.type == "removed"
 
 
+def test_classify_bulk_sync_without_removed_count_never_removes() -> None:
+    assert _classify_bulk_sync("sync: 0 new, 0 changed", 0, 42) == "updated"
+
+
+def test_classify_bulk_sync_without_changed_count_can_remove() -> None:
+    assert _classify_bulk_sync("sync: 0 new, 1 removed", 0, 42) == "removed"
+
+
+def test_classify_bulk_sync_requires_positive_removed_lines_for_delete() -> None:
+    assert _classify_bulk_sync("sync: 0 new, 0 changed, 1 removed", 0, 0) == "added"
+    assert _classify_bulk_sync("sync: 0 new, 0 changed, 1 removed", 0, 1) == "removed"
+    assert _classify_bulk_sync("sync: 0 new, 0 changed, 1 removed", None, 1) == "removed"
+
+
 def test_classify_unknown_subject_falls_back_to_added() -> None:
     """Initial seed commit ('chore: initialize corpus repository') has no
     per-doc info; we still want an entry rather than dropping the commit."""
@@ -334,6 +418,22 @@ def test_classify_unknown_subject_falls_back_to_added() -> None:
         "chore: initialize corpus repository",
         [],
     )
+    assert event is not None
+    assert event.type == "added"
+
+
+def test_classify_partial_rename_paths_do_not_count_as_rename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("lovspor.history._parse_rename_paths", lambda _lines: ("old.md", None))
+
+    event = _classify_commit(
+        "abc1234",
+        "2026-04-27T10:15:00Z",
+        "sync: 0 new, 0 changed, 0 renamed, 0 removed",
+        ["0\t0\told.md => "],
+    )
+
     assert event is not None
     assert event.type == "added"
 
@@ -395,6 +495,26 @@ def test_parse_events_skips_malformed_block() -> None:
     assert _parse_events(raw) == []
 
 
+def test_parse_events_skips_malformed_block_then_parses_later_commit() -> None:
+    raw = "__COMMIT__\nabc\n__COMMIT__\ndef5678\n2026-04-27T10:15:00Z\nadd(lov): x\n52\t0\tx.md\n"
+    events = _parse_events(raw)
+    assert len(events) == 1
+    assert events[0].commit == "def5678"
+
+
+def test_parse_events_preserves_first_numstat_line() -> None:
+    raw = "__COMMIT__\nabc1234\n2026-04-27T10:15:00Z\nadd(lov): x\n52\t18\tx.md\n"
+    events = _parse_events(raw)
+    assert events[0].lines_added == 52
+    assert events[0].lines_removed == 18
+
+
+def test_parse_events_strips_only_outer_newlines_from_block() -> None:
+    raw = "__COMMIT__\n\nabc1234\n2026-04-27T10:15:00Z\nadd(lov): x\n52\t18\tx.md\n\n"
+    events = _parse_events(raw)
+    assert events[0].commit == "abc1234"
+
+
 def test_parse_events_accepts_three_line_block_without_numstat() -> None:
     """A commit that touched no tracked file (e.g., the initial 'chore:
     initialize corpus repository') has only sha + date + subject — no
@@ -412,10 +532,9 @@ def test_parse_events_accepts_three_line_block_without_numstat() -> None:
 
 def test_render_empty_history() -> None:
     record = HistoryRecord(slug="x", doc_id="nl-x", events=[])
-    md = render_history_markdown(record)
-    assert md.startswith("# x — Change history\n")
-    assert "_No history available; doc_id `nl-x`._" in md
-    assert md.endswith("\n")
+    assert render_history_markdown(record) == (
+        "# x — Change history\n\n_No history available; doc_id `nl-x`._\n"
+    )
 
 
 def test_render_single_event_includes_basics() -> None:
@@ -433,12 +552,16 @@ def test_render_single_event_includes_basics() -> None:
             ),
         ],
     )
-    md = render_history_markdown(record)
-    assert "# skatteloven — Change history" in md
-    assert "_1 events; doc_id `nl-19990326-014`._" in md
-    assert "## 2024-01-15 — Content updated" in md
-    assert "Lines: +52 -18." in md
-    assert "Commit: `def5678`." in md
+    assert render_history_markdown(record) == (
+        "# skatteloven — Change history\n"
+        "\n"
+        "_1 events; doc_id `nl-19990326-014`._\n"
+        "\n"
+        "## 2024-01-15 — Content updated\n"
+        "Lines: +52 -18.\n"
+        "Subject: `update(lov): skatteloven`\n"
+        "Commit: `def5678`.\n"
+    )
 
 
 def test_render_rename_event_includes_from_to() -> None:
@@ -456,8 +579,58 @@ def test_render_rename_event_includes_from_to() -> None:
             ),
         ],
     )
+    assert render_history_markdown(record) == (
+        "# skatteloven — Change history\n"
+        "\n"
+        "_1 events; doc_id `nl-19990326-014`._\n"
+        "\n"
+        "## 2026-04-27 — Filename renamed\n"
+        "Renamed: `lover/nl-19990326-014.md` → `lover/skatteloven.md`.\n"
+        "Subject: `migration: rename 4522 documents to slug-based filenames`\n"
+        "Commit: `3dddeca`.\n"
+    )
+
+
+def test_render_removed_event_uses_removed_title() -> None:
+    record = HistoryRecord(
+        slug="x",
+        doc_id="nl-x",
+        events=[
+            HistoryEvent(
+                date=date(2024, 1, 1),
+                commit="abc1234",
+                type="removed",
+                subject="remove(lov): x",
+            ),
+        ],
+    )
+    assert "## 2024-01-01 — Removed from corpus\n" in render_history_markdown(record)
+
+
+def test_render_partial_rename_or_line_stats_are_omitted() -> None:
+    record = HistoryRecord(
+        slug="x",
+        doc_id="nl-x",
+        events=[
+            HistoryEvent(
+                date=date(2024, 1, 1),
+                commit="abc1234",
+                type="renamed",
+                subject="rename(lov): x",
+                from_path="lover/old.md",
+            ),
+            HistoryEvent(
+                date=date(2024, 1, 2),
+                commit="def5678",
+                type="updated",
+                subject="update(lov): x",
+                lines_added=1,
+            ),
+        ],
+    )
     md = render_history_markdown(record)
-    assert "Renamed: `lover/nl-19990326-014.md` → `lover/skatteloven.md`." in md
+    assert "Renamed:" not in md
+    assert "Lines:" not in md
 
 
 def test_render_is_deterministic() -> None:
@@ -527,6 +700,42 @@ def test_write_history_json_is_deterministic(tmp_path: Path) -> None:
     json_path_a, _ = write_history(record, a)
     json_path_b, _ = write_history(record, b)
     assert json_path_a.read_bytes() == json_path_b.read_bytes()
+
+
+def test_write_history_json_has_exact_stable_format(tmp_path: Path) -> None:
+    record = HistoryRecord(
+        slug="x",
+        doc_id="nl-x",
+        events=[
+            HistoryEvent(
+                date=date(2024, 1, 1),
+                commit="abc1234",
+                type="added",
+                subject="add(lov): x",
+            ),
+        ],
+    )
+    json_path, _ = write_history(record, tmp_path)
+
+    assert json_path.read_text(encoding="utf-8") == (
+        "{\n"
+        '  "doc_id": "nl-x",\n'
+        '  "events": [\n'
+        "    {\n"
+        '      "commit": "abc1234",\n'
+        '      "date": "2024-01-01",\n'
+        '      "from_path": null,\n'
+        '      "lines_added": null,\n'
+        '      "lines_removed": null,\n'
+        '      "subject": "add(lov): x",\n'
+        '      "to_path": null,\n'
+        '      "type": "added"\n'
+        "    }\n"
+        "  ],\n"
+        '  "schema_version": 1,\n'
+        '  "slug": "x"\n'
+        "}\n"
+    )
 
 
 def test_write_history_json_round_trips(tmp_path: Path) -> None:

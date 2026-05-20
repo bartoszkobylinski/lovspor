@@ -15,7 +15,9 @@ from pydantic import ValidationError
 from lovspor.errors import ParseError
 from lovspor.rendering.document import (
     FrontmatterContext,
+    LegalDocumentFrontMatter,
     build_frontmatter,
+    extract_xml_metadata,
 )
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -55,6 +57,37 @@ def test_frontmatter_context_has_expected_defaults() -> None:
     assert ctx.source_license == "NLOD 2.0"
 
 
+def test_frontmatter_context_is_frozen() -> None:
+    ctx = _default_context()
+
+    with pytest.raises(ValidationError):
+        ctx.slug = "mutated"  # type: ignore[misc]
+
+
+def test_legal_document_frontmatter_default_eu_basis_is_empty_list_direct() -> None:
+    fm = LegalDocumentFrontMatter(
+        id="id",
+        slug="slug",
+        type="lov",
+        ref_id=None,
+        title="Title",
+        short_title=None,
+        language="nb",
+        ministry=[],
+        date_in_force=None,
+        last_change_in_force=None,
+        last_updated=None,
+        xml_hash="a" * 64,
+        source_provider="Lovdata",
+        source_dataset="gjeldende-lover",
+        source_license="NLOD 2.0",
+        retrieved_at=datetime(2026, 4, 22, tzinfo=UTC),
+        status="current",
+    )
+
+    assert fm.eu_basis == []
+
+
 def test_build_frontmatter_extracts_title_from_fixture() -> None:
     fm = build_frontmatter(_TINY_XML, _default_context())
     assert fm.title == "Forbud paa Vimpel-Føring"
@@ -73,6 +106,15 @@ def test_build_frontmatter_extracts_ref_id_from_fixture() -> None:
 def test_build_frontmatter_extracts_language_from_html_lang() -> None:
     fm = build_frontmatter(_TINY_XML, _default_context())
     assert fm.language == "nb"
+
+
+def test_build_frontmatter_defaults_missing_language_to_empty_string() -> None:
+    xml = b"""<!DOCTYPE html><html><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.language == ""
 
 
 def test_build_frontmatter_extracts_ministry_as_list() -> None:
@@ -116,8 +158,9 @@ def test_build_frontmatter_preserves_retrieved_at() -> None:
 
 
 def test_build_frontmatter_raises_parse_error_on_malformed_xml() -> None:
-    with pytest.raises(ParseError, match="malformed XML"):
+    with pytest.raises(ParseError) as exc_info:
         build_frontmatter(b"not xml at all", _default_context())
+    assert str(exc_info.value).startswith("malformed XML: ")
 
 
 def test_build_frontmatter_raises_parse_error_when_title_missing() -> None:
@@ -125,8 +168,9 @@ def test_build_frontmatter_raises_parse_error_when_title_missing() -> None:
     <header><dl>
     <dt class="ministry">D</dt><dd class="ministry">X</dd>
     </dl></header><main><h1>Empty</h1></main></body></html>"""
-    with pytest.raises(ParseError, match="no <dd class='title'>"):
+    with pytest.raises(ParseError) as exc_info:
         build_frontmatter(xml, _default_context())
+    assert str(exc_info.value) == "no <dd class='title'> in document header"
 
 
 def test_build_frontmatter_is_deterministic_on_same_input() -> None:
@@ -144,6 +188,27 @@ def test_build_frontmatter_extracts_date_only_from_date_plus_note() -> None:
     </dl></header><main><h1>T</h1></main></body></html>"""
     fm = build_frontmatter(xml, _default_context())
     assert fm.date_in_force == "1999-03-26"
+
+
+def test_build_frontmatter_uses_title_short_when_title_missing() -> None:
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="titleShort">T</dt><dd class="titleShort">Kortform</dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    metadata = extract_xml_metadata(xml)
+    assert metadata["title"] == "Kortform"
+    assert metadata["short_title"] == "Kortform"
+
+
+def test_build_frontmatter_extracts_last_change_in_force_date_only() -> None:
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    <dt class="lastChangeInForce">X</dt>
+    <dd class="lastChangeInForce">2024-02-03 (endringslov)</dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.last_change_in_force == "2024-02-03"
 
 
 def test_build_frontmatter_ministry_empty_when_absent() -> None:
@@ -165,6 +230,17 @@ def test_build_frontmatter_ministry_as_plain_text_falls_back_to_single_item() ->
     </dl></header><main><h1>T</h1></main></body></html>"""
     fm = build_frontmatter(xml, _default_context())
     assert fm.ministry == ["Finansdepartementet"]
+
+
+def test_build_frontmatter_ministry_list_items_are_preserved() -> None:
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    <dt class="ministry">D</dt>
+    <dd class="ministry"><ul><li>Finansdepartementet</li><li>Justisdepartementet</li></ul></dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.ministry == ["Finansdepartementet", "Justisdepartementet"]
 
 
 def test_build_frontmatter_ignores_body_level_dd_elements() -> None:
@@ -191,8 +267,9 @@ def test_build_frontmatter_raises_when_header_dl_missing() -> None:
     xml = b"""<!DOCTYPE html><html lang="nb"><body>
     <main><h1>No header dl at all</h1></main>
     </body></html>"""
-    with pytest.raises(ParseError, match="no <header><dl>"):
+    with pytest.raises(ParseError) as exc_info:
         build_frontmatter(xml, _default_context())
+    assert str(exc_info.value) == "no <header><dl> found in document"
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +335,16 @@ def test_eu_basis_skips_non_eu_anchors_in_eea_block() -> None:
     </dl></header><main><h1>T</h1></main></body></html>""".encode()
     fm = build_frontmatter(xml, _default_context())
     assert fm.eu_basis == []
+
+
+def test_eu_basis_skips_empty_eu_href() -> None:
+    xml = b"""<!DOCTYPE html><html lang="nb"><body>
+    <header><dl>
+    <dt class="title">T</dt><dd class="title">T</dd>
+    <dd class="eeaReferences"><a href="eu/">empty</a><a href="eu/32016r0679">GDPR</a></dd>
+    </dl></header><main><h1>T</h1></main></body></html>"""
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.eu_basis == ["32016R0679"]
 
 
 def test_eu_basis_handles_multiple_celex_in_one_block() -> None:

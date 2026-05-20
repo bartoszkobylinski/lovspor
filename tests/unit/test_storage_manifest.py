@@ -61,6 +61,11 @@ def test_manifest_record_history_fields_default_to_none() -> None:
     assert rec.last_changed is None
 
 
+def test_manifest_record_title_defaults_to_none() -> None:
+    rec = _record()
+    assert rec.title is None
+
+
 def test_manifest_record_accepts_history_fields_when_provided() -> None:
     rec = ManifestRecord(
         doc_type="lov",
@@ -266,8 +271,9 @@ def test_read_manifest_raises_parse_error_on_malformed_json(
 ) -> None:
     path = tmp_path / "bad.json"
     path.write_text("{not valid json", encoding="utf-8")
-    with pytest.raises(ParseError, match="malformed JSON"):
+    with pytest.raises(ParseError) as exc_info:
         read_manifest(path)
+    assert str(exc_info.value).startswith(f"{path}: malformed JSON manifest: ")
 
 
 def test_read_manifest_raises_parse_error_on_invalid_schema(
@@ -278,8 +284,9 @@ def test_read_manifest_raises_parse_error_on_invalid_schema(
         json.dumps({"not": "a manifest"}),
         encoding="utf-8",
     )
-    with pytest.raises(ParseError, match="invalid manifest schema"):
+    with pytest.raises(ParseError) as exc_info:
         read_manifest(path)
+    assert str(exc_info.value).startswith(f"{path}: invalid manifest schema: ")
 
 
 def test_read_manifest_rejects_extra_record_fields(
@@ -333,8 +340,11 @@ def test_read_manifest_rejects_unsupported_version(tmp_path: Path) -> None:
         "documents": {},
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ParseError, match="unsupported manifest version"):
+    with pytest.raises(ParseError) as exc_info:
         read_manifest(path)
+    assert "unsupported manifest version 999; this engine reads version 1" in str(
+        exc_info.value,
+    )
 
 
 def test_read_manifest_wraps_unicode_decode_error_as_parse_error(
@@ -345,8 +355,9 @@ def test_read_manifest_wraps_unicode_decode_error_as_parse_error(
     PR #10 reproducer."""
     path = tmp_path / "bad-utf8.json"
     path.write_bytes(b"\xff\xfe\xfd not valid utf-8")
-    with pytest.raises(ParseError, match="not valid UTF-8"):
+    with pytest.raises(ParseError) as exc_info:
         read_manifest(path)
+    assert str(exc_info.value).startswith(f"{path}: manifest is not valid UTF-8: ")
 
 
 def test_empty_manifest_round_trips(tmp_path: Path) -> None:

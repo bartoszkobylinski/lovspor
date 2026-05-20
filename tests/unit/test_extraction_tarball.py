@@ -125,6 +125,42 @@ def test_iter_tarball_xml_skips_hardlinks(tmp_path: Path) -> None:
     assert [m.name for m in members] == ["real.xml"]
 
 
+def test_iter_tarball_xml_continues_when_extractfile_returns_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeMember:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def isfile(self) -> bool:
+            return True
+
+    class FakeTar:
+        def __init__(self) -> None:
+            self.members = [FakeMember("missing.xml"), FakeMember("kept.xml")]
+
+        def __enter__(self) -> "FakeTar":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def __iter__(self) -> object:
+            return iter(self.members)
+
+        def extractfile(self, member: FakeMember) -> io.BytesIO | None:
+            if member.name == "missing.xml":
+                return None
+            return io.BytesIO(_XML_ONE)
+
+    monkeypatch.setattr(tarfile, "open", lambda *args, **kwargs: FakeTar())
+
+    assert list(iter_tarball_xml(tmp_path / "archive.tar.bz2")) == [
+        TarballMember(name="kept.xml", content=_XML_ONE),
+    ]
+
+
 def test_iter_tarball_xml_rejects_parent_reference(tmp_path: Path) -> None:
     archive = _build_tarball(
         tmp_path / "evil.tar.bz2",
@@ -183,8 +219,28 @@ def test_check_safe_name_rejects_null_byte() -> None:
     null-byte branch is still defense-in-depth against hand-crafted
     tarballs that bypass tarfile's write path. Tested directly on the
     private helper."""
-    with pytest.raises(ExtractionError, match="null byte"):
-        _check_safe_name("with\x00null.xml", Path("/dummy"))
+    archive = Path("/dummy")
+    with pytest.raises(ExtractionError) as exc_info:
+        _check_safe_name("with\x00null.xml", archive)
+    assert str(exc_info.value) == (
+        f"{archive}: member name contains null byte: 'with\\x00null.xml'"
+    )
+
+
+def test_check_safe_name_rejects_absolute_with_exact_message() -> None:
+    archive = Path("/dummy")
+    with pytest.raises(ExtractionError) as exc_info:
+        _check_safe_name("/escape.xml", archive)
+    assert str(exc_info.value) == f"{archive}: member name is absolute: '/escape.xml'"
+
+
+def test_check_safe_name_rejects_parent_reference_with_exact_message() -> None:
+    archive = Path("/dummy")
+    with pytest.raises(ExtractionError) as exc_info:
+        _check_safe_name("a/../escape.xml", archive)
+    assert str(exc_info.value) == (
+        f"{archive}: member name has parent reference: 'a/../escape.xml'"
+    )
 
 
 def test_iter_tarball_xml_raises_on_malformed_archive(
@@ -192,14 +248,16 @@ def test_iter_tarball_xml_raises_on_malformed_archive(
 ) -> None:
     bogus = tmp_path / "not-a-tarball.tar.bz2"
     bogus.write_bytes(b"this is not a bz2 tarball at all")
-    with pytest.raises(ExtractionError, match="malformed archive"):
+    with pytest.raises(ExtractionError) as exc_info:
         list(iter_tarball_xml(bogus))
+    assert str(exc_info.value).startswith(f"{bogus}: malformed archive: ")
 
 
 def test_iter_tarball_xml_raises_on_missing_file(tmp_path: Path) -> None:
     missing = tmp_path / "does-not-exist.tar.bz2"
-    with pytest.raises(ExtractionError, match="cannot open archive"):
+    with pytest.raises(ExtractionError) as exc_info:
         list(iter_tarball_xml(missing))
+    assert str(exc_info.value).startswith(f"{missing}: cannot open archive: ")
 
 
 def test_iter_tarball_xml_returns_empty_for_empty_archive(

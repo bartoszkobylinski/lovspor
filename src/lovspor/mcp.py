@@ -1,10 +1,13 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles twelve read-only tools over a local clone of the lovverk Markdown
-corpus (produced by the lovspor sync engine). Each tool answers a class
-of question an AI agent would naturally ask about Norwegian law:
+Bundles fourteen read-only tools over a local clone of the lovverk
+Markdown corpus (produced by the lovspor sync engine). Each tool
+answers a class of question an AI agent would naturally ask about
+Norwegian law:
 
     get_law(slug)                       -> "Show me Skatteloven"
+    get_law_at(slug, "2018-06-15")      -> "Show me Skatteloven as of 2018-06-15"
+    list_law_versions(slug)             -> "When did Skatteloven change?"
     get_section(slug, "5-12")           -> "Show me just § 5-12 of Skatteloven"
     get_law_history(slug)               -> "What changed in Skatteloven recently?"
     list_recent_changes(...)            -> "Which laws changed last week?"
@@ -49,6 +52,7 @@ from mcp.server.fastmcp import FastMCP
 from lovspor.embeddings import EmbeddingModel, OpenAIEmbedder, read_embeddings, top_k_cosine
 from lovspor.errors import LovsporError
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
+from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
 
 _STALE_THRESHOLD_DAYS = 7
 """Manifest age beyond which corpus_status() flags the corpus as stale.
@@ -402,6 +406,106 @@ class CorpusReader:
             )
         loaded: dict[str, Any] = json.loads(history_path.read_text(encoding="utf-8"))
         return loaded
+
+    def get_law_at(self, slug: str, target_date: str) -> str:
+        """Return the rendered Markdown of ``slug`` as it stood on ``target_date``.
+
+        ``target_date`` is an ISO ``YYYY-MM-DD`` string; end-of-day
+        UTC semantics ("close of business on that day"). Future dates
+        are refused — a calendar date past today's UTC date is almost
+        always a typo, and silently aliasing it to HEAD would mask the
+        mistake. Past dates that predate the act's first appearance
+        in the corpus raise with a hint pointing to ``get_law_history``
+        so the AI can recover.
+
+        Walks ``git log --follow`` on the manifest's current
+        ``markdown_path`` to find the latest commit ≤ end-of-day on
+        ``target_date`` that touched the file (or its predecessor
+        through the Sprint-4 slug-rename migration), then ``git show``s
+        the blob at that revision. The Markdown returned starts with
+        the YAML frontmatter as it was at that revision (``retrieved_at``,
+        ``xml_hash``, ``eu_basis``-or-absent, etc.), so consumers can
+        distinguish "rendered from the same XML" vs "an actual content
+        update" without re-deriving it from the body.
+        """
+        try:
+            target = date.fromisoformat(target_date)
+        except ValueError as exc:
+            raise ValueError(
+                f"target_date must be ISO date YYYY-MM-DD, got {target_date!r}",
+            ) from exc
+        today = datetime.now(UTC).date()
+        if target > today:
+            raise ValueError(
+                f"target_date {target.isoformat()} is in the future "
+                f"(today is {today.isoformat()}); "
+                f"use get_law for the current version",
+            )
+        record = self._find_current_by_slug(slug)
+        try:
+            return get_law_at_revision(
+                self.corpus_path,
+                record.markdown_path,
+                target,
+            )
+        except RevisionNotFoundError as exc:
+            raise CorpusNotFoundError(
+                f"law {slug!r} did not exist in the corpus on {target.isoformat()}; "
+                f"call get_law_history({slug!r}) to see when it first appeared",
+            ) from exc
+
+    @staticmethod
+    def _history_event_to_version(event: dict[str, Any]) -> dict[str, Any]:
+        """Project a history event into a ``list_law_versions`` entry."""
+        return {
+            "date": event["date"],
+            "commit": event["commit"],
+            "type": event["type"],
+            "lines_added": event.get("lines_added"),
+            "lines_removed": event.get("lines_removed"),
+        }
+
+    def list_law_versions(self, slug: str) -> list[dict[str, Any]]:
+        """List the dates on which ``slug`` had distinct content versions.
+
+        Reads the same ``history/<slug>.json`` that powers
+        ``get_law_history`` and filters to events whose ``type`` is
+        ``added`` or ``updated`` — the only event types that produce
+        a different ``get_law_at`` result. Pure renames (filename
+        slug change with identical XML) are skipped: they don't
+        change the content so they don't add a "version" from the
+        time-machine consumer's point of view.
+
+        When two or more content changes land on the same UTC date,
+        only the latest is listed. ``get_law_at`` resolves a date with
+        end-of-day semantics, so an earlier same-day version is not
+        reachable through the date interface; listing it would imply a
+        precision the tool does not offer. ``get_law_history`` still
+        carries the complete intra-day event trail for audit use.
+
+        Returns events oldest-first (chronological reading order), the
+        opposite of ``get_law_history`` which is newest-first
+        (audit-trail order). Each entry: ``date`` (ISO YYYY-MM-DD —
+        feed straight into ``get_law_at``), ``commit`` (short SHA),
+        ``type`` (``added`` | ``updated``), ``lines_added`` /
+        ``lines_removed`` (may be null for pre-Sprint-4 binary-classified
+        commits; see history.py).
+        """
+        history = self.get_law_history(slug)
+        seen_dates: set[str] = set()
+        versions: list[dict[str, Any]] = []
+        # get_law_history yields events newest-first, so the first event
+        # seen for a date is the latest commit on that date — the one
+        # get_law_at resolves to under end-of-day semantics.
+        for event in history["events"]:
+            if event["type"] not in ("added", "updated"):
+                continue
+            if event["date"] in seen_dates:
+                continue
+            seen_dates.add(event["date"])
+            versions.append(self._history_event_to_version(event))
+        versions.sort(key=lambda v: v["date"])
+        return versions
 
     def list_recent_changes(
         self,
@@ -1418,8 +1522,8 @@ def _build_embedder() -> EmbeddingModel | None:
     if not api_key:
         print(
             "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-            "but the other eleven tools work normally. Set OPENAI_API_KEY and "
-            "restart to enable semantic search.",
+            "but the other thirteen tools work normally. Set OPENAI_API_KEY "
+            "and restart to enable semantic search.",
             file=sys.stderr,
             flush=True,
         )
@@ -1439,7 +1543,7 @@ def build_server(corpus_path: Path) -> FastMCP:
     the OpenAI embedder at startup (so a malformed key surfaces
     immediately, not on the first tool call); if it is not set we
     log a warning and disable ``semantic_search`` with a clear
-    runtime error. The other eleven tools do not need the embedder
+    runtime error. The other thirteen tools do not need the embedder
     so they continue to work without an OpenAI key — refusing to
     start the whole server over one optional dependency would be
     user-hostile.
@@ -1510,6 +1614,63 @@ def build_server(corpus_path: Path) -> FastMCP:
         event first.
         """
         return reader.get_law_history(slug)
+
+    @mcp.tool()
+    def get_law_at(slug: str, target_date: str) -> str:
+        """Return a law's full Markdown as it stood on a given calendar date.
+
+        Time-machine companion to ``get_law``: where ``get_law(slug)``
+        always returns the current version, ``get_law_at(slug, date)``
+        returns the version that was current at end-of-day UTC on
+        ``date``. Use it when the user asks *"what did Skatteloven
+        say in 2018?"*, or when an answer needs to anchor to the
+        version of an act in force at a specific historical moment
+        (case decided 2019-03-12 -> what was the relevant § as of
+        2019-03-12).
+
+        ``slug``: the act's current slug (same as for ``get_law``).
+        Even if the kortform was different in the past, you pass
+        today's slug — the corpus's git history is rename-aware and
+        traces predecessors automatically.
+
+        ``target_date``: ISO date ``YYYY-MM-DD``. End-of-day semantics:
+        ``"2026-04-15"`` returns the version that was current at
+        23:59:59 UTC on April 15. Future dates are refused with
+        ``ValueError`` because they're almost always typos; use
+        ``get_law(slug)`` for the current version.
+
+        Output mirrors ``get_law``: YAML frontmatter (as it was at
+        that revision — ``retrieved_at`` / ``xml_hash`` / ``eu_basis``
+        reflect that point in time, not today's manifest) followed by
+        the legal text in Markdown.
+
+        Raises if the slug is unknown or if the act first appeared in
+        the corpus *after* ``target_date`` — the error message points
+        to ``get_law_history`` so the AI can find the earliest
+        available date.
+        """
+        return reader.get_law_at(slug, target_date)
+
+    @mcp.tool()
+    def list_law_versions(slug: str) -> list[dict[str, Any]]:
+        """List the dates on which a law had distinct content versions.
+
+        Companion to ``get_law_at``: this answers *"which dates can I
+        time-travel to?"*. Each entry is a moment when the act's content
+        actually changed — pure filename renames are filtered out
+        because they don't yield different ``get_law_at`` output.
+
+        Returns oldest-first so the AI can reason about the act's
+        timeline naturally (initial appearance → updates → today).
+        Each entry has ``date`` (ISO ``YYYY-MM-DD`` — feed straight
+        into ``get_law_at``), ``commit`` (short SHA),
+        ``type`` (``added`` | ``updated``), and ``lines_added`` /
+        ``lines_removed`` (may be null for legacy bulk-mode commits).
+
+        Raises if the slug is unknown or if the corpus pre-dates the
+        Sprint 5 history layer (no ``history/<slug>.json``).
+        """
+        return reader.list_law_versions(slug)
 
     @mcp.tool()
     def list_recent_changes(

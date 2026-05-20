@@ -24,10 +24,12 @@
 - Full git history. Time-travel "as of date" already exists for free — just not yet exposed.
 - Manifest as the single source of truth for change detection.
 
-### MCP server (12 tools)
+### MCP server (14 tools)
 | Tool | Purpose |
 |---|---|
 | `get_law` | full Markdown of an act |
+| `get_law_at` | full Markdown as of a target date — time-machine via `git log --follow` (Sprint 10) |
+| `list_law_versions` | dates of distinct content versions, oldest-first (Sprint 10) |
 | `get_section` | one `§` with parent chapter + validated `cross_references` |
 | `get_law_history` | structured change events |
 | `list_recent_changes` | sorted by `last_changed` |
@@ -41,7 +43,7 @@
 | `corpus_status` | freshness / staleness signal |
 
 ### Positioning
-Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 12 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`).
+Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 14 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 PR-A adding a git-history time-machine pair (`get_law_at` + `list_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
 
 ---
 
@@ -134,12 +136,11 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 
 ### Class B: Time and version
 
-**B1. Time-machine**
-- New tool: `get_law_at(slug, date: ISO)` — uses `git log --before=<date> -- <markdown_path>` and `git show <commit>:<path>`.
-- New tool: `list_law_versions(slug)` — distinct content snapshots in history.
-- **Leverage:** high. No competitor has a git-based architecture, so this is a unique selling point.
-- **Novelty:** unique to this project.
-- **Effort:** low. Estimated ~200 lines on top of existing history infrastructure.
+**B1. Time-machine — SHIPPED in Sprint 10 PR-A (this PR)**
+- New tool: `get_law_at(slug, date: ISO)` — walks the file's full `git log --follow` lineage in-process (`--before` cannot be used with `--follow` because it blinds the rename-tracker to pre-cutoff commits) and feeds the matched `(sha, path-at-commit)` to `git show`. Pre-Sprint-4 historical paths (e.g. `lover/nl-19990326-014.md`) are traced transparently from today's slug.
+- New tool: `list_law_versions(slug)` — reads the existing `history/<slug>.json` from Sprint 5, filters to `added` / `updated` events (renames skipped — content unchanged), returns oldest-first.
+- Implemented as a new `lovspor.timetravel` module + two `CorpusReader` methods + two `@mcp.tool()` decorators. ~150 lines of net new code; reuses Sprint-5 `history/<slug>.json` and the manifest's `markdown_path`.
+- End-of-day UTC semantics for `target_date`; future dates are refused with a `ValueError` (typo guard rather than alias to HEAD).
 
 **B2. Diff tool**
 - New tool: `diff_law_versions(slug, date_a, date_b)` or `diff_law_versions(slug, version_a, version_b)`.

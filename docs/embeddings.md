@@ -67,7 +67,7 @@ Trade-offs accepted with the OpenAI choice:
   hobby project. Trivial vs the +24% retrieval quality gain.
 - **Network dependency.** Sync now needs OpenAI reachable. Same
   for the MCP server (only when `semantic_search` is invoked —
-  the other 11 tools are pure local).
+  the other 13 tools are pure local).
 - **Privacy.** Norwegian law text is publicly available under
   NLOD 2.0; embedding it through OpenAI is no leak.
 - **Supply chain.** Dropped `trust_remote_code=True` from

@@ -69,6 +69,22 @@ def test_render_plain_h3_without_legal_class() -> None:
     assert md == "### Some heading\n"
 
 
+@pytest.mark.parametrize("tag", ["h4", "h5", "h6"])
+def test_render_lower_heading_levels_as_h3_markdown(tag: str) -> None:
+    md = render_markdown(_wrap(f"<{tag}>Sub heading</{tag}>".encode()))
+    assert md == "### Sub heading\n"
+
+
+def test_render_legal_header_class_on_h4_uses_article_header_renderer() -> None:
+    xml = _wrap(
+        b'<h4 class="legalArticleHeader">'
+        b'<span class="legalArticleValue">\xc2\xa7 2</span>. '
+        b'<span class="legalArticleTitle">Tittel</span>'
+        b"</h4>",
+    )
+    assert render_markdown(xml) == "### § 2. Tittel\n"
+
+
 def test_render_legal_p_produces_plain_paragraph() -> None:
     md = render_markdown(_wrap(b'<article class="legalP">Hello world.</article>'))
     assert md == "Hello world.\n"
@@ -97,6 +113,15 @@ def test_render_changes_to_parent_produces_blockquote() -> None:
     assert md == "> Endret ved lov 2020-05-01.\n"
 
 
+def test_render_empty_changes_to_parent_and_paragraph_produce_no_output() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="changesToParent"></article><article class="legalP"></article>',
+        ),
+    )
+    assert md == "\n"
+
+
 def test_render_ol_produces_numbered_markdown_list() -> None:
     md = render_markdown(
         _wrap(b'<ol class="defaultList"><li>first</li><li>second</li></ol>'),
@@ -123,6 +148,12 @@ def test_render_anchor_without_href_produces_plain_text() -> None:
         _wrap(b'<article class="legalP">Mention <a>anchor</a>.</article>'),
     )
     assert md == "Mention anchor.\n"
+
+
+def test_render_span_without_class_does_not_inject_placeholder_text() -> None:
+    md = render_markdown(_wrap(b'<article class="legalP"><span>inner</span></article>'))
+
+    assert md == "inner\n"
 
 
 def test_render_strong_produces_bold_markdown() -> None:
@@ -176,13 +207,15 @@ def test_render_nested_legal_article_walks_children() -> None:
 
 
 def test_render_raises_parse_error_on_malformed_xml() -> None:
-    with pytest.raises(ParseError, match="malformed XML"):
+    with pytest.raises(ParseError) as exc_info:
         render_markdown(b"<not><closed")
+    assert str(exc_info.value).startswith("malformed XML: ")
 
 
 def test_render_raises_parse_error_when_main_missing() -> None:
-    with pytest.raises(ParseError, match="no <main>"):
+    with pytest.raises(ParseError) as exc_info:
         render_markdown(b"<html><body><h1>no main</h1></body></html>")
+    assert str(exc_info.value) == "no <main> in document"
 
 
 def test_render_is_deterministic_across_calls() -> None:
@@ -209,6 +242,16 @@ def test_render_legal_article_header_fallback_when_no_spans() -> None:
     xml = _wrap(b'<h3 class="legalArticleHeader">Raw heading text</h3>')
     md = render_markdown(xml)
     assert md == "### Raw heading text\n"
+
+
+def test_render_legal_article_header_ignores_span_tail_in_value() -> None:
+    xml = _wrap(
+        b'<h3 class="legalArticleHeader">'
+        b'<span class="legalArticleValue">\xc2\xa7 1</span> tail '
+        b'<span class="legalArticleTitle">Title</span>'
+        b"</h3>",
+    )
+    assert render_markdown(xml) == "### § 1. Title\n"
 
 
 def test_render_empty_list_yields_nothing() -> None:
@@ -254,6 +297,20 @@ def test_render_list_item_with_nested_list_and_trailing_text() -> None:
     assert md == "- before after\n  - x\n"
 
 
+def test_render_list_item_continues_after_nested_list_child() -> None:
+    md = render_markdown(
+        _wrap(
+            b"<ul><li>before<ul><li>x</li></ul><strong>after</strong></li></ul>",
+        ),
+    )
+    assert md == "- before**after**\n  - x\n"
+
+
+def test_render_list_item_without_leading_text_uses_child_text_only() -> None:
+    md = render_markdown(_wrap(b"<ul><li><strong>bold</strong> tail</li></ul>"))
+    assert md == "- **bold** tail\n"
+
+
 def test_render_three_levels_of_nesting() -> None:
     md = render_markdown(
         _wrap(b"<ul><li>a<ul><li>b<ul><li>c</li></ul></li></ul></li></ul>"),
@@ -274,3 +331,14 @@ def test_render_list_item_with_inline_emphasis_and_link() -> None:
         ),
     )
     assert md == "- plain\n- has **bold** text\n- see [ref](x)\n"
+
+
+def test_render_inline_without_leading_text_preserves_child_tail() -> None:
+    md = render_markdown(_wrap(b'<article class="legalP"><strong>Bold</strong> tail</article>'))
+    assert md == "**Bold** tail\n"
+
+
+def test_render_inline_without_tail_does_not_inject_placeholder_text() -> None:
+    md = render_markdown(_wrap(b'<article class="legalP">Prefix <strong>Bold</strong></article>'))
+
+    assert md == "Prefix **Bold**\n"

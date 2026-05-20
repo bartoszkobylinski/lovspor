@@ -11,9 +11,11 @@ from pathlib import Path
 import pytest
 
 from lovspor.errors import ParseError
+from lovspor.parsing import xml_normalizer
 from lovspor.parsing.xml_normalizer import (
     canonicalize_xml,
     hash_normalized_xml,
+    safe_parser,
 )
 
 _HEX_64 = re.compile(r"^[0-9a-f]{64}$")
@@ -94,8 +96,9 @@ def test_canonicalize_strips_xml_declaration() -> None:
 
 
 def test_canonicalize_raises_parse_error_on_malformed_xml() -> None:
-    with pytest.raises(ParseError, match="malformed XML"):
+    with pytest.raises(ParseError) as exc_info:
         canonicalize_xml(b"not <xml")
+    assert str(exc_info.value).startswith("malformed XML: ")
 
 
 def test_canonicalize_parse_error_preserves_cause() -> None:
@@ -129,6 +132,20 @@ def test_canonicalize_rejects_documents_with_external_entities(
     assert "LEAKED_SECRET_CONTENT" not in str(exc_info.value)
 
 
+def test_safe_parser_disables_network_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_parser(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(xml_normalizer.etree, "XMLParser", fake_parser)
+
+    safe_parser()
+
+    assert captured["no_network"] is True
+
+
 def test_canonicalize_rejects_excessively_deep_xml() -> None:
     """Mutation hardening: huge_tree=False protects against XML bombs
     that exploit deep nesting rather than entity expansion. With our
@@ -154,8 +171,9 @@ def test_canonicalize_rejects_billion_laughs_bomb() -> None:
         b"]>\n"
         b"<lolz>&lol4;</lolz>"
     )
-    with pytest.raises(ParseError):
+    with pytest.raises(ParseError) as exc_info:
         canonicalize_xml(bomb)
+    assert str(exc_info.value).startswith("cannot canonicalize XML: ")
 
 
 def test_canonicalize_preserves_predefined_entity_escape() -> None:

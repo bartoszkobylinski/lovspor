@@ -12,6 +12,7 @@ import pytest
 
 from lovspor.sync.git_commit import (
     GitCommandError,
+    _run,
     add,
     commit,
     has_staged_changes,
@@ -269,3 +270,60 @@ def test_push_raises_on_unknown_remote(repo: Path) -> None:
         push(repo, remote="missing-remote", branch="main")
     assert "exited" in str(exc_info.value)
     assert "missing-remote" in str(exc_info.value)
+
+
+def test_run_error_message_preserves_command_cwd_code_and_stripped_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(
+            128,
+            ["git", "push", "origin", "main"],
+            stderr="  fatal: no remote\n",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitCommandError) as exc_info:
+        _run(["push", "origin", "main"], cwd=tmp_path)
+
+    assert str(exc_info.value) == (
+        f"git push origin main (cwd={tmp_path}) exited 128: fatal: no remote"
+    )
+
+
+def test_run_error_message_handles_missing_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(
+            2,
+            ["git", "status"],
+            stderr=None,
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitCommandError) as exc_info:
+        _run(["status"], cwd=tmp_path)
+
+    assert str(exc_info.value) == f"git status (cwd={tmp_path}) exited 2: "
+
+
+def test_has_staged_changes_reports_unexpected_git_exit_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["git"], 9)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitCommandError) as exc_info:
+        has_staged_changes(tmp_path)
+
+    assert str(exc_info.value) == (
+        f"git diff --cached --quiet (cwd={tmp_path}) returned unexpected code 9"
+    )

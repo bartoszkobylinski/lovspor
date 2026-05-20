@@ -1,4 +1,5 @@
 import os
+import re
 
 import pytest
 from typer.testing import CliRunner
@@ -10,6 +11,18 @@ from lovspor.sync.orchestrator import SyncReport
 
 runner = CliRunner()
 
+# Typer >= 0.12 renders --help through Rich panels, which interleave the
+# usage text with ANSI escape sequences and box-drawing characters. The
+# literal "Usage: lovspor [OPTIONS] COMMAND [ARGS]..." chunk only appears
+# contiguously after the ANSI is stripped — Rich does not honour NO_COLOR
+# for panel rendering. Local terminals with TERM=dumb don't trigger Rich,
+# which is why the gap reached CI rather than failing pre-push.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s)
+
 
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in list(os.environ):
@@ -20,26 +33,45 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_help_succeeds() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Norwegian law change tracker" in result.stdout
+    plain = _strip_ansi(result.stdout)
+    assert "Usage: lovspor [OPTIONS] COMMAND [ARGS]..." in plain
+    assert "Norwegian law change tracker" in plain
+    assert "XXNorwegian law change tracker" not in plain
+
+
+def test_no_args_shows_help() -> None:
+    result = runner.invoke(app, [])
+    assert result.exit_code == 2
+    assert "Usage: lovspor [OPTIONS] COMMAND [ARGS]..." in _strip_ansi(result.stdout)
+
+
+def test_completion_options_are_not_registered() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert "--install-completion" not in result.stdout
+    assert "--show-completion" not in result.stdout
 
 
 def test_version_flag_prints_version() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert __version__ in result.stdout
+    assert result.stdout == f"lovspor {__version__}\n"
 
 
 def test_short_version_flag_prints_version() -> None:
     result = runner.invoke(app, ["-V"])
     assert result.exit_code == 0
-    assert __version__ in result.stdout
+    assert result.stdout == f"lovspor {__version__}\n"
 
 
 def test_info_command_prints_project_info() -> None:
     result = runner.invoke(app, ["info"])
     assert result.exit_code == 0
-    assert __version__ in result.stdout
-    assert "lovverk" in result.stdout
+    assert result.stdout == (
+        f"lovspor {__version__}\n"
+        "Engine producing the lovverk Norwegian law corpus.\n"
+        "Repo:   https://github.com/bartoszkobylinski/lovspor\n"
+        "Corpus: https://github.com/bartoszkobylinski/lovverk\n"
+    )
 
 
 def test_unknown_command_fails_cleanly() -> None:
@@ -85,7 +117,7 @@ def test_seed_invokes_run_sync_and_reports_count(
     monkeypatch.setattr("lovspor.cli.run_sync", lambda _settings: canned)
     result = runner.invoke(app, ["seed"])
     assert result.exit_code == 0
-    assert "3 documents added" in result.stdout
+    assert result.stdout == f"Seeded corpus at {tmp_path}: 3 documents added.\n"
 
 
 def test_sync_invokes_run_sync_and_reports_counts(
@@ -104,10 +136,9 @@ def test_sync_invokes_run_sync_and_reports_counts(
     monkeypatch.setattr("lovspor.cli.run_sync", lambda _settings: canned)
     result = runner.invoke(app, ["sync"])
     assert result.exit_code == 0
-    assert "2 new" in result.stdout
-    assert "5 changed" in result.stdout
-    assert "1 removed" in result.stdout
-    assert "774 unchanged" in result.stdout
+    assert result.stdout == (
+        f"Sync complete at {tmp_path}: 2 new, 5 changed, 1 removed, 774 unchanged.\n"
+    )
 
 
 def test_sync_surfaces_config_error_on_missing_env(
