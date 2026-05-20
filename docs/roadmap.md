@@ -48,11 +48,33 @@ Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). Th
 ## Known gaps
 
 ### Domain coverage
-- **`gjeldende-lokale-forskrifter`** — local regulations, ~10x volume of central regulations. Available in the same Lovdata API.
-- **`historiske-lover`** — repealed acts, for "what was the law in 2015?" questions.
-- **`forarbeider`** — preparatory works (Ot.prp., NOU, Innst., Prop.). Important for legislative-intent reasoning.
-- **`domsregister`** — Supreme Court (Høyesterett) decisions. Without case law, AI cannot reason about precedent.
-- **Sami-language datasets** — northern Sami, lule Sami.
+
+Grouped by source availability (restructured 2026-05-18 — see Class D for execution detail and "Currently out of scope" for the §43 reasoning behind the blocked items).
+
+**In Lovdata's `publicData` API — pipeline work only:**
+- **`gjeldende-lokale-forskrifter`** — municipal + county regulations, ~10× volume of central regulations (~37k docs).
+- **`historiske-lover`** — repealed acts, for "what was the law in 2015?" questions that the time-machine tool can't reach (it can only see commits we have made).
+- **`lovtidend-avd1-{year}`** — official change announcements (Norwegian Federal Register equivalent). Explains *why* a law changed, complementing our existing change-detection.
+- **Sami-language datasets** — northern Sami, Lule Sami translations of selected acts.
+
+**Outside Lovdata, on the source publisher's own site — new fetcher per source, legally clean:**
+- **`domstol.no` — Høyesterett decisions 2004+** (~3k docs, ~100–150/yr). State-published, no Lovdata middleman, no §43 problem. Apex precedent only; ~5–10% of full case-law need.
+- **`stortinget.no` API** — parliamentary records (saker, voteringer, komitéinnstillinger). Documented JSON API, 100 req/min. Enrichment overlay rather than primary corpus.
+- **`stortinget.no` + `regjeringen.no` — forarbeider** (NOU, Ot.prp., Prop. L, Innst. S). The legislative-intent goldmine. PDF-heavy.
+- **`eur-lex.europa.eu`** — resolve existing `eu_basis` CELEX identifiers to actual EU directive text. Closes the loop on EU-implementation acts.
+- **Specialized administrative tribunals** — Datatilsynet, KOFA, Markedsrådet, Konkurransetilsynet, Finanstilsynet rulings + guidance. Per-institution, varies wildly.
+
+**Partial — published subset only:**
+- **Lagmannsrett (appellate) decisions** — sporadic individual high-profile rulings on `domstol.no/<court>/`. No systematic collection outside Lovdata.
+- **Tingrett (district) decisions** — almost none published openly. Practically inaccessible as a corpus.
+- **Specialized courts** (Arbeidsretten, Trygderetten, Riksrett) — per-institution sites with varying transparency.
+- **English translations of Norwegian law / Høyesterett decisions** — partial coverage on domstol.no and individual ministry sites; full collection is Lovdata-Pro-only.
+
+**Legally blocked by Lovdata §43 (database right) — see "Currently out of scope":**
+- Lovdata's full `domsregister` (appellate + district + specialized, all courts).
+- Lovdata's editorial layer (headnotes, sammendrag, stikkord, prejudikat-classification, cross-reference networks).
+- Pre-2004 Høyesterett full decisions held only in Lovdata's collection.
+- Lovdata's commentary (kommentarutgaver, Lovdata Pro).
 
 ### Structural depth
 - **No AST.** The corpus is raw Markdown; there is no structured graph of `Lov → Kapittel → Paragraf → Ledd → Bokstav → Punkt`. Each tool parses text ad-hoc with its own regex (`get_section`, `validate_citation`). This compounds badly as more tools are added.
@@ -67,8 +89,7 @@ Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). Th
 - **No fuzzy slug match.** Callers must hit the canonical slug exactly.
 
 ### Operational
-- **No time-machine tool.** `git log --follow` exists; `get_law_at(slug, date)` does not. Trivial to add.
-- **No diff tool.** `diff_law_versions(slug, date_a, date_b)` would be unique to this project — competitors lack the git-based architecture.
+- **No diff tool.** `diff_law_versions(slug, date_a, date_b)` would be unique to this project — competitors lack the git-based architecture. Time-machine half (`get_law_at` + `list_law_versions`) shipped in Sprint 10 PR-A.
 - **No quality monitor.** Whether every cross-reference in body text resolves to a real act is unknown.
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
 
@@ -144,21 +165,81 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 
 ### Class D: Domain expansion
 
-**D1. Local regulations (`gjeldende-lokale-forskrifter`)**
-- Add the dataset to the sync pipeline.
-- ~10x volume; likely warrants a separate corpus repo (`lovverk-lokal`) to avoid bloating the main one.
-- **Leverage:** medium. Specific audience — municipal lawyers, urban planners.
-- **Effort:** medium.
+Restructured 2026-05-18 around source-legality reality (see "Domain coverage" above for the full taxonomy). Three sub-classes:
 
-**D2. Domsregister (Supreme Court cases)**
-- Different schema, different licensing.
-- **Leverage:** very high. Without case law, AI cannot reason about precedent — this is the largest qualitative gap.
-- **Effort:** high. A different pipeline, different rendering.
+#### D-API — additional Lovdata `publicData` datasets
 
-**D3. Forarbeider (preparatory works)**
-- Ot.prp., NOU, Innst. — *legislative intent*, important for interpreting acts.
-- **Leverage:** medium (academic / specialist).
-- **Effort:** high.
+Pure pipeline extension. Same engine, same legal posture, same MCP contract. New dataset key + slug-prefix per item.
+
+**D-API-1. `gjeldende-lokale-forskrifter`** — local regulations.
+- ~37k docs, ~10× current central forskrifter. Pushes `lovverk` toward GitHub's 1 GB soft repo-size warning; embeddings would push past it.
+- Open question: subfolder (`lovverk/lokale-forskrifter/`) vs separate repo (`lovverk-lokal`). Leaning separate repo for audience-separation reasons — 95% of users don't need municipal regs and shouldn't pay the clone/RAM/embedding-disk cost.
+- **Leverage:** medium. Niche audience — municipal lawyers, urban planners, building consultants.
+- **Effort:** 2 sprints (pipeline + MCP-side dataset-filter adjustments).
+
+**D-API-2. `historiske-lover`** — repealed acts.
+- Modest volume. Static — no daily update cadence required.
+- Enables "what was the law in 2015?" answers beyond the time-machine's reach (the time-machine can only see commits we have made; repealed-before-corpus laws need this dataset).
+- **Leverage:** medium-high. Closes a real query type.
+- **Effort:** 1 sprint.
+
+**D-API-3. `lovtidend-avd1-{year}`** — official change announcements.
+- Annual tarballs, small.
+- Complements existing change-detection: explains *why* a law changed, not *what* it now says.
+- **Leverage:** medium. Useful overlay on `list_recent_changes` / `get_law_history`.
+- **Effort:** half-sprint.
+
+**D-API-4. Sami-language texts** — northern + Lule Sami.
+- Same XML shape as primary law texts; mostly manifest-key + frontmatter extension.
+- **Leverage:** low by volume, high by cultural value.
+- **Effort:** half-sprint.
+
+#### D-DIRECT — state primary sources outside Lovdata
+
+New fetcher per source (no Lovdata involvement, no §43 risk). Each source has its own format, metadata model, and update cadence — heavier engineering than D-API but legally clean.
+
+**D-DIRECT-1. Høyesterett via `domstol.no`** — apex precedent.
+- ~3k decisions 2004→present, ~100–150/yr. HTML + linked PDFs, no documented JSON API; "polite-fetch + cache" pattern.
+- New domain model: `case_number`, `panel`, `dissens`, `prejudikat`, `cited_acts`. Decisions are immutable; no change-detection / time-machine machinery needed.
+- New MCP tools: `get_decision(case_id)`, `list_decisions_citing(slug, section_id?)`. The latter is unique — linking apex precedent to law sections, no competitor has it.
+- **Leverage:** very high. Closes the apex-precedent gap that the project has called "the largest qualitative gap" (the rest of case law sits behind §43; see "Currently out of scope").
+- **Novelty:** unique. No other Norwegian-law MCP server has case law.
+- **Effort:** 2 sprints (crawl + PDF→Markdown + new domain model + MCP tools).
+
+**D-DIRECT-2. EUR-Lex CELEX resolution**
+- We already extract `eu_basis` as CELEX identifiers (Sprint 8). Fetch the actual directive text on demand.
+- EUR-Lex has a public API; legislation is CC0-equivalent.
+- New MCP tool: `get_eu_text(celex)` or expand `get_eu_basis` to return text inline.
+- **Leverage:** high for users working with EU-implementation acts (GDPR, NIS2, eIDAS, AI Act).
+- **Effort:** 1 sprint.
+
+**D-DIRECT-3. Forarbeider** — Ot.prp., NOU, Prop. L, Innst. S.
+- Mixed sources: `stortinget.no` API for some metadata, `regjeringen.no` for NOUs as PDFs.
+- Heavy PDF→text work. Cross-linking forarbeider→acts requires a slug-resolution layer.
+- **Leverage:** high for serious legal research (legislative intent), niche otherwise.
+- **Effort:** 2–3 sprints. (Previously listed as "out of scope — niche" — moved into D-DIRECT after the 2026-05-18 source audit clarified the engineering is real but the legal path is clean.)
+
+**D-DIRECT-4. `data.stortinget.no`** — parliamentary records.
+- Documented JSON API, 100 req/min.
+- Enrichment overlay: which parties voted how on a given act, on what date, with what dissent.
+- **Leverage:** medium. Adds political-context layer to existing acts.
+- **Effort:** 1 sprint.
+
+**D-DIRECT-5. Specialized administrative tribunals**
+- Datatilsynet, KOFA, Markedsrådet, Konkurransetilsynet, Finanstilsynet — each has its own site, PDFs, varying transparency.
+- Demand-driven: ship one when a real user surfaces an ask for that domain.
+- **Leverage:** specialist value per industry.
+- **Effort:** 1 sprint per institution.
+
+#### D-BLOCKED — legally inaccessible
+
+Documented for clarity; do not attempt. See "Currently out of scope" for the legal reasoning.
+
+- **Lovdata's full `domsregister`** (appellate + district + specialized, all-court collection).
+- **Lovdata's editorial layer** on case law (headnotes, sammendrag, stikkord, classification, cross-references).
+- **Pre-2004 Høyesterett full decisions** held only in Lovdata's collection.
+- **Lovdata's commentary** (kommentarutgaver, Lovdata Pro features).
+- **Lagmannsrett / tingrett decisions in bulk** — the systematic collection only exists at Lovdata; only sporadic individual cases reach `domstol.no`.
 
 ### Class E: Distribution
 
@@ -211,27 +292,42 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 
 ## Recommendation
 
-Top three by **value × novelty**:
+Top three by **value × novelty** (refreshed 2026-05-18 after Sprint 10 PR-A ships the time-machine half of Class B):
 
-1. **Time-machine + diff tool** (Class B). Cheapest in cost-per-impact (~3 days). Unique — no competitor has a git-based architecture. Answers a real legal-research question: "what did this law say in 2018?". Builds on infrastructure already present.
-2. **AST + cross-reference graph** (Classes A1, A2). A larger investment, but unblocks many later sprints. The AST enables: better `get_section`, structural diffs (complementing class B), navigation tools, and a richer `cross_references` field on `get_section` (currently regex-based, B-tier scope).
-3. **Domsregister** (Class D2). The most valuable domain expansion — without case law, legal AI is weak. Sprint 9 closed the semantic-search gap (C1), so the next major leverage move is in domain coverage rather than search quality.
+1. **Diff tool** (Class B2). Time-machine half (B1) is shipped; B2 builds directly on it. Section-by-section unified diff between two dates. Small effort, unique to this project (no git-architecture competitor can do it), answers the obvious follow-up to "what did this law say in 2018?".
+2. **AST + cross-reference graph** (Classes A1, A2). A larger investment, but unblocks many later sprints. The AST enables: better `get_section`, structural diffs (complementing B2), navigation tools, and a richer `cross_references` field on `get_section` (currently regex-based, B-tier scope).
+3. **Høyesterett via `domstol.no`** (Class D-DIRECT-1). The realistic version of the old Class D2 "Domsregister" entry — Lovdata's full case-law collection is legally blocked (§43; see "Currently out of scope"), but apex precedent via the courts' own publication is sprint-sized and legally clean. Closes the largest qualitative gap reachable without legislative change. Genuinely novel — no Norwegian-law MCP has case law.
 
 Top three by **adoption × reach**:
 
 4. **PyPI publish** (Class E1). One day of work, opens the project to mass adoption.
 5. **Public docs site + showcase** (Class E2). Discoverability.
-6. **Local regulations** (D1). Concrete audience (municipal lawyers, urban planners); separate corpus repo to avoid bloating the main one.
+6. **`historiske-lover` + `gjeldende-lokale-forskrifter`** (Classes D-API-1, D-API-2). Pure pipeline work, no legal risk, closes two real corpus gaps. Local regulations likely as a separate `lovverk-lokal` repo for audience-separation reasons.
 
 ---
 
 ## Currently out of scope
 
+**Strategic deferrals:**
 - **Multi-jurisdiction** (G1) — premature; would dilute focus.
 - **Hosted MCP endpoint** (E3) — moves the project into SaaS territory, a different problem from the OSS engine.
 - **Web UI** (G2) — the audience is AI agents, not humans.
-- **Forarbeider** (D3) — niche; low leverage relative to effort.
+
+**Legally inaccessible** (see Class D-BLOCKED above):
+
+The judgments themselves are public domain under *åndsverkloven* §14, but Lovdata's *database* of them is protected under §43 (Norway's implementation of EU Database Directive 96/9/EC), and Lovdata's editorial enrichment (headnotes, sammendrag, classification, cross-references) is original creative work and copyright-protected.
+
+The position was tested and settled in *Lovdata vs Liland & Edvardsen* (Høyesterett 2019, the "Rettspraksis.no" case): scraping individual judgments from Lovdata's collection violates §43 even though the underlying judgments are public domain. Substantial extraction = §43 violation. Settled Norwegian law.
+
+Lovdata is the institutional consolidator since 1981; courts pipe decisions into them; the editorial layer compounded over ~45 years. The legal paths around this are: (a) `domstol.no` for courts that publish directly — Høyesterett does (Class D-DIRECT-1), most lower courts don't; (b) court-by-court archive harvesting from primary sources, gargantuan and mostly paper; (c) wait for legislation to extend NLOD coverage to case law (ongoing political pressure, no commitment, no timeline).
+
+Until (c), the following remain out of scope as a matter of Norwegian law, not project preference:
+
+- Lovdata's full `domsregister` (appellate + district + specialized).
+- Lovdata's editorial layer on any case law.
+- Pre-2004 Høyesterett full decisions held only in Lovdata's collection.
+- Lovdata's commentary (kommentarutgaver, Lovdata Pro).
 
 ---
 
-*Last reviewed: 2026-05-07 (post-Sprint-9 update). Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
+*Last reviewed: 2026-05-18 (post-Sprint-10-PR-A; Class D restructured around source-legality reality after the domstol.no / Lovdata §43 audit). Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*

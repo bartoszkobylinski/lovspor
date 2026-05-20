@@ -8,6 +8,10 @@ Contract for how Claude works in this project. Read at the start of every sessio
 
 This repo contains **only the engine**. Legal text never lives here. The corpus lives in `lovverk`.
 
+## Cross-repo doc currency
+- lovspor and lovverk are sibling repos that reference each other's facts.
+- When changing one repo's docs, check whether the other references the same facts and update both in lockstep.
+
 ## Critical constraints (non-negotiable)
 
 - **Source:** only `https://api.lovdata.no/v1/publicData/`. Never scrape lovdata.no HTML.
