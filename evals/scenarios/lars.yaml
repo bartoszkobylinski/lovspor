@@ -157,9 +157,9 @@ scenarios:
         tool: get_law_history
     failure_modes:
       - Event list is not a version index.
-      - There is no list_law_versions tool.
-    reveals_gap: no law-version listing tool
-    roadmap_class: B1
+      - list_law_versions shipped in Sprint 10 but the deterministic runner does not script it yet.
+    reveals_gap: eval runner does not script list_law_versions
+    roadmap_class: eval-coverage
 
   - id: lars_009
     persona: lars
@@ -194,6 +194,6 @@ scenarios:
         tool: get_law_history
     failure_modes:
       - Rename metadata is not a historical content snapshot.
-      - No get_law_at tool exists for retrieving the file at a date.
-    reveals_gap: no time-machine tool
-    roadmap_class: B1
+      - get_law_at shipped in Sprint 10 but the deterministic runner does not script it yet.
+    reveals_gap: eval runner does not script get_law_at
+    roadmap_class: eval-coverage
