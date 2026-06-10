@@ -293,6 +293,42 @@ def test_slug_index_first_record_wins_on_duplicate_slugs(tmp_path: Path) -> None
     assert reader.get_eu_basis("dupe")["doc_id"] == "nl-1"
 
 
+def test_get_section_duplicate_slug_stable_after_search_body(tmp_path: Path) -> None:
+    """Codex PR #62 round 1: with two current records sharing a slug
+    but pointing at different files, get_section resolved the FIRST
+    record's file — until search_body() loaded the corpus-wide body
+    index, whose last-record-wins dict silently flipped subsequent
+    point lookups to the SECOND record's content. Point lookups must
+    return the same content before and after a search_body call."""
+    first = _record(slug="dupe", title="First")
+    second = _record(slug="dupe", title="Second").model_copy(
+        update={"markdown_path": "lover/dupe-second.md"},
+    )
+    _seed_corpus(tmp_path, {"nl-1": first, "nl-2": second}, write_files=False)
+    (tmp_path / "lover").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "lover" / "dupe.md").write_text(
+        "---\nid: x\ntitle: First\n---\n\n## Kapittel 1.\n\n### § 1-1. F\n\nFirst body.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lover" / "dupe-second.md").write_text(
+        "---\nid: x\ntitle: Second\n---\n\n## Kapittel 9.\n\n### § 9-9. S\n\nSecond body.\n",
+        encoding="utf-8",
+    )
+    reader = CorpusReader(tmp_path)
+
+    before = reader.get_section("dupe", "1-1")
+    assert "First body." in before["body"]
+
+    # search_body loads the corpus-wide body index; it must agree with
+    # the slug index on which record owns a duplicated slug.
+    assert [hit["slug"] for hit in reader.search_body("First body")] == ["dupe"]
+    assert reader.search_body("Second body") == []
+
+    after = reader.get_section("dupe", "1-1")
+    assert after["body"] == before["body"]
+    assert reader.verify_quote("dupe", "1-1", "First body.")["verified"] is True
+
+
 def test_get_law_returns_file_content(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
     out = CorpusReader(tmp_path).get_law("skatteloven")

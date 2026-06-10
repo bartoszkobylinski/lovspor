@@ -657,9 +657,16 @@ class CorpusReader:
         needle = query.lower()
         dataset_key = _resolve_dataset(dataset) if dataset is not None else None
         index = self._load_body_index()
+        slug_index = self._load_slug_index()
         results: list[dict[str, Any]] = []
         for doc_id, record in self.manifest.documents.items():
             if record.status != "current" or record.slug is None:
+                continue
+            # On a duplicate slug only the slug-index owner (first
+            # manifest entry) produces a hit — otherwise the same
+            # body would be reported once per claiming record, with
+            # doc_ids that point lookups cannot resolve.
+            if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
                 continue
             if dataset_key is not None and record.source_dataset != dataset_key:
                 continue
@@ -1086,11 +1093,20 @@ class CorpusReader:
         of the server's lifetime. Files that fail the path-containment
         check or are missing on disk are silently skipped — the same
         defensive posture as ``get_law``.
+
+        First manifest entry wins on a duplicate slug — the same
+        contract as ``_load_slug_index``. Without this, point lookups
+        (which fall back to this index once it is loaded) would
+        silently flip from the first record's content to the last
+        record's after the first ``search_body`` call (Codex PR #62
+        round 1 reproducer).
         """
         if self._body_index is None:
             index: dict[str, str] = {}
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
+                    continue
+                if record.slug in index:
                     continue
                 try:
                     path = self._safe_join(record.markdown_path)
