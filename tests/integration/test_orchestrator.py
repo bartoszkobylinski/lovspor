@@ -875,6 +875,49 @@ def test_write_embeddings_for_doc_empty_sections_writes_header_only_file(
     assert parsed.sections == []
 
 
+def test_write_embeddings_for_doc_chunks_sections_over_token_limit(
+    tmp_path: Path,
+) -> None:
+    """A section longer than the embedding model's input window must
+    produce multiple vectors under the same section_id (the tail used
+    to be silently truncated and invisible to semantic search)."""
+    long_text = " ".join(f"ord{i}" for i in range(9000))
+    rendered = (
+        "---\ntitle: Lang\n---\n# Lang lov\n\n"
+        "## Kapittel 1.\n\n"
+        "### § 1-1. Kort\n\nKort innhold.\n\n"
+        f"### § 1-2. Lang\n\n{long_text}\n"
+    )
+
+    class CountingEmbedder:
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            self.texts = list(texts)
+            return _fake_embedding_matrix(texts)
+
+    embedder = CountingEmbedder()
+    path = orchestrator_module._write_embeddings_for_doc(
+        tmp_path,
+        "gjeldende-lover",
+        "lang-lov",
+        rendered,
+        embedder,
+    )
+
+    parsed = read_embeddings(path)
+    ids = [section_id for section_id, _vector in parsed.sections]
+    assert ids.count("1-1") == 1
+    assert ids.count("1-2") >= 2  # 9000+ tokens -> at least two chunks
+    assert len(parsed.sections) == len(embedder.texts)
+    # The chunks reassemble the original section text — nothing lost.
+    chunk_texts = [
+        text for text, section_id in zip(embedder.texts, ids, strict=True) if section_id == "1-2"
+    ]
+    assert "".join(chunk_texts).endswith("ord8999")
+
+
 def test_needs_sprint9_embeddings_migration_filters_to_current_slugged_docs(
     tmp_path: Path,
 ) -> None:

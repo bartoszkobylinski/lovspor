@@ -27,6 +27,7 @@ core dep for the Lovdata client). The ``openai`` package pulls in
 its own dependency cluster we don't otherwise use.
 """
 
+from functools import lru_cache
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -59,6 +60,45 @@ per-request reliability."""
 
 _DEFAULT_TIMEOUT_SECONDS = 180.0
 _DEFAULT_MAX_RETRIES = 3
+
+
+@lru_cache(maxsize=4)
+def _encoding_for(model_name: str) -> tiktoken.Encoding:
+    """Cached tiktoken encoding lookup — ``encoding_for_model`` walks a
+    registry on every call, and the chunker calls it per section."""
+    return tiktoken.encoding_for_model(model_name)
+
+
+def split_to_token_chunks(
+    text: str,
+    max_tokens: int = _MAX_INPUT_TOKENS,
+    model_name: str = DEFAULT_MODEL_NAME,
+) -> list[str]:
+    """Split ``text`` into consecutive chunks of at most ``max_tokens``.
+
+    The anti-truncation companion to ``OpenAIEmbedder``'s input
+    limit: a section longer than the model's window used to be
+    silently cut at ``_MAX_INPUT_TOKENS``, making its tail invisible
+    to semantic search. Callers embed every chunk under the same
+    section_id instead, so the whole section stays searchable.
+
+    Chunks are split at token boundaries — BPE tokens are full byte
+    sequences, so each chunk decodes to valid text and the chunks
+    concatenate back to the original. No overlap between chunks:
+    boundary-straddling phrases may embed weaker, accepted as the
+    simple-first trade-off (documented in docs/embeddings.md).
+
+    Text at or under the limit (including empty text) returns a
+    single chunk, preserving the one-vector-per-section common case.
+    """
+    encoding = _encoding_for(model_name)
+    tokens = encoding.encode(text)
+    if len(tokens) <= max_tokens:
+        return [text]
+    return [
+        encoding.decode(tokens[start : start + max_tokens])
+        for start in range(0, len(tokens), max_tokens)
+    ]
 
 
 @runtime_checkable

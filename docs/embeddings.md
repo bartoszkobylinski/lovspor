@@ -108,6 +108,18 @@ Repeated `section count` times immediately after the header:
 Section ids match the `### § N-M` headings in the rendered Markdown
 (`5-12`, `1`, `5-12a`, etc. — bare id, no `§` prefix).
 
+**Section ids are not unique within a file.** A section longer than
+the embedding model's input window (8 000 tokens) is split into
+consecutive token-bounded chunks at sync time
+(`split_to_token_chunks`), and every chunk is stored as its own
+record under the same section_id — previously the tail of such
+sections was silently truncated and invisible to semantic search.
+Chunks have no overlap (a boundary-straddling phrase may embed
+weaker in both chunks; accepted simple-first trade-off). Consumers
+that rank search results must deduplicate by `(slug, section_id)`
+keeping the best score — `EmbeddingIndex.top_k` does this for the
+MCP server.
+
 ## Read/write API
 
 `lovspor.embeddings.store` is the single canonical implementation

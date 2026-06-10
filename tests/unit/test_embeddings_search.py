@@ -225,6 +225,49 @@ def test_chunked_scoring_matches_unchunked(monkeypatch: pytest.MonkeyPatch) -> N
         assert hit.score == pytest.approx(score, abs=1e-6)
 
 
+def test_top_k_dedupes_chunked_sections_keeping_best_score() -> None:
+    """Long sections embed as multiple vectors under the same
+    (slug, section_id); top_k must report each section once, with
+    the best chunk's score."""
+    query = np.array([1.0, 0.0], dtype=np.float32)
+    index = _index(
+        [
+            ("lang-lov", "9-9", [1, 1], 1.0),  # chunk 2, score ~0.707
+            ("lang-lov", "9-9", [1, 0], 1.0),  # chunk 1, score 1.0
+            ("annen-lov", "1-1", [3, 4], 1.0),  # score 0.6
+        ],
+    )
+
+    hits = index.top_k(query, k=3)
+
+    assert [(hit.slug, hit.section_id) for hit in hits] == [
+        ("lang-lov", "9-9"),
+        ("annen-lov", "1-1"),
+    ]
+    assert hits[0].score == pytest.approx(1.0)
+
+
+def test_top_k_expands_candidates_past_duplicate_chunks() -> None:
+    """k unique sections must come back even when the top-k raw rows
+    are dominated by chunks of the same section."""
+    query = np.array([1.0, 0.0], dtype=np.float32)
+    index = _index(
+        [
+            ("lang-lov", "9-9", [100, 0], 1.0),
+            ("lang-lov", "9-9", [99, 1], 1.0),
+            ("lang-lov", "9-9", [98, 2], 1.0),
+            ("annen-lov", "1-1", [1, 1], 1.0),
+        ],
+    )
+
+    hits = index.top_k(query, k=2)
+
+    assert [(hit.slug, hit.section_id) for hit in hits] == [
+        ("lang-lov", "9-9"),
+        ("annen-lov", "1-1"),
+    ]
+
+
 def test_search_hit_is_immutable() -> None:
     hit = SearchHit(slug="a", section_id="1", score=1.0)
 

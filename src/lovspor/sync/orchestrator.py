@@ -46,7 +46,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder
+from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder, split_to_token_chunks
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import write_embeddings
@@ -641,6 +641,12 @@ def _write_embeddings_for_doc(
     with a valid header. Empty is intentional — it lets the
     existence check in ``_needs_sprint9_embeddings_migration`` flip
     to False and stop re-triggering on every sync.
+
+    Sections longer than the model's input window are split into
+    token-bounded chunks, each embedded under the same section_id —
+    previously the tail of such sections was silently truncated and
+    invisible to semantic search. The search side dedupes by
+    ``(slug, section_id)`` keeping the best chunk score.
     """
     body = strip_frontmatter(rendered_markdown)
     sections = iter_sections(body)
@@ -648,10 +654,15 @@ def _write_embeddings_for_doc(
     if not sections:
         write_embeddings(path, [], scale=1.0)
         return path
-    texts = [s.text for s in sections]
+    texts: list[str] = []
+    section_ids: list[str] = []
+    for section in sections:
+        for chunk in split_to_token_chunks(section.text):
+            texts.append(chunk)
+            section_ids.append(section.section_id)
     matrix = embedder.encode(texts)
     quantized, scale = quantize_int8(matrix)
-    pairs = [(s.section_id, quantized[i]) for i, s in enumerate(sections)]
+    pairs = [(section_ids[i], quantized[i]) for i in range(len(section_ids))]
     write_embeddings(path, pairs, scale)
     return path
 
