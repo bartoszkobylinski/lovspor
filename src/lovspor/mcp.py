@@ -50,7 +50,13 @@ from typing import Any
 import numpy as np
 from mcp.server.fastmcp import FastMCP
 
-from lovspor.embeddings import EmbeddingIndex, EmbeddingModel, OpenAIEmbedder, read_embeddings
+from lovspor.embeddings import (
+    EmbeddingIndex,
+    EmbeddingModel,
+    OpenAIEmbedder,
+    SearchHit,
+    read_embeddings,
+)
 from lovspor.errors import LovsporError
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
@@ -112,6 +118,27 @@ _SNIPPET_CONTEXT_CHARS = 50
 returned snippet. 50 chars on each side + match length ~= 100-130 chars
 total, which fits a single AI message line and gives enough context
 to judge relevance without overwhelming the response."""
+
+_SEMANTIC_MIN_SCORE_DEFAULT = 0.25
+"""Default similarity floor for ``semantic_search``.
+
+Hits below this score are noise for the production embedding model
+(text-embedding-3-large on Norwegian legal text): off-topic sections
+sit around 0.1-0.2 while same-language matches score > 0.4.
+The floor is deliberately below the same-language band because
+cross-lingual queries score systematically lower — the eval suite's
+English lay-vocabulary query against personopplysningsloven scores
+~0.31 for the correct section. Returning 20 paste-ready citation
+hints for an off-corpus query invites the AI to cite the least-bad
+one — filtering plus an explicit 'no strong match' notice is the
+anti-hallucination posture. Callers can pass ``min_score=0.0`` to
+see everything."""
+
+_SEMANTIC_SNIPPET_CHARS = 200
+"""Max characters of section-body lead included with each
+``semantic_search`` hit. Enough to judge relevance and ground the
+hit in real corpus text; the full section still comes from
+``get_section``."""
 
 _CROSS_REF_SECTION = re.compile(r"§\s*(\d+(?:-[\da-z]+)?)")
 """Detect ``§ N-M`` (or just ``§ N``) section references inside a
@@ -747,20 +774,31 @@ class CorpusReader:
         query: str,
         dataset: str | None = None,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+        min_score: float = _SEMANTIC_MIN_SCORE_DEFAULT,
+    ) -> dict[str, Any]:
         """Top-K cosine semantic search over per-section embeddings.
 
-        Returns hits ranked by cosine similarity to ``query``. Each hit
-        carries ``slug``, ``section_id``, ``score`` (similarity in
-        [-1, 1] but in practice [0.2, 0.95] for any usable result),
-        ``title``, ``dataset``, and ``citation_hint`` (a paste-in
-        ``§ <id> <slug>`` string the AI can quote next to a claim).
+        Returns ``{results, notice}``. ``results`` is ranked by cosine
+        similarity to ``query``; each hit carries ``slug``,
+        ``section_id``, ``score``, ``title``, ``dataset``,
+        ``citation_hint`` (a paste-in ``§ <id> <slug>`` string),
+        ``heading`` (the section's real heading line), ``snippet``
+        (the first ~200 chars of the section body — actual corpus
+        text, so every hit is self-grounding), and ``last_changed``
+        (the act's last content change, for currency caveats).
+        ``heading`` / ``snippet`` are null when the embedded section
+        id no longer exists in the rendered Markdown (stale .bin,
+        corpus drift) — treat such hits with extra suspicion.
 
-        Score is a *similarity*, NOT a relevance proof. A high score
-        means the section discusses semantically similar content; it
-        does not mean the section answers the user's question. Treat
-        results as candidates that need verification — the
-        recommended pattern is:
+        Hits scoring below ``min_score`` are dropped. When nothing
+        clears the floor, ``results`` is empty and ``notice`` says so
+        explicitly (including the best rejected score) — the AI must
+        report "no strong match" rather than cite from memory.
+        ``notice`` is null whenever results exist.
+
+        Score is a *similarity*, NOT a relevance proof. Treat results
+        as candidates that need verification — the recommended
+        pattern is:
 
         1. ``semantic_search(query)`` -> top candidates
         2. ``get_section(slug, section_id)`` for each top hit ->
@@ -784,61 +822,95 @@ class CorpusReader:
                 f"limit must be non-negative, got {limit}",
             )
         if not query.strip() or limit == 0:
-            return []
+            return {"results": [], "notice": None}
 
         index = self._load_embedding_index()
         if not index:
-            if self._stale_bin_count > 0:
-                raise CorpusNotFoundError(
-                    f"no usable embeddings: all {self._stale_bin_count} .bin file(s) "
-                    f"are from an older model with a different dim. The corpus needs "
-                    f"to be re-embedded — run 'lovspor sync' (which will overwrite "
-                    f"every .bin with the current model), then 'git pull' in the "
-                    f"corpus to refresh.",
-                )
-            raise CorpusNotFoundError(
-                "no embeddings found in corpus; run 'lovspor sync' to "
-                "populate per-document .bin files, then 'git pull' in the "
-                "corpus to refresh.",
-            )
+            self._raise_for_empty_embedding_index()
 
-        dataset_key = _resolve_dataset(dataset) if dataset is not None else None
-        slug_meta: dict[str, tuple[str | None, str]] = {}
-        allowed_slugs: set[str] | None = None
-        if dataset_key is not None:
-            allowed_slugs = set()
-        for record in self.manifest.documents.values():
-            if record.status != "current" or record.slug is None:
-                continue
-            try:
-                subdir = _subdir_for_dataset(record.source_dataset)
-            except CorpusNotFoundError:
-                continue
-            slug_meta[record.slug] = (record.title, subdir)
-            if allowed_slugs is not None and record.source_dataset == dataset_key:
-                allowed_slugs.add(record.slug)
-
+        allowed_slugs = self._dataset_slugs(dataset)
         # Skip the (network) query-embedding call entirely when the
         # dataset filter cannot match any indexed row.
         if allowed_slugs is not None and allowed_slugs.isdisjoint(index.unique_slugs):
-            return []
+            return {
+                "results": [],
+                "notice": (
+                    f"no embedded sections available in dataset {dataset!r}; "
+                    f"embeddings may not be backfilled for it yet."
+                ),
+            }
 
         query_vector = self._embedder.encode([query])[0]
         hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
-        results: list[dict[str, Any]] = []
-        for hit in hits:
-            title, subdir = slug_meta.get(hit.slug, (None, ""))
-            results.append(
-                {
-                    "slug": hit.slug,
-                    "section_id": hit.section_id,
-                    "score": hit.score,
-                    "title": title,
-                    "dataset": subdir,
-                    "citation_hint": f"§ {hit.section_id} {hit.slug}",
-                },
+        kept = [hit for hit in hits if hit.score >= min_score]
+        if not kept:
+            best = max((hit.score for hit in hits), default=None)
+            return {"results": [], "notice": _no_strong_match_notice(min_score, best)}
+        sections_memo: dict[str, dict[str, dict[str, str]]] = {}
+        return {
+            "results": [self._grounded_hit(hit, sections_memo) for hit in kept],
+            "notice": None,
+        }
+
+    def _raise_for_empty_embedding_index(self) -> None:
+        if self._stale_bin_count > 0:
+            raise CorpusNotFoundError(
+                f"no usable embeddings: all {self._stale_bin_count} .bin file(s) "
+                f"are from an older model with a different dim. The corpus needs "
+                f"to be re-embedded — run 'lovspor sync' (which will overwrite "
+                f"every .bin with the current model), then 'git pull' in the "
+                f"corpus to refresh.",
             )
-        return results
+        raise CorpusNotFoundError(
+            "no embeddings found in corpus; run 'lovspor sync' to "
+            "populate per-document .bin files, then 'git pull' in the "
+            "corpus to refresh.",
+        )
+
+    def _dataset_slugs(self, dataset: str | None) -> set[str] | None:
+        """Slugs belonging to ``dataset``, or None for 'no filter'."""
+        if dataset is None:
+            return None
+        dataset_key = _resolve_dataset(dataset)
+        return {
+            slug
+            for slug, (_doc_id, record) in self._load_slug_index().items()
+            if record.source_dataset == dataset_key
+        }
+
+    def _grounded_hit(
+        self,
+        hit: SearchHit,
+        sections_memo: dict[str, dict[str, dict[str, str]]],
+    ) -> dict[str, Any]:
+        """Project a search hit into the grounded result row.
+
+        ``sections_memo`` deduplicates the per-doc section parse when
+        several hits land in the same act within one query.
+        """
+        entry = self._load_slug_index().get(hit.slug)
+        record = entry[1] if entry is not None else None
+        subdir = ""
+        section: dict[str, str] | None = None
+        if record is not None:
+            try:
+                subdir = _subdir_for_dataset(record.source_dataset)
+            except CorpusNotFoundError:
+                subdir = ""
+            if hit.slug not in sections_memo:
+                sections_memo[hit.slug] = _parse_sections(self._body_for_record(record))
+            section = sections_memo[hit.slug].get(hit.section_id)
+        return {
+            "slug": hit.slug,
+            "section_id": hit.section_id,
+            "score": hit.score,
+            "title": record.title if record is not None else None,
+            "dataset": subdir,
+            "citation_hint": f"§ {hit.section_id} {hit.slug}",
+            "heading": section["heading"] if section is not None else None,
+            "snippet": _lead_snippet(section["body"]) if section is not None else None,
+            "last_changed": record.last_changed if record is not None else None,
+        }
 
     def verify_quote(
         self,
@@ -1346,6 +1418,37 @@ def _strip_frontmatter_and_h1(text: str) -> str:
     return text.lstrip("\n")
 
 
+def _lead_snippet(text: str) -> str:
+    """First ``_SEMANTIC_SNIPPET_CHARS`` chars of ``text`` as one line.
+
+    Whitespace runs collapse to single spaces so the snippet renders
+    on a single line; a trailing ``...`` marks truncation.
+    """
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= _SEMANTIC_SNIPPET_CHARS:
+        return collapsed
+    return collapsed[:_SEMANTIC_SNIPPET_CHARS] + "..."
+
+
+def _no_strong_match_notice(min_score: float, best: float | None) -> str:
+    """Explicit anti-hallucination message for an empty semantic result.
+
+    Includes the best rejected score so the AI (and the user) can
+    judge how near the miss was, and spells out the required
+    behavior: report no match, never substitute training-data
+    memory for the corpus.
+    """
+    best_part = (
+        f"best candidate scored {best:.2f}" if best is not None else "no candidates were scored"
+    )
+    return (
+        f"no sections scored >= {min_score:.2f} for this query ({best_part}). "
+        f"The corpus has no strong match — do NOT cite a law from memory. "
+        f"Tell the user no strong match was found, or retry with different "
+        f"wording, use search_body for exact keywords, or lower min_score."
+    )
+
+
 def _snippet(body: str, match_idx: int, match_len: int) -> str:
     """Extract a ``~100`` char window around ``match_idx`` in ``body``.
 
@@ -1791,7 +1894,8 @@ def build_server(corpus_path: Path) -> FastMCP:
         query: str,
         dataset: str | None = None,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+        min_score: float = _SEMANTIC_MIN_SCORE_DEFAULT,
+    ) -> dict[str, Any]:
         """Semantic search by meaning, not by substring match.
 
         Use when the user's question uses different vocabulary than
@@ -1809,19 +1913,36 @@ def build_server(corpus_path: Path) -> FastMCP:
         quoting. If you quote anything verbatim, run ``verify_quote``
         as a final safety check.
 
-        Returns a list of hits with: ``slug``, ``section_id``,
-        ``score`` (cosine similarity in [-1, 1]; useful matches are
-        usually > 0.4), ``title``, ``dataset``, and ``citation_hint``
-        (a paste-ready ``§ <id> <slug>`` string).
+        Returns ``{results, notice}``. Each result has ``slug``,
+        ``section_id``, ``score`` (cosine similarity; hits below
+        ``min_score`` are dropped), ``title``, ``dataset``,
+        ``citation_hint`` (a paste-ready ``§ <id> <slug>`` string),
+        ``heading`` (the section's actual heading), ``snippet`` (the
+        first ~200 chars of the section's real text), and
+        ``last_changed`` (the act's last content change — mention it
+        when currency matters). Null ``heading``/``snippet`` mean the
+        embedding is stale for that doc; verify via ``get_section``
+        before trusting such a hit.
+
+        When ``results`` is empty, ``notice`` explains why (e.g. no
+        section cleared ``min_score``). In that case say the corpus
+        has no strong match — do NOT answer from memory.
 
         ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
         ``limit``: max results, default 20, must be non-negative.
+        ``min_score``: similarity floor, default 0.25; pass 0.0 to
+        see every candidate.
 
         Raises if ``OPENAI_API_KEY`` was not set when the server
         started, or if the corpus has no per-doc ``.bin`` files
         yet (early bootstrap state — run ``lovspor sync``).
         """
-        return reader.semantic_search(query, dataset=dataset, limit=limit)
+        return reader.semantic_search(
+            query,
+            dataset=dataset,
+            limit=limit,
+            min_score=min_score,
+        )
 
     @mcp.tool()
     def validate_citation(citation: str) -> dict[str, Any]:

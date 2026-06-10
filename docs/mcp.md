@@ -37,7 +37,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
    No PyPI publish required (yet). If you prefer `pip install`, see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
 
-3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other thirteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit) below for the trade-off and cost.
+3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other thirteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
 ---
 
@@ -301,7 +301,7 @@ Sorted by `match_count` descending, then by `slug` for stable ordering. The snip
 
 **Performance:** the body index is loaded lazily on the first call (~3-5 s for the production 4522-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
 
-### `semantic_search(query, dataset?, limit?)`
+### `semantic_search(query, dataset?, limit?, min_score?)`
 
 Top-K cosine semantic search over per-section embeddings. Use when the user's question uses different vocabulary than the law text — e.g. *"renter rights when the landlord doesn't fix things"* finds husleieloven sections about *manglende vedlikehold* even though the user said "rights" and "fix" rather than the Norwegian legal terms. Complement to `search_body` (substring) and `search_laws` (title/slug).
 
@@ -311,40 +311,61 @@ Top-K cosine semantic search over per-section embeddings. Use when the user's qu
 2. `get_section(slug, section_id)` for each top hit → read actual text + see `cross_references`
 3. `verify_quote(slug, section_id, quote)` if you quote anything verbatim
 
-- **`query`** — natural-language query string. Empty / whitespace-only queries return `[]`.
+- **`query`** — natural-language query string. Empty / whitespace-only queries return empty results.
 - **`dataset`** *(optional)* — `lover` or `forskrifter` to filter.
 - **`limit`** *(default 20)* — max results. Must be non-negative.
+- **`min_score`** *(default 0.25)* — similarity floor; hits below it are dropped. Pass `0.0` to see every candidate.
 
 **Sample call:** `semantic_search(query="renter rights when landlord refuses repairs", limit=3)`
 
 **Sample output:**
 
 ```json
-[
-  {
-    "slug": "husleieloven",
-    "section_id": "5-3",
-    "score": 0.71,
-    "title": "Lov om husleieavtaler",
-    "dataset": "lover",
-    "citation_hint": "§ 5-3 husleieloven"
-  },
-  {
-    "slug": "husleieloven",
-    "section_id": "5-7",
-    "score": 0.62,
-    "title": "Lov om husleieavtaler",
-    "dataset": "lover",
-    "citation_hint": "§ 5-7 husleieloven"
-  }
-]
+{
+  "results": [
+    {
+      "slug": "husleieloven",
+      "section_id": "5-3",
+      "score": 0.71,
+      "title": "Lov om husleieavtaler",
+      "dataset": "lover",
+      "citation_hint": "§ 5-3 husleieloven",
+      "heading": "§ 5-3. Utleierens vedlikeholdsplikt",
+      "snippet": "Utleieren plikter i leietiden å holde utleid husrom og eiendommen for øvrig i den stand som...",
+      "last_changed": "2026-03-14"
+    },
+    {
+      "slug": "husleieloven",
+      "section_id": "5-7",
+      "score": 0.62,
+      "title": "Lov om husleieavtaler",
+      "dataset": "lover",
+      "citation_hint": "§ 5-7 husleieloven",
+      "heading": "§ 5-7. Utbedring av mangel",
+      "snippet": "Leieren kan kreve at utleieren retter en mangel dersom dette kan skje uten urimelig kostnad...",
+      "last_changed": "2026-03-14"
+    }
+  ],
+  "notice": null
+}
 ```
 
-Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `citation_hint` is a paste-ready `§ <id> <slug>` string for quoting next to a claim.
+Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `citation_hint` is a paste-ready `§ <id> <slug>` string for quoting next to a claim. `heading` and `snippet` are the section's **actual corpus text** (first ~200 chars of the body), so every hit is self-grounding; `last_changed` is the act's last content change, for currency caveats. Null `heading`/`snippet` mean the embedding `.bin` references a section that no longer exists in the rendered Markdown (corpus drift) — verify such hits via `get_section` before trusting them.
+
+**Sample output (no strong match):**
+
+```json
+{
+  "results": [],
+  "notice": "no sections scored >= 0.25 for this query (best candidate scored 0.22). The corpus has no strong match — do NOT cite a law from memory. Tell the user no strong match was found, or retry with different wording, use search_body for exact keywords, or lower min_score."
+}
+```
+
+When `results` is empty the `notice` says why — the AI is expected to report "no strong match" instead of substituting training-data memory.
 
 **Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other thirteen keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
 
-**Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a brute-force cosine scan (~50 ms). Per-call OpenAI cost is fractions of a cent.
+**Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a vectorized brute-force cosine scan (well under 100 ms). Per-call OpenAI cost is fractions of a cent.
 
 If the corpus has no `.bin` files (early bootstrap state) or every `.bin` is from an older model with a different dim (post-migration state), `semantic_search` raises with a remediation message — different errors for different states so the operator sees what to do.
 

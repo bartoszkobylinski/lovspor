@@ -922,13 +922,23 @@ def test_semantic_search_requires_embedder(tmp_path: Path) -> None:
         CorpusReader(tmp_path).semantic_search("bolig")
 
 
-def test_semantic_search_returns_ranked_hits_with_metadata(tmp_path: Path) -> None:
+def test_semantic_search_returns_grounded_hits_with_metadata(tmp_path: Path) -> None:
+    body = (
+        "## Kapittel 2. Leie\n\n"
+        "### § 2-10. Vedlikehold\n\n"
+        "Utleieren plikter å holde boligen i stand i leietiden.\n"
+    )
     _seed_corpus(
         tmp_path,
         {
-            "nl-1": _record(slug="husleieloven", title="Husleieloven"),
+            "nl-1": _record(
+                slug="husleieloven",
+                title="Husleieloven",
+                last_changed="2026-04-27",
+            ),
             "nl-2": _record(slug="skatteloven", title="Skatteloven"),
         },
+        body_for={"husleieloven": body},
     )
     _write_embedding_file(
         tmp_path,
@@ -944,9 +954,11 @@ def test_semantic_search_returns_ranked_hits_with_metadata(tmp_path: Path) -> No
     )
     embedder = _FakeEmbedder([1.0, 0.0, 0.0])
 
-    rows = CorpusReader(tmp_path, embedder=embedder).semantic_search("leierettigheter")
+    out = CorpusReader(tmp_path, embedder=embedder).semantic_search("leierettigheter")
 
     assert embedder.queries == ["leierettigheter"]
+    assert out["notice"] is None
+    rows = out["results"]
     assert rows[0] == {
         "slug": "husleieloven",
         "section_id": "2-10",
@@ -954,9 +966,97 @@ def test_semantic_search_returns_ranked_hits_with_metadata(tmp_path: Path) -> No
         "title": "Husleieloven",
         "dataset": "lover",
         "citation_hint": "§ 2-10 husleieloven",
+        "heading": "§ 2-10. Vedlikehold",
+        "snippet": "Utleieren plikter å holde boligen i stand i leietiden.",
+        "last_changed": "2026-04-27",
     }
-    assert rows[1]["slug"] == "skatteloven"
-    assert rows[1]["score"] == 0.0
+    # The 0.0-score hit falls below the default min_score and is
+    # filtered out — similarity that low is noise, not a candidate.
+    assert [row["slug"] for row in rows] == ["husleieloven"]
+
+
+def test_semantic_search_min_score_zero_returns_all_hits(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="husleieloven", title="Husleieloven"),
+            "nl-2": _record(slug="skatteloven", title="Skatteloven"),
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "husleieloven", [("2-10", [10, 0, 0])])
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("5-12", [0, 10, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("leierettigheter", min_score=0.0)
+
+    assert [row["slug"] for row in out["results"]] == ["husleieloven", "skatteloven"]
+    assert out["results"][1]["score"] == 0.0
+
+
+def test_semantic_search_all_hits_below_min_score_returns_explicit_notice(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("5-12", [0, 10, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("noe helt annet")
+
+    assert out["results"] == []
+    notice = out["notice"]
+    assert notice is not None
+    assert "0.25" in notice  # the default min_score
+    assert "0.00" in notice  # best candidate score, so the AI can judge the miss
+    assert "do not cite" in notice.lower()
+
+
+def test_semantic_search_grounding_fields_are_null_for_stale_embedding(
+    tmp_path: Path,
+) -> None:
+    """A .bin section id that no longer exists in the rendered Markdown
+    (corpus drift) must surface as null grounding fields, not crash."""
+    body = "## Kapittel 1.\n\n### § 1-1. Finnes\n\nInnhold.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="husleieloven", title="Husleieloven")},
+        body_for={"husleieloven": body},
+    )
+    _write_embedding_file(tmp_path, "lover", "husleieloven", [("9-9", [10, 0, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("vedlikehold")
+
+    row = out["results"][0]
+    assert row["section_id"] == "9-9"
+    assert row["heading"] is None
+    assert row["snippet"] is None
+
+
+def test_semantic_search_snippet_is_truncated_and_single_line(tmp_path: Path) -> None:
+    long_paragraph = "ord " * 200
+    body = f"## Kapittel 1.\n\n### § 1-1. Lang\n\n{long_paragraph}\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="husleieloven", title="Husleieloven")},
+        body_for={"husleieloven": body},
+    )
+    _write_embedding_file(tmp_path, "lover", "husleieloven", [("1-1", [10, 0, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("noe")
+
+    snippet = out["results"][0]["snippet"]
+    assert snippet.endswith("...")
+    assert len(snippet) <= 203  # 200 chars + ellipsis
+    assert "\n" not in snippet
 
 
 def test_semantic_search_filters_by_dataset(tmp_path: Path) -> None:
@@ -975,10 +1075,12 @@ def test_semantic_search_filters_by_dataset(tmp_path: Path) -> None:
     _write_embedding_file(tmp_path, "forskrifter", "forskact", [("2", [10, 0, 0])])
     reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
 
-    assert [r["slug"] for r in reader.semantic_search("common", dataset="lover")] == ["lovact"]
-    assert [r["slug"] for r in reader.semantic_search("common", dataset="forskrifter")] == [
-        "forskact",
+    assert [r["slug"] for r in reader.semantic_search("common", dataset="lover")["results"]] == [
+        "lovact",
     ]
+    assert [
+        r["slug"] for r in reader.semantic_search("common", dataset="forskrifter")["results"]
+    ] == ["forskact"]
 
 
 def test_semantic_search_raises_when_no_embeddings_found(tmp_path: Path) -> None:
@@ -1006,13 +1108,13 @@ def test_semantic_search_does_not_call_embedder_when_dataset_filter_has_no_hits(
     _write_embedding_file(tmp_path, "lover", "x", [("1", [10, 0, 0])])
     embedder = _FakeEmbedder([1.0, 0.0, 0.0])
 
-    assert (
-        CorpusReader(tmp_path, embedder=embedder).semantic_search(
-            "query",
-            dataset="forskrifter",
-        )
-        == []
+    out = CorpusReader(tmp_path, embedder=embedder).semantic_search(
+        "query",
+        dataset="forskrifter",
     )
+
+    assert out["results"] == []
+    assert "forskrifter" in (out["notice"] or "")
     assert embedder.queries == []
 
 
@@ -1035,7 +1137,7 @@ def test_semantic_search_skips_corrupt_embedding_files(
     rows = CorpusReader(
         tmp_path,
         embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
-    ).semantic_search("query")
+    ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["good"]
     assert "skipping corrupt bad.bin" in capsys.readouterr().err
@@ -1059,7 +1161,7 @@ def test_semantic_search_skips_embedding_files_with_wrong_dimension(
     rows = CorpusReader(
         tmp_path,
         embedder=_FakeEmbedder([1.0] + [0.0] * 3071),
-    ).semantic_search("query")
+    ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["current"]
     assert rows[0]["section_id"] == "1"
@@ -1086,7 +1188,7 @@ def test_semantic_search_continues_after_wrong_dimension_file(
     rows = CorpusReader(
         tmp_path,
         embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
-    ).semantic_search("query")
+    ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["current"]
     assert rows[0]["section_id"] == "2"
@@ -1162,13 +1264,13 @@ def test_semantic_search_reuses_cached_embedding_index_and_stale_count(
     embedder = _FakeEmbedder([1.0, 0.0, 0.0])
     reader = CorpusReader(tmp_path, embedder=embedder)
 
-    first_rows = reader.semantic_search("first")
+    first_rows = reader.semantic_search("first")["results"]
     assert [row["slug"] for row in first_rows] == ["current"]
     assert first_rows[0]["section_id"] == "2"
     assert reader._stale_bin_count == 1
 
     current_path.unlink()
-    second_rows = reader.semantic_search("second")
+    second_rows = reader.semantic_search("second")["results"]
 
     assert [row["slug"] for row in second_rows] == ["current"]
     assert second_rows[0]["section_id"] == "2"
@@ -1180,8 +1282,8 @@ def test_semantic_search_empty_query_and_zero_limit_return_empty(tmp_path: Path)
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
 
-    assert reader.semantic_search("") == []
-    assert reader.semantic_search("query", limit=0) == []
+    assert reader.semantic_search("") == {"results": [], "notice": None}
+    assert reader.semantic_search("query", limit=0) == {"results": [], "notice": None}
 
 
 def test_semantic_search_rejects_negative_limit(tmp_path: Path) -> None:

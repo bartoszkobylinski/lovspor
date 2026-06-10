@@ -624,6 +624,20 @@ def _response_contains(
     )
 
 
+def _result_rows(response: Any) -> list[Any] | None:
+    """Normalize a tool response to its result-row list.
+
+    Most list-returning tools respond with a bare list;
+    ``semantic_search`` responds with ``{"results": [...], "notice":
+    ...}``. Returns None when the response has no list shape at all.
+    """
+    if isinstance(response, list):
+        return response
+    if isinstance(response, dict) and isinstance(response.get("results"), list):
+        return cast(list[Any], response["results"])
+    return None
+
+
 def _list_contains_slug(
     kind: str,
     criterion: dict[str, Any],
@@ -632,8 +646,10 @@ def _list_contains_slug(
     slug = criterion["slug"]
     selected = _calls_for_tool(calls, cast(str | None, criterion.get("tool")))
     passed = any(
-        isinstance(call.response, list)
-        and any(isinstance(item, dict) and item.get("slug") == slug for item in call.response)
+        any(
+            isinstance(item, dict) and item.get("slug") == slug
+            for item in (_result_rows(call.response) or [])
+        )
         for call in selected
     )
     return _criterion(
@@ -653,7 +669,9 @@ def _result_count(
 ) -> CriterionResult:
     count = cast(int, criterion["count"])
     selected = _calls_for_tool(calls, cast(str | None, criterion.get("tool")))
-    lengths = [len(call.response) for call in selected if isinstance(call.response, list)]
+    lengths = [
+        len(rows) for rows in (_result_rows(call.response) for call in selected) if rows is not None
+    ]
     passed = (
         any(length == count for length in lengths)
         if equals
@@ -1052,6 +1070,8 @@ _LLM_DRIVER_PROMPT_TEMPLATE = (
     "\n"
     "Tool usage guidance:\n"
     "- Use semantic_search when the user's wording differs from the law's vocabulary.\n"
+    "  If its results are empty, heed the returned notice: report that the corpus has\n"
+    "  no strong match instead of answering from memory.\n"
     "- Use search_laws / search_body for keyword discovery.\n"
     "- Use get_section to read the verbatim text of one section. The response includes\n"
     "  a validated cross_references list — heed it.\n"
