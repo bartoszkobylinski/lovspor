@@ -668,9 +668,16 @@ class CorpusReader:
         needle = query.lower()
         dataset_key = _resolve_dataset(dataset) if dataset is not None else None
         index = self._load_body_index()
+        slug_index = self._load_slug_index()
         results: list[dict[str, Any]] = []
         for doc_id, record in self.manifest.documents.items():
             if record.status != "current" or record.slug is None:
+                continue
+            # On a duplicate slug only the slug-index owner (first
+            # manifest entry) produces a hit — otherwise the same
+            # body would be reported once per claiming record, with
+            # doc_ids that point lookups cannot resolve.
+            if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
                 continue
             if dataset_key is not None and record.source_dataset != dataset_key:
                 continue
@@ -805,7 +812,10 @@ class CorpusReader:
         clears the floor, ``results`` is empty and ``notice`` says so
         explicitly (including the best rejected score) — the AI must
         report "no strong match" rather than cite from memory.
-        ``notice`` is null whenever results exist.
+        Invariant: EVERY empty-``results`` response carries a
+        non-null ``notice`` (empty query, zero limit, dataset
+        without embeddings, or nothing above the floor); ``notice``
+        is null whenever results exist.
 
         Score is a *similarity*, NOT a relevance proof. Treat results
         as candidates that need verification — the recommended
@@ -832,8 +842,13 @@ class CorpusReader:
             raise ValueError(
                 f"limit must be non-negative, got {limit}",
             )
-        if not query.strip() or limit == 0:
-            return {"results": [], "notice": None}
+        # Empty results ALWAYS carry a notice (documented contract) —
+        # including these caller no-op cases, so the AI never has to
+        # guess whether nothing matched or nothing was searched.
+        if not query.strip():
+            return {"results": [], "notice": "query is empty; nothing was searched."}
+        if limit == 0:
+            return {"results": [], "notice": "limit is 0; nothing was searched."}
 
         index = self._load_embedding_index()
         if not index:
@@ -1101,11 +1116,20 @@ class CorpusReader:
         of the server's lifetime. Files that fail the path-containment
         check or are missing on disk are silently skipped — the same
         defensive posture as ``get_law``.
+
+        First manifest entry wins on a duplicate slug — the same
+        contract as ``_load_slug_index``. Without this, point lookups
+        (which fall back to this index once it is loaded) would
+        silently flip from the first record's content to the last
+        record's after the first ``search_body`` call (Codex PR #62
+        round 1 reproducer).
         """
         if self._body_index is None:
             index: dict[str, str] = {}
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
+                    continue
+                if record.slug in index:
                     continue
                 try:
                     path = self._safe_join(record.markdown_path)
