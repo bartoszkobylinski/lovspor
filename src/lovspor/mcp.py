@@ -42,6 +42,7 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -49,7 +50,7 @@ from typing import Any
 import numpy as np
 from mcp.server.fastmcp import FastMCP
 
-from lovspor.embeddings import EmbeddingModel, OpenAIEmbedder, read_embeddings, top_k_cosine
+from lovspor.embeddings import EmbeddingIndex, EmbeddingModel, OpenAIEmbedder, read_embeddings
 from lovspor.errors import LovsporError
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
@@ -191,11 +192,11 @@ class CorpusReader:
         self._body_index: dict[str, str] | None = None
         # Per-section int8 embedding index for semantic_search; lazy-
         # loaded on first call. ~200 MB resident for the production
-        # corpus at 3072-dim int8. Kept separate from _body_index
-        # because the two indices have very different load profiles
-        # (binary parse vs. text strip) and most consumers will use
-        # only one of them.
-        self._embedding_index: list[tuple[str, str, np.ndarray, float]] | None = None
+        # corpus at 3072-dim int8 (one contiguous matrix inside
+        # EmbeddingIndex). Kept separate from _body_index because the
+        # two indices have very different load profiles (binary parse
+        # vs. text strip) and most consumers will use only one of them.
+        self._embedding_index: EmbeddingIndex | None = None
         # Count of .bin files dropped due to dim mismatch during the
         # last index build. Surfaced in semantic_search error messages
         # so an all-stale corpus (post-model-migration state) gets a
@@ -203,13 +204,23 @@ class CorpusReader:
         # "no embeddings found" message that fits an empty-corpus
         # bootstrap state instead.
         self._stale_bin_count: int = 0
-        # ``slug -> {section_ids}`` index for cross-reference
-        # validation in get_section. Lazy-built on the first
-        # get_section call that has at least one ``§`` pattern in
-        # its body. Holds set-of-strings per slug, much smaller
-        # than the body text itself (~100-500 KB resident across
-        # the production corpus).
-        self._sections_by_slug: dict[str, set[str]] | None = None
+        # Per-doc body cache for point lookups (get_section,
+        # verify_quote). Filled one doc at a time so a single
+        # get_section never pays the corpus-wide load that
+        # search_body's _body_index needs (~3-5 s, ~45 MB for the
+        # production corpus). When the full index IS already loaded,
+        # _body_for_record reads from it instead of this cache.
+        self._doc_bodies: dict[str, str] = {}
+        # ``slug -> {section_ids}`` cache for cross-reference
+        # validation in get_section. Filled per target slug on
+        # demand — only acts actually referenced by a ``§`` pattern
+        # are parsed, not the whole corpus.
+        self._section_ids_cache: dict[str, set[str]] = {}
+        # ``slug -> (doc_id, record)`` for O(1) point lookups
+        # (get_law, get_section, get_eu_basis, ...). Built once from
+        # the cached manifest — every per-call linear scan over ~4500
+        # records was pure waste for the most common tool calls.
+        self._slug_index: dict[str, tuple[str, ManifestRecord]] | None = None
 
     @property
     def manifest(self) -> Manifest:
@@ -254,15 +265,15 @@ class CorpusReader:
         available section ids in natural order so the AI can recover
         without a separate get_law call.
 
-        Reuses the cached body index from ``search_body``: the body
-        text is already frontmatter / H1 stripped, so the section
-        parser only sees the legal content.
+        Reads only this act's Markdown file (plus the files of acts
+        its cross-references point at) — never the corpus-wide body
+        index that ``search_body`` needs.
         """
         record = self._find_current_by_slug(slug)
         # _find_current_by_slug only returns records whose slug == the
         # query slug, so record.slug is non-None here even though the
         # type annotation allows None.
-        body = self._load_body_index().get(record.slug or "", "")
+        body = self._body_for_record(record)
         sections = _parse_sections(body)
         if section_id not in sections:
             available = ", ".join(
@@ -273,15 +284,19 @@ class CorpusReader:
                 f"available: {available or '(no sections in this act)'}",
             )
         section = sections[section_id]
-        # Skip the sections-index build for sections with no ``§``
-        # patterns at all — most short sections have none, and the
-        # build is non-trivial (parse every act's sections once).
+        # The act's own section-id set is a free by-product of the
+        # parse above — seed the cache so same-act cross-refs don't
+        # re-parse the body.
+        self._section_ids_cache.setdefault(record.slug or "", set(sections.keys()))
+        # Skip cross-ref resolution for sections with no ``§``
+        # patterns at all — most short sections have none.
         cross_references: list[dict[str, Any]] = []
         if _CROSS_REF_SECTION.search(section["body"]):
             cross_references = _extract_cross_references(
                 section["body"],
                 record.slug or "",
-                self._load_sections_index(),
+                set(self._load_slug_index()),
+                self._section_ids_for,
             )
         return {
             "slug": record.slug,
@@ -615,9 +630,16 @@ class CorpusReader:
         needle = query.lower()
         dataset_key = _resolve_dataset(dataset) if dataset is not None else None
         index = self._load_body_index()
+        slug_index = self._load_slug_index()
         results: list[dict[str, Any]] = []
         for doc_id, record in self.manifest.documents.items():
             if record.status != "current" or record.slug is None:
+                continue
+            # On a duplicate slug only the slug-index owner (first
+            # manifest entry) produces a hit — otherwise the same
+            # body would be reported once per claiming record, with
+            # doc_ids that point lookups cannot resolve.
+            if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
                 continue
             if dataset_key is not None and record.source_dataset != dataset_key:
                 continue
@@ -659,29 +681,30 @@ class CorpusReader:
         + ``git pull`` to remediate rather than treating the field
         as 'unset'.
         """
-        for doc_id, record in self.manifest.documents.items():
-            if record.slug == slug and record.status == "current":
-                # eu_basis is None signals a pre-Sprint-8 manifest record.
-                # The backfill migration runs on the next sync, but until
-                # then the MCP server has no authoritative answer to give.
-                # Returning [] would be a silent lie ("we know there's no
-                # EU basis"); raising is the honest answer.
-                if record.eu_basis is None:
-                    raise CorpusNotFoundError(
-                        f"eu_basis is unknown for {slug!r}; corpus predates Sprint 8 PR-D. "
-                        f"Run 'git pull' in the corpus to refresh.",
-                    )
-                return {
-                    "slug": record.slug,
-                    "doc_id": doc_id,
-                    "title": record.title,
-                    "dataset": _subdir_for_dataset(record.source_dataset),
-                    "eu_basis": list(record.eu_basis),
-                }
-        raise CorpusNotFoundError(
-            f"no current law with slug {slug!r}; "
-            f"use search_laws or list_recent_changes to discover slugs",
-        )
+        entry = self._load_slug_index().get(slug)
+        if entry is None:
+            raise CorpusNotFoundError(
+                f"no current law with slug {slug!r}; "
+                f"use search_laws or list_recent_changes to discover slugs",
+            )
+        doc_id, record = entry
+        # eu_basis is None signals a pre-Sprint-8 manifest record.
+        # The backfill migration runs on the next sync, but until
+        # then the MCP server has no authoritative answer to give.
+        # Returning [] would be a silent lie ("we know there's no
+        # EU basis"); raising is the honest answer.
+        if record.eu_basis is None:
+            raise CorpusNotFoundError(
+                f"eu_basis is unknown for {slug!r}; corpus predates Sprint 8 PR-D. "
+                f"Run 'git pull' in the corpus to refresh.",
+            )
+        return {
+            "slug": record.slug,
+            "doc_id": doc_id,
+            "title": record.title,
+            "dataset": _subdir_for_dataset(record.source_dataset),
+            "eu_basis": list(record.eu_basis),
+        }
 
     def search_eu_implementations(self, eu_doc_id: str) -> list[dict[str, Any]]:
         """Reverse lookup: list Norwegian acts that implement a given EU
@@ -802,16 +825,13 @@ class CorpusReader:
             if allowed_slugs is not None and record.source_dataset == dataset_key:
                 allowed_slugs.add(record.slug)
 
-        searchable = (
-            [(s, sid, v, sc) for s, sid, v, sc in index if s in allowed_slugs]
-            if allowed_slugs is not None
-            else index
-        )
-        if not searchable:
+        # Skip the (network) query-embedding call entirely when the
+        # dataset filter cannot match any indexed row.
+        if allowed_slugs is not None and allowed_slugs.isdisjoint(index.unique_slugs):
             return []
 
         query_vector = self._embedder.encode([query])[0]
-        hits = top_k_cosine(query_vector, searchable, k=limit)
+        hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
         results: list[dict[str, Any]] = []
         for hit in hits:
             title, subdir = slug_meta.get(hit.slug, (None, ""))
@@ -889,7 +909,7 @@ class CorpusReader:
             ),
         }
 
-    def _load_embedding_index(self) -> list[tuple[str, str, np.ndarray, float]]:
+    def _load_embedding_index(self) -> EmbeddingIndex:
         """Lazy-build the per-section embedding index for ``semantic_search``.
 
         Walks every current manifest record and tries to load
@@ -908,7 +928,7 @@ class CorpusReader:
         tool offline.
         """
         if self._embedding_index is None:
-            index: list[tuple[str, str, np.ndarray, float]] = []
+            entries: list[tuple[str, str, np.ndarray, float]] = []
             stale = 0
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
@@ -943,32 +963,53 @@ class CorpusReader:
                     stale += 1
                     continue
                 for section_id, vector in embedding_file.sections:
-                    index.append((record.slug, section_id, vector, embedding_file.scale))
-            self._embedding_index = index
+                    entries.append((record.slug, section_id, vector, embedding_file.scale))
+            self._embedding_index = EmbeddingIndex.from_entries(entries)
             self._stale_bin_count = stale
         return self._embedding_index
 
-    def _load_sections_index(self) -> dict[str, set[str]]:
-        """Build ``slug -> {section_ids}`` for cross-reference validation.
+    def _section_ids_for(self, slug: str) -> set[str]:
+        """Section-id set for one act, parsed lazily and cached.
 
-        Triggered on the first ``get_section`` call that finds at
-        least one ``§`` pattern in the section body — sections
-        without any cross-references skip this work entirely so
-        the cost is paid only by callers that actually need it.
-
-        Reuses the body-index cache (``_load_body_index``) so the
-        underlying file I/O happens at most once across the two
-        indices. Each value is a ``set`` to keep membership checks
-        O(1) — cross-ref validation is the only consumer and only
-        needs ``section_id in target_sections``.
+        Used by cross-reference validation: only the acts a section
+        actually references get read and parsed, not the whole
+        corpus. Unknown slugs resolve to an empty set — the caller
+        distinguishes "known act, missing §" from "unknown act" via
+        the slug index, not via this lookup.
         """
-        if self._sections_by_slug is None:
-            body_index = self._load_body_index()
-            index: dict[str, set[str]] = {}
-            for slug, body_text in body_index.items():
-                index[slug] = set(_parse_sections(body_text).keys())
-            self._sections_by_slug = index
-        return self._sections_by_slug
+        cached = self._section_ids_cache.get(slug)
+        if cached is None:
+            entry = self._load_slug_index().get(slug)
+            body = self._body_for_record(entry[1]) if entry is not None else ""
+            cached = set(_parse_sections(body).keys())
+            self._section_ids_cache[slug] = cached
+        return cached
+
+    def _body_for_record(self, record: ManifestRecord) -> str:
+        """Frontmatter/H1-stripped body text for one doc.
+
+        Reuses the corpus-wide body index when ``search_body`` has
+        already paid for it; otherwise reads and caches just this
+        doc's file. Missing or path-escaping files resolve to an
+        empty body — the same defensive posture as the full index.
+        """
+        slug = record.slug or ""
+        if self._body_index is not None:
+            return self._body_index.get(slug, "")
+        cached = self._doc_bodies.get(slug)
+        if cached is None:
+            cached = self._read_stripped_body(record)
+            self._doc_bodies[slug] = cached
+        return cached
+
+    def _read_stripped_body(self, record: ManifestRecord) -> str:
+        try:
+            path = self._safe_join(record.markdown_path)
+        except CorpusNotFoundError:
+            return ""
+        if not path.exists():
+            return ""
+        return _strip_frontmatter_and_h1(path.read_text(encoding="utf-8"))
 
     def _load_body_index(self) -> dict[str, str]:
         """Lazy-build the slug -> body-text dict for ``search_body``.
@@ -980,11 +1021,20 @@ class CorpusReader:
         of the server's lifetime. Files that fail the path-containment
         check or are missing on disk are silently skipped — the same
         defensive posture as ``get_law``.
+
+        First manifest entry wins on a duplicate slug — the same
+        contract as ``_load_slug_index``. Without this, point lookups
+        (which fall back to this index once it is loaded) would
+        silently flip from the first record's content to the last
+        record's after the first ``search_body`` call (Codex PR #62
+        round 1 reproducer).
         """
         if self._body_index is None:
             index: dict[str, str] = {}
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
+                    continue
+                if record.slug in index:
                     continue
                 try:
                     path = self._safe_join(record.markdown_path)
@@ -1108,14 +1158,30 @@ class CorpusReader:
             "subject": lines[2],
         }
 
+    def _load_slug_index(self) -> dict[str, tuple[str, ManifestRecord]]:
+        """Build ``slug -> (doc_id, record)`` once for current records.
+
+        First manifest entry wins on a duplicate slug, matching the
+        linear-scan behavior this index replaced. Pinned for the
+        reader's lifetime — the same contract as the cached manifest.
+        """
+        if self._slug_index is None:
+            index: dict[str, tuple[str, ManifestRecord]] = {}
+            for doc_id, record in self.manifest.documents.items():
+                if record.status != "current" or record.slug is None:
+                    continue
+                index.setdefault(record.slug, (doc_id, record))
+            self._slug_index = index
+        return self._slug_index
+
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
-        for record in self.manifest.documents.values():
-            if record.slug == slug and record.status == "current":
-                return record
-        raise CorpusNotFoundError(
-            f"no current law with slug {slug!r}; "
-            f"use search_laws or list_recent_changes to discover slugs",
-        )
+        entry = self._load_slug_index().get(slug)
+        if entry is None:
+            raise CorpusNotFoundError(
+                f"no current law with slug {slug!r}; "
+                f"use search_laws or list_recent_changes to discover slugs",
+            )
+        return entry[1]
 
     def _safe_join(self, *parts: str) -> Path:
         """Join ``parts`` under ``corpus_path`` and refuse paths that escape it.
@@ -1354,7 +1420,8 @@ def _compute_match_owner_starts(
 def _extract_cross_references(
     body: str,
     current_slug: str,
-    sections_by_slug: dict[str, set[str]],
+    known_slugs: set[str],
+    sections_for: Callable[[str], set[str]],
 ) -> list[dict[str, Any]]:
     """Extract validated cross-references from a section body.
 
@@ -1364,6 +1431,11 @@ def _extract_cross_references(
     the reference is treated as cross-act. Otherwise it is treated
     as a same-act reference (validated against ``current_slug``'s
     section set).
+
+    ``known_slugs`` is the full set of current manifest slugs (cheap
+    — no body parsing). ``sections_for`` resolves one slug to its
+    section-id set lazily, so only acts actually referenced get
+    parsed.
 
     Output is deduplicated by ``(target_slug, target_section_id)``
     so a section that mentions ``§ 5-12`` three times produces one
@@ -1390,7 +1462,6 @@ def _extract_cross_references(
     """
     seen: dict[tuple[str, str], dict[str, Any]] = {}
     body_lower = body.lower()
-    known_slugs = set(sections_by_slug.keys())
     matches = list(_CROSS_REF_SECTION.finditer(body))
     owner_starts = _compute_match_owner_starts(body_lower, matches, known_slugs)
     for idx, match in enumerate(matches):
@@ -1416,7 +1487,7 @@ def _extract_cross_references(
             current_slug,
             known_slugs,
         )
-        target_sections = sections_by_slug.get(target_slug, set())
+        target_sections = sections_for(target_slug) if target_slug in known_slugs else set()
         valid = section_id in target_sections
         reason: str | None = None
         if not valid:

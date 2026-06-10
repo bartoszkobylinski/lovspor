@@ -265,6 +265,70 @@ def test_reader_loads_manifest_lazily(tmp_path: Path) -> None:
 # ---------- get_law ----------
 
 
+def test_slug_lookups_use_cached_index(tmp_path: Path) -> None:
+    """Point lookups resolve through a slug index built once from the
+    manifest, not a per-call linear scan over every record."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+    assert "# Skatteloven" in reader.get_law("skatteloven")
+
+    # Mutating the manifest after the first lookup must not affect
+    # resolution: the index is pinned for the reader's lifetime, the
+    # same contract as the cached manifest itself.
+    reader.manifest.documents.clear()
+    assert "# Skatteloven" in reader.get_law("skatteloven")
+
+
+def test_slug_index_first_record_wins_on_duplicate_slugs(tmp_path: Path) -> None:
+    """Two current records with the same slug: the first manifest entry
+    wins, matching the old linear-scan behavior."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="First", eu_basis=["32016R0679"]),
+            "nl-2": _record(slug="dupe", title="Second", eu_basis=[]),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+    assert reader.get_eu_basis("dupe")["doc_id"] == "nl-1"
+
+
+def test_get_section_duplicate_slug_stable_after_search_body(tmp_path: Path) -> None:
+    """Codex PR #62 round 1: with two current records sharing a slug
+    but pointing at different files, get_section resolved the FIRST
+    record's file — until search_body() loaded the corpus-wide body
+    index, whose last-record-wins dict silently flipped subsequent
+    point lookups to the SECOND record's content. Point lookups must
+    return the same content before and after a search_body call."""
+    first = _record(slug="dupe", title="First")
+    second = _record(slug="dupe", title="Second").model_copy(
+        update={"markdown_path": "lover/dupe-second.md"},
+    )
+    _seed_corpus(tmp_path, {"nl-1": first, "nl-2": second}, write_files=False)
+    (tmp_path / "lover").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "lover" / "dupe.md").write_text(
+        "---\nid: x\ntitle: First\n---\n\n## Kapittel 1.\n\n### § 1-1. F\n\nFirst body.\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lover" / "dupe-second.md").write_text(
+        "---\nid: x\ntitle: Second\n---\n\n## Kapittel 9.\n\n### § 9-9. S\n\nSecond body.\n",
+        encoding="utf-8",
+    )
+    reader = CorpusReader(tmp_path)
+
+    before = reader.get_section("dupe", "1-1")
+    assert "First body." in before["body"]
+
+    # search_body loads the corpus-wide body index; it must agree with
+    # the slug index on which record owns a duplicated slug.
+    assert [hit["slug"] for hit in reader.search_body("First body")] == ["dupe"]
+    assert reader.search_body("Second body") == []
+
+    after = reader.get_section("dupe", "1-1")
+    assert after["body"] == before["body"]
+    assert reader.verify_quote("dupe", "1-1", "First body.")["verified"] is True
+
+
 def test_get_law_returns_file_content(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
     out = CorpusReader(tmp_path).get_law("skatteloven")
@@ -1211,7 +1275,10 @@ def test_get_section_returns_expected_fields(tmp_path: Path) -> None:
     assert "Skattefradraget gis for sparing til bolig" in section["body"]
     assert "Fradraget reduseres ved utbetaling" in section["body"]
     assert section["cross_references"] == []
-    assert reader._sections_by_slug is None
+    # No cross-references -> no other act was read or parsed, and the
+    # corpus-wide body index stayed untouched.
+    assert set(reader._section_ids_cache) == {"skatteloven"}
+    assert reader._body_index is None
 
 
 def test_get_section_extracts_same_act_cross_references(tmp_path: Path) -> None:
@@ -1561,7 +1628,7 @@ def test_get_section_prefers_longest_slug_token_in_reference_window(
     ]
 
 
-def test_get_section_reuses_cached_sections_index_for_cross_references(
+def test_get_section_reuses_cached_section_ids_for_cross_references(
     tmp_path: Path,
 ) -> None:
     body = "## Kapittel 1.\n\n### § 1-1. Main\n\nSe § 1-2.\n\n### § 1-2. Target\n\nTarget body.\n"
@@ -1573,18 +1640,43 @@ def test_get_section_reuses_cached_sections_index_for_cross_references(
     reader = CorpusReader(tmp_path)
 
     first_section = reader.get_section("egen-lov", "1-1")
-    sections_index = reader._sections_by_slug
     assert first_section["cross_references"][0]["valid"] is True
-    assert sections_index is not None
+    cached_ids = reader._section_ids_cache["egen-lov"]
 
     second_section = reader.get_section("egen-lov", "1-1")
 
     assert second_section["cross_references"] == first_section["cross_references"]
-    assert reader._sections_by_slug is sections_index
+    assert reader._section_ids_cache["egen-lov"] is cached_ids
+
+
+def test_get_section_does_not_load_full_body_index(tmp_path: Path) -> None:
+    """A point lookup must read only its own doc's file — never pay
+    the corpus-wide body-index load that search_body needs."""
+    body = "## Kapittel 1.\n\n### § 1-1. Main\n\nSe § 1-2 i annen-lov.\n\n### § 1-2. T\n\nB.\n"
+    other = "## Kapittel 1.\n\n### § 1-2. Other\n\nOther body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+            "nl-3": _record(slug="untouched-lov", title="Untouched"),
+        },
+        body_for={"egen-lov": body, "annen-lov": other, "untouched-lov": other},
+    )
+    reader = CorpusReader(tmp_path)
+
+    section = reader.get_section("egen-lov", "1-1")
+
+    assert section["cross_references"][0]["target_slug"] == "annen-lov"
+    assert section["cross_references"][0]["valid"] is True
+    assert reader._body_index is None
+    # Only the two acts involved in the lookup were read and parsed.
+    assert set(reader._section_ids_cache) == {"egen-lov", "annen-lov"}
+    assert set(reader._doc_bodies) == {"egen-lov", "annen-lov"}
 
 
 def test_extract_cross_references_reports_unknown_current_slug() -> None:
-    assert _extract_cross_references("Se § 1-1.", "missing-lov", {}) == [
+    assert _extract_cross_references("Se § 1-1.", "missing-lov", set(), lambda _slug: set()) == [
         {
             "text": "§ 1-1",
             "target_slug": "missing-lov",

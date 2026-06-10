@@ -20,7 +20,7 @@ The pipeline at MCP query time:
 
     user query
       -> model.encode (single string, normalized)
-      -> search.top_k (cosine sim against loaded index)
+      -> search.EmbeddingIndex.top_k (cosine sim against loaded index)
       -> dict[slug, section_id, score, snippet]
 
 Model choice rationale: the empirical benchmark in
@@ -36,7 +36,7 @@ from lovspor.embeddings.model import (
     OpenAIEmbedder,
 )
 from lovspor.embeddings.quantize import dequantize_int8, quantize_int8
-from lovspor.embeddings.search import SearchHit, top_k_cosine
+from lovspor.embeddings.search import EmbeddingIndex, SearchHit
 from lovspor.embeddings.sections import EmbeddingSection, iter_sections
 from lovspor.embeddings.store import (
     EMBEDDING_DIM,
@@ -50,6 +50,7 @@ __all__ = [
     "DEFAULT_MODEL_NAME",
     "EMBEDDING_DIM",
     "EmbeddingFile",
+    "EmbeddingIndex",
     "EmbeddingModel",
     "EmbeddingSection",
     "OpenAIEmbedder",
@@ -58,6 +59,5 @@ __all__ = [
     "iter_sections",
     "quantize_int8",
     "read_embeddings",
-    "top_k_cosine",
     "write_embeddings",
 ]
