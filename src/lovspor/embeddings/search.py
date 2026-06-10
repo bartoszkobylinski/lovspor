@@ -142,28 +142,68 @@ class EmbeddingIndex:
         return np.asarray(raw / self._norms, dtype=np.float32)
 
     def _select_top(self, scores: np.ndarray, k: int) -> list[SearchHit]:
-        """Pick the top ``k`` rows with the documented deterministic tie-break.
+        """Pick the top ``k`` unique sections with the deterministic tie-break.
 
         ``argpartition`` alone is unordered and breaks score ties
-        arbitrarily, so every row tied with the k-th best score joins
+        arbitrarily, so every row tied with the boundary score joins
         the candidate set and a full ``(-score, slug, section_id)``
         sort decides which survive. Rows masked to ``-inf`` never
         qualify.
+
+        Long sections embed as several chunk vectors under the same
+        ``(slug, section_id)``; results report each section once with
+        its best chunk's score. When duplicate chunks crowd out the
+        top of the candidate set, the take-width doubles until ``k``
+        unique sections are found or the index is exhausted.
         """
-        k_eff = min(k, scores.shape[0])
-        boundary = np.partition(scores, -k_eff)[-k_eff]
-        if boundary == -np.inf:
-            candidates = np.flatnonzero(scores > -np.inf)
-        else:
-            candidates = np.flatnonzero(scores >= boundary)
+        n = scores.shape[0]
+        k_eff = min(k, n)
+        take = k_eff
+        while True:
+            boundary = np.partition(scores, -take)[-take]
+            if boundary == -np.inf:
+                candidates, exhausted = np.flatnonzero(scores > -np.inf), True
+            else:
+                candidates = np.flatnonzero(scores >= boundary)
+                exhausted = take >= n
+            hits = self._rank_unique(scores, candidates, k_eff)
+            if len(hits) >= k_eff or exhausted:
+                return hits
+            take = min(take * 2, n)
+
+    def _rank_unique(
+        self,
+        scores: np.ndarray,
+        candidates: np.ndarray,
+        k_eff: int,
+    ) -> list[SearchHit]:
+        """Sort candidate rows and keep the best row per section.
+
+        The sort is by ``(-score, slug, section_id)``, so the first
+        occurrence of a ``(slug, section_id)`` pair carries that
+        section's best chunk score — later duplicates are skipped.
+        """
         ranked = sorted(
             candidates.tolist(),
             key=lambda i: (-scores[i], self._slugs[i], self._section_ids[i]),
-        )[:k_eff]
-        return [
-            SearchHit(slug=self._slugs[i], section_id=self._section_ids[i], score=float(scores[i]))
-            for i in ranked
-        ]
+        )
+        hits: list[SearchHit] = []
+        seen: set[tuple[str, str]] = set()
+        for i in ranked:
+            key = (self._slugs[i], self._section_ids[i])
+            if key in seen:
+                continue
+            seen.add(key)
+            hits.append(
+                SearchHit(
+                    slug=self._slugs[i],
+                    section_id=self._section_ids[i],
+                    score=float(scores[i]),
+                ),
+            )
+            if len(hits) == k_eff:
+                break
+        return hits
 
 
 def _row_norms(matrix: np.ndarray) -> np.ndarray:

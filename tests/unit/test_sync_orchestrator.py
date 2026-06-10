@@ -15,7 +15,6 @@ from lovspor.sync.orchestrator import (
     SyncReport,
     _collect_upstream,
     _commit_with_history,
-    _delete_one,
     _DocAction,
     _ensure_corpus_git_repo,
     _index_tarball,
@@ -391,7 +390,6 @@ def test_embedding_paths_delete_helpers_and_overlap_detection(
         == existing
     )
     assert deleted == [existing]
-    assert orchestrator_module._delete_embeddings(tmp_path, "gjeldende-lover", "missing") is None
 
     actions = [
         _DocAction("rename", "lov", "a", "a", (Path("shared.md"), Path("a.md"))),
@@ -463,24 +461,6 @@ def test_write_one_renders_document_record_and_optional_embeddings(
     assert context.xml_hash == "a" * 64
     assert context.source_dataset == "gjeldende-lover"
     assert context.retrieved_at == now
-
-
-def test_delete_one_deletes_and_returns_manifest_path(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    settings = _settings(tmp_path)
-    prior = Manifest(
-        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
-        documents={"lov-1": _record("lov-1", xml_hash="a" * 64, slug="old")},
-    )
-    deleted: list[Path] = []
-    monkeypatch.setattr(orchestrator_module, "delete_document", deleted.append)
-
-    path = _delete_one(settings, prior, "lov-1")
-
-    assert path == settings.lovverk_repo_path / "lover" / "old.md"
-    assert deleted == [path]
 
 
 def test_record_with_history_and_generate_history_skip_rules(

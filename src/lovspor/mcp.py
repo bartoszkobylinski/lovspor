@@ -1,6 +1,6 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles fourteen read-only tools over a local clone of the lovverk
+Bundles fifteen read-only tools over a local clone of the lovverk
 Markdown corpus (produced by the lovspor sync engine). Each tool
 answers a class of question an AI agent would naturally ask about
 Norwegian law:
@@ -9,6 +9,7 @@ Norwegian law:
     get_law_at(slug, "2018-06-15")      -> "Show me Skatteloven as of 2018-06-15"
     list_law_versions(slug)             -> "When did Skatteloven change?"
     get_section(slug, "5-12")           -> "Show me just § 5-12 of Skatteloven"
+    list_sections(slug)                 -> "Which sections does Skatteloven have?"
     get_law_history(slug)               -> "What changed in Skatteloven recently?"
     list_recent_changes(...)            -> "Which laws changed last week?"
     search_laws(query, ...)             -> "Are there laws about jernbane?" (metadata)
@@ -36,12 +37,14 @@ Why dataset aliases: legal text consumers think in Norwegian terms
 inputs accept either form and normalize internally.
 """
 
+import difflib
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import unicodedata
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -50,7 +53,13 @@ from typing import Any
 import numpy as np
 from mcp.server.fastmcp import FastMCP
 
-from lovspor.embeddings import EmbeddingIndex, EmbeddingModel, OpenAIEmbedder, read_embeddings
+from lovspor.embeddings import (
+    EmbeddingIndex,
+    EmbeddingModel,
+    OpenAIEmbedder,
+    SearchHit,
+    read_embeddings,
+)
 from lovspor.errors import LovsporError
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
@@ -112,6 +121,32 @@ _SNIPPET_CONTEXT_CHARS = 50
 returned snippet. 50 chars on each side + match length ~= 100-130 chars
 total, which fits a single AI message line and gives enough context
 to judge relevance without overwhelming the response."""
+
+_SEMANTIC_MIN_SCORE_DEFAULT = 0.25
+"""Default similarity floor for ``semantic_search``.
+
+Hits below this score are noise for the production embedding model
+(text-embedding-3-large on Norwegian legal text): off-topic sections
+sit around 0.1-0.2 while same-language matches score > 0.4.
+The floor is deliberately below the same-language band because
+cross-lingual queries score systematically lower — the eval suite's
+English lay-vocabulary query against personopplysningsloven scores
+~0.31 for the correct section. Returning 20 paste-ready citation
+hints for an off-corpus query invites the AI to cite the least-bad
+one — filtering plus an explicit 'no strong match' notice is the
+anti-hallucination posture. Callers can pass ``min_score=0.0`` to
+see everything."""
+
+_SEMANTIC_SNIPPET_CHARS = 200
+"""Max characters of section-body lead included with each
+``semantic_search`` hit. Enough to judge relevance and ground the
+hit in real corpus text; the full section still comes from
+``get_section``."""
+
+_MIN_SUGGESTION_TOKEN_CHARS = 4
+"""Citation tokens shorter than this never feed slug suggestions —
+Norwegian filler words (``i``, ``jf``, ``og``, ``av``) are slug-shaped
+but would only produce noise matches."""
 
 _CROSS_REF_SECTION = re.compile(r"§\s*(\d+(?:-[\da-z]+)?)")
 """Detect ``§ N-M`` (or just ``§ N``) section references inside a
@@ -243,7 +278,10 @@ class CorpusReader:
         """Return a single ``§`` section of an act.
 
         ``section_id`` is the bare numeric / hyphenated identifier
-        (``"5-12"`` or ``"1"`` — no ``§`` prefix, no trailing dot).
+        (``"5-12"`` or ``"1"``). The obvious AI-written variants —
+        leading ``§``, trailing dot, surrounding whitespace — are
+        normalized away rather than costing an error round trip; the
+        response always carries the canonical bare id.
 
         The section body runs from the heading line to the next
         ``###`` or ``##`` heading. ``parent_chapter`` carries the
@@ -269,6 +307,7 @@ class CorpusReader:
         its cross-references point at) — never the corpus-wide body
         index that ``search_body`` needs.
         """
+        section_id = _normalize_section_id(section_id)
         record = self._find_current_by_slug(slug)
         # _find_current_by_slug only returns records whose slug == the
         # query slug, so record.slug is non-None here even though the
@@ -307,6 +346,34 @@ class CorpusReader:
             "cross_references": cross_references,
         }
 
+    def list_sections(self, slug: str) -> list[dict[str, str]]:
+        """Table of contents for one act, in document order.
+
+        One row per ``§`` section: ``{section_id, heading,
+        parent_chapter}``. The cheap navigation companion to
+        ``get_section`` — an AI that doesn't know the exact section
+        id can fetch the TOC instead of pulling the whole act
+        through ``get_law`` (hundreds of KB for the big codes).
+
+        Empty list for an act with no ``§`` sections. Unknown slug
+        raises with the usual recovery hints.
+
+        Reads only this act's Markdown file; the parsed section-id
+        set is seeded into the cross-reference cache as a free
+        by-product.
+        """
+        record = self._find_current_by_slug(slug)
+        sections = _parse_sections(self._body_for_record(record))
+        self._section_ids_cache.setdefault(record.slug or "", set(sections.keys()))
+        return [
+            {
+                "section_id": section_id,
+                "heading": data["heading"],
+                "parent_chapter": data["parent_chapter"],
+            }
+            for section_id, data in sections.items()
+        ]
+
     def validate_citation(self, citation: str) -> dict[str, Any]:
         """Verify that a citation string actually resolves in the corpus.
 
@@ -344,11 +411,9 @@ class CorpusReader:
         # happens to also be a separate token in the same citation.
         citation_lower = citation.lower()
         candidates = [
-            record.slug
-            for record in self.manifest.documents.values()
-            if record.status == "current"
-            and record.slug is not None
-            and _slug_token_in_citation(record.slug, citation_lower)
+            slug
+            for slug in self._load_slug_index()
+            if _slug_token_in_citation(slug, citation_lower)
         ]
         matched_slug = max(candidates, key=len) if candidates else None
 
@@ -360,6 +425,7 @@ class CorpusReader:
                 "heading": None,
                 "reason": (
                     f"could not parse citation {citation!r}: no § id and no known slug found"
+                    f"{self._citation_suggestion_hint(citation_lower)}"
                 ),
             }
 
@@ -372,6 +438,7 @@ class CorpusReader:
                 "reason": (
                     f"ambiguous citation: § {section_id} found but no act "
                     f"identifier; many acts have a section by that id"
+                    f"{self._citation_suggestion_hint(citation_lower)}"
                 ),
             }
 
@@ -754,20 +821,34 @@ class CorpusReader:
         query: str,
         dataset: str | None = None,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+        min_score: float = _SEMANTIC_MIN_SCORE_DEFAULT,
+    ) -> dict[str, Any]:
         """Top-K cosine semantic search over per-section embeddings.
 
-        Returns hits ranked by cosine similarity to ``query``. Each hit
-        carries ``slug``, ``section_id``, ``score`` (similarity in
-        [-1, 1] but in practice [0.2, 0.95] for any usable result),
-        ``title``, ``dataset``, and ``citation_hint`` (a paste-in
-        ``§ <id> <slug>`` string the AI can quote next to a claim).
+        Returns ``{results, notice}``. ``results`` is ranked by cosine
+        similarity to ``query``; each hit carries ``slug``,
+        ``section_id``, ``score``, ``title``, ``dataset``,
+        ``citation_hint`` (a paste-in ``§ <id> <slug>`` string),
+        ``heading`` (the section's real heading line), ``snippet``
+        (the first ~200 chars of the section body — actual corpus
+        text, so every hit is self-grounding), and ``last_changed``
+        (the act's last content change, for currency caveats).
+        ``heading`` / ``snippet`` are null when the embedded section
+        id no longer exists in the rendered Markdown (stale .bin,
+        corpus drift) — treat such hits with extra suspicion.
 
-        Score is a *similarity*, NOT a relevance proof. A high score
-        means the section discusses semantically similar content; it
-        does not mean the section answers the user's question. Treat
-        results as candidates that need verification — the
-        recommended pattern is:
+        Hits scoring below ``min_score`` are dropped. When nothing
+        clears the floor, ``results`` is empty and ``notice`` says so
+        explicitly (including the best rejected score) — the AI must
+        report "no strong match" rather than cite from memory.
+        Invariant: EVERY empty-``results`` response carries a
+        non-null ``notice`` (empty query, zero limit, dataset
+        without embeddings, or nothing above the floor); ``notice``
+        is null whenever results exist.
+
+        Score is a *similarity*, NOT a relevance proof. Treat results
+        as candidates that need verification — the recommended
+        pattern is:
 
         1. ``semantic_search(query)`` -> top candidates
         2. ``get_section(slug, section_id)`` for each top hit ->
@@ -790,62 +871,101 @@ class CorpusReader:
             raise ValueError(
                 f"limit must be non-negative, got {limit}",
             )
-        if not query.strip() or limit == 0:
-            return []
+        # Empty results ALWAYS carry a notice (documented contract) —
+        # including these caller no-op cases, so the AI never has to
+        # guess whether nothing matched or nothing was searched.
+        if not query.strip():
+            return {"results": [], "notice": "query is empty; nothing was searched."}
+        if limit == 0:
+            return {"results": [], "notice": "limit is 0; nothing was searched."}
 
         index = self._load_embedding_index()
         if not index:
-            if self._stale_bin_count > 0:
-                raise CorpusNotFoundError(
-                    f"no usable embeddings: all {self._stale_bin_count} .bin file(s) "
-                    f"are from an older model with a different dim. The corpus needs "
-                    f"to be re-embedded — run 'lovspor sync' (which will overwrite "
-                    f"every .bin with the current model), then 'git pull' in the "
-                    f"corpus to refresh.",
-                )
-            raise CorpusNotFoundError(
-                "no embeddings found in corpus; run 'lovspor sync' to "
-                "populate per-document .bin files, then 'git pull' in the "
-                "corpus to refresh.",
-            )
+            self._raise_for_empty_embedding_index()
 
-        dataset_key = _resolve_dataset(dataset) if dataset is not None else None
-        slug_meta: dict[str, tuple[str | None, str]] = {}
-        allowed_slugs: set[str] | None = None
-        if dataset_key is not None:
-            allowed_slugs = set()
-        for record in self.manifest.documents.values():
-            if record.status != "current" or record.slug is None:
-                continue
-            try:
-                subdir = _subdir_for_dataset(record.source_dataset)
-            except CorpusNotFoundError:
-                continue
-            slug_meta[record.slug] = (record.title, subdir)
-            if allowed_slugs is not None and record.source_dataset == dataset_key:
-                allowed_slugs.add(record.slug)
-
+        allowed_slugs = self._dataset_slugs(dataset)
         # Skip the (network) query-embedding call entirely when the
         # dataset filter cannot match any indexed row.
         if allowed_slugs is not None and allowed_slugs.isdisjoint(index.unique_slugs):
-            return []
+            return {
+                "results": [],
+                "notice": (
+                    f"no embedded sections available in dataset {dataset!r}; "
+                    f"embeddings may not be backfilled for it yet."
+                ),
+            }
 
         query_vector = self._embedder.encode([query])[0]
         hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
-        results: list[dict[str, Any]] = []
-        for hit in hits:
-            title, subdir = slug_meta.get(hit.slug, (None, ""))
-            results.append(
-                {
-                    "slug": hit.slug,
-                    "section_id": hit.section_id,
-                    "score": hit.score,
-                    "title": title,
-                    "dataset": subdir,
-                    "citation_hint": f"§ {hit.section_id} {hit.slug}",
-                },
+        kept = [hit for hit in hits if hit.score >= min_score]
+        if not kept:
+            best = max((hit.score for hit in hits), default=None)
+            return {"results": [], "notice": _no_strong_match_notice(min_score, best)}
+        sections_memo: dict[str, dict[str, dict[str, str]]] = {}
+        return {
+            "results": [self._grounded_hit(hit, sections_memo) for hit in kept],
+            "notice": None,
+        }
+
+    def _raise_for_empty_embedding_index(self) -> None:
+        if self._stale_bin_count > 0:
+            raise CorpusNotFoundError(
+                f"no usable embeddings: all {self._stale_bin_count} .bin file(s) "
+                f"are from an older model with a different dim. The corpus needs "
+                f"to be re-embedded — run 'lovspor sync' (which will overwrite "
+                f"every .bin with the current model), then 'git pull' in the "
+                f"corpus to refresh.",
             )
-        return results
+        raise CorpusNotFoundError(
+            "no embeddings found in corpus; run 'lovspor sync' to "
+            "populate per-document .bin files, then 'git pull' in the "
+            "corpus to refresh.",
+        )
+
+    def _dataset_slugs(self, dataset: str | None) -> set[str] | None:
+        """Slugs belonging to ``dataset``, or None for 'no filter'."""
+        if dataset is None:
+            return None
+        dataset_key = _resolve_dataset(dataset)
+        return {
+            slug
+            for slug, (_doc_id, record) in self._load_slug_index().items()
+            if record.source_dataset == dataset_key
+        }
+
+    def _grounded_hit(
+        self,
+        hit: SearchHit,
+        sections_memo: dict[str, dict[str, dict[str, str]]],
+    ) -> dict[str, Any]:
+        """Project a search hit into the grounded result row.
+
+        ``sections_memo`` deduplicates the per-doc section parse when
+        several hits land in the same act within one query.
+        """
+        entry = self._load_slug_index().get(hit.slug)
+        record = entry[1] if entry is not None else None
+        subdir = ""
+        section: dict[str, str] | None = None
+        if record is not None:
+            try:
+                subdir = _subdir_for_dataset(record.source_dataset)
+            except CorpusNotFoundError:
+                subdir = ""
+            if hit.slug not in sections_memo:
+                sections_memo[hit.slug] = _parse_sections(self._body_for_record(record))
+            section = sections_memo[hit.slug].get(hit.section_id)
+        return {
+            "slug": hit.slug,
+            "section_id": hit.section_id,
+            "score": hit.score,
+            "title": record.title if record is not None else None,
+            "dataset": subdir,
+            "citation_hint": f"§ {hit.section_id} {hit.slug}",
+            "heading": section["heading"] if section is not None else None,
+            "snippet": _lead_snippet(section["body"]) if section is not None else None,
+            "last_changed": record.last_changed if record is not None else None,
+        }
 
     def verify_quote(
         self,
@@ -858,8 +978,10 @@ class CorpusReader:
         Anti-hallucination guard for the AI: before claiming *"§ 5-12
         of Skatteloven says X"*, call this with the verbatim text of
         X. Returns ``{verified, slug, section_id, reason}``. ``verified``
-        is true only when the quote, after lowercase + whitespace
-        normalization, appears as a substring of the section body.
+        is true only when the quote, after case, whitespace and
+        typographic-punctuation normalization (see
+        ``_normalize_for_quote_match``), appears as a substring of
+        the section body.
 
         Catches the most common citation hallucination — the AI quotes
         words that are NOT in the section it cites (often pulled from
@@ -872,6 +994,7 @@ class CorpusReader:
         — surfaced via ``get_section``). Empty quote returns
         verified=False with a clear reason rather than raising.
         """
+        section_id = _normalize_section_id(section_id)
         if not quote.strip():
             return {
                 "verified": False,
@@ -902,9 +1025,10 @@ class CorpusReader:
             "slug": slug,
             "section_id": section_id,
             "reason": (
-                f"quote not found in § {section_id} of {slug!r} after lowercase "
-                f"and whitespace normalization. The quote may be from a different "
-                f"section, paraphrased rather than verbatim, or hallucinated. "
+                f"quote not found in § {section_id} of {slug!r} after case, "
+                f"whitespace and typographic-punctuation normalization. The quote "
+                f"may be from a different section, paraphrased rather than "
+                f"verbatim, or hallucinated. "
                 f"Call get_section({slug!r}, {section_id!r}) to read the actual text."
             ),
         }
@@ -1177,11 +1301,49 @@ class CorpusReader:
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
         entry = self._load_slug_index().get(slug)
         if entry is None:
+            suggestions = self._slug_suggestions(slug)
+            hint = f"did you mean {', '.join(suggestions)}? " if suggestions else ""
             raise CorpusNotFoundError(
-                f"no current law with slug {slug!r}; "
+                f"no current law with slug {slug!r}; {hint}"
                 f"use search_laws or list_recent_changes to discover slugs",
             )
         return entry[1]
+
+    def _citation_suggestion_hint(self, citation_lower: str) -> str:
+        """Near-miss hint for a citation whose act token matched nothing.
+
+        Walks the citation's slug-shaped tokens (4+ chars, so filler
+        like ``i`` / ``jf`` never queries) and collects close matches
+        against the canonical slugs. Empty string when there is
+        nothing to suggest, so pinned exact-reason contracts stay
+        intact for token-less citations.
+        """
+        suggestions: list[str] = []
+        for token in _SLUG_TOKEN_PATTERN.findall(citation_lower):
+            if len(token) < _MIN_SUGGESTION_TOKEN_CHARS:
+                continue
+            for match in self._slug_suggestions(token):
+                if match not in suggestions:
+                    suggestions.append(match)
+        if not suggestions:
+            return ""
+        return f"; did you mean {', '.join(suggestions[:3])}? Use search_laws for canonical slugs"
+
+    def _slug_suggestions(self, slug: str) -> list[str]:
+        """Up to three near-miss canonical slugs for an unknown input.
+
+        The most common AI mistake is the colloquial kortform
+        ('skatteloven') for the canonical slug ('skatteloven-sktl');
+        offering the near-miss in the error lets the AI recover in
+        one step instead of a search_laws round trip. Suggestions
+        are advisory — the strict-match contract is unchanged.
+        """
+        return difflib.get_close_matches(
+            slug.lower(),
+            list(self._load_slug_index()),
+            n=3,
+            cutoff=0.6,
+        )
 
     def _safe_join(self, *parts: str) -> Path:
         """Join ``parts`` under ``corpus_path`` and refuse paths that escape it.
@@ -1362,6 +1524,37 @@ def _strip_frontmatter_and_h1(text: str) -> str:
     return text.lstrip("\n")
 
 
+def _lead_snippet(text: str) -> str:
+    """First ``_SEMANTIC_SNIPPET_CHARS`` chars of ``text`` as one line.
+
+    Whitespace runs collapse to single spaces so the snippet renders
+    on a single line; a trailing ``...`` marks truncation.
+    """
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= _SEMANTIC_SNIPPET_CHARS:
+        return collapsed
+    return collapsed[:_SEMANTIC_SNIPPET_CHARS] + "..."
+
+
+def _no_strong_match_notice(min_score: float, best: float | None) -> str:
+    """Explicit anti-hallucination message for an empty semantic result.
+
+    Includes the best rejected score so the AI (and the user) can
+    judge how near the miss was, and spells out the required
+    behavior: report no match, never substitute training-data
+    memory for the corpus.
+    """
+    best_part = (
+        f"best candidate scored {best:.2f}" if best is not None else "no candidates were scored"
+    )
+    return (
+        f"no sections scored >= {min_score:.2f} for this query ({best_part}). "
+        f"The corpus has no strong match — do NOT cite a law from memory. "
+        f"Tell the user no strong match was found, or retry with different "
+        f"wording, use search_body for exact keywords, or lower min_score."
+    )
+
+
 def _snippet(body: str, match_idx: int, match_len: int) -> str:
     """Extract a ``~100`` char window around ``match_idx`` in ``body``.
 
@@ -1534,24 +1727,66 @@ def _resolve_slug_in_window(
     return current_slug
 
 
+def _normalize_section_id(section_id: str) -> str:
+    """Fold the obvious AI-written section-id variants to the bare id.
+
+    ``"§ 5-12"``, ``"§5-12"``, ``"5-12."`` and surrounding whitespace
+    all mean ``"5-12"`` — rejecting them costs an error round trip for
+    no information gain. Anything beyond these (chapter words,
+    ``ledd`` qualifiers) is left untouched and fails the section
+    lookup with the available-ids recovery message.
+    """
+    normalized = section_id.strip()
+    normalized = normalized.removeprefix("§").lstrip()
+    return normalized.rstrip(".").strip()
+
+
+_QUOTE_FOLD_TABLE = str.maketrans(
+    {
+        "\u2018": "'",  # left single quotation mark
+        "\u2019": "'",  # right single quotation mark / typographic apostrophe
+        "\u201a": "'",  # single low-9 quotation mark
+        "\u201b": "'",  # single high-reversed-9 quotation mark
+        "\u201c": '"',  # left double quotation mark
+        "\u201d": '"',  # right double quotation mark
+        "\u201e": '"',  # double low-9 quotation mark
+        "\u2013": "-",  # en dash
+        "\u2014": "-",  # em dash
+        "\u2212": "-",  # minus sign
+        "\u00ad": None,  # soft hyphen (invisible) dropped entirely
+    },
+)
+"""Typographic punctuation folded to its ASCII equivalent before
+quote matching. These are the characters chat UIs and renderers
+rewrite between the corpus and what the AI pastes back; an honest
+quote must not fail verification over typography. ``§`` and digits
+are deliberately NOT in this table."""
+
+
 def _normalize_for_quote_match(text: str) -> str:
     """Normalize text for ``verify_quote`` substring matching.
 
-    Lowercases the text and collapses every whitespace run (spaces,
-    tabs, newlines) to a single space. This rejects two false-
-    negative classes that would otherwise plague legitimate quotes:
+    Applies Unicode NFKC, folds typographic quotes/dashes to ASCII
+    (``_QUOTE_FOLD_TABLE``), lowercases, and collapses every
+    whitespace run (spaces, tabs, newlines, NBSP) to a single space.
+    This rejects the false-negative classes that would otherwise
+    plague legitimate quotes:
 
     - Case differences between AI-generated text and source text
       (Norwegian legal text uses sentence case; AIs sometimes
       capitalize for emphasis).
     - Newline / tab differences from copy-paste through different
       AI client UIs that re-wrap text.
+    - Curly-vs-straight quotes, en/em-dash-vs-hyphen, and soft
+      hyphens introduced by typography-aware clients. A guard that
+      rejects honest quotes teaches the AI to skip the guard.
 
-    Does NOT strip punctuation or accents — those are semantically
-    significant in Norwegian legal text (``§`` is not the same as
-    ``$``, ``§ 5-12`` is not the same as ``§ 512``).
+    Does NOT strip punctuation classes or accents wholesale — those
+    are semantically significant in Norwegian legal text (``§`` is
+    not the same as ``$``, ``§ 5-12`` is not the same as ``§ 512``).
     """
-    return " ".join(text.lower().split())
+    folded = unicodedata.normalize("NFKC", text).translate(_QUOTE_FOLD_TABLE)
+    return " ".join(folded.lower().split())
 
 
 def _record_summary(doc_id: str, record: ManifestRecord) -> dict[str, Any]:
@@ -1593,7 +1828,7 @@ def _build_embedder() -> EmbeddingModel | None:
     if not api_key:
         print(
             "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-            "but the other thirteen tools work normally. Set OPENAI_API_KEY "
+            "but the other fourteen tools work normally. Set OPENAI_API_KEY "
             "and restart to enable semantic search.",
             file=sys.stderr,
             flush=True,
@@ -1614,7 +1849,7 @@ def build_server(corpus_path: Path) -> FastMCP:
     the OpenAI embedder at startup (so a malformed key surfaces
     immediately, not on the first tool call); if it is not set we
     log a warning and disable ``semantic_search`` with a clear
-    runtime error. The other thirteen tools do not need the embedder
+    runtime error. The other fourteen tools do not need the embedder
     so they continue to work without an OpenAI key — refusing to
     start the whole server over one optional dependency would be
     user-hostile.
@@ -1674,6 +1909,29 @@ def build_server(corpus_path: Path) -> FastMCP:
         call.
         """
         return reader.get_section(slug, section_id)
+
+    @mcp.tool()
+    def list_sections(slug: str) -> list[dict[str, str]]:
+        """List an act's table of contents: every ``§`` section id and heading.
+
+        Use this BEFORE ``get_section`` when you don't know the exact
+        section id — it answers *"which section of Skatteloven covers
+        X?"*-style navigation without pulling the whole act through
+        ``get_law`` (hundreds of KB for the big codes, which would
+        flood your context window).
+
+        ``slug``: the act's slug (same as for ``get_law``).
+
+        Returns one row per section, in document order:
+        ``section_id`` (feed straight into ``get_section``),
+        ``heading`` (the full ``§ N-M. Title`` line), and
+        ``parent_chapter`` (the ``Kapittel`` the section belongs to).
+        Empty list when the act has no ``§`` sections.
+
+        Raises if the slug is unknown — the error suggests near-miss
+        slugs and points to ``search_laws``.
+        """
+        return reader.list_sections(slug)
 
     @mcp.tool()
     def get_law_history(slug: str) -> dict[str, Any]:
@@ -1807,7 +2065,8 @@ def build_server(corpus_path: Path) -> FastMCP:
         query: str,
         dataset: str | None = None,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+        min_score: float = _SEMANTIC_MIN_SCORE_DEFAULT,
+    ) -> dict[str, Any]:
         """Semantic search by meaning, not by substring match.
 
         Use when the user's question uses different vocabulary than
@@ -1825,19 +2084,36 @@ def build_server(corpus_path: Path) -> FastMCP:
         quoting. If you quote anything verbatim, run ``verify_quote``
         as a final safety check.
 
-        Returns a list of hits with: ``slug``, ``section_id``,
-        ``score`` (cosine similarity in [-1, 1]; useful matches are
-        usually > 0.4), ``title``, ``dataset``, and ``citation_hint``
-        (a paste-ready ``§ <id> <slug>`` string).
+        Returns ``{results, notice}``. Each result has ``slug``,
+        ``section_id``, ``score`` (cosine similarity; hits below
+        ``min_score`` are dropped), ``title``, ``dataset``,
+        ``citation_hint`` (a paste-ready ``§ <id> <slug>`` string),
+        ``heading`` (the section's actual heading), ``snippet`` (the
+        first ~200 chars of the section's real text), and
+        ``last_changed`` (the act's last content change — mention it
+        when currency matters). Null ``heading``/``snippet`` mean the
+        embedding is stale for that doc; verify via ``get_section``
+        before trusting such a hit.
+
+        When ``results`` is empty, ``notice`` explains why (e.g. no
+        section cleared ``min_score``). In that case say the corpus
+        has no strong match — do NOT answer from memory.
 
         ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
         ``limit``: max results, default 20, must be non-negative.
+        ``min_score``: similarity floor, default 0.25; pass 0.0 to
+        see every candidate.
 
         Raises if ``OPENAI_API_KEY`` was not set when the server
         started, or if the corpus has no per-doc ``.bin`` files
         yet (early bootstrap state — run ``lovspor sync``).
         """
-        return reader.semantic_search(query, dataset=dataset, limit=limit)
+        return reader.semantic_search(
+            query,
+            dataset=dataset,
+            limit=limit,
+            min_score=min_score,
+        )
 
     @mcp.tool()
     def validate_citation(citation: str) -> dict[str, Any]:
@@ -1880,12 +2156,14 @@ def build_server(corpus_path: Path) -> FastMCP:
         call this with the verbatim quote you intend to attribute to
         that section. Returns ``{verified, slug, section_id, reason}``.
 
-        Match is case-insensitive and whitespace-tolerant (Norwegian
-        legal text is sentence case but AIs sometimes capitalize for
-        emphasis; copy-paste through different clients can re-wrap
-        whitespace). Punctuation and accents are NOT normalized —
-        ``§`` is not the same as ``$`` and ``§ 5-12`` is not the
-        same as ``§ 512``.
+        Match is case-insensitive, whitespace-tolerant, and folds
+        typographic punctuation (curly vs straight quotes, en/em dash
+        vs hyphen, soft hyphens) — Norwegian legal text is sentence
+        case but AIs sometimes capitalize for emphasis, and chat
+        clients rewrite quotes and dashes in transit. Beyond that,
+        punctuation and accents are NOT normalized — ``§`` is not
+        the same as ``$`` and ``§ 5-12`` is not the same as
+        ``§ 512``.
 
         Catches the most common citation hallucination: AI quotes
         words that are NOT in the section it cites (often pulled

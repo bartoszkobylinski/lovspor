@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets fourteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets fifteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 Sprint 9 added a four-layer anti-hallucination story for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
@@ -12,7 +12,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** fourteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Two of the fourteen (`get_law_at`, `list_law_versions`) are time-machine tools added in Sprint 10 that read past versions of acts directly from the corpus's git history.
+- **Tools:** fifteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Two of the fifteen (`get_law_at`, `list_law_versions`) are time-machine tools added in Sprint 10 that read past versions of acts directly from the corpus's git history.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -37,7 +37,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
    No PyPI publish required (yet). If you prefer `pip install`, see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
 
-3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other thirteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit) below for the trade-off and cost.
+3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fourteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
 ---
 
@@ -80,7 +80,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All fourteen are read-only. None mutate the corpus or trigger a sync. Thirteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
+All fifteen are read-only. None mutate the corpus or trigger a sync. Fourteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
 
 ### `get_law(slug)`
 
@@ -122,7 +122,7 @@ The frontmatter carries the law's metadata and provenance; the body is the legal
 Return a single ``§`` section of an act — the surgical alternative to `get_law` when the user wants just one paragraph (e.g. *"What does § 5-12 of Skatteloven say?"*). Cheaper for the AI's context window than fetching the whole law.
 
 - **`slug`** — the act's slug (same as for `get_law`).
-- **`section_id`** — the bare numeric / hyphenated identifier WITHOUT the `§` prefix or trailing dot. Examples: `"5-12"`, `"1"`, `"5-12a"`. Norwegian acts use `§ N` for single-chapter acts and `§ N-M` (chapter N, section M) for multi-chapter acts; both work.
+- **`section_id`** — the bare numeric / hyphenated identifier. Examples: `"5-12"`, `"1"`, `"5-12a"`. Norwegian acts use `§ N` for single-chapter acts and `§ N-M` (chapter N, section M) for multi-chapter acts; both work. The obvious variants — leading `§` (`"§ 5-12"`), trailing dot (`"5-12."`), surrounding whitespace — are normalized to the bare id rather than erroring; the response always carries the canonical bare form.
 
 **Sample call:** `get_section(slug="skatteloven-sktl", section_id="5-12")`
 
@@ -154,6 +154,33 @@ Use this list to decide whether a referenced section is safe to quote without a 
 Limitations: descriptive name references (*"i lov om X"* without a canonical slug) silently fall back to same-act and may false-positive validate. Chapter references (`kapittel 4`) and paragraph qualifiers (`første ledd`) are not extracted. `validate_citation` remains the off-ramp for ambiguous cases.
 
 If the section is unknown the error message lists the act's available section ids in natural order (so `5-2` < `5-10`, not lexicographic) — the AI can recover without an extra `get_law` call.
+
+### `list_sections(slug)`
+
+List an act's table of contents: every `§` section id and heading, in document order. The navigation companion to `get_section` — when the AI doesn't know the exact section id, the TOC answers *"which section of Skatteloven covers X?"* without pulling the whole act through `get_law` (hundreds of KB for the big codes).
+
+- **`slug`** — the act's slug (same as for `get_law`).
+
+**Sample call:** `list_sections(slug="skatteloven-sktl")`
+
+**Sample output** (truncated):
+
+```json
+[
+  {
+    "section_id": "1-1",
+    "heading": "§ 1-1. Lovens virkeområde",
+    "parent_chapter": "Kapittel 1. Alminnelige bestemmelser"
+  },
+  {
+    "section_id": "5-12",
+    "heading": "§ 5-12. Boligsparing for ungdom",
+    "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene"
+  }
+]
+```
+
+`section_id` feeds straight into `get_section`. Empty list when the act has no `§` sections. Unknown slug raises with near-miss suggestions and a pointer to `search_laws`.
 
 ### `get_law_history(slug)`
 
@@ -301,7 +328,7 @@ Sorted by `match_count` descending, then by `slug` for stable ordering. The snip
 
 **Performance:** the body index is loaded lazily on the first call (~3-5 s for the production 4522-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
 
-### `semantic_search(query, dataset?, limit?)`
+### `semantic_search(query, dataset?, limit?, min_score?)`
 
 Top-K cosine semantic search over per-section embeddings. Use when the user's question uses different vocabulary than the law text — e.g. *"renter rights when the landlord doesn't fix things"* finds husleieloven sections about *manglende vedlikehold* even though the user said "rights" and "fix" rather than the Norwegian legal terms. Complement to `search_body` (substring) and `search_laws` (title/slug).
 
@@ -311,40 +338,61 @@ Top-K cosine semantic search over per-section embeddings. Use when the user's qu
 2. `get_section(slug, section_id)` for each top hit → read actual text + see `cross_references`
 3. `verify_quote(slug, section_id, quote)` if you quote anything verbatim
 
-- **`query`** — natural-language query string. Empty / whitespace-only queries return `[]`.
+- **`query`** — natural-language query string. Empty / whitespace-only queries return empty results.
 - **`dataset`** *(optional)* — `lover` or `forskrifter` to filter.
 - **`limit`** *(default 20)* — max results. Must be non-negative.
+- **`min_score`** *(default 0.25)* — similarity floor; hits below it are dropped. Pass `0.0` to see every candidate.
 
 **Sample call:** `semantic_search(query="renter rights when landlord refuses repairs", limit=3)`
 
 **Sample output:**
 
 ```json
-[
-  {
-    "slug": "husleieloven",
-    "section_id": "5-3",
-    "score": 0.71,
-    "title": "Lov om husleieavtaler",
-    "dataset": "lover",
-    "citation_hint": "§ 5-3 husleieloven"
-  },
-  {
-    "slug": "husleieloven",
-    "section_id": "5-7",
-    "score": 0.62,
-    "title": "Lov om husleieavtaler",
-    "dataset": "lover",
-    "citation_hint": "§ 5-7 husleieloven"
-  }
-]
+{
+  "results": [
+    {
+      "slug": "husleieloven",
+      "section_id": "5-3",
+      "score": 0.71,
+      "title": "Lov om husleieavtaler",
+      "dataset": "lover",
+      "citation_hint": "§ 5-3 husleieloven",
+      "heading": "§ 5-3. Utleierens vedlikeholdsplikt",
+      "snippet": "Utleieren plikter i leietiden å holde utleid husrom og eiendommen for øvrig i den stand som...",
+      "last_changed": "2026-03-14"
+    },
+    {
+      "slug": "husleieloven",
+      "section_id": "5-7",
+      "score": 0.62,
+      "title": "Lov om husleieavtaler",
+      "dataset": "lover",
+      "citation_hint": "§ 5-7 husleieloven",
+      "heading": "§ 5-7. Utbedring av mangel",
+      "snippet": "Leieren kan kreve at utleieren retter en mangel dersom dette kan skje uten urimelig kostnad...",
+      "last_changed": "2026-03-14"
+    }
+  ],
+  "notice": null
+}
 ```
 
-Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `citation_hint` is a paste-ready `§ <id> <slug>` string for quoting next to a claim.
+Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `citation_hint` is a paste-ready `§ <id> <slug>` string for quoting next to a claim. `heading` and `snippet` are the section's **actual corpus text** (first ~200 chars of the body), so every hit is self-grounding; `last_changed` is the act's last content change, for currency caveats. Null `heading`/`snippet` mean the embedding `.bin` references a section that no longer exists in the rendered Markdown (corpus drift) — verify such hits via `get_section` before trusting them.
 
-**Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other thirteen keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
+**Sample output (no strong match):**
 
-**Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a brute-force cosine scan (~50 ms). Per-call OpenAI cost is fractions of a cent.
+```json
+{
+  "results": [],
+  "notice": "no sections scored >= 0.25 for this query (best candidate scored 0.22). The corpus has no strong match — do NOT cite a law from memory. Tell the user no strong match was found, or retry with different wording, use search_body for exact keywords, or lower min_score."
+}
+```
+
+When `results` is empty the `notice` says why — the AI is expected to report "no strong match" instead of substituting training-data memory.
+
+**Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other fourteen keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
+
+**Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a vectorized brute-force cosine scan (well under 100 ms). Per-call OpenAI cost is fractions of a cent.
 
 If the corpus has no `.bin` files (early bootstrap state) or every `.bin` is from an older model with a different dim (post-migration state), `semantic_search` raises with a remediation message — different errors for different states so the operator sees what to do.
 
@@ -380,7 +428,7 @@ Verify that a Norwegian-law citation string actually resolves in the corpus. **Z
 }
 ```
 
-The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. AI consumers should use canonical slugs from `search_laws`.
+The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. When the citation contains a near-miss token, the `reason` appends an advisory `did you mean skatteloven-sktl?` hint (the same hint appears in `get_law`/`get_section` unknown-slug errors), but validation itself never fuzzy-matches: AI consumers should confirm via `search_laws` and re-validate with the canonical slug.
 
 ### `verify_quote(slug, section_id, quote)`
 
@@ -390,7 +438,7 @@ Anti-hallucination guard for verbatim citations. Before answering with text like
 - **`section_id`** — the bare numeric id (same form as for `get_section`).
 - **`quote`** — the verbatim string to verify against the section body.
 
-Match is **case-insensitive and whitespace-tolerant** (Norwegian legal text is sentence case but AIs sometimes capitalize for emphasis; copy-paste through different clients can re-wrap whitespace). Punctuation and accents are NOT normalized — `§` is not the same as `$`, and `§ 5-12` is not the same as `§ 512`.
+Match is **case-insensitive, whitespace-tolerant, and typography-tolerant**: curly vs straight quotes, en/em dash vs hyphen, and soft hyphens are folded before matching (Norwegian legal text is sentence case but AIs sometimes capitalize for emphasis; chat clients rewrite quotes and dashes in transit — an honest quote must not fail over typography). Beyond that, punctuation and accents are NOT normalized — `§` is not the same as `$`, and `§ 5-12` is not the same as `§ 512`.
 
 **Sample call:** `verify_quote(slug="skatteloven-sktl", section_id="5-12", quote="Skattefradraget gis for sparing til bolig")`
 
@@ -412,7 +460,7 @@ Match is **case-insensitive and whitespace-tolerant** (Norwegian legal text is s
   "verified": false,
   "slug": "skatteloven-sktl",
   "section_id": "5-12",
-  "reason": "quote not found in § 5-12 of 'skatteloven-sktl' after lowercase and whitespace normalization. The quote may be from a different section, paraphrased rather than verbatim, or hallucinated. Call get_section('skatteloven-sktl', '5-12') to read the actual text."
+  "reason": "quote not found in § 5-12 of 'skatteloven-sktl' after case, whitespace and typographic-punctuation normalization. The quote may be from a different section, paraphrased rather than verbatim, or hallucinated. Call get_section('skatteloven-sktl', '5-12') to read the actual text."
 }
 ```
 
@@ -584,7 +632,7 @@ A typical AI-assistant interaction with this server follows the same pattern:
 11. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
 12. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The fourteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. Sprint 10's time-machine pair (`get_law_at` + `list_law_versions`) extends the same surface to historical research: the AI can answer "what did Skatteloven say in 2018?" by walking the corpus's git history without any extra plumbing.
+The fifteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. Sprint 10's time-machine pair (`get_law_at` + `list_law_versions`) extends the same surface to historical research: the AI can answer "what did Skatteloven say in 2018?" by walking the corpus's git history without any extra plumbing.
 
 ---
 

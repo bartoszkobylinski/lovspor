@@ -961,6 +961,8 @@ def test_llm_driven_scenario_invokes_claude_and_evaluates_tool_trace(
         "\n"
         "Tool usage guidance:\n"
         "- Use semantic_search when the user's wording differs from the law's vocabulary.\n"
+        "  If its results are empty, heed the returned notice: report that the corpus has\n"
+        "  no strong match instead of answering from memory.\n"
         "- Use search_laws / search_body for keyword discovery.\n"
         "- Use get_section to read the verbatim text of one section. The response includes\n"
         "  a validated cross_references list — heed it.\n"

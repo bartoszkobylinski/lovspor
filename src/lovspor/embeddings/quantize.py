@@ -47,5 +47,12 @@ def quantize_int8(vectors: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 def dequantize_int8(quantized: np.ndarray, scale: float) -> np.ndarray:
-    """Reverse quantization. Returns float32 array matching the input shape."""
+    """Reverse quantization. Returns float32 array matching the input shape.
+
+    Not called by the engine itself — cosine scoring works directly on
+    the int8 rows because the positive scale cancels out (see
+    ``embeddings.search``). Kept as public API: it is the documented
+    inverse of :func:`quantize_int8` for third-party tools that verify
+    the corpus ``.bin`` files end-to-end (``docs/embeddings.md``).
+    """
     return quantized.astype(np.float32) * scale

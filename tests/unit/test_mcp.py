@@ -341,6 +341,47 @@ def test_get_law_raises_for_unknown_slug(tmp_path: Path) -> None:
         CorpusReader(tmp_path).get_law("does-not-exist")
 
 
+def test_get_law_unknown_slug_suggests_closest_match(tmp_path: Path) -> None:
+    """The most common first call from an AI is the colloquial kortform
+    ('skatteloven') instead of the canonical slug ('skatteloven-sktl').
+    The error must offer the near-miss so the AI recovers in one step
+    instead of a search_laws round trip."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug="husleieloven", title="Husleieloven"),
+        },
+    )
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_law("skatteloven")
+
+    message = str(exc_info.value)
+    assert "skatteloven-sktl" in message
+    assert "did you mean" in message
+
+
+def test_get_law_unknown_slug_without_near_miss_omits_suggestions(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="husleieloven", title="Husleieloven")})
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_law("zzz-qqq-vvv")
+
+    message = str(exc_info.value)
+    assert "did you mean" not in message
+    assert "search_laws" in message
+
+
+def test_validate_citation_unmatched_slug_suggests_canonical_form(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven-sktl", title="Skatteloven")},
+    )
+    out = CorpusReader(tmp_path).validate_citation("§ 5-12 skatteloven")
+
+    assert out["valid"] is False
+    assert "skatteloven-sktl" in (out["reason"] or "")
+
+
 def test_get_law_skips_tombstoned_records(tmp_path: Path) -> None:
     """A removed law is not retrievable via get_law — its file is gone."""
     _seed_corpus(
@@ -958,13 +999,23 @@ def test_semantic_search_requires_embedder(tmp_path: Path) -> None:
         CorpusReader(tmp_path).semantic_search("bolig")
 
 
-def test_semantic_search_returns_ranked_hits_with_metadata(tmp_path: Path) -> None:
+def test_semantic_search_returns_grounded_hits_with_metadata(tmp_path: Path) -> None:
+    body = (
+        "## Kapittel 2. Leie\n\n"
+        "### § 2-10. Vedlikehold\n\n"
+        "Utleieren plikter å holde boligen i stand i leietiden.\n"
+    )
     _seed_corpus(
         tmp_path,
         {
-            "nl-1": _record(slug="husleieloven", title="Husleieloven"),
+            "nl-1": _record(
+                slug="husleieloven",
+                title="Husleieloven",
+                last_changed="2026-04-27",
+            ),
             "nl-2": _record(slug="skatteloven", title="Skatteloven"),
         },
+        body_for={"husleieloven": body},
     )
     _write_embedding_file(
         tmp_path,
@@ -980,9 +1031,11 @@ def test_semantic_search_returns_ranked_hits_with_metadata(tmp_path: Path) -> No
     )
     embedder = _FakeEmbedder([1.0, 0.0, 0.0])
 
-    rows = CorpusReader(tmp_path, embedder=embedder).semantic_search("leierettigheter")
+    out = CorpusReader(tmp_path, embedder=embedder).semantic_search("leierettigheter")
 
     assert embedder.queries == ["leierettigheter"]
+    assert out["notice"] is None
+    rows = out["results"]
     assert rows[0] == {
         "slug": "husleieloven",
         "section_id": "2-10",
@@ -990,9 +1043,97 @@ def test_semantic_search_returns_ranked_hits_with_metadata(tmp_path: Path) -> No
         "title": "Husleieloven",
         "dataset": "lover",
         "citation_hint": "§ 2-10 husleieloven",
+        "heading": "§ 2-10. Vedlikehold",
+        "snippet": "Utleieren plikter å holde boligen i stand i leietiden.",
+        "last_changed": "2026-04-27",
     }
-    assert rows[1]["slug"] == "skatteloven"
-    assert rows[1]["score"] == 0.0
+    # The 0.0-score hit falls below the default min_score and is
+    # filtered out — similarity that low is noise, not a candidate.
+    assert [row["slug"] for row in rows] == ["husleieloven"]
+
+
+def test_semantic_search_min_score_zero_returns_all_hits(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="husleieloven", title="Husleieloven"),
+            "nl-2": _record(slug="skatteloven", title="Skatteloven"),
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "husleieloven", [("2-10", [10, 0, 0])])
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("5-12", [0, 10, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("leierettigheter", min_score=0.0)
+
+    assert [row["slug"] for row in out["results"]] == ["husleieloven", "skatteloven"]
+    assert out["results"][1]["score"] == 0.0
+
+
+def test_semantic_search_all_hits_below_min_score_returns_explicit_notice(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("5-12", [0, 10, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("noe helt annet")
+
+    assert out["results"] == []
+    notice = out["notice"]
+    assert notice is not None
+    assert "0.25" in notice  # the default min_score
+    assert "0.00" in notice  # best candidate score, so the AI can judge the miss
+    assert "do not cite" in notice.lower()
+
+
+def test_semantic_search_grounding_fields_are_null_for_stale_embedding(
+    tmp_path: Path,
+) -> None:
+    """A .bin section id that no longer exists in the rendered Markdown
+    (corpus drift) must surface as null grounding fields, not crash."""
+    body = "## Kapittel 1.\n\n### § 1-1. Finnes\n\nInnhold.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="husleieloven", title="Husleieloven")},
+        body_for={"husleieloven": body},
+    )
+    _write_embedding_file(tmp_path, "lover", "husleieloven", [("9-9", [10, 0, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("vedlikehold")
+
+    row = out["results"][0]
+    assert row["section_id"] == "9-9"
+    assert row["heading"] is None
+    assert row["snippet"] is None
+
+
+def test_semantic_search_snippet_is_truncated_and_single_line(tmp_path: Path) -> None:
+    long_paragraph = "ord " * 200
+    body = f"## Kapittel 1.\n\n### § 1-1. Lang\n\n{long_paragraph}\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="husleieloven", title="Husleieloven")},
+        body_for={"husleieloven": body},
+    )
+    _write_embedding_file(tmp_path, "lover", "husleieloven", [("1-1", [10, 0, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("noe")
+
+    snippet = out["results"][0]["snippet"]
+    assert snippet.endswith("...")
+    assert len(snippet) <= 203  # 200 chars + ellipsis
+    assert "\n" not in snippet
 
 
 def test_semantic_search_filters_by_dataset(tmp_path: Path) -> None:
@@ -1011,10 +1152,12 @@ def test_semantic_search_filters_by_dataset(tmp_path: Path) -> None:
     _write_embedding_file(tmp_path, "forskrifter", "forskact", [("2", [10, 0, 0])])
     reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
 
-    assert [r["slug"] for r in reader.semantic_search("common", dataset="lover")] == ["lovact"]
-    assert [r["slug"] for r in reader.semantic_search("common", dataset="forskrifter")] == [
-        "forskact",
+    assert [r["slug"] for r in reader.semantic_search("common", dataset="lover")["results"]] == [
+        "lovact",
     ]
+    assert [
+        r["slug"] for r in reader.semantic_search("common", dataset="forskrifter")["results"]
+    ] == ["forskact"]
 
 
 def test_semantic_search_raises_when_no_embeddings_found(tmp_path: Path) -> None:
@@ -1042,13 +1185,13 @@ def test_semantic_search_does_not_call_embedder_when_dataset_filter_has_no_hits(
     _write_embedding_file(tmp_path, "lover", "x", [("1", [10, 0, 0])])
     embedder = _FakeEmbedder([1.0, 0.0, 0.0])
 
-    assert (
-        CorpusReader(tmp_path, embedder=embedder).semantic_search(
-            "query",
-            dataset="forskrifter",
-        )
-        == []
+    out = CorpusReader(tmp_path, embedder=embedder).semantic_search(
+        "query",
+        dataset="forskrifter",
     )
+
+    assert out["results"] == []
+    assert "forskrifter" in (out["notice"] or "")
     assert embedder.queries == []
 
 
@@ -1071,7 +1214,7 @@ def test_semantic_search_skips_corrupt_embedding_files(
     rows = CorpusReader(
         tmp_path,
         embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
-    ).semantic_search("query")
+    ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["good"]
     assert "skipping corrupt bad.bin" in capsys.readouterr().err
@@ -1095,7 +1238,7 @@ def test_semantic_search_skips_embedding_files_with_wrong_dimension(
     rows = CorpusReader(
         tmp_path,
         embedder=_FakeEmbedder([1.0] + [0.0] * 3071),
-    ).semantic_search("query")
+    ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["current"]
     assert rows[0]["section_id"] == "1"
@@ -1122,7 +1265,7 @@ def test_semantic_search_continues_after_wrong_dimension_file(
     rows = CorpusReader(
         tmp_path,
         embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
-    ).semantic_search("query")
+    ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["current"]
     assert rows[0]["section_id"] == "2"
@@ -1198,13 +1341,13 @@ def test_semantic_search_reuses_cached_embedding_index_and_stale_count(
     embedder = _FakeEmbedder([1.0, 0.0, 0.0])
     reader = CorpusReader(tmp_path, embedder=embedder)
 
-    first_rows = reader.semantic_search("first")
+    first_rows = reader.semantic_search("first")["results"]
     assert [row["slug"] for row in first_rows] == ["current"]
     assert first_rows[0]["section_id"] == "2"
     assert reader._stale_bin_count == 1
 
     current_path.unlink()
-    second_rows = reader.semantic_search("second")
+    second_rows = reader.semantic_search("second")["results"]
 
     assert [row["slug"] for row in second_rows] == ["current"]
     assert second_rows[0]["section_id"] == "2"
@@ -1212,12 +1355,20 @@ def test_semantic_search_reuses_cached_embedding_index_and_stale_count(
     assert embedder.queries == ["first", "second"]
 
 
-def test_semantic_search_empty_query_and_zero_limit_return_empty(tmp_path: Path) -> None:
+def test_semantic_search_empty_query_and_zero_limit_return_notice(tmp_path: Path) -> None:
+    """Contract: empty results ALWAYS carry a notice explaining why —
+    the AI must never have to guess whether nothing matched or the
+    call itself was a no-op (Codex PR #63 round 1)."""
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
 
-    assert reader.semantic_search("") == []
-    assert reader.semantic_search("query", limit=0) == []
+    empty_query = reader.semantic_search("")
+    assert empty_query["results"] == []
+    assert "empty" in (empty_query["notice"] or "")
+
+    zero_limit = reader.semantic_search("query", limit=0)
+    assert zero_limit["results"] == []
+    assert "limit" in (zero_limit["notice"] or "")
 
 
 def test_semantic_search_rejects_negative_limit(tmp_path: Path) -> None:
@@ -1228,6 +1379,72 @@ def test_semantic_search_rejects_negative_limit(tmp_path: Path) -> None:
             tmp_path,
             embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
         ).semantic_search("query", limit=-1)
+
+
+# ---------- list_sections ----------
+
+
+def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    toc = CorpusReader(tmp_path).list_sections("skatteloven")
+
+    assert toc == [
+        {
+            "section_id": "1-1",
+            "heading": "§ 1-1. Virkeområde",
+            "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+        },
+        {
+            "section_id": "1-2",
+            "heading": "§ 1-2. Hvem som pålegger skatt",
+            "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+        },
+        {
+            "section_id": "5-12",
+            "heading": "§ 5-12. Boligsparing for ungdom",
+            "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+        },
+        {
+            "section_id": "5-13",
+            "heading": "§ 5-13. Annet",
+            "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+        },
+    ]
+
+
+def test_list_sections_empty_act_returns_empty_list(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="tom-lov", title="Tom lov")},
+        body_for={"tom-lov": "Ingen paragrafer her.\n"},
+    )
+    assert CorpusReader(tmp_path).list_sections("tom-lov") == []
+
+
+def test_list_sections_unknown_slug_raises_with_recovery_hint(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven-sktl", title="Skatteloven")})
+    with pytest.raises(CorpusNotFoundError, match="no current law"):
+        CorpusReader(tmp_path).list_sections("finnes-ikke")
+
+
+def test_list_sections_does_not_load_full_body_index(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven", title="Skatteloven"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+        },
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    reader = CorpusReader(tmp_path)
+    reader.list_sections("skatteloven")
+
+    assert reader._body_index is None
+    assert set(reader._doc_bodies) == {"skatteloven"}
 
 
 # ---------- get_section ----------
@@ -1279,6 +1496,44 @@ def test_get_section_returns_expected_fields(tmp_path: Path) -> None:
     # corpus-wide body index stayed untouched.
     assert set(reader._section_ids_cache) == {"skatteloven"}
     assert reader._body_index is None
+
+
+@pytest.mark.parametrize(
+    "raw_section_id",
+    ["§ 5-12", "§5-12", "5-12.", " 5-12 ", "§ 5-12."],
+)
+def test_get_section_normalizes_section_id_forms(
+    tmp_path: Path,
+    raw_section_id: str,
+) -> None:
+    """AIs naturally write '§ 5-12' or '5-12.'; the bare id is the
+    documented form but the obvious variants must not cost an error
+    round trip. The response always carries the canonical bare id."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    section = CorpusReader(tmp_path).get_section("skatteloven", raw_section_id)
+
+    assert section["section_id"] == "5-12"
+    assert section["heading"] == "§ 5-12. Boligsparing for ungdom"
+
+
+def test_verify_quote_normalizes_section_id_forms(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    out = CorpusReader(tmp_path).verify_quote(
+        "skatteloven",
+        "§ 5-12",
+        "Skattefradraget gis for sparing til bolig",
+    )
+
+    assert out["verified"] is True
+    assert out["section_id"] == "5-12"
 
 
 def test_get_section_extracts_same_act_cross_references(tmp_path: Path) -> None:
@@ -2214,6 +2469,58 @@ def test_verify_quote_accepts_case_and_whitespace_differences(tmp_path: Path) ->
     }
 
 
+@pytest.mark.parametrize(
+    ("source_text", "quoted_text"),
+    [
+        # Curly vs straight apostrophe (chat UIs rewrite these).
+        ("barnets «beste» og foreldres ansvar", "barnets «beste» og foreldres ansvar"),
+        ("avtalens \u2019gyldighet\u2019 vurderes", "avtalens 'gyldighet' vurderes"),
+        # Typographic double quotes vs straight.
+        ("såkalt \u201cfast eiendom\u201d her", 'såkalt "fast eiendom" her'),
+        # En dash / em dash vs hyphen.
+        ("perioden 2020\u20132024 gjelder", "perioden 2020-2024 gjelder"),
+        ("ansvaret \u2014 uansett grunn", "ansvaret - uansett grunn"),
+        # Soft hyphen inside a word disappears in copy-paste.
+        ("eien\u00addomsretten overføres", "eiendomsretten overføres"),
+    ],
+)
+def test_verify_quote_folds_typographic_punctuation(
+    tmp_path: Path,
+    source_text: str,
+    quoted_text: str,
+) -> None:
+    """Curly quotes, en/em dashes and soft hyphens differ between the
+    corpus text and what an AI client pastes back; an honest quote must
+    not fail verification over typography. § stays distinct from $ and
+    digits are untouched — only punctuation variants fold."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={
+            "skatteloven": (f"## Kapittel 1.\n\n### § 1-1. Virkeområde\n\n{source_text}\n"),
+        },
+    )
+
+    result = CorpusReader(tmp_path).verify_quote("skatteloven", "1-1", quoted_text)
+
+    assert result["verified"] is True
+
+
+def test_verify_quote_does_not_fold_section_sign_or_digits(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={
+            "skatteloven": ("## Kapittel 1.\n\n### § 1-1. Virkeområde\n\nSe § 5-12 i loven.\n"),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+
+    assert reader.verify_quote("skatteloven", "1-1", "Se $ 5-12 i loven.")["verified"] is False
+    assert reader.verify_quote("skatteloven", "1-1", "Se § 512 i loven.")["verified"] is False
+    assert reader.verify_quote("skatteloven", "1-1", "Se § 5\u20132 i loven.")["verified"] is False
+
+
 def test_verify_quote_rejects_text_from_different_section(tmp_path: Path) -> None:
     _seed_corpus(
         tmp_path,
@@ -2779,7 +3086,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_fourteen_tools(tmp_path: Path) -> None:
+def test_build_server_registers_fifteen_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -2792,6 +3099,7 @@ def test_build_server_registers_fourteen_tools(tmp_path: Path) -> None:
             "get_law_at",
             "list_law_versions",
             "get_section",
+            "list_sections",
             "get_law_history",
             "list_recent_changes",
             "search_laws",
