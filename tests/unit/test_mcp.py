@@ -1239,7 +1239,10 @@ def test_get_section_returns_expected_fields(tmp_path: Path) -> None:
     assert "Skattefradraget gis for sparing til bolig" in section["body"]
     assert "Fradraget reduseres ved utbetaling" in section["body"]
     assert section["cross_references"] == []
-    assert reader._sections_by_slug is None
+    # No cross-references -> no other act was read or parsed, and the
+    # corpus-wide body index stayed untouched.
+    assert set(reader._section_ids_cache) == {"skatteloven"}
+    assert reader._body_index is None
 
 
 def test_get_section_extracts_same_act_cross_references(tmp_path: Path) -> None:
@@ -1589,7 +1592,7 @@ def test_get_section_prefers_longest_slug_token_in_reference_window(
     ]
 
 
-def test_get_section_reuses_cached_sections_index_for_cross_references(
+def test_get_section_reuses_cached_section_ids_for_cross_references(
     tmp_path: Path,
 ) -> None:
     body = "## Kapittel 1.\n\n### § 1-1. Main\n\nSe § 1-2.\n\n### § 1-2. Target\n\nTarget body.\n"
@@ -1601,18 +1604,43 @@ def test_get_section_reuses_cached_sections_index_for_cross_references(
     reader = CorpusReader(tmp_path)
 
     first_section = reader.get_section("egen-lov", "1-1")
-    sections_index = reader._sections_by_slug
     assert first_section["cross_references"][0]["valid"] is True
-    assert sections_index is not None
+    cached_ids = reader._section_ids_cache["egen-lov"]
 
     second_section = reader.get_section("egen-lov", "1-1")
 
     assert second_section["cross_references"] == first_section["cross_references"]
-    assert reader._sections_by_slug is sections_index
+    assert reader._section_ids_cache["egen-lov"] is cached_ids
+
+
+def test_get_section_does_not_load_full_body_index(tmp_path: Path) -> None:
+    """A point lookup must read only its own doc's file — never pay
+    the corpus-wide body-index load that search_body needs."""
+    body = "## Kapittel 1.\n\n### § 1-1. Main\n\nSe § 1-2 i annen-lov.\n\n### § 1-2. T\n\nB.\n"
+    other = "## Kapittel 1.\n\n### § 1-2. Other\n\nOther body.\n"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="egen-lov", title="Egen lov"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+            "nl-3": _record(slug="untouched-lov", title="Untouched"),
+        },
+        body_for={"egen-lov": body, "annen-lov": other, "untouched-lov": other},
+    )
+    reader = CorpusReader(tmp_path)
+
+    section = reader.get_section("egen-lov", "1-1")
+
+    assert section["cross_references"][0]["target_slug"] == "annen-lov"
+    assert section["cross_references"][0]["valid"] is True
+    assert reader._body_index is None
+    # Only the two acts involved in the lookup were read and parsed.
+    assert set(reader._section_ids_cache) == {"egen-lov", "annen-lov"}
+    assert set(reader._doc_bodies) == {"egen-lov", "annen-lov"}
 
 
 def test_extract_cross_references_reports_unknown_current_slug() -> None:
-    assert _extract_cross_references("Se § 1-1.", "missing-lov", {}) == [
+    assert _extract_cross_references("Se § 1-1.", "missing-lov", set(), lambda _slug: set()) == [
         {
             "text": "§ 1-1",
             "target_slug": "missing-lov",
