@@ -2359,6 +2359,58 @@ def test_verify_quote_accepts_case_and_whitespace_differences(tmp_path: Path) ->
     }
 
 
+@pytest.mark.parametrize(
+    ("source_text", "quoted_text"),
+    [
+        # Curly vs straight apostrophe (chat UIs rewrite these).
+        ("barnets «beste» og foreldres ansvar", "barnets «beste» og foreldres ansvar"),
+        ("avtalens \u2019gyldighet\u2019 vurderes", "avtalens 'gyldighet' vurderes"),
+        # Typographic double quotes vs straight.
+        ("såkalt \u201cfast eiendom\u201d her", 'såkalt "fast eiendom" her'),
+        # En dash / em dash vs hyphen.
+        ("perioden 2020\u20132024 gjelder", "perioden 2020-2024 gjelder"),
+        ("ansvaret \u2014 uansett grunn", "ansvaret - uansett grunn"),
+        # Soft hyphen inside a word disappears in copy-paste.
+        ("eien\u00addomsretten overføres", "eiendomsretten overføres"),
+    ],
+)
+def test_verify_quote_folds_typographic_punctuation(
+    tmp_path: Path,
+    source_text: str,
+    quoted_text: str,
+) -> None:
+    """Curly quotes, en/em dashes and soft hyphens differ between the
+    corpus text and what an AI client pastes back; an honest quote must
+    not fail verification over typography. § stays distinct from $ and
+    digits are untouched — only punctuation variants fold."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={
+            "skatteloven": (f"## Kapittel 1.\n\n### § 1-1. Virkeområde\n\n{source_text}\n"),
+        },
+    )
+
+    result = CorpusReader(tmp_path).verify_quote("skatteloven", "1-1", quoted_text)
+
+    assert result["verified"] is True
+
+
+def test_verify_quote_does_not_fold_section_sign_or_digits(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={
+            "skatteloven": ("## Kapittel 1.\n\n### § 1-1. Virkeområde\n\nSe § 5-12 i loven.\n"),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+
+    assert reader.verify_quote("skatteloven", "1-1", "Se $ 5-12 i loven.")["verified"] is False
+    assert reader.verify_quote("skatteloven", "1-1", "Se § 512 i loven.")["verified"] is False
+    assert reader.verify_quote("skatteloven", "1-1", "Se § 5\u20132 i loven.")["verified"] is False
+
+
 def test_verify_quote_rejects_text_from_different_section(tmp_path: Path) -> None:
     _seed_corpus(
         tmp_path,

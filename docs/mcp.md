@@ -411,7 +411,7 @@ Anti-hallucination guard for verbatim citations. Before answering with text like
 - **`section_id`** — the bare numeric id (same form as for `get_section`).
 - **`quote`** — the verbatim string to verify against the section body.
 
-Match is **case-insensitive and whitespace-tolerant** (Norwegian legal text is sentence case but AIs sometimes capitalize for emphasis; copy-paste through different clients can re-wrap whitespace). Punctuation and accents are NOT normalized — `§` is not the same as `$`, and `§ 5-12` is not the same as `§ 512`.
+Match is **case-insensitive, whitespace-tolerant, and typography-tolerant**: curly vs straight quotes, en/em dash vs hyphen, and soft hyphens are folded before matching (Norwegian legal text is sentence case but AIs sometimes capitalize for emphasis; chat clients rewrite quotes and dashes in transit — an honest quote must not fail over typography). Beyond that, punctuation and accents are NOT normalized — `§` is not the same as `$`, and `§ 5-12` is not the same as `§ 512`.
 
 **Sample call:** `verify_quote(slug="skatteloven-sktl", section_id="5-12", quote="Skattefradraget gis for sparing til bolig")`
 
@@ -433,7 +433,7 @@ Match is **case-insensitive and whitespace-tolerant** (Norwegian legal text is s
   "verified": false,
   "slug": "skatteloven-sktl",
   "section_id": "5-12",
-  "reason": "quote not found in § 5-12 of 'skatteloven-sktl' after lowercase and whitespace normalization. The quote may be from a different section, paraphrased rather than verbatim, or hallucinated. Call get_section('skatteloven-sktl', '5-12') to read the actual text."
+  "reason": "quote not found in § 5-12 of 'skatteloven-sktl' after case, whitespace and typographic-punctuation normalization. The quote may be from a different section, paraphrased rather than verbatim, or hallucinated. Call get_section('skatteloven-sktl', '5-12') to read the actual text."
 }
 ```
 

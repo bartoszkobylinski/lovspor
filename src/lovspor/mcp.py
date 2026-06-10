@@ -43,6 +43,7 @@ import re
 import shlex
 import subprocess
 import sys
+import unicodedata
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -933,8 +934,10 @@ class CorpusReader:
         Anti-hallucination guard for the AI: before claiming *"§ 5-12
         of Skatteloven says X"*, call this with the verbatim text of
         X. Returns ``{verified, slug, section_id, reason}``. ``verified``
-        is true only when the quote, after lowercase + whitespace
-        normalization, appears as a substring of the section body.
+        is true only when the quote, after case, whitespace and
+        typographic-punctuation normalization (see
+        ``_normalize_for_quote_match``), appears as a substring of
+        the section body.
 
         Catches the most common citation hallucination — the AI quotes
         words that are NOT in the section it cites (often pulled from
@@ -978,9 +981,10 @@ class CorpusReader:
             "slug": slug,
             "section_id": section_id,
             "reason": (
-                f"quote not found in § {section_id} of {slug!r} after lowercase "
-                f"and whitespace normalization. The quote may be from a different "
-                f"section, paraphrased rather than verbatim, or hallucinated. "
+                f"quote not found in § {section_id} of {slug!r} after case, "
+                f"whitespace and typographic-punctuation normalization. The quote "
+                f"may be from a different section, paraphrased rather than "
+                f"verbatim, or hallucinated. "
                 f"Call get_section({slug!r}, {section_id!r}) to read the actual text."
             ),
         }
@@ -1684,24 +1688,52 @@ def _normalize_section_id(section_id: str) -> str:
     return normalized.rstrip(".").strip()
 
 
+_QUOTE_FOLD_TABLE = str.maketrans(
+    {
+        "\u2018": "'",  # left single quotation mark
+        "\u2019": "'",  # right single quotation mark / typographic apostrophe
+        "\u201a": "'",  # single low-9 quotation mark
+        "\u201b": "'",  # single high-reversed-9 quotation mark
+        "\u201c": '"',  # left double quotation mark
+        "\u201d": '"',  # right double quotation mark
+        "\u201e": '"',  # double low-9 quotation mark
+        "\u2013": "-",  # en dash
+        "\u2014": "-",  # em dash
+        "\u2212": "-",  # minus sign
+        "\u00ad": None,  # soft hyphen (invisible) dropped entirely
+    },
+)
+"""Typographic punctuation folded to its ASCII equivalent before
+quote matching. These are the characters chat UIs and renderers
+rewrite between the corpus and what the AI pastes back; an honest
+quote must not fail verification over typography. ``§`` and digits
+are deliberately NOT in this table."""
+
+
 def _normalize_for_quote_match(text: str) -> str:
     """Normalize text for ``verify_quote`` substring matching.
 
-    Lowercases the text and collapses every whitespace run (spaces,
-    tabs, newlines) to a single space. This rejects two false-
-    negative classes that would otherwise plague legitimate quotes:
+    Applies Unicode NFKC, folds typographic quotes/dashes to ASCII
+    (``_QUOTE_FOLD_TABLE``), lowercases, and collapses every
+    whitespace run (spaces, tabs, newlines, NBSP) to a single space.
+    This rejects the false-negative classes that would otherwise
+    plague legitimate quotes:
 
     - Case differences between AI-generated text and source text
       (Norwegian legal text uses sentence case; AIs sometimes
       capitalize for emphasis).
     - Newline / tab differences from copy-paste through different
       AI client UIs that re-wrap text.
+    - Curly-vs-straight quotes, en/em-dash-vs-hyphen, and soft
+      hyphens introduced by typography-aware clients. A guard that
+      rejects honest quotes teaches the AI to skip the guard.
 
-    Does NOT strip punctuation or accents — those are semantically
-    significant in Norwegian legal text (``§`` is not the same as
-    ``$``, ``§ 5-12`` is not the same as ``§ 512``).
+    Does NOT strip punctuation classes or accents wholesale — those
+    are semantically significant in Norwegian legal text (``§`` is
+    not the same as ``$``, ``§ 5-12`` is not the same as ``§ 512``).
     """
-    return " ".join(text.lower().split())
+    folded = unicodedata.normalize("NFKC", text).translate(_QUOTE_FOLD_TABLE)
+    return " ".join(folded.lower().split())
 
 
 def _record_summary(doc_id: str, record: ManifestRecord) -> dict[str, Any]:
@@ -2048,12 +2080,14 @@ def build_server(corpus_path: Path) -> FastMCP:
         call this with the verbatim quote you intend to attribute to
         that section. Returns ``{verified, slug, section_id, reason}``.
 
-        Match is case-insensitive and whitespace-tolerant (Norwegian
-        legal text is sentence case but AIs sometimes capitalize for
-        emphasis; copy-paste through different clients can re-wrap
-        whitespace). Punctuation and accents are NOT normalized —
-        ``§`` is not the same as ``$`` and ``§ 5-12`` is not the
-        same as ``§ 512``.
+        Match is case-insensitive, whitespace-tolerant, and folds
+        typographic punctuation (curly vs straight quotes, en/em dash
+        vs hyphen, soft hyphens) — Norwegian legal text is sentence
+        case but AIs sometimes capitalize for emphasis, and chat
+        clients rewrite quotes and dashes in transit. Beyond that,
+        punctuation and accents are NOT normalized — ``§`` is not
+        the same as ``$`` and ``§ 5-12`` is not the same as
+        ``§ 512``.
 
         Catches the most common citation hallucination: AI quotes
         words that are NOT in the section it cites (often pulled
