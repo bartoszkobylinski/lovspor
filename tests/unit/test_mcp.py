@@ -1337,6 +1337,72 @@ def test_semantic_search_rejects_negative_limit(tmp_path: Path) -> None:
         ).semantic_search("query", limit=-1)
 
 
+# ---------- list_sections ----------
+
+
+def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    toc = CorpusReader(tmp_path).list_sections("skatteloven")
+
+    assert toc == [
+        {
+            "section_id": "1-1",
+            "heading": "§ 1-1. Virkeområde",
+            "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+        },
+        {
+            "section_id": "1-2",
+            "heading": "§ 1-2. Hvem som pålegger skatt",
+            "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+        },
+        {
+            "section_id": "5-12",
+            "heading": "§ 5-12. Boligsparing for ungdom",
+            "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+        },
+        {
+            "section_id": "5-13",
+            "heading": "§ 5-13. Annet",
+            "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+        },
+    ]
+
+
+def test_list_sections_empty_act_returns_empty_list(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="tom-lov", title="Tom lov")},
+        body_for={"tom-lov": "Ingen paragrafer her.\n"},
+    )
+    assert CorpusReader(tmp_path).list_sections("tom-lov") == []
+
+
+def test_list_sections_unknown_slug_raises_with_recovery_hint(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven-sktl", title="Skatteloven")})
+    with pytest.raises(CorpusNotFoundError, match="no current law"):
+        CorpusReader(tmp_path).list_sections("finnes-ikke")
+
+
+def test_list_sections_does_not_load_full_body_index(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven", title="Skatteloven"),
+            "nl-2": _record(slug="annen-lov", title="Annen lov"),
+        },
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    reader = CorpusReader(tmp_path)
+    reader.list_sections("skatteloven")
+
+    assert reader._body_index is None
+    assert set(reader._doc_bodies) == {"skatteloven"}
+
+
 # ---------- get_section ----------
 
 
@@ -2976,7 +3042,7 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 # ---------- build_server ----------
 
 
-def test_build_server_registers_fourteen_tools(tmp_path: Path) -> None:
+def test_build_server_registers_fifteen_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -2989,6 +3055,7 @@ def test_build_server_registers_fourteen_tools(tmp_path: Path) -> None:
             "get_law_at",
             "list_law_versions",
             "get_section",
+            "list_sections",
             "get_law_history",
             "list_recent_changes",
             "search_laws",

@@ -91,13 +91,13 @@ def test_sync_help_mentions_incremental() -> None:
     assert "Incremental sync" in result.stdout
 
 
-def test_mcp_help_mentions_twelve_tools_and_optional_semantic_search_key() -> None:
+def test_mcp_help_mentions_fifteen_tools_and_optional_semantic_search_key() -> None:
     result = runner.invoke(app, ["mcp", "--help"])
     assert result.exit_code == 0
-    assert "Twelve read-only tools" in result.stdout
+    assert "Fifteen read-only tools" in result.stdout
     assert "OPENAI_API_KEY" in result.stdout
     assert "semantic_search" in result.stdout
-    assert "other eleven" in result.stdout
+    assert "other fourteen" in result.stdout
     assert "tools work normally" in result.stdout
 
 

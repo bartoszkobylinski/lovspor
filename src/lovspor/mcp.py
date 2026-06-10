@@ -1,6 +1,6 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles fourteen read-only tools over a local clone of the lovverk
+Bundles fifteen read-only tools over a local clone of the lovverk
 Markdown corpus (produced by the lovspor sync engine). Each tool
 answers a class of question an AI agent would naturally ask about
 Norwegian law:
@@ -9,6 +9,7 @@ Norwegian law:
     get_law_at(slug, "2018-06-15")      -> "Show me Skatteloven as of 2018-06-15"
     list_law_versions(slug)             -> "When did Skatteloven change?"
     get_section(slug, "5-12")           -> "Show me just § 5-12 of Skatteloven"
+    list_sections(slug)                 -> "Which sections does Skatteloven have?"
     get_law_history(slug)               -> "What changed in Skatteloven recently?"
     list_recent_changes(...)            -> "Which laws changed last week?"
     search_laws(query, ...)             -> "Are there laws about jernbane?" (metadata)
@@ -344,6 +345,34 @@ class CorpusReader:
             "body": section["body"],
             "cross_references": cross_references,
         }
+
+    def list_sections(self, slug: str) -> list[dict[str, str]]:
+        """Table of contents for one act, in document order.
+
+        One row per ``§`` section: ``{section_id, heading,
+        parent_chapter}``. The cheap navigation companion to
+        ``get_section`` — an AI that doesn't know the exact section
+        id can fetch the TOC instead of pulling the whole act
+        through ``get_law`` (hundreds of KB for the big codes).
+
+        Empty list for an act with no ``§`` sections. Unknown slug
+        raises with the usual recovery hints.
+
+        Reads only this act's Markdown file; the parsed section-id
+        set is seeded into the cross-reference cache as a free
+        by-product.
+        """
+        record = self._find_current_by_slug(slug)
+        sections = _parse_sections(self._body_for_record(record))
+        self._section_ids_cache.setdefault(record.slug or "", set(sections.keys()))
+        return [
+            {
+                "section_id": section_id,
+                "heading": data["heading"],
+                "parent_chapter": data["parent_chapter"],
+            }
+            for section_id, data in sections.items()
+        ]
 
     def validate_citation(self, citation: str) -> dict[str, Any]:
         """Verify that a citation string actually resolves in the corpus.
@@ -1775,7 +1804,7 @@ def _build_embedder() -> EmbeddingModel | None:
     if not api_key:
         print(
             "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-            "but the other thirteen tools work normally. Set OPENAI_API_KEY "
+            "but the other fourteen tools work normally. Set OPENAI_API_KEY "
             "and restart to enable semantic search.",
             file=sys.stderr,
             flush=True,
@@ -1796,7 +1825,7 @@ def build_server(corpus_path: Path) -> FastMCP:
     the OpenAI embedder at startup (so a malformed key surfaces
     immediately, not on the first tool call); if it is not set we
     log a warning and disable ``semantic_search`` with a clear
-    runtime error. The other thirteen tools do not need the embedder
+    runtime error. The other fourteen tools do not need the embedder
     so they continue to work without an OpenAI key — refusing to
     start the whole server over one optional dependency would be
     user-hostile.
@@ -1856,6 +1885,29 @@ def build_server(corpus_path: Path) -> FastMCP:
         call.
         """
         return reader.get_section(slug, section_id)
+
+    @mcp.tool()
+    def list_sections(slug: str) -> list[dict[str, str]]:
+        """List an act's table of contents: every ``§`` section id and heading.
+
+        Use this BEFORE ``get_section`` when you don't know the exact
+        section id — it answers *"which section of Skatteloven covers
+        X?"*-style navigation without pulling the whole act through
+        ``get_law`` (hundreds of KB for the big codes, which would
+        flood your context window).
+
+        ``slug``: the act's slug (same as for ``get_law``).
+
+        Returns one row per section, in document order:
+        ``section_id`` (feed straight into ``get_section``),
+        ``heading`` (the full ``§ N-M. Title`` line), and
+        ``parent_chapter`` (the ``Kapittel`` the section belongs to).
+        Empty list when the act has no ``§`` sections.
+
+        Raises if the slug is unknown — the error suggests near-miss
+        slugs and points to ``search_laws``.
+        """
+        return reader.list_sections(slug)
 
     @mcp.tool()
     def get_law_history(slug: str) -> dict[str, Any]:
