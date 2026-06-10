@@ -592,3 +592,34 @@ def test_split_to_token_chunks_exact_limit_is_single_chunk() -> None:
 
 def test_split_to_token_chunks_empty_text_is_single_empty_chunk() -> None:
     assert model_module.split_to_token_chunks("") == [""]
+
+
+def test_split_to_token_chunks_preserves_multitoken_unicode_characters() -> None:
+    """Codex PR #66 round 1: an emoji (or any character that encodes
+    to multiple BPE tokens) straddling a chunk boundary decoded to
+    U+FFFD replacement characters, corrupting the embedded text and
+    breaking the chunks-reassemble-to-original contract."""
+    text = "😀" * 10
+
+    chunks = model_module.split_to_token_chunks(text, max_tokens=1)
+
+    assert "".join(chunks) == text
+    assert all("�" not in chunk for chunk in chunks)
+
+
+def test_split_to_token_chunks_boundary_backs_up_to_character_edge() -> None:
+    """A boundary that would land mid-character moves back to the
+    nearest character edge; chunks stay within max_tokens and still
+    reassemble exactly."""
+    encoding = model_module._encoding_for(DEFAULT_MODEL_NAME)
+    text = ("ord " * 30) + ("😀" * 8) + (" mer norsk tekst æøå" * 5)
+
+    chunks = model_module.split_to_token_chunks(text, max_tokens=20)
+
+    assert len(chunks) > 1
+    assert "".join(chunks) == text
+    for chunk in chunks:
+        assert "�" not in chunk
+        # A single character wider than max_tokens is the only allowed
+        # overflow; none of these characters is, so the cap holds.
+        assert len(encoding.encode(chunk)) <= 20
