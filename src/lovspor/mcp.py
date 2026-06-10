@@ -801,7 +801,10 @@ class CorpusReader:
         clears the floor, ``results`` is empty and ``notice`` says so
         explicitly (including the best rejected score) — the AI must
         report "no strong match" rather than cite from memory.
-        ``notice`` is null whenever results exist.
+        Invariant: EVERY empty-``results`` response carries a
+        non-null ``notice`` (empty query, zero limit, dataset
+        without embeddings, or nothing above the floor); ``notice``
+        is null whenever results exist.
 
         Score is a *similarity*, NOT a relevance proof. Treat results
         as candidates that need verification — the recommended
@@ -828,8 +831,13 @@ class CorpusReader:
             raise ValueError(
                 f"limit must be non-negative, got {limit}",
             )
-        if not query.strip() or limit == 0:
-            return {"results": [], "notice": None}
+        # Empty results ALWAYS carry a notice (documented contract) —
+        # including these caller no-op cases, so the AI never has to
+        # guess whether nothing matched or nothing was searched.
+        if not query.strip():
+            return {"results": [], "notice": "query is empty; nothing was searched."}
+        if limit == 0:
+            return {"results": [], "notice": "limit is 0; nothing was searched."}
 
         index = self._load_embedding_index()
         if not index:

@@ -1314,12 +1314,20 @@ def test_semantic_search_reuses_cached_embedding_index_and_stale_count(
     assert embedder.queries == ["first", "second"]
 
 
-def test_semantic_search_empty_query_and_zero_limit_return_empty(tmp_path: Path) -> None:
+def test_semantic_search_empty_query_and_zero_limit_return_notice(tmp_path: Path) -> None:
+    """Contract: empty results ALWAYS carry a notice explaining why —
+    the AI must never have to guess whether nothing matched or the
+    call itself was a no-op (Codex PR #63 round 1)."""
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
 
-    assert reader.semantic_search("") == {"results": [], "notice": None}
-    assert reader.semantic_search("query", limit=0) == {"results": [], "notice": None}
+    empty_query = reader.semantic_search("")
+    assert empty_query["results"] == []
+    assert "empty" in (empty_query["notice"] or "")
+
+    zero_limit = reader.semantic_search("query", limit=0)
+    assert zero_limit["results"] == []
+    assert "limit" in (zero_limit["notice"] or "")
 
 
 def test_semantic_search_rejects_negative_limit(tmp_path: Path) -> None:
