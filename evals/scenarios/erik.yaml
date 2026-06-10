@@ -208,6 +208,6 @@ scenarios:
         tool: get_law_history
     failure_modes:
       - Event history is not the same as distinct content snapshots.
-      - No list_law_versions tool exists.
-    reveals_gap: no law-version listing tool
-    roadmap_class: B1
+      - list_law_versions shipped in Sprint 10 but the deterministic runner does not script it yet.
+    reveals_gap: eval runner does not script list_law_versions
+    roadmap_class: eval-coverage
