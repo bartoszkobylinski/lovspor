@@ -49,7 +49,7 @@ from typing import Any
 import numpy as np
 from mcp.server.fastmcp import FastMCP
 
-from lovspor.embeddings import EmbeddingModel, OpenAIEmbedder, read_embeddings, top_k_cosine
+from lovspor.embeddings import EmbeddingIndex, EmbeddingModel, OpenAIEmbedder, read_embeddings
 from lovspor.errors import LovsporError
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
@@ -191,11 +191,11 @@ class CorpusReader:
         self._body_index: dict[str, str] | None = None
         # Per-section int8 embedding index for semantic_search; lazy-
         # loaded on first call. ~200 MB resident for the production
-        # corpus at 3072-dim int8. Kept separate from _body_index
-        # because the two indices have very different load profiles
-        # (binary parse vs. text strip) and most consumers will use
-        # only one of them.
-        self._embedding_index: list[tuple[str, str, np.ndarray, float]] | None = None
+        # corpus at 3072-dim int8 (one contiguous matrix inside
+        # EmbeddingIndex). Kept separate from _body_index because the
+        # two indices have very different load profiles (binary parse
+        # vs. text strip) and most consumers will use only one of them.
+        self._embedding_index: EmbeddingIndex | None = None
         # Count of .bin files dropped due to dim mismatch during the
         # last index build. Surfaced in semantic_search error messages
         # so an all-stale corpus (post-model-migration state) gets a
@@ -802,16 +802,13 @@ class CorpusReader:
             if allowed_slugs is not None and record.source_dataset == dataset_key:
                 allowed_slugs.add(record.slug)
 
-        searchable = (
-            [(s, sid, v, sc) for s, sid, v, sc in index if s in allowed_slugs]
-            if allowed_slugs is not None
-            else index
-        )
-        if not searchable:
+        # Skip the (network) query-embedding call entirely when the
+        # dataset filter cannot match any indexed row.
+        if allowed_slugs is not None and allowed_slugs.isdisjoint(index.unique_slugs):
             return []
 
         query_vector = self._embedder.encode([query])[0]
-        hits = top_k_cosine(query_vector, searchable, k=limit)
+        hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
         results: list[dict[str, Any]] = []
         for hit in hits:
             title, subdir = slug_meta.get(hit.slug, (None, ""))
@@ -889,7 +886,7 @@ class CorpusReader:
             ),
         }
 
-    def _load_embedding_index(self) -> list[tuple[str, str, np.ndarray, float]]:
+    def _load_embedding_index(self) -> EmbeddingIndex:
         """Lazy-build the per-section embedding index for ``semantic_search``.
 
         Walks every current manifest record and tries to load
@@ -908,7 +905,7 @@ class CorpusReader:
         tool offline.
         """
         if self._embedding_index is None:
-            index: list[tuple[str, str, np.ndarray, float]] = []
+            entries: list[tuple[str, str, np.ndarray, float]] = []
             stale = 0
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
@@ -943,8 +940,8 @@ class CorpusReader:
                     stale += 1
                     continue
                 for section_id, vector in embedding_file.sections:
-                    index.append((record.slug, section_id, vector, embedding_file.scale))
-            self._embedding_index = index
+                    entries.append((record.slug, section_id, vector, embedding_file.scale))
+            self._embedding_index = EmbeddingIndex.from_entries(entries)
             self._stale_bin_count = stale
         return self._embedding_index
 
