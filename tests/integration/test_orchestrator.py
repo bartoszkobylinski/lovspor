@@ -489,9 +489,6 @@ def test_run_sync_actions_do_not_double_stage_embedding_sidecars(
             )
             return record, [md_path, sidecar_path]
 
-        def fake_delete_one(settings: Settings, manifest: Manifest, doc_id: str) -> Path:
-            return settings.lovverk_repo_path / manifest.documents[doc_id].markdown_path
-
         def capture_commit(*_args: object, **kwargs: object) -> None:
             captured_actions.extend(kwargs["actions"])
 
@@ -518,7 +515,6 @@ def test_run_sync_actions_do_not_double_stage_embedding_sidecars(
             )
             monkeypatch.setattr(orchestrator_module, "_load_embedder", lambda _settings: object())
             monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
-            monkeypatch.setattr(orchestrator_module, "_delete_one", fake_delete_one)
             monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
             run_sync(
                 Settings(
@@ -738,56 +734,6 @@ def test_run_sync_non_collision_changed_and_renamed_keep_per_doc_sequence_and_si
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["documents"]["lov-change"]["markdown_path"] == "lover/beta.md"
     assert manifest["documents"]["lov-rename"]["markdown_path"] == "lover/gamma.md"
-
-
-def test_delete_embeddings_returns_none_for_absent_sidecar(tmp_path: Path) -> None:
-    result = orchestrator_module._delete_embeddings(
-        tmp_path,
-        "gjeldende-lover",
-        "missing",
-    )
-
-    assert result is None
-
-
-def test_delete_embeddings_returns_path_and_deletes_existing_sidecar(tmp_path: Path) -> None:
-    path = tmp_path / "lover" / "embeddings" / "skattie.bin"
-    _write_seed_embedding(path, marker=7)
-
-    result = orchestrator_module._delete_embeddings(
-        tmp_path,
-        "gjeldende-lover",
-        "skattie",
-    )
-
-    assert result == path
-    assert not path.exists()
-
-
-def test_delete_one_deletes_manifest_path_and_returns_it(tmp_path: Path) -> None:
-    corpus = tmp_path / "lovverk"
-    path = corpus / "lover" / "legacy.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("# Legacy\n", encoding="utf-8")
-    manifest = Manifest(
-        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
-        documents={
-            "lov-legacy": _current_law_record(
-                xml=_law_with_section("Legacy", "Body."),
-                slug="legacy",
-                title="Legacy",
-            ),
-        },
-    )
-
-    result = orchestrator_module._delete_one(
-        Settings(data_dir=tmp_path / "data", lovverk_repo_path=corpus),
-        manifest,
-        "lov-legacy",
-    )
-
-    assert result == path
-    assert not path.exists()
 
 
 def test_maybe_delete_old_embeddings_returns_none_for_absent_sidecar(

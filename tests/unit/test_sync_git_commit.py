@@ -16,13 +16,25 @@ from lovspor.sync.git_commit import (
     add,
     commit,
     has_staged_changes,
-    push,
-    status_porcelain,
 )
 
 
 def _git(args: list[str], cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def _status(repo: Path) -> str:
+    """``git status --porcelain`` via raw git — observation helper for
+    staging assertions (the production module deliberately has no
+    status wrapper; the sync pipeline never reads status)."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
 
 
 @pytest.fixture
@@ -93,7 +105,7 @@ def test_add_stages_existing_path_when_mixed_with_orphan_path(repo: Path) -> Non
 
     add(repo, ["kept.txt", "does-not-exist.txt"])
 
-    status = status_porcelain(repo)
+    status = _status(repo)
     assert "kept.txt" in status
     assert "does-not-exist.txt" not in status
 
@@ -107,7 +119,7 @@ def test_add_stages_deletion_for_tracked_missing_path(repo: Path) -> None:
 
     add(repo, ["tracked.txt"])
 
-    assert status_porcelain(repo) == "D  tracked.txt\n"
+    assert _status(repo) == "D  tracked.txt\n"
 
 
 def test_add_stages_deletion_for_dash_prefixed_tracked_path(repo: Path) -> None:
@@ -119,7 +131,7 @@ def test_add_stages_deletion_for_dash_prefixed_tracked_path(repo: Path) -> None:
 
     add(repo, ["-tracked.txt"])
 
-    assert status_porcelain(repo) == "D  -tracked.txt\n"
+    assert _status(repo) == "D  -tracked.txt\n"
 
 
 def test_add_drops_absolute_orphan_path_inside_repo(repo: Path) -> None:
@@ -183,93 +195,6 @@ def test_commit_message_with_multiline_body_preserved(repo: Path) -> None:
         text=True,
     )
     assert "Longer body explaining" in log.stdout
-
-
-def test_status_porcelain_empty_on_clean_repo(repo: Path) -> None:
-    assert status_porcelain(repo) == ""
-
-
-def test_status_porcelain_lists_untracked_files(repo: Path) -> None:
-    (repo / "untracked.txt").write_text("x")
-    out = status_porcelain(repo)
-    assert "untracked.txt" in out
-    assert out.startswith("??")
-
-
-def test_push_to_local_bare_repo(tmp_path: Path) -> None:
-    bare = tmp_path / "bare.git"
-    _git(["init", "--bare", "-q", str(bare)], tmp_path)
-
-    src = tmp_path / "src"
-    src.mkdir()
-    _git(["init", "-q"], src)
-    _git(["config", "user.name", "test"], src)
-    _git(["config", "user.email", "test@example.com"], src)
-    _git(["config", "commit.gpgsign", "false"], src)
-    _git(["remote", "add", "origin", str(bare)], src)
-    _git(["checkout", "-q", "-b", "main"], src)
-    (src / "a.txt").write_text("hi")
-    _git(["add", "a.txt"], src)
-    _git(["commit", "-m", "init"], src)
-
-    push(src, branch="main")
-
-    # Verify the bare repo received the push by inspecting refs directly
-    # (default 'git log' on a bare repo without HEAD set is fragile).
-    refs = subprocess.run(
-        ["git", "show-ref", "refs/heads/main"],
-        cwd=bare,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert "refs/heads/main" in refs.stdout
-
-
-def test_push_defaults_to_main_branch(tmp_path: Path) -> None:
-    """Pin push() default branch='main'. Mutation hardening: the previous
-    push test passed branch='main' explicitly, leaving the default
-    parameter unexercised."""
-    bare = tmp_path / "bare.git"
-    _git(["init", "--bare", "-q", str(bare)], tmp_path)
-
-    src = tmp_path / "src"
-    src.mkdir()
-    _git(["init", "-q"], src)
-    _git(["config", "user.name", "test"], src)
-    _git(["config", "user.email", "test@example.com"], src)
-    _git(["config", "commit.gpgsign", "false"], src)
-    _git(["remote", "add", "origin", str(bare)], src)
-    _git(["checkout", "-q", "-b", "main"], src)
-    (src / "a.txt").write_text("hi")
-    _git(["add", "a.txt"], src)
-    _git(["commit", "-m", "init"], src)
-
-    push(src)  # no branch kwarg — relies on default
-
-    refs = subprocess.run(
-        ["git", "show-ref", "refs/heads/main"],
-        cwd=bare,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert "refs/heads/main" in refs.stdout
-
-
-def test_push_raises_on_unknown_remote(repo: Path) -> None:
-    """``push`` surfaces git's stderr in the raised ``GitCommandError`` so the
-    operator can see *why* the push failed (this is the canonical witness
-    for the ``_run`` stderr-inclusion contract — when ``add`` used to fail
-    on missing paths, that was the original witness; orphan-path filtering
-    moved the witness here)."""
-    (repo / "a.txt").write_text("hi")
-    add(repo, ["a.txt"])
-    commit(repo, "init")
-    with pytest.raises(GitCommandError) as exc_info:
-        push(repo, remote="missing-remote", branch="main")
-    assert "exited" in str(exc_info.value)
-    assert "missing-remote" in str(exc_info.value)
 
 
 def test_run_error_message_preserves_command_cwd_code_and_stripped_stderr(

@@ -149,13 +149,3 @@ def commit(repo: Path, message: str) -> None:
     error.
     """
     _run(["commit", "-m", message], cwd=repo)
-
-
-def push(repo: Path, *, remote: str = "origin", branch: str = "main") -> None:
-    """``git push <remote> <branch>`` from ``repo``."""
-    _run(["push", remote, branch], cwd=repo)
-
-
-def status_porcelain(repo: Path) -> str:
-    """Return ``git status --porcelain`` output. Empty string = clean."""
-    return _run(["status", "--porcelain"], cwd=repo).stdout

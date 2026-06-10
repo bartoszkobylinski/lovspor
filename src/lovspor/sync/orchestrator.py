@@ -381,8 +381,8 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
         # Production crash 2026-05-05 reproducer: a doc is removed
         # while another action (rename/update/add) has just written
         # to the SAME path (collision-resolution slug shuffle moves
-        # someone else into the slot). Without this protection,
-        # ``_delete_one`` would wipe the new owner's content AND
+        # someone else into the slot). Without this protection, an
+        # unconditional delete would wipe the new owner's content AND
         # the resulting per-doc commit would crash with
         # ``pathspec did not match any files``. When the slot is
         # already taken, the tombstone is a manifest-only update —
@@ -667,28 +667,6 @@ def _write_embeddings_for_doc(
     return path
 
 
-def _delete_embeddings(corpus_root: Path, dataset: str, slug: str) -> Path | None:
-    """Remove a doc's embedding sidecar if it exists.
-
-    Returns the path so the caller can stage the deletion, or ``None``
-    when the sidecar never existed (e.g., a sync without an OpenAI
-    key configured). Returning ``None`` lets callers omit the path
-    from ``git_add`` and avoid the ``pathspec did not match any
-    files`` error on untracked + absent paths.
-
-    For removed-doc deletions there is no path-collision risk (the
-    doc has no replacement), so this helper does not consult
-    ``written_paths``. Callers that DO need the protection (changed
-    or renamed actions reusing a sidecar slot) must use
-    :func:`_maybe_delete_old_embeddings` instead.
-    """
-    path = _embeddings_path(corpus_root, dataset, slug)
-    if not path.exists():
-        return None
-    delete_document(path)
-    return path
-
-
 def _maybe_delete_old_embeddings(
     corpus_root: Path,
     dataset: str,
@@ -713,17 +691,6 @@ def _maybe_delete_old_embeddings(
     path = _embeddings_path(corpus_root, dataset, slug)
     if not path.exists() or path in written_paths:
         return None
-    delete_document(path)
-    return path
-
-
-def _delete_one(
-    settings: Settings,
-    prior: Manifest,
-    doc_id: str,
-) -> Path:
-    prior_record = prior.documents[doc_id]
-    path = settings.lovverk_repo_path / prior_record.markdown_path
     delete_document(path)
     return path
 
