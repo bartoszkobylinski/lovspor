@@ -82,11 +82,18 @@ def split_to_token_chunks(
     to semantic search. Callers embed every chunk under the same
     section_id instead, so the whole section stays searchable.
 
-    Chunks are split at token boundaries — BPE tokens are full byte
-    sequences, so each chunk decodes to valid text and the chunks
-    concatenate back to the original. No overlap between chunks:
-    boundary-straddling phrases may embed weaker, accepted as the
-    simple-first trade-off (documented in docs/embeddings.md).
+    Chunks are split at token boundaries, but a boundary that lands
+    inside a multi-token character (an emoji, for example) backs up
+    to the nearest character edge — naive per-token slicing decoded
+    such boundaries to U+FFFD replacement characters and corrupted
+    the text (Codex PR #66 round 1). Chunks therefore always decode
+    cleanly and concatenate back to the original. The single
+    degenerate exception: a character whose own token count exceeds
+    ``max_tokens`` becomes one chunk wider than the cap (only
+    reachable with absurdly small ``max_tokens``; the production cap
+    is 8000). No overlap between chunks: boundary-straddling phrases
+    may embed weaker, accepted as the simple-first trade-off
+    (documented in docs/embeddings.md).
 
     Text at or under the limit (including empty text) returns a
     single chunk, preserving the one-vector-per-section common case.
@@ -95,10 +102,45 @@ def split_to_token_chunks(
     tokens = encoding.encode(text)
     if len(tokens) <= max_tokens:
         return [text]
-    return [
-        encoding.decode(tokens[start : start + max_tokens])
-        for start in range(0, len(tokens), max_tokens)
-    ]
+    chunks: list[str] = []
+    start = 0
+    while start < len(tokens):
+        end = _character_safe_cut(encoding, tokens, start, min(start + max_tokens, len(tokens)))
+        chunks.append(encoding.decode_bytes(tokens[start:end]).decode("utf-8"))
+        start = end
+    return chunks
+
+
+def _character_safe_cut(
+    encoding: tiktoken.Encoding,
+    tokens: list[int],
+    start: int,
+    end: int,
+) -> int:
+    """Largest cut in ``(start, end]`` where ``tokens[start:cut]``
+    decodes to complete UTF-8.
+
+    ``start`` is always a character edge (guaranteed inductively: the
+    previous cut was). When even ``start + 1`` is mid-character, the
+    cut extends FORWARD past ``end`` until the character completes —
+    the degenerate single-wide-character case documented on
+    ``split_to_token_chunks``. Terminates because the full token
+    sequence decodes to the original valid string.
+    """
+    cut = end
+    while cut > start + 1 and not _is_complete_utf8(encoding.decode_bytes(tokens[start:cut])):
+        cut -= 1
+    while not _is_complete_utf8(encoding.decode_bytes(tokens[start:cut])):
+        cut += 1
+    return cut
+
+
+def _is_complete_utf8(data: bytes) -> bool:
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
 
 
 @runtime_checkable
