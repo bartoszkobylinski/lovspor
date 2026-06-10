@@ -36,6 +36,7 @@ Why dataset aliases: legal text consumers think in Norwegian terms
 inputs accept either form and normalize internally.
 """
 
+import difflib
 import json
 import os
 import re
@@ -139,6 +140,11 @@ _SEMANTIC_SNIPPET_CHARS = 200
 ``semantic_search`` hit. Enough to judge relevance and ground the
 hit in real corpus text; the full section still comes from
 ``get_section``."""
+
+_MIN_SUGGESTION_TOKEN_CHARS = 4
+"""Citation tokens shorter than this never feed slug suggestions —
+Norwegian filler words (``i``, ``jf``, ``og``, ``av``) are slug-shaped
+but would only produce noise matches."""
 
 _CROSS_REF_SECTION = re.compile(r"§\s*(\d+(?:-[\da-z]+)?)")
 """Detect ``§ N-M`` (or just ``§ N``) section references inside a
@@ -371,11 +377,9 @@ class CorpusReader:
         # happens to also be a separate token in the same citation.
         citation_lower = citation.lower()
         candidates = [
-            record.slug
-            for record in self.manifest.documents.values()
-            if record.status == "current"
-            and record.slug is not None
-            and _slug_token_in_citation(record.slug, citation_lower)
+            slug
+            for slug in self._load_slug_index()
+            if _slug_token_in_citation(slug, citation_lower)
         ]
         matched_slug = max(candidates, key=len) if candidates else None
 
@@ -387,6 +391,7 @@ class CorpusReader:
                 "heading": None,
                 "reason": (
                     f"could not parse citation {citation!r}: no § id and no known slug found"
+                    f"{self._citation_suggestion_hint(citation_lower)}"
                 ),
             }
 
@@ -399,6 +404,7 @@ class CorpusReader:
                 "reason": (
                     f"ambiguous citation: § {section_id} found but no act "
                     f"identifier; many acts have a section by that id"
+                    f"{self._citation_suggestion_hint(citation_lower)}"
                 ),
             }
 
@@ -1233,11 +1239,49 @@ class CorpusReader:
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
         entry = self._load_slug_index().get(slug)
         if entry is None:
+            suggestions = self._slug_suggestions(slug)
+            hint = f"did you mean {', '.join(suggestions)}? " if suggestions else ""
             raise CorpusNotFoundError(
-                f"no current law with slug {slug!r}; "
+                f"no current law with slug {slug!r}; {hint}"
                 f"use search_laws or list_recent_changes to discover slugs",
             )
         return entry[1]
+
+    def _citation_suggestion_hint(self, citation_lower: str) -> str:
+        """Near-miss hint for a citation whose act token matched nothing.
+
+        Walks the citation's slug-shaped tokens (4+ chars, so filler
+        like ``i`` / ``jf`` never queries) and collects close matches
+        against the canonical slugs. Empty string when there is
+        nothing to suggest, so pinned exact-reason contracts stay
+        intact for token-less citations.
+        """
+        suggestions: list[str] = []
+        for token in _SLUG_TOKEN_PATTERN.findall(citation_lower):
+            if len(token) < _MIN_SUGGESTION_TOKEN_CHARS:
+                continue
+            for match in self._slug_suggestions(token):
+                if match not in suggestions:
+                    suggestions.append(match)
+        if not suggestions:
+            return ""
+        return f"; did you mean {', '.join(suggestions[:3])}? Use search_laws for canonical slugs"
+
+    def _slug_suggestions(self, slug: str) -> list[str]:
+        """Up to three near-miss canonical slugs for an unknown input.
+
+        The most common AI mistake is the colloquial kortform
+        ('skatteloven') for the canonical slug ('skatteloven-sktl');
+        offering the near-miss in the error lets the AI recover in
+        one step instead of a search_laws round trip. Suggestions
+        are advisory — the strict-match contract is unchanged.
+        """
+        return difflib.get_close_matches(
+            slug.lower(),
+            list(self._load_slug_index()),
+            n=3,
+            cutoff=0.6,
+        )
 
     def _safe_join(self, *parts: str) -> Path:
         """Join ``parts`` under ``corpus_path`` and refuse paths that escape it.

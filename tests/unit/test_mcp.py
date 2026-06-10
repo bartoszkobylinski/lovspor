@@ -305,6 +305,47 @@ def test_get_law_raises_for_unknown_slug(tmp_path: Path) -> None:
         CorpusReader(tmp_path).get_law("does-not-exist")
 
 
+def test_get_law_unknown_slug_suggests_closest_match(tmp_path: Path) -> None:
+    """The most common first call from an AI is the colloquial kortform
+    ('skatteloven') instead of the canonical slug ('skatteloven-sktl').
+    The error must offer the near-miss so the AI recovers in one step
+    instead of a search_laws round trip."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-sktl", title="Skatteloven"),
+            "nl-2": _record(slug="husleieloven", title="Husleieloven"),
+        },
+    )
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_law("skatteloven")
+
+    message = str(exc_info.value)
+    assert "skatteloven-sktl" in message
+    assert "did you mean" in message
+
+
+def test_get_law_unknown_slug_without_near_miss_omits_suggestions(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="husleieloven", title="Husleieloven")})
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        CorpusReader(tmp_path).get_law("zzz-qqq-vvv")
+
+    message = str(exc_info.value)
+    assert "did you mean" not in message
+    assert "search_laws" in message
+
+
+def test_validate_citation_unmatched_slug_suggests_canonical_form(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven-sktl", title="Skatteloven")},
+    )
+    out = CorpusReader(tmp_path).validate_citation("§ 5-12 skatteloven")
+
+    assert out["valid"] is False
+    assert "skatteloven-sktl" in (out["reason"] or "")
+
+
 def test_get_law_skips_tombstoned_records(tmp_path: Path) -> None:
     """A removed law is not retrievable via get_law — its file is gone."""
     _seed_corpus(

@@ -401,7 +401,7 @@ Verify that a Norwegian-law citation string actually resolves in the corpus. **Z
 }
 ```
 
-The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. AI consumers should use canonical slugs from `search_laws`.
+The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. When the citation contains a near-miss token, the `reason` appends an advisory `did you mean skatteloven-sktl?` hint (the same hint appears in `get_law`/`get_section` unknown-slug errors), but validation itself never fuzzy-matches: AI consumers should confirm via `search_laws` and re-validate with the canonical slug.
 
 ### `verify_quote(slug, section_id, quote)`
 
