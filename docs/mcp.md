@@ -122,7 +122,7 @@ The frontmatter carries the law's metadata and provenance; the body is the legal
 Return a single ``§`` section of an act — the surgical alternative to `get_law` when the user wants just one paragraph (e.g. *"What does § 5-12 of Skatteloven say?"*). Cheaper for the AI's context window than fetching the whole law.
 
 - **`slug`** — the act's slug (same as for `get_law`).
-- **`section_id`** — the bare numeric / hyphenated identifier WITHOUT the `§` prefix or trailing dot. Examples: `"5-12"`, `"1"`, `"5-12a"`. Norwegian acts use `§ N` for single-chapter acts and `§ N-M` (chapter N, section M) for multi-chapter acts; both work.
+- **`section_id`** — the bare numeric / hyphenated identifier. Examples: `"5-12"`, `"1"`, `"5-12a"`. Norwegian acts use `§ N` for single-chapter acts and `§ N-M` (chapter N, section M) for multi-chapter acts; both work. The obvious variants — leading `§` (`"§ 5-12"`), trailing dot (`"5-12."`), surrounding whitespace — are normalized to the bare id rather than erroring; the response always carries the canonical bare form.
 
 **Sample call:** `get_section(slug="skatteloven-sktl", section_id="5-12")`
 

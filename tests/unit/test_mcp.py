@@ -1388,6 +1388,44 @@ def test_get_section_returns_expected_fields(tmp_path: Path) -> None:
     assert reader._body_index is None
 
 
+@pytest.mark.parametrize(
+    "raw_section_id",
+    ["§ 5-12", "§5-12", "5-12.", " 5-12 ", "§ 5-12."],
+)
+def test_get_section_normalizes_section_id_forms(
+    tmp_path: Path,
+    raw_section_id: str,
+) -> None:
+    """AIs naturally write '§ 5-12' or '5-12.'; the bare id is the
+    documented form but the obvious variants must not cost an error
+    round trip. The response always carries the canonical bare id."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    section = CorpusReader(tmp_path).get_section("skatteloven", raw_section_id)
+
+    assert section["section_id"] == "5-12"
+    assert section["heading"] == "§ 5-12. Boligsparing for ungdom"
+
+
+def test_verify_quote_normalizes_section_id_forms(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    out = CorpusReader(tmp_path).verify_quote(
+        "skatteloven",
+        "§ 5-12",
+        "Skattefradraget gis for sparing til bolig",
+    )
+
+    assert out["verified"] is True
+    assert out["section_id"] == "5-12"
+
+
 def test_get_section_extracts_same_act_cross_references(tmp_path: Path) -> None:
     body = (
         "## Kapittel 1.\n\n"

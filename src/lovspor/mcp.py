@@ -276,7 +276,10 @@ class CorpusReader:
         """Return a single ``§`` section of an act.
 
         ``section_id`` is the bare numeric / hyphenated identifier
-        (``"5-12"`` or ``"1"`` — no ``§`` prefix, no trailing dot).
+        (``"5-12"`` or ``"1"``). The obvious AI-written variants —
+        leading ``§``, trailing dot, surrounding whitespace — are
+        normalized away rather than costing an error round trip; the
+        response always carries the canonical bare id.
 
         The section body runs from the heading line to the next
         ``###`` or ``##`` heading. ``parent_chapter`` carries the
@@ -302,6 +305,7 @@ class CorpusReader:
         its cross-references point at) — never the corpus-wide body
         index that ``search_body`` needs.
         """
+        section_id = _normalize_section_id(section_id)
         record = self._find_current_by_slug(slug)
         # _find_current_by_slug only returns records whose slug == the
         # query slug, so record.slug is non-None here even though the
@@ -943,6 +947,7 @@ class CorpusReader:
         — surfaced via ``get_section``). Empty quote returns
         verified=False with a clear reason rather than raising.
         """
+        section_id = _normalize_section_id(section_id)
         if not quote.strip():
             return {
                 "verified": False,
@@ -1663,6 +1668,20 @@ def _resolve_slug_in_window(
         if token != current_slug and token in known_slugs:
             return token
     return current_slug
+
+
+def _normalize_section_id(section_id: str) -> str:
+    """Fold the obvious AI-written section-id variants to the bare id.
+
+    ``"§ 5-12"``, ``"§5-12"``, ``"5-12."`` and surrounding whitespace
+    all mean ``"5-12"`` — rejecting them costs an error round trip for
+    no information gain. Anything beyond these (chapter words,
+    ``ledd`` qualifiers) is left untouched and fails the section
+    lookup with the available-ids recovery message.
+    """
+    normalized = section_id.strip()
+    normalized = normalized.removeprefix("§").lstrip()
+    return normalized.rstrip(".").strip()
 
 
 def _normalize_for_quote_match(text: str) -> str:
