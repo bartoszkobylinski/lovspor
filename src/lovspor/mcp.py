@@ -210,6 +210,11 @@ class CorpusReader:
         # than the body text itself (~100-500 KB resident across
         # the production corpus).
         self._sections_by_slug: dict[str, set[str]] | None = None
+        # ``slug -> (doc_id, record)`` for O(1) point lookups
+        # (get_law, get_section, get_eu_basis, ...). Built once from
+        # the cached manifest — every per-call linear scan over ~4500
+        # records was pure waste for the most common tool calls.
+        self._slug_index: dict[str, tuple[str, ManifestRecord]] | None = None
 
     @property
     def manifest(self) -> Manifest:
@@ -659,29 +664,30 @@ class CorpusReader:
         + ``git pull`` to remediate rather than treating the field
         as 'unset'.
         """
-        for doc_id, record in self.manifest.documents.items():
-            if record.slug == slug and record.status == "current":
-                # eu_basis is None signals a pre-Sprint-8 manifest record.
-                # The backfill migration runs on the next sync, but until
-                # then the MCP server has no authoritative answer to give.
-                # Returning [] would be a silent lie ("we know there's no
-                # EU basis"); raising is the honest answer.
-                if record.eu_basis is None:
-                    raise CorpusNotFoundError(
-                        f"eu_basis is unknown for {slug!r}; corpus predates Sprint 8 PR-D. "
-                        f"Run 'git pull' in the corpus to refresh.",
-                    )
-                return {
-                    "slug": record.slug,
-                    "doc_id": doc_id,
-                    "title": record.title,
-                    "dataset": _subdir_for_dataset(record.source_dataset),
-                    "eu_basis": list(record.eu_basis),
-                }
-        raise CorpusNotFoundError(
-            f"no current law with slug {slug!r}; "
-            f"use search_laws or list_recent_changes to discover slugs",
-        )
+        entry = self._load_slug_index().get(slug)
+        if entry is None:
+            raise CorpusNotFoundError(
+                f"no current law with slug {slug!r}; "
+                f"use search_laws or list_recent_changes to discover slugs",
+            )
+        doc_id, record = entry
+        # eu_basis is None signals a pre-Sprint-8 manifest record.
+        # The backfill migration runs on the next sync, but until
+        # then the MCP server has no authoritative answer to give.
+        # Returning [] would be a silent lie ("we know there's no
+        # EU basis"); raising is the honest answer.
+        if record.eu_basis is None:
+            raise CorpusNotFoundError(
+                f"eu_basis is unknown for {slug!r}; corpus predates Sprint 8 PR-D. "
+                f"Run 'git pull' in the corpus to refresh.",
+            )
+        return {
+            "slug": record.slug,
+            "doc_id": doc_id,
+            "title": record.title,
+            "dataset": _subdir_for_dataset(record.source_dataset),
+            "eu_basis": list(record.eu_basis),
+        }
 
     def search_eu_implementations(self, eu_doc_id: str) -> list[dict[str, Any]]:
         """Reverse lookup: list Norwegian acts that implement a given EU
@@ -1105,14 +1111,30 @@ class CorpusReader:
             "subject": lines[2],
         }
 
+    def _load_slug_index(self) -> dict[str, tuple[str, ManifestRecord]]:
+        """Build ``slug -> (doc_id, record)`` once for current records.
+
+        First manifest entry wins on a duplicate slug, matching the
+        linear-scan behavior this index replaced. Pinned for the
+        reader's lifetime — the same contract as the cached manifest.
+        """
+        if self._slug_index is None:
+            index: dict[str, tuple[str, ManifestRecord]] = {}
+            for doc_id, record in self.manifest.documents.items():
+                if record.status != "current" or record.slug is None:
+                    continue
+                index.setdefault(record.slug, (doc_id, record))
+            self._slug_index = index
+        return self._slug_index
+
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
-        for record in self.manifest.documents.values():
-            if record.slug == slug and record.status == "current":
-                return record
-        raise CorpusNotFoundError(
-            f"no current law with slug {slug!r}; "
-            f"use search_laws or list_recent_changes to discover slugs",
-        )
+        entry = self._load_slug_index().get(slug)
+        if entry is None:
+            raise CorpusNotFoundError(
+                f"no current law with slug {slug!r}; "
+                f"use search_laws or list_recent_changes to discover slugs",
+            )
+        return entry[1]
 
     def _safe_join(self, *parts: str) -> Path:
         """Join ``parts`` under ``corpus_path`` and refuse paths that escape it.

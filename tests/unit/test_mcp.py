@@ -265,6 +265,34 @@ def test_reader_loads_manifest_lazily(tmp_path: Path) -> None:
 # ---------- get_law ----------
 
 
+def test_slug_lookups_use_cached_index(tmp_path: Path) -> None:
+    """Point lookups resolve through a slug index built once from the
+    manifest, not a per-call linear scan over every record."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+    assert "# Skatteloven" in reader.get_law("skatteloven")
+
+    # Mutating the manifest after the first lookup must not affect
+    # resolution: the index is pinned for the reader's lifetime, the
+    # same contract as the cached manifest itself.
+    reader.manifest.documents.clear()
+    assert "# Skatteloven" in reader.get_law("skatteloven")
+
+
+def test_slug_index_first_record_wins_on_duplicate_slugs(tmp_path: Path) -> None:
+    """Two current records with the same slug: the first manifest entry
+    wins, matching the old linear-scan behavior."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="First", eu_basis=["32016R0679"]),
+            "nl-2": _record(slug="dupe", title="Second", eu_basis=[]),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+    assert reader.get_eu_basis("dupe")["doc_id"] == "nl-1"
+
+
 def test_get_law_returns_file_content(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
     out = CorpusReader(tmp_path).get_law("skatteloven")
