@@ -40,7 +40,13 @@ The workflow:
 2. Installs `uv` and engine dependencies.
 3. Configures SSH using the `LOVVERK_DEPLOY_KEY` secret.
 4. Clones `lovverk` to a sibling directory.
-5. Runs `lovspor sync`.
+5. Runs `lovspor sync` with the `OPENAI_API_KEY` secret in the
+   environment, so changed docs get their embedding `.bin` sidecars
+   written in the same run. (Production ran keyless from Sprint 9
+   until 2026-06-10 — every sync silently skipped embeddings and
+   `semantic_search` had no data to search. If the secret is ever
+   removed, syncs keep working but embeddings stop updating until
+   the next keyed run triggers the backfill migration.)
 6. Pushes corpus changes only if HEAD is ahead of `origin/main`.
 
 Concurrency is set to a single `sync` group: a second invocation queues until the active one finishes, never races.
@@ -71,6 +77,20 @@ Two files: `~/.ssh/lovverk_deploy_key` (private) and `~/.ssh/lovverk_deploy_key.
 - **Name:** `LOVVERK_DEPLOY_KEY`
 - **Value:** paste the contents of `~/.ssh/lovverk_deploy_key` (the file **without** `.pub`)
 - Click **Add secret**
+
+## OpenAI key setup (one-time)
+
+The sync workflow also needs `OPENAI_API_KEY` as an Actions secret to
+write the embedding sidecars that power `semantic_search`:
+
+```bash
+gh secret set OPENAI_API_KEY   # paste the key when prompted
+```
+
+The first keyed sync after a key-less period auto-runs the Sprint 9
+backfill migration (embeds every doc missing a `.bin`; ~30-60 min and
+a few dollars of OpenAI usage for the full corpus, seconds and
+fractions of a cent on routine daily runs).
 
 ### 4. Optionally remove the local copies
 
