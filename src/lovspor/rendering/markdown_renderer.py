@@ -27,8 +27,14 @@ Inline elements (inside any rendered text content):
     <a href="url">                          -> [text](url)
     <br>                                    -> hard newline
 
-Unknown tags fall through to "walk children, skip this wrapper". This
-means future Lovdata additions won't silently drop content.
+Unknown tags fall through to "walk children, skip this wrapper". That
+walk (``_render_children``) emits only child *elements*: an element's
+own ``.text`` and each child's ``.tail`` are not rendered. On the
+current Lovdata schema those are whitespace-only between block elements.
+If real text ever lands there — a ``<p>`` with direct text, a
+``<table>``, or any other unhandled text-bearing element — it guards
+against silent loss by raising :class:`~lovspor.errors.RenderError`
+rather than committing an incomplete legal document.
 
 Output contract: body only, no YAML frontmatter, no trailing whitespace
 except a single trailing newline.
@@ -38,8 +44,10 @@ from io import BytesIO
 
 from lxml import etree
 
-from lovspor.errors import ParseError
+from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
+
+_DROPPED_TEXT_SAMPLE = 60
 
 _INLINE_STRONG = {"strong"}
 _INLINE_EMPHASIS = {"i", "em"}
@@ -88,7 +96,32 @@ def _render_sub_heading(
 
 
 def _render_children(elem: etree._Element) -> str:
+    _assert_no_dropped_text(elem)
     return "".join(_render_element(child) for child in elem)
+
+
+def _assert_no_dropped_text(elem: etree._Element) -> None:
+    """Raise if this container carries non-whitespace text the child-only
+    walk would silently drop.
+
+    ``_render_children`` emits only child *elements*; the element's own
+    ``.text`` (before the first child) and each child's ``.tail`` (after
+    its close tag) are never rendered here. On the current Lovdata schema
+    those nodes are whitespace-only between block elements. Real text means
+    an unhandled text-bearing element reached the block walk — a ``<p>``
+    with direct text, a ``<table>``, or a future schema addition. Dropping
+    it would publish an incomplete legal document, so fail loudly. Text
+    handled elsewhere (paragraph/heading/list/anchor rendering) never
+    reaches this walk, so intentional drops are not affected.
+    """
+    skipped = (elem.text, *(child.tail for child in elem))
+    offending = next((text.strip() for text in skipped if text and text.strip()), "")
+    if offending:
+        raise RenderError(
+            f"renderer would drop block-level text ({offending[:_DROPPED_TEXT_SAMPLE]!r}) "
+            f"in <{elem.tag}>; an unhandled text-bearing element reached the "
+            f"child-only walk",
+        )
 
 
 def _render_article(
