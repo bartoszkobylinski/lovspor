@@ -17,6 +17,15 @@ class ParseError(LovsporError):
     """Failed to parse upstream data (XML, JSON, or manifest)."""
 
 
+class RenderError(LovsporError):
+    """Rendering produced output that lost source content.
+
+    Distinct from ``ParseError`` (input was well-formed and parsed): the
+    renderer dropped text that was present in the XML, so committing the
+    output would publish an incomplete legal document.
+    """
+
+
 class ExtractionError(LovsporError):
     """Failed to safely extract or validate an archive."""
 

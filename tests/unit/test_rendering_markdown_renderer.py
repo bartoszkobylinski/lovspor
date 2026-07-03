@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.errors import ParseError
+from lovspor.errors import ParseError, RenderError
 from lovspor.rendering.markdown_renderer import render_markdown
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -187,6 +187,40 @@ def test_render_unknown_tag_traverses_children() -> None:
         ),
     )
     assert md == "Still visible.\n"
+
+
+def test_render_raises_when_block_level_text_would_be_dropped() -> None:
+    """A <p> carrying direct text is an unhandled text-bearing wrapper:
+    the block walk emits only child *elements*, so the text would vanish.
+    The lost-content guard must raise rather than silently commit an
+    incomplete legal document."""
+    with pytest.raises(RenderError, match="drop block-level text"):
+        render_markdown(_wrap(b"<p>Direct paragraph text in a plain p tag</p>"))
+
+
+def test_render_raises_when_table_content_would_be_dropped() -> None:
+    """Whole tables (fee/rate schedules in forskrifter) currently vanish
+    because tr/td are unknown text-bearing wrappers; the guard catches it."""
+    with pytest.raises(RenderError):
+        render_markdown(
+            _wrap(b"<table><tr><td>sats 25 kr</td><td>2020</td></tr></table>"),
+        )
+
+
+def test_render_raises_when_block_level_tail_text_would_be_dropped() -> None:
+    """Text after a child element's close tag (its tail) at block level is
+    dropped by the walk; only whitespace tails are safe."""
+    with pytest.raises(RenderError):
+        render_markdown(
+            _wrap(b"<section>intro tekst<h2>Overskrift</h2>hale tekst</section>"),
+        )
+
+
+def test_render_guard_tolerates_whitespace_between_block_elements() -> None:
+    """Whitespace-only text and tails around block elements (the normal
+    Lovdata document shape) carry no words and must NOT trip the guard."""
+    md = render_markdown(_wrap(b'\n  <article class="legalP">Tekst</article>\n  '))
+    assert md == "Tekst\n"
 
 
 def test_render_nested_legal_article_walks_children() -> None:
