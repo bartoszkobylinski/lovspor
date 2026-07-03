@@ -872,3 +872,30 @@ def test_extract_history_raises_on_git_log_failure(tmp_path: Path) -> None:
             doc_id="nl-x",
             slug="x",
         )
+
+
+def test_extract_history_records_raw_non_ascii_rename_paths(tmp_path: Path) -> None:
+    """Regression: git C-quotes non-ASCII paths in ``--numstat`` rename rows
+    by default, so from/to would be stored as
+    ``"lover/oppl\\303\\246ringslova.md"`` (quotes + octal escapes included)
+    instead of the real UTF-8 path. ~2,000 corpus files carry æøå slugs."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "lover").mkdir()
+    (repo / "lover" / "opplæringslova.md").write_text("body\n", encoding="utf-8")
+    _git("add", "lover/opplæringslova.md", cwd=repo)
+    _git("commit", "-m", "add(lov): opplaeringslova", cwd=repo)
+
+    _git("mv", "lover/opplæringslova.md", "lover/opplæringslova-ny.md", cwd=repo)
+    _git("commit", "-m", "migration: rename to new kortform", cwd=repo)
+
+    record = extract_history(
+        repo_path=repo,
+        current_path="lover/opplæringslova-ny.md",
+        doc_id="nl-x",
+        slug="opplaeringslova-ny",
+    )
+
+    assert record.events[0].type == "renamed"
+    assert record.events[0].from_path == "lover/opplæringslova.md"
+    assert record.events[0].to_path == "lover/opplæringslova-ny.md"

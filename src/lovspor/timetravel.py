@@ -115,6 +115,11 @@ def _iter_follow_log(repo_path: Path, current_path: str) -> list[_RevisionEntry]
     result = subprocess.run(  # noqa: S603
         [  # noqa: S607
             "git",
+            # core.quotePath=true (git's default) C-quotes non-ASCII bytes in
+            # path output (æøå -> "\303\246"), which then breaks the `git show
+            # <sha>:<path>` in _read_blob. ~2,000 corpus files have æøå slugs.
+            "-c",
+            "core.quotePath=false",
             "log",
             "--follow",
             f"--format={_LOG_RECORD_SEP}%n%H%n%aI",
