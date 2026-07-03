@@ -1,5 +1,6 @@
 """Tests for lovspor.timetravel."""
 
+import os
 import subprocess
 from dataclasses import FrozenInstanceError
 from datetime import UTC, date, datetime, time
@@ -77,6 +78,8 @@ def test_iter_follow_log_parses_commit_blocks_and_skips_malformed_blocks(
     ) -> subprocess.CompletedProcess[str]:
         assert args == [
             "git",
+            "-c",
+            "core.quotePath=false",
             "log",
             "--follow",
             "--format=__COMMIT__%n%H%n%aI",
@@ -176,3 +179,59 @@ def test_get_law_at_revision_reads_latest_matching_revision(
         datetime.combine(date(2026, 4, 27), time.max).replace(tzinfo=UTC),
     )
     assert seen["read"] == (tmp_path, "sha-old", "lover/old.md")
+
+
+# ---------- real-git regression: non-ASCII slug paths ----------
+
+
+def _init_repo(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"], cwd=repo, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _commit_all(repo: Path, message: str, when: str) -> None:
+    env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def test_get_law_at_revision_handles_non_ascii_slug_paths(tmp_path: Path) -> None:
+    """Regression: git C-quotes non-ASCII paths in ``--name-only`` output by
+    default (``core.quotePath=true``); the quoted, octal-escaped string then
+    breaks ``git show``. ~2,000 corpus files carry æøå slugs
+    (arbeidsmiljøloven, opplæringslova, ...), so this is the common case."""
+    repo = tmp_path / "lovverk"
+    _init_repo(repo)
+    (repo / "lover").mkdir()
+    doc = repo / "lover" / "arbeidsmiljøloven-aml.md"
+
+    doc.write_text("versjon 1\n", encoding="utf-8")
+    _commit_all(repo, "add(lov): arbeidsmiljoloven", "2026-01-01T12:00:00+00:00")
+
+    doc.write_text("versjon 2\n", encoding="utf-8")
+    _commit_all(repo, "update(lov): arbeidsmiljoloven", "2026-06-01T12:00:00+00:00")
+
+    rel = "lover/arbeidsmiljøloven-aml.md"
+    assert get_law_at_revision(repo, rel, date(2026, 3, 1)) == "versjon 1\n"
+    assert get_law_at_revision(repo, rel, date(2026, 7, 1)) == "versjon 2\n"

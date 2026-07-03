@@ -172,6 +172,11 @@ def _run_git_log(repo_path: Path, file_path: str) -> str:
     result = subprocess.run(  # noqa: S603
         [  # noqa: S607
             "git",
+            # core.quotePath=true (git's default) C-quotes non-ASCII bytes in
+            # numstat rename rows (æøå -> "\303\246"), storing garbage paths
+            # in the history record. ~2,000 corpus files have æøå slugs.
+            "-c",
+            "core.quotePath=false",
             "log",
             "--follow",
             "--numstat",
