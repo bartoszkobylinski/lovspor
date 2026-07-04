@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 import lovspor.sync.orchestrator as orchestrator_module
-from lovspor.errors import ConfigError, CorpusStateError
+from lovspor.errors import ConfigError, CorpusStateError, MassRemovalError
 from lovspor.history import HistoryRecord
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import LovdataArchive
@@ -18,6 +18,7 @@ from lovspor.sync.orchestrator import (
     _commit_with_history,
     _DocAction,
     _ensure_corpus_git_repo,
+    _guard_mass_removal,
     _index_tarball,
     _load_or_empty_manifest,
     _UpstreamDoc,
@@ -1165,6 +1166,106 @@ def test_run_sync_aborts_on_dirty_corpus_worktree(
     monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
 
     with pytest.raises(CorpusStateError, match="uncommitted"):
+        run_sync(settings)
+
+
+def _current_manifest(dataset: str, count: int) -> Manifest:
+    docs = {
+        f"{dataset}-{i}": ManifestRecord(
+            doc_type="lov",
+            xml_hash=f"{i:064x}",
+            markdown_path=f"lover/{dataset}-{i}.md",
+            source_dataset=dataset,
+            last_seen=datetime(2026, 5, 1, tzinfo=UTC),
+            status="current",
+            slug=f"{dataset}-{i}",
+            title=f"doc {i}",
+            eu_basis=[],
+        )
+        for i in range(count)
+    }
+    return Manifest(generated_at=datetime(2026, 5, 1, tzinfo=UTC), documents=docs)
+
+
+def test_guard_mass_removal_raises_over_threshold() -> None:
+    manifest = _current_manifest("gjeldende-lover", 100)
+    removed = [f"gjeldende-lover-{i}" for i in range(50)]
+
+    with pytest.raises(MassRemovalError, match="50/100"):
+        _guard_mass_removal(removed, manifest, max_ratio=0.10)
+
+
+def test_guard_mass_removal_allows_removal_under_threshold() -> None:
+    manifest = _current_manifest("gjeldende-lover", 100)
+    removed = [f"gjeldende-lover-{i}" for i in range(5)]
+
+    _guard_mass_removal(removed, manifest, max_ratio=0.10)  # no raise
+
+
+def test_guard_mass_removal_skips_datasets_below_min_docs() -> None:
+    """A small/early-stage dataset can legitimately churn a large fraction;
+    the absolute risk (a handful of docs) is low, so the guard skips it."""
+    manifest = _current_manifest("gjeldende-lover", 10)
+    removed = [f"gjeldende-lover-{i}" for i in range(10)]
+
+    _guard_mass_removal(removed, manifest, max_ratio=0.10)  # no raise
+
+
+def test_guard_mass_removal_is_noop_for_empty_removed() -> None:
+    manifest = _current_manifest("gjeldende-lover", 100)
+
+    _guard_mass_removal([], manifest, max_ratio=0.10)  # no raise
+
+
+def test_guard_mass_removal_is_per_dataset_not_global() -> None:
+    """A wiped small dataset must trip even when a large healthy sibling
+    keeps the global removal fraction tiny (30/1030 = 3%)."""
+    docs = {
+        **_current_manifest("gjeldende-lover", 1000).documents,
+        **_current_manifest("gjeldende-sentrale-forskrifter", 30).documents,
+    }
+    manifest = Manifest(generated_at=datetime(2026, 5, 1, tzinfo=UTC), documents=docs)
+    removed = [f"gjeldende-sentrale-forskrifter-{i}" for i in range(30)]
+
+    with pytest.raises(MassRemovalError, match="gjeldende-sentrale-forskrifter"):
+        _guard_mass_removal(removed, manifest, max_ratio=0.10)
+
+
+def test_guard_mass_removal_respects_configured_ratio() -> None:
+    manifest = _current_manifest("gjeldende-lover", 100)
+
+    _guard_mass_removal(
+        [f"gjeldende-lover-{i}" for i in range(50)],
+        manifest,
+        max_ratio=0.60,
+    )  # 50% < 60% -> no raise
+    with pytest.raises(MassRemovalError):
+        _guard_mass_removal(
+            [f"gjeldende-lover-{i}" for i in range(70)],
+            manifest,
+            max_ratio=0.60,
+        )
+
+
+def test_run_sync_aborts_on_mass_removal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safety guard: an empty/truncated upstream makes every doc in a
+    dataset look removed. run_sync must abort before deleting anything
+    rather than wipe the dataset and let the workflow push it."""
+    settings = _settings(tmp_path)
+    prior = _current_manifest("gjeldende-lover", 30)
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
+
+    def fail_commit(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("mass-removal sync must not reach commit")
+
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", fail_commit)
+
+    with pytest.raises(MassRemovalError, match="30/30"):
         run_sync(settings)
 
 

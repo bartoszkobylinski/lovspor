@@ -68,6 +68,49 @@ def test_from_env_applies_optional_overrides(
     assert settings.http_user_agent == "test-agent"
 
 
+def _required_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("LOVSPOR_OUTPUT_REPO_PATH", str(tmp_path / "lovverk"))
+
+
+def test_max_removal_ratio_defaults_to_ten_percent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _required_env(monkeypatch, tmp_path)
+    assert Settings.from_env().max_removal_ratio == pytest.approx(0.10)
+
+
+def test_max_removal_ratio_reads_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _required_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOVSPOR_MAX_REMOVAL_RATIO", "0.5")
+    assert Settings.from_env().max_removal_ratio == pytest.approx(0.5)
+
+
+def test_max_removal_ratio_rejects_non_float(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _required_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOVSPOR_MAX_REMOVAL_RATIO", "half")
+    with pytest.raises(ConfigError, match="LOVSPOR_MAX_REMOVAL_RATIO"):
+        Settings.from_env()
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
+def test_max_removal_ratio_must_be_in_unit_interval(bad: float) -> None:
+    with pytest.raises(ValidationError, match="max_removal_ratio"):
+        Settings(
+            data_dir=Path("/d"),
+            lovverk_repo_path=Path("/r"),
+            max_removal_ratio=bad,
+        )
+
+
 def test_from_env_uses_defaults_when_optional_absent(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

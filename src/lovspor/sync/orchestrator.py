@@ -40,6 +40,7 @@ Commit strategy (decisions.md §12a + §12d):
   populated history dirs and skip.
 """
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,7 +51,7 @@ from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder, split_to_to
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import write_embeddings
-from lovspor.errors import ConfigError, CorpusStateError
+from lovspor.errors import ConfigError, CorpusStateError, MassRemovalError
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_history, write_history
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
@@ -233,6 +234,8 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
             removed_count=0,
             unchanged_count=len(changes.unchanged),
         )
+
+    _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
 
     now = datetime.now(UTC)
     new_records = _carry_unchanged(prior, changes.unchanged)
@@ -469,6 +472,49 @@ def _ensure_clean_corpus(path: Path) -> None:
             f"committing. Inspect `git -C {path} status`; if this is crash "
             "residue, `git reset --hard` and `git clean -fd`, then re-run.",
         )
+
+
+_REMOVAL_GUARD_MIN_DOCS = 20
+"""Datasets with fewer current docs than this skip the mass-removal guard:
+an early-stage corpus legitimately churns a large fraction, and the absolute
+risk (a handful of docs) is low."""
+
+
+def _guard_mass_removal(
+    removed: list[str],
+    prior: Manifest,
+    max_ratio: float,
+) -> None:
+    """Abort if any single dataset would lose more than ``max_ratio`` of its
+    current documents in one sync.
+
+    A valid-but-empty or truncated upstream tarball makes every document in
+    that dataset look removed; unguarded, the sync deletes them all and the
+    scheduled workflow auto-pushes the wipe. The check is per-dataset so one
+    empty tarball cannot hide behind a healthy sibling dataset. Legitimate
+    mass removals are rare — when one is real, re-run with a higher
+    ``LOVSPOR_MAX_REMOVAL_RATIO``.
+    """
+    if not removed:
+        return
+    current_per_dataset: Counter[str] = Counter(
+        rec.source_dataset for rec in prior.documents.values() if rec.status == "current"
+    )
+    removed_per_dataset: Counter[str] = Counter(
+        prior.documents[doc_id].source_dataset for doc_id in removed
+    )
+    for dataset, removed_count in sorted(removed_per_dataset.items()):
+        total = current_per_dataset.get(dataset, 0)
+        if total < _REMOVAL_GUARD_MIN_DOCS:
+            continue
+        ratio = removed_count / total
+        if ratio > max_ratio:
+            raise MassRemovalError(
+                f"sync would remove {removed_count}/{total} ({ratio:.0%}) of "
+                f"dataset {dataset!r}, over the {max_ratio:.0%} safety threshold — "
+                "likely an empty or truncated upstream tarball. If the removal is "
+                f"real, re-run with LOVSPOR_MAX_REMOVAL_RATIO above {ratio:.2f}.",
+            )
 
 
 def _load_or_empty_manifest(path: Path) -> Manifest:
