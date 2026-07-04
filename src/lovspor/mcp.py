@@ -138,6 +138,24 @@ one — filtering plus an explicit 'no strong match' notice is the
 anti-hallucination posture. Callers can pass ``min_score=0.0`` to
 see everything."""
 
+_MAX_RESULT_LIMIT = 100
+"""Hard cap on any list-returning tool's ``limit``. A request above this is
+clamped (not rejected), so one call cannot amplify into a corpus-wide scan
+or return; the per-tool default stays 20."""
+
+
+def _bounded_limit(limit: int) -> int:
+    """Validate and clamp a tool's ``limit``.
+
+    Rejects negatives — Python slicing with a negative limit silently
+    returns 'all but the last N', which an AI caller never intends — and
+    caps large values at :data:`_MAX_RESULT_LIMIT`.
+    """
+    if limit < 0:
+        raise ValueError(f"limit must be non-negative, got {limit}")
+    return min(limit, _MAX_RESULT_LIMIT)
+
+
 _SEMANTIC_SNIPPET_CHARS = 200
 """Max characters of section-body lead included with each
 ``semantic_search`` hit. Enough to judge relevance and ground the
@@ -604,12 +622,10 @@ class CorpusReader:
         comparing as opaque strings. ``limit`` caps the result count
         and must be non-negative — Python slicing with a negative
         limit silently returns 'all but the last N', which is
-        unambiguously not what an AI caller intends.
+        unambiguously not what an AI caller intends. Values above
+        ``_MAX_RESULT_LIMIT`` are clamped.
         """
-        if limit < 0:
-            raise ValueError(
-                f"limit must be non-negative, got {limit}",
-            )
+        limit = _bounded_limit(limit)
         if since is not None:
             try:
                 # Normalize, do not just validate: date.fromisoformat
@@ -642,13 +658,19 @@ class CorpusReader:
         self,
         query: str,
         dataset: str | None = None,
+        limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Substring-match ``query`` against slug + title (case-insensitive).
 
         Matches against manifest data only (slug, title) — no body
         text scan in this MVP. Body-text search would be a separate
         sprint with its own indexing strategy.
+
+        ``limit`` caps the result count (default 20), must be non-negative,
+        and is clamped to ``_MAX_RESULT_LIMIT`` — without it a broad query
+        returned the entire matching corpus in one response.
         """
+        limit = _bounded_limit(limit)
         if not query.strip():
             return []
         needle = query.lower()
@@ -662,7 +684,7 @@ class CorpusReader:
             haystack = f"{record.slug or ''} {record.title or ''}".lower()
             if needle in haystack:
                 results.append(_record_summary(doc_id, record))
-        return results
+        return results[:limit]
 
     def search_body(
         self,
@@ -680,19 +702,16 @@ class CorpusReader:
         ``snippet`` (~100 char window around the FIRST match). Sorted
         by match_count descending, then by slug for stable ordering.
 
-        ``limit`` caps the result count and must be non-negative.
-        ``dataset`` accepts ``lover`` / ``forskrifter`` (or the full
-        Lovdata key).
+        ``limit`` caps the result count, must be non-negative, and is
+        clamped to ``_MAX_RESULT_LIMIT``. ``dataset`` accepts
+        ``lover`` / ``forskrifter`` (or the full Lovdata key).
 
         The body index is loaded lazily on the first call (~45 MB
         resident for the production 4522-doc corpus, ~3-5 s cold
         load) so server startup stays fast for clients that only
         query metadata.
         """
-        if limit < 0:
-            raise ValueError(
-                f"limit must be non-negative, got {limit}",
-            )
+        limit = _bounded_limit(limit)
         if not query.strip():
             return []
         needle = query.lower()
@@ -868,10 +887,7 @@ class CorpusReader:
                 "at MCP server startup. Set the environment variable and "
                 "restart the server.",
             )
-        if limit < 0:
-            raise ValueError(
-                f"limit must be non-negative, got {limit}",
-            )
+        limit = _bounded_limit(limit)
         # Empty results ALWAYS carry a notice (documented contract) —
         # including these caller no-op cases, so the AI never has to
         # guess whether nothing matched or nothing was searched.
@@ -2021,7 +2037,11 @@ def build_server(corpus_path: Path) -> FastMCP:
         return reader.list_recent_changes(dataset=dataset, since=since, limit=limit)
 
     @mcp.tool()
-    def search_laws(query: str, dataset: str | None = None) -> list[dict[str, Any]]:
+    def search_laws(
+        query: str,
+        dataset: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
         """Search the corpus for laws whose slug or title contains ``query``.
 
         Substring match, case-insensitive, against manifest metadata
@@ -2030,8 +2050,9 @@ def build_server(corpus_path: Path) -> FastMCP:
         Use ``get_law(slug)`` to fetch the full text of any result.
 
         ``dataset`` (optional): ``lover`` or ``forskrifter`` to filter.
+        ``limit``: max results (default 20, capped).
         """
-        return reader.search_laws(query, dataset=dataset)
+        return reader.search_laws(query, dataset=dataset, limit=limit)
 
     @mcp.tool()
     def search_body(
