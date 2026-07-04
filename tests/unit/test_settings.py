@@ -91,6 +91,18 @@ def test_max_removal_ratio_reads_env(
     assert Settings.from_env().max_removal_ratio == pytest.approx(0.5)
 
 
+def test_max_removal_ratio_explicit_override_wins_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _required_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("LOVSPOR_MAX_REMOVAL_RATIO", "0.8")
+
+    settings = Settings.from_env(max_removal_ratio=0.25)
+
+    assert settings.max_removal_ratio == pytest.approx(0.25)
+
+
 def test_max_removal_ratio_rejects_non_float(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -109,6 +121,16 @@ def test_max_removal_ratio_must_be_in_unit_interval(bad: float) -> None:
             lovverk_repo_path=Path("/r"),
             max_removal_ratio=bad,
         )
+
+
+def test_max_removal_ratio_allows_one_to_disable_guard() -> None:
+    settings = Settings(
+        data_dir=Path("/d"),
+        lovverk_repo_path=Path("/r"),
+        max_removal_ratio=1.0,
+    )
+
+    assert settings.max_removal_ratio == pytest.approx(1.0)
 
 
 def test_from_env_uses_defaults_when_optional_absent(
