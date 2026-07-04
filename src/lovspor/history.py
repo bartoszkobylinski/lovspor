@@ -31,7 +31,7 @@ every sync, plus a one-time bulk migration for existing docs.
 import json
 import re
 import subprocess
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -234,7 +234,13 @@ def _classify_commit(
 ) -> HistoryEvent | None:
     """Map a single git-log block to a ``HistoryEvent``."""
     short_sha = sha[:7]
-    commit_date = date.fromisoformat(iso_date.split("T", maxsplit=1)[0])
+    # Convert the author-timezone %aI instant to a UTC calendar date so
+    # history dates agree with the time-machine (get_law_at), which cuts off
+    # by end-of-day UTC. A commit authored 00:30+02:00 is the PREVIOUS day in
+    # UTC; recording the author-local date would disagree at the midnight
+    # boundary. Bot syncs author in UTC (GitHub runners), so this is a no-op
+    # for the production corpus — it only corrects manual/non-UTC commits.
+    commit_date = datetime.fromisoformat(iso_date).astimezone(UTC).date()
     added, removed = _parse_line_stats(stat_lines)
     from_path, to_path = _parse_rename_paths(stat_lines)
 
