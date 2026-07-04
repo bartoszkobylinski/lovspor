@@ -33,12 +33,25 @@ from lxml import etree
 from lovspor.errors import ParseError
 
 
-def safe_parser() -> etree.XMLParser:
+def safe_parser(*, remove_blank_text: bool = True) -> etree.XMLParser:
+    """Return the hardened lxml parser used across the pipeline.
+
+    Security config (XXE / billion-laughs / no-network / bounded tree) is
+    fixed here so every caller shares one source of truth.
+
+    ``remove_blank_text`` (default ``True``) strips whitespace-only nodes
+    at parse time. That is correct for *hashing* — formatting whitespace
+    between elements must not change the content hash. It is WRONG for
+    *rendering*: it also drops the significant whitespace-only tail
+    between two inline elements (``<strong>a</strong> <em>b</em>``),
+    fusing the words in the Markdown output. The renderer and metadata
+    extractor pass ``remove_blank_text=False`` to keep that space.
+    """
     return etree.XMLParser(
         resolve_entities=False,
         no_network=True,
         huge_tree=False,
-        remove_blank_text=True,
+        remove_blank_text=remove_blank_text,
         remove_comments=True,
     )
 

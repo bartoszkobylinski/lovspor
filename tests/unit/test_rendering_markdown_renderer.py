@@ -163,6 +163,17 @@ def test_render_strong_produces_bold_markdown() -> None:
     assert md == "Very **important**.\n"
 
 
+def test_render_preserves_space_between_adjacent_inline_elements() -> None:
+    """Regression: the renderer parsed with remove_blank_text=True, which
+    stripped the whitespace-only tail between two inline elements — fusing
+    the words and producing a broken ``**fet***kursiv*`` emphasis run. The
+    space must be preserved."""
+    md = render_markdown(
+        _wrap(b'<article class="legalP"><strong>fet</strong> <em>kursiv</em> etter</article>'),
+    )
+    assert md == "**fet** *kursiv* etter\n"
+
+
 def test_render_em_and_i_produce_italic_markdown() -> None:
     md_em = render_markdown(
         _wrap(b'<article class="legalP">Word <em>italics</em>.</article>'),
