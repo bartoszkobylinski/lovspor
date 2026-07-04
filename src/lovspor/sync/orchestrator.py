@@ -241,6 +241,7 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
 
     now = datetime.now(UTC)
     new_records = _carry_unchanged(prior, changes.unchanged)
+    new_records.update(_carry_tombstones(prior, set(upstream)))
     actions: list[_DocAction] = []
     embedder = _load_embedder(settings)
 
@@ -817,6 +818,28 @@ def _carry_unchanged(
     'no upstream change -> no commit' invariant.
     """
     return {doc_id: prior.documents[doc_id] for doc_id in unchanged_ids}
+
+
+def _carry_tombstones(
+    prior: Manifest,
+    upstream_ids: set[str],
+) -> dict[str, ManifestRecord]:
+    """Preserve ``removed`` records across syncs so a removal stays a
+    permanent audit record.
+
+    ``detect_changes`` excludes tombstones from its ``current`` set, so a
+    tombstoned doc lands in none of new/changed/removed/unchanged and would
+    be dropped from the rewritten manifest on the next sync that commits
+    anything — surviving exactly one sync instead of forever. A tombstone
+    still absent upstream is carried verbatim. One whose ``doc_id`` reappears
+    upstream is a ``new`` doc this sync and is deliberately NOT carried — the
+    new-doc write replaces it with a fresh ``current`` record.
+    """
+    return {
+        doc_id: rec
+        for doc_id, rec in prior.documents.items()
+        if rec.status == "removed" and doc_id not in upstream_ids
+    }
 
 
 def _tombstone(old: ManifestRecord) -> ManifestRecord:

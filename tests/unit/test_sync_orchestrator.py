@@ -1481,3 +1481,109 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
         settings.lovverk_repo_path / "lover" / "renamed-old.md",
         settings.lovverk_repo_path / "lover" / "removed.md",
     ]
+
+
+def _fake_write_one_slug_path(
+    settings: Settings,
+    upstream_doc: _UpstreamDoc,
+    _now: datetime,
+    _embedder: object,
+) -> tuple[ManifestRecord, list[Path]]:
+    path = settings.lovverk_repo_path / "lover" / f"{upstream_doc.slug}.md"
+    return (
+        _record(upstream_doc.doc_id, xml_hash=upstream_doc.xml_hash, slug=upstream_doc.slug),
+        [path],
+    )
+
+
+def test_run_sync_carries_prior_tombstone_forward(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tombstone written by an earlier sync must persist in the manifest
+    across every subsequent sync that commits — a removal is a permanent
+    audit record, not a one-sync artifact. ``detect_changes`` excludes
+    tombstones from its ``current`` set, so without an explicit carry they
+    fall through every classification list and vanish from ``new_records``.
+    """
+    settings = _settings(tmp_path)
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "lov-active": _record("lov-active", xml_hash="a" * 64, slug="active"),
+            "lov-gone": _record("lov-gone", xml_hash="d" * 64, slug="gone", status="removed"),
+        },
+    )
+    upstream = {
+        "lov-active": _upstream("lov-active", xml_hash="a" * 64, slug="active"),
+        "lov-new": _upstream("lov-new", xml_hash="f" * 64, slug="new"),
+    }
+    captured: dict[str, object] = {}
+
+    def capture_commit(*_args: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: upstream)
+    monkeypatch.setattr(orchestrator_module, "_write_one", _fake_write_one_slug_path)
+    monkeypatch.setattr(orchestrator_module, "delete_document", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+
+    run_sync(settings)
+
+    new_records = captured["new_records"]
+    assert isinstance(new_records, dict)
+    assert "lov-gone" in new_records, "tombstone dropped from manifest on the next sync"
+    assert new_records["lov-gone"] == prior.documents["lov-gone"]
+
+
+def test_run_sync_does_not_carry_reappeared_tombstone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tombstoned doc that reappears upstream is reclassified ``new`` and
+    rewritten as ``current`` — the tombstone carry must not resurrect the
+    stale ``removed`` record over the fresh one."""
+    settings = _settings(tmp_path)
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "lov-back": _record("lov-back", xml_hash="d" * 64, slug="back", status="removed"),
+        },
+    )
+    upstream = {
+        "lov-back": _upstream("lov-back", xml_hash="f" * 64, slug="back"),
+    }
+    captured: dict[str, object] = {}
+
+    def capture_commit(*_args: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: upstream)
+    monkeypatch.setattr(orchestrator_module, "_write_one", _fake_write_one_slug_path)
+    monkeypatch.setattr(orchestrator_module, "delete_document", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+
+    run_sync(settings)
+
+    new_records = captured["new_records"]
+    assert new_records["lov-back"].status == "current"
+    assert new_records["lov-back"].xml_hash == "f" * 64
+
+
+def test_carry_tombstones_keeps_only_absent_removed_records() -> None:
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "current": _record("current", xml_hash="a" * 64, slug="current"),
+            "gone": _record("gone", xml_hash="b" * 64, slug="gone", status="removed"),
+            "back": _record("back", xml_hash="c" * 64, slug="back", status="removed"),
+        },
+    )
+
+    carried = orchestrator_module._carry_tombstones(prior, {"back", "other"})
+
+    assert carried == {"gone": prior.documents["gone"]}
