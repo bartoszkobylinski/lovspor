@@ -116,6 +116,7 @@ class _UpstreamDoc:
     slug: str
     title: str
     eu_basis: tuple[str, ...]
+    retrieved_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -301,8 +302,8 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
     # changed loop so changed actions' sidecar-delete checks see
     # the renamed writes.
     for doc_id in renamed:
-        upstream_doc = upstream[doc_id]
         prior_record = prior.documents[doc_id]
+        upstream_doc = _with_retrieved_at(upstream[doc_id], prior_record.last_seen)
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
         record, paths_written = _write_one(settings, upstream_doc, now, embedder)
         new_path = paths_written[0]
@@ -571,6 +572,20 @@ def _with_slug(doc: _UpstreamDoc, slug: str) -> _UpstreamDoc:
         slug=slug,
         title=doc.title,
         eu_basis=doc.eu_basis,
+        retrieved_at=doc.retrieved_at,
+    )
+
+
+def _with_retrieved_at(doc: _UpstreamDoc, retrieved_at: datetime) -> _UpstreamDoc:
+    return _UpstreamDoc(
+        doc_id=doc.doc_id,
+        source_dataset=doc.source_dataset,
+        xml_bytes=doc.xml_bytes,
+        xml_hash=doc.xml_hash,
+        slug=doc.slug,
+        title=doc.title,
+        eu_basis=doc.eu_basis,
+        retrieved_at=retrieved_at,
     )
 
 
@@ -642,7 +657,7 @@ def _write_one(
         doc_type=doc_type,
         xml_hash=upstream.xml_hash,
         source_dataset=upstream.source_dataset,
-        retrieved_at=now,
+        retrieved_at=upstream.retrieved_at or now,
     )
     rendered = render_full_document(upstream.xml_bytes, context)
     write_document(path, rendered)
@@ -1147,7 +1162,11 @@ def _run_sprint8_eu_basis_migration(
         # reads Markdown back from disk; mixing the two would slow
         # the eu_basis re-render and would fail entirely if no
         # OpenAI key is configured.
-        new_record, paths_written = _write_one(settings, upstream_doc, now)
+        new_record, paths_written = _write_one(
+            settings,
+            _with_retrieved_at(upstream_doc, record.last_seen),
+            now,
+        )
         new_records[doc_id] = new_record
         written_paths.append(paths_written[0])
     if not written_paths:
