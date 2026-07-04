@@ -174,6 +174,22 @@ def test_resolve_collisions_handles_three_way_collision() -> None:
     assert result == {"nl-a": "x", "nl-b": "x-2", "nl-c": "x-3"}
 
 
+def test_resolve_collisions_suffix_skips_natural_slug() -> None:
+    result = resolve_collisions(
+        {
+            "nl-1": "opplæringslova",
+            "nl-2": "opplæringslova",
+            "nl-3": "opplæringslova-2",
+        },
+    )
+
+    assert result == {
+        "nl-1": "opplæringslova",
+        "nl-2": "opplæringslova-3",
+        "nl-3": "opplæringslova-2",
+    }
+
+
 def test_resolve_collisions_is_deterministic_regardless_of_input_order() -> None:
     insertion_a = {"nl-2": "duplikat", "nl-1": "duplikat"}
     insertion_b = {"nl-1": "duplikat", "nl-2": "duplikat"}
