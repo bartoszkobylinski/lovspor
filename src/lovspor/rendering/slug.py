@@ -70,14 +70,22 @@ def resolve_collisions(slugs_by_doc: dict[str, str]) -> dict[str, str]:
 
     Sort key is ``doc_id`` so the assignment is deterministic regardless
     of the input dict's iteration order: the smallest ``doc_id`` keeps
-    the bare slug, the next gets ``-2``, and so on.
+    the bare slug, the next gets the first available suffix. Generated
+    suffixes skip natural base slugs, so a duplicate ``foo`` cannot
+    overwrite another document whose own slug is already ``foo-2``.
     """
-    counts: dict[str, int] = {}
+    natural_slugs = set(slugs_by_doc.values())
+    taken: set[str] = set()
     resolved: dict[str, str] = {}
     for doc_id in sorted(slugs_by_doc):
         slug = slugs_by_doc[doc_id]
-        counts[slug] = counts.get(slug, 0) + 1
-        resolved[doc_id] = slug if counts[slug] == 1 else f"{slug}-{counts[slug]}"
+        final_slug = slug
+        suffix = 1
+        while final_slug in taken or (final_slug in natural_slugs and final_slug != slug):
+            suffix += 1
+            final_slug = f"{slug}-{suffix}"
+        taken.add(final_slug)
+        resolved[doc_id] = final_slug
     return resolved
 
 
