@@ -881,6 +881,7 @@ def test_needs_sprint9_embeddings_migration_filters_to_current_slugged_docs(
         slug="present",
         title="Present",
         eu_basis=[],
+        embedding_hash="a" * 64,
     )
     manifest = Manifest(
         generated_at=datetime(2026, 5, 1, tzinfo=UTC),
@@ -2048,6 +2049,7 @@ def test_sprint9_embeddings_migration_skips_non_targets_and_commits_once(
     corpus = tmp_path / "lovverk"
     corpus.mkdir()
     base_xml = _law_with_section("Base", "Body.")
+    base_hash = hash_normalized_xml(base_xml)
     _write_markdown_with_section(corpus / "lover" / "removed.md", "Removed", "Removed body.")
     _write_markdown_with_section(corpus / "lover" / "slugless.md", "Slugless", "Slugless body.")
     _write_markdown_with_section(corpus / "lover" / "present.md", "Present", "Present body.")
@@ -2070,8 +2072,14 @@ def test_sprint9_embeddings_migration_skips_non_targets_and_commits_once(
                 markdown_path="lover/slugless.md",
                 title="Slugless",
             ),
-            "lov-present": _current_law_record(xml=base_xml, slug="present", title="Present"),
+            # present sidecar exists AND its hash matches -> not stale, skipped.
+            "lov-present": _current_law_record(
+                xml=base_xml, slug="present", title="Present"
+            ).model_copy(
+                update={"embedding_hash": base_hash},
+            ),
             "lov-missing": _current_law_record(xml=base_xml, slug="missing", title="Missing"),
+            # needs has embedding_hash=None -> stale -> re-embedded.
             "lov-needs": _current_law_record(xml=base_xml, slug="needs", title="Needs"),
         },
     )
@@ -2112,10 +2120,13 @@ def test_sprint9_embeddings_migration_skips_non_targets_and_commits_once(
         Settings(data_dir=tmp_path / "data", lovverk_repo_path=corpus),
         prior,
         object(),
+        datetime(2026, 5, 2, tzinfo=UTC),
     )
 
     assert writes == [("needs", (corpus / "lover" / "needs.md").read_text(encoding="utf-8"))]
-    assert staged == [_embedding_path(corpus, "needs")]
+    # The migration now also rewrites the manifest to record the stamped
+    # embedding_hash, so it stages the manifest alongside the sidecar.
+    assert staged == [corpus / "manifest.json", _embedding_path(corpus, "needs")]
     assert messages == ["migration: backfill embeddings for 1 documents"]
     assert present_sidecar.read_bytes() == present_bytes
     assert not _embedding_path(corpus, "removed").exists()
@@ -2130,13 +2141,18 @@ def test_sprint9_embeddings_migration_noops_when_no_current_doc_needs_sidecar(
     corpus = tmp_path / "lovverk"
     corpus.mkdir()
     base_xml = _law_with_section("Base", "Body.")
+    base_hash = hash_normalized_xml(base_xml)
     _write_markdown_with_section(corpus / "lover" / "present.md", "Present", "Present body.")
     _write_markdown_with_section(corpus / "lover" / "removed.md", "Removed", "Removed body.")
     _write_seed_embedding(_embedding_path(corpus, "present"), marker=4)
     prior = Manifest(
         generated_at=datetime(2026, 5, 1, tzinfo=UTC),
         documents={
-            "lov-present": _current_law_record(xml=base_xml, slug="present", title="Present"),
+            "lov-present": _current_law_record(
+                xml=base_xml, slug="present", title="Present"
+            ).model_copy(
+                update={"embedding_hash": base_hash},
+            ),
             "lov-removed": _current_law_record(
                 xml=base_xml,
                 slug="removed",
@@ -2174,6 +2190,7 @@ def test_sprint9_embeddings_migration_noops_when_no_current_doc_needs_sidecar(
         Settings(data_dir=tmp_path / "data", lovverk_repo_path=corpus),
         prior,
         object(),
+        datetime(2026, 5, 2, tzinfo=UTC),
     )
 
     assert staged == []

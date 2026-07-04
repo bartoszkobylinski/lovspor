@@ -463,6 +463,7 @@ def test_write_one_renders_document_record_and_optional_embeddings(
         slug="slug-1",
         title="Lov 1",
         eu_basis=["32024R0001"],
+        embedding_hash="a" * 64,
     )
     context = rendered_contexts[0]
     assert context.doc_id == "lov-1"
@@ -471,6 +472,51 @@ def test_write_one_renders_document_record_and_optional_embeddings(
     assert context.xml_hash == "a" * 64
     assert context.source_dataset == "gjeldende-lover"
     assert context.retrieved_at == now
+
+
+def test_write_one_without_embedder_leaves_embedding_hash_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A keyless sync writes Markdown but no sidecar, so the record's
+    embedding_hash stays None — the next keyed sync sees it != xml_hash
+    and re-embeds the doc."""
+    settings = _settings(tmp_path)
+    upstream = _UpstreamDoc(
+        doc_id="lov-1",
+        source_dataset="gjeldende-lover",
+        xml_bytes=b"<xml/>",
+        xml_hash="a" * 64,
+        slug="slug-1",
+        title="Lov 1",
+        eu_basis=(),
+    )
+    monkeypatch.setattr(orchestrator_module, "render_full_document", lambda *_a: "md")
+    monkeypatch.setattr(orchestrator_module, "write_document", lambda *_a: None)
+
+    record, paths = _write_one(settings, upstream, datetime(2026, 5, 2, tzinfo=UTC))
+
+    assert record.embedding_hash is None
+    assert len(paths) == 1  # markdown only, no sidecar
+
+
+def test_needs_sprint9_migration_detects_stale_hash_with_bin_present(
+    tmp_path: Path,
+) -> None:
+    """A present .bin whose embedding_hash no longer matches xml_hash (a
+    keyless sync changed the doc) must still trigger the backfill —
+    existence alone cannot catch it."""
+    record = _record("d1", xml_hash="n" * 64, slug="d1").model_copy(
+        update={"embedding_hash": "o" * 64},
+    )
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={"d1": record},
+    )
+    (tmp_path / "lover" / "embeddings").mkdir(parents=True)
+    (tmp_path / "lover" / "embeddings" / "d1.bin").write_bytes(b"")
+
+    assert orchestrator_module._needs_sprint9_embeddings_migration(prior, tmp_path) is True
 
 
 def test_record_with_history_and_generate_history_skip_rules(
@@ -954,10 +1000,16 @@ def test_run_sprint5_history_migration_returns_prior_when_no_paths(
 
 
 def test_migration_triggers_and_messages(tmp_path: Path) -> None:
-    current = _record("current", xml_hash="a" * 64, slug="current")
+    # embedding_hash matches xml_hash so these records are stale only via a
+    # missing .bin, not a hash mismatch — isolates the existence dimension.
+    current = _record("current", xml_hash="a" * 64, slug="current").model_copy(
+        update={"embedding_hash": "a" * 64},
+    )
     removed = _record("removed", xml_hash="b" * 64, slug="removed", status="removed")
     legacy = _record("legacy", xml_hash="c" * 64, slug="legacy").model_copy(update={"slug": None})
-    eu_missing = _record("eu", xml_hash="d" * 64, slug="eu").model_copy(update={"eu_basis": None})
+    eu_missing = _record("eu", xml_hash="d" * 64, slug="eu").model_copy(
+        update={"eu_basis": None, "embedding_hash": "d" * 64},
+    )
     prior = Manifest(
         generated_at=datetime(2026, 5, 1, tzinfo=UTC),
         documents={

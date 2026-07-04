@@ -911,14 +911,16 @@ class CorpusReader:
         if self._stale_bin_count > 0:
             raise CorpusNotFoundError(
                 f"no usable embeddings: all {self._stale_bin_count} .bin file(s) "
-                f"are from an older model with a different dim. The corpus needs "
-                f"to be re-embedded — run 'lovspor sync' (which will overwrite "
-                f"every .bin with the current model), then 'git pull' in the "
-                f"corpus to refresh.",
+                "are from an older model with a different dimension. The sync's "
+                "staleness check keys on content hash, not dimension, so it will "
+                "not re-embed these on its own — delete the stale "
+                "<dataset>/embeddings/*.bin and run 'lovspor sync' with "
+                "OPENAI_API_KEY set (missing files are re-embedded), then "
+                "'git pull' in the corpus to refresh.",
             )
         raise CorpusNotFoundError(
-            "no embeddings found in corpus; run 'lovspor sync' to "
-            "populate per-document .bin files, then 'git pull' in the "
+            "no embeddings found in corpus; run 'lovspor sync' with OPENAI_API_KEY "
+            "set to populate per-document .bin files, then 'git pull' in the "
             "corpus to refresh.",
         )
 

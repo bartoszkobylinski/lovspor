@@ -217,10 +217,11 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
         prior,
         settings.lovverk_repo_path,
     ):
-        _run_sprint9_embeddings_migration(
+        prior = _run_sprint9_embeddings_migration(
             settings,
             prior,
             sprint9_embedder,
+            datetime.now(UTC),
         )
 
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
@@ -667,6 +668,10 @@ def _write_one(
         slug=upstream.slug,
         title=upstream.title,
         eu_basis=list(upstream.eu_basis),
+        # A sidecar was written iff an embedder ran; record which content
+        # it was built from. No embedder (keyless sync) -> None -> the doc
+        # reads stale until the next keyed sync re-embeds it.
+        embedding_hash=upstream.xml_hash if embedder is not None else None,
     )
     return record, written_paths
 
@@ -675,11 +680,11 @@ def _load_embedder(settings: Settings) -> EmbeddingModel | None:
     """Return an ``OpenAIEmbedder`` when an API key is configured, else ``None``.
 
     ``None`` means embeddings are skipped for this sync — the engine
-    still produces Markdown and runs the rest of the pipeline
-    normally. The only casualty is that the ``semantic_search`` MCP
-    tool will not have up-to-date vectors for documents added or
-    changed in this run; the next sync with a key set picks them up
-    via the Sprint 9 backfill migration.
+    still produces Markdown and runs the rest of the pipeline normally.
+    Documents added or changed in this run get their manifest
+    ``embedding_hash`` set to ``None`` (added) or left at the old hash
+    (changed), so it no longer matches their ``xml_hash``; the next sync
+    with a key set re-embeds exactly those via the backfill migration.
     """
     if not settings.openai_api_key:
         return None
@@ -707,9 +712,9 @@ def _write_embeddings_for_doc(
 
     A doc with zero embedding-eligible sections (very short act with
     only chapter headers, or a malformed render) gets an empty file
-    with a valid header. Empty is intentional — it lets the
-    existence check in ``_needs_sprint9_embeddings_migration`` flip
-    to False and stop re-triggering on every sync.
+    with a valid header. Empty is intentional — the file exists and its
+    manifest ``embedding_hash`` matches ``xml_hash``, so the staleness
+    check in ``_needs_sprint9_embeddings_migration`` stops re-triggering.
 
     Sections longer than the model's input window are split into
     token-bounded chunks, each embedded under the same section_id —
@@ -1158,23 +1163,39 @@ def _run_sprint8_eu_basis_migration(
     return new_manifest
 
 
+def _embedding_is_stale(embedding_hash: str | None, xml_hash: str, embed_path: Path) -> bool:
+    """True if an embedding sidecar is missing or built from stale content.
+
+    Stale = the sidecar's recorded source hash (``embedding_hash``)
+    differs from the doc's current ``xml_hash`` — the vectors were built
+    from text that has since changed (e.g. a keyless sync updated the
+    Markdown but skipped the embedder) — or the ``.bin`` is absent. The
+    hash compare is in-memory (no file read); existence is checked only
+    when the hash matches, to catch a deleted-but-recorded sidecar.
+    """
+    if embedding_hash != xml_hash:
+        return True
+    return not embed_path.exists()
+
+
 def _needs_sprint9_embeddings_migration(prior: Manifest, repo_path: Path) -> bool:
-    """True if any current record lacks its ``<slug>.bin`` sidecar on disk.
+    """True if any current record has a missing or stale ``<slug>.bin``.
 
-    Triggers once on the first sync after Sprint 9 PR-B2 ships with a
-    configured OpenAI key. The migration reads existing Markdown,
-    computes embeddings, and writes the binary files. After it
-    completes every current record has its sidecar; subsequent
-    syncs see all sidecars present and skip this branch.
+    Triggers the embeddings backfill whenever a sidecar is absent OR its
+    source hash no longer matches the doc's ``xml_hash``. Existence alone
+    (the original check) could not catch a stale-but-present file left by
+    a keyless sync or an older render, so ``semantic_search`` silently
+    scored current text against outdated vectors.
 
-    Tombstones (``status='removed'``) and slug-less records are
-    skipped — their files don't exist and the legacy schema is the
-    Sprint 4 rename migration's concern.
+    Tombstones (``status='removed'``) and slug-less records are skipped —
+    their files don't exist and the legacy schema is the Sprint 4 rename
+    migration's concern.
     """
     for record in prior.documents.values():
         if record.status != "current" or record.slug is None:
             continue
-        if not _embeddings_path(repo_path, record.source_dataset, record.slug).exists():
+        embed_path = _embeddings_path(repo_path, record.source_dataset, record.slug)
+        if _embedding_is_stale(record.embedding_hash, record.xml_hash, embed_path):
             return True
     return False
 
@@ -1183,21 +1204,28 @@ def _run_sprint9_embeddings_migration(
     settings: Settings,
     prior: Manifest,
     embedder: EmbeddingModel,
-) -> None:
-    """Backfill embedding sidecars for every current doc that lacks one.
+    now: datetime,
+) -> Manifest:
+    """Backfill embedding sidecars for every current doc whose sidecar is
+    missing or stale, stamp each rebuilt record's ``embedding_hash``, and
+    rewrite the manifest so the repair is durably recorded.
 
     Reads existing Markdown from disk and computes embeddings without
-    re-rendering. The Markdown is unchanged so the manifest is also
-    unchanged (no ``Manifest`` rewrite, no INDEX update). One bulk
-    commit records every newly-written sidecar.
+    re-rendering (embeddings derive from the rendered output, not the raw
+    XML). One bulk commit records the newly-written sidecars plus the
+    manifest update; returns the rewritten manifest so the caller uses the
+    stamped records for the rest of the sync (else the final manifest
+    write would clobber the ``embedding_hash`` fields).
     """
     repo = settings.lovverk_repo_path
+    manifest_path = repo / _MANIFEST_FILENAME
     written: list[Path] = []
-    for record in prior.documents.values():
+    new_records = dict(prior.documents)
+    for doc_id, record in prior.documents.items():
         if record.status != "current" or record.slug is None:
             continue
         embed_path = _embeddings_path(repo, record.source_dataset, record.slug)
-        if embed_path.exists():
+        if not _embedding_is_stale(record.embedding_hash, record.xml_hash, embed_path):
             continue
         markdown_path = repo / record.markdown_path
         if not markdown_path.exists():
@@ -1214,14 +1242,18 @@ def _run_sprint9_embeddings_migration(
             embedder,
         )
         written.append(new_path)
+        new_records[doc_id] = record.model_copy(update={"embedding_hash": record.xml_hash})
     if not written:
-        return
-    git_add(repo, written)
+        return prior
+    new_manifest = Manifest(generated_at=now, documents=new_records)
+    write_manifest(new_manifest, manifest_path)
+    git_add(repo, [manifest_path, *written])
     if has_staged_changes(repo):
         git_commit_msg(
             repo,
             f"migration: backfill embeddings for {len(written)} documents",
         )
+    return new_manifest
 
 
 def _migration_message(actions: list[_DocAction]) -> str:
