@@ -210,9 +210,11 @@ class CorpusNotFoundError(LovsporError):
 class CorpusReader:
     """Read-only view of a local lovverk corpus clone.
 
-    Holds the manifest in memory after the first load: it changes only
-    when the user pulls new commits, and the MCP server process is
-    short-lived (one launch per MCP client session).
+    Holds the manifest and its derived indices in memory after the first
+    load. The server process is long-lived (one launch per MCP client
+    session), so a ``git pull`` against the corpus can land underneath it;
+    ``_refresh_if_stale`` drops every cache when manifest.json changes on
+    disk so tools never serve the pre-pull corpus (see its docstring).
     """
 
     def __init__(
@@ -275,9 +277,41 @@ class CorpusReader:
         # the cached manifest — every per-call linear scan over ~4500
         # records was pure waste for the most common tool calls.
         self._slug_index: dict[str, tuple[str, ManifestRecord]] | None = None
+        # mtime of manifest.json as of the last cache load. Guards every
+        # cache against a ``git pull`` landing underneath the long-lived
+        # server (see _refresh_if_stale). None until the first read.
+        self._manifest_mtime_ns: int | None = None
+
+    def _refresh_if_stale(self) -> None:
+        """Drop all in-memory caches when ``manifest.json`` changed on disk.
+
+        The server is long-lived (one stdio session) but the user can
+        ``git pull`` the corpus underneath it. Every sync rewrites
+        manifest.json with a fresh ``generated_at``, so its mtime is a
+        cheap, reliable change signal: when it moves, the cached manifest
+        and every derived index (slug / body / embeddings) describe the
+        pre-pull corpus and must be rebuilt. Without this, ``corpus_status``
+        reports a freshly-pulled git HEAD beside a stale manifest age, and
+        the search tools keep serving the old corpus.
+        """
+        try:
+            mtime = (self.corpus_path / "manifest.json").stat().st_mtime_ns
+        except OSError:
+            return  # manifest vanished mid-session; the next read raises clearly
+        if mtime == self._manifest_mtime_ns:
+            return
+        self._manifest_mtime_ns = mtime
+        self._manifest = None
+        self._slug_index = None
+        self._body_index = None
+        self._embedding_index = None
+        self._stale_bin_count = 0
+        self._doc_bodies = {}
+        self._section_ids_cache = {}
 
     @property
     def manifest(self) -> Manifest:
+        self._refresh_if_stale()
         if self._manifest is None:
             self._manifest = read_manifest(self.corpus_path / "manifest.json")
         return self._manifest
@@ -1070,6 +1104,7 @@ class CorpusReader:
         ~4500 docs and any single corrupt file would take the whole
         tool offline.
         """
+        self._refresh_if_stale()
         if self._embedding_index is None:
             entries: list[tuple[str, str, np.ndarray, float]] = []
             stale = 0
@@ -1172,6 +1207,7 @@ class CorpusReader:
         record's after the first ``search_body`` call (Codex PR #62
         round 1 reproducer).
         """
+        self._refresh_if_stale()
         if self._body_index is None:
             index: dict[str, str] = {}
             for record in self.manifest.documents.values():
@@ -1305,9 +1341,10 @@ class CorpusReader:
         """Build ``slug -> (doc_id, record)`` once for current records.
 
         First manifest entry wins on a duplicate slug, matching the
-        linear-scan behavior this index replaced. Pinned for the
-        reader's lifetime — the same contract as the cached manifest.
+        linear-scan behavior this index replaced. Pinned until the
+        corpus changes on disk — the same contract as the cached manifest.
         """
+        self._refresh_if_stale()
         if self._slug_index is None:
             index: dict[str, tuple[str, ManifestRecord]] = {}
             for doc_id, record in self.manifest.documents.items():
