@@ -8,6 +8,7 @@ four expected tool names are registered.
 """
 
 import json
+import os
 import shlex
 import subprocess
 from datetime import UTC, date, datetime, timedelta
@@ -2889,6 +2890,105 @@ def _git_init_corpus(repo: Path) -> None:
     _git("config", "user.email", "test@example.com", cwd=repo)
     _git("config", "user.name", "Test", cwd=repo)
     _git("config", "commit.gpgsign", "false", cwd=repo)
+
+
+def _bump_mtime(path: Path) -> None:
+    """Force a strictly-later mtime, regardless of filesystem granularity or
+    how fast the test rewrote the file — a faithful stand-in for the mtime
+    change a real ``git pull`` stamps on manifest.json."""
+    later = path.stat().st_mtime_ns + 1_000_000_000
+    os.utime(path, ns=(later, later))
+
+
+def test_corpus_status_stops_self_contradicting_after_pull(tmp_path: Path) -> None:
+    """Regression: the reader cached the manifest for the server's lifetime
+    but read git HEAD fresh each call. After a ``git pull`` landed a new sync
+    commit, corpus_status reported the freshly-pulled HEAD next to a stale
+    'N days old, run git pull' manifest age — a direct self-contradiction.
+    All manifest-derived fields must now reflect the pulled corpus."""
+    repo = tmp_path / "lovverk"
+    _git_init_corpus(repo)
+    _seed_corpus(
+        repo,
+        {"nl-1": _record(slug="x", title="X")},
+        generated_at=datetime.now(UTC) - timedelta(days=30),
+    )
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-m", "sync: 1 new, 0 changed, 0 removed", cwd=repo)
+
+    reader = CorpusReader(repo)
+    before = reader.corpus_status()
+    assert before["is_stale"] is True
+    assert before["total_current_documents"] == 1
+
+    # Simulate `git pull`: a fresh sync rewrites manifest.json (new
+    # generated_at + an extra current doc) and lands a new commit.
+    _seed_corpus(
+        repo,
+        {
+            "nl-1": _record(slug="x", title="X"),
+            "nl-2": _record(slug="y", title="Y"),
+        },
+        generated_at=datetime.now(UTC),
+    )
+    _bump_mtime(repo / "manifest.json")
+    _git("add", "-A", cwd=repo)
+    _git("commit", "-m", "sync: 1 new, 0 changed, 0 removed", cwd=repo)
+
+    after = reader.corpus_status()
+    assert after["total_current_documents"] == 2
+    assert after["manifest_age_days"] == 0
+    assert after["is_stale"] is False
+    assert "current" in after["notice"]
+    # Fresh HEAD and fresh manifest now agree: no more contradiction.
+    assert after["head_commit"] != before["head_commit"]
+
+
+def test_search_tools_reflect_corpus_pulled_after_construction(tmp_path: Path) -> None:
+    """The slug and body indices are built once and pinned. A law added by a
+    ``git pull`` after those indices were primed must still become findable
+    — otherwise search_laws / search_body / get_law serve the pre-pull
+    corpus for the rest of the session."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "Skatt paa inntekt.\n"},
+    )
+    reader = CorpusReader(tmp_path)
+    # Prime the slug + body indices against the pre-pull corpus.
+    assert reader.search_laws("forvaltning") == []
+    assert reader.search_body("forvaltning") == []
+    assert reader.get_law("skatteloven")
+
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven", title="Skatteloven"),
+            "nl-2": _record(slug="forvaltningsloven", title="Forvaltningsloven"),
+        },
+        body_for={
+            "skatteloven": "Skatt paa inntekt.\n",
+            "forvaltningsloven": "Regler for forvaltning.\n",
+        },
+    )
+    _bump_mtime(tmp_path / "manifest.json")
+
+    assert [hit["slug"] for hit in reader.search_laws("forvaltning")] == ["forvaltningsloven"]
+    assert any(hit["slug"] == "forvaltningsloven" for hit in reader.search_body("forvaltning"))
+    assert reader.get_law("forvaltningsloven")
+
+
+def test_reader_does_not_reload_when_manifest_unchanged(tmp_path: Path) -> None:
+    """The invalidation must be surgical: with manifest.json untouched, the
+    cached manifest object is reused so the O(1) index caching still pays
+    off. Guards against over-invalidation that would rebuild on every call."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    reader = CorpusReader(tmp_path)
+
+    first = reader.manifest
+    reader._refresh_if_stale()
+
+    assert reader.manifest is first
 
 
 def test_corpus_status_reports_fresh_when_manifest_is_recent(tmp_path: Path) -> None:
