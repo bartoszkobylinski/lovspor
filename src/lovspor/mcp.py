@@ -546,7 +546,7 @@ class CorpusReader:
         try:
             return get_law_at_revision(
                 self.corpus_path,
-                record.markdown_path,
+                self._safe_relative(record.markdown_path),
                 target,
             )
         except RevisionNotFoundError as exc:
@@ -1383,6 +1383,19 @@ class CorpusReader:
                 f"path {'/'.join(parts)!r} escapes corpus root",
             ) from exc
         return target
+
+    def _safe_relative(self, *parts: str) -> str:
+        """Containment-check ``parts`` like :meth:`_safe_join`, but return the
+        normalized repo-relative path (the form git pathspecs need).
+
+        ``get_law_at`` feeds the manifest's ``markdown_path`` into
+        ``git log --follow`` / ``git show <sha>:<path>``. A raw path with
+        ``..`` or an absolute prefix would not traverse the filesystem (git
+        stays inside the repo), but it would crash or resolve to an
+        unexpected tracked file — so validate and normalize it first.
+        """
+        absolute = self._safe_join(*parts)
+        return str(absolute.relative_to(self.corpus_path.resolve()))
 
 
 def _slug_token_in_citation(slug: str, citation_lower: str) -> bool:
