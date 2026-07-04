@@ -2642,6 +2642,27 @@ def test_get_law_at_passes_manifest_path_and_parsed_date_to_timetravel(
     )
 
 
+def test_get_law_at_rejects_manifest_path_escaping_corpus_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A cloned manifest whose markdown_path escapes the corpus root must not
+    reach git — get_law_at validates containment before the timetravel call
+    (feeding '../..' raw into git pathspecs would crash or hit a stray file)."""
+    evil = _record(slug="evil", title="Evil").model_copy(
+        update={"markdown_path": "../../../../etc/passwd"},
+    )
+    _seed_corpus(tmp_path, {"nl-1": evil}, write_files=False)
+
+    def fail_if_called(*_args: object) -> str:
+        raise AssertionError("timetravel must not run for an escaping path")
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fail_if_called)
+
+    with pytest.raises(CorpusNotFoundError, match="escapes corpus root"):
+        CorpusReader(tmp_path).get_law_at("evil", "2026-04-27")
+
+
 def test_get_law_at_rejects_non_iso_date_before_manifest_lookup(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
