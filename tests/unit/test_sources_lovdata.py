@@ -138,6 +138,18 @@ def test_list_datasets_retries_on_5xx_then_succeeds(
     assert len(archives) == 4
 
 
+def test_list_datasets_retries_on_429_then_succeeds(
+    httpx_mock: HTTPXMock,
+    list_payload: list[dict[str, Any]],
+) -> None:
+    """429 (rate limit) is transient: back off and retry, not fail the run."""
+    httpx_mock.add_response(url=_LIST_URL, status_code=429)
+    httpx_mock.add_response(url=_LIST_URL, json=list_payload)
+    with LovdataClient() as client:
+        archives = client.list_datasets()
+    assert len(archives) == 4
+
+
 def test_list_datasets_retries_on_connect_error_then_succeeds(
     httpx_mock: HTTPXMock,
     list_payload: list[dict[str, Any]],
@@ -175,8 +187,8 @@ def test_list_datasets_treats_400_as_non_retryable(
         client.list_datasets()
 
 
-@pytest.mark.parametrize("status", [500, 502, 503, 504])
-def test_list_datasets_retries_on_each_retryable_5xx(
+@pytest.mark.parametrize("status", [429, 500, 502, 503, 504])
+def test_list_datasets_retries_on_each_retryable_status(
     httpx_mock: HTTPXMock,
     list_payload: list[dict[str, Any]],
     status: int,
@@ -560,6 +572,20 @@ def test_download_retries_on_5xx_then_succeeds(
 ) -> None:
     payload = b"after retry"
     httpx_mock.add_response(url=_GET_URL, status_code=503)
+    httpx_mock.add_response(url=_GET_URL, content=payload)
+    archive = _make_archive(size_bytes=len(payload))
+    with LovdataClient() as client:
+        result = client.download(archive, tmp_path)
+    assert result.path.read_bytes() == payload
+
+
+def test_download_retries_on_429_then_succeeds(
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    """The download call site retries a 429 rate limit, same as list."""
+    payload = b"after backoff"
+    httpx_mock.add_response(url=_GET_URL, status_code=429)
     httpx_mock.add_response(url=_GET_URL, content=payload)
     archive = _make_archive(size_bytes=len(payload))
     with LovdataClient() as client:
