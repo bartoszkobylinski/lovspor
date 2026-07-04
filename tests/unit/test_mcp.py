@@ -1292,9 +1292,11 @@ def test_semantic_search_raises_when_all_embedding_files_have_wrong_dimension(
 
     expected_message = (
         f"no usable embeddings: all {stale_count} .bin file(s) are from an older "
-        "model with a different dim. The corpus needs to be re-embedded — run "
-        "'lovspor sync' (which will overwrite every .bin with the current model), "
-        "then 'git pull' in the corpus to refresh."
+        "model with a different dimension. The sync's staleness check keys on "
+        "content hash, not dimension, so it will not re-embed these on its own — "
+        "delete the stale <dataset>/embeddings/*.bin and run 'lovspor sync' with "
+        "OPENAI_API_KEY set (missing files are re-embedded), then 'git pull' in "
+        "the corpus to refresh."
     )
     with pytest.raises(CorpusNotFoundError, match=rf"all {stale_count} \.bin file") as exc_info:
         CorpusReader(

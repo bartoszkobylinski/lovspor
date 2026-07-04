@@ -36,11 +36,18 @@ class ManifestRecord(BaseModel):
     that the new ``get_eu_basis`` and ``search_eu_implementations``
     MCP tools answer over.
 
-    All five are ``None``-defaulted for backward compatibility:
+    All are ``None``-defaulted for backward compatibility:
     manifests written by Sprint 3 still load (no slug/title), Sprint 4
     manifests still load (no history fields), Sprint 5 / Sprint 6 / 7
     manifests still load (no eu_basis). A record with ``eu_basis is
     None`` triggers the Sprint 8 backfill migration on next sync.
+
+    ``embedding_hash`` records the ``xml_hash`` the doc's ``<slug>.bin``
+    embedding sidecar was built from. It is the staleness signal: when it
+    differs from ``xml_hash`` (or is ``None`` — no valid embedding, e.g. a
+    keyless sync that changed the Markdown but skipped the embedder), the
+    sidecar is stale and the embeddings backfill re-embeds the doc.
+    Existence-on-disk alone cannot catch a stale-but-present ``.bin``.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -56,6 +63,7 @@ class ManifestRecord(BaseModel):
     total_changes: int | None = None
     last_changed: str | None = None
     eu_basis: list[str] | None = None
+    embedding_hash: str | None = None
 
 
 class Manifest(BaseModel):

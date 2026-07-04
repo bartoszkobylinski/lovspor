@@ -91,6 +91,16 @@ def test_write_embeddings_creates_nested_parent_directories(tmp_path: Path) -> N
     assert path.exists()
 
 
+def test_write_embeddings_leaves_no_temp_file(tmp_path: Path) -> None:
+    """The write goes via a temp file + atomic rename; on success nothing
+    but the final .bin should remain in the directory."""
+    path = tmp_path / "atomic.bin"
+
+    write_embeddings(path, [("1", _vector([1]))], scale=1.0, dim=1)
+
+    assert [p.name for p in tmp_path.iterdir()] == ["atomic.bin"]
+
+
 def test_write_embeddings_header_reserved_byte_is_zero(tmp_path: Path) -> None:
     path = tmp_path / "header.bin"
 

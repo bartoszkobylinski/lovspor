@@ -111,7 +111,12 @@ def write_embeddings(
         parts.append(struct.pack("<B", len(encoded)))
         parts.append(encoded)
         parts.append(vector.tobytes())
-    path.write_bytes(b"".join(parts))
+    # Write to a sibling temp file then atomically rename, so a crash
+    # mid-write can never leave a truncated .bin that later reads as
+    # corrupt (or, worse, that a staleness check treats as present).
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_bytes(b"".join(parts))
+    tmp.replace(path)
 
 
 def read_embeddings(path: Path) -> EmbeddingFile:
