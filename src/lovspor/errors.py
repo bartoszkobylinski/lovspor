@@ -43,3 +43,13 @@ class CorpusStateError(LovsporError):
     uncommitted manifest, classify everything unchanged, and silently
     drop the work — so the sync aborts loudly instead.
     """
+
+
+class MassRemovalError(LovsporError):
+    """A sync would remove more of a dataset than the safety threshold allows.
+
+    A valid-but-empty or truncated upstream tarball makes every document
+    in that dataset look removed. Rather than delete them all (and let the
+    scheduled workflow auto-push the wipe), the sync aborts. When a large
+    removal is genuinely correct, re-run with a higher removal ratio.
+    """

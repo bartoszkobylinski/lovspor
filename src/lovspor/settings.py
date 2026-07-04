@@ -34,6 +34,13 @@ class Settings(BaseModel):
     data_dir: Path
     lovverk_repo_path: Path
     git_commit_mode: str = "per-document"
+    max_removal_ratio: float = 0.10
+    """Abort a sync that would remove more than this fraction of any one
+    dataset's current documents (guards against an empty/truncated upstream
+    tarball wiping the corpus). Applies only to datasets above a minimum
+    doc count; see ``_REMOVAL_GUARD_MIN_DOCS``. Raise it for a run with a
+    genuine mass removal via ``LOVSPOR_MAX_REMOVAL_RATIO``.
+    """
     http_timeout_seconds: float = 120.0
     http_user_agent: str = "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"
     log_level: str = "INFO"
@@ -56,6 +63,15 @@ class Settings(BaseModel):
             )
         return value
 
+    @field_validator("max_removal_ratio")
+    @classmethod
+    def _ratio_in_unit_interval(cls, value: float) -> float:
+        if not 0.0 < value <= 1.0:
+            raise ValueError(
+                f"max_removal_ratio must be in (0, 1], got: {value!r}",
+            )
+        return value
+
     @field_validator("data_dir", "lovverk_repo_path")
     @classmethod
     def _absolute_paths(cls, value: Path) -> Path:
@@ -71,6 +87,7 @@ class Settings(BaseModel):
 
         Optional env vars:
             LOVSPOR_GIT_COMMIT_MODE       (per-document | single)
+            LOVSPOR_MAX_REMOVAL_RATIO     (float in (0, 1])
             LOVSPOR_HTTP_TIMEOUT_SECONDS  (float)
             LOVSPOR_HTTP_USER_AGENT       (str)
             LOVSPOR_LOG_LEVEL             (DEBUG | INFO | WARNING | ERROR)
@@ -111,6 +128,19 @@ class Settings(BaseModel):
             except ValueError as exc:
                 raise ConfigError(
                     f"LOVSPOR_HTTP_TIMEOUT_SECONDS must be a float, got: {raw_timeout!r}",
+                ) from exc
+
+        # Explicit None check (not 'or') so an explicit override of a
+        # small ratio is not swallowed by the env fallback.
+        raw_ratio = overrides.get("max_removal_ratio")
+        if raw_ratio is None:
+            raw_ratio = os.environ.get("LOVSPOR_MAX_REMOVAL_RATIO")
+        if raw_ratio is not None:
+            try:
+                data["max_removal_ratio"] = float(str(raw_ratio))
+            except ValueError as exc:
+                raise ConfigError(
+                    f"LOVSPOR_MAX_REMOVAL_RATIO must be a float, got: {raw_ratio!r}",
                 ) from exc
 
         # OpenAI key: try the canonical env var first, then the
