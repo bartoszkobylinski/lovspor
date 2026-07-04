@@ -7,6 +7,8 @@ the pipeline easy to test in isolation.
 
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 from lovspor.rendering.document import (
     FrontmatterContext,
     build_frontmatter,
@@ -14,6 +16,22 @@ from lovspor.rendering.document import (
 from lovspor.rendering.frontmatter import serialize_frontmatter
 from lovspor.rendering.markdown_renderer import render_markdown
 from lovspor.storage.manifest import Manifest
+
+
+class _IndexFrontMatter(BaseModel):
+    """Minimal NLOD 2.0 attribution front matter for a dataset ``INDEX.md``.
+
+    The corpus contract requires every output Markdown file to carry NLOD
+    attribution. No timestamp field, so regeneration stays byte-identical.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    type: str = "index"
+    dataset: str
+    source_provider: str = "Lovdata"
+    source_license: str = "NLOD 2.0"
+
 
 _DATASET_TO_TYPE = {
     "gjeldende-lover": "lov",
@@ -140,5 +158,6 @@ def generate_index(
         title = rec.title or "(no title)"
         lines.append(f"- [{slug}]({slug}.md) — {title}")
     lines.append("")
-    write_document(index_path, "\n".join(lines))
+    front = serialize_frontmatter(_IndexFrontMatter(dataset=source_dataset))
+    write_document(index_path, front + "\n" + "\n".join(lines))
     return index_path

@@ -90,7 +90,9 @@ def test_render_output_ends_with_newline(record: HistoryRecord) -> None:
 
 
 @given(_records())
-def test_render_output_starts_with_heading(record: HistoryRecord) -> None:
-    """The slug always appears in the H1 heading."""
+def test_render_output_starts_with_frontmatter_then_heading(record: HistoryRecord) -> None:
+    """Output opens with NLOD front matter, then the slug's H1 heading."""
     output = render_history_markdown(record)
-    assert output.startswith(f"# {record.slug} — Change history")
+    assert output.startswith("---\n")
+    assert 'source_license: "NLOD 2.0"' in output
+    assert f"---\n\n# {record.slug} — Change history" in output

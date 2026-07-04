@@ -271,10 +271,18 @@ def test_generate_index_format_links_to_md_file(tmp_path: Path) -> None:
     assert "- [skatteloven](skatteloven.md) — Skatteloven" in text
 
 
+_LOVER_INDEX_FM = (
+    '---\ntype: "index"\ndataset: "gjeldende-lover"\n'
+    'source_provider: "Lovdata"\nsource_license: "NLOD 2.0"\n---\n\n'
+)
+
+
 def test_generate_index_empty_file_has_exact_layout(tmp_path: Path) -> None:
     path = generate_index(tmp_path, "gjeldende-lover", _manifest({}))
 
-    assert path.read_text(encoding="utf-8") == ("# Lover\n\n_0 current documents_\n\n")
+    assert path.read_text(encoding="utf-8") == (
+        _LOVER_INDEX_FM + "# Lover\n\n_0 current documents_\n\n"
+    )
 
 
 def test_generate_index_entry_file_has_exact_layout(tmp_path: Path) -> None:
@@ -282,8 +290,21 @@ def test_generate_index_entry_file_has_exact_layout(tmp_path: Path) -> None:
     path = generate_index(tmp_path, "gjeldende-lover", manifest)
 
     assert path.read_text(encoding="utf-8") == (
-        "# Lover\n\n_1 current documents_\n\n- [skatteloven](skatteloven.md) — Skatteloven\n"
+        _LOVER_INDEX_FM
+        + "# Lover\n\n_1 current documents_\n\n- [skatteloven](skatteloven.md) — Skatteloven\n"
     )
+
+
+def test_generate_index_carries_nlod_frontmatter(tmp_path: Path) -> None:
+    """Corpus invariant: every output Markdown file, INDEX.md included,
+    carries NLOD 2.0 attribution in YAML front matter."""
+    content = generate_index(tmp_path, "gjeldende-lover", _manifest({})).read_text(
+        encoding="utf-8",
+    )
+
+    assert content.startswith("---\n")
+    assert 'source_license: "NLOD 2.0"' in content
+    assert 'source_provider: "Lovdata"' in content
 
 
 def test_generate_index_falls_back_to_markdown_stem_and_no_title(tmp_path: Path) -> None:

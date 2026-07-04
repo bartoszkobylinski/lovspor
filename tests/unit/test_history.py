@@ -530,11 +530,27 @@ def test_parse_events_accepts_three_line_block_without_numstat() -> None:
 # ---------- render_history_markdown ----------
 
 
+def _history_fm(slug: str) -> str:
+    return (
+        f'---\ntype: "history"\nslug: "{slug}"\n'
+        'source_provider: "Lovdata"\nsource_license: "NLOD 2.0"\n---\n\n'
+    )
+
+
 def test_render_empty_history() -> None:
     record = HistoryRecord(slug="x", doc_id="nl-x", events=[])
     assert render_history_markdown(record) == (
-        "# x — Change history\n\n_No history available; doc_id `nl-x`._\n"
+        _history_fm("x") + "# x — Change history\n\n_No history available; doc_id `nl-x`._\n"
     )
+
+
+def test_render_history_carries_nlod_frontmatter() -> None:
+    """Corpus invariant: history/<slug>.md carries NLOD 2.0 attribution."""
+    content = render_history_markdown(HistoryRecord(slug="x", doc_id="nl-x", events=[]))
+
+    assert content.startswith("---\n")
+    assert 'source_license: "NLOD 2.0"' in content
+    assert 'source_provider: "Lovdata"' in content
 
 
 def test_render_single_event_includes_basics() -> None:
@@ -553,7 +569,7 @@ def test_render_single_event_includes_basics() -> None:
         ],
     )
     assert render_history_markdown(record) == (
-        "# skatteloven — Change history\n"
+        _history_fm("skatteloven") + "# skatteloven — Change history\n"
         "\n"
         "_1 events; doc_id `nl-19990326-014`._\n"
         "\n"
@@ -580,7 +596,7 @@ def test_render_rename_event_includes_from_to() -> None:
         ],
     )
     assert render_history_markdown(record) == (
-        "# skatteloven — Change history\n"
+        _history_fm("skatteloven") + "# skatteloven — Change history\n"
         "\n"
         "_1 events; doc_id `nl-19990326-014`._\n"
         "\n"

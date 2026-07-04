@@ -37,6 +37,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from lovspor.rendering.frontmatter import serialize_frontmatter
+
 HISTORY_SCHEMA_VERSION = 1
 
 EventType = Literal["added", "updated", "renamed", "removed"]
@@ -132,21 +134,38 @@ def extract_history(
     return HistoryRecord(slug=slug, doc_id=doc_id, events=_parse_events(raw))
 
 
+class _HistoryFrontMatter(BaseModel):
+    """Minimal NLOD 2.0 attribution front matter for a ``history/<slug>.md``.
+
+    The corpus contract requires every output Markdown file to carry NLOD
+    attribution. No timestamp field, so regeneration stays byte-identical.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    type: str = "history"
+    slug: str
+    source_provider: str = "Lovdata"
+    source_license: str = "NLOD 2.0"
+
+
 def render_history_markdown(record: HistoryRecord) -> str:
     """Render ``HistoryRecord`` as human-readable Markdown.
 
     Output is deterministic: same record in -> byte-identical text out.
+    Carries NLOD 2.0 attribution front matter like every corpus Markdown file.
     """
+    front = serialize_frontmatter(_HistoryFrontMatter(slug=record.slug))
     lines = [f"# {record.slug} — Change history", ""]
     if not record.events:
         lines.append(f"_No history available; doc_id `{record.doc_id}`._")
-        return "\n".join(lines) + "\n"
+        return front + "\n" + "\n".join(lines) + "\n"
     lines.append(f"_{len(record.events)} events; doc_id `{record.doc_id}`._")
     lines.append("")
     for event in record.events:
         lines.extend(_render_event(event))
         lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+    return front + "\n" + "\n".join(lines).rstrip() + "\n"
 
 
 def write_history(record: HistoryRecord, dataset_dir: Path) -> tuple[Path, Path]:
