@@ -290,6 +290,22 @@ def test_classify_migration_without_numstat_is_renamed() -> None:
     assert event.to_path is None
 
 
+def test_classify_migration_backfill_eu_basis_is_updated() -> None:
+    """A non-rename migration (Sprint 8 eu_basis backfill) re-renders the doc
+    in place — a content update, not a filename change. It must not stamp a
+    bogus "Filename renamed" event on every backfilled doc's history."""
+    event = _classify_commit(
+        "beef123",
+        "2026-05-10T05:00:00Z",
+        "migration: backfill eu_basis for 4200 documents",
+        ["6\t0\tlover/skatteloven.md"],
+    )
+    assert event is not None
+    assert event.type == "updated"
+    assert event.from_path is None
+    assert event.to_path is None
+
+
 def test_classify_bulk_sync_no_removals_is_added() -> None:
     """Pre-Sprint-4 bulk subject. With only additions in numstat, treat as add."""
     event = _classify_commit(
@@ -855,6 +871,43 @@ def test_extract_history_walks_real_git_log(tmp_path: Path) -> None:
     assert record.events[0].type == "renamed"
     assert record.events[0].from_path == "lover/nl-19990326-014.md"
     assert record.events[0].to_path == "lover/skatteloven.md"
+    assert record.events[1].type == "added"
+
+
+def test_extract_history_classifies_eu_basis_backfill_as_update(tmp_path: Path) -> None:
+    """End-to-end: a real ``migration: backfill eu_basis`` commit edits the
+    doc's frontmatter in place. git records no rename, so the extracted event
+    must be ``updated`` — not the spurious ``renamed`` the old blanket
+    migration rule produced for every backfilled doc."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "lover").mkdir()
+
+    doc = repo / "lover" / "skatteloven.md"
+    doc.write_text("---\ntitle: Skatteloven\n---\nbody\n", encoding="utf-8")
+    _git("add", "lover/skatteloven.md", cwd=repo)
+    _git("commit", "-m", "add(lov): skatteloven", cwd=repo)
+
+    # Sprint 8 re-render adds the eu_basis frontmatter field in place.
+    doc.write_text(
+        "---\ntitle: Skatteloven\neu_basis: []\n---\nbody\n",
+        encoding="utf-8",
+    )
+    _git("add", "lover/skatteloven.md", cwd=repo)
+    _git("commit", "-m", "migration: backfill eu_basis for 1 documents", cwd=repo)
+
+    record = extract_history(
+        repo_path=repo,
+        current_path="lover/skatteloven.md",
+        doc_id="nl-19990326-014",
+        slug="skatteloven",
+    )
+
+    assert len(record.events) == 2
+    # Newest first: the backfill, then the original add.
+    assert record.events[0].type == "updated"
+    assert record.events[0].from_path is None
+    assert record.events[0].to_path is None
     assert record.events[1].type == "added"
 
 
