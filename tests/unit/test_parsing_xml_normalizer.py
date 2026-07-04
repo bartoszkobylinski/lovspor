@@ -43,7 +43,9 @@ def test_canonicalize_normalizes_self_closing_tags() -> None:
 def test_safe_parser_preserves_blank_tail_when_disabled() -> None:
     """The renderer parses with remove_blank_text=False so the significant
     whitespace-only tail between two inline elements survives; the default
-    (hashing) parser strips it."""
+    (hashing) parser strips it. This strip-vs-preserve mismatch is the
+    accepted change-detection gap documented in decisions.md §14 — a
+    whitespace-only inline change moves the render but not the hash."""
     xml = b"<r><b>x</b> <b>y</b></r>"
 
     preserved = etree.parse(BytesIO(xml), parser=safe_parser(remove_blank_text=False)).getroot()

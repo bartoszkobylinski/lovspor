@@ -15,6 +15,14 @@ between two snapshots of the same Lovdata document means the document's
 
 Whitespace inside element text content IS significant and is preserved.
 
+Known gap: ``remove_blank_text=True`` also strips whitespace-only nodes
+*between* elements, which the renderer (``remove_blank_text=False``, PR #79)
+treats as significant inline spacing. A change to that inter-element
+whitespace alone therefore does not move the hash and skips a re-render.
+This is accepted, not a bug: making the hash whitespace-sensitive would
+re-hash on every upstream indentation reflow and force a corpus-wide
+re-render, against the conservative-churn posture. See decisions.md §14.
+
 Implementation: lxml parser with ``remove_blank_text=True`` and
 ``remove_comments=True`` strips formatting noise at parse time, then
 W3C XML Canonicalization (C14N) via ``etree.tostring(method="c14n")``
