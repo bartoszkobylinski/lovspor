@@ -50,7 +50,7 @@ from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder, split_to_to
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import write_embeddings
-from lovspor.errors import ConfigError
+from lovspor.errors import ConfigError, CorpusStateError
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_history, write_history
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
@@ -79,7 +79,7 @@ from lovspor.sync.document_io import (
 )
 from lovspor.sync.git_commit import add as git_add
 from lovspor.sync.git_commit import commit as git_commit_msg
-from lovspor.sync.git_commit import has_staged_changes
+from lovspor.sync.git_commit import has_staged_changes, has_uncommitted_changes
 
 _TRACKED_DATASETS = (
     "gjeldende-lover",
@@ -163,6 +163,7 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
     the scheduled workflow relies on to detect 'nothing to do' runs.
     """
     _ensure_corpus_git_repo(settings.lovverk_repo_path)
+    _ensure_clean_corpus(settings.lovverk_repo_path)
     manifest_path = settings.lovverk_repo_path / _MANIFEST_FILENAME
     prior = _load_or_empty_manifest(manifest_path)
 
@@ -445,6 +446,28 @@ def _ensure_corpus_git_repo(path: Path) -> None:
     if not (path / ".git").exists():
         raise ConfigError(
             f"{path} is not a git repository (expected .git/ inside it)",
+        )
+
+
+def _ensure_clean_corpus(path: Path) -> None:
+    """Abort the sync if the corpus worktree is dirty at start.
+
+    A dirty tree means a prior sync wrote the manifest / docs / index but
+    crashed before committing them. Because change-detection state is read
+    from the on-disk manifest, continuing would classify everything
+    unchanged and silently drop the work forever (see ``_commit_with_history``
+    — the manifest is written before its commit lands). Failing loudly turns
+    that silent permanent loss into a visible error. The scheduled workflow
+    clones lovverk fresh each run, so this only fires on a persistent
+    checkout carrying crash residue; the operator inspects ``git status``
+    and, if it is residue, ``git reset --hard`` + ``git clean`` and re-runs.
+    """
+    if has_uncommitted_changes(path):
+        raise CorpusStateError(
+            f"corpus worktree {path} has uncommitted changes at sync start — a "
+            "prior sync likely crashed after writing the manifest but before "
+            f"committing. Inspect `git -C {path} status`; if this is crash "
+            "residue, `git reset --hard` and `git clean -fd`, then re-run.",
         )
 
 

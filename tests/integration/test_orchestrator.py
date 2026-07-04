@@ -494,6 +494,7 @@ def test_run_sync_actions_do_not_double_stage_embedding_sidecars(
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _path: None)
+            monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _path: None)
             monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
             monkeypatch.setattr(
                 orchestrator_module, "_collect_upstream", lambda *_args: upstream_docs
@@ -609,6 +610,7 @@ def test_run_sync_add_rename_change_sidecar_collision_stages_each_sidecar_once(
         captured_actions.extend(kwargs["actions"])
 
     monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _path: None)
+    monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _path: None)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
     monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: upstream_docs)
     monkeypatch.setattr(
@@ -1693,6 +1695,7 @@ def test_run_sync_removed_slugless_doc_builds_remove_action_without_sidecars(
         captured_actions.extend(kwargs["actions"])
 
     monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _path: None)
+    monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _path: None)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
     monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
     monkeypatch.setattr(

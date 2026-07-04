@@ -16,6 +16,7 @@ from lovspor.sync.git_commit import (
     add,
     commit,
     has_staged_changes,
+    has_uncommitted_changes,
 )
 
 
@@ -252,3 +253,40 @@ def test_has_staged_changes_reports_unexpected_git_exit_code(
     assert str(exc_info.value) == (
         f"git diff --cached --quiet (cwd={tmp_path}) returned unexpected code 9"
     )
+
+
+def test_has_uncommitted_changes_false_for_empty_repo(repo: Path) -> None:
+    assert has_uncommitted_changes(repo) is False
+
+
+def test_has_uncommitted_changes_false_after_a_clean_commit(repo: Path) -> None:
+    (repo / "a.md").write_text("body\n", encoding="utf-8")
+    add(repo, ["a.md"])
+    commit(repo, "add a")
+
+    assert has_uncommitted_changes(repo) is False
+
+
+def test_has_uncommitted_changes_true_for_modified_tracked_file(repo: Path) -> None:
+    (repo / "a.md").write_text("v1\n", encoding="utf-8")
+    add(repo, ["a.md"])
+    commit(repo, "add a")
+    (repo / "a.md").write_text("v2\n", encoding="utf-8")
+
+    assert has_uncommitted_changes(repo) is True
+
+
+def test_has_uncommitted_changes_true_for_staged_file(repo: Path) -> None:
+    (repo / "a.md").write_text("body\n", encoding="utf-8")
+    add(repo, ["a.md"])
+
+    assert has_uncommitted_changes(repo) is True
+
+
+def test_has_uncommitted_changes_true_for_untracked_file(repo: Path) -> None:
+    (repo / "a.md").write_text("committed\n", encoding="utf-8")
+    add(repo, ["a.md"])
+    commit(repo, "add a")
+    (repo / "stray.md").write_text("untracked\n", encoding="utf-8")
+
+    assert has_uncommitted_changes(repo) is True
