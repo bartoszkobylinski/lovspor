@@ -1,5 +1,6 @@
 import os
 import re
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -99,6 +100,32 @@ def test_mcp_help_mentions_fifteen_tools_and_optional_semantic_search_key() -> N
     assert "semantic_search" in result.stdout
     assert "other fourteen" in result.stdout
     assert "tools work normally" in result.stdout
+
+
+def test_mcp_command_reads_corpus_path_supplied_via_dotenv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """LOVVERK_CORPUS_PATH provided only via .env (not exported) must still
+    reach the mcp command. Typer resolves the option's envvar during arg
+    parsing, so .env has to be loaded in the app callback — loading it in
+    serve() is too late (the command already exited on the missing option)."""
+    monkeypatch.setattr("lovspor.settings._ENV_LOADED", False)
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+
+    def fake_load_dotenv(**_kwargs: object) -> bool:
+        monkeypatch.setenv("LOVVERK_CORPUS_PATH", str(tmp_path))
+        return True
+
+    monkeypatch.setattr("lovspor.settings.load_dotenv", fake_load_dotenv)
+
+    captured: dict[str, Path] = {}
+    monkeypatch.setattr("lovspor.cli._mcp_serve", lambda path: captured.update(path=path))
+
+    result = runner.invoke(app, ["mcp"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["path"] == tmp_path.resolve()
 
 
 def test_seed_invokes_run_sync_and_reports_count(
