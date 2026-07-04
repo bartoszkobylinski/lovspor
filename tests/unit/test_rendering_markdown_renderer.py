@@ -23,10 +23,20 @@ def _wrap(main_body: bytes) -> bytes:
 def test_render_markdown_on_tiny_vimpel_fixture() -> None:
     xml = (_FIXTURES / "lov-17410217-000.xml").read_bytes()
     md = render_markdown(xml)
-    assert md.startswith("# Forbud paa Vimpel-Føring\n\n")
-    # En-dashes in the expected suffix are verbatim from Lovdata content.
-    assert md.rstrip().endswith("ligesom de dem virkelig havde misbrugt. – – –")  # noqa: RUF001
-    assert md.endswith("\n")
+    dash = "\N{EN DASH}"
+    assert md == (
+        "# Forbud paa Vimpel-Føring\n\n"
+        "Ingen Skipper, som fører noget i Kongens Riger og Lande hjemmehørende Skib, "
+        "enten det maatte føre Canoner eller ikke, ei heller nogen Kjøbmand eller "
+        "Rheder deri, maa understaa sig enten i Søen, paa nogen indenlandsk Rhed eller "
+        "Havn, eller og paa fremmede Kyster og Havne at føre nogen Vimpel eller Kgl. "
+        "Flag og Gjøs med Split i, det være sig i hvad Slags Leilighed det være maatte, "
+        f"{dash} {dash} {dash}; [under samme Straf] skal det være forbudt alle Skippere "
+        "og Rhedere af noget i Kongens Riger og Lande hjemmehørende Skib dertil at lade "
+        "gjøre eller derved at føre nogen Vimpel eller Kgl. Flag og Gjøs, og om de dermed "
+        "betræffes, skal de uden Forskaansel ansees, ligesom de dem virkelig havde "
+        f"misbrugt. {dash} {dash} {dash}\n"
+    )
 
 
 def test_render_h1_produces_h1_markdown() -> None:
