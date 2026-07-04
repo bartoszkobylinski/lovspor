@@ -40,6 +40,7 @@ Output contract: body only, no YAML frontmatter, no trailing whitespace
 except a single trailing newline.
 """
 
+import re
 from io import BytesIO
 
 from lxml import etree
@@ -56,6 +57,56 @@ _PARAGRAPH_CLASSES = frozenset(
     {"legalP", "numberedLegalP", "listArticle"},
 )
 _CHANGE_NOTE_CLASS = "changesToParent"
+
+_INLINE_ESCAPE = str.maketrans(
+    {
+        "\\": "\\\\",
+        "`": "\\`",
+        "*": "\\*",
+    },
+)
+_ORDERED_LIST_MARKER = re.compile(r"^(\d{1,9})([.)])(?=\s|$)")
+
+
+def _escape_inline_text(text: str) -> str:
+    """Escape inline Markdown specials in a raw text run so law text cannot
+    turn into emphasis, a code span, or a stray escape.
+
+    Deliberately conservative: only backslash, backtick, and asterisk are
+    escaped. Brackets, underscores, and angle brackets are left verbatim —
+    a lone bracket is literal in CommonMark, ``_`` inside a word is not
+    emphasis, and escaping them would pepper legal citations and
+    identifiers with backslashes for no real ambiguity.
+    """
+    return text.translate(_INLINE_ESCAPE)
+
+
+def _escape_block_leading(text: str) -> str:
+    """Escape a leading block-structural token so a paragraph, blockquote,
+    or list item whose text starts with ``- ``/``# ``/``> ``/``| ``/``1. ``
+    is not reparsed as a list, heading, quote, or table row. Asterisk-led
+    bullets are already handled by ``_escape_inline_text`` (every asterisk
+    is escaped); this covers markers only significant at line start.
+    """
+    if not text:
+        return text
+    if text[0] in "#>|":
+        return "\\" + text
+    if text[0] in "-+" and (len(text) == 1 or text[1].isspace()):
+        return "\\" + text
+    marker = _ORDERED_LIST_MARKER.match(text)
+    if marker:
+        return f"{marker.group(1)}\\{marker.group(2)}{text[marker.end() :]}"
+    return text
+
+
+def _escape_href(href: str) -> str:
+    """Percent-encode the characters that break a Markdown link
+    destination: parentheses (which close the ``(...)``) and spaces (which
+    would start a link title). Everything else is left verbatim so an
+    already-encoded URL is not double-encoded.
+    """
+    return href.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
 
 
 def render_markdown(xml_bytes: bytes) -> str:
@@ -129,10 +180,10 @@ def _render_article(
     classes: list[str],
 ) -> str:
     if _CHANGE_NOTE_CLASS in classes:
-        text = _inline(elem)
+        text = _escape_block_leading(_inline(elem))
         return f"> {text}\n\n" if text else ""
     if any(c in _PARAGRAPH_CLASSES for c in classes):
-        text = _inline(elem)
+        text = _escape_block_leading(_inline(elem))
         return f"{text}\n\n" if text else ""
     return _render_children(elem)
 
@@ -156,7 +207,7 @@ def _span_text(span: etree._Element | None) -> str:
     # which is what we want. tostring(method="text") incorrectly includes the tail.
     # lxml-stubs types itertext() as Iterator[str | bytes] but it only yields str
     # for text parsed from an XML document.
-    return "".join(span.itertext()).strip()  # type: ignore[arg-type]
+    return _escape_inline_text("".join(span.itertext()).strip())  # type: ignore[arg-type]
 
 
 _LIST_TAGS = frozenset({"ul", "ol"})
@@ -186,7 +237,7 @@ def _render_list_lines(
     indent = "  " * depth
     for index, li in enumerate(items, start=1):
         prefix = f"{index}. " if ordered else "- "
-        lines.append(f"{indent}{prefix}{_inline_of_li(li)}")
+        lines.append(f"{indent}{prefix}{_escape_block_leading(_inline_of_li(li))}")
         for child in li:
             if child.tag in _LIST_TAGS:
                 lines.extend(
@@ -206,21 +257,21 @@ def _inline_of_li(li: etree._Element) -> str:
     their own indentation; their tails (text after the closing tag) are
     preserved as inline content of the parent li.
     """
-    parts = [li.text or ""]
+    parts = [_escape_inline_text(li.text or "")]
     for child in li:
         if child.tag in _LIST_TAGS:
-            parts.append(child.tail or "")
+            parts.append(_escape_inline_text(child.tail or ""))
             continue
         parts.append(_inline_for_child(child))
-        parts.append(child.tail or "")
+        parts.append(_escape_inline_text(child.tail or ""))
     return "".join(parts).strip()
 
 
 def _inline(elem: etree._Element) -> str:
-    parts = [elem.text or ""]
+    parts = [_escape_inline_text(elem.text or "")]
     for child in elem:
         parts.append(_inline_for_child(child))
-        parts.append(child.tail or "")
+        parts.append(_escape_inline_text(child.tail or ""))
     return "".join(parts).strip()
 
 
@@ -241,5 +292,5 @@ def _render_anchor(elem: etree._Element) -> str:
     text = _inline(elem)
     href = elem.get("href") or ""
     if href:
-        return f"[{text}]({href})"
+        return f"[{text}]({_escape_href(href)})"
     return text

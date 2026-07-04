@@ -200,6 +200,53 @@ def test_render_br_produces_newline() -> None:
     assert "Line1\nLine2" in md
 
 
+def test_render_escapes_leading_bullet_in_paragraph() -> None:
+    """A legalP whose text begins with '- ' must not be reparsed as a
+    Markdown bullet — the dash is escaped."""
+    md = render_markdown(_wrap(b'<article class="legalP">- 500 kr per dag</article>'))
+    assert md == "\\- 500 kr per dag\n"
+
+
+def test_render_escapes_leading_ordered_list_marker_in_paragraph() -> None:
+    md = render_markdown(_wrap(b'<article class="legalP">1. punkt</article>'))
+    assert md == "1\\. punkt\n"
+
+
+def test_render_escapes_leading_heading_and_quote_and_table_tokens() -> None:
+    assert (
+        render_markdown(_wrap(b'<article class="legalP"># ikke overskrift</article>'))
+        == "\\# ikke overskrift\n"
+    )
+    assert (
+        render_markdown(_wrap(b'<article class="legalP">> ikke sitat</article>'))
+        == "\\> ikke sitat\n"
+    )
+
+
+def test_render_escapes_leading_token_inside_blockquote() -> None:
+    md = render_markdown(_wrap(b'<article class="changesToParent">- endret</article>'))
+    assert md == "> \\- endret\n"
+
+
+def test_render_escapes_inline_asterisks_in_text() -> None:
+    md = render_markdown(_wrap(b'<article class="legalP">2*2 og 3*3</article>'))
+    assert md == "2\\*2 og 3\\*3\n"
+
+
+def test_render_does_not_escape_hyphen_without_following_space() -> None:
+    """A leading hyphen not followed by whitespace (e.g. a negative amount)
+    is not a Markdown bullet and must stay verbatim."""
+    md = render_markdown(_wrap(b'<article class="legalP">-500 kr i fradrag</article>'))
+    assert md == "-500 kr i fradrag\n"
+
+
+def test_render_encodes_parens_and_spaces_in_href() -> None:
+    md = render_markdown(
+        _wrap(b'<article class="legalP">See <a href="https://x.no/a(b) c">ref</a>.</article>'),
+    )
+    assert md == "See [ref](https://x.no/a%28b%29%20c).\n"
+
+
 def test_render_unknown_tag_traverses_children() -> None:
     """Unknown wrapper tags must not drop content."""
     md = render_markdown(
