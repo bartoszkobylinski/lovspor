@@ -31,7 +31,11 @@ DEFAULT_BASE_URL = "https://api.lovdata.no/v1/publicData"
 DEFAULT_TIMEOUT_SECONDS = 120.0
 DEFAULT_USER_AGENT = "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"
 
-_RETRYABLE_HTTP_STATUSES = frozenset({500, 502, 503, 504})
+# 429 (Too Many Requests) is transient rate-limiting, not a client error to
+# give up on — a scheduled sync that hits Lovdata's limit should back off and
+# retry rather than fail the whole run. (Retry-After is not yet honored; the
+# fixed exponential backoff applies. See docs/decisions.md if that changes.)
+_RETRYABLE_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
 _HTTP_ERROR_THRESHOLD = 400
 _RETRY_ATTEMPTS = 3
 _RETRY_BASE_DELAY_SECONDS = 1.0
@@ -182,10 +186,10 @@ class LovdataClient:
     def list_datasets(self) -> list[LovdataArchive]:
         """Fetch the catalogue of available archives.
 
-        Retries on transient HTTP 5xx and network errors.
+        Retries on transient HTTP 429 / 5xx and network errors.
         Raises:
-            NetworkError: non-retryable HTTP status (4xx) or final
-                attempt fails after retries.
+            NetworkError: non-retryable HTTP status (4xx other than 429)
+                or final attempt fails after retries.
             ParseError: response is not valid JSON, not an array, or
                 does not match the LovdataArchive schema.
         """
@@ -220,7 +224,7 @@ class LovdataClient:
         byte count matches ``archive.size_bytes`` (a mismatch is
         treated as transient transport truncation and retried).
 
-        Retries on transient 5xx, network errors, and size mismatch.
+        Retries on transient 429 / 5xx, network errors, and size mismatch.
 
         Raises:
             NetworkError: non-retryable HTTP status or final retry
