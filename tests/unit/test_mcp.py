@@ -20,8 +20,10 @@ import lovspor.mcp as mcp_module
 from lovspor.embeddings import write_embeddings
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
+    _MAX_RESULT_LIMIT,
     CorpusNotFoundError,
     CorpusReader,
+    _bounded_limit,
     _build_embedder,
     _compute_match_owner_starts,
     _extract_cross_references,
@@ -656,6 +658,39 @@ def test_list_recent_changes_excludes_tombstones(tmp_path: Path) -> None:
 
 
 # ---------- search_laws ----------
+
+
+def test_bounded_limit_rejects_negative_and_clamps_large() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        _bounded_limit(-1)
+    assert _bounded_limit(5) == 5
+    assert _bounded_limit(_MAX_RESULT_LIMIT) == _MAX_RESULT_LIMIT
+    assert _bounded_limit(10_000) == _MAX_RESULT_LIMIT
+
+
+def test_search_laws_caps_results_at_limit(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {f"nl-{i}": _record(slug=f"lov-{i}", title=f"Lov {i}") for i in range(5)},
+        write_files=False,
+    )
+    rows = CorpusReader(tmp_path).search_laws("lov", limit=2)
+    assert len(rows) == 2
+
+
+def test_search_laws_clamps_huge_limit_to_max(tmp_path: Path) -> None:
+    """A broad query with a huge limit cannot return the whole corpus in one
+    response — the result count is capped at _MAX_RESULT_LIMIT."""
+    _seed_corpus(
+        tmp_path,
+        {
+            f"nl-{i}": _record(slug=f"lov-{i}", title=f"Lov {i}")
+            for i in range(_MAX_RESULT_LIMIT + 10)
+        },
+        write_files=False,
+    )
+    rows = CorpusReader(tmp_path).search_laws("lov", limit=10_000)
+    assert len(rows) == _MAX_RESULT_LIMIT
 
 
 def test_search_laws_substring_matches_slug(tmp_path: Path) -> None:
