@@ -102,22 +102,19 @@ def test_mcp_help_mentions_fifteen_tools_and_optional_semantic_search_key() -> N
     assert "tools work normally" in result.stdout
 
 
-def test_mcp_command_reads_corpus_path_supplied_via_dotenv(
+def test_mcp_command_reads_corpus_path_from_real_dotenv_in_cwd(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """LOVVERK_CORPUS_PATH provided only via .env (not exported) must still
-    reach the mcp command. Typer resolves the option's envvar during arg
-    parsing, so .env has to be loaded in the app callback — loading it in
-    serve() is too late (the command already exited on the missing option)."""
+    """A real .env in the working directory (not an exported var) must reach
+    the mcp command. Two things have to line up: the app callback loads .env
+    BEFORE Typer resolves the --corpus-path envvar, and the loader discovers
+    .env from the cwd (usecwd=True) rather than the installed module dir.
+    No load_dotenv mock, so this exercises real dotenv discovery."""
     monkeypatch.setattr("lovspor.settings._ENV_LOADED", False)
     monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
-
-    def fake_load_dotenv(**_kwargs: object) -> bool:
-        monkeypatch.setenv("LOVVERK_CORPUS_PATH", str(tmp_path))
-        return True
-
-    monkeypatch.setattr("lovspor.settings.load_dotenv", fake_load_dotenv)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"LOVVERK_CORPUS_PATH={tmp_path}\n", encoding="utf-8")
 
     captured: dict[str, Path] = {}
     monkeypatch.setattr("lovspor.cli._mcp_serve", lambda path: captured.update(path=path))
