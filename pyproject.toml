@@ -26,6 +26,10 @@ dependencies = [
     # truncation under the 8191-token API limit. It's tiny (~3 MB
     # wheel) so we don't gain anything by gating it behind an extra.
     "tiktoken>=0.7.0",
+    # pyyaml backs the `lovspor-eval` console script (evals.runner, which
+    # is shipped in the wheel). It was only ever present transitively via
+    # dev tooling, so `pip install lovspor` shipped a broken entry point.
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
