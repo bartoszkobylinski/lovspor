@@ -149,3 +149,18 @@ def commit(repo: Path, message: str) -> None:
     error.
     """
     _run(["commit", "-m", message], cwd=repo)
+
+
+def has_uncommitted_changes(repo: Path) -> bool:
+    """True if the worktree or index is dirty (any modified, staged,
+    deleted, or untracked-and-unignored path).
+
+    A sync writes the manifest — the change-detection source of truth —
+    then commits it. If a prior run crashed in that window the manifest
+    is left ahead of git; the next run would read it, see 'nothing
+    changed', and silently drop the work. A dirty tree at sync start is
+    exactly that residue, so the caller aborts. Ignored files (per
+    ``.gitignore``) never count; ``git status --porcelain`` omits them.
+    """
+    result = _run(["status", "--porcelain"], cwd=repo)
+    return bool(result.stdout.strip())

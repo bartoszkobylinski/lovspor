@@ -1,3 +1,4 @@
+import subprocess
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 from pathlib import Path
@@ -6,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 import lovspor.sync.orchestrator as orchestrator_module
-from lovspor.errors import ConfigError
+from lovspor.errors import ConfigError, CorpusStateError
 from lovspor.history import HistoryRecord
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import LovdataArchive
@@ -58,9 +59,17 @@ def _upstream(doc_id: str, *, xml_hash: str, slug: str) -> _UpstreamDoc:
     )
 
 
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
 def _settings(tmp_path: Path) -> Settings:
     corpus = tmp_path / "lovverk"
-    (corpus / ".git").mkdir(parents=True)
+    corpus.mkdir(parents=True)
+    _git(corpus, "init", "-q")
+    _git(corpus, "config", "user.name", "test")
+    _git(corpus, "config", "user.email", "test@example.com")
+    _git(corpus, "config", "commit.gpgsign", "false")
     return Settings(
         data_dir=tmp_path / "data",
         lovverk_repo_path=corpus,
@@ -1124,6 +1133,39 @@ def test_run_sprint8_eu_basis_migration_returns_prior_when_nothing_written(
         )
         is prior
     )
+
+
+def test_run_sync_aborts_on_dirty_corpus_worktree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """C3 regression: a prior sync that wrote the manifest/docs but crashed
+    before committing leaves the worktree dirty and the on-disk manifest
+    ahead of git. run_sync must abort loudly rather than read the poisoned
+    manifest, classify everything unchanged, and silently drop the work.
+
+    Upstream + manifest load are stubbed so that WITHOUT the guard the run
+    would return a clean no-op — making the guard the only thing that can
+    raise here."""
+    settings = _settings(tmp_path)
+    repo = settings.lovverk_repo_path
+    (repo / "lover").mkdir()
+    (repo / "lover" / "x.md").write_text("v1\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+    # Crash residue: a tracked file modified but never committed.
+    (repo / "lover" / "x.md").write_text("v2 uncommitted\n", encoding="utf-8")
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_load_or_empty_manifest",
+        lambda _path: Manifest(generated_at=datetime(2026, 5, 1, tzinfo=UTC), documents={}),
+    )
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
+
+    with pytest.raises(CorpusStateError, match="uncommitted"):
+        run_sync(settings)
 
 
 def test_run_sync_noops_without_rewriting_manifest_or_committing(

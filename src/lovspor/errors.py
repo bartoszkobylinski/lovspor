@@ -32,3 +32,14 @@ class ExtractionError(LovsporError):
 
 class ConfigError(LovsporError):
     """Misconfiguration: invalid env var, malformed config file, bad path."""
+
+
+class CorpusStateError(LovsporError):
+    """The corpus git repo is in an unexpected state to start a sync.
+
+    Currently raised when the worktree is dirty at sync start, which
+    means a prior sync wrote the manifest (the change-detection source of
+    truth) but crashed before committing it. Proceeding would read the
+    uncommitted manifest, classify everything unchanged, and silently
+    drop the work — so the sync aborts loudly instead.
+    """
