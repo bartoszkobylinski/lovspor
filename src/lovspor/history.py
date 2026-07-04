@@ -46,6 +46,7 @@ EventType = Literal["added", "updated", "renamed", "removed"]
 _PER_DOC_SUBJECT = re.compile(
     r"^(?P<verb>add|update|rename|remove)\((?P<dataset>lov|forskrift)\): ",
 )
+_MIGRATION_RENAME_SUBJECT = re.compile(r"^migration: rename ")
 _MIGRATION_SUBJECT = re.compile(r"^migration: ")
 _BULK_SYNC_SUBJECT = re.compile(r"^sync: \d+ new, \d+ changed")
 _BULK_SYNC_REMOVED_COUNT = re.compile(r"(?P<count>\d+) removed")
@@ -247,7 +248,9 @@ def _classify_commit(
     per_doc = _PER_DOC_SUBJECT.match(subject)
     if per_doc:
         event_type = _VERB_TO_TYPE[per_doc.group("verb")]
-    elif _MIGRATION_SUBJECT.match(subject):
+    elif _MIGRATION_RENAME_SUBJECT.match(subject):
+        # Only the Sprint 4 slug migration ("migration: rename N documents
+        # to slug-based filenames") is a genuine filename change.
         event_type = "renamed"
     elif from_path and to_path:
         # Numstat rename signal is unambiguous — for any commit whose
@@ -257,6 +260,13 @@ def _classify_commit(
         # which would otherwise fall through to the bulk-sync heuristic
         # and be misclassified as added.
         event_type = "renamed"
+    elif _MIGRATION_SUBJECT.match(subject):
+        # A non-rename migration re-renders the doc in place — a content
+        # change, not a filename change. The Sprint 8 "migration: backfill
+        # eu_basis for N documents" commit rewrites every doc's frontmatter;
+        # classifying every "migration:" subject as renamed stamped a bogus
+        # "Filename renamed" event on every backfilled doc's history.
+        event_type = "updated"
     elif _BULK_SYNC_SUBJECT.match(subject):
         event_type = _classify_bulk_sync(subject, added, removed)
     else:
