@@ -22,8 +22,11 @@ from lovspor.embeddings import write_embeddings
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
     _MAX_RESULT_LIMIT,
+    _MCP_EMBED_MAX_RETRIES,
+    _MCP_EMBED_TIMEOUT_SECONDS,
     CorpusNotFoundError,
     CorpusReader,
+    OpenAIEmbedder,
     _bounded_limit,
     _build_embedder,
     _compute_match_owner_starts,
@@ -212,7 +215,7 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     created: list[str] = []
 
     class FakeOpenAIEmbedder:
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, **_kwargs: object) -> None:
             created.append(api_key)
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -225,6 +228,25 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     monkeypatch.setenv("OPENAI_APIKEY", "sk-compact")
     assert _build_embedder().__class__ is FakeOpenAIEmbedder
     assert created == ["sk-compact"]
+
+
+def test_build_embedder_uses_tight_interactive_timeout_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP server is single-threaded stdio: a hung OpenAI request blocks
+    every tool for the session. The embedder it builds must carry an
+    interactive timeout/retry budget, not the engine's 180s x 3 batch
+    defaults (~9 min worst case) that _build_embedder used to inherit."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    embedder = _build_embedder()
+
+    assert isinstance(embedder, OpenAIEmbedder)
+    assert embedder._timeout_seconds == _MCP_EMBED_TIMEOUT_SECONDS
+    assert embedder._max_retries == _MCP_EMBED_MAX_RETRIES
+    # Strictly tighter than the batch defaults it previously inherited.
+    assert embedder._timeout_seconds < 180.0
+    assert embedder._max_retries < 3
 
 
 def _write_embedding_file(
