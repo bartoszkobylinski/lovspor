@@ -1888,11 +1888,23 @@ def _resolve_dataset(dataset: str) -> str:
         ) from exc
 
 
+# The MCP server is a single-threaded stdio process: a hung OpenAI request
+# blocks every other tool for the rest of the session. semantic_search embeds
+# one short query, so it gets a tight interactive budget instead of the
+# engine's batch-embedding defaults (180s x 3 retries + backoff ~= 9 minutes
+# worst case). 15s x 2 attempts caps a fully-hung call at ~32s.
+_MCP_EMBED_TIMEOUT_SECONDS = 15.0
+_MCP_EMBED_MAX_RETRIES = 2
+
+
 def _build_embedder() -> EmbeddingModel | None:
     """Instantiate the OpenAI embedder if ``OPENAI_API_KEY`` is set,
     otherwise log a warning and return None. Reads either
     ``OPENAI_API_KEY`` or the underscore-less ``OPENAI_APIKEY`` to
-    match what ``Settings.from_env`` accepts on the engine side."""
+    match what ``Settings.from_env`` accepts on the engine side.
+
+    The embedder is built with an interactive timeout/retry budget so a
+    hung OpenAI node cannot freeze the stdio server for minutes."""
     api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_APIKEY")
     if not api_key:
         print(
@@ -1903,7 +1915,11 @@ def _build_embedder() -> EmbeddingModel | None:
             flush=True,
         )
         return None
-    return OpenAIEmbedder(api_key=api_key)
+    return OpenAIEmbedder(
+        api_key=api_key,
+        timeout_seconds=_MCP_EMBED_TIMEOUT_SECONDS,
+        max_retries=_MCP_EMBED_MAX_RETRIES,
+    )
 
 
 def build_server(corpus_path: Path) -> FastMCP:
