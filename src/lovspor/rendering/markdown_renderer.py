@@ -61,7 +61,7 @@ _CHANGE_NOTE_CLASS = "changesToParent"
 def render_markdown(xml_bytes: bytes) -> str:
     """Convert a Lovdata HTML document body to Markdown."""
     try:
-        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
+        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser(remove_blank_text=False))
     except etree.XMLSyntaxError as exc:
         raise ParseError(f"malformed XML: {exc}") from exc
     main = tree.find(".//main")

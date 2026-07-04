@@ -102,7 +102,7 @@ def build_frontmatter(
 
 def extract_xml_metadata(xml_bytes: bytes) -> dict[str, Any]:
     try:
-        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
+        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser(remove_blank_text=False))
     except etree.XMLSyntaxError as exc:
         raise ParseError(f"malformed XML: {exc}") from exc
     root = tree.getroot()

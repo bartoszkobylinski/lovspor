@@ -6,9 +6,11 @@ The two key invariants under test:
 """
 
 import re
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
 from lovspor.errors import ParseError
 from lovspor.parsing import xml_normalizer
@@ -36,6 +38,19 @@ def test_canonicalize_normalizes_self_closing_tags() -> None:
     a = b"<element/>"
     b = b"<element></element>"
     assert canonicalize_xml(a) == canonicalize_xml(b)
+
+
+def test_safe_parser_preserves_blank_tail_when_disabled() -> None:
+    """The renderer parses with remove_blank_text=False so the significant
+    whitespace-only tail between two inline elements survives; the default
+    (hashing) parser strips it."""
+    xml = b"<r><b>x</b> <b>y</b></r>"
+
+    preserved = etree.parse(BytesIO(xml), parser=safe_parser(remove_blank_text=False)).getroot()
+    stripped = etree.parse(BytesIO(xml), parser=safe_parser()).getroot()
+
+    assert preserved[0].tail == " "
+    assert stripped[0].tail is None
 
 
 def test_canonicalize_normalizes_inter_element_whitespace() -> None:
