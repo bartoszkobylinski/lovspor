@@ -26,6 +26,17 @@ def _ensure_env_loaded() -> None:
         _ENV_LOADED = True
 
 
+def load_env() -> None:
+    """Load ``.env`` into the process environment (idempotent, one-shot).
+
+    Public entry point for code that reads ``os.environ`` directly without
+    building :class:`Settings` — notably the MCP server, which reads
+    ``OPENAI_API_KEY`` from the environment to enable ``semantic_search``.
+    ``override=False`` means an already-exported variable always wins.
+    """
+    _ensure_env_loaded()
+
+
 class Settings(BaseModel):
     """Runtime configuration resolved from env vars or explicit overrides."""
 
