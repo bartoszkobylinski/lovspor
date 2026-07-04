@@ -123,6 +123,12 @@ def test_manifest_record_accepts_empty_eu_basis_list() -> None:
     assert rec.eu_basis == []
 
 
+def test_manifest_record_embedding_hash_defaults_to_none() -> None:
+    """Missing embedding_hash marks a legacy or keyless-sync record stale."""
+    rec = _record()
+    assert rec.embedding_hash is None
+
+
 def test_manifest_is_frozen() -> None:
     mf = _manifest()
     with pytest.raises(ValidationError):
@@ -365,6 +371,35 @@ def test_empty_manifest_round_trips(tmp_path: Path) -> None:
     path = tmp_path / "empty.json"
     write_manifest(empty, path)
     assert read_manifest(path) == empty
+
+
+def test_read_manifest_legacy_record_without_embedding_hash_loads_none(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "manifest.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": MANIFEST_VERSION,
+                "generated_at": "2026-04-22T06:00:00Z",
+                "documents": {
+                    "lov-legacy": {
+                        "doc_type": "lov",
+                        "xml_hash": "a" * 64,
+                        "markdown_path": "lover/legacy.md",
+                        "source_dataset": "gjeldende-lover",
+                        "last_seen": "2026-04-22T01:31:00Z",
+                        "status": "current",
+                    },
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = read_manifest(path)
+
+    assert loaded.documents["lov-legacy"].embedding_hash is None
 
 
 def test_removed_status_is_preserved_through_round_trip(
