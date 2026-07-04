@@ -1,4 +1,5 @@
 import json
+import tomllib
 from pathlib import Path
 from typing import Any, cast
 
@@ -1416,3 +1417,15 @@ def test_write_embeddings_empty_doc_writes_header_only_file(tmp_path: Path) -> N
     assert embedding_file.dim == EMBEDDING_DIM
     assert embedding_file.scale == 1.0
     assert embedding_file.sections == []
+
+
+def test_pyyaml_is_a_declared_runtime_dependency() -> None:
+    """evals.runner (the lovspor-eval console script, shipped in the wheel)
+    imports yaml at module top. pyyaml must be a real runtime dependency,
+    not merely transitive via dev tooling, or `pip install lovspor` ships a
+    console script that ImportErrors on first use."""
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    deps = data["project"]["dependencies"]
+
+    assert any(dep.lower().startswith("pyyaml") for dep in deps), deps
