@@ -1,6 +1,7 @@
 """Tests for lovspor.history."""
 
 import json
+import os
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -438,8 +439,10 @@ def test_classify_partial_rename_paths_do_not_count_as_rename(
     assert event.type == "added"
 
 
-def test_classify_strips_iso_timezone_to_date() -> None:
-    """Different timezone offsets produce the same calendar date."""
+def test_classify_uses_utc_calendar_date_of_author_instant() -> None:
+    """The author %aI instant is converted to a UTC calendar date so history
+    agrees with the time-machine's end-of-day-UTC cutoff. 23:59:59-08:00 is
+    already 07:59:59 the NEXT day in UTC."""
     event = _classify_commit(
         "abc",
         "2026-04-27T23:59:59-08:00",
@@ -447,7 +450,7 @@ def test_classify_strips_iso_timezone_to_date() -> None:
         [],
     )
     assert event is not None
-    assert event.date == date(2026, 4, 27)
+    assert event.date == date(2026, 4, 28)
 
 
 # ---------- _parse_events ----------
@@ -888,6 +891,30 @@ def test_extract_history_raises_on_git_log_failure(tmp_path: Path) -> None:
             doc_id="nl-x",
             slug="x",
         )
+
+
+def test_extract_history_records_utc_date_for_non_utc_author_timezone(tmp_path: Path) -> None:
+    """A commit authored 00:30 at +02:00 is 22:30 the PREVIOUS day in UTC.
+    History must record the UTC date (2026-04-15), not the author-local one
+    (2026-04-16), so it agrees with get_law_at's end-of-day-UTC cutoff."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "lover").mkdir()
+    (repo / "lover" / "x.md").write_text("body\n", encoding="utf-8")
+    _git("add", "lover/x.md", cwd=repo)
+    when = "2026-04-16T00:30:00+02:00"
+    env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    subprocess.run(
+        ["git", "commit", "-m", "add(lov): x"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+    record = extract_history(repo_path=repo, current_path="lover/x.md", doc_id="nl-x", slug="x")
+
+    assert record.events[0].date == date(2026, 4, 15)
 
 
 def test_extract_history_records_raw_non_ascii_rename_paths(tmp_path: Path) -> None:
