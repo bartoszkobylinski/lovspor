@@ -474,6 +474,38 @@ def test_write_one_renders_document_record_and_optional_embeddings(
     assert context.retrieved_at == now
 
 
+def test_write_one_can_preserve_prior_retrieved_at(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    prior_retrieved_at = datetime(2026, 4, 30, tzinfo=UTC)
+    now = datetime(2026, 5, 2, tzinfo=UTC)
+    upstream = _UpstreamDoc(
+        doc_id="lov-1",
+        source_dataset="gjeldende-lover",
+        xml_bytes=b"<xml/>",
+        xml_hash="a" * 64,
+        slug="slug-1",
+        title="Lov 1",
+        eu_basis=(),
+        retrieved_at=prior_retrieved_at,
+    )
+    rendered_contexts: list[object] = []
+
+    def fake_render(_xml_bytes: bytes, context: object) -> str:
+        rendered_contexts.append(context)
+        return "rendered markdown"
+
+    monkeypatch.setattr(orchestrator_module, "render_full_document", fake_render)
+    monkeypatch.setattr(orchestrator_module, "write_document", lambda *_a: None)
+
+    record, _paths = _write_one(settings, upstream, now)
+
+    assert record.last_seen == now
+    assert rendered_contexts[0].retrieved_at == prior_retrieved_at
+
+
 def test_write_one_without_embedder_leaves_embedding_hash_none(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1118,6 +1150,7 @@ def test_run_sprint8_eu_basis_migration_skips_unsafe_records_and_commits(
     written_record = current.model_copy(update={"eu_basis": []})
     written_path = settings.lovverk_repo_path / "lover" / "current.md"
     write_calls: list[str] = []
+    retrieved_at_values: list[datetime | None] = []
     added_paths: list[list[Path]] = []
     messages: list[str] = []
 
@@ -1127,6 +1160,7 @@ def test_run_sprint8_eu_basis_migration_skips_unsafe_records_and_commits(
         _now: datetime,
     ) -> tuple[ManifestRecord, list[Path]]:
         write_calls.append(upstream_doc.doc_id)
+        retrieved_at_values.append(upstream_doc.retrieved_at)
         return written_record, [written_path]
 
     monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
@@ -1152,6 +1186,7 @@ def test_run_sprint8_eu_basis_migration_skips_unsafe_records_and_commits(
     )
 
     assert write_calls == ["current"]
+    assert retrieved_at_values == [current.last_seen]
     assert result == Manifest(
         generated_at=now,
         documents={
@@ -1381,6 +1416,7 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
     }
     captured: dict[str, object] = {}
     deleted: list[Path] = []
+    retrieved_at_by_doc: dict[str, datetime | None] = {}
 
     def fake_write_one(
         settings: Settings,
@@ -1388,6 +1424,7 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
         _now: datetime,
         _embedder: object,
     ) -> tuple[ManifestRecord, list[Path]]:
+        retrieved_at_by_doc[upstream_doc.doc_id] = upstream_doc.retrieved_at
         path = settings.lovverk_repo_path / "lover" / f"{upstream_doc.slug}.md"
         return (
             _record(upstream_doc.doc_id, xml_hash=upstream_doc.xml_hash, slug=upstream_doc.slug),
@@ -1425,6 +1462,11 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
         ("rename", "lov-renamed", "renamed-new"),
         ("remove", "lov-removed", "removed"),
     ]
+    assert retrieved_at_by_doc == {
+        "lov-new": None,
+        "lov-changed": None,
+        "lov-renamed": prior.documents["lov-renamed"].last_seen,
+    }
     assert actions[1].paths == (
         settings.lovverk_repo_path / "lover" / "changed-old.md",
         settings.lovverk_repo_path / "lover" / "changed-new.md",
