@@ -82,22 +82,30 @@ def _escape_inline_text(text: str) -> str:
 
 
 def _escape_block_leading(text: str) -> str:
-    """Escape a leading block-structural token so a paragraph, blockquote,
-    or list item whose text starts with ``- ``/``# ``/``> ``/``| ``/``1. ``
-    is not reparsed as a list, heading, quote, or table row. Asterisk-led
-    bullets are already handled by ``_escape_inline_text`` (every asterisk
-    is escaped); this covers markers only significant at line start.
+    """Escape a leading block-structural token so text starting with
+    ``- ``/``# ``/``> ``/``| ``/``1. `` is not reparsed as a list, heading,
+    quote, or table row.
+
+    Markdown block parsing is line-oriented, and a ``<br/>`` renders as a
+    newline inside a paragraph / blockquote / list item, so the check runs
+    on EVERY line — not just the first character of the block. A ``- `` on
+    line two would otherwise start a list (and break out of a blockquote).
+    Asterisk-led bullets are already handled by ``_escape_inline_text``.
     """
-    if not text:
-        return text
-    if text[0] in "#>|":
-        return "\\" + text
-    if text[0] in "-+" and (len(text) == 1 or text[1].isspace()):
-        return "\\" + text
-    marker = _ORDERED_LIST_MARKER.match(text)
+    return "\n".join(_escape_line_leading(line) for line in text.split("\n"))
+
+
+def _escape_line_leading(line: str) -> str:
+    if not line:
+        return line
+    if line[0] in "#>|":
+        return "\\" + line
+    if line[0] in "-+" and (len(line) == 1 or line[1].isspace()):
+        return "\\" + line
+    marker = _ORDERED_LIST_MARKER.match(line)
     if marker:
-        return f"{marker.group(1)}\\{marker.group(2)}{text[marker.end() :]}"
-    return text
+        return f"{marker.group(1)}\\{marker.group(2)}{line[marker.end() :]}"
+    return line
 
 
 def _escape_href(href: str) -> str:

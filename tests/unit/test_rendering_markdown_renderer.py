@@ -240,6 +240,31 @@ def test_render_does_not_escape_hyphen_without_following_space() -> None:
     assert md == "-500 kr i fradrag\n"
 
 
+def test_render_escapes_leading_token_on_second_line_after_br_in_paragraph() -> None:
+    """Markdown block parsing is line-oriented: a <br/> splits the paragraph
+    into lines, and a line starting '- ' would reparse as a bullet even
+    though it is not the first character of the block."""
+    md = render_markdown(_wrap(b'<article class="legalP">Line<br/>- 500 kr</article>'))
+    assert md == "Line\n\\- 500 kr\n"
+
+
+def test_render_escapes_leading_heading_on_second_line_after_br() -> None:
+    md = render_markdown(_wrap(b'<article class="legalP">Line<br/># heading</article>'))
+    assert md == "Line\n\\# heading\n"
+
+
+def test_render_escapes_second_line_token_inside_blockquote_after_br() -> None:
+    """A '- ' on line 2 of a changesToParent would otherwise leave the
+    blockquote and become a list; escaped, it stays lazy-continuation text."""
+    md = render_markdown(_wrap(b'<article class="changesToParent">Line<br/>- endret</article>'))
+    assert md == "> Line\n\\- endret\n"
+
+
+def test_render_escapes_leading_token_on_second_line_in_list_item() -> None:
+    md = render_markdown(_wrap(b"<ul><li>item<br/>- sub</li></ul>"))
+    assert md == "- item\n\\- sub\n"
+
+
 def test_render_encodes_parens_and_spaces_in_href() -> None:
     md = render_markdown(
         _wrap(b'<article class="legalP">See <a href="https://x.no/a(b) c">ref</a>.</article>'),
