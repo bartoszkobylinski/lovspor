@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Self
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from lovspor.errors import ConfigError
@@ -22,8 +22,24 @@ _ENV_LOADED = False
 def _ensure_env_loaded() -> None:
     global _ENV_LOADED  # noqa: PLW0603 - process-wide one-shot init
     if not _ENV_LOADED:
-        load_dotenv(override=False)
+        # usecwd=True searches from the working directory the CLI was launched
+        # in, not from this module's installed location. Without it,
+        # find_dotenv walks up from site-packages and never sees the user's
+        # project .env — so `lovspor mcp` run from a checkout with a .env would
+        # miss LOVVERK_CORPUS_PATH / OPENAI_API_KEY. Empty result -> no-op.
+        load_dotenv(find_dotenv(usecwd=True), override=False)
         _ENV_LOADED = True
+
+
+def load_env() -> None:
+    """Load ``.env`` into the process environment (idempotent, one-shot).
+
+    Public entry point for code that reads ``os.environ`` directly without
+    building :class:`Settings` — notably the MCP server, which reads
+    ``OPENAI_API_KEY`` from the environment to enable ``semantic_search``.
+    ``override=False`` means an already-exported variable always wins.
+    """
+    _ensure_env_loaded()
 
 
 class Settings(BaseModel):

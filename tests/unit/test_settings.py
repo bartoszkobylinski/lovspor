@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import lovspor.settings as settings_module
 from lovspor.errors import ConfigError
-from lovspor.settings import Settings
+from lovspor.settings import Settings, load_env
 
 
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -16,6 +17,24 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
             monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_APIKEY", raising=False)
+
+
+def test_load_env_invokes_dotenv_loader_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The public load_env() delegates to the guarded one-shot .env loader —
+    the MCP server relies on it since it reads os.environ without Settings."""
+    calls: list[bool] = []
+
+    def _spy(*_args: object, **_kwargs: object) -> None:
+        calls.append(True)
+
+    monkeypatch.setattr(settings_module, "_ENV_LOADED", False)
+    monkeypatch.setattr(settings_module, "find_dotenv", lambda **_kwargs: "")
+    monkeypatch.setattr(settings_module, "load_dotenv", _spy)
+
+    load_env()
+    load_env()  # one-shot: the guard prevents a second load
+
+    assert calls == [True]
 
 
 def test_from_env_reads_required_vars(

@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import lovspor.mcp as mcp_module
 from lovspor.embeddings import write_embeddings
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
@@ -3086,6 +3087,28 @@ def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
 
 
 # ---------- build_server ----------
+
+
+def test_serve_loads_dotenv_before_building_server(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The `lovspor mcp` command does not build Settings, so serve() must
+    load .env itself before build_server reads os.environ — otherwise an
+    OPENAI_API_KEY set only in .env is missed and semantic_search is
+    silently disabled."""
+    calls: list[str] = []
+    monkeypatch.setattr(mcp_module, "load_env", lambda: calls.append("load_env"))
+
+    class _FakeServer:
+        def run(self) -> None:
+            calls.append("run")
+
+    monkeypatch.setattr(mcp_module, "build_server", lambda _path: _FakeServer())
+
+    mcp_module.serve(tmp_path)
+
+    assert calls == ["load_env", "run"]
 
 
 def test_build_server_registers_fifteen_tools(tmp_path: Path) -> None:

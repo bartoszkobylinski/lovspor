@@ -7,7 +7,7 @@ import typer
 
 from lovspor import __version__
 from lovspor.mcp import serve as _mcp_serve
-from lovspor.settings import Settings
+from lovspor.settings import Settings, load_env
 from lovspor.sync.orchestrator import run_sync
 
 app = typer.Typer(
@@ -36,6 +36,12 @@ def main(
     ),
 ) -> None:
     """Norwegian law change tracker."""
+    # Load .env here, in the group callback, so it is applied BEFORE Typer
+    # resolves any subcommand option's ``envvar=`` (e.g. the mcp command's
+    # LOVVERK_CORPUS_PATH). Doing it inside the command body — or in
+    # serve() — is too late: the option is resolved during arg parsing and
+    # a value living only in .env would be missed, exiting with code 2.
+    load_env()
 
 
 @app.command()

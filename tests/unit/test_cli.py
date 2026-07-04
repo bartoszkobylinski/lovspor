@@ -1,5 +1,6 @@
 import os
 import re
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -99,6 +100,29 @@ def test_mcp_help_mentions_fifteen_tools_and_optional_semantic_search_key() -> N
     assert "semantic_search" in result.stdout
     assert "other fourteen" in result.stdout
     assert "tools work normally" in result.stdout
+
+
+def test_mcp_command_reads_corpus_path_from_real_dotenv_in_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A real .env in the working directory (not an exported var) must reach
+    the mcp command. Two things have to line up: the app callback loads .env
+    BEFORE Typer resolves the --corpus-path envvar, and the loader discovers
+    .env from the cwd (usecwd=True) rather than the installed module dir.
+    No load_dotenv mock, so this exercises real dotenv discovery."""
+    monkeypatch.setattr("lovspor.settings._ENV_LOADED", False)
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"LOVVERK_CORPUS_PATH={tmp_path}\n", encoding="utf-8")
+
+    captured: dict[str, Path] = {}
+    monkeypatch.setattr("lovspor.cli._mcp_serve", lambda path: captured.update(path=path))
+
+    result = runner.invoke(app, ["mcp"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["path"] == tmp_path.resolve()
 
 
 def test_seed_invokes_run_sync_and_reports_count(

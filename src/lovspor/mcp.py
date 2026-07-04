@@ -61,6 +61,7 @@ from lovspor.embeddings import (
     read_embeddings,
 )
 from lovspor.errors import LovsporError
+from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
 
@@ -2269,6 +2270,13 @@ def build_server(corpus_path: Path) -> FastMCP:
 def serve(corpus_path: Path) -> None:
     """Start the stdio MCP server bound to ``corpus_path``.
 
+    Loads ``.env`` first: the ``lovspor mcp`` command does not build
+    :class:`Settings`, so without this the server would read ``os.environ``
+    with no ``.env`` applied and silently start with ``semantic_search``
+    disabled whenever ``OPENAI_API_KEY`` lives in ``.env`` rather than an
+    exported variable.
+
     Blocks until the MCP client disconnects.
     """
+    load_env()
     build_server(corpus_path).run()
