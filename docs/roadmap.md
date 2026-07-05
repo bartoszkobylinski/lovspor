@@ -24,13 +24,14 @@
 - Full git history. Time-travel "as of date" already exists for free — just not yet exposed.
 - Manifest as the single source of truth for change detection.
 
-### MCP server (14 tools)
+### MCP server (15 tools)
 | Tool | Purpose |
 |---|---|
 | `get_law` | full Markdown of an act |
 | `get_law_at` | full Markdown as of a target date — time-machine via `git log --follow` (Sprint 10) |
 | `list_law_versions` | dates of distinct content versions, oldest-first (Sprint 10) |
 | `get_section` | one `§` with parent chapter + validated `cross_references` |
+| `list_sections` | an act's table of contents: every `§` id + heading |
 | `get_law_history` | structured change events |
 | `list_recent_changes` | sorted by `last_changed` |
 | `search_laws` | slug + title metadata search |
@@ -43,7 +44,7 @@
 | `corpus_status` | freshness / staleness signal |
 
 ### Positioning
-Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 14 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 PR-A adding a git-history time-machine pair (`get_law_at` + `list_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
+Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 15 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 PR-A adding a git-history time-machine pair (`get_law_at` + `list_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
 
 ---
 
@@ -111,8 +112,8 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 
 **A1. Structural AST + table-of-contents tools**
 - Parse Markdown into a Pydantic AST: `Lov(chapters=[Kapittel(sections=[Paragraf(...)])])`.
-- New tools: `get_law_toc(slug)`, `get_chapter(slug, chapter_id)`, `list_sections(slug)`.
-- Refactor `get_section` and `validate_citation` to consume the AST instead of parsing text repeatedly.
+- New tools: `get_law_toc(slug)`, `get_chapter(slug, chapter_id)`.
+- Refactor `get_section`, `list_sections`, and `validate_citation` (all currently text-parsing, already shipped) to consume the AST instead of parsing text repeatedly.
 - **Leverage:** very high — every later tool builds on the AST.
 - **Effort:** high. Norwegian legal structure is irregular: sometimes `§ 1`, sometimes `§ 1-1`, preambles without numbering, "Kap. III" in Roman numerals, appendices ("Vedlegg").
 - **Risk:** the parser must be solid; an AST bug breaks every dependent tool.
