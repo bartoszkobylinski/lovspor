@@ -112,8 +112,8 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 
 **A1. Structural AST + table-of-contents tools**
 - Parse Markdown into a Pydantic AST: `Lov(chapters=[Kapittel(sections=[Paragraf(...)])])`.
-- New tools: `get_law_toc(slug)`, `get_chapter(slug, chapter_id)`, `list_sections(slug)`.
-- Refactor `get_section` and `validate_citation` to consume the AST instead of parsing text repeatedly.
+- New tools: `get_law_toc(slug)`, `get_chapter(slug, chapter_id)`.
+- Refactor `get_section`, `list_sections`, and `validate_citation` (all currently text-parsing, already shipped) to consume the AST instead of parsing text repeatedly.
 - **Leverage:** very high — every later tool builds on the AST.
 - **Effort:** high. Norwegian legal structure is irregular: sometimes `§ 1`, sometimes `§ 1-1`, preambles without numbering, "Kap. III" in Roman numerals, appendices ("Vedlegg").
 - **Risk:** the parser must be solid; an AST bug breaks every dependent tool.
