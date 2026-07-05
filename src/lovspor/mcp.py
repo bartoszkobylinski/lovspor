@@ -2194,6 +2194,11 @@ def build_server(corpus_path: Path) -> FastMCP:
         ``min_score``: similarity floor, default 0.25; pass 0.0 to
         see every candidate.
 
+        Privacy: the ``query`` text is sent to the OpenAI embeddings
+        API to be embedded — this is the only tool that leaves the
+        local machine. Fine for public-law research; do not paste
+        confidential text into the query.
+
         Raises if ``OPENAI_API_KEY`` was not set when the server
         started, or if the corpus has no per-doc ``.bin`` files
         yet (early bootstrap state — run ``lovspor sync``).

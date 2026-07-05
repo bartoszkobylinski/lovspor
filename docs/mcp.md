@@ -10,7 +10,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 ## At a glance
 
-- **Transport:** stdio. Each user runs their own copy locally; no network surface, no shared infrastructure, no auth needed.
+- **Transport:** stdio. Each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
 - **Tools:** fifteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Two of the fifteen (`get_law_at`, `list_law_versions`) are time-machine tools added in Sprint 10 that read past versions of acts directly from the corpus's git history.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
@@ -391,6 +391,8 @@ Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `ci
 When `results` is empty the `notice` says why — the AI is expected to report "no strong match" instead of substituting training-data memory.
 
 **Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other fourteen keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
+
+**Privacy:** unlike the other fourteen tools, `semantic_search` is **not fully local** — the query text you pass is sent to the OpenAI embeddings API to be embedded (the corpus vectors were computed once at sync time; only your live query leaves the machine, per call). The Norwegian-law corpus is public, but your *question* is not — avoid pasting confidential or client-identifying text into a `semantic_search` query. Every other tool (`get_law`, `get_section`, `search_body`, …) is filesystem-and-git only and never leaves your machine.
 
 **Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a vectorized brute-force cosine scan (well under 100 ms). Per-call OpenAI cost is fractions of a cent.
 
