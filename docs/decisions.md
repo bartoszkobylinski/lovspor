@@ -135,7 +135,7 @@ Local layout:
 | Types | `mypy` strict mode | Wired into CI + pre-commit |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
 | Mutation | `mutmut == 2.5.1` | See §9 |
-| Hooks | `pre-commit` | Wired for ruff, format, mypy, pytest unit |
+| Hooks | `pre-commit` | Wired for gitleaks, ruff, format, mypy, pytest unit |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
 | XML | `lxml` with `resolve_entities=False, huge_tree=False` (when added) | XXE / billion-laughs mitigation |
