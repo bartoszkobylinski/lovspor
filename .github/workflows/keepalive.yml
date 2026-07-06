@@ -1,0 +1,51 @@
+name: Keepalive
+
+# GitHub automatically disables a repository's scheduled workflows after 60 days
+# with no repository activity. lovspor's daily sync (sync.yml) commits to the
+# *lovverk* corpus repo, not here — so this engine repo can sit 60 days without a
+# commit and silently lose its sync cron, with no operator alert (see
+# docs/operations.md "Scheduled sync stopped / auto-disabled").
+#
+# This workflow pushes an empty commit whenever HEAD is older than 45 days,
+# resetting the activity clock with comfortable margin before the 60-day cutoff.
+# During active development it does nothing (the guard skips when the repo has
+# recent commits), so it only touches history when the repo is genuinely idle.
+on:
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+
+# Needs write access to push the keepalive commit to this repo.
+permissions:
+  contents: write
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for commit-age check)
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Push an empty commit if the repo is going stale
+        run: |
+          set -euo pipefail
+          last_commit_epoch=$(git log -1 --format=%ct)
+          now_epoch=$(date +%s)
+          age_days=$(( (now_epoch - last_commit_epoch) / 86400 ))
+          echo "Last commit was ${age_days} day(s) ago (auto-disable cutoff: 60 days)."
+          if [ "$age_days" -lt 45 ]; then
+            echo "Repo active within 45 days — no keepalive commit needed."
+            exit 0
+          fi
+          echo "Repo idle ≥45 days — pushing a keepalive commit to reset the clock."
+          git config user.name "lovspor-keepalive[bot]"
+          git config user.email "lovspor-keepalive@users.noreply.github.com"
+          git commit --allow-empty \
+            -m "chore: keepalive — keep the scheduled sync from auto-disabling"
+          git push
