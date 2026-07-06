@@ -19,6 +19,7 @@ reconnaissance notes). Element-by-element mapping:
     <article class='changesToParent'>       -> > blockquote
     <ol>                                    -> 1. 2. 3. numbered list
     <ul>                                    -> -  -  -  bullet list
+    <table>                                 -> GFM table (<caption> as a lead-in)
 
 Inline elements (inside any rendered text content):
 
@@ -31,10 +32,11 @@ Unknown tags fall through to "walk children, skip this wrapper". That
 walk (``_render_children``) emits only child *elements*: an element's
 own ``.text`` and each child's ``.tail`` are not rendered. On the
 current Lovdata schema those are whitespace-only between block elements.
-If real text ever lands there — a ``<p>`` with direct text, a
-``<table>``, or any other unhandled text-bearing element — it guards
-against silent loss by raising :class:`~lovspor.errors.RenderError`
-rather than committing an incomplete legal document.
+If real text ever lands there — a ``<p>`` with direct text or any other
+unhandled text-bearing element — it guards against silent loss by raising
+:class:`~lovspor.errors.RenderError` rather than committing an incomplete
+legal document. ``<table>`` is handled explicitly (``_render_table`` /
+``_render_mixed_article``), so a table's cell text is never dropped.
 
 Output contract: body only, no YAML frontmatter, no trailing whitespace
 except a single trailing newline.
@@ -57,6 +59,10 @@ _PARAGRAPH_CLASSES = frozenset(
     {"legalP", "numberedLegalP", "listArticle"},
 )
 _CHANGE_NOTE_CLASS = "changesToParent"
+# Tags _render_element renders as blocks (mirrors its dispatch); everything
+# else is inline. Used by _render_mixed_article to keep block children (a
+# heading, a nested list, a table) out of the inline paragraph accumulator.
+_BLOCK_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6", "article", "ol", "ul", "table"})
 
 _INLINE_ESCAPE = str.maketrans(
     {
@@ -132,16 +138,17 @@ def render_markdown(xml_bytes: bytes) -> str:
 def _render_element(elem: etree._Element) -> str:
     tag = elem.tag
     classes = (elem.get("class") or "").split()
-    if tag == "h1":
-        return f"# {_inline(elem)}\n\n"
-    if tag == "h2":
-        return f"## {_inline(elem)}\n\n"
+    if tag in {"h1", "h2"}:
+        marker = "#" if tag == "h1" else "##"
+        return f"{marker} {_inline(elem)}\n\n"
     if tag in {"h3", "h4", "h5", "h6"}:
         return _render_sub_heading(elem, classes)
     if tag == "article":
         return _render_article(elem, classes)
     if tag in {"ol", "ul"}:
         return _render_list(elem, ordered=(tag == "ol"))
+    if tag == "table":
+        return _render_table(elem)
     return _render_children(elem)
 
 
@@ -187,6 +194,8 @@ def _render_article(
     elem: etree._Element,
     classes: list[str],
 ) -> str:
+    if elem.find("table") is not None:
+        return _render_mixed_article(elem)
     if _CHANGE_NOTE_CLASS in classes:
         text = _escape_block_leading(_inline(elem))
         return f"> {text}\n\n" if text else ""
@@ -206,6 +215,115 @@ def _render_legal_article_header(elem: etree._Element) -> str:
     if value:
         return f"### {value}\n\n"
     return f"### {_inline(elem)}\n\n"
+
+
+def _render_mixed_article(elem: etree._Element) -> str:
+    """Render an ``<article>`` that mixes inline text with block children.
+
+    A ``<table>`` is the case that forces this path (``_inline`` would mash
+    its cell values into one run), but the same article can also hold a
+    ``legalArticleHeader`` or a nested list. Block children go through
+    ``_render_element`` (so a header stays a ``###`` heading, a table a GFM
+    block); genuinely-inline children accumulate into paragraphs in between.
+    """
+    blocks: list[str] = []
+    inline: list[str] = [_escape_inline_text(elem.text or "")]
+    for child in elem:
+        if child.tag in _BLOCK_TAGS:
+            blocks.append(_flush_inline(inline))
+            blocks.append(_render_element(child))
+            inline = [_escape_inline_text(child.tail or "")]
+        else:
+            inline.append(_inline_for_child(child))
+            inline.append(_escape_inline_text(child.tail or ""))
+    blocks.append(_flush_inline(inline))
+    return "".join(block for block in blocks if block)
+
+
+def _flush_inline(parts: list[str]) -> str:
+    text = "".join(parts).strip()
+    return f"{_escape_block_leading(text)}\n\n" if text else ""
+
+
+def _render_table(elem: etree._Element) -> str:
+    """Render an HTML ``<table>`` as a GitHub-Flavored-Markdown table.
+
+    Every row is padded to the widest row's column count, expanding
+    ``colspan`` into empty pad cells so the grid stays rectangular (GFM has
+    no cell spanning). A ``<thead>`` row is the header; a headerless table
+    gets a blank header row so no data row is promoted into header position.
+    """
+    rows = list(elem.iter("tr"))
+    width = max((_row_width(row) for row in rows), default=0)
+    if width == 0:
+        return ""
+    header, body = _table_header_and_body(elem, rows, width)
+    lines = [_table_row(header), _table_separator(width)]
+    lines.extend(_table_row(_expand_row(row, width)) for row in body)
+    return _table_caption(elem) + "\n".join(lines) + "\n\n"
+
+
+def _table_caption(elem: etree._Element) -> str:
+    caption = elem.find("caption")
+    if caption is None:
+        return ""
+    text = _escape_block_leading(_inline(caption))
+    return f"{text}\n\n" if text else ""
+
+
+def _table_header_and_body(
+    elem: etree._Element,
+    rows: list[etree._Element],
+    width: int,
+) -> tuple[list[str], list[etree._Element]]:
+    thead = elem.find(".//thead")
+    header_tr = thead.find(".//tr") if thead is not None else None
+    if header_tr is None:
+        return [""] * width, rows
+    body = [row for row in rows if row is not header_tr]
+    return _expand_row(header_tr, width), body
+
+
+def _row_cells(row: etree._Element) -> list[etree._Element]:
+    return [cell for cell in row if cell.tag in {"th", "td"}]
+
+
+def _colspan(cell: etree._Element) -> int:
+    raw = cell.get("colspan")
+    if raw is None:
+        return 1
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 1
+
+
+def _row_width(row: etree._Element) -> int:
+    return sum(_colspan(cell) for cell in _row_cells(row))
+
+
+def _expand_row(row: etree._Element, width: int) -> list[str]:
+    cells: list[str] = []
+    for cell in _row_cells(row):
+        cells.append(_render_table_cell(cell))
+        cells.extend([""] * (_colspan(cell) - 1))
+    cells.extend([""] * (width - len(cells)))
+    return cells[:width]
+
+
+def _render_table_cell(cell: etree._Element) -> str:
+    # Reuse inline rendering, then adapt for a GFM cell: a <br/> became a
+    # newline (which would break the row) -> an HTML line break; and escape
+    # the pipe that would otherwise start a new cell.
+    return _inline(cell).replace("|", "\\|").replace("\n", "<br>")
+
+
+def _table_row(cells: list[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
+
+
+def _table_separator(width: int) -> str:
+    return "| " + " | ".join(["---"] * width) + " |"
 
 
 def _span_text(span: etree._Element | None) -> str:

@@ -309,13 +309,204 @@ def test_render_raises_when_block_level_text_would_be_dropped() -> None:
         render_markdown(_wrap(b"<p>Direct paragraph text in a plain p tag</p>"))
 
 
-def test_render_raises_when_table_content_would_be_dropped() -> None:
-    """Whole tables (fee/rate schedules in forskrifter) currently vanish
-    because tr/td are unknown text-bearing wrappers; the guard catches it."""
-    with pytest.raises(RenderError):
-        render_markdown(
-            _wrap(b"<table><tr><td>sats 25 kr</td><td>2020</td></tr></table>"),
-        )
+def test_render_table_renders_as_gfm_not_dropped() -> None:
+    """Whole tables (fee/rate schedules in forskrifter) used to flatten to
+    mush or trip the lost-content guard; they now render as a GFM table with
+    a blank header row when the source has no <thead>."""
+    md = render_markdown(
+        _wrap(b"<table><tr><td>sats 25 kr</td><td>2020</td></tr></table>"),
+    )
+    assert md == "|  |  |\n| --- | --- |\n| sats 25 kr | 2020 |\n"
+
+
+def test_render_table_with_thead_as_gfm() -> None:
+    xml = _wrap(
+        b'<article class="defaultP"><table>'
+        b"<thead><tr><th>A</th><th>B</th></tr></thead>"
+        b"<tbody><tr><td>1</td><td>2</td></tr><tr><td>3</td><td>4</td></tr></tbody>"
+        b"</table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n"
+
+
+def test_render_headerless_table_gets_blank_header() -> None:
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b"<tr><td>x</td><td>y</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |\n| --- | --- |\n| x | y |\n"
+
+
+def test_render_table_caption_becomes_lead_in_paragraph() -> None:
+    xml = _wrap(
+        b'<article class="defaultP"><table>'
+        b"<caption>Rates:</caption>"
+        b"<tbody><tr><td>a</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "Rates:\n\n|  |\n| --- |\n| a |\n"
+
+
+def test_render_table_expands_colspan_into_pad_cells() -> None:
+    """A full-width colspan banner row (the real Lovdata certificate-form
+    pattern) keeps the grid rectangular: the cell content goes in the first
+    column and the spanned columns become empty pads."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b'<tr><td colspan="3">Banner</td></tr>'
+        b"<tr><td>a</td><td>b</td><td>c</td></tr>"
+        b"</tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == ("|  |  |  |\n| --- | --- | --- |\n| Banner |  |  |\n| a | b | c |\n")
+
+
+def test_render_table_colspan_pads_mid_row_not_just_at_end() -> None:
+    """A colspan cell followed by another cell in the same row: the pad must
+    land BETWEEN them, so a later cell stays in its true column. The banner-row
+    test above can't catch this — its pad comes from end padding, so ignoring
+    colspan (or an off-by-one pad count) would render identically. Here it does
+    not: dropping the colspan puts ``B`` in column 2 instead of column 3."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b'<tr><td colspan="2">A</td><td>B</td></tr>'
+        b"</tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |  |\n| --- | --- | --- |\n| A |  | B |\n"
+
+
+def test_render_mixed_article_inline_child_with_no_tail_before_table() -> None:
+    """An inline child immediately followed by the table (no tail text) must
+    not inject anything for the absent tail — pins the ``child.tail or ""``."""
+    xml = _wrap(
+        b'<article class="legalP">See <a href="https://x.no">rule</a>'
+        b"<table><tbody><tr><td>a</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "See [rule](https://x.no)\n\n|  |\n| --- |\n| a |\n"
+
+
+def test_render_table_empty_caption_emits_no_lead_in() -> None:
+    """An empty ``<caption>`` produces no lead-in paragraph — pins the
+    ``if text else ""`` empty branch in the caption renderer."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><caption></caption>'
+        b"<tbody><tr><td>a</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |\n| --- |\n| a |\n"
+
+
+def test_render_table_ragged_row_gets_blank_trailing_cells() -> None:
+    """A row shorter than the widest row is end-padded with EMPTY cells, not
+    placeholder text — pins the ``[""] * (width - len(cells))`` padding."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b"<tr><td>a</td><td>b</td></tr><tr><td>c</td></tr>"
+        b"</tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |\n| --- | --- |\n| a | b |\n| c |  |\n"
+
+
+def test_render_table_zero_colspan_normalizes_to_one() -> None:
+    """``colspan="0"`` clamps to 1 (like the malformed fallback), so the row
+    stays two columns — pins the ``max(1, int(raw))`` lower bound."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b'<tr><td colspan="0">x</td><td>y</td></tr>'
+        b"</tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |\n| --- | --- |\n| x | y |\n"
+
+
+def test_render_table_cell_inline_content_br_link_italic_and_pipe() -> None:
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody><tr>'
+        b"<td>L1<br/>L2</td>"
+        b'<td>See <a href="https://x.no">link</a></td>'
+        b"<td>a<i>b</i></td>"
+        b"<td>x|y</td>"
+        b"</tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == (
+        "|  |  |  |  |\n"
+        "| --- | --- | --- | --- |\n"
+        "| L1<br>L2 | See [link](https://x.no) | a*b* | x\\|y |\n"
+    )
+
+
+def test_render_article_mixing_lead_in_text_and_table() -> None:
+    """A legalP article with intro text before a table keeps BOTH — the
+    text as a paragraph and the table as a GFM block — instead of flattening
+    every cell value into one run."""
+    xml = _wrap(
+        b'<article class="legalP">Satser:<table><tbody>'
+        b"<tr><td>a</td><td>b</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "Satser:\n\n|  |  |\n| --- | --- |\n| a | b |\n"
+
+
+def test_render_table_directly_under_section_without_article() -> None:
+    md = render_markdown(
+        _wrap(b"<section><table><tbody><tr><td>a</td><td>b</td></tr></tbody></table></section>"),
+    )
+    assert md == "|  |  |\n| --- | --- |\n| a | b |\n"
+
+
+def test_render_table_is_deterministic() -> None:
+    xml = _wrap(
+        b'<article class="defaultP"><table><thead><tr><th>A</th><th>B</th></tr></thead>'
+        b"<tbody><tr><td>1</td><td>2</td></tr></tbody></table></article>",
+    )
+    assert render_markdown(xml) == render_markdown(xml)
+
+
+def test_render_mixed_article_with_inline_child_before_table() -> None:
+    xml = _wrap(
+        b'<article class="legalP">See <a href="https://x.no">rule</a> below:'
+        b"<table><tbody><tr><td>a</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "See [rule](https://x.no) below:\n\n|  |\n| --- |\n| a |\n"
+
+
+def test_render_article_with_legal_header_and_table_keeps_both() -> None:
+    """Regression (Codex): an article holding BOTH a legalArticleHeader and a
+    table must render the ### heading as a heading — the mixed-content path
+    routes block children through _render_element, not the inline accumulator,
+    so the header is not flattened into text."""
+    xml = _wrap(
+        b'<article class="legalArticle">'
+        b'<h3 class="legalArticleHeader">'
+        b'<span class="legalArticleValue">\xc2\xa7 3</span>. '
+        b'<span class="legalArticleTitle">Satser</span>'
+        b"</h3>"
+        b"<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>"
+        b"</article>",
+    )
+    md = render_markdown(xml)
+    assert md == "### § 3. Satser\n\n|  |  |\n| --- | --- |\n| a | b |\n"
+
+
+def test_render_empty_table_produces_no_table() -> None:
+    md = render_markdown(_wrap(b'<article class="defaultP"><table></table></article>'))
+    assert md == "\n"
+
+
+def test_render_table_treats_malformed_colspan_as_one() -> None:
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b'<tr><td colspan="abc">x</td><td>y</td></tr></tbody></table></article>',
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |\n| --- | --- |\n| x | y |\n"
 
 
 def test_render_raises_when_block_level_tail_text_would_be_dropped() -> None:
