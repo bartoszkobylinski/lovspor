@@ -345,6 +345,21 @@ def test_render_table_expands_colspan_into_pad_cells() -> None:
     assert md == ("|  |  |  |\n| --- | --- | --- |\n| Banner |  |  |\n| a | b | c |\n")
 
 
+def test_render_table_colspan_pads_mid_row_not_just_at_end() -> None:
+    """A colspan cell followed by another cell in the same row: the pad must
+    land BETWEEN them, so a later cell stays in its true column. The banner-row
+    test above can't catch this — its pad comes from end padding, so ignoring
+    colspan (or an off-by-one pad count) would render identically. Here it does
+    not: dropping the colspan puts ``B`` in column 2 instead of column 3."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b'<tr><td colspan="2">A</td><td>B</td></tr>'
+        b"</tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |  |\n| --- | --- | --- |\n| A |  | B |\n"
+
+
 def test_render_table_cell_inline_content_br_link_italic_and_pipe() -> None:
     xml = _wrap(
         b'<article class="defaultP"><table><tbody><tr>'
