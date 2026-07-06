@@ -9,6 +9,7 @@ style HTML structure we render against in production.
 import hashlib
 import io
 import json
+import logging
 import subprocess
 import tarfile
 import tempfile
@@ -27,7 +28,7 @@ import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import EMBEDDING_DIM, read_embeddings, write_embeddings
-from lovspor.errors import ConfigError
+from lovspor.errors import ConfigError, RenderError
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import DEFAULT_BASE_URL
@@ -3803,3 +3804,120 @@ def test_sprint8_eu_basis_migration_defers_slug_renames_to_rename_flow(
     log = _git_log_subjects(corpus)
     assert "migration: backfill eu_basis" not in log
     assert "rename(lov): newskattie" in log
+
+
+def test_run_sync_skips_unrenderable_doc_instead_of_aborting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A doc whose render raises must not abort the whole sync. A NEW bad doc is
+    skipped; a CHANGED bad doc keeps its prior record (so it is re-detected and
+    retried next run rather than vanishing); the good doc still processes; and a
+    warning names each skipped doc for the operator."""
+    corpus = tmp_path / "lovverk"
+    corpus.mkdir()
+    data_dir = tmp_path / "data"
+
+    def _rec(slug: str, hash_int: int) -> ManifestRecord:
+        return ManifestRecord(
+            doc_type="lov",
+            xml_hash=f"{hash_int:064x}",
+            markdown_path=f"lover/{slug}.md",
+            source_dataset="gjeldende-lover",
+            last_seen=datetime(2026, 5, 1, tzinfo=UTC),
+            status="current",
+            slug=slug,
+            title=f"lov-{slug}",
+            eu_basis=[],
+        )
+
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "lov-good": _rec("good", 1),
+            "lov-bad": _rec("bad", 2),
+            "lov-ren": _rec("ren-old", 4),  # renamed to an unrenderable slug
+        },
+    )
+
+    def _up(doc_id: str, slug: str, hash_int: int) -> orchestrator_module._UpstreamDoc:
+        return orchestrator_module._UpstreamDoc(
+            doc_id=doc_id,
+            source_dataset="gjeldende-lover",
+            xml_bytes=b"<xml/>",
+            xml_hash=f"{hash_int:064x}",
+            slug=slug,
+            title=doc_id,
+            eu_basis=(),
+        )
+
+    upstream = {
+        "lov-good": _up("lov-good", "good", 101),  # changed, renders fine
+        "lov-bad": _up("lov-bad", "bad", 102),  # changed, render raises
+        "lov-new-bad": _up("lov-new-bad", "new-bad", 103),  # new, render raises
+        "lov-ren": _up("lov-ren", "ren-bad", 4),  # unchanged content, new slug, raises
+    }
+
+    def fake_write_one(
+        settings: Settings,
+        upstream_doc: orchestrator_module._UpstreamDoc,
+        now: datetime,
+        _embedder: object,
+    ) -> tuple[ManifestRecord, list[Path]]:
+        if "bad" in upstream_doc.slug:
+            raise RenderError("unhandled Lovdata structure")
+        md_path = settings.lovverk_repo_path / "lover" / f"{upstream_doc.slug}.md"
+        record = ManifestRecord(
+            doc_type="lov",
+            xml_hash=upstream_doc.xml_hash,
+            markdown_path=str(md_path.relative_to(settings.lovverk_repo_path)),
+            source_dataset=upstream_doc.source_dataset,
+            last_seen=now,
+            status="current",
+            slug=upstream_doc.slug,
+            title=upstream_doc.title,
+            eu_basis=[],
+        )
+        return record, [md_path]
+
+    captured: dict[str, object] = {}
+
+    def capture_commit(*_args: object, **kwargs: object) -> None:
+        captured["records"] = kwargs["new_records"]
+        captured["actions"] = kwargs["actions"]
+
+    monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _p: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_a: upstream)
+    monkeypatch.setattr(orchestrator_module, "_needs_sprint5_history_migration", lambda *_a: False)
+    monkeypatch.setattr(orchestrator_module, "_needs_sprint8_eu_basis_migration", lambda *_a: False)
+    monkeypatch.setattr(
+        orchestrator_module, "_needs_sprint9_embeddings_migration", lambda *_a: False
+    )
+    monkeypatch.setattr(orchestrator_module, "_load_embedder", lambda _s: None)
+    monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+
+    with caplog.at_level(logging.WARNING):
+        run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    records = captured["records"]
+    assert isinstance(records, dict)
+    # good changed doc: updated to the new hash
+    assert records["lov-good"].xml_hash == f"{101:064x}"
+    # changed-but-unrenderable: prior record (old hash) carried forward, not dropped
+    assert records["lov-bad"].xml_hash == f"{2:064x}"
+    # renamed-but-unrenderable: prior record (old slug) kept, not moved
+    assert records["lov-ren"].slug == "ren-old"
+    # brand-new unrenderable: skipped entirely
+    assert "lov-new-bad" not in records
+    # only the good doc produced a commit action
+    actions = captured["actions"]
+    assert isinstance(actions, list)
+    assert [a.doc_id for a in actions] == ["lov-good"]
+    # operator warning names each skipped doc
+    assert "lov-bad" in caplog.text
+    assert "lov-new-bad" in caplog.text
+    assert "lov-ren" in caplog.text
