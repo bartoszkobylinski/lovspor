@@ -74,6 +74,24 @@ def test_render_legal_article_header_value_only_when_title_absent() -> None:
     assert md == "### § 5\n"
 
 
+def test_render_legal_article_header_captures_nested_span_text() -> None:
+    # Regression: _span_text must collect the whole span subtree via
+    # itertext(), not just span.text (which stops at the first child). Both
+    # the value and the title carry text inside a nested inline element, so a
+    # mutant reading only .text would drop the "1" and "reach" fragments and
+    # produce "### § 1-. Scope and\n" instead.
+    xml = _wrap(
+        b'<article class="legalArticle">'
+        b'<h3 class="legalArticleHeader">'
+        b'<span class="legalArticleValue">\xc2\xa7 1-<em>1</em></span>. '
+        b'<span class="legalArticleTitle">Scope and <em>reach</em></span>'
+        b"</h3>"
+        b"</article>",
+    )
+    md = render_markdown(xml)
+    assert md == "### § 1-1. Scope and reach\n"
+
+
 def test_render_plain_h3_without_legal_class() -> None:
     md = render_markdown(_wrap(b"<h3>Some heading</h3>"))
     assert md == "### Some heading\n"
