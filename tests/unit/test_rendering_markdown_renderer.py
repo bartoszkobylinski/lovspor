@@ -360,6 +360,52 @@ def test_render_table_colspan_pads_mid_row_not_just_at_end() -> None:
     assert md == "|  |  |  |\n| --- | --- | --- |\n| A |  | B |\n"
 
 
+def test_render_mixed_article_inline_child_with_no_tail_before_table() -> None:
+    """An inline child immediately followed by the table (no tail text) must
+    not inject anything for the absent tail — pins the ``child.tail or ""``."""
+    xml = _wrap(
+        b'<article class="legalP">See <a href="https://x.no">rule</a>'
+        b"<table><tbody><tr><td>a</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "See [rule](https://x.no)\n\n|  |\n| --- |\n| a |\n"
+
+
+def test_render_table_empty_caption_emits_no_lead_in() -> None:
+    """An empty ``<caption>`` produces no lead-in paragraph — pins the
+    ``if text else ""`` empty branch in the caption renderer."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><caption></caption>'
+        b"<tbody><tr><td>a</td></tr></tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |\n| --- |\n| a |\n"
+
+
+def test_render_table_ragged_row_gets_blank_trailing_cells() -> None:
+    """A row shorter than the widest row is end-padded with EMPTY cells, not
+    placeholder text — pins the ``[""] * (width - len(cells))`` padding."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b"<tr><td>a</td><td>b</td></tr><tr><td>c</td></tr>"
+        b"</tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |\n| --- | --- |\n| a | b |\n| c |  |\n"
+
+
+def test_render_table_zero_colspan_normalizes_to_one() -> None:
+    """``colspan="0"`` clamps to 1 (like the malformed fallback), so the row
+    stays two columns — pins the ``max(1, int(raw))`` lower bound."""
+    xml = _wrap(
+        b'<article class="defaultP"><table><tbody>'
+        b'<tr><td colspan="0">x</td><td>y</td></tr>'
+        b"</tbody></table></article>",
+    )
+    md = render_markdown(xml)
+    assert md == "|  |  |\n| --- | --- |\n| x | y |\n"
+
+
 def test_render_table_cell_inline_content_br_link_italic_and_pipe() -> None:
     xml = _wrap(
         b'<article class="defaultP"><table><tbody><tr>'
