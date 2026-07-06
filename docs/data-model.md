@@ -5,14 +5,18 @@ model** (or, for the embeddings hot path, a frozen dataclass). This document is 
 reference for those models, the on-disk `manifest.json` schema, the Markdown front
 matter emitted into the corpus, and the identifier conventions.
 
-All models are frozen; the ledger and source models additionally set
-`extra="forbid"`, so an unknown key in stored JSON raises `ParseError` on load
-rather than being silently dropped. Field types below are quoted from the class
-definitions — see [`architecture.md`](architecture.md) for where each lives.
+All models are frozen. The models loaded from stored or upstream JSON — the
+manifest (`Manifest` / `ManifestRecord`), the history record (`HistoryRecord` /
+`HistoryEvent`), and the Lovdata catalogue entry (`LovdataArchive`) —
+additionally set `extra="forbid"`, so an unknown key raises `ParseError` on load
+rather than being silently dropped. The render- and result-side models (e.g.
+`LegalDocumentFrontMatter`, `DownloadResult`, `SyncReport`) are frozen but not
+`forbid`. Field types below are quoted from the class definitions — see
+[`architecture.md`](architecture.md) for where each lives.
 
 ## On-disk artifacts
 
-The engine writes five kinds of file into the `lovverk` clone:
+The engine writes six kinds of file into the `lovverk` clone:
 
 | Path | Content | Defined by |
 |---|---|---|
