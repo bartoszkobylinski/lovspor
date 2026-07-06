@@ -29,7 +29,9 @@ set up a cron) to pick up updates.
 
 Transport: stdio only — the server is launched as a subprocess by the
 MCP client (Claude Desktop, Claude Code, etc.) and communicates over
-stdin/stdout. No network surface.
+stdin/stdout. No *inbound* network surface. The one outbound call is
+``semantic_search`` embedding the user's query via the OpenAI API; every
+other tool is filesystem-and-git only.
 
 Why dataset aliases: legal text consumers think in Norwegian terms
 (``lover``, ``forskrifter``), not in Lovdata's archive filenames
