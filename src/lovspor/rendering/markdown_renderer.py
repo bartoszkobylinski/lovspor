@@ -59,6 +59,10 @@ _PARAGRAPH_CLASSES = frozenset(
     {"legalP", "numberedLegalP", "listArticle"},
 )
 _CHANGE_NOTE_CLASS = "changesToParent"
+# Tags _render_element renders as blocks (mirrors its dispatch); everything
+# else is inline. Used by _render_mixed_article to keep block children (a
+# heading, a nested list, a table) out of the inline paragraph accumulator.
+_BLOCK_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6", "article", "ol", "ul", "table"})
 
 _INLINE_ESCAPE = str.maketrans(
     {
@@ -214,19 +218,20 @@ def _render_legal_article_header(elem: etree._Element) -> str:
 
 
 def _render_mixed_article(elem: etree._Element) -> str:
-    """Render an ``<article>`` that mixes inline text with block ``<table>``s.
+    """Render an ``<article>`` that mixes inline text with block children.
 
-    Inline runs become paragraphs and each table becomes a GFM block, in
-    document order — so a "rate per year: <table/>" article keeps both the
-    lead-in text and the tabular structure instead of flattening to one run
-    (which is what ``_inline`` would do, mashing cell values together).
+    A ``<table>`` is the case that forces this path (``_inline`` would mash
+    its cell values into one run), but the same article can also hold a
+    ``legalArticleHeader`` or a nested list. Block children go through
+    ``_render_element`` (so a header stays a ``###`` heading, a table a GFM
+    block); genuinely-inline children accumulate into paragraphs in between.
     """
     blocks: list[str] = []
     inline: list[str] = [_escape_inline_text(elem.text or "")]
     for child in elem:
-        if child.tag == "table":
+        if child.tag in _BLOCK_TAGS:
             blocks.append(_flush_inline(inline))
-            blocks.append(_render_table(child))
+            blocks.append(_render_element(child))
             inline = [_escape_inline_text(child.tail or "")]
         else:
             inline.append(_inline_for_child(child))

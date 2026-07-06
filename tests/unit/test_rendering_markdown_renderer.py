@@ -398,6 +398,24 @@ def test_render_mixed_article_with_inline_child_before_table() -> None:
     assert md == "See [rule](https://x.no) below:\n\n|  |\n| --- |\n| a |\n"
 
 
+def test_render_article_with_legal_header_and_table_keeps_both() -> None:
+    """Regression (Codex): an article holding BOTH a legalArticleHeader and a
+    table must render the ### heading as a heading — the mixed-content path
+    routes block children through _render_element, not the inline accumulator,
+    so the header is not flattened into text."""
+    xml = _wrap(
+        b'<article class="legalArticle">'
+        b'<h3 class="legalArticleHeader">'
+        b'<span class="legalArticleValue">\xc2\xa7 3</span>. '
+        b'<span class="legalArticleTitle">Satser</span>'
+        b"</h3>"
+        b"<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>"
+        b"</article>",
+    )
+    md = render_markdown(xml)
+    assert md == "### § 3. Satser\n\n|  |  |\n| --- | --- |\n| a | b |\n"
+
+
 def test_render_empty_table_produces_no_table() -> None:
     md = render_markdown(_wrap(b'<article class="defaultP"><table></table></article>'))
     assert md == "\n"
