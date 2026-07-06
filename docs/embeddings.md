@@ -69,7 +69,12 @@ Trade-offs accepted with the OpenAI choice:
   for the MCP server (only when `semantic_search` is invoked —
   the other 14 tools are pure local).
 - **Privacy.** Norwegian law text is publicly available under
-  NLOD 2.0; embedding it through OpenAI is no leak.
+  NLOD 2.0, so embedding the *corpus* through OpenAI at sync time
+  is no leak. At MCP query time, though, the **user's own question**
+  is sent to OpenAI to be embedded — that text leaves the machine,
+  unlike every other MCP tool, which is fully local. Immaterial for
+  public-law research, but worth knowing before pasting anything
+  confidential into a `semantic_search` query.
 - **Supply chain.** Dropped `trust_remote_code=True` from
   sentence-transformers loading. OpenAI API has been the more
   stable interface.

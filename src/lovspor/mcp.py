@@ -29,7 +29,9 @@ set up a cron) to pick up updates.
 
 Transport: stdio only — the server is launched as a subprocess by the
 MCP client (Claude Desktop, Claude Code, etc.) and communicates over
-stdin/stdout. No network surface.
+stdin/stdout. No *inbound* network surface. The one outbound call is
+``semantic_search`` embedding the user's query via the OpenAI API; every
+other tool is filesystem-and-git only.
 
 Why dataset aliases: legal text consumers think in Norwegian terms
 (``lover``, ``forskrifter``), not in Lovdata's archive filenames
@@ -2193,6 +2195,11 @@ def build_server(corpus_path: Path) -> FastMCP:
         ``limit``: max results, default 20, must be non-negative.
         ``min_score``: similarity floor, default 0.25; pass 0.0 to
         see every candidate.
+
+        Privacy: the ``query`` text is sent to the OpenAI embeddings
+        API to be embedded — this is the only tool that leaves the
+        local machine. Fine for public-law research; do not paste
+        confidential text into the query.
 
         Raises if ``OPENAI_API_KEY`` was not set when the server
         started, or if the corpus has no per-doc ``.bin`` files
