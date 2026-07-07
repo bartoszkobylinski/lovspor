@@ -25,6 +25,12 @@ This document covers the full setup: prerequisites, configuration for two common
    git clone https://github.com/bartoszkobylinski/lovverk.git ~/lovverk
    ```
 
+   **Or let lovspor manage it:** `lovspor fetch-corpus` shallow-clones the
+   corpus into `~/.cache/lovverk` (honouring `$XDG_CACHE_HOME`) and
+   fast-forwards it on every re-run. `lovspor mcp` looks there by default, so
+   with this route you can omit `--corpus-path` entirely — the whole flow is
+   `lovspor fetch-corpus` then `lovspor mcp`.
+
    Optional: keep it fresh with a daily cron, e.g. add to your crontab:
 
    ```cron

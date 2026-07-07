@@ -6,6 +6,8 @@ from typing import Annotated
 import typer
 
 from lovspor import __version__
+from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
+from lovspor.errors import ConfigError
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.settings import Settings, load_env
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
@@ -108,22 +110,46 @@ def repair_embeddings() -> None:
     )
 
 
+@app.command(name="fetch-corpus")
+def fetch_corpus_command(
+    dest: Annotated[
+        Path | None,
+        typer.Option(
+            "--dest",
+            help="Where to clone/update the corpus (default: ~/.cache/lovverk).",
+            envvar="LOVVERK_CORPUS_PATH",
+        ),
+    ] = None,
+) -> None:
+    """Clone or update the local lovverk corpus that ``lovspor mcp`` reads.
+
+    First run shallow-clones the public corpus to ``--dest`` (or the default
+    cache); later runs fast-forward it. With no ``--dest`` and no
+    ``LOVVERK_CORPUS_PATH``, ``lovspor mcp`` then finds it automatically — so
+    the whole consumer flow is ``lovspor fetch-corpus`` then ``lovspor mcp``.
+    """
+    result = fetch_corpus(dest or default_corpus_path())
+    typer.echo(f"Corpus {result.action} at {result.path}.")
+
+
 @app.command()
 def mcp(
     corpus_path: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             "--corpus-path",
-            help="Path to a local clone of the lovverk corpus.",
+            help="Path to a local lovverk clone (default: the fetch-corpus cache).",
             envvar="LOVVERK_CORPUS_PATH",
         ),
-    ],
+    ] = None,
 ) -> None:
     """Start the stdio MCP server exposing the lovverk corpus to AI clients.
 
     Designed to be launched as a subprocess by an MCP client (Claude
-    Desktop, Claude Code, ...). Reads the corpus from ``--corpus-path``;
-    does not pull from GitHub or trigger an engine sync.
+    Desktop, Claude Code, ...). Reads the corpus from ``--corpus-path`` (or
+    ``LOVVERK_CORPUS_PATH``); with neither set it falls back to the
+    ``fetch-corpus`` cache (``~/.cache/lovverk``). Does not pull from GitHub
+    or trigger an engine sync.
 
     Sixteen read-only tools are served — see ``docs/mcp.md`` for the
     full list, sample inputs/outputs, and the Sprint 9 anti-
@@ -132,4 +158,10 @@ def mcp(
     missing key disables only ``semantic_search``, the other fifteen
     tools work normally.
     """
-    _mcp_serve(corpus_path.resolve())
+    target = (corpus_path or default_corpus_path()).expanduser()
+    if not is_corpus(target):
+        raise ConfigError(
+            f"No lovverk corpus at {target}. Run `lovspor fetch-corpus` first, "
+            "or pass --corpus-path / set LOVVERK_CORPUS_PATH.",
+        )
+    _mcp_serve(target.resolve())
