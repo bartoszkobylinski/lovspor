@@ -8,7 +8,7 @@ import typer
 from lovspor import __version__
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.settings import Settings, load_env
-from lovspor.sync.orchestrator import run_sync
+from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
 
 app = typer.Typer(
     name="lovspor",
@@ -89,6 +89,25 @@ def sync() -> None:
     )
 
 
+@app.command(name="repair-embeddings")
+def repair_embeddings() -> None:
+    """Flag documents whose embeddings under-count their current sections.
+
+    One-time repair for a corpus embedded before a section-parser fix — e.g.
+    flat acts whose sections render at H2 (``## § N.``) produced zero vectors
+    and are invisible to ``semantic_search``. Clears each affected record's
+    ``embedding_hash`` and commits the manifest; run ``lovspor sync`` afterwards
+    (with ``OPENAI_API_KEY`` set) to rebuild the vectors via the Sprint 9
+    backfill. A no-op — no commit — when every embedding is already current.
+    """
+    settings = Settings.from_env()
+    count = mark_undersized_embeddings_stale(settings)
+    typer.echo(
+        f"Flagged {count} document(s) for re-embed. "
+        "Run `lovspor sync` with OPENAI_API_KEY set to rebuild their vectors.",
+    )
+
+
 @app.command()
 def mcp(
     corpus_path: Annotated[
@@ -106,11 +125,11 @@ def mcp(
     Desktop, Claude Code, ...). Reads the corpus from ``--corpus-path``;
     does not pull from GitHub or trigger an engine sync.
 
-    Fifteen read-only tools are served — see ``docs/mcp.md`` for the
+    Sixteen read-only tools are served — see ``docs/mcp.md`` for the
     full list, sample inputs/outputs, and the Sprint 9 anti-
     hallucination flow (semantic_search → get_section + cross_references
     → verify_quote → validate_citation). ``OPENAI_API_KEY`` is optional;
-    missing key disables only ``semantic_search``, the other fourteen
+    missing key disables only ``semantic_search``, the other fifteen
     tools work normally.
     """
     _mcp_serve(corpus_path.resolve())

@@ -51,7 +51,7 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder, split_to_token_chunks
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
-from lovspor.embeddings.store import write_embeddings
+from lovspor.embeddings.store import read_embeddings, write_embeddings
 from lovspor.errors import (
     ConfigError,
     CorpusStateError,
@@ -1371,6 +1371,67 @@ def _run_sprint9_embeddings_migration(
             f"migration: backfill embeddings for {len(written)} documents",
         )
     return new_manifest
+
+
+def _embedding_section_count(embed_path: Path) -> int:
+    """Number of vectors stored in a ``.bin`` (0 if absent or unreadable).
+
+    A corrupt sidecar counts as 0 so the caller rebuilds it rather than
+    trusting a file the reader rejects.
+    """
+    if not embed_path.exists():
+        return 0
+    try:
+        return len(read_embeddings(embed_path).sections)
+    except ValueError:
+        return 0
+
+
+def _find_undersized_embeddings(repo: Path, prior: Manifest) -> set[str]:
+    """``doc_id``s of current docs whose stored vector count differs from the
+    section count the current parser finds.
+
+    This is the staleness signal that ``embedding_hash`` cannot give: a flat
+    ``## §`` act embedded before the parser fix has ``embedding_hash ==
+    xml_hash`` and a present-but-empty ``.bin``, so ``_embedding_is_stale``
+    reports it fresh. Comparing section counts catches exactly those.
+    """
+    undersized: set[str] = set()
+    for doc_id, record in prior.documents.items():
+        if record.status != "current" or record.slug is None:
+            continue
+        markdown_path = repo / record.markdown_path
+        if not markdown_path.exists():
+            continue
+        body = strip_frontmatter(markdown_path.read_text(encoding="utf-8"))
+        embed_path = _embeddings_path(repo, record.source_dataset, record.slug)
+        if len(iter_sections(body)) != _embedding_section_count(embed_path):
+            undersized.add(doc_id)
+    return undersized
+
+
+def mark_undersized_embeddings_stale(settings: Settings) -> int:
+    """Flag current docs whose embeddings under-count their sections so the next
+    ``sync``'s Sprint 9 backfill re-embeds them; return how many were flagged.
+
+    One-time repair for corpora embedded before a section-parser fix (flat
+    ``## §`` acts produced zero vectors). Clears each flagged record's
+    ``embedding_hash`` and commits the manifest — committing keeps the tree
+    clean so the follow-up ``sync``, which aborts on a dirty tree, can run.
+    """
+    repo = settings.lovverk_repo_path
+    manifest_path = repo / _MANIFEST_FILENAME
+    prior = _load_or_empty_manifest(manifest_path)
+    flagged = _find_undersized_embeddings(repo, prior)
+    if not flagged:
+        return 0
+    new_records = dict(prior.documents)
+    for doc_id in flagged:
+        new_records[doc_id] = new_records[doc_id].model_copy(update={"embedding_hash": None})
+    write_manifest(Manifest(generated_at=datetime.now(UTC), documents=new_records), manifest_path)
+    git_add(repo, [manifest_path])
+    git_commit_msg(repo, f"migration: flag {len(flagged)} under-embedded documents for re-embed")
+    return len(flagged)
 
 
 def _migration_message(actions: list[_DocAction]) -> str:

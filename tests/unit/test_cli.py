@@ -92,14 +92,34 @@ def test_sync_help_mentions_incremental() -> None:
     assert "Incremental sync" in result.stdout
 
 
-def test_mcp_help_mentions_fifteen_tools_and_optional_semantic_search_key() -> None:
+def test_mcp_help_mentions_sixteen_tools_and_optional_semantic_search_key() -> None:
     result = runner.invoke(app, ["mcp", "--help"])
     assert result.exit_code == 0
-    assert "Fifteen read-only tools" in result.stdout
+    assert "Sixteen read-only tools" in result.stdout
     assert "OPENAI_API_KEY" in result.stdout
     assert "semantic_search" in result.stdout
-    assert "other fourteen" in result.stdout
+    assert "other fifteen" in result.stdout
     assert "tools work normally" in result.stdout
+
+
+def test_repair_embeddings_command_is_registered() -> None:
+    result = runner.invoke(app, ["repair-embeddings", "--help"])
+    assert result.exit_code == 0
+    assert "repair-embeddings" in _strip_ansi(result.stdout)
+
+
+def test_repair_embeddings_invokes_mark_and_reports_count(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOVSPOR_OUTPUT_REPO_PATH", str(tmp_path))
+    monkeypatch.setattr("lovspor.cli.mark_undersized_embeddings_stale", lambda _settings: 2326)
+    result = runner.invoke(app, ["repair-embeddings"])
+    assert result.exit_code == 0
+    assert "Flagged 2326 document(s) for re-embed." in result.stdout
+    assert "lovspor sync" in result.stdout
 
 
 def test_mcp_command_reads_corpus_path_from_real_dotenv_in_cwd(
