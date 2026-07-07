@@ -40,6 +40,7 @@ Commit strategy (decisions.md §12a + §12d):
   populated history dirs and skip.
 """
 
+import logging
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -51,7 +52,13 @@ from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder, split_to_to
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import write_embeddings
-from lovspor.errors import ConfigError, CorpusStateError, MassRemovalError
+from lovspor.errors import (
+    ConfigError,
+    CorpusStateError,
+    MassRemovalError,
+    ParseError,
+    RenderError,
+)
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_history, write_history
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
@@ -81,6 +88,8 @@ from lovspor.sync.document_io import (
 from lovspor.sync.git_commit import add as git_add
 from lovspor.sync.git_commit import commit as git_commit_msg
 from lovspor.sync.git_commit import has_staged_changes, has_uncommitted_changes
+
+logger = logging.getLogger(__name__)
 
 _TRACKED_DATASETS = (
     "gjeldende-lover",
@@ -254,10 +263,18 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
     # the update+rename variant of the same class as the production
     # crash 2026-04-30 (rename+rename). Both variants now handled.
     written_paths: set[Path] = set()
+    # Prior records for changed/renamed docs whose render failed this sync.
+    # Their carry-forward is deferred until every write is done, then resolved
+    # against ``written_paths`` below — a failed doc keeps its prior record only
+    # if no successful action took over its old path.
+    deferred_carries: list[tuple[str, ManifestRecord]] = []
 
     for doc_id in changes.new:
         upstream_doc = upstream[doc_id]
-        record, paths_written = _write_one(settings, upstream_doc, now, embedder)
+        written = _try_write_one(settings, upstream_doc, now, embedder)
+        if written is None:
+            continue  # unrenderable new doc: skip; re-detected as new next sync
+        record, paths_written = written
         md_path = paths_written[0]
         sidecar = tuple(paths_written[1:])
         new_records[doc_id] = record
@@ -291,7 +308,14 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
         upstream_doc = upstream[doc_id]
         prior_record = prior.documents[doc_id]
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
-        record, paths_written = _write_one(settings, upstream_doc, now, embedder)
+        written = _try_write_one(settings, upstream_doc, now, embedder)
+        if written is None:
+            # Render failed: defer the carry-forward until all writes are done,
+            # so we can keep the prior record (old xml_hash → retried next sync)
+            # only if no successful action takes over its old path.
+            deferred_carries.append((doc_id, prior_record))
+            continue
+        record, paths_written = written
         new_path = paths_written[0]
         new_sidecar = tuple(paths_written[1:])
         new_records[doc_id] = record
@@ -306,13 +330,39 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
         prior_record = prior.documents[doc_id]
         upstream_doc = _with_retrieved_at(upstream[doc_id], prior_record.last_seen)
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
-        record, paths_written = _write_one(settings, upstream_doc, now, embedder)
+        written = _try_write_one(settings, upstream_doc, now, embedder)
+        if written is None:
+            # Same deferral as the changed loop: keep the prior path/slug only
+            # if no successful action claims it (reconciled below).
+            deferred_carries.append((doc_id, prior_record))
+            continue
+        record, paths_written = written
         new_path = paths_written[0]
         new_sidecar = tuple(paths_written[1:])
         new_records[doc_id] = record
         written_paths.add(new_path)
         written_paths.update(new_sidecar)
         rename_plan.append((doc_id, old_path, new_path, new_sidecar, record))
+
+    # Reconcile deferred carries now that ``written_paths`` reflects every
+    # write. A failed changed/renamed doc keeps its prior record ONLY if its old
+    # Markdown path was not written by a successful action this sync. If it was
+    # (e.g. a rename moved into the failed doc's slug), carrying it would leave
+    # two current records at one file — and that file now holds the OTHER doc's
+    # content. Drop it instead: it re-appears as ``new`` and is re-added once it
+    # renders on a future sync. Same path-ownership invariant the phase-2 delete
+    # guards enforce (Codex #104).
+    for doc_id, prior_record in deferred_carries:
+        carried_path = settings.lovverk_repo_path / prior_record.markdown_path
+        if carried_path in written_paths:
+            logger.warning(
+                "dropping %s this sync: its file %s was taken over by another "
+                "document; it will be re-added once it renders on a future sync",
+                doc_id,
+                prior_record.markdown_path,
+            )
+            continue
+        new_records[doc_id] = prior_record
 
     # Phase 2a: changed-action deletes + action build. ``written_paths``
     # now reflects every write from new + changed + rename loops, so
@@ -690,6 +740,31 @@ def _write_one(
         embedding_hash=upstream.xml_hash if embedder is not None else None,
     )
     return record, written_paths
+
+
+def _try_write_one(
+    settings: Settings,
+    upstream: _UpstreamDoc,
+    now: datetime,
+    embedder: EmbeddingModel | None,
+) -> tuple[ManifestRecord, list[Path]] | None:
+    """Render+write a doc, or log and return ``None`` if it cannot render.
+
+    A single unrenderable doc — an unhandled Lovdata structure such as a
+    ``futuretitle`` span, or malformed XML — must not abort the whole sync.
+    Returning ``None`` lets the caller skip it, leaving any prior version and
+    its manifest record untouched so the change detector retries it next run.
+    """
+    try:
+        return _write_one(settings, upstream, now, embedder)
+    except (RenderError, ParseError) as exc:
+        logger.warning(
+            "skipping %s (%s): could not render — %s",
+            upstream.slug,
+            upstream.doc_id,
+            exc,
+        )
+        return None
 
 
 def _load_embedder(settings: Settings) -> EmbeddingModel | None:

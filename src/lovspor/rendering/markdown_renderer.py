@@ -202,7 +202,12 @@ def _render_article(
     if any(c in _PARAGRAPH_CLASSES for c in classes):
         text = _escape_block_leading(_inline(elem))
         return f"{text}\n\n" if text else ""
-    return _render_children(elem)
+    # Any other article (footnote, defaultP, centeredP, the legalArticle
+    # container) may carry inline text next to element children — a footnote's
+    # "Jf. <a/>" reference is the common case. Render inline runs as paragraphs
+    # and block children as blocks, rather than dropping the text via the
+    # child-only walk.
+    return _render_mixed_article(elem)
 
 
 def _render_legal_article_header(elem: etree._Element) -> str:
@@ -218,13 +223,16 @@ def _render_legal_article_header(elem: etree._Element) -> str:
 
 
 def _render_mixed_article(elem: etree._Element) -> str:
-    """Render an ``<article>`` that mixes inline text with block children.
+    """Render an ``<article>`` as a run of inline paragraphs and block children.
 
-    A ``<table>`` is the case that forces this path (``_inline`` would mash
-    its cell values into one run), but the same article can also hold a
-    ``legalArticleHeader`` or a nested list. Block children go through
-    ``_render_element`` (so a header stays a ``###`` heading, a table a GFM
-    block); genuinely-inline children accumulate into paragraphs in between.
+    The general renderer for every article that is not a plain paragraph or a
+    blockquote: footnotes (``footnote``: label span + "Jf. <a/>" reference
+    text), ``defaultP`` / ``centeredP`` notes, and the ``legalArticle``
+    container (a header plus nested paragraph articles). Block children (a
+    ``legalArticleHeader``, a nested list, a table) go through
+    ``_render_element`` so a header stays a ``###`` heading and a table a GFM
+    block; genuinely-inline children (spans, links, ``<br/>``) accumulate into
+    the paragraphs between them, so no reference text is dropped.
     """
     blocks: list[str] = []
     inline: list[str] = [_escape_inline_text(elem.text or "")]

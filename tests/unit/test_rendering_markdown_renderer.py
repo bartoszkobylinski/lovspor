@@ -542,6 +542,48 @@ def test_render_nested_legal_article_walks_children() -> None:
     assert "Second ledd." in md
 
 
+def test_render_footnote_article_renders_reference_as_paragraph() -> None:
+    """A ``<article class="footnote">`` (label span + "Jf." reference text +
+    links to EØS/EU) is the dominant Lovdata structure that used to trip the
+    lost-content guard. It now renders as a paragraph so the reference text and
+    links are preserved instead of aborting the whole sync."""
+    xml = _wrap(
+        b'<footer class="footnotes">'
+        b'<article class="footnote" data-name="1">'
+        b'<span class="footnoteLabel">1</span> Jf. '
+        b'<a href="avtale/avt-1992-05-02-1-v19">E\xc3\x98S-avtalen vedlegg XIX</a>'
+        b" nr. 7a."
+        b"</article>"
+        b"</footer>",
+    )
+    md = render_markdown(xml)
+    assert md == "1 Jf. [EØS-avtalen vedlegg XIX](avtale/avt-1992-05-02-1-v19) nr. 7a.\n"
+
+
+def test_render_non_paragraph_article_with_mixed_text_and_link() -> None:
+    """A non-paragraph article (e.g. ``defaultP``) carrying inline text next to
+    a link renders as a paragraph rather than dropping the text."""
+    xml = _wrap(
+        b'<article class="defaultP">Se '
+        b'<a href="lov/2016-05-27-14">skatteforvaltningsloven</a> for reglene.</article>',
+    )
+    md = render_markdown(xml)
+    assert md == "Se [skatteforvaltningsloven](lov/2016-05-27-14) for reglene.\n"
+
+
+def test_render_block_level_span_in_section_still_raises() -> None:
+    """Boundary: a block-level ``<span>`` (Lovdata's ``futuretitle``, a proposed
+    chapter title) directly under a ``<section>`` is NOT an article and is still
+    caught by the guard. The sync's per-doc isolation skips such a doc rather
+    than the renderer guessing at proposed-title semantics."""
+    with pytest.raises(RenderError):
+        render_markdown(
+            _wrap(
+                b'<section class="section"><span class="futuretitle">Kapittel 6A</span></section>',
+            ),
+        )
+
+
 def test_render_raises_parse_error_on_malformed_xml() -> None:
     with pytest.raises(ParseError) as exc_info:
         render_markdown(b"<not><closed")
