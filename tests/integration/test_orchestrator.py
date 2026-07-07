@@ -3921,3 +3921,108 @@ def test_run_sync_skips_unrenderable_doc_instead_of_aborting(
     assert "lov-bad" in caplog.text
     assert "lov-new-bad" in caplog.text
     assert "lov-ren" in caplog.text
+
+
+def test_run_sync_deferred_carry_dropped_when_path_taken_by_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Codex #104: a changed doc that fails to render must NOT keep its prior
+    markdown_path if a successful rename takes over that path — otherwise two
+    current records point at one Markdown file (holding the other doc's content).
+    The failed doc is dropped this sync and re-added once it renders."""
+    corpus = tmp_path / "lovverk"
+    corpus.mkdir()
+    data_dir = tmp_path / "data"
+
+    def _rec(slug: str, hash_int: int) -> ManifestRecord:
+        return ManifestRecord(
+            doc_type="lov",
+            xml_hash=f"{hash_int:064x}",
+            markdown_path=f"lover/{slug}.md",
+            source_dataset="gjeldende-lover",
+            last_seen=datetime(2026, 5, 1, tzinfo=UTC),
+            status="current",
+            slug=slug,
+            title=f"doc-{slug}",
+            eu_basis=[],
+        )
+
+    # lov-a owns alpha.md; lov-b owns beta.md.
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={"lov-a": _rec("alpha", 1), "lov-b": _rec("beta", 3)},
+    )
+
+    def _up(doc_id: str, slug: str, hash_int: int) -> orchestrator_module._UpstreamDoc:
+        return orchestrator_module._UpstreamDoc(
+            doc_id=doc_id,
+            source_dataset="gjeldende-lover",
+            xml_bytes=b"<xml/>",
+            xml_hash=f"{hash_int:064x}",
+            slug=slug,
+            title=doc_id,
+            eu_basis=(),
+        )
+
+    upstream = {
+        # changed (new hash) and would move to beta — but render RAISES
+        "lov-a": _up("lov-a", "beta", 2),
+        # unchanged content (hash 3) with slug beta->alpha == rename INTO lov-a's old path
+        "lov-b": _up("lov-b", "alpha", 3),
+    }
+
+    def fake_write_one(
+        settings: Settings,
+        up: orchestrator_module._UpstreamDoc,
+        now: datetime,
+        _embedder: object,
+    ) -> tuple[ManifestRecord, list[Path]]:
+        if up.doc_id == "lov-a":
+            raise RenderError("boom")
+        md_path = settings.lovverk_repo_path / "lover" / f"{up.slug}.md"
+        record = ManifestRecord(
+            doc_type="lov",
+            xml_hash=up.xml_hash,
+            markdown_path=str(md_path.relative_to(settings.lovverk_repo_path)),
+            source_dataset=up.source_dataset,
+            last_seen=now,
+            status="current",
+            slug=up.slug,
+            title=up.title,
+            eu_basis=[],
+        )
+        return record, [md_path]
+
+    captured: dict[str, object] = {}
+
+    def capture_commit(*_args: object, **kwargs: object) -> None:
+        captured["records"] = kwargs["new_records"]
+
+    monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _p: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_a: upstream)
+    monkeypatch.setattr(orchestrator_module, "_needs_sprint5_history_migration", lambda *_a: False)
+    monkeypatch.setattr(orchestrator_module, "_needs_sprint8_eu_basis_migration", lambda *_a: False)
+    monkeypatch.setattr(
+        orchestrator_module, "_needs_sprint9_embeddings_migration", lambda *_a: False
+    )
+    monkeypatch.setattr(orchestrator_module, "_load_embedder", lambda _s: None)
+    monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+
+    with caplog.at_level(logging.WARNING):
+        run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    records = captured["records"]
+    assert isinstance(records, dict)
+    # the rename wins the shared path
+    assert records["lov-b"].markdown_path == "lover/alpha.md"
+    # the failed changed doc is dropped, NOT carried at the taken-over path
+    assert "lov-a" not in records
+    # invariant: no two current records share a markdown_path
+    paths = [r.markdown_path for r in records.values()]
+    assert len(paths) == len(set(paths))
+    assert "dropping lov-a" in caplog.text
