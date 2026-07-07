@@ -10,11 +10,13 @@ import pytest
 
 from lovspor.timetravel import (
     RevisionNotFoundError,
+    RevisionResult,
     _find_revision,
     _iter_follow_log,
     _read_blob,
     _RevisionEntry,
     get_law_at_revision,
+    resolve_law_at_revision,
 )
 
 
@@ -235,3 +237,51 @@ def test_get_law_at_revision_handles_non_ascii_slug_paths(tmp_path: Path) -> Non
     rel = "lover/arbeidsmiljøloven-aml.md"
     assert get_law_at_revision(repo, rel, date(2026, 3, 1)) == "versjon 1\n"
     assert get_law_at_revision(repo, rel, date(2026, 7, 1)) == "versjon 2\n"
+
+
+def test_resolve_law_at_revision_returns_content_and_resolved_sha(
+    tmp_path: Path,
+) -> None:
+    """The diff tool needs to report WHICH commit each date resolved to, so a
+    caller can see that e.g. 2026-03-01 mapped to the January version. The
+    resolver returns the content plus that commit's sha and author date."""
+    repo = tmp_path / "lovverk"
+    _init_repo(repo)
+    (repo / "lover").mkdir()
+    doc = repo / "lover" / "skatteloven-sktl.md"
+
+    doc.write_text("versjon 1\n", encoding="utf-8")
+    _commit_all(repo, "add(lov): skatteloven", "2026-01-01T12:00:00+00:00")
+
+    rel = "lover/skatteloven-sktl.md"
+    result = resolve_law_at_revision(repo, rel, date(2026, 3, 1))
+
+    assert isinstance(result, RevisionResult)
+    assert result.content == "versjon 1\n"
+    assert result.commit_date == datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert result.sha == head
+
+
+def test_get_law_at_revision_delegates_to_resolver(tmp_path: Path) -> None:
+    """get_law_at_revision is now a thin content-only wrapper over the resolver
+    — same date/rename semantics, just the string."""
+    repo = tmp_path / "lovverk"
+    _init_repo(repo)
+    (repo / "lover").mkdir()
+    doc = repo / "lover" / "x.md"
+    doc.write_text("only\n", encoding="utf-8")
+    _commit_all(repo, "add(lov): x", "2026-01-01T12:00:00+00:00")
+
+    rel = "lover/x.md"
+    assert get_law_at_revision(repo, rel, date(2026, 2, 1)) == "only\n"
+    assert (
+        get_law_at_revision(repo, rel, date(2026, 2, 1))
+        == resolve_law_at_revision(repo, rel, date(2026, 2, 1)).content
+    )

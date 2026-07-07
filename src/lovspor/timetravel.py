@@ -57,13 +57,27 @@ class _RevisionEntry:
     path: str
 
 
-def get_law_at_revision(
+@dataclass(frozen=True)
+class RevisionResult:
+    """A resolved past version: the blob text plus which commit produced it.
+
+    The diff tool reports ``sha`` and ``commit_date`` so a caller can see that
+    e.g. ``2026-03-01`` actually resolved to the January commit — the date the
+    user asked for is rarely the date the version changed.
+    """
+
+    content: str
+    sha: str
+    commit_date: datetime
+
+
+def resolve_law_at_revision(
     repo_path: Path,
     current_path: str,
     target_date: date,
-) -> str:
-    """Return file content as it was at the latest commit on or before
-    ``target_date``, following renames.
+) -> RevisionResult:
+    """Resolve a doc to the latest commit on or before ``target_date``
+    (following renames) and return its content plus that commit's identity.
 
     ``current_path`` is the doc's HEAD-relative path
     (e.g. ``"lover/skatteloven-sktl.md"``). ``--follow`` traces back
@@ -78,7 +92,21 @@ def get_law_at_revision(
     """
     cutoff = datetime.combine(target_date, time.max).replace(tzinfo=UTC)
     entry = _find_revision(repo_path, current_path, cutoff)
-    return _read_blob(repo_path, entry.sha, entry.path)
+    content = _read_blob(repo_path, entry.sha, entry.path)
+    return RevisionResult(content=content, sha=entry.sha, commit_date=entry.commit_date)
+
+
+def get_law_at_revision(
+    repo_path: Path,
+    current_path: str,
+    target_date: date,
+) -> str:
+    """Return only the file content as it was on ``target_date``.
+
+    Thin wrapper over :func:`resolve_law_at_revision` for callers (``get_law_at``)
+    that need the Markdown but not the resolved commit identity.
+    """
+    return resolve_law_at_revision(repo_path, current_path, target_date).content
 
 
 def _find_revision(
