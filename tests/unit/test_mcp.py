@@ -3623,6 +3623,63 @@ def test_diff_section_maps_is_deterministic() -> None:
     assert _diff_section_maps(before, after) == _diff_section_maps(before, after)
 
 
+def test_diff_section_maps_uses_natural_order_and_omits_unchanged() -> None:
+    before = {
+        "1": _sec("§ 1. Uendret", "samme"),
+        "5-10": _sec("§ 5-10. Ti", "gammel ti"),
+        "5-2": _sec("§ 5-2. To", "gammel to"),
+    }
+    after = {
+        "1": _sec("§ 1. Uendret", "samme"),
+        "5-2": _sec("§ 5-2. To", "ny to"),
+        "5-10": _sec("§ 5-10. Ti", "ny ti"),
+    }
+
+    result = _diff_section_maps(before, after)
+
+    assert [entry["section_id"] for entry in result["sections"]] == ["5-2", "5-10"]
+    assert all(entry["section_id"] != "1" for entry in result["sections"])
+    assert json.dumps(result, sort_keys=True, ensure_ascii=False) == json.dumps(
+        _diff_section_maps(before, after),
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
+def test_diff_section_maps_marks_retitle_as_changed() -> None:
+    before = {"1-1": _sec("§ 1-1. Gammelt navn", "Uendret brødtekst.")}
+    after = {"1-1": _sec("§ 1-1. Nytt navn", "Uendret brødtekst.")}
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 0,
+        "sections_changed": 1,
+    }
+    assert result["sections"][0]["change_type"] == "changed"
+    assert "-§ 1-1. Gammelt navn" in result["sections"][0]["unified_diff"]
+    assert "+§ 1-1. Nytt navn" in result["sections"][0]["unified_diff"]
+
+
+def test_diff_section_maps_marks_empty_body_retitle_as_changed() -> None:
+    before = {"1-1": _sec("§ 1-1. Gammelt navn", "")}
+    after = {"1-1": _sec("§ 1-1. Nytt navn", "")}
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"]["sections_changed"] == 1
+    assert result["sections"][0]["unified_diff"] == "\n".join(
+        [
+            "--- before",
+            "+++ after",
+            "@@ -1 +1 @@",
+            "-§ 1-1. Gammelt navn",
+            "+§ 1-1. Nytt navn",
+        ],
+    )
+
+
 # --- CorpusReader.diff_law_versions: version-to-version section diff ---
 
 
@@ -3704,6 +3761,67 @@ def test_diff_law_versions_reports_added_removed_changed(
     }
     by_id = {e["section_id"]: e["change_type"] for e in result["sections"]}
     assert by_id == {"2": "changed", "3": "removed", "4": "added"}
+    added = next(e for e in result["sections"] if e["section_id"] == "4")
+    assert added["unified_diff"] == "\n".join(
+        [
+            "--- before",
+            "+++ after",
+            "@@ -0,0 +1,2 @@",
+            "+§ 4. Ny",
+            "+Ny paragraf.",
+        ],
+    )
+    removed = next(e for e in result["sections"] if e["section_id"] == "3")
+    assert removed["unified_diff"] == "\n".join(
+        [
+            "--- before",
+            "+++ after",
+            "@@ -1,2 +0,0 @@",
+            "-§ 3. Opphevet",
+            "-Skal oppheves.",
+        ],
+    )
+
+
+def test_diff_law_versions_counts_multiple_changed_sections(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    before = _law_md(
+        [
+            ("1", "Formål", "Gammel formålstekst."),
+            ("2", "Virkeområde", "Gammelt virkeområde."),
+        ],
+    )
+    after = _law_md(
+        [
+            ("1", "Formål", "Ny formålstekst."),
+            ("2", "Virkeområde", "Nytt virkeområde."),
+        ],
+    )
+
+    def fake_resolve(
+        _repo_path: Path,
+        _current_path: str,
+        target_date: date,
+    ) -> RevisionResult:
+        return _rev(before, "sha-a") if target_date == date(2020, 1, 1) else _rev(after, "sha-b")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fake_resolve)
+
+    result = CorpusReader(tmp_path).diff_law_versions(
+        "skatteloven",
+        "2020-01-01",
+        "2024-01-01",
+    )
+
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 0,
+        "sections_changed": 2,
+    }
+    assert [entry["section_id"] for entry in result["sections"]] == ["1", "2"]
 
 
 def test_diff_law_versions_same_content_yields_empty_diff_but_reports_commits(
@@ -3737,6 +3855,68 @@ def test_diff_law_versions_same_content_yields_empty_diff_but_reports_commits(
     }
     assert result["resolved_commit_a"] == "sha-x"
     assert result["resolved_commit_b"] == "sha-y"
+
+
+def test_diff_law_versions_ignores_frontmatter_metadata_churn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    body = "\n".join(
+        [
+            "# Skatteloven",
+            "",
+            "## Kapittel 1. Alminnelige bestemmelser",
+            "",
+            "### § 1. Formål",
+            "",
+            "Loven gjelder skatt.",
+            "",
+        ],
+    )
+    before = (
+        "---\n"
+        "id: nl-1\n"
+        "title: Skatteloven\n"
+        "retrieved_at: 2020-01-01T00:00:00Z\n"
+        f"xml_hash: {'a' * 64}\n"
+        "---\n\n"
+        f"{body}"
+    )
+    after = (
+        "---\n"
+        "id: nl-1\n"
+        "title: Skatteloven\n"
+        "retrieved_at: 2024-01-01T00:00:00Z\n"
+        f"xml_hash: {'b' * 64}\n"
+        "---\n\n"
+        f"{body}"
+    )
+
+    def fake_resolve(
+        _repo_path: Path,
+        _current_path: str,
+        target_date: date,
+    ) -> RevisionResult:
+        return _rev(before, "sha-a") if target_date == date(2020, 1, 1) else _rev(after, "sha-b")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fake_resolve)
+
+    result = CorpusReader(tmp_path).diff_law_versions(
+        "skatteloven",
+        "2020-01-01",
+        "2024-01-01",
+    )
+
+    assert result["sections"] == []
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 0,
+        "sections_changed": 0,
+    }
+    serialized = json.dumps(result, sort_keys=True)
+    assert "retrieved_at" not in serialized
+    assert "xml_hash" not in serialized
 
 
 def test_diff_law_versions_rejects_manifest_path_escaping_corpus_root(
@@ -3775,6 +3955,54 @@ def test_diff_law_versions_rejects_non_iso_date_a(
         CorpusReader(tmp_path).diff_law_versions("skatteloven", "01-01-2020", "2024-01-01")
 
 
+def test_diff_law_versions_rejects_non_iso_date_b_before_timetravel(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fail_if_called(*_args: object) -> RevisionResult:
+        raise AssertionError("timetravel lookup should not run")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fail_if_called)
+
+    with pytest.raises(
+        ValueError,
+        match=r"^date_b must be ISO date YYYY-MM-DD, got '01-01-2024'$",
+    ):
+        CorpusReader(tmp_path).diff_law_versions("skatteloven", "2020-01-01", "01-01-2024")
+
+
+def test_diff_law_versions_allows_todays_utc_date(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    today = datetime.now(UTC).date()
+    seen: list[date] = []
+    md = _law_md([("1", "Formål", "Loven gjelder skatt.")])
+
+    def fake_resolve(
+        _repo_path: Path,
+        _current_path: str,
+        target_date: date,
+    ) -> RevisionResult:
+        seen.append(target_date)
+        return _rev(md, f"sha-{len(seen)}")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fake_resolve)
+
+    result = CorpusReader(tmp_path).diff_law_versions(
+        "skatteloven",
+        today.isoformat(),
+        today.isoformat(),
+    )
+
+    assert seen == [today, today]
+    assert result["date_a"] == today.isoformat()
+    assert result["date_b"] == today.isoformat()
+
+
 def test_diff_law_versions_rejects_future_date_b(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -3807,7 +4035,10 @@ def test_diff_law_versions_translates_missing_revision_to_corpus_not_found(
 
     with pytest.raises(
         CorpusNotFoundError,
-        match=r"did not exist in the corpus on 2018-01-01",
+        match=(
+            r"^law 'skatteloven' did not exist in the corpus on 2018-01-01; "
+            r"call get_law_history\('skatteloven'\) to see when it first appeared$"
+        ),
     ):
         CorpusReader(tmp_path).diff_law_versions("skatteloven", "2018-01-01", "2024-01-01")
 

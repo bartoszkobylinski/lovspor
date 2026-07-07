@@ -27,6 +27,17 @@ def test_revision_entry_is_frozen() -> None:
         entry.sha = "other"
 
 
+def test_revision_result_is_frozen() -> None:
+    result = RevisionResult(
+        content="markdown",
+        sha="sha",
+        commit_date=datetime(2026, 4, 27, tzinfo=UTC),
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        result.content = "other"
+
+
 def test_find_revision_uses_end_of_day_cutoff_inclusively(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
