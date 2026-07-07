@@ -2237,6 +2237,36 @@ def build_server(corpus_path: Path) -> FastMCP:
         return reader.list_law_versions(slug)
 
     @mcp.tool()
+    def diff_law_versions(slug: str, date_a: str, date_b: str) -> dict[str, Any]:
+        """Show what changed in a law between two dates, section by section.
+
+        Builds on ``get_law_at`` + ``list_law_versions``: instead of fetching
+        one historical version, it compares two. Use it when the user asks
+        *"what changed in Skatteloven between 2018 and 2024?"* or wants to see
+        the exact edit a reform introduced. Pick the two dates from
+        ``list_law_versions`` (or any calendar dates) — each resolves to the
+        version current at end-of-day UTC.
+
+        ``slug``: the act's current slug (rename-aware, as for ``get_law_at``).
+        ``date_a`` / ``date_b``: ISO ``YYYY-MM-DD``. ``date_a`` is the "before"
+        side; a later ``date_a`` gives a reverse diff. Future dates are refused.
+
+        Returns ``{slug, date_a, date_b, resolved_commit_a, resolved_commit_b,
+        summary, sections}``. ``resolved_commit_a/b`` are the commits the dates
+        actually mapped to (a date rarely equals the day the law changed).
+        ``summary`` counts ``sections_added`` / ``sections_removed`` /
+        ``sections_changed``. ``sections`` lists each affected ``§`` with its
+        ``section_id``, ``heading``, ``change_type``, and a unified diff of its
+        heading and body; unchanged sections are omitted. Metadata-only churn
+        (``retrieved_at``, hashes) is stripped and never appears.
+
+        Raises if the slug is unknown or if either date predates the act's
+        first appearance in the corpus (the message points to
+        ``get_law_history``).
+        """
+        return reader.diff_law_versions(slug, date_a, date_b)
+
+    @mcp.tool()
     def list_recent_changes(
         dataset: str | None = None,
         since: str | None = None,

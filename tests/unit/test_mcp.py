@@ -3290,7 +3290,7 @@ def test_serve_loads_dotenv_before_building_server(
     assert calls == ["load_env", "run"]
 
 
-def test_build_server_registers_fifteen_tools(tmp_path: Path) -> None:
+def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -3302,6 +3302,7 @@ def test_build_server_registers_fifteen_tools(tmp_path: Path) -> None:
             "get_law",
             "get_law_at",
             "list_law_versions",
+            "diff_law_versions",
             "get_section",
             "list_sections",
             "get_law_history",
