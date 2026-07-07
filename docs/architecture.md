@@ -55,8 +55,8 @@ facade.
 | `errors.py` | Exception hierarchy so callers never catch bare `Exception`. | `LovsporError` + `NetworkError`, `ParseError`, `RenderError`, `ExtractionError`, `ConfigError`, `CorpusStateError`, `MassRemovalError` |
 | `retry.py` | Dependency-free exponential-backoff retry helper. | `retry_with_backoff(...)` |
 | `history.py` | Per-act change history from `git log --follow --numstat`; writes `history/<slug>.{json,md}`. | `extract_history()`, `write_history()`, `render_history_markdown()` |
-| `timetravel.py` | Time-machine: a doc's text as of a past date via `git log --follow` + `git show <sha>:<path>`. | `get_law_at_revision(...)` |
-| `mcp.py` | Stdio MCP server exposing 15 read-only tools over a local `lovverk` clone. | `serve()`, `build_server()`, `CorpusReader` |
+| `timetravel.py` | Time-machine: a doc's text as of a past date via `git log --follow` + `git show <sha>:<path>`. | `get_law_at_revision(...)`, `resolve_law_at_revision(...)` |
+| `mcp.py` | Stdio MCP server exposing 16 read-only tools over a local `lovverk` clone. | `serve()`, `build_server()`, `CorpusReader` |
 
 ### `sources/` — Lovdata API boundary
 
@@ -184,7 +184,7 @@ In order:
 ## MCP server
 
 `lovspor mcp` builds a `FastMCP("lovverk")` server (`mcp.py`) transported over
-**stdio** with 15 read-only tools. A `CorpusReader` reads `manifest.json` plus the
+**stdio** with 16 read-only tools. A `CorpusReader` reads `manifest.json` plus the
 Markdown / `.bin` files from the local clone, caching in memory and dropping caches
 when `manifest.json`'s mtime changes so a `git pull` under a long-lived server is
 picked up. Full tool reference, setup, and limitations are in [`mcp.md`](mcp.md).

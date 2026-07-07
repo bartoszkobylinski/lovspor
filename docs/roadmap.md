@@ -24,12 +24,13 @@
 - Full git history. Time-travel "as of date" already exists for free — just not yet exposed.
 - Manifest as the single source of truth for change detection.
 
-### MCP server (15 tools)
+### MCP server (16 tools)
 | Tool | Purpose |
 |---|---|
 | `get_law` | full Markdown of an act |
 | `get_law_at` | full Markdown as of a target date — time-machine via `git log --follow` (Sprint 10) |
 | `list_law_versions` | dates of distinct content versions, oldest-first (Sprint 10) |
+| `diff_law_versions` | section-by-section diff of an act between two dates (Sprint 10 B2) |
 | `get_section` | one `§` with parent chapter + validated `cross_references` |
 | `list_sections` | an act's table of contents: every `§` id + heading |
 | `get_law_history` | structured change events |
@@ -44,7 +45,7 @@
 | `corpus_status` | freshness / staleness signal |
 
 ### Positioning
-Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 15 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 PR-A adding a git-history time-machine pair (`get_law_at` + `list_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
+Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 16 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 adding a git-history time-machine set (`get_law_at`, `list_law_versions`, `diff_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
 
 ---
 
@@ -92,7 +93,7 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **No fuzzy slug match.** Callers must hit the canonical slug exactly.
 
 ### Operational
-- **No diff tool.** `diff_law_versions(slug, date_a, date_b)` would be unique to this project — competitors lack the git-based architecture. Time-machine half (`get_law_at` + `list_law_versions`) shipped in Sprint 10 PR-A.
+- **Diff tool — SHIPPED (Sprint 10 B2).** `diff_law_versions(slug, date_a, date_b)` returns a section-by-section diff between two dates — unique to this project, since competitors lack the git-based architecture. Built on the B1 time-machine (`get_law_at` + `list_law_versions`).
 - **No quality monitor.** Whether every cross-reference in body text resolves to a real act is unknown.
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
 
@@ -143,12 +144,12 @@ Grouped by class. Each entry estimates **leverage** (how much it unlocks), **nov
 - Implemented as a new `lovspor.timetravel` module + two `CorpusReader` methods + two `@mcp.tool()` decorators. ~150 lines of net new code; reuses Sprint-5 `history/<slug>.json` and the manifest's `markdown_path`.
 - End-of-day UTC semantics for `target_date`; future dates are refused with a `ValueError` (typo guard rather than alias to HEAD).
 
-**B2. Diff tool**
-- New tool: `diff_law_versions(slug, date_a, date_b)` or `diff_law_versions(slug, version_a, version_b)`.
-- Output: section-by-section unified diff plus a summary.
-- Builds on B1.
+**B2. Diff tool — SHIPPED in Sprint 10 (this PR)**
+- New tool: `diff_law_versions(slug, date_a, date_b)` — resolves both dates through the B1 time-machine, then diffs the two versions section by section.
+- Output: `{slug, date_a, date_b, resolved_commit_a, resolved_commit_b, summary, sections}`; each added / removed / changed `§` carries a stdlib `difflib` unified diff of its heading and body. Frontmatter is stripped so metadata churn never shows.
+- Implemented as a pure `_diff_section_maps` core + a `CorpusReader.diff_law_versions` method + one `@mcp.tool()`, reusing the Sprint-10 `timetravel` resolver (extended to report the resolved commit sha) and the existing section parser. No new dependency.
 - **Leverage:** high. Answers "what exactly changed in skatteloven between 2020 and 2024?".
-- **Effort:** medium. Diff library plus careful formatting.
+- Date input only for now; version-index input (`version_a`/`version_b` from `list_law_versions`) deferred as a possible follow-up.
 
 ### Class C: Search quality
 
@@ -294,11 +295,11 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ## Recommendation
 
-Top three by **value × novelty** (refreshed 2026-05-18 after Sprint 10 PR-A ships the time-machine half of Class B):
+Top three by **value × novelty** (refreshed after Sprint 10 ships Class B in full — the B1 time-machine and the B2 diff tool):
 
-1. **Diff tool** (Class B2). Time-machine half (B1) is shipped; B2 builds directly on it. Section-by-section unified diff between two dates. Small effort, unique to this project (no git-architecture competitor can do it), answers the obvious follow-up to "what did this law say in 2018?".
-2. **AST + cross-reference graph** (Classes A1, A2). A larger investment, but unblocks many later sprints. The AST enables: better `get_section`, structural diffs (complementing B2), navigation tools, and a richer `cross_references` field on `get_section` (currently regex-based, B-tier scope).
-3. **Høyesterett via `domstol.no`** (Class D-DIRECT-1). The realistic version of the old Class D2 "Domsregister" entry — Lovdata's full case-law collection is legally blocked (§43; see "Currently out of scope"), but apex precedent via the courts' own publication is sprint-sized and legally clean. Closes the largest qualitative gap reachable without legislative change. Genuinely novel — no Norwegian-law MCP has case law.
+1. **AST + cross-reference graph** (Classes A1, A2). With Class B now complete (`diff_law_versions` shipped), this is the next value×novelty target. A larger investment, but unblocks many later sprints. The AST enables: better `get_section`, structural diffs (complementing B2's textual diff), navigation tools, and a richer `cross_references` field on `get_section` (currently regex-based, B-tier scope).
+2. **Høyesterett via `domstol.no`** (Class D-DIRECT-1). The realistic version of the old Class D2 "Domsregister" entry — Lovdata's full case-law collection is legally blocked (§43; see "Currently out of scope"), but apex precedent via the courts' own publication is sprint-sized and legally clean. Closes the largest qualitative gap reachable without legislative change. Genuinely novel — no Norwegian-law MCP has case law.
+3. **Per-section Lovdata deep links** (Class F1). Low effort, medium leverage: each section's frontmatter gains a `lovdata_url` anchored to the `§`, so AI consumers can cite straight back to Lovdata for verification.
 
 Top three by **adoption × reach**:
 
