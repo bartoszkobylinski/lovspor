@@ -3,27 +3,31 @@ from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings.store import write_embeddings
 from lovspor.errors import ConfigError, CorpusStateError, MassRemovalError
 from lovspor.history import HistoryRecord
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import LovdataArchive
-from lovspor.storage.manifest import Manifest, ManifestRecord
+from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
 from lovspor.sync.orchestrator import (
     SyncReport,
     _collect_upstream,
     _commit_with_history,
     _DocAction,
     _ensure_corpus_git_repo,
+    _find_undersized_embeddings,
     _guard_mass_removal,
     _index_tarball,
     _load_or_empty_manifest,
     _UpstreamDoc,
     _with_slug,
     _write_one,
+    mark_undersized_embeddings_stale,
     run_sync,
 )
 
@@ -1587,3 +1591,119 @@ def test_carry_tombstones_keeps_only_absent_removed_records() -> None:
     carried = orchestrator_module._carry_tombstones(prior, {"back", "other"})
 
     assert carried == {"gone": prior.documents["gone"]}
+
+
+# --- repair under-embedded docs (flat ## § acts embedded before the parser fix) ---
+
+
+def _write_md(repo: Path, slug: str, body: str) -> None:
+    path = repo / "lover" / f"{slug}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\nid: x\ntitle: T\n---\n\n{body}", encoding="utf-8")
+
+
+def _write_bin(repo: Path, slug: str, section_ids: list[str]) -> None:
+    path = orchestrator_module._embeddings_path(repo, "gjeldende-lover", slug)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pairs = [(sid, np.zeros(4, dtype=np.int8)) for sid in section_ids]
+    write_embeddings(path, pairs, scale=1.0, dim=4)
+
+
+def _embedded_record(slug: str) -> ManifestRecord:
+    # embedding_hash == xml_hash: looks fully embedded, so hash-based staleness
+    # can never flag it — the whole point of the section-count repair.
+    return _record(slug, xml_hash="a" * 64, slug=slug).model_copy(
+        update={"embedding_hash": "a" * 64},
+    )
+
+
+def test_find_undersized_embeddings_flags_only_under_embedded_current_docs(
+    tmp_path: Path,
+) -> None:
+    # flat act: markdown has 2 H2 sections, .bin has 0 vectors -> under-embedded.
+    _write_md(tmp_path, "flat", "## § 1. A\n\nx\n\n## § 2.\n\ny\n")
+    _write_bin(tmp_path, "flat", [])
+    # healthy act: 1 section, 1 vector -> counts match, not flagged.
+    _write_md(tmp_path, "healthy", "### § 1. A\n\nx\n")
+    _write_bin(tmp_path, "healthy", ["1"])
+    # preamble-only act: genuinely 0 sections, 0 vectors -> not flagged.
+    _write_md(tmp_path, "preamble", "Bare tekst uten paragrafer.\n")
+    _write_bin(tmp_path, "preamble", [])
+    prior = Manifest(
+        generated_at=datetime(2026, 7, 7, tzinfo=UTC),
+        documents={
+            "flat": _embedded_record("flat"),
+            "healthy": _embedded_record("healthy"),
+            "preamble": _embedded_record("preamble"),
+            "removed": _record("removed", xml_hash="b" * 64, slug="removed", status="removed"),
+        },
+    )
+
+    assert _find_undersized_embeddings(tmp_path, prior) == {"flat"}
+
+
+def test_mark_undersized_embeddings_stale_clears_hash_and_commits(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    repo = settings.lovverk_repo_path
+    _write_md(repo, "flat", "## § 1. A\n\nx\n\n## § 2.\n\ny\n")
+    _write_bin(repo, "flat", [])
+    _write_md(repo, "healthy", "### § 1. A\n\nx\n")
+    _write_bin(repo, "healthy", ["1"])
+    write_manifest(
+        Manifest(
+            generated_at=datetime(2026, 7, 7, tzinfo=UTC),
+            documents={"flat": _embedded_record("flat"), "healthy": _embedded_record("healthy")},
+        ),
+        repo / "manifest.json",
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+
+    count = mark_undersized_embeddings_stale(settings)
+
+    assert count == 1
+    updated = read_manifest(repo / "manifest.json")
+    assert updated.documents["flat"].embedding_hash is None
+    assert updated.documents["healthy"].embedding_hash == "a" * 64
+    log = subprocess.run(
+        ["git", "log", "--oneline", "-1"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "under-embedded" in log
+
+
+def test_mark_undersized_embeddings_stale_is_noop_when_all_current(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    repo = settings.lovverk_repo_path
+    _write_md(repo, "healthy", "### § 1. A\n\nx\n")
+    _write_bin(repo, "healthy", ["1"])
+    write_manifest(
+        Manifest(
+            generated_at=datetime(2026, 7, 7, tzinfo=UTC),
+            documents={"healthy": _embedded_record("healthy")},
+        ),
+        repo / "manifest.json",
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed")
+    head_before = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    assert mark_undersized_embeddings_stale(settings) == 0
+
+    head_after = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert head_before == head_after
