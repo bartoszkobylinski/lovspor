@@ -2,7 +2,13 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from lovspor.embeddings.sections import EmbeddingSection, iter_sections, strip_frontmatter
+from lovspor.embeddings.sections import (
+    _SECTION_HEADING,
+    EmbeddingSection,
+    iter_sections,
+    strip_frontmatter,
+)
+from lovspor.mcp import _parse_sections as parse_mcp_sections
 
 
 def test_strip_frontmatter_removes_yaml_block() -> None:
@@ -124,6 +130,63 @@ def test_iter_sections_h2_chapter_still_closes_section() -> None:
     body = "## § 1. A\nTekst.\n## Kapittel 2\nIgnorert."
 
     assert iter_sections(body) == [EmbeddingSection(section_id="1", text="## § 1. A\nTekst.")]
+
+
+def test_iter_sections_h3_non_section_heading_closes_without_opening() -> None:
+    body = "### § 1. A\nTekst.\n### Merknad\nIgnorert.\n### § 2. B\nMer."
+
+    assert iter_sections(body) == [
+        EmbeddingSection(section_id="1", text="### § 1. A\nTekst."),
+        EmbeddingSection(section_id="2", text="### § 2. B\nMer."),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("line", "section_id", "title"),
+    [
+        ("## § 1. Formål", "1", "Formål"),
+        ("## § 14.", "14", None),
+        ("## § 13. (Opphevet)", "13", "(Opphevet)"),
+        ("### § 5-12. Title", "5-12", "Title"),
+        ("### § 5", "5", None),
+    ],
+)
+def test_embedding_section_heading_regex_matches_real_heading_shapes(
+    line: str,
+    section_id: str,
+    title: str | None,
+) -> None:
+    match = _SECTION_HEADING.match(line)
+
+    assert match is not None
+    assert match.group(1) == section_id
+    assert match.group(2) == title
+
+
+def test_embedding_section_heading_regex_does_not_match_chapter_heading() -> None:
+    assert _SECTION_HEADING.match("## Kapittel 1.") is None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "## § 1. Formål",
+        "## § 14.",
+        "## § 13. (Opphevet)",
+        "### § 5-12. Title",
+        "### § 5",
+        "## Kapittel 1.",
+        "### Merknad",
+    ],
+)
+def test_embedding_and_mcp_splitters_agree_on_section_heading_matrix(line: str) -> None:
+    embedding_match = _SECTION_HEADING.match(line)
+    mcp_sections = parse_mcp_sections(f"{line}\n\nBody.\n")
+
+    if embedding_match is None:
+        assert mcp_sections == {}
+    else:
+        assert set(mcp_sections) == {embedding_match.group(1)}
 
 
 def test_iter_sections_returns_empty_when_no_section_headings() -> None:
