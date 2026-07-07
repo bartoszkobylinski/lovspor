@@ -24,6 +24,7 @@ from lovspor.mcp import (
     _MAX_RESULT_LIMIT,
     _MCP_EMBED_MAX_RETRIES,
     _MCP_EMBED_TIMEOUT_SECONDS,
+    _SECTION_HEADING,
     CorpusNotFoundError,
     CorpusReader,
     OpenAIEmbedder,
@@ -4132,6 +4133,32 @@ def test_diff_law_versions_end_to_end_over_real_git(tmp_path: Path) -> None:
 # --- flat (chapterless) laws: sections render as ## § N., not ### § N. ---
 
 
+@pytest.mark.parametrize(
+    ("line", "section_id", "title"),
+    [
+        ("## § 1. Formål", "1", "Formål"),
+        ("## § 14.", "14", None),
+        ("## § 13. (Opphevet)", "13", "(Opphevet)"),
+        ("### § 5-12. Title", "5-12", "Title"),
+        ("### § 5", "5", None),
+    ],
+)
+def test_section_heading_regex_matches_real_heading_shapes(
+    line: str,
+    section_id: str,
+    title: str | None,
+) -> None:
+    match = _SECTION_HEADING.match(line)
+
+    assert match is not None
+    assert match.group(1) == section_id
+    assert match.group(2) == title
+
+
+def test_section_heading_regex_does_not_match_chapter_heading() -> None:
+    assert _SECTION_HEADING.match("## Kapittel 1.") is None
+
+
 def test_parse_sections_recognizes_h2_flat_law_sections() -> None:
     """Flat laws with no chapter level render paragraphs as ``## § N.`` (H2).
     _parse_sections must treat those as sections, not chapters. Regression for
@@ -4188,4 +4215,108 @@ def test_list_and_get_section_work_on_flat_h2_law(tmp_path: Path) -> None:
     assert [s["section_id"] for s in reader.list_sections("vrakloven")] == ["1", "2"]
     section = reader.get_section("vrakloven", "1")
     assert section["heading"] == "§ 1. Formål"
+    assert section["parent_chapter"] == ""
     assert section["body"] == "Loven gjelder berging."
+
+
+def test_flat_h2_law_section_cross_references_and_search_body_work(tmp_path: Path) -> None:
+    flat = (
+        "# Flat lov\n\n"
+        "## § 1. Formål\n\n"
+        "Se § 2. søkeord-flat.\n\n"
+        "## § 2. Definisjoner\n\n"
+        "Definisjonstekst.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="flat-lov", title="Flat lov")},
+        body_for={"flat-lov": flat},
+    )
+
+    reader = CorpusReader(tmp_path)
+    section = reader.get_section("flat-lov", "1")
+
+    assert section["cross_references"] == [
+        {
+            "text": "§ 2",
+            "target_slug": "flat-lov",
+            "target_section_id": "2",
+            "valid": True,
+            "reason": None,
+        },
+    ]
+    assert [hit["slug"] for hit in reader.search_body("søkeord-flat")] == ["flat-lov"]
+
+
+def test_diff_law_versions_diffs_flat_h2_law_sections(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="vrakloven", title="Vrakloven")})
+    before = "\n".join(
+        [
+            "---",
+            "id: nl-1",
+            "title: Vrakloven",
+            "---",
+            "",
+            "# Vrakloven",
+            "",
+            "## § 1. Formål",
+            "",
+            "Gammel tekst.",
+            "",
+            "## § 2.",
+            "",
+            "Uendret.",
+            "",
+        ],
+    )
+    after = "\n".join(
+        [
+            "---",
+            "id: nl-1",
+            "title: Vrakloven",
+            "---",
+            "",
+            "# Vrakloven",
+            "",
+            "## § 1. Formål",
+            "",
+            "Ny tekst.",
+            "",
+            "## § 2.",
+            "",
+            "Uendret.",
+            "",
+            "## § 3. Ny",
+            "",
+            "Ny paragraf.",
+            "",
+        ],
+    )
+
+    def fake_resolve(
+        _repo_path: Path,
+        _current_path: str,
+        target_date: date,
+    ) -> RevisionResult:
+        return _rev(before, "sha-a") if target_date == date(2020, 1, 1) else _rev(after, "sha-b")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fake_resolve)
+
+    result = CorpusReader(tmp_path).diff_law_versions(
+        "vrakloven",
+        "2020-01-01",
+        "2024-01-01",
+    )
+
+    assert result["summary"] == {
+        "sections_added": 1,
+        "sections_removed": 0,
+        "sections_changed": 1,
+    }
+    assert [(entry["section_id"], entry["change_type"]) for entry in result["sections"]] == [
+        ("1", "changed"),
+        ("3", "added"),
+    ]
