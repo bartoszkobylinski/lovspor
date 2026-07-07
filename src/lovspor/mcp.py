@@ -65,7 +65,12 @@ from lovspor.embeddings import (
 from lovspor.errors import LovsporError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
-from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
+from lovspor.timetravel import (
+    RevisionNotFoundError,
+    RevisionResult,
+    get_law_at_revision,
+    resolve_law_at_revision,
+)
 
 _STALE_THRESHOLD_DAYS = 7
 """Manifest age beyond which corpus_status() flags the corpus as stale.
@@ -590,6 +595,76 @@ class CorpusReader:
                 f"law {slug!r} did not exist in the corpus on {target.isoformat()}; "
                 f"call get_law_history({slug!r}) to see when it first appeared",
             ) from exc
+
+    @staticmethod
+    def _parse_diff_date(field: str, value: str) -> date:
+        """Parse an ISO diff endpoint, rejecting future dates as a typo guard
+        (same posture as ``get_law_at``, but named for the diff parameter)."""
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"{field} must be ISO date YYYY-MM-DD, got {value!r}",
+            ) from exc
+        today = datetime.now(UTC).date()
+        if parsed > today:
+            raise ValueError(
+                f"{field} {parsed.isoformat()} is in the future (today is {today.isoformat()})",
+            )
+        return parsed
+
+    def _resolve_diff_side(self, slug: str, rel: str, target: date) -> RevisionResult:
+        """Resolve one diff endpoint, translating a missing revision into the
+        same user-facing ``CorpusNotFoundError`` that ``get_law_at`` raises."""
+        try:
+            return resolve_law_at_revision(self.corpus_path, rel, target)
+        except RevisionNotFoundError as exc:
+            raise CorpusNotFoundError(
+                f"law {slug!r} did not exist in the corpus on {target.isoformat()}; "
+                f"call get_law_history({slug!r}) to see when it first appeared",
+            ) from exc
+
+    def diff_law_versions(
+        self,
+        slug: str,
+        date_a: str,
+        date_b: str,
+    ) -> dict[str, Any]:
+        """Diff a law between the versions current on ``date_a`` and ``date_b``.
+
+        Both are ISO ``YYYY-MM-DD`` strings with the same end-of-day UTC,
+        rename-following resolution as ``get_law_at``. Each date is mapped to
+        the latest commit on or before it; ``resolved_commit_a`` /
+        ``resolved_commit_b`` report which two commits were actually compared
+        (a date rarely coincides with the day the law changed). ``date_a`` is
+        the "before" side — passing a later ``date_a`` yields a reverse diff.
+
+        Compares rendered Markdown section-by-section (frontmatter stripped, so
+        ``retrieved_at`` / hash churn never shows). Each changed / added /
+        removed ``§`` section carries a stdlib unified diff of its heading and
+        body. Sections identical on both dates are omitted.
+
+        Raises ``CorpusNotFoundError`` for an unknown slug or a date before the
+        law first appeared; ``ValueError`` for a non-ISO or future date.
+        """
+        parsed_a = self._parse_diff_date("date_a", date_a)
+        parsed_b = self._parse_diff_date("date_b", date_b)
+        record = self._find_current_by_slug(slug)
+        rel = self._safe_relative(record.markdown_path)
+        rev_a = self._resolve_diff_side(slug, rel, parsed_a)
+        rev_b = self._resolve_diff_side(slug, rel, parsed_b)
+        sections_a = _parse_sections(_strip_frontmatter_and_h1(rev_a.content))
+        sections_b = _parse_sections(_strip_frontmatter_and_h1(rev_b.content))
+        diff = _diff_section_maps(sections_a, sections_b)
+        return {
+            "slug": record.slug,
+            "date_a": parsed_a.isoformat(),
+            "date_b": parsed_b.isoformat(),
+            "resolved_commit_a": rev_a.sha,
+            "resolved_commit_b": rev_b.sha,
+            "summary": diff["summary"],
+            "sections": diff["sections"],
+        }
 
     @staticmethod
     def _history_event_to_version(event: dict[str, Any]) -> dict[str, Any]:
@@ -1555,6 +1630,79 @@ def _natural_section_key(section_id: str) -> tuple[tuple[int, int | str], ...]:
     return tuple((0, int(p)) if p.isdigit() else (1, p) for p in section_id.split("-"))
 
 
+def _section_text(data: dict[str, str]) -> str:
+    """Heading line + body as one block.
+
+    Diffing the heading together with the body means a retitle (the section
+    keeps its id and body but its ``§ N. Title`` changes) surfaces as a
+    change — a body-only comparison would silently miss that legal edit.
+    """
+    body = data["body"]
+    return f"{data['heading']}\n{body}" if body else data["heading"]
+
+
+def _classify_section_change(
+    before: dict[str, str] | None,
+    after: dict[str, str] | None,
+) -> str | None:
+    """Return ``added`` / ``removed`` / ``changed``, or ``None`` if identical."""
+    if before is None:
+        return "added"
+    if after is None:
+        return "removed"
+    return "changed" if _section_text(before) != _section_text(after) else None
+
+
+def _diff_section_maps(
+    sections_a: dict[str, dict[str, str]],
+    sections_b: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    """Section-by-section diff of two parsed-section maps (``_parse_sections``
+    output). Sections present in both with identical heading+body are omitted;
+    every other id yields one entry carrying a stdlib unified diff. Entries are
+    emitted in natural section order so the output is byte-stable for a given
+    pair of inputs.
+    """
+    summary = {"sections_added": 0, "sections_removed": 0, "sections_changed": 0}
+    entries: list[dict[str, str]] = []
+    for sid in sorted(sections_a.keys() | sections_b.keys(), key=_natural_section_key):
+        before = sections_a.get(sid)
+        after = sections_b.get(sid)
+        change = _classify_section_change(before, after)
+        if change is None:
+            continue
+        summary[f"sections_{change}"] += 1
+        source = after if after is not None else before
+        entries.append(
+            {
+                "section_id": sid,
+                "heading": source["heading"] if source is not None else "",
+                "change_type": change,
+                "unified_diff": _section_unified_diff(before, after),
+            },
+        )
+    return {"summary": summary, "sections": entries}
+
+
+def _section_unified_diff(
+    before: dict[str, str] | None,
+    after: dict[str, str] | None,
+) -> str:
+    """Deterministic unified diff between two section-text blocks; an absent
+    side (added / removed) diffs against the empty document."""
+    before_text = _section_text(before) if before is not None else ""
+    after_text = _section_text(after) if after is not None else ""
+    return "\n".join(
+        difflib.unified_diff(
+            before_text.splitlines(),
+            after_text.splitlines(),
+            fromfile="before",
+            tofile="after",
+            lineterm="",
+        ),
+    )
+
+
 def _strip_frontmatter_and_h1(text: str) -> str:
     """Remove the YAML frontmatter block and the leading H1 title from
     a rendered lovspor Markdown file, leaving only the legal body.
@@ -2087,6 +2235,36 @@ def build_server(corpus_path: Path) -> FastMCP:
         Sprint 5 history layer (no ``history/<slug>.json``).
         """
         return reader.list_law_versions(slug)
+
+    @mcp.tool()
+    def diff_law_versions(slug: str, date_a: str, date_b: str) -> dict[str, Any]:
+        """Show what changed in a law between two dates, section by section.
+
+        Builds on ``get_law_at`` + ``list_law_versions``: instead of fetching
+        one historical version, it compares two. Use it when the user asks
+        *"what changed in Skatteloven between 2018 and 2024?"* or wants to see
+        the exact edit a reform introduced. Pick the two dates from
+        ``list_law_versions`` (or any calendar dates) — each resolves to the
+        version current at end-of-day UTC.
+
+        ``slug``: the act's current slug (rename-aware, as for ``get_law_at``).
+        ``date_a`` / ``date_b``: ISO ``YYYY-MM-DD``. ``date_a`` is the "before"
+        side; a later ``date_a`` gives a reverse diff. Future dates are refused.
+
+        Returns ``{slug, date_a, date_b, resolved_commit_a, resolved_commit_b,
+        summary, sections}``. ``resolved_commit_a/b`` are the commits the dates
+        actually mapped to (a date rarely equals the day the law changed).
+        ``summary`` counts ``sections_added`` / ``sections_removed`` /
+        ``sections_changed``. ``sections`` lists each affected ``§`` with its
+        ``section_id``, ``heading``, ``change_type``, and a unified diff of its
+        heading and body; unchanged sections are omitted. Metadata-only churn
+        (``retrieved_at``, hashes) is stripped and never appears.
+
+        Raises if the slug is unknown or if either date predates the act's
+        first appearance in the corpus (the message points to
+        ``get_law_history``).
+        """
+        return reader.diff_law_versions(slug, date_a, date_b)
 
     @mcp.tool()
     def list_recent_changes(

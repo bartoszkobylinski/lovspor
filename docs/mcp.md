@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets fifteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets sixteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 Sprint 9 added a four-layer anti-hallucination story for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
@@ -12,7 +12,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio. Each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note.
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
-- **Tools:** fifteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Two of the fifteen (`get_law_at`, `list_law_versions`) are time-machine tools added in Sprint 10 that read past versions of acts directly from the corpus's git history.
+- **Tools:** sixteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the sixteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -37,7 +37,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
    No PyPI publish required (yet). If you prefer `pip install`, see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
 
-3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fourteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
+3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fifteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
 ---
 
@@ -80,7 +80,7 @@ Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh 
 
 ## Tools
 
-All fifteen are read-only. None mutate the corpus or trigger a sync. Fourteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
+All sixteen are read-only. None mutate the corpus or trigger a sync. Fifteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
 
 ### `get_law(slug)`
 
@@ -265,6 +265,37 @@ Returns oldest-first so the AI can reason about the timeline naturally (initial 
 
 Raises if the slug is unknown or if the corpus pre-dates the Sprint 5 history layer (no `history/<slug>.json`).
 
+### `diff_law_versions(slug, date_a, date_b)`
+
+What changed in an act between two dates, section by section. Builds on `get_law_at` + `list_law_versions`: rather than fetching one historical version, it resolves both dates to their commits and compares them. `date_a` is the "before" side (a later `date_a` yields a reverse diff); future dates are refused.
+
+The comparison runs on rendered Markdown with the YAML frontmatter stripped, so metadata-only churn (`retrieved_at`, `xml_hash`) never surfaces as a change. Each added / removed / changed `§` section carries a stdlib unified diff of its heading and body; sections identical on both dates are omitted. `resolved_commit_a` / `resolved_commit_b` report which commits the two dates actually mapped to — a date rarely coincides with the day the law changed.
+
+**Sample call:** `diff_law_versions("skatteloven-sktl", "2020-01-01", "2024-01-01")`
+
+**Sample output:**
+
+```json
+{
+  "slug": "skatteloven-sktl",
+  "date_a": "2020-01-01",
+  "date_b": "2024-01-01",
+  "resolved_commit_a": "57c3052e1b…",
+  "resolved_commit_b": "9a1f3c8d04…",
+  "summary": { "sections_added": 1, "sections_removed": 0, "sections_changed": 1 },
+  "sections": [
+    {
+      "section_id": "5-12",
+      "heading": "§ 5-12. Naturalytelser",
+      "change_type": "changed",
+      "unified_diff": "--- before\n+++ after\n@@ -1,2 +1,2 @@\n § 5-12. Naturalytelser\n-Gammel ordlyd.\n+Ny ordlyd."
+    }
+  ]
+}
+```
+
+Raises if the slug is unknown or if either date predates the act's first appearance in the corpus (the message points to `get_law_history`).
+
 ### `list_recent_changes(dataset?, since?, limit?)`
 
 List current laws ordered by most recent change first.
@@ -390,9 +421,9 @@ Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `ci
 
 When `results` is empty the `notice` says why — the AI is expected to report "no strong match" instead of substituting training-data memory.
 
-**Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other fourteen keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
+**Requires** `OPENAI_API_KEY` set in the environment when the MCP server starts. The embedder (`text-embedding-3-large`, 3072-dim) is constructed eagerly at startup — a malformed key fails fast rather than on the first tool call. Missing key disables only this one tool with a clear runtime error; the other fifteen keep working without it. See [`docs/embeddings.md`](embeddings.md) for the binary corpus format and the model choice rationale.
 
-**Privacy:** unlike the other fourteen tools, `semantic_search` is **not fully local** — the query text you pass is sent to the OpenAI embeddings API to be embedded (the corpus vectors were computed once at sync time; only your live query leaves the machine, per call). The Norwegian-law corpus is public, but your *question* is not — avoid pasting confidential or client-identifying text into a `semantic_search` query. Every other tool (`get_law`, `get_section`, `search_body`, …) is filesystem-and-git only and never leaves your machine.
+**Privacy:** unlike the other fifteen tools, `semantic_search` is **not fully local** — the query text you pass is sent to the OpenAI embeddings API to be embedded (the corpus vectors were computed once at sync time; only your live query leaves the machine, per call). The Norwegian-law corpus is public, but your *question* is not — avoid pasting confidential or client-identifying text into a `semantic_search` query. Every other tool (`get_law`, `get_section`, `search_body`, …) is filesystem-and-git only and never leaves your machine.
 
 **Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a vectorized brute-force cosine scan (well under 100 ms). Per-call OpenAI cost is fractions of a cent.
 
@@ -634,7 +665,7 @@ A typical AI-assistant interaction with this server follows the same pattern:
 11. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
 12. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The fifteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. Sprint 10's time-machine pair (`get_law_at` + `list_law_versions`) extends the same surface to historical research: the AI can answer "what did Skatteloven say in 2018?" by walking the corpus's git history without any extra plumbing.
+The sixteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) extend the same surface to historical research: the AI can answer "what did Skatteloven say in 2018?" — or "what changed between 2018 and 2024?" via `diff_law_versions` — by walking the corpus's git history without any extra plumbing.
 
 ---
 
