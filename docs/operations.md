@@ -9,9 +9,23 @@ uv run lovspor --version       # show version
 uv run lovspor info            # project info
 uv run lovspor seed            # initial corpus population (first sync)
 uv run lovspor sync            # incremental update against latest tarballs
+uv run lovspor repair-embeddings  # flag under-embedded docs for re-embed (see Maintenance)
 ```
 
 `seed` and `sync` are aliases at the engine level — both call the same orchestrator. Use `seed` semantically for the first run on an empty corpus, `sync` for repeated invocations. Settings are read from environment variables (or a `.env` file at the engine repo root). See `.env.example` for the required variables.
+
+### Maintenance: `repair-embeddings`
+
+A one-time repair for a corpus whose embeddings were written before a section-parser fix. Flat (chapterless) acts render their sections at H2 (`## § N.`); acts synced before that shape was recognized produced **zero** embedding vectors and are invisible to `semantic_search`, yet carry `embedding_hash == xml_hash` — so the normal Sprint 9 staleness check never re-embeds them.
+
+`repair-embeddings` compares each current doc's stored vector count against the sections the current parser finds, clears `embedding_hash` on any mismatch, and commits the manifest. It does **not** call the OpenAI API itself:
+
+```bash
+uv run lovspor repair-embeddings          # flags docs, commits the manifest (no API cost)
+OPENAI_API_KEY=sk-... uv run lovspor sync  # Sprint 9 backfill re-embeds exactly the flagged docs
+```
+
+It is idempotent — a no-op with no commit once every embedding matches its sections. As of 2026-07-07 the affected set is ~2,333 acts (~$0.57 one-time at `text-embedding-3-large` pricing); the churn is `.bin` rewrites only, markdown is untouched.
 
 ### Required environment
 
