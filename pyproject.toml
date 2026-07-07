@@ -63,6 +63,19 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/lovspor", "evals"]
 
+[tool.hatch.build.targets.sdist]
+# Explicit allowlist: the sdist ships only package sources, evals, docs, and
+# metadata — never dev caches (.uv-cache, .hypothesis) or working notes, which
+# hatchling's gitignore-based default would otherwise sweep in (12k+ files,
+# including a venv symlink that breaks the wheel build).
+include = [
+  "/src/lovspor",
+  "/evals",
+  "/docs",
+  "/README.md",
+  "/LICENSE",
+]
+
 # ---------- Ruff ----------
 [tool.ruff]
 line-length = 100

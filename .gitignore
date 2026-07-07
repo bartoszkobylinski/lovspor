@@ -22,6 +22,8 @@ htmlcov/
 mutmut-stats.json
 html/
 .tox/
+.uv-cache/
+.hypothesis/
 
 # Environment
 .env
