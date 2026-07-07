@@ -1,10 +1,16 @@
-"""Extract ``### § N-M.`` sections from rendered lovspor Markdown.
+"""Extract ``§`` sections from rendered lovspor Markdown for embedding.
 
 Used at sync time to decide what units to embed. Each ``EmbeddingSection``
 gets one vector. The section parser in ``lovspor.mcp`` (``_parse_sections``)
 serves a different need (it tracks ``parent_chapter`` for the
 ``get_section`` tool), so this module keeps a thin separate
-implementation rather than coupling the sync path to the MCP module.
+implementation rather than coupling the sync path to the MCP module. Both
+must recognize the same heading shapes or they drift.
+
+Chaptered acts render sections at H3 (``### § 5-12.``); flat acts with no
+chapter level render them at H2 (``## § 1.``). Both are matched — an
+H3-only parser embedded zero sections for ~18% of acts (vrakloven,
+særavgiftsloven, ...), leaving them invisible to ``semantic_search``.
 
 A section's text is the lines between its ``### §`` heading and the
 next ``###`` or ``##`` heading, stripped of leading / trailing
@@ -21,7 +27,7 @@ optional-title regex pattern used elsewhere in the codebase).
 import re
 from dataclasses import dataclass
 
-_SECTION_HEADING = re.compile(r"^### § ([\d-]+[a-z]?)(?:\.\s+(.+?))?\s*$")
+_SECTION_HEADING = re.compile(r"^#{2,3} § ([\d-]+[a-z]?)(?:\.(?:\s+(.+?))?)?\s*$")
 _SUBSECTION_PREFIX = "### "
 _CHAPTER_PREFIX = "## "
 
@@ -39,11 +45,15 @@ def iter_sections(body: str) -> list[EmbeddingSection]:
 
     Boundary rules match the renderer's output exactly:
 
-    - ``### § N-M. Title`` opens a section; the title (if any) is
-      kept in ``text`` because it carries meaning.
+    - ``### § N-M. Title`` (chaptered) or ``## § N. Title`` (flat, no
+      chapter level) opens a section; the title, if any, is kept in
+      ``text`` because it carries meaning. The section pattern is tested
+      before the chapter/subsection prefixes, so a flat act's ``## §``
+      opens a section rather than being read as a chapter boundary.
     - ``### `` (anything else) closes the current section without
       opening a new one.
-    - ``## `` (chapter heading) closes the current section.
+    - ``## `` (a chapter heading, i.e. an ``##`` line without ``§``)
+      closes the current section.
     - End-of-input closes the current section.
     """
     sections: list[EmbeddingSection] = []
