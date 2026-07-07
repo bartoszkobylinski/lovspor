@@ -33,6 +33,7 @@ from lovspor.mcp import (
     _diff_section_maps,
     _extract_cross_references,
     _normalize_for_quote_match,
+    _parse_sections,
     _record_summary,
     _resolve_dataset,
     _resolve_slug_in_window,
@@ -4126,3 +4127,65 @@ def test_diff_law_versions_end_to_end_over_real_git(tmp_path: Path) -> None:
     changed = next(e for e in result["sections"] if e["section_id"] == "1-2")
     assert "-Gjelder norsk landterritorium." in changed["unified_diff"]
     assert "+Gjelder også Svalbard." in changed["unified_diff"]
+
+
+# --- flat (chapterless) laws: sections render as ## § N., not ### § N. ---
+
+
+def test_parse_sections_recognizes_h2_flat_law_sections() -> None:
+    """Flat laws with no chapter level render paragraphs as ``## § N.`` (H2).
+    _parse_sections must treat those as sections, not chapters. Regression for
+    vrakloven and ~18% of multi-version laws that parsed to zero sections."""
+    body = (
+        "## § 1. Formål\n\nLoven gjelder berging.\n\n## § 2. Virkeområde\n\nGjelder hele landet.\n"
+    )
+    sections = _parse_sections(body)
+    assert set(sections) == {"1", "2"}
+    assert sections["1"]["heading"] == "§ 1. Formål"
+    assert sections["1"]["parent_chapter"] == ""
+    assert sections["1"]["body"] == "Loven gjelder berging."
+
+
+def test_parse_sections_h2_titleless_section_with_trailing_dot() -> None:
+    """``## § 14.`` (H2, trailing dot, no title) is how flat laws render a
+    titleless paragraph — it must still parse as section 14."""
+    body = "## § 13. (Opphevet)\n\nx\n\n## § 14.\n\nInnhold.\n"
+    sections = _parse_sections(body)
+    assert set(sections) == {"13", "14"}
+    assert sections["13"]["heading"] == "§ 13. (Opphevet)"
+    assert sections["14"]["heading"] == "§ 14"
+    assert sections["14"]["body"] == "Innhold."
+
+
+def test_parse_sections_still_handles_chaptered_h3_sections() -> None:
+    """Regression: chaptered laws keep working — ``## Kapittel`` is a chapter,
+    ``### § N-M`` is the section under it."""
+    body = "## Kapittel 1. Alminnelig\n\n### § 1-1. Start\n\nBody.\n"
+    sections = _parse_sections(body)
+    assert set(sections) == {"1-1"}
+    assert sections["1-1"]["parent_chapter"] == "Kapittel 1. Alminnelig"
+    assert sections["1-1"]["body"] == "Body."
+
+
+def test_parse_sections_mixed_h2_section_and_h2_chapter() -> None:
+    """``## §`` is a section; ``## Kapittel`` (no ``§``) is still a chapter."""
+    body = "## Kapittel 1.\n\n### § 1-1. A\n\nx\n\n## § 2. B\n\ny\n"
+    sections = _parse_sections(body)
+    assert set(sections) == {"1-1", "2"}
+    assert sections["1-1"]["parent_chapter"] == "Kapittel 1."
+    assert sections["2"]["parent_chapter"] == "Kapittel 1."
+
+
+def test_list_and_get_section_work_on_flat_h2_law(tmp_path: Path) -> None:
+    """End-to-end via the public tools: a flat law is now navigable."""
+    flat = "# Vrakloven\n\n## § 1. Formål\n\nLoven gjelder berging.\n\n## § 2.\n\nMer.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="vrakloven", title="Vrakloven")},
+        body_for={"vrakloven": flat},
+    )
+    reader = CorpusReader(tmp_path)
+    assert [s["section_id"] for s in reader.list_sections("vrakloven")] == ["1", "2"]
+    section = reader.get_section("vrakloven", "1")
+    assert section["heading"] == "§ 1. Formål"
+    assert section["body"] == "Loven gjelder berging."

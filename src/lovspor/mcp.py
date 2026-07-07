@@ -102,16 +102,24 @@ character after the match is itself a slug character. Without this,
 ``"skatteloven-sktlX"`` because the trailing X is appended to the
 slug, contradicting the strict-match contract."""
 
-_SECTION_HEADING = re.compile(r"^### § ([\d-]+[a-z]?)(?:\.\s+(.+?))?\s*$")
+_SECTION_HEADING = re.compile(r"^#{2,3} § ([\d-]+[a-z]?)(?:\.(?:\s+(.+?))?)?\s*$")
 """Matches a Norwegian-law section heading produced by the lovspor
 renderer. Captures the section id (e.g. ``5-12``, ``1``, ``5-12a``)
 and the optional section title (everything after the dot).
 
+Two hashes OR three: chaptered acts render sections at H3 under a
+``## Kapittel`` (``### § 5-12. ...``), but flat acts with no chapter
+level render them at H2 (``## § 1. ...``) — ~18% of multi-version acts
+(vrakloven, særavgiftsloven, hittegodslova, ...). Both must be
+recognized or the whole flat act parses to zero sections and becomes
+invisible to ``get_section`` / ``list_sections`` / ``diff_law_versions``.
+
 The title group is OPTIONAL because Lovdata's source XML sometimes
-ships a ``legalArticleValue`` with no accompanying ``title`` field,
-in which case the renderer emits a bare ``### § 5`` heading. We must
-match those too — otherwise the section becomes invisible to
-``get_section`` even though it exists in the rendered Markdown."""
+ships a ``legalArticleValue`` with no accompanying ``title`` field.
+The trailing dot is optional and independent of the title: chaptered
+titleless sections render bare (``### § 5``) while flat titleless ones
+carry a dangling dot (``## § 14.``); the ``(?:\\.(?:\\s+(.+?))?)?`` shape
+matches ``§ 5``, ``§ 14.`` and ``§ 13. (Opphevet)`` alike."""
 
 _CHAPTER_HEADING = re.compile(r"^## (.+?)\s*$")
 """Matches a chapter heading (``## Kapittel N. Title``). Captured for
@@ -1554,14 +1562,18 @@ def _parse_sections(body: str) -> dict[str, dict[str, str]]:
     Boundary rules (every transition closes the current section, if
     any, before opening the new context):
 
-    - ``## Kapittel ...`` updates ``parent_chapter`` for subsequent
-      sections; does not itself open a section.
-    - ``### § N-M. ...`` closes the previous section (if open) and
-      opens a new one keyed by ``N-M``.
+    - ``### § N-M. ...`` (chaptered act) or ``## § N. ...`` (flat act,
+      no chapter level) closes the previous section and opens a new one
+      keyed by its id. The section pattern is tested before the chapter
+      pattern precisely because a flat act's ``## §`` also looks like a
+      chapter heading.
+    - ``## Kapittel ...`` (an ``##`` line that is NOT a ``§`` section)
+      updates ``parent_chapter`` for subsequent sections; does not
+      itself open a section.
     - ``### <other text>`` (subsection grouping without ``§``) closes
       the previous section but does not open a new one — the lines
       that follow are not attributed to any section until the next
-      ``### § ...``.
+      ``§`` heading.
 
     The body of a section is the text strictly between its heading
     line and the next boundary heading (``###`` or ``##``), stripped
@@ -1578,13 +1590,9 @@ def _parse_sections(body: str) -> dict[str, dict[str, str]]:
             sections[current_id] = current_data
 
     for line in body.split("\n"):
-        chapter = _CHAPTER_HEADING.match(line)
-        if chapter:
-            _close()
-            current_id = None
-            current_data = None
-            current_chapter = chapter.group(1)
-            continue
+        # Section check MUST precede the chapter check: a flat act's ``## § 1.``
+        # heading also matches _CHAPTER_HEADING (any ``## ...``), so testing the
+        # section pattern first is what stops it being misread as a chapter.
         section = _SECTION_HEADING.match(line)
         if section:
             _close()
@@ -1600,6 +1608,13 @@ def _parse_sections(body: str) -> dict[str, dict[str, str]]:
                 "parent_chapter": current_chapter,
                 "body_lines": [],
             }
+            continue
+        chapter = _CHAPTER_HEADING.match(line)
+        if chapter:
+            _close()
+            current_id = None
+            current_data = None
+            current_chapter = chapter.group(1)
             continue
         if line.startswith(_SUBSECTION_HEADING_PREFIX):
             _close()
