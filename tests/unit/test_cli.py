@@ -136,6 +136,7 @@ def test_mcp_command_reads_corpus_path_from_real_dotenv_in_cwd(
     monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text(f"LOVVERK_CORPUS_PATH={tmp_path}\n", encoding="utf-8")
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
 
     captured: dict[str, Path] = {}
     monkeypatch.setattr("lovspor.cli._mcp_serve", lambda path: captured.update(path=path))
@@ -222,6 +223,7 @@ def test_mcp_falls_back_to_default_corpus_path_when_unset(
     monkeypatch.setattr("lovspor.cli.load_env", lambda: None)
     monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
     monkeypatch.setattr("lovspor.cli.default_corpus_path", lambda: tmp_path)
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
     captured: dict[str, Path] = {}
     monkeypatch.setattr("lovspor.cli._mcp_serve", lambda path: captured.update(path=path))
 
@@ -229,6 +231,41 @@ def test_mcp_falls_back_to_default_corpus_path_when_unset(
 
     assert result.exit_code == 0, result.output
     assert captured["path"] == tmp_path.resolve()
+
+
+def test_mcp_path_precedence_prefers_cli_then_env_then_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("lovspor.cli.load_env", lambda: None)
+    cli_path = tmp_path / "cli"
+    env_path = tmp_path / "env"
+    default_path = tmp_path / "default"
+    for path in (cli_path, env_path, default_path):
+        path.mkdir()
+        (path / "manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("LOVVERK_CORPUS_PATH", str(env_path))
+    monkeypatch.setattr("lovspor.cli.default_corpus_path", lambda: default_path)
+    captured: dict[str, Path] = {}
+    monkeypatch.setattr("lovspor.cli._mcp_serve", lambda path: captured.update(path=path))
+
+    result = runner.invoke(app, ["mcp", "--corpus-path", str(cli_path)])
+
+    assert result.exit_code == 0, result.output
+    assert captured["path"] == cli_path.resolve()
+
+    captured.clear()
+    result = runner.invoke(app, ["mcp"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["path"] == env_path.resolve()
+
+    captured.clear()
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH")
+    result = runner.invoke(app, ["mcp"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["path"] == default_path.resolve()
 
 
 def test_mcp_missing_corpus_points_to_fetch_corpus(
@@ -239,6 +276,25 @@ def test_mcp_missing_corpus_points_to_fetch_corpus(
     monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
     missing = tmp_path / "absent"
     monkeypatch.setattr("lovspor.cli.default_corpus_path", lambda: missing)
+
+    result = runner.invoke(app, ["mcp"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ConfigError)
+    assert "fetch-corpus" in str(result.exception)
+
+
+def test_mcp_existing_non_corpus_path_points_to_fetch_corpus(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("lovspor.cli.load_env", lambda: None)
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    monkeypatch.setattr("lovspor.cli.default_corpus_path", lambda: tmp_path)
+    monkeypatch.setattr(
+        "lovspor.cli._mcp_serve",
+        lambda _path: pytest.fail("MCP server should not start without a corpus manifest"),
+    )
 
     result = runner.invoke(app, ["mcp"])
 

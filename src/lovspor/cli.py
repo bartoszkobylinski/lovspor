@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from lovspor import __version__
-from lovspor.corpus_fetch import default_corpus_path, fetch_corpus
+from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.settings import Settings, load_env
@@ -159,7 +159,7 @@ def mcp(
     tools work normally.
     """
     target = (corpus_path or default_corpus_path()).expanduser()
-    if not target.exists():
+    if not is_corpus(target):
         raise ConfigError(
             f"No lovverk corpus at {target}. Run `lovspor fetch-corpus` first, "
             "or pass --corpus-path / set LOVVERK_CORPUS_PATH.",
