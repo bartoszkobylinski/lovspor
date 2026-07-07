@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from lovspor import __version__
 from lovspor.cli import app
+from lovspor.corpus_fetch import FetchResult
 from lovspor.errors import ConfigError
 from lovspor.sync.orchestrator import SyncReport
 
@@ -192,3 +193,55 @@ def test_sync_surfaces_config_error_on_missing_env(
     result = runner.invoke(app, ["sync"])
     assert result.exit_code != 0
     assert isinstance(result.exception, ConfigError)
+
+
+def test_fetch_corpus_command_is_registered() -> None:
+    result = runner.invoke(app, ["fetch-corpus", "--help"])
+    assert result.exit_code == 0
+    assert "fetch-corpus" in _strip_ansi(result.stdout)
+
+
+def test_fetch_corpus_reports_action_and_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "lovverk"
+    canned = FetchResult(path=target, action="cloned")
+    monkeypatch.setattr("lovspor.cli.fetch_corpus", lambda _dest: canned)
+    result = runner.invoke(app, ["fetch-corpus", "--dest", str(target)])
+    assert result.exit_code == 0, result.output
+    assert "cloned" in result.stdout
+    assert str(target) in result.stdout
+
+
+def test_mcp_falls_back_to_default_corpus_path_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Silence .env discovery so the LOVVERK_CORPUS_PATH envvar stays truly unset.
+    monkeypatch.setattr("lovspor.cli.load_env", lambda: None)
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    monkeypatch.setattr("lovspor.cli.default_corpus_path", lambda: tmp_path)
+    captured: dict[str, Path] = {}
+    monkeypatch.setattr("lovspor.cli._mcp_serve", lambda path: captured.update(path=path))
+
+    result = runner.invoke(app, ["mcp"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["path"] == tmp_path.resolve()
+
+
+def test_mcp_missing_corpus_points_to_fetch_corpus(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("lovspor.cli.load_env", lambda: None)
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    missing = tmp_path / "absent"
+    monkeypatch.setattr("lovspor.cli.default_corpus_path", lambda: missing)
+
+    result = runner.invoke(app, ["mcp"])
+
+    assert result.exit_code != 0
+    assert isinstance(result.exception, ConfigError)
+    assert "fetch-corpus" in str(result.exception)
