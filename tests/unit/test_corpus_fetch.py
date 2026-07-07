@@ -90,6 +90,18 @@ def test_fetch_corpus_updates_existing_clone(tmp_path: Path) -> None:
     assert '{"version": 2}' in (dest / "manifest.json").read_text(encoding="utf-8")
 
 
+def test_fetch_corpus_reports_unchanged_when_already_current(tmp_path: Path) -> None:
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    dest = tmp_path / "clone"
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    # No upstream change between the two fetches: the pull is a no-op.
+    result = fetch_corpus(dest, repo_url=_url(origin))
+
+    assert result.action == "unchanged"
+
+
 def test_fetch_corpus_refuses_git_repo_that_is_not_lovverk_clone(tmp_path: Path) -> None:
     other_origin = tmp_path / "other-origin"
     _make_origin(other_origin, manifest_body='{"repo": "not lovverk"}')

@@ -31,7 +31,7 @@ class FetchResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     path: Path
-    action: Literal["cloned", "updated"]
+    action: Literal["cloned", "updated", "unchanged"]
 
 
 def default_corpus_path() -> Path:
@@ -75,13 +75,13 @@ def is_corpus(path: Path) -> bool:
     return (path / "manifest.json").is_file()
 
 
-def _origin_url(path: Path) -> str | None:
-    """The clone's ``origin`` remote URL, or None if it cannot be read."""
+def _git_capture(args: Sequence[str], cwd: Path) -> str | None:
+    """Run a read-only git command, returning stripped stdout or None on failure."""
     try:
-        # S607: trusted git command, list args, no shell (see _git).
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],  # noqa: S607
-            cwd=path,
+        # S603/S607: trusted git command, list args, no shell (see _git).
+        result = subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
+            cwd=cwd,
             capture_output=True,
             text=True,
             check=True,
@@ -89,6 +89,11 @@ def _origin_url(path: Path) -> str | None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
     return result.stdout.strip()
+
+
+def _origin_url(path: Path) -> str | None:
+    """The clone's ``origin`` remote URL, or None if it cannot be read."""
+    return _git_capture(["remote", "get-url", "origin"], path)
 
 
 def _same_repo(left: str, right: str) -> bool:
@@ -119,12 +124,16 @@ def fetch_corpus(dest: Path, *, repo_url: str = LOVVERK_REPO_URL) -> FetchResult
     Refuses to touch a path that exists but is not a lovverk clone (a file, or
     a non-empty directory), so a stray ``--dest`` can never clobber unrelated
     files. A shallow clone keeps the download small; ``pull --ff-only`` keeps
-    updates honest (never a surprise merge).
+    updates honest (never a surprise merge). The result reports ``cloned``,
+    ``updated`` (a pull moved HEAD), or ``unchanged`` (already current).
     """
     dest = dest.expanduser()
     if _is_corpus_clone(dest, repo_url):
+        before = _git_capture(["rev-parse", "HEAD"], dest)
         _git(["pull", "--ff-only"], cwd=dest)
-        return FetchResult(path=dest.resolve(), action="updated")
+        after = _git_capture(["rev-parse", "HEAD"], dest)
+        action: Literal["updated", "unchanged"] = "updated" if after != before else "unchanged"
+        return FetchResult(path=dest.resolve(), action=action)
     if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         raise CorpusFetchError(
             f"{dest} exists and is not a lovverk clone; refusing to overwrite it.",
