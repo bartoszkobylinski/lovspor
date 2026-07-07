@@ -19,6 +19,8 @@ from lovspor.sync.orchestrator import (
     _collect_upstream,
     _commit_with_history,
     _DocAction,
+    _embedding_is_stale,
+    _embedding_section_count,
     _ensure_corpus_git_repo,
     _find_undersized_embeddings,
     _guard_mass_removal,
@@ -1642,6 +1644,38 @@ def test_find_undersized_embeddings_flags_only_under_embedded_current_docs(
     assert _find_undersized_embeddings(tmp_path, prior) == {"flat"}
 
 
+def test_embedding_section_count_treats_missing_or_corrupt_sidecars_as_zero(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "missing.bin"
+    corrupt = tmp_path / "corrupt.bin"
+    corrupt.write_bytes(b"not an embedding file")
+
+    assert _embedding_section_count(missing) == 0
+    assert _embedding_section_count(corrupt) == 0
+
+
+def test_find_undersized_embeddings_skips_legacy_missing_and_flags_corrupt(
+    tmp_path: Path,
+) -> None:
+    _write_md(tmp_path, "corrupt", "## § 1. A\n\nx\n")
+    corrupt_path = orchestrator_module._embeddings_path(tmp_path, "gjeldende-lover", "corrupt")
+    corrupt_path.parent.mkdir(parents=True, exist_ok=True)
+    corrupt_path.write_bytes(b"bad sidecar")
+    _write_md(tmp_path, "legacy", "## § 1. A\n\nx\n")
+    _write_bin(tmp_path, "legacy", [])
+    prior = Manifest(
+        generated_at=datetime(2026, 7, 7, tzinfo=UTC),
+        documents={
+            "legacy": _embedded_record("legacy").model_copy(update={"slug": None}),
+            "missing-md": _embedded_record("missing-md"),
+            "corrupt": _embedded_record("corrupt"),
+        },
+    )
+
+    assert _find_undersized_embeddings(tmp_path, prior) == {"corrupt"}
+
+
 def test_mark_undersized_embeddings_stale_clears_hash_and_commits(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     repo = settings.lovverk_repo_path
@@ -1665,6 +1699,32 @@ def test_mark_undersized_embeddings_stale_clears_hash_and_commits(tmp_path: Path
     updated = read_manifest(repo / "manifest.json")
     assert updated.documents["flat"].embedding_hash is None
     assert updated.documents["healthy"].embedding_hash == "a" * 64
+    flat_embed = orchestrator_module._embeddings_path(repo, "gjeldende-lover", "flat")
+    healthy_embed = orchestrator_module._embeddings_path(repo, "gjeldende-lover", "healthy")
+    assert (
+        _embedding_is_stale(
+            updated.documents["flat"].embedding_hash,
+            updated.documents["flat"].xml_hash,
+            flat_embed,
+        )
+        is True
+    )
+    assert (
+        _embedding_is_stale(
+            updated.documents["healthy"].embedding_hash,
+            updated.documents["healthy"].xml_hash,
+            healthy_embed,
+        )
+        is False
+    )
+    status = subprocess.run(
+        ["git", "status", "--short"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert status == ""
     log = subprocess.run(
         ["git", "log", "--oneline", "-1"],
         cwd=repo,
@@ -1672,7 +1732,9 @@ def test_mark_undersized_embeddings_stale_clears_hash_and_commits(tmp_path: Path
         text=True,
         check=True,
     ).stdout
-    assert "under-embedded" in log
+    assert log.split(maxsplit=1)[1].strip() == (
+        "migration: flag 1 under-embedded documents for re-embed"
+    )
 
 
 def test_mark_undersized_embeddings_stale_is_noop_when_all_current(tmp_path: Path) -> None:
