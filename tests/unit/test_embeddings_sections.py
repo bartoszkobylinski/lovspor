@@ -93,6 +93,39 @@ def test_iter_sections_accepts_bare_and_lettered_section_ids() -> None:
     ]
 
 
+def test_iter_sections_extracts_h2_flat_law_sections() -> None:
+    """Flat acts with no chapter level render sections at H2 (``## § N.``), not
+    H3. Without matching these, ~18% of acts produce zero embeddings and are
+    invisible to semantic_search (parity with mcp._parse_sections)."""
+    body = "\n".join(
+        [
+            "# Vrakloven",
+            "## § 1. Formål",
+            "Loven gjelder berging.",
+            "## § 14.",
+            "Titlelaus paragraf.",
+        ],
+    )
+
+    sections = iter_sections(body)
+
+    assert sections == [
+        EmbeddingSection(
+            section_id="1",
+            text="## § 1. Formål\nLoven gjelder berging.",
+        ),
+        EmbeddingSection(section_id="14", text="## § 14.\nTitlelaus paragraf."),
+    ]
+
+
+def test_iter_sections_h2_chapter_still_closes_section() -> None:
+    """Regression: ``## Kapittel`` (an H2 line without ``§``) is still a chapter
+    boundary that closes the current section, not a section itself."""
+    body = "## § 1. A\nTekst.\n## Kapittel 2\nIgnorert."
+
+    assert iter_sections(body) == [EmbeddingSection(section_id="1", text="## § 1. A\nTekst.")]
+
+
 def test_iter_sections_returns_empty_when_no_section_headings() -> None:
     assert iter_sections("# Lov\n\n## Kapittel\n\nVanlig tekst.") == []
 
