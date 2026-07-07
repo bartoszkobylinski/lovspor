@@ -65,7 +65,12 @@ from lovspor.embeddings import (
 from lovspor.errors import LovsporError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
-from lovspor.timetravel import RevisionNotFoundError, get_law_at_revision
+from lovspor.timetravel import (
+    RevisionNotFoundError,
+    RevisionResult,
+    get_law_at_revision,
+    resolve_law_at_revision,
+)
 
 _STALE_THRESHOLD_DAYS = 7
 """Manifest age beyond which corpus_status() flags the corpus as stale.
@@ -590,6 +595,76 @@ class CorpusReader:
                 f"law {slug!r} did not exist in the corpus on {target.isoformat()}; "
                 f"call get_law_history({slug!r}) to see when it first appeared",
             ) from exc
+
+    @staticmethod
+    def _parse_diff_date(field: str, value: str) -> date:
+        """Parse an ISO diff endpoint, rejecting future dates as a typo guard
+        (same posture as ``get_law_at``, but named for the diff parameter)."""
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"{field} must be ISO date YYYY-MM-DD, got {value!r}",
+            ) from exc
+        today = datetime.now(UTC).date()
+        if parsed > today:
+            raise ValueError(
+                f"{field} {parsed.isoformat()} is in the future (today is {today.isoformat()})",
+            )
+        return parsed
+
+    def _resolve_diff_side(self, slug: str, rel: str, target: date) -> RevisionResult:
+        """Resolve one diff endpoint, translating a missing revision into the
+        same user-facing ``CorpusNotFoundError`` that ``get_law_at`` raises."""
+        try:
+            return resolve_law_at_revision(self.corpus_path, rel, target)
+        except RevisionNotFoundError as exc:
+            raise CorpusNotFoundError(
+                f"law {slug!r} did not exist in the corpus on {target.isoformat()}; "
+                f"call get_law_history({slug!r}) to see when it first appeared",
+            ) from exc
+
+    def diff_law_versions(
+        self,
+        slug: str,
+        date_a: str,
+        date_b: str,
+    ) -> dict[str, Any]:
+        """Diff a law between the versions current on ``date_a`` and ``date_b``.
+
+        Both are ISO ``YYYY-MM-DD`` strings with the same end-of-day UTC,
+        rename-following resolution as ``get_law_at``. Each date is mapped to
+        the latest commit on or before it; ``resolved_commit_a`` /
+        ``resolved_commit_b`` report which two commits were actually compared
+        (a date rarely coincides with the day the law changed). ``date_a`` is
+        the "before" side — passing a later ``date_a`` yields a reverse diff.
+
+        Compares rendered Markdown section-by-section (frontmatter stripped, so
+        ``retrieved_at`` / hash churn never shows). Each changed / added /
+        removed ``§`` section carries a stdlib unified diff of its heading and
+        body. Sections identical on both dates are omitted.
+
+        Raises ``CorpusNotFoundError`` for an unknown slug or a date before the
+        law first appeared; ``ValueError`` for a non-ISO or future date.
+        """
+        parsed_a = self._parse_diff_date("date_a", date_a)
+        parsed_b = self._parse_diff_date("date_b", date_b)
+        record = self._find_current_by_slug(slug)
+        rel = self._safe_relative(record.markdown_path)
+        rev_a = self._resolve_diff_side(slug, rel, parsed_a)
+        rev_b = self._resolve_diff_side(slug, rel, parsed_b)
+        sections_a = _parse_sections(_strip_frontmatter_and_h1(rev_a.content))
+        sections_b = _parse_sections(_strip_frontmatter_and_h1(rev_b.content))
+        diff = _diff_section_maps(sections_a, sections_b)
+        return {
+            "slug": record.slug,
+            "date_a": parsed_a.isoformat(),
+            "date_b": parsed_b.isoformat(),
+            "resolved_commit_a": rev_a.sha,
+            "resolved_commit_b": rev_b.sha,
+            "summary": diff["summary"],
+            "sections": diff["sections"],
+        }
 
     @staticmethod
     def _history_event_to_version(event: dict[str, Any]) -> dict[str, Any]:
