@@ -3810,3 +3810,88 @@ def test_diff_law_versions_translates_missing_revision_to_corpus_not_found(
         match=r"did not exist in the corpus on 2018-01-01",
     ):
         CorpusReader(tmp_path).diff_law_versions("skatteloven", "2018-01-01", "2024-01-01")
+
+
+# --- diff_law_versions over a real git corpus (end-to-end, no monkeypatch) ---
+
+
+def _law_body(title: str, sections: list[tuple[str, str, str]]) -> str:
+    """Body portion (H1 + one chapter + sections) that _seed_corpus / _write_doc
+    wrap in frontmatter. _strip_frontmatter_and_h1 removes the frontmatter and
+    the H1, leaving the chapter + sections the diff parses."""
+    lines = [f"# {title}", "", "## Kapittel 1. Alminnelige bestemmelser", ""]
+    for sid, sec_title, sec_body in sections:
+        lines += [f"### § {sid}. {sec_title}", "", sec_body, ""]
+    return "\n".join(lines)
+
+
+def _write_doc(path: Path, title: str, body: str) -> None:
+    path.write_text(f"---\nid: x\ntitle: {title}\n---\n\n{body}", encoding="utf-8")
+
+
+def _commit_corpus_at(repo: Path, message: str, when: str) -> str:
+    env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_diff_law_versions_end_to_end_over_real_git(tmp_path: Path) -> None:
+    """Full path with no monkeypatch: two committed versions at two dates,
+    diffed via git-follow. Uses an æøå slug so the core.quotePath handling in
+    timetravel is exercised end-to-end."""
+    repo = tmp_path / "lovverk"
+    _git_init_corpus(repo)
+    slug = "arbeidsmiljøloven-aml"
+    title = "Arbeidsmiljøloven"
+    v1 = _law_body(
+        title,
+        [
+            ("1-1", "Formål", "Sikre et godt arbeidsmiljø."),
+            ("1-2", "Virkeområde", "Gjelder norsk landterritorium."),
+        ],
+    )
+    _seed_corpus(
+        repo,
+        {"nl-1": _record(slug=slug, title=title)},
+        body_for={slug: v1},
+    )
+    sha_a = _commit_corpus_at(repo, "add(lov): aml", "2020-01-01T12:00:00+00:00")
+
+    v2 = _law_body(
+        title,
+        [
+            ("1-1", "Formål", "Sikre et godt arbeidsmiljø."),
+            ("1-2", "Virkeområde", "Gjelder også Svalbard."),
+            ("1-3", "Ny bestemmelse", "Trer i kraft 2024."),
+        ],
+    )
+    _write_doc(repo / "lover" / f"{slug}.md", title, v2)
+    sha_b = _commit_corpus_at(repo, "update(lov): aml", "2024-01-01T12:00:00+00:00")
+
+    result = CorpusReader(repo).diff_law_versions(slug, "2020-06-01", "2024-06-01")
+
+    assert result["summary"] == {
+        "sections_added": 1,
+        "sections_removed": 0,
+        "sections_changed": 1,
+    }
+    by_id = {e["section_id"]: e["change_type"] for e in result["sections"]}
+    assert by_id == {"1-2": "changed", "1-3": "added"}
+    assert result["resolved_commit_a"] == sha_a
+    assert result["resolved_commit_b"] == sha_b
+    changed = next(e for e in result["sections"] if e["section_id"] == "1-2")
+    assert "-Gjelder norsk landterritorium." in changed["unified_diff"]
+    assert "+Gjelder også Svalbard." in changed["unified_diff"]
