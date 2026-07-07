@@ -1555,6 +1555,79 @@ def _natural_section_key(section_id: str) -> tuple[tuple[int, int | str], ...]:
     return tuple((0, int(p)) if p.isdigit() else (1, p) for p in section_id.split("-"))
 
 
+def _section_text(data: dict[str, str]) -> str:
+    """Heading line + body as one block.
+
+    Diffing the heading together with the body means a retitle (the section
+    keeps its id and body but its ``§ N. Title`` changes) surfaces as a
+    change — a body-only comparison would silently miss that legal edit.
+    """
+    body = data["body"]
+    return f"{data['heading']}\n{body}" if body else data["heading"]
+
+
+def _classify_section_change(
+    before: dict[str, str] | None,
+    after: dict[str, str] | None,
+) -> str | None:
+    """Return ``added`` / ``removed`` / ``changed``, or ``None`` if identical."""
+    if before is None:
+        return "added"
+    if after is None:
+        return "removed"
+    return "changed" if _section_text(before) != _section_text(after) else None
+
+
+def _diff_section_maps(
+    sections_a: dict[str, dict[str, str]],
+    sections_b: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    """Section-by-section diff of two parsed-section maps (``_parse_sections``
+    output). Sections present in both with identical heading+body are omitted;
+    every other id yields one entry carrying a stdlib unified diff. Entries are
+    emitted in natural section order so the output is byte-stable for a given
+    pair of inputs.
+    """
+    summary = {"sections_added": 0, "sections_removed": 0, "sections_changed": 0}
+    entries: list[dict[str, str]] = []
+    for sid in sorted(sections_a.keys() | sections_b.keys(), key=_natural_section_key):
+        before = sections_a.get(sid)
+        after = sections_b.get(sid)
+        change = _classify_section_change(before, after)
+        if change is None:
+            continue
+        summary[f"sections_{change}"] += 1
+        source = after if after is not None else before
+        entries.append(
+            {
+                "section_id": sid,
+                "heading": source["heading"] if source is not None else "",
+                "change_type": change,
+                "unified_diff": _section_unified_diff(before, after),
+            },
+        )
+    return {"summary": summary, "sections": entries}
+
+
+def _section_unified_diff(
+    before: dict[str, str] | None,
+    after: dict[str, str] | None,
+) -> str:
+    """Deterministic unified diff between two section-text blocks; an absent
+    side (added / removed) diffs against the empty document."""
+    before_text = _section_text(before) if before is not None else ""
+    after_text = _section_text(after) if after is not None else ""
+    return "\n".join(
+        difflib.unified_diff(
+            before_text.splitlines(),
+            after_text.splitlines(),
+            fromfile="before",
+            tofile="after",
+            lineterm="",
+        ),
+    )
+
+
 def _strip_frontmatter_and_h1(text: str) -> str:
     """Remove the YAML frontmatter block and the leading H1 title from
     a rendered lovspor Markdown file, leaving only the legal body.

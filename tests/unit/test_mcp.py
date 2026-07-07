@@ -30,6 +30,7 @@ from lovspor.mcp import (
     _bounded_limit,
     _build_embedder,
     _compute_match_owner_starts,
+    _diff_section_maps,
     _extract_cross_references,
     _normalize_for_quote_match,
     _record_summary,
@@ -3516,3 +3517,106 @@ def test_search_eu_implementations_skips_pre_sprint8_records(tmp_path: Path) -> 
     )
     result = CorpusReader(tmp_path).search_eu_implementations("32016R0679")
     assert [hit["slug"] for hit in result] == ["known"]
+
+
+# --- _diff_section_maps: pure section-map diff core (B2 diff tool) ---
+
+
+def _sec(heading: str, body: str, chapter: str = "") -> dict[str, str]:
+    """Build one parsed-section entry in the shape _parse_sections emits."""
+    return {"heading": heading, "parent_chapter": chapter, "body": body}
+
+
+def test_diff_section_maps_identical_maps_is_empty() -> None:
+    sections = {"1": _sec("§ 1. Formål", "Loven gjelder skatt.")}
+    result = _diff_section_maps(sections, sections)
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 0,
+        "sections_changed": 0,
+    }
+    assert result["sections"] == []
+
+
+def test_diff_section_maps_added_section() -> None:
+    before: dict[str, dict[str, str]] = {}
+    after = {"2": _sec("§ 2. Virkeområde", "Ny paragraf.")}
+    result = _diff_section_maps(before, after)
+    assert result["summary"]["sections_added"] == 1
+    [entry] = result["sections"]
+    assert entry["section_id"] == "2"
+    assert entry["change_type"] == "added"
+    assert entry["heading"] == "§ 2. Virkeområde"
+    assert "+Ny paragraf." in entry["unified_diff"]
+
+
+def test_diff_section_maps_removed_section() -> None:
+    before = {"3": _sec("§ 3. Opphevet", "Gammel tekst.")}
+    after: dict[str, dict[str, str]] = {}
+    result = _diff_section_maps(before, after)
+    assert result["summary"]["sections_removed"] == 1
+    [entry] = result["sections"]
+    assert entry["change_type"] == "removed"
+    assert "-Gammel tekst." in entry["unified_diff"]
+
+
+def test_diff_section_maps_changed_body() -> None:
+    before = {"1": _sec("§ 1. Formål", "Gammel setning.")}
+    after = {"1": _sec("§ 1. Formål", "Ny setning.")}
+    result = _diff_section_maps(before, after)
+    assert result["summary"]["sections_changed"] == 1
+    [entry] = result["sections"]
+    assert entry["change_type"] == "changed"
+    assert "-Gammel setning." in entry["unified_diff"]
+    assert "+Ny setning." in entry["unified_diff"]
+
+
+def test_diff_section_maps_retitle_with_identical_body_is_a_change() -> None:
+    """A section keeps its id and body but the title changes — a real legal
+    edit that a body-only diff would miss. The heading line is part of the
+    diffed text so the retitle surfaces."""
+    before = {"1": _sec("§ 1. Gammelt navn", "Samme tekst.")}
+    after = {"1": _sec("§ 1. Nytt navn", "Samme tekst.")}
+    result = _diff_section_maps(before, after)
+    assert result["summary"]["sections_changed"] == 1
+    diff = result["sections"][0]["unified_diff"]
+    assert "-§ 1. Gammelt navn" in diff
+    assert "+§ 1. Nytt navn" in diff
+
+
+def test_diff_section_maps_emits_sections_in_natural_order() -> None:
+    before: dict[str, dict[str, str]] = {}
+    after = {
+        "5-10": _sec("§ 5-10. Ti", "x"),
+        "1": _sec("§ 1. En", "x"),
+        "5-2": _sec("§ 5-2. To", "x"),
+    }
+    result = _diff_section_maps(before, after)
+    assert [e["section_id"] for e in result["sections"]] == ["1", "5-2", "5-10"]
+
+
+def test_diff_section_maps_mixed_add_remove_change() -> None:
+    before = {
+        "1": _sec("§ 1. Formål", "Uendret."),
+        "2": _sec("§ 2. Fjernes", "Borte snart."),
+        "3": _sec("§ 3. Endres", "Før."),
+    }
+    after = {
+        "1": _sec("§ 1. Formål", "Uendret."),
+        "3": _sec("§ 3. Endres", "Etter."),
+        "4": _sec("§ 4. Ny", "Lagt til."),
+    }
+    result = _diff_section_maps(before, after)
+    assert result["summary"] == {
+        "sections_added": 1,
+        "sections_removed": 1,
+        "sections_changed": 1,
+    }
+    by_id = {e["section_id"]: e["change_type"] for e in result["sections"]}
+    assert by_id == {"2": "removed", "3": "changed", "4": "added"}
+
+
+def test_diff_section_maps_is_deterministic() -> None:
+    before = {"1": _sec("§ 1. A", "gammel")}
+    after = {"1": _sec("§ 1. A", "ny"), "2": _sec("§ 2. B", "ny b")}
+    assert _diff_section_maps(before, after) == _diff_section_maps(before, after)
