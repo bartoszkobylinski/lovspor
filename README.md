@@ -16,20 +16,22 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 
 **Setup — three steps:**
 
-1. **Install [`uv`](https://docs.astral.sh/uv/)** (it provides `uvx`). Your MCP client launches the server through it — you never clone or install `lovspor` yourself.
+1. **Install [`uv`](https://docs.astral.sh/uv/)** (it provides `uvx`, which runs `lovspor` on demand — no manual install).
 
-2. **Clone the corpus.** The legal text lives in a separate repo:
+2. **Fetch the corpus.** One command shallow-clones the legal text to the default cache (`~/.cache/lovverk`):
 
    ```bash
-   git clone https://github.com/bartoszkobylinski/lovverk.git ~/lovverk
+   uvx --from "git+https://github.com/bartoszkobylinski/lovspor.git" lovspor fetch-corpus
    ```
 
-3. **Register the server.** With Claude Code:
+   Re-run it any time to update — it reports `cloned`, `updated`, or `unchanged`.
+
+3. **Register the server.** `lovspor mcp` finds that cache automatically. With Claude Code:
 
    ```bash
    claude mcp add lovverk uvx \
      --from "git+https://github.com/bartoszkobylinski/lovspor.git" \
-     -- lovspor mcp --corpus-path ~/lovverk
+     -- lovspor mcp
    ```
 
    Or add it to your client config directly — Claude Desktop's `claude_desktop_config.json`, or `~/.claude.json` for Claude Code:
@@ -41,8 +43,7 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
          "command": "uvx",
          "args": [
            "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
-           "lovspor", "mcp",
-           "--corpus-path", "/absolute/path/to/lovverk"
+           "lovspor", "mcp"
          ]
        }
      }
@@ -57,16 +58,16 @@ Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen
 "lovverk": {
   "command": "uvx",
   "args": ["--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
-           "lovspor", "mcp", "--corpus-path", "/absolute/path/to/lovverk"],
+           "lovspor", "mcp"],
   "env": { "OPENAI_API_KEY": "sk-...your-own-key..." }
 }
 ```
 
 It's your key in your own local config file — keep that file private and never commit it. Without a key, `semantic_search` is simply disabled; the other fifteen tools are unaffected.
 
-Keep the corpus fresh with `git -C ~/lovverk pull` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
+Keep the corpus fresh by re-running `lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
 
-> **Coming soon:** once `lovspor` is published to PyPI, the `--from git+https://…` line collapses to a plain `uvx lovspor mcp …`. Tracked in [`docs/roadmap.md`](docs/roadmap.md).
+> **Coming soon:** once `lovspor` is published to PyPI, the `--from git+https://…` prefix drops — both commands collapse to plain `uvx lovspor fetch-corpus` and `uvx lovspor mcp …`. Tracked in [`docs/roadmap.md`](docs/roadmap.md).
 
 See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all sixteen tools documented with examples (`get_law`, `get_law_at`, `list_law_versions`, `diff_law_versions`, `get_section`, `list_sections`, `get_law_history`, `list_recent_changes`, `search_laws`, `search_body`, `semantic_search`, `validate_citation`, `verify_quote`, `get_eu_basis`, `search_eu_implementations`, `corpus_status`), troubleshooting, and limitations. The binary embedding format that powers `semantic_search` is documented in [`docs/embeddings.md`](docs/embeddings.md).
 
