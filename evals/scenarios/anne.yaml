@@ -219,6 +219,6 @@ scenarios:
         tool: get_law
     failure_modes:
       - Full-law fetch is heavy and leaves the assistant to infer a table of contents.
-      - There is no get_law_toc, get_chapter, or list_sections tool.
-    reveals_gap: no chapter or table-of-contents tool
+      - (partially historical) list_sections (Sprint 10) now returns an act's table of contents; a dedicated get_chapter / get_law_toc fetch still does not exist.
+    reveals_gap: "PARTIAL — table-of-contents closed by list_sections (Sprint 10); chapter-level get_chapter still open"
     roadmap_class: A1

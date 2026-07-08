@@ -138,9 +138,9 @@ scenarios:
       - kind: tool_called
         tool: get_law_history
     failure_modes:
-      - No diff tool exists.
+      - (historical) When authored, no diff tool existed; diff_law_versions (Sprint 10 B2) has since closed this gap.
       - History metadata cannot show textual changes.
-    reveals_gap: no law-version diff tool
+    reveals_gap: "CLOSED (Sprint 10 B2) — diff_law_versions now exists"
     roadmap_class: B2
 
   - id: lars_008
