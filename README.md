@@ -4,7 +4,7 @@ Norwegian law change tracker. Engine that produces the [`lovverk`](https://githu
 
 ## Status
 
-**Production.** A scheduled GitHub Actions workflow runs daily at 04:00 UTC, pulls the latest tarballs from Lovdata, classifies each document as new / updated / renamed / removed, renders the changes to Markdown, and pushes the diff to `lovverk` as conventional-commit history. The corpus currently mirrors **4 522 acts** (≈ 781 lover + ≈ 3 741 forskrifter) with a structured per-act change history under each `<dataset>/history/<slug>.json`.
+**Production.** A scheduled GitHub Actions workflow runs daily at 04:00 UTC, pulls the latest tarballs from Lovdata, classifies each document as new / updated / renamed / removed, renders the changes to Markdown, and pushes the diff to `lovverk` as conventional-commit history. The corpus mirrors close to **6 000 acts** (Norwegian *lover* and central *forskrifter*), each with a structured per-act change history under `<dataset>/history/<slug>.json`. The exact live count is always available from the MCP `corpus_status` tool.
 
 Sprint 9 (MERGED 2026-05-06) added per-section embeddings to the corpus and a four-layer anti-hallucination story to the MCP surface: `semantic_search` (cosine over embeddings), `verify_quote` (verbatim-citation guard), validated `cross_references` on `get_section`, and `validate_citation` as the off-ramp for ambiguous citations.
 
@@ -12,9 +12,46 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 
 ## MCP server
 
-`lovspor` ships an MCP server that exposes the `lovverk` corpus to AI assistants like Claude Desktop and Claude Code. Once configured, you can ask things like *"what changed in Skatteloven this year?"* or *"are there forskrifter about jernbane?"* and the assistant fetches the answer from the corpus directly.
+`lovspor` ships a stdio MCP server that exposes the `lovverk` corpus to AI assistants — Claude Desktop, Claude Code, or any MCP client. Once configured, you can ask *"what changed in Skatteloven this year?"* or *"are there forskrifter about jernbane?"* and the assistant answers from the live corpus instead of stale training data.
 
-Quickstart for Claude Desktop / Claude Code (replace `/path/to/lovverk` with the location of your local clone):
+**Setup — three steps:**
+
+1. **Install [`uv`](https://docs.astral.sh/uv/)** (it provides `uvx`, which runs `lovspor` on demand — no manual install).
+
+2. **Fetch the corpus.** One command shallow-clones the legal text to the default cache (`~/.cache/lovverk`):
+
+   ```bash
+   uvx --from "git+https://github.com/bartoszkobylinski/lovspor.git" lovspor fetch-corpus
+   ```
+
+   Re-run it any time to update — it reports `cloned`, `updated`, or `unchanged`.
+
+3. **Register the server.** `lovspor mcp` finds that cache automatically. With Claude Code:
+
+   ```bash
+   claude mcp add lovverk -- \
+     uvx --from "git+https://github.com/bartoszkobylinski/lovspor.git" lovspor mcp
+   ```
+
+   Or add it to your client config directly — Claude Desktop's `claude_desktop_config.json`, or `~/.claude.json` for Claude Code:
+
+   ```jsonc
+   {
+     "mcpServers": {
+       "lovverk": {
+         "command": "uvx",
+         "args": [
+           "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
+           "lovspor", "mcp"
+         ]
+       }
+     }
+   }
+   ```
+
+Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen tools work immediately — no key, and no network access beyond your local corpus clone.
+
+**Optional — enable `semantic_search`.** The one search-by-meaning tool needs an OpenAI API key: it embeds *your query* at call time (the corpus vectors ship pre-computed, so you never re-embed the corpus yourself). Bring your own key via the server's `env`:
 
 ```jsonc
 {
@@ -23,15 +60,19 @@ Quickstart for Claude Desktop / Claude Code (replace `/path/to/lovverk` with the
       "command": "uvx",
       "args": [
         "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
-        "lovspor", "mcp",
-        "--corpus-path", "/path/to/lovverk"
-      ]
+        "lovspor", "mcp"
+      ],
+      "env": { "OPENAI_API_KEY": "sk-...your-own-key..." }
     }
   }
 }
 ```
 
-This runs the server on demand from this GitHub repo via [`uv`](https://docs.astral.sh/uv/) — no local clone of `lovspor` required, just the corpus.
+It's your key in your own local config file — keep that file private and never commit it. Without a key, `semantic_search` is simply disabled; the other fifteen tools are unaffected.
+
+Keep the corpus fresh by re-running `lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
+
+> **Coming soon:** once `lovspor` is published to PyPI, the `--from git+https://…` prefix drops — both commands collapse to plain `uvx lovspor fetch-corpus` and `uvx lovspor mcp …`. Tracked in [`docs/roadmap.md`](docs/roadmap.md).
 
 See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all sixteen tools documented with examples (`get_law`, `get_law_at`, `list_law_versions`, `diff_law_versions`, `get_section`, `list_sections`, `get_law_history`, `list_recent_changes`, `search_laws`, `search_body`, `semantic_search`, `validate_citation`, `verify_quote`, `get_eu_basis`, `search_eu_implementations`, `corpus_status`), troubleshooting, and limitations. The binary embedding format that powers `semantic_search` is documented in [`docs/embeddings.md`](docs/embeddings.md).
 
