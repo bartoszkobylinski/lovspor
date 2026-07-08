@@ -17,10 +17,10 @@
 - Per-dataset `INDEX.md`.
 - Three self-healing migrations (Sprint 4 slug, Sprint 5 history, Sprint 8 `eu_basis`).
 - Daily 04:00 UTC scheduled sync via GitHub Actions.
-- 503 tests, 98% coverage, Codex review on every PR.
+- 1056 tests, ~98% coverage, Codex review on every PR.
 
 ### Corpus (`lovverk`)
-- ~4500 Norwegian acts and central regulations rendered to Markdown.
+- ~5,900 Norwegian acts and central regulations rendered to Markdown.
 - Full git history. Time-travel "as of date" already exists for free — just not yet exposed.
 - Manifest as the single source of truth for change detection.
 
@@ -88,7 +88,7 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 
 ### Search quality
 - **Substring matching only** in `search_body`. A search for `"kryptovaluta"` misses `"virtuell valuta"` — both terms appear in Norwegian tax guidance for the same concept. No tokenization, no Norwegian morphology (Norwegian inflects heavily — `skatteyteren` / `skatteytere` / `skatteyterne` is one term), no BM25 ranking. (Sprint 9 added `semantic_search` for cross-vocabulary matching, which addresses this from a different angle but does not replace BM25 / morphology for keyword queries.)
-- **45 MB body index in RAM** is acceptable for 4500 docs but would scale to ~500 MB once local regulations are added. No SQLite FTS5 fallback.
+- **45 MB body index in RAM** is acceptable for ~5,900 docs but would scale to ~500 MB once local regulations are added. No SQLite FTS5 fallback.
 - **No reranker on `semantic_search` results.** Top-K is raw cosine similarity; a domain-tuned reranker (cross-encoder) could filter "close-but-wrong" matches further. Deferred until eval shows a need.
 - **No fuzzy slug match.** Callers must hit the canonical slug exactly.
 
@@ -98,10 +98,10 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
 
 ### Distribution
-- **Not on PyPI.** `uvx --from git+...` is friction for most users.
+- **PyPI — SHIPPED.** `pip install lovspor` / `uvx lovspor` work (0.2.0, OIDC trusted publishing via `release.yml`).
 - **No Docker image.**
 - **No public docs site** (mkdocs).
-- **No hosted MCP endpoint.** Each user clones `lovverk` themselves.
+- **No hosted MCP endpoint.** Each user runs their own server (though `lovspor fetch-corpus` now automates the corpus clone/update).
 
 ---
 
@@ -246,11 +246,10 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ### Class E: Distribution
 
-**E1. PyPI publish + Docker image**
-- `pip install lovspor`, `docker run lovspor mcp ...`.
+**E1. PyPI publish — SHIPPED (0.2.0); Docker image — pending**
+- `pip install lovspor` / `uvx lovspor` are live via OIDC trusted publishing (`release.yml`). Remaining: `docker run lovspor mcp ...`.
 - **Leverage:** high in adoption terms.
-- **Effort:** low (1–2 days).
-- **Missing pieces:** version bump strategy, classifiers, PyPI README, trusted publishing through GitHub Actions.
+- **Effort:** Docker image ~low.
 
 **E2. Public docs site (mkdocs-material)**
 - GitHub Pages.
@@ -303,7 +302,7 @@ Top three by **value × novelty** (refreshed after Sprint 10 ships Class B in fu
 
 Top three by **adoption × reach**:
 
-4. **PyPI publish** (Class E1). One day of work, opens the project to mass adoption.
+4. **Docker image** (remaining half of Class E1; PyPI publish already shipped at 0.2.0). A `docker run lovspor mcp` path for users who don't use `uv`.
 5. **Public docs site + showcase** (Class E2). Discoverability.
 6. **`historiske-lover` + `gjeldende-lokale-forskrifter`** (Classes D-API-1, D-API-2). Pure pipeline work, no legal risk, closes two real corpus gaps. Local regulations likely as a separate `lovverk-lokal` repo for audience-separation reasons.
 

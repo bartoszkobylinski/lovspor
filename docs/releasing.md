@@ -7,7 +7,7 @@ the repo, in Actions secrets, or in anyone's `~/.pypirc`. The publish job lives
 in [`.github/workflows/release.yml`](../.github/workflows/release.yml) and runs
 only when a GitHub Release is *published*.
 
-## One-time setup (do this once, before the first release)
+## One-time setup (done once — already completed for lovspor at 0.2.0)
 
 Trusted Publishing has to be registered on PyPI **before** the project exists —
 this is a "pending publisher". You need a PyPI account; no token, no `twine`.
@@ -34,9 +34,13 @@ PyPI pending-publisher form and the GitHub environment.
 ## Cutting a release
 
 1. **Bump the version** in `pyproject.toml` (`[project] version`) on a branch,
-   e.g. `0.1.0` → `0.2.0`. Open a PR, get the Codex pass, merge to `main`.
-   (Versioning is [SemVer](https://semver.org/): breaking → major, features →
-   minor, fixes → patch. Pre-1.0, minor is fine for anything.)
+   e.g. `0.2.0` → `0.2.1`, then **re-lock** with `uv lock` and commit both
+   `pyproject.toml` and `uv.lock` (the lockfile pins the package's own version;
+   CI runs `uv sync --frozen` and fails if they disagree). `__version__` is
+   derived from package metadata, so there is no second copy to edit. Open a PR,
+   get the Codex pass, merge to `main`. (Versioning is [SemVer](https://semver.org/):
+   breaking → major, features → minor, fixes → patch. Pre-1.0, minor is fine for
+   anything.)
 2. **Create the GitHub Release.** Tag `v<version>` (the leading `v` is stripped;
    `v0.2.0` → package `0.2.0`). Target `main` at the merged bump commit. Write
    release notes. Publish.
@@ -49,10 +53,10 @@ PyPI pending-publisher form and the GitHub environment.
 
 ## After the first successful publish
 
-Once `lovspor` is on PyPI, the MCP quickstart in `README.md` and `docs/mcp.md`
-can drop the `--from git+https://github.com/bartoszkobylinski/lovspor.git` form
-in favour of a plain `uvx lovspor mcp --corpus-path …` — versioned, immutable,
-and immune to the `uvx`-from-git cache-staleness that the git form is prone to.
+Done as of 0.2.0: `README.md` and `docs/mcp.md` now lead with the plain
+`uvx lovspor mcp` (and `pip install lovspor`) form — versioned, immutable, and
+immune to the `uvx`-from-git cache-staleness the git form is prone to. The
+`--from git+https://…` form stays documented only as a from-source fallback.
 
 ## Why Trusted Publishing (and not an API token)
 
