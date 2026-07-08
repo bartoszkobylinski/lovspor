@@ -20,7 +20,7 @@ For every PR, evaluate:
    - changed XML → detected as changed
    - unchanged XML → no commit triggered
 4. **XML parsing safety** — XXE blocked, billion laughs blocked, malformed XML fails loudly with useful error.
-5. **Tar extraction safety** — path traversal blocked (no `../../etc/passwd` extraction), symlinks handled safely. `tarfile.data_filter` is in use.
+5. **Tar extraction safety** — extraction is read-only via `extractfile()` (never `extractall()`/`extract()`) with member-name validation, so path traversal and unsafe symlinks are structurally impossible — no data filter needed.
 6. **Manifest round-trip** — write → read → assertions identical.
 7. **Edge cases** — empty tarball, missing fields, malformed UTF-8, very large files, network timeout, partial download.
 

@@ -50,13 +50,14 @@ facade.
 
 | Module | Responsibility | Key public API |
 |---|---|---|
-| `cli.py` | Typer CLI entry point; loads `.env` in the group callback before Typer resolves `envvar=` options. | `app`; commands `info`, `seed`, `sync`, `mcp` |
+| `cli.py` | Typer CLI entry point; loads `.env` in the group callback before Typer resolves `envvar=` options. | `app`; commands `info`, `seed`, `sync`, `mcp`, `fetch-corpus`, `repair-embeddings` |
 | `settings.py` | Runtime config resolved from env / `.env`; frozen Pydantic model; paths resolved absolute. | `Settings.from_env()`, `load_env()` |
 | `errors.py` | Exception hierarchy so callers never catch bare `Exception`. | `LovsporError` + `NetworkError`, `ParseError`, `RenderError`, `ExtractionError`, `ConfigError`, `CorpusStateError`, `MassRemovalError` |
 | `retry.py` | Dependency-free exponential-backoff retry helper. | `retry_with_backoff(...)` |
 | `history.py` | Per-act change history from `git log --follow --numstat`; writes `history/<slug>.{json,md}`. | `extract_history()`, `write_history()`, `render_history_markdown()` |
 | `timetravel.py` | Time-machine: a doc's text as of a past date via `git log --follow` + `git show <sha>:<path>`. | `get_law_at_revision(...)`, `resolve_law_at_revision(...)` |
 | `mcp.py` | Stdio MCP server exposing 16 read-only tools over a local `lovverk` clone. | `serve()`, `build_server()`, `CorpusReader` |
+| `corpus_fetch.py` | Clone / fast-forward the local `lovverk` cache (`~/.cache/lovverk`) that `lovspor fetch-corpus` populates and `lovspor mcp` reads by default. | `fetch_corpus()`, `default_corpus_path()`, `is_corpus()`, `FetchResult`, `CorpusFetchError` |
 
 ### `sources/` — Lovdata API boundary
 
@@ -187,4 +188,7 @@ In order:
 **stdio** with 16 read-only tools. A `CorpusReader` reads `manifest.json` plus the
 Markdown / `.bin` files from the local clone, caching in memory and dropping caches
 when `manifest.json`'s mtime changes so a `git pull` under a long-lived server is
-picked up. Full tool reference, setup, and limitations are in [`mcp.md`](mcp.md).
+picked up. With no `--corpus-path` / `LOVVERK_CORPUS_PATH`, it defaults to the
+`fetch-corpus` cache (`~/.cache/lovverk`), so the consumer flow is `lovspor
+fetch-corpus` then `lovspor mcp`. Full tool reference, setup, and limitations are
+in [`mcp.md`](mcp.md).

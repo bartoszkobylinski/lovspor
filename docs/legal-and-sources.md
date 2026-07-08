@@ -51,4 +51,4 @@ Anyone can verify our output by:
 2. Running this engine on it.
 3. Comparing the resulting Markdown and SHA256 hashes against the corresponding `lovverk` commit.
 
-Determinism is enforced by tests. See `tests/unit/test_markdown_renderer.py` (when implemented).
+Determinism is enforced by tests. See `tests/unit/test_rendering_markdown_renderer.py`.

@@ -4,7 +4,7 @@ Single source of truth for why this project looks the way it does. Every non-obv
 
 Update this file whenever a new decision lands.
 
-Last updated: 2026-04-28
+Last updated: 2026-07-08
 
 ---
 
@@ -449,6 +449,23 @@ Originally decided 2026-04-26 to keep `Settings.git_commit_mode` as a forward de
 
 Sprint 5 also introduced a separate **Sprint 5 history migration** branch in `run_sync` that fires once on the first sync after PR #24 ships and emits a standalone `migration: generate history for N documents` commit before any regular sync work. Triggered when the corpus has prior current docs but no `<dataset>/history/` dirs. See §12d.
 
+### Sprint 10 — Time-machine tools + PyPI distribution (2026-06 → 2026-07)
+
+Three threads: git-history time-travel tools, consumer distribution, and maintenance tooling.
+
+**Time-machine MCP tools (git-history "as of date").** `timetravel.py` (`git log --follow` + `git show <sha>:<path>`) backs three read-only tools no other corpus-MCP can match, since none version their corpus through git:
+- `get_law_at(slug, date)` — an act's full Markdown as of a past date (B1).
+- `list_law_versions(slug)` — dates of distinct content versions, oldest-first (B1).
+- `diff_law_versions(slug, date_a, date_b)` — section-by-section diff between two dates (B2).
+Tool count rose to **16**.
+
+**Maintenance: `repair-embeddings` (PR #109, MERGED).** Flags docs whose stored vector count under-counts their current sections (flat acts rendering `§` at H2 produced zero vectors before a parser fix) by clearing `embedding_hash`; the next keyed `sync` re-embeds them via the Sprint 9 backfill. A one-time backfill of ~2,336 docs ran 2026-07-07.
+
+**Consumer distribution — PyPI (PRs #110–#114).** lovspor became a PyPI-published tool:
+- `lovspor fetch-corpus` (PR #112) — one command shallow-clones the corpus to `~/.cache/lovverk`; `lovspor mcp` auto-discovers that cache, so `--corpus-path` is now optional.
+- PyPI-publishable packaging + OIDC Trusted-Publishing release workflow (PR #111); refreshed README consumer quickstart (PR #110).
+- Released 0.2.0, then **0.2.1** (PR #114) after 0.2.0 shipped reporting itself as 0.1.0 — `__version__` now derives from `importlib.metadata` (single source of truth), guarded by a drift test.
+
 ## 12b. Slug-based filenames (Sprint 4)
 
 Decided 2026-04-26. Markdown filenames in `lovverk/lover/` and `lovverk/forskrifter/` use a human-readable slug derived from the law's `short_title` (Lovdata's official kortform), not the opaque `nl-YYYYMMDD-NNN` doc_id from the source XML.
@@ -519,7 +536,7 @@ Both 7 letters, both start with `lov`, ship visibly as siblings.
 
 ## 14. Known open items
 
-End of Sprint 7:
+Open items (current):
 
 - **Dependabot PRs #2 / #3 / #4 followups** — `actions/checkout` v4 and `setup-uv` v4 are still pinned in `.github/workflows/sync.yml` (PR #2 / #3 only bumped `test.yml`, since `sync.yml` was added later in PR #16). Dependabot's next weekly run will propose new PRs against `sync.yml`; merge those as a batch. No functional risk.
 - **Mutation baseline still pending an authoritative full rerun.** Codex's PR #23–#29 reviews ran fresh mutmut snapshots but stopped them mid-flight to keep the working tree clean (mutmut mutates files in-place). Latest non-final snapshot from PR #29: 851 / 1299 killed, 357 survived, 91 untested. The §9a revisit trigger of 250 survivors is still exceeded but the count remains non-authoritative until a clean full run completes. Next Codex pass on a Sprint 8+ PR should include a cache reset and a fresh authoritative score before any §9a re-evaluation.
@@ -527,7 +544,7 @@ End of Sprint 7:
 - **Sprint 5 partial-failure recovery** — `_needs_sprint5_history_migration` only checks for the presence of `<dataset>/history/`, not that every current doc has a populated history file. A migration that crashes mid-bulk-write would not auto-retry on the next sync. Acceptable for a one-time event; recovery is manual rerun or a strengthened detector. See §12d.
 - **Sprint-5 mixed-bulk-commit ambiguity** — `_classify_bulk_sync` cannot distinguish a deleted file from an in-place shrunken update inside the same bulk commit using `--numstat` alone. Deletes mixed with updates are classified as updates. Bounded to legacy bulk-mode commits (post-Sprint-4 default is per-doc, never goes through this branch). Full fix needs `--name-status` parsing; deferred unless real lovverk history shows the misclassification mattering.
 - **Orchestrator branch coverage at 97%** — Sprint 5 PR-B added several new branches (commit-mode dispatch, history follow-up, Sprint 5 migration trigger) without proportional integration coverage. Codex flagged but did not classify as a bug.
-- **Stale `uvx` cache after lovspor pushes (operational gotcha)** — Adopters who configured the MCP server via `uvx --from "git+https://github.com/.../lovspor.git" lovspor mcp ...` may continue to see an older lovspor build after the upstream main moves, because `uvx`'s git-source cache does not refresh aggressively. Diagnosis: call `corpus_status()` and check whether the `schema_compatible` field is present. If absent → cached pre-PR-#29 build is in play. Fix: `uvx --refresh --from "git+..." ...` once (or `uv cache clean lovspor`) and restart the MCP client. Worth a one-line note in `docs/mcp.md` Troubleshooting if a real adopter reports it.
+- **Stale `uvx` cache after lovspor pushes (operational gotcha)** — *Largely obsolete since the 0.2.0 PyPI release: prefer `uvx lovspor` / `pip install lovspor`, which are versioned and immutable. The gotcha below applies only to legacy `--from git+...` installs.* Adopters who configured the MCP server via `uvx --from "git+https://github.com/.../lovspor.git" lovspor mcp ...` may continue to see an older lovspor build after the upstream main moves, because `uvx`'s git-source cache does not refresh aggressively. Diagnosis: call `corpus_status()` and check whether the `schema_compatible` field is present. If absent → cached pre-PR-#29 build is in play. Fix: `uvx --refresh --from "git+..." ...` once (or `uv cache clean lovspor`) and restart the MCP client. Worth a one-line note in `docs/mcp.md` Troubleshooting if a real adopter reports it.
 - **PR-merge follow-up branch detection** — discovered during PR #29: when a PR has Codex-reviewed follow-up commits after the initial "No findings", a squash-merge of the PR deletes the source branch on origin; any subsequent push to the same branch name silently creates a new orphan branch and re-triggers Codex without ever connecting back to a PR. We almost shipped Sprint 7 with the schema-detection invisible because of this. Mitigation: after a squash-merge, **always** verify a follow-up branch's existence via `git ls-remote origin <branch>` before assuming a re-Codex-pass means the work is on main. Worth automating into the PR-merge skill flow.
 - **Change-detection is blind to inter-element whitespace the renderer treats as significant** — `hash_normalized_xml` parses with `remove_blank_text=True`, so an upstream change that alters ONLY whitespace-only nodes between elements (`<strong>a</strong><em>b</em>` → `<strong>a</strong> <em>b</em>`) yields the same hash and triggers no re-render. The renderer parses with `remove_blank_text=False` (PR #79) and DOES treat that inline space as significant, so the rendered corpus can drift from upstream for such a change. **Deliberately not fixed** (decided 2026-07-05): making the hash whitespace-sensitive flips it on every block-level indentation reflow Lovdata emits (`<root><a>` vs `<root>\n  <a>`), forcing a corpus-wide re-render — a direct violation of the conservative-churn posture (§4). A precise fix would have to replicate the renderer's inline-vs-block whitespace model inside the hash path (fragile, could still churn). The gap is bounded and rare — real legal amendments change text or structure, never inline spacing alone — and it heals forward on the doc's next content change. Verified empirically: strip=True collapses both the inline-space diff and the indentation reflow; strip=False separates them but re-hashes on indentation. Revisit only if a real upstream diff shows a whitespace-only rendering change being dropped.
 
