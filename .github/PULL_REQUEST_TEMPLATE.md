@@ -17,9 +17,6 @@ What changed:
 What to verify:
 - (behaviors, invariants, edge cases)
 
-What to write tests for:
-- (concrete test ideas)
-
 What NOT to do:
 - Do not refactor existing code
 - Do not change feature behavior
@@ -34,6 +31,6 @@ What NOT to do:
 - [ ] `uv run mypy src/` green
 - [ ] `uv run pytest` green
 - [ ] Coverage ≥ 90% on changed files
-- [ ] `uv run mutmut run` reviewed (if logic changes)
+- [ ] Mutation score reviewed by Codex on the PR (if logic changes)
 - [ ] `/security-check` clean
 - [ ] Codex review pass

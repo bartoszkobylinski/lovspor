@@ -25,7 +25,7 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     # Routine syncs finish in under a minute; the one-time Sprint 9
-    # embeddings backfill (first keyed run over ~4100 docs) needs
+    # embeddings backfill (first keyed run over the whole corpus) needed
     # room for ~1000 batched OpenAI calls plus retries.
     timeout-minutes: 120
     env:

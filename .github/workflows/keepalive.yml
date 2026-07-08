@@ -4,7 +4,7 @@ name: Keepalive
 # with no repository activity. lovspor's daily sync (sync.yml) commits to the
 # *lovverk* corpus repo, not here — so this engine repo can sit 60 days without a
 # commit and silently lose its sync cron, with no operator alert (see
-# docs/operations.md "Scheduled sync stopped / auto-disabled").
+# docs/operations.md "Keepalive — preventing 60-day auto-disable").
 #
 # This workflow pushes an empty commit whenever HEAD is older than 45 days,
 # resetting the activity clock with comfortable margin before the 60-day cutoff.

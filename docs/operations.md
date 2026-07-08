@@ -10,6 +10,8 @@ uv run lovspor info            # project info
 uv run lovspor seed            # initial corpus population (first sync)
 uv run lovspor sync            # incremental update against latest tarballs
 uv run lovspor repair-embeddings  # flag under-embedded docs for re-embed (see Maintenance)
+uv run lovspor fetch-corpus    # clone/update the local lovverk corpus that `lovspor mcp` reads
+uv run lovspor mcp             # serve the corpus to AI assistants over MCP (stdio)
 ```
 
 `seed` and `sync` are aliases at the engine level — both call the same orchestrator. Use `seed` semantically for the first run on an empty corpus, `sync` for repeated invocations. Settings are read from environment variables (or a `.env` file at the engine repo root). See `.env.example` for the required variables.
@@ -25,7 +27,7 @@ uv run lovspor repair-embeddings          # flags docs, commits the manifest (no
 OPENAI_API_KEY=sk-... uv run lovspor sync  # Sprint 9 backfill re-embeds exactly the flagged docs
 ```
 
-It is idempotent — a no-op with no commit once every embedding matches its sections. As of 2026-07-07 the affected set is ~2,333 acts (~$0.57 one-time at `text-embedding-3-large` pricing); the churn is `.bin` rewrites only, markdown is untouched.
+It is idempotent — a no-op with no commit once every embedding matches its sections. When last run (2026-07-07) the affected set was ~2,333 acts (~$0.57 one-time at `text-embedding-3-large` pricing); that backfill has since completed. The churn is `.bin` rewrites only, markdown is untouched.
 
 ### Required environment
 
