@@ -21,7 +21,7 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 2. **Fetch the corpus.** One command shallow-clones the legal text to the default cache (`~/.cache/lovverk`):
 
    ```bash
-   uvx --from "git+https://github.com/bartoszkobylinski/lovspor.git" lovspor fetch-corpus
+   uvx lovspor fetch-corpus
    ```
 
    Re-run it any time to update — it reports `cloned`, `updated`, or `unchanged`.
@@ -29,8 +29,7 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 3. **Register the server.** `lovspor mcp` finds that cache automatically. With Claude Code:
 
    ```bash
-   claude mcp add lovverk -- \
-     uvx --from "git+https://github.com/bartoszkobylinski/lovspor.git" lovspor mcp
+   claude mcp add lovverk -- uvx lovspor mcp
    ```
 
    Or add it to your client config directly — Claude Desktop's `claude_desktop_config.json`, or `~/.claude.json` for Claude Code:
@@ -40,10 +39,7 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
      "mcpServers": {
        "lovverk": {
          "command": "uvx",
-         "args": [
-           "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
-           "lovspor", "mcp"
-         ]
+         "args": ["lovspor", "mcp"]
        }
      }
    }
@@ -58,10 +54,7 @@ Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen
   "mcpServers": {
     "lovverk": {
       "command": "uvx",
-      "args": [
-        "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
-        "lovspor", "mcp"
-      ],
+      "args": ["lovspor", "mcp"],
       "env": { "OPENAI_API_KEY": "sk-...your-own-key..." }
     }
   }
@@ -72,7 +65,7 @@ It's your key in your own local config file — keep that file private and never
 
 Keep the corpus fresh by re-running `lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
 
-> **Coming soon:** once `lovspor` is published to PyPI, the `--from git+https://…` prefix drops — both commands collapse to plain `uvx lovspor fetch-corpus` and `uvx lovspor mcp …`. Tracked in [`docs/roadmap.md`](docs/roadmap.md).
+> **From source:** the commands above use the [PyPI release](https://pypi.org/project/lovspor/) (`pip install lovspor` works too). To run an unreleased build instead, prefix the package spec — e.g. `uvx --from "git+https://github.com/bartoszkobylinski/lovspor.git" lovspor mcp`.
 
 See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all sixteen tools documented with examples (`get_law`, `get_law_at`, `list_law_versions`, `diff_law_versions`, `get_section`, `list_sections`, `get_law_history`, `list_recent_changes`, `search_laws`, `search_body`, `semantic_search`, `validate_citation`, `verify_quote`, `get_eu_basis`, `search_eu_implementations`, `corpus_status`), troubleshooting, and limitations. The binary embedding format that powers `semantic_search` is documented in [`docs/embeddings.md`](docs/embeddings.md).
 
