@@ -8,7 +8,7 @@
 
 ### Engine (`lovspor`)
 - Downloads `gjeldende-lover` and `gjeldende-sentrale-forskrifter` from Lovdata's NLOD 2.0 public-data API.
-- Safely extracts XML members (XXE blocked, billion-laughs blocked, tar path traversal blocked, lxml `safe_parser`, `tarfile.data_filter`).
+- Safely extracts XML members (XXE + billion-laughs blocked via lxml `safe_parser`; tar path traversal blocked by streaming members with `extractfile()` — never `extractall()`/`extract()`).
 - Deterministic SHA256 over normalized XML.
 - Deterministic Markdown rendering (frontmatter + body).
 - Change detection: new / changed / removed / unchanged + rename detection.
