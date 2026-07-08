@@ -29,9 +29,8 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 3. **Register the server.** `lovspor mcp` finds that cache automatically. With Claude Code:
 
    ```bash
-   claude mcp add lovverk uvx \
-     --from "git+https://github.com/bartoszkobylinski/lovspor.git" \
-     -- lovspor mcp
+   claude mcp add lovverk -- \
+     uvx --from "git+https://github.com/bartoszkobylinski/lovspor.git" lovspor mcp
    ```
 
    Or add it to your client config directly — Claude Desktop's `claude_desktop_config.json`, or `~/.claude.json` for Claude Code:
@@ -55,11 +54,17 @@ Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen
 **Optional — enable `semantic_search`.** The one search-by-meaning tool needs an OpenAI API key: it embeds *your query* at call time (the corpus vectors ship pre-computed, so you never re-embed the corpus yourself). Bring your own key via the server's `env`:
 
 ```jsonc
-"lovverk": {
-  "command": "uvx",
-  "args": ["--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
-           "lovspor", "mcp"],
-  "env": { "OPENAI_API_KEY": "sk-...your-own-key..." }
+{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
+        "lovspor", "mcp"
+      ],
+      "env": { "OPENAI_API_KEY": "sk-...your-own-key..." }
+    }
+  }
 }
 ```
 
