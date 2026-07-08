@@ -2,7 +2,7 @@
 
 This suite exercises the MCP tool surface through realistic user personas without using an external LLM as the *driver* (the runner is deterministic — it invokes tools directly from each scenario's `expected_tool_calls`). The runner builds a small synthetic `lovverk` corpus in a temporary directory, points `CorpusReader` at it, executes the expected tool calls, and evaluates deterministic success criteria.
 
-`semantic_search` is the one tool that talks to a remote service: it embeds the query through OpenAI's `text-embedding-3-large`. Scenarios that use `semantic_search` therefore require `OPENAI_API_KEY` in the environment; without the key those scenarios are reported as gap-revealed (skipped). The other tools the runner exercises stay pure local. (The MCP server itself serves fifteen tools; the runner currently drives twelve — the Sprint 10 time-machine pair `get_law_at` / `list_law_versions` and the `list_sections` TOC tool are not yet scripted in any scenario.)
+`semantic_search` is the one tool that talks to a remote service: it embeds the query through OpenAI's `text-embedding-3-large`. Scenarios that use `semantic_search` therefore require `OPENAI_API_KEY` in the environment; without the key those scenarios are reported as gap-revealed (skipped). The other tools the runner exercises stay pure local. (The MCP server itself serves sixteen tools; the runner currently drives twelve — the Sprint 10 time-machine trio `get_law_at` / `list_law_versions` / `diff_law_versions` and the `list_sections` TOC tool are not yet scripted in any scenario.)
 
 ## Run
 
