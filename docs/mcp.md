@@ -11,7 +11,7 @@ This document covers the full setup: prerequisites, configuration for two common
 ## At a glance
 
 - **Transport:** stdio. Each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note.
-- **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user runs `git pull` (or sets up a cron) to pick up updates.
+- **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user re-runs `lovspor fetch-corpus` (which fast-forwards the cache) to pick up updates.
 - **Tools:** sixteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the sixteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
@@ -19,29 +19,28 @@ This document covers the full setup: prerequisites, configuration for two common
 
 ## Prerequisites
 
-1. **Local clone of `lovverk`**:
+1. **The `lovverk` corpus.** One command fetches it:
+
+   ```bash
+   uvx lovspor fetch-corpus
+   ```
+
+   This shallow-clones the corpus into `~/.cache/lovverk` (honouring
+   `$XDG_CACHE_HOME`) and fast-forwards it on every re-run. `lovspor mcp`
+   looks there by default, so you can omit `--corpus-path` entirely — the
+   whole flow is `lovspor fetch-corpus` then `lovspor mcp`. Re-run
+   `lovspor fetch-corpus` any time to refresh (the engine re-syncs daily at
+   04:00 UTC).
+
+   **Or clone it yourself** to a custom path you then pass via `--corpus-path`:
 
    ```bash
    git clone https://github.com/bartoszkobylinski/lovverk.git ~/lovverk
    ```
 
-   **Or let lovspor manage it:** `lovspor fetch-corpus` shallow-clones the
-   corpus into `~/.cache/lovverk` (honouring `$XDG_CACHE_HOME`) and
-   fast-forwards it on every re-run. `lovspor mcp` looks there by default, so
-   with this route you can omit `--corpus-path` entirely — the whole flow is
-   `lovspor fetch-corpus` then `lovspor mcp`.
+2. **`uv`** (or `uvx`) installed locally — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server via `uvx lovspor`, which fetches and runs the published package from PyPI on demand — no manual clone or install.
 
-   Optional: keep it fresh with a daily cron, e.g. add to your crontab:
-
-   ```cron
-   30 5 * * * cd ~/lovverk && git pull --quiet
-   ```
-
-   (The lovspor sync runs daily at 04:00 UTC; pulling at 05:30 UTC catches it.)
-
-2. **`uv`** (or `uvx`) installed locally — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server via `uvx`, which fetches and runs `lovspor` directly from this GitHub repo without you needing to clone or install it manually.
-
-   No PyPI publish required (yet). If you prefer `pip install`, see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
+   `lovspor` is on [PyPI](https://pypi.org/project/lovspor/); `pip install lovspor` works too — see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
 
 3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fifteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
@@ -56,17 +55,13 @@ Add the following to your Claude Desktop config (path varies by OS — see [Clau
   "mcpServers": {
     "lovverk": {
       "command": "uvx",
-      "args": [
-        "--from", "git+https://github.com/bartoszkobylinski/lovspor.git",
-        "lovspor", "mcp",
-        "--corpus-path", "/absolute/path/to/lovverk"
-      ]
+      "args": ["lovspor", "mcp"]
     }
   }
 }
 ```
 
-Replace `/absolute/path/to/lovverk` with your local clone path. Restart Claude Desktop. The server appears in the MCP indicator at the bottom of a new conversation.
+This uses the default `fetch-corpus` cache (`~/.cache/lovverk`). To point at a custom clone instead, add `"--corpus-path", "/absolute/path/to/lovverk"` to `args`. Restart Claude Desktop. The server appears in the MCP indicator at the bottom of a new conversation.
 
 Try it: ask Claude *"Use the lovverk MCP tools to tell me when Skatteloven was last updated."*
 
@@ -75,12 +70,10 @@ Try it: ask Claude *"Use the lovverk MCP tools to tell me when Skatteloven was l
 Same config shape, registered via the Claude Code CLI:
 
 ```bash
-claude mcp add lovverk uvx \
-  --from "git+https://github.com/bartoszkobylinski/lovspor.git" \
-  -- lovspor mcp --corpus-path /absolute/path/to/lovverk
+claude mcp add lovverk -- uvx lovspor mcp
 ```
 
-Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh session — `/mcp` lists the registered servers.
+(Add `--corpus-path <path>` after `mcp` only to override the default cache.) Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh session — `/mcp` lists the registered servers.
 
 ---
 
@@ -363,7 +356,7 @@ Search the **full Markdown body** of every current law for a substring (case-ins
 
 Sorted by `match_count` descending, then by `slug` for stable ordering. The snippet is a ~100-char window around the **first** match (whitespace collapsed, leading/trailing `...` if not at the document boundaries).
 
-**Performance:** the body index is loaded lazily on the first call (~3-5 s for the production 4522-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
+**Performance:** the body index is loaded lazily on the first call (~3-5 s for the production ~5,900-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
 
 ### `semantic_search(query, dataset?, limit?, min_score?)`
 
@@ -576,7 +569,7 @@ Return current state of the local corpus plus freshness metadata. Call this proa
   "manifest_age_days": 0,
   "is_stale": false,
   "schema_compatible": true,
-  "total_current_documents": 4522,
+  "total_current_documents": 5910,
   "head_commit": "0c40d0b",
   "head_commit_date": "2026-04-27",
   "head_commit_subject": "migration: generate history for 4522 documents",
@@ -593,7 +586,7 @@ Return current state of the local corpus plus freshness metadata. Call this proa
   "manifest_age_days": 14,
   "is_stale": true,
   "schema_compatible": true,
-  "total_current_documents": 4520,
+  "total_current_documents": 5908,
   "head_commit": "abc1234",
   "head_commit_date": "2026-04-13",
   "head_commit_subject": "sync: 0 new, 5 changed, 0 removed",
@@ -610,12 +603,12 @@ Return current state of the local corpus plus freshness metadata. Call this proa
   "manifest_age_days": 1,
   "is_stale": true,
   "schema_compatible": false,
-  "total_current_documents": 4522,
+  "total_current_documents": 5910,
   "head_commit": "57c3052",
   "head_commit_date": "2026-04-26",
   "head_commit_subject": "sync: 4522 new, 0 changed, 0 removed",
   "refresh_command": "git -C /Users/you/lovverk pull",
-  "notice": "Corpus manifest is on the pre-Sprint-4 schema (4522 of 4522 current documents have no slug field). MCP search/get tools cannot operate on this schema. Run: git -C /Users/you/lovverk pull to refresh."
+  "notice": "Corpus manifest is on the pre-Sprint-4 schema (5910 of 5910 current documents have no slug field). MCP search/get tools cannot operate on this schema. Run: git -C /Users/you/lovverk pull to refresh."
 }
 ```
 
@@ -677,20 +670,20 @@ The sixteen tools compose: an assistant can stitch together a research workflow 
 
 ## If you prefer pip install
 
-PyPI publish for `lovspor` is **planned** but not yet shipped. Once published, the config simplifies to:
+`lovspor` is published on [PyPI](https://pypi.org/project/lovspor/), so the config is simply:
 
 ```jsonc
 {
   "mcpServers": {
     "lovverk": {
       "command": "uvx",
-      "args": ["lovspor", "mcp", "--corpus-path", "/absolute/path/to/lovverk"]
+      "args": ["lovspor", "mcp"]
     }
   }
 }
 ```
 
-(or `pip install lovspor` + `lovspor mcp ...` if you don't use `uv`). For now, the `--from git+https://...` form above is the primary path.
+(or `pip install lovspor` + `lovspor mcp` if you don't use `uv`). Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache. To pin an unreleased build, use the `--from git+https://...` form instead.
 
 You can also clone `lovspor` and run from source if you want to develop or pin a specific commit:
 
@@ -741,11 +734,11 @@ Corpus drift: the manifest knows about a file that isn't on disk. Run `git pull`
 
 ### "history file missing for ..., corpus may predate the Sprint 5 history layer"
 
-The `history/<slug>.json` file isn't present. If you cloned `lovverk` before the Sprint 5 history migration commit `0c40d0bf` (2026-04-27), `git pull` to fetch it.
+The `history/<slug>.json` file isn't present. If your corpus predates the Sprint 5 history migration commit `0c40d0bf` (2026-04-27), refresh it — re-run `lovspor fetch-corpus` (or `git pull` a manual clone).
 
 ### "corpus path does not exist" / "is missing manifest.json"
 
-The `--corpus-path` argument doesn't point at a valid `lovverk` clone. Verify with `ls /path/to/lovverk/manifest.json` — if absent, re-clone (`git clone https://github.com/bartoszkobylinski/lovverk.git`).
+The corpus (the `fetch-corpus` cache at `~/.cache/lovverk`, or a `--corpus-path` you passed) has no `manifest.json`. Run `lovspor fetch-corpus` to populate the default cache, or verify a custom path with `ls /path/to/lovverk/manifest.json`.
 
 ### "path X escapes corpus root"
 
@@ -755,7 +748,7 @@ Defensive error. Should not happen with a clean `lovverk` clone — the manifest
 
 - Check the client's MCP logs (Claude Desktop: `~/Library/Logs/Claude/mcp*.log` on macOS).
 - Verify `uvx` is on your `PATH` — MCP clients often launch in a minimal shell environment without your full `PATH`.
-- Try the command standalone: `uvx --from git+https://github.com/bartoszkobylinski/lovspor.git lovspor mcp --corpus-path /path/to/lovverk` should start and wait for stdio input.
+- Try the command standalone: `uvx lovspor mcp` should start and wait for stdio input (append `--corpus-path /path/to/lovverk` if you use a custom clone).
 
 ---
 
