@@ -117,9 +117,9 @@ scenarios:
       - kind: tool_called
         tool: get_law_history
     failure_modes:
-      - Current text is not a historical snapshot.
-      - Event history does not expose file contents as of a date.
-    reveals_gap: no time-machine tool
+      - get_law_at exists but cannot reach 2018 — the corpus git history does not extend that far back.
+      - Current text and event history are not a 2018 snapshot.
+    reveals_gap: "historical date predates the corpus's git history"
     roadmap_class: B1
 
   - id: lars_007

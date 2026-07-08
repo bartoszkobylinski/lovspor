@@ -21,7 +21,7 @@ Two repos because two audiences: engine repo is for contributors and portfolio, 
 Build a versioned Markdown corpus of current Norwegian law, auto-updated from Lovdata's public-data API, with every change landing as an individual Git commit. Primary use case: AI/RAG ingestion with auditable provenance.
 
 **Out of scope (deliberately):**
-- Historical point-in-time reconstruction of laws
+- Point-in-time reconstruction from *before* the corpus's git history began (the Sprint 10 time-machine tools — `get_law_at`, `diff_law_versions` — cover dates within the tracked window; pre-corpus reconstruction stays out of scope, see `historiske-lover` in the roadmap)
 - Local/regional regulations (only `sentrale forskrifter`)
 - Full parliamentary enrichment from Stortinget
 - Interpretation or legal advice

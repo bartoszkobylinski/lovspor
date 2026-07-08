@@ -704,7 +704,7 @@ You can also clone `lovspor` and run from source if you want to develop or pin a
 
 ## Limitations
 
-- **Current laws only.** The corpus mirrors `gjeldende-lover` and `gjeldende-sentrale-forskrifter` — laws and central regulations as currently in force. No historical point-in-time reconstruction (a law's text as of 2018-06-01 is *not* directly retrievable; only the current text plus a per-act change-event history are available).
+- **Current laws only, with git-history point-in-time.** The corpus mirrors `gjeldende-lover` and `gjeldende-sentrale-forskrifter` — laws and central regulations as currently in force (no repealed acts). The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) reconstruct an act's text as of a past date, but only back to the **earliest corpus revision** — a law's text as of 2018-06-01 predates lovspor's tracking window and is not retrievable.
 - **No local or municipal regulations.** Only `sentrale forskrifter` are tracked.
 - **`search_laws` matches metadata only.** A law mentioning "klima" in its body but not its title or slug will not be found via `search_laws("klima")` — use `search_body` for that. (The two tools are complementary; `search_laws` is fast, `search_body` is thorough.)
 - **No Stortinget enrichment.** Parliamentary metadata (saker, voteringer, publikasjoner) is not surfaced. See [`docs/decisions.md` §3](decisions.md) for the rationale.

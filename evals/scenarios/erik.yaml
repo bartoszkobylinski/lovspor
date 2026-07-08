@@ -168,9 +168,9 @@ scenarios:
       - kind: tool_called
         tool: get_law_history
     failure_modes:
-      - History shows events but not the historical section text.
-      - Current get_section returns only today's text.
-    reveals_gap: no time-machine tool
+      - get_law_at exists but cannot reach 2020 — it only sees revisions in the corpus's git history, which begins later.
+      - History and current get_section expose events and today's text, not the 2020 snapshot.
+    reveals_gap: "historical date predates the corpus's git history"
     roadmap_class: B1
 
   - id: erik_009
