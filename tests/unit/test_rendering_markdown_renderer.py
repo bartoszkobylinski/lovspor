@@ -604,6 +604,38 @@ def test_render_elides_future_legal_article_subtree() -> None:
     assert "Plasseringsalternativer" not in md
 
 
+def test_render_elides_future_legal_article_subtree_with_body_text() -> None:
+    """Mutation guard: eliding only ``futureLegalArticleHeader`` is not enough.
+    The enclosing ``article.futureLegalArticle`` may also carry direct body
+    paragraphs, and those must never leak into current-law output."""
+    body = (
+        '<article class="legalP">[§ 4-27] skal lyde:</article>'
+        '<article class="futureLegalArticle">'
+        '<article class="legalP">Ny regel som ikke er i kraft ennå.</article>'
+        "</article>"
+        '<article class="legalP">Videre gjeldende tekst.</article>'
+    ).encode()
+    md = render_markdown(_wrap(body))
+    assert md == "[§ 4-27] skal lyde:\n\nVidere gjeldende tekst.\n"
+    assert "ikke er i kraft ennå" not in md
+
+
+def test_render_elides_standalone_future_legal_article_header() -> None:
+    """Mutation guard: ``futureLegalArticleHeader`` can appear on its own, so it
+    must be elided even when no enclosing ``futureLegalArticle`` wrapper is
+    present."""
+    body = (
+        '<span class="futureLegalArticleHeader">'
+        '<span class="legalArticleValue">§ 8 a.</span>'
+        '<span class="legalArticleTitle">Aldersgrenser</span>'
+        "</span>"
+        '<article class="legalP">Gjeldende tekst.</article>'
+    ).encode()
+    md = render_markdown(_wrap(body))
+    assert md == "Gjeldende tekst.\n"
+    assert "Aldersgrenser" not in md
+
+
 def test_render_eliding_future_block_preserves_its_tail_text() -> None:
     """Removing an element must not take its ``.tail`` with it — that text
     belongs to the parent and would otherwise be dropped silently."""
