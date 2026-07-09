@@ -73,7 +73,18 @@ def seed() -> None:
 
 
 @app.command()
-def sync() -> None:
+def sync(
+    force_rerender: bool = typer.Option(
+        False,
+        "--force-rerender",
+        help=(
+            "Re-render every document even when its XML is unchanged, so a "
+            "renderer fix reaches files the change detector would skip forever. "
+            "Byte-identical re-renders are skipped, so only genuinely different "
+            "output is written, embedded, and committed."
+        ),
+    ),
+) -> None:
     """Incremental sync against the current Lovdata public-data tarballs.
 
     Typically invoked by the scheduled workflow. Reads the existing
@@ -81,7 +92,7 @@ def sync() -> None:
     commits only the changed ones.
     """
     settings = Settings.from_env()
-    report = run_sync(settings)
+    report = run_sync(settings, force_rerender=force_rerender)
     typer.echo(
         f"Sync complete at {settings.lovverk_repo_path}: "
         f"{report.new_count} new, "
