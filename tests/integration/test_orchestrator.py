@@ -35,6 +35,7 @@ from lovspor.sources.lovdata import DEFAULT_BASE_URL
 from lovspor.storage.manifest import (
     Manifest,
     ManifestRecord,
+    read_manifest,
     write_manifest,
 )
 from lovspor.sync.orchestrator import (
@@ -4225,3 +4226,123 @@ def test_force_rerender_leaves_renamed_docs_to_the_rename_loop(
     assert report.changed_count == 0
     assert report.unchanged_count == 1
     assert not (corpus / "lover" / "old-slug.md").exists()
+
+
+def _force_rerender_corpus(
+    tmp_path: Path,
+    members: list[tuple[str, bytes]],
+) -> tuple[Path, Path, Path, Path]:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, members)
+    _build_tarball(forskrifter_tar, [])
+    return data_dir, corpus, lover_tar, forskrifter_tar
+
+
+def test_force_rerender_continues_past_a_noop_to_later_documents(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mutation guard (`continue` -> `break`): in a real backfill almost every
+    document is a no-op, so aborting the loop on the first one would silently
+    re-render nothing. The no-op must be skipped, not terminate the scan.
+
+    Also pins that a skipped no-op keeps its prior manifest record intact —
+    `last_seen` and `embedding_hash` must not be disturbed.
+    """
+    data_dir, corpus, lover_tar, forskrifter_tar = _force_rerender_corpus(
+        tmp_path,
+        [
+            ("nl/lov-1.xml", _law_with_section("First", "Alpha body.")),
+            ("nl/lov-2.xml", _law_with_section("Second", "Beta body.")),
+        ],
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus)
+    run_sync(settings)
+    prior = read_manifest(corpus / "manifest.json")
+    first_record_before = prior.documents["lov-1"]
+
+    # Renderer fix that only affects the SECOND document (sorted after the first).
+    real_render = orchestrator_module.render_full_document
+
+    def _partial_fix(xml: bytes, ctx: object) -> str:
+        rendered = real_render(xml, ctx)
+        if ctx.doc_id == "lov-2":  # type: ignore[attr-defined]
+            return rendered + "\nRecovered text.\n"
+        return rendered
+
+    monkeypatch.setattr(orchestrator_module, "render_full_document", _partial_fix)
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    report = run_sync(settings, force_rerender=True)
+
+    assert report.changed_count == 1
+    assert report.unchanged_count == 1
+    # The loop must have reached lov-2 despite lov-1 being a no-op.
+    assert "Recovered text." in (corpus / "lover" / "second.md").read_text(encoding="utf-8")
+    assert "Recovered text." not in (corpus / "lover" / "first.md").read_text(encoding="utf-8")
+
+    after = read_manifest(corpus / "manifest.json")
+    assert after.documents["lov-1"] == first_record_before
+
+
+def test_force_rerender_rewrites_a_document_whose_markdown_file_is_missing(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Mutation guard: a manifest record whose Markdown file is absent is NOT a
+    no-op. The live corpus has 25 such records; classifying them as identical
+    would leave the gap forever."""
+    data_dir, corpus, lover_tar, forskrifter_tar = _force_rerender_corpus(
+        tmp_path,
+        [("nl/lov-1.xml", _law_with_section("First", "Alpha body."))],
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus)
+    run_sync(settings)
+
+    md_path = corpus / "lover" / "first.md"
+    md_path.unlink()
+    subprocess.run(["git", "add", "-A"], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "drop the file"], cwd=corpus, check=True)
+    assert not md_path.exists()
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    report = run_sync(settings, force_rerender=True)
+
+    assert md_path.exists(), "a missing file must be re-rendered, not skipped as a no-op"
+    assert report.changed_count == 1
+
+
+def test_force_rerender_reports_an_unrenderable_document_instead_of_skipping_it(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Mutation guard: an unrenderable doc is not a no-op. It must fall through to
+    `_try_write_one`, which logs the skip and keeps the prior version. Treating it
+    as identical would silently swallow the 35 forskrifter that still fail the
+    lost-content guard."""
+    data_dir, corpus, lover_tar, forskrifter_tar = _force_rerender_corpus(
+        tmp_path,
+        [("nl/lov-1.xml", _law_with_section("First", "Alpha body."))],
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus)
+    run_sync(settings)
+
+    def _always_fails(_xml: bytes, _ctx: object) -> str:
+        raise RenderError("unhandled Lovdata structure")
+
+    monkeypatch.setattr(orchestrator_module, "render_full_document", _always_fails)
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    with caplog.at_level(logging.WARNING):
+        run_sync(settings, force_rerender=True)
+
+    assert "could not render" in caplog.text
+    assert (corpus / "lover" / "first.md").exists()
