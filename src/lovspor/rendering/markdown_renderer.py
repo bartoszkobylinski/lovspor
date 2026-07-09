@@ -28,6 +28,12 @@ Inline elements (inside any rendered text content):
     <a href="url">                          -> [text](url)
     <br>                                    -> hard newline
 
+Not-yet-in-force markup (``futuretitle``, ``futureLegalArticle``,
+``futureLegalArticleHeader``) is elided before the walk: the corpus
+tracks law as *currently* in force, so an amending act's proposed
+provision must not appear as body text, while its operative "``§ N``
+skal lyde:" instructions must.
+
 Unknown tags fall through to "walk children, skip this wrapper". That
 walk (``_render_children``) emits only child *elements*: an element's
 own ``.text`` and each child's ``.tail`` are not rendered. On the
@@ -51,6 +57,14 @@ from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
 _DROPPED_TEXT_SAMPLE = 60
+
+# Lovdata marks enacted-but-not-yet-in-force text with these classes. The corpus
+# tracks law as *currently* in force, so the subtrees are elided before the walk
+# rather than rendered as body text. Lovdata's own en-dash elision marks already
+# stand where content is omitted.
+_NOT_IN_FORCE_CLASSES = frozenset(
+    {"futuretitle", "futureLegalArticle", "futureLegalArticleHeader"},
+)
 
 _INLINE_STRONG = {"strong"}
 _INLINE_EMPHASIS = {"i", "em"}
@@ -132,7 +146,49 @@ def render_markdown(xml_bytes: bytes) -> str:
     main = tree.find(".//main")
     if main is None:
         raise ParseError("no <main> in document")
+    _elide_not_in_force(main)
     return _render_children(main).rstrip() + "\n"
+
+
+def _elide_not_in_force(root: etree._Element) -> None:
+    """Drop the enacted-but-not-yet-in-force subtrees before rendering.
+
+    An amending act carries the provision it *will* install, tagged
+    ``futuretitle`` / ``futureLegalArticle``. Publishing that as body text would
+    put proposed law into a corpus of current law; refusing the whole document
+    would instead lose its operative "``§ N`` skal lyde:" instructions. Elide the
+    proposed subtree and render everything around it.
+
+    The matches are collected before removal: mutating a tree mid-iteration
+    would skip siblings.
+    """
+    for elem in [child for child in root.iter() if _is_not_in_force(child)]:
+        _remove_preserving_tail(elem)
+
+
+def _is_not_in_force(elem: etree._Element) -> bool:
+    classes = (elem.get("class") or "").split()
+    return bool(_NOT_IN_FORCE_CLASSES.intersection(classes))
+
+
+def _remove_preserving_tail(elem: etree._Element) -> None:
+    """Detach ``elem``, keeping its tail — that text belongs to the parent.
+
+    lxml stores text after a close tag on the element itself, so a plain
+    ``parent.remove(child)`` would silently take the following run of law text
+    with it.
+    """
+    parent = elem.getparent()
+    if parent is None:
+        return
+    tail = elem.tail or ""
+    if tail:
+        previous = elem.getprevious()
+        if previous is not None:
+            previous.tail = (previous.tail or "") + tail
+        else:
+            parent.text = (parent.text or "") + tail
+    parent.remove(elem)
 
 
 def _render_element(elem: etree._Element) -> str:

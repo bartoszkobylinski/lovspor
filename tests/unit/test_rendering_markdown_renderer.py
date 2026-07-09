@@ -571,15 +571,60 @@ def test_render_non_paragraph_article_with_mixed_text_and_link() -> None:
     assert md == "Se [skatteforvaltningsloven](lov/2016-05-27-14) for reglene.\n"
 
 
-def test_render_block_level_span_in_section_still_raises() -> None:
-    """Boundary: a block-level ``<span>`` (Lovdata's ``futuretitle``, a proposed
-    chapter title) directly under a ``<section>`` is NOT an article and is still
-    caught by the guard. The sync's per-doc isolation skips such a doc rather
-    than the renderer guessing at proposed-title semantics."""
-    with pytest.raises(RenderError):
+def test_render_elides_futuretitle_instead_of_skipping_the_document() -> None:
+    """Lovdata's ``futuretitle`` is a chapter heading that is enacted but NOT yet
+    in force. The corpus tracks law as *currently* in force, so the proposed title
+    must never reach the body — but refusing the whole document also loses the
+    surrounding operative text. Elide the future subtree, render the rest."""
+    md = render_markdown(
+        _wrap(
+            b'<section class="section"><span class="futuretitle">Kapittel 6A</span>'
+            b'<article class="legalP">I kraft i dag.</article></section>',
+        ),
+    )
+    assert md == "I kraft i dag.\n"
+    assert "Kapittel 6A" not in md
+
+
+def test_render_elides_future_legal_article_subtree() -> None:
+    """``article.futureLegalArticle`` carries a proposed § heading and body. It
+    used to render straight through ``_render_mixed_article``, leaking not-in-force
+    text into the corpus whenever the document happened to render at all."""
+    body = (
+        '<article class="legalP">[§ 4-27] skal lyde:</article>'
+        '<article class="futureLegalArticle">'
+        '<span class="futureLegalArticleHeader">'
+        '<span class="legalArticleValue">§ 4-27</span>'
+        '<span class="legalArticleTitle">Plasseringsalternativer</span>'
+        "</span>"
+        "</article>"
+    ).encode()
+    md = render_markdown(_wrap(body))
+    assert md == "[§ 4-27] skal lyde:\n"
+    assert "Plasseringsalternativer" not in md
+
+
+def test_render_eliding_future_block_preserves_its_tail_text() -> None:
+    """Removing an element must not take its ``.tail`` with it — that text
+    belongs to the parent and would otherwise be dropped silently."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="defaultP">Before'
+            b'<span class="futuretitle">Kapittel 6A</span> after</article>',
+        ),
+    )
+    assert md == "Before after\n"
+    assert "Kapittel 6A" not in md
+
+
+def test_render_block_level_span_without_future_class_still_raises() -> None:
+    """The lost-content guard must stay armed for every wrapper the renderer does
+    not understand. Only the three known ``future*`` classes are elided; anything
+    else carrying block-level text still fails loudly rather than vanishing."""
+    with pytest.raises(RenderError, match="drop block-level text"):
         render_markdown(
             _wrap(
-                b'<section class="section"><span class="futuretitle">Kapittel 6A</span></section>',
+                b'<section class="section"><span class="mysteryClass">Kapittel 6A</span></section>',
             ),
         )
 
