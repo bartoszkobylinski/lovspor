@@ -14,7 +14,7 @@ in the manifest's current set; if it reappears upstream it is classified
 as ``new``, not as a hash diff against the stale removed-snapshot hash.
 """
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -62,4 +62,34 @@ def detect_changes(
         changed=changed_ids,
         removed=removed_ids,
         unchanged=unchanged_ids,
+    )
+
+
+def force_rerender_changeset(
+    changes: ChangeSet,
+    *,
+    exclude: Collection[str],
+) -> ChangeSet:
+    """Reclassify unchanged documents as changed, for a forced re-render.
+
+    A renderer fix leaves upstream XML untouched, so every hash still matches
+    and the corpus keeps serving whatever the renderer produced when it last
+    wrote each file. Promoting ``unchanged`` to ``changed`` is what makes the
+    fix reach the corpus.
+
+    ``exclude`` holds the renamed doc_ids. The rename loop re-renders those at
+    their new path already; promoting them too would write the same document
+    from two plans. They stay in ``unchanged``, which is where
+    ``_carry_unchanged`` and the rename loop both expect to find them.
+
+    ``new`` and ``removed`` are passed through untouched: a forced re-render
+    must not resurrect a tombstone, nor make a corpus-wide deletion look like a
+    corpus-wide rewrite.
+    """
+    promoted = [doc_id for doc_id in changes.unchanged if doc_id not in exclude]
+    return ChangeSet(
+        new=changes.new,
+        changed=sorted(changes.changed + promoted),
+        removed=changes.removed,
+        unchanged=[doc_id for doc_id in changes.unchanged if doc_id in exclude],
     )

@@ -11,7 +11,11 @@ import pytest
 from pydantic import ValidationError
 
 from lovspor.storage.manifest import Manifest, ManifestRecord
-from lovspor.sync.change_detector import ChangeSet, detect_changes
+from lovspor.sync.change_detector import (
+    ChangeSet,
+    detect_changes,
+    force_rerender_changeset,
+)
 
 
 def _record(*, xml_hash: str, status: str = "current") -> ManifestRecord:
@@ -213,3 +217,57 @@ def test_detect_changes_does_not_mutate_inputs() -> None:
     detect_changes(upstream, manifest)
     assert upstream == upstream_before
     assert manifest.documents == docs_before
+
+
+def test_force_rerender_promotes_unchanged_to_changed() -> None:
+    """A renderer fix leaves upstream XML untouched, so every hash still matches
+    and the corpus never picks the fix up. Promotion is what makes it reach disk."""
+    changes = ChangeSet(new=["n"], changed=["c"], removed=["r"], unchanged=["u1", "u2"])
+
+    forced = force_rerender_changeset(changes, exclude=set())
+
+    assert forced.changed == ["c", "u1", "u2"]
+    assert forced.unchanged == []
+    assert forced.new == ["n"]
+    assert forced.removed == ["r"]
+
+
+def test_force_rerender_leaves_renamed_docs_in_unchanged() -> None:
+    """The rename loop already re-renders renamed docs at their new path.
+    Promoting them too would write the same document from two plans."""
+    changes = ChangeSet(new=[], changed=[], removed=[], unchanged=["renamed", "plain"])
+
+    forced = force_rerender_changeset(changes, exclude={"renamed"})
+
+    assert forced.changed == ["plain"]
+    assert forced.unchanged == ["renamed"]
+
+
+def test_force_rerender_does_not_touch_new_or_removed() -> None:
+    """Forcing a re-render must not resurrect a tombstone, nor make a
+    corpus-wide deletion look like a corpus-wide rewrite."""
+    changes = ChangeSet(new=["fresh"], changed=[], removed=["gone"], unchanged=["u"])
+
+    forced = force_rerender_changeset(changes, exclude=set())
+
+    assert forced.new == ["fresh"]
+    assert forced.removed == ["gone"]
+
+
+def test_force_rerender_output_is_sorted_and_disjoint() -> None:
+    """Sorted order is part of ChangeSet's contract; the four lists stay disjoint."""
+    changes = ChangeSet(new=[], changed=["z"], removed=[], unchanged=["a", "m"])
+
+    forced = force_rerender_changeset(changes, exclude=set())
+
+    assert forced.changed == ["a", "m", "z"]
+    assert not set(forced.changed) & set(forced.unchanged)
+
+
+def test_force_rerender_is_idempotent() -> None:
+    changes = ChangeSet(new=[], changed=[], removed=[], unchanged=["a", "b"])
+
+    once = force_rerender_changeset(changes, exclude=set())
+    twice = force_rerender_changeset(once, exclude=set())
+
+    assert once == twice
