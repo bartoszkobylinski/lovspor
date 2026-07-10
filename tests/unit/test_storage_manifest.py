@@ -315,13 +315,16 @@ def test_read_manifest_raises_parse_error_on_invalid_schema(
     assert str(exc_info.value).startswith(f"{path}: invalid manifest schema: ")
 
 
-def test_read_manifest_rejects_extra_record_fields(
+def test_read_manifest_ignores_unknown_record_fields(
     tmp_path: Path,
 ) -> None:
-    """Schema drift in records must surface, not silently pass. Forward
-    compatibility comes via bumping MANIFEST_VERSION in a coordinated
-    way; tolerating unknown fields makes silent semantic mismatch
-    possible."""
+    """A per-record field written by a NEWER engine must be ignored, not
+    rejected, so an older reader (e.g. a cached ``uvx`` MCP build) still loads
+    a forward-compatible manifest. Direct regression for the 0.3.0
+    ``renderer_version`` rollout, which broke every older MCP with a pydantic
+    ``extra_forbidden`` error. Genuinely incompatible changes are gated by
+    ``MANIFEST_VERSION`` instead — see
+    ``test_read_manifest_rejects_unsupported_version``."""
     path = tmp_path / "manifest.json"
     payload = {
         "version": 1,
@@ -334,26 +337,32 @@ def test_read_manifest_rejects_extra_record_fields(
                 "source_dataset": "gjeldende-lover",
                 "last_seen": "2026-04-22T01:31:00+00:00",
                 "status": "current",
-                "future_field": "should be rejected",
+                "future_field": "stamped by a newer engine",
             },
         },
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ParseError, match="invalid manifest schema"):
-        read_manifest(path)
+    manifest = read_manifest(path)
+    record = manifest.documents["x"]
+    assert record.xml_hash == "a"
+    # ignored, not retained: extra="ignore" drops it rather than keeping it
+    assert not hasattr(record, "future_field")
 
 
-def test_read_manifest_rejects_extra_top_level_fields(tmp_path: Path) -> None:
+def test_read_manifest_ignores_unknown_top_level_fields(tmp_path: Path) -> None:
+    """A top-level key written by a newer engine must be ignored, not
+    rejected — same forward-compatibility contract as records."""
     path = tmp_path / "manifest.json"
     payload = {
         "version": 1,
         "generated_at": "2026-04-22T06:00:00+00:00",
         "documents": {},
-        "future_top_level": "should be rejected",
+        "future_top_level": "stamped by a newer engine",
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ParseError, match="invalid manifest schema"):
-        read_manifest(path)
+    manifest = read_manifest(path)
+    assert manifest.documents == {}
+    assert not hasattr(manifest, "future_top_level")
 
 
 def test_read_manifest_rejects_unsupported_version(tmp_path: Path) -> None:
