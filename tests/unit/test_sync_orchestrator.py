@@ -659,6 +659,52 @@ def test_empty_extracted_history_preserves_prior_record_and_files(
     assert writes == []
 
 
+def test_nonempty_history_on_record_with_prior_state_still_updates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The preserve guard fires ONLY on an empty extraction: a doc that has
+    prior history state AND fresh real events must take the new values (a
+    genuine legal change on an already-tracked doc). Pins the guard's `and`
+    against an `or` mutation, which would freeze every tracked doc's history."""
+    prior = _record("doc-3", xml_hash="c" * 64, slug="doc-3").model_copy(
+        update={"total_changes": 3, "last_changed": "2026-05-04"},
+    )
+    fresh_history = HistoryRecord(
+        slug="doc-3",
+        doc_id="doc-3",
+        events=[
+            {
+                "date": "2026-06-01",
+                "commit": "abc123",
+                "type": "updated",
+                "subject": "update(lov): doc-3",
+            },
+        ],
+    )
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "extract_history",
+        lambda **kwargs: fresh_history,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "write_history",
+        lambda record, target_dir: (target_dir / "x.json", target_dir / "x.md"),
+    )
+
+    updated, written = orchestrator_module._generate_and_apply_history(
+        tmp_path,
+        {"doc-3": prior},
+        ["doc-3"],
+    )
+
+    assert updated["doc-3"].total_changes == 1
+    assert updated["doc-3"].last_changed == "2026-06-01"
+    assert len(written) == 2
+
+
 def test_empty_extracted_history_on_record_without_prior_state_stamps_zero(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
