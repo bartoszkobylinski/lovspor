@@ -11,6 +11,7 @@ import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.embeddings.store import write_embeddings
 from lovspor.errors import ConfigError, CorpusStateError, MassRemovalError
 from lovspor.history import HistoryRecord
+from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import LovdataArchive
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
@@ -470,6 +471,7 @@ def test_write_one_renders_document_record_and_optional_embeddings(
         title="Lov 1",
         eu_basis=["32024R0001"],
         embedding_hash="a" * 64,
+        renderer_version=RENDERER_VERSION,
     )
     context = rendered_contexts[0]
     assert context.doc_id == "lov-1"
@@ -536,6 +538,30 @@ def test_write_one_without_embedder_leaves_embedding_hash_none(
 
     assert record.embedding_hash is None
     assert len(paths) == 1  # markdown only, no sidecar
+
+
+def test_write_one_stamps_current_renderer_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every written record carries the renderer version that produced it, so a
+    later renderer bump makes this doc detectably stale."""
+    settings = _settings(tmp_path)
+    upstream = _UpstreamDoc(
+        doc_id="lov-1",
+        source_dataset="gjeldende-lover",
+        xml_bytes=b"<xml/>",
+        xml_hash="a" * 64,
+        slug="slug-1",
+        title="Lov 1",
+        eu_basis=(),
+    )
+    monkeypatch.setattr(orchestrator_module, "render_full_document", lambda *_a: "md")
+    monkeypatch.setattr(orchestrator_module, "write_document", lambda *_a: None)
+
+    record, _paths = _write_one(settings, upstream, datetime(2026, 5, 2, tzinfo=UTC))
+
+    assert record.renderer_version == RENDERER_VERSION
 
 
 def test_needs_sprint9_migration_detects_stale_hash_with_bin_present(

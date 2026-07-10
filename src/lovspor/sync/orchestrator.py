@@ -66,6 +66,7 @@ from lovspor.rendering.document import (
     FrontmatterContext,
     extract_xml_metadata,
 )
+from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.rendering.slug import derive_slug, resolve_collisions
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import LovdataArchive, LovdataClient
@@ -807,6 +808,9 @@ def _write_one(
         # it was built from. No embedder (keyless sync) -> None -> the doc
         # reads stale until the next keyed sync re-embeds it.
         embedding_hash=upstream.xml_hash if embedder is not None else None,
+        # Stamp the renderer that produced this Markdown, so a later renderer
+        # bump makes the doc detectably stale even though its XML is unchanged.
+        renderer_version=RENDERER_VERSION,
     )
     return record, written_paths
 

@@ -129,6 +129,26 @@ def test_manifest_record_embedding_hash_defaults_to_none() -> None:
     assert rec.embedding_hash is None
 
 
+def test_manifest_record_renderer_version_defaults_to_none() -> None:
+    """A record with no renderer_version predates the stamp; sync treats it as
+    stale and re-renders it once."""
+    rec = _record()
+    assert rec.renderer_version is None
+
+
+def test_manifest_record_accepts_renderer_version() -> None:
+    rec = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/x.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 4, 22, 1, 31, tzinfo=UTC),
+        status="current",
+        renderer_version=2,
+    )
+    assert rec.renderer_version == 2
+
+
 def test_manifest_is_frozen() -> None:
     mf = _manifest()
     with pytest.raises(ValidationError):
@@ -400,6 +420,7 @@ def test_read_manifest_legacy_record_without_embedding_hash_loads_none(
     loaded = read_manifest(path)
 
     assert loaded.documents["lov-legacy"].embedding_hash is None
+    assert loaded.documents["lov-legacy"].renderer_version is None
 
 
 def test_removed_status_is_preserved_through_round_trip(

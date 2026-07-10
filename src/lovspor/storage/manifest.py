@@ -48,6 +48,13 @@ class ManifestRecord(BaseModel):
     keyless sync that changed the Markdown but skipped the embedder), the
     sidecar is stale and the embeddings backfill re-embeds the doc.
     Existence-on-disk alone cannot catch a stale-but-present ``.bin``.
+
+    ``renderer_version`` records the ``RENDERER_VERSION`` that produced the
+    Markdown. Change detection keys on the *upstream XML* hash, so a renderer
+    fix leaves the record ``unchanged`` and never reaches it; sync compares this
+    stamp against the current version and re-renders the doc when they differ. A
+    record with ``renderer_version is None`` predates the stamp — treated as
+    stale and re-rendered once, then carrying the current version thereafter.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -64,6 +71,7 @@ class ManifestRecord(BaseModel):
     last_changed: str | None = None
     eu_basis: list[str] | None = None
     embedding_hash: str | None = None
+    renderer_version: int | None = None
 
 
 class Manifest(BaseModel):
