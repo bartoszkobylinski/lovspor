@@ -56,6 +56,20 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
+RENDERER_VERSION = 1
+"""Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
+
+Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
+existing document classified ``unchanged`` and never reaches it — the corpus stays
+frozen on whatever this code produced when each file was last written. Sync
+therefore also re-renders any current document whose stamp is not this value.
+
+BUMP THIS (+1) IN THE SAME COMMIT AS ANY CHANGE TO RENDERED OUTPUT — body or
+frontmatter. Forgetting is a silent corpus bug, not a test failure, so
+``tests/unit/test_rendering_golden.py`` pins the produced bytes against this
+number and goes red when the two drift apart.
+"""
+
 _DROPPED_TEXT_SAMPLE = 60
 
 # Lovdata marks enacted-but-not-yet-in-force text with these classes. The corpus
