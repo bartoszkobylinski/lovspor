@@ -306,6 +306,68 @@ def test_classify_migration_backfill_eu_basis_is_updated() -> None:
     assert event.to_path is None
 
 
+def test_classify_rerender_migration_is_no_event() -> None:
+    """A re-render migration rewrites Markdown from unchanged XML — a renderer
+    fix, not a legal change. It must produce NO history event, or a corpus-wide
+    backfill would stamp thousands of phantom "Content updated" events and
+    corrupt every doc's last_changed."""
+    event = _classify_commit(
+        "cafe042",
+        "2026-07-10T04:00:00Z",
+        "migration: re-render 1991 documents (renderer v2)",
+        ["166\t3\tforskrifter/skiltforskriften.md"],
+    )
+    assert event is None
+
+
+def test_classify_rerender_migration_without_numstat_is_no_event() -> None:
+    event = _classify_commit(
+        "cafe042",
+        "2026-07-10T04:00:00Z",
+        "migration: re-render 12 documents (renderer v3)",
+        [],
+    )
+    assert event is None
+
+
+def test_classify_rerender_prefix_requires_the_exact_verb() -> None:
+    """Only "migration: re-render " is exempt; any other migration subject
+    keeps its Sprint-8 classification (updated)."""
+    event = _classify_commit(
+        "cafe042",
+        "2026-07-10T04:00:00Z",
+        "migration: re-renderish experiment",
+        ["1\t1\tlover/skatteloven.md"],
+    )
+    assert event is not None
+    assert event.type == "updated"
+
+
+def test_parse_events_drops_rerender_commits() -> None:
+    """End-to-end through the git-log parser: the re-render commit vanishes,
+    surrounding legal events survive in order."""
+    raw = (
+        "__COMMIT__\n"
+        "aaa1111\n"
+        "2026-07-10T04:00:00Z\n"
+        "migration: re-render 1991 documents (renderer v2)\n"
+        "166\t3\tforskrifter/skiltforskriften.md\n"
+        "__COMMIT__\n"
+        "bbb2222\n"
+        "2026-06-01T04:00:00Z\n"
+        "update(forskrift): skiltforskriften\n"
+        "5\t2\tforskrifter/skiltforskriften.md\n"
+        "__COMMIT__\n"
+        "ccc3333\n"
+        "2026-05-01T04:00:00Z\n"
+        "add(forskrift): skiltforskriften\n"
+        "40\t0\tforskrifter/skiltforskriften.md\n"
+    )
+    events = _parse_events(raw)
+    assert [event.type for event in events] == ["updated", "added"]
+    assert all(not event.subject.startswith("migration: re-render") for event in events)
+
+
 def test_classify_bulk_sync_no_removals_is_added() -> None:
     """Pre-Sprint-4 bulk subject. With only additions in numstat, treat as add."""
     event = _classify_commit(

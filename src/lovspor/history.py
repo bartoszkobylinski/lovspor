@@ -47,6 +47,7 @@ _PER_DOC_SUBJECT = re.compile(
     r"^(?P<verb>add|update|rename|remove)\((?P<dataset>lov|forskrift)\): ",
 )
 _MIGRATION_RENAME_SUBJECT = re.compile(r"^migration: rename ")
+_RERENDER_SUBJECT = re.compile(r"^migration: re-render ")
 _MIGRATION_SUBJECT = re.compile(r"^migration: ")
 _BULK_SYNC_SUBJECT = re.compile(r"^sync: \d+ new, \d+ changed")
 _BULK_SYNC_REMOVED_COUNT = re.compile(r"(?P<count>\d+) removed")
@@ -233,7 +234,15 @@ def _classify_commit(
     subject: str,
     stat_lines: list[str],
 ) -> HistoryEvent | None:
-    """Map a single git-log block to a ``HistoryEvent``."""
+    """Map a single git-log block to a ``HistoryEvent``.
+
+    Returns ``None`` for commits that are not legal-history events: a
+    ``migration: re-render`` commit rewrites Markdown from unchanged XML (a
+    renderer fix), so it must not surface as a change of the law — no event,
+    no ``last_changed`` bump, no ``total_changes`` increment.
+    """
+    if _RERENDER_SUBJECT.match(subject):
+        return None
     short_sha = sha[:7]
     # Convert the author-timezone %aI instant to a UTC calendar date so
     # history dates agree with the time-machine (get_law_at), which cuts off
