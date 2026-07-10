@@ -42,6 +42,7 @@ Commit strategy (decisions.md §12a + §12d):
 
 import logging
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,7 +77,11 @@ from lovspor.storage.manifest import (
     read_manifest,
     write_manifest,
 )
-from lovspor.sync.change_detector import detect_changes, force_rerender_changeset
+from lovspor.sync.change_detector import (
+    detect_changes,
+    force_rerender_changeset,
+    stale_render_changeset,
+)
 from lovspor.sync.document_io import (
     dataset_dir,
     delete_document,
@@ -115,6 +120,10 @@ class SyncReport(BaseModel):
     changed_count: int
     removed_count: int
     unchanged_count: int
+    # Documents re-rendered from unchanged XML because their renderer stamp was
+    # stale (or force_rerender promoted them) AND the output actually differed.
+    # Distinct from changed_count, which counts real upstream content changes.
+    rerendered_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -250,8 +259,23 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
     # Renames are detected from the *unchanged* partition, so promote only
     # after they are known — and never promote a renamed doc, which the rename
     # loop already re-renders at its new path.
+    real_changed = set(changes.changed)
     if force_rerender:
         changes = force_rerender_changeset(changes, exclude=set(renamed))
+    else:
+        # Auto-heal: a renderer bump leaves every doc's XML — and its
+        # change-detection hash — untouched, so promote the ones still carrying
+        # an old renderer_version stamp. Skipped under force_rerender, which
+        # already promotes everything.
+        changes = stale_render_changeset(
+            changes,
+            prior,
+            current_version=RENDERER_VERSION,
+            exclude=set(renamed),
+        )
+    # Docs promoted purely to re-render (stamp/force), not for a real content
+    # change: their commit must be the history-exempt migration subject.
+    rerender_ids = set(changes.changed) - real_changed
     if not (changes.new or changes.changed or changes.removed or renamed):
         return SyncReport(
             new_count=0,
@@ -323,9 +347,19 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
         prior_record = prior.documents[doc_id]
         upstream_doc = _rerender_upstream(upstream[doc_id], prior_record)
         if _rerender_is_noop(settings, upstream_doc, now, prior_record):
-            # Forced re-render that reproduces the file byte-for-byte: keep the
-            # prior record so last_seen and embedding_hash are not disturbed.
-            new_records[doc_id] = prior_record
+            # Re-render that reproduces the file byte-for-byte: keep the prior
+            # record so last_seen and embedding_hash are not disturbed. But
+            # refresh the renderer stamp when it is stale — otherwise a
+            # stamp-driven promotion would re-render this doc every sync forever
+            # (a renderer bump that did not touch THIS file). Only when it
+            # differs, so force_rerender of an already-current doc adds no
+            # manifest churn.
+            if prior_record.renderer_version != RENDERER_VERSION:
+                new_records[doc_id] = prior_record.model_copy(
+                    update={"renderer_version": RENDERER_VERSION},
+                )
+            else:
+                new_records[doc_id] = prior_record
             rerender_noop_ids.append(doc_id)
             continue
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
@@ -500,24 +534,38 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
             ),
         )
 
-    _commit_with_history(
-        settings,
-        repo=settings.lovverk_repo_path,
-        manifest_path=manifest_path,
-        actions=actions,
-        new_records=new_records,
-        now=now,
-        is_sprint4_migration=_is_migration(prior, renamed),
-        force_bulk_commit=_has_rename_path_overlap(actions),
-    )
+    # Commit only when something actually lands: a document action, or a
+    # manifest change (a stale-stamp refresh on a byte-identical re-render has
+    # no action but does mutate a record). Without this, a force-rerender whose
+    # output is unchanged everywhere would still rewrite the manifest — its
+    # generated_at ticks every run — and commit an empty no-op.
+    if actions or new_records != prior.documents:
+        _commit_with_history(
+            settings,
+            repo=settings.lovverk_repo_path,
+            manifest_path=manifest_path,
+            actions=actions,
+            new_records=new_records,
+            now=now,
+            is_sprint4_migration=_is_migration(prior, renamed),
+            force_bulk_commit=_has_rename_path_overlap(actions),
+            rerender_ids=rerender_ids,
+        )
 
-    # A skipped no-op re-render wrote nothing, so report it as unchanged. The
-    # scheduled workflow reads these counts to decide whether anything happened.
+    # A byte-identical re-render wrote nothing, so report it as unchanged. Of the
+    # docs that DID write, separate real upstream content changes (changed_count)
+    # from stamp/force re-renders (rerendered_count) so the scheduled workflow can
+    # tell a legal update from a corpus-heal. The workflow reads these counts to
+    # decide whether anything happened.
+    noop = set(rerender_noop_ids)
+    wrote_ids = [doc_id for doc_id in changes.changed if doc_id not in noop]
+    rerendered = sum(1 for doc_id in wrote_ids if doc_id in rerender_ids)
     return SyncReport(
         new_count=len(changes.new),
-        changed_count=len(changes.changed) - len(rerender_noop_ids),
+        changed_count=len(wrote_ids) - rerendered,
         removed_count=len(changes.removed),
         unchanged_count=len(changes.unchanged) + len(rerender_noop_ids),
+        rerendered_count=rerendered,
     )
 
 
@@ -1063,6 +1111,7 @@ def _commit_with_history(
     now: datetime,
     is_sprint4_migration: bool,
     force_bulk_commit: bool = False,
+    rerender_ids: Collection[str] = (),
 ) -> None:
     """Mode-aware commit pipeline that bundles per-act history.
 
@@ -1084,22 +1133,45 @@ def _commit_with_history(
     fails to stage with ``pathspec did not match any files``. Bulk
     commit avoids the issue by recording all renames as one atomic
     diff. Production crash 2026-04-30 reproducer.
-    """
-    if not actions:
-        return  # pragma: no cover - run_sync early-returns when nothing changed
 
+    ``rerender_ids`` names the documents promoted purely to re-render on a
+    stale renderer stamp (not a real content change). Their ``update`` actions
+    are peeled off and committed FIRST as one ``migration: re-render N documents
+    (renderer vK)`` commit, the subject the history classifier ignores — so a
+    corpus-wide re-render does not stamp thousands of phantom "Content updated"
+    events. They still ride the shared manifest + INDEX + history tail below, so
+    their renderer_version stamp lands and their history files stay accurate
+    (the exempt commit contributes no event, real prior commits still do).
+
+    Empty ``actions`` is not short-circuited: a sync that only refreshes stale
+    renderer stamps on byte-identical re-renders has no document actions, yet the
+    manifest still needs to persist the new stamps. Every commit below is gated
+    on ``has_staged_changes``, so a truly-empty run writes no commit anyway.
+    """
+    rerender_actions = [a for a in actions if a.action == "update" and a.doc_id in rerender_ids]
+    if rerender_actions:
+        _commit_rerender_bulk(repo, rerender_actions)
+    other_actions = [a for a in actions if a not in rerender_actions]
+
+    # History and the manifest cover EVERY document (re-rendered included); only
+    # the doc-content commit above is split out. target_doc_ids therefore spans
+    # all non-remove actions so re-rendered docs' history regenerates too.
     target_doc_ids = [a.doc_id for a in actions if a.action != "remove"]
 
     if is_sprint4_migration or force_bulk_commit or settings.git_commit_mode == "single":
-        message = _migration_message(actions) if is_sprint4_migration else _single_message(actions)
+        message = (
+            _migration_message(other_actions)
+            if is_sprint4_migration
+            else _single_message(other_actions)
+        )
         manifest = Manifest(generated_at=now, documents=new_records)
         write_manifest(manifest, manifest_path)
         index_paths = [generate_index(repo, dataset, manifest) for dataset in _TRACKED_DATASETS]
-        _commit_bulk(repo, actions, [manifest_path, *index_paths], message)
+        _commit_bulk(repo, other_actions, [manifest_path, *index_paths], message)
         _commit_history_followup(repo, manifest_path, new_records, target_doc_ids, now)
         return
 
-    _commit_per_doc_actions_only(repo, actions)
+    _commit_per_doc_actions_only(repo, other_actions)
     new_records, history_paths = _generate_and_apply_history(repo, new_records, target_doc_ids)
     manifest = Manifest(generated_at=now, documents=new_records)
     write_manifest(manifest, manifest_path)
@@ -1159,6 +1231,23 @@ def _commit_bulk(
     if not has_staged_changes(repo):  # pragma: no cover - defensive
         return
     git_commit_msg(repo, message)
+
+
+def _commit_rerender_bulk(repo: Path, actions: list[_DocAction]) -> None:
+    """Commit the re-rendered documents as one history-exempt migration commit.
+
+    The subject matches the ``^migration: re-render `` prefix the history
+    classifier drops, so re-rendering a frozen-render backlog stamps no phantom
+    "Content updated" event on any document. Markdown + embedding sidecars only;
+    the manifest / INDEX / history tail rides the shared commit afterwards.
+    """
+    all_paths = [p for action in actions for p in action.all_paths_to_stage]
+    git_add(repo, all_paths)
+    if not has_staged_changes(repo):  # pragma: no cover - defensive
+        return
+    git_commit_msg(
+        repo, f"migration: re-render {len(actions)} documents (renderer v{RENDERER_VERSION})"
+    )
 
 
 def _generate_and_apply_history(

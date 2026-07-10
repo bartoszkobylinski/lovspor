@@ -41,7 +41,11 @@ def _record(
     xml_hash: str,
     slug: str,
     status: str = "current",
+    renderer_version: int | None = RENDERER_VERSION,
 ) -> ManifestRecord:
+    # Defaults to the current renderer version: a record as a normal sync writes
+    # it. Pass renderer_version=None to model a pre-stamp/legacy record that the
+    # stale-render promotion should pick up.
     return ManifestRecord(
         doc_type="lov",
         xml_hash=xml_hash,
@@ -52,6 +56,7 @@ def _record(
         slug=slug,
         title=doc_id,
         eu_basis=[],
+        renderer_version=renderer_version,
     )
 
 
@@ -371,7 +376,7 @@ def test_rename_carry_tombstone_and_migration_helpers() -> None:
 
     tombstone = orchestrator_module._tombstone(prior.documents["renamed"])
     assert tombstone == prior.documents["renamed"].model_copy(
-        update={"status": "removed", "eu_basis": None}
+        update={"status": "removed", "eu_basis": None, "renderer_version": None}
     )
 
 
