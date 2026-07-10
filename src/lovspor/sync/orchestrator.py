@@ -75,7 +75,7 @@ from lovspor.storage.manifest import (
     read_manifest,
     write_manifest,
 )
-from lovspor.sync.change_detector import detect_changes
+from lovspor.sync.change_detector import detect_changes, force_rerender_changeset
 from lovspor.sync.document_io import (
     dataset_dir,
     delete_document,
@@ -165,13 +165,21 @@ class _DocAction:
         return (*self.paths, *self.sidecar_paths)
 
 
-def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
+def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:  # noqa: PLR0912, PLR0915
     """Execute a full sync cycle against the configured lovverk repo.
 
     If upstream has no new / changed / removed documents, the manifest
     on disk is not rewritten and no commit is created — the sync is a
     true no-op at the filesystem and git layers. This is the contract
     the scheduled workflow relies on to detect 'nothing to do' runs.
+
+    ``force_rerender`` re-renders every current document even though its XML
+    hash is unchanged, so a renderer fix reaches files the change detector
+    would otherwise skip forever. Documents whose re-render is byte-identical
+    are skipped entirely, so the run stays self-limiting: only genuinely
+    different output is written, embedded, and committed. It is a parameter
+    rather than a ``Settings`` field on purpose — a stray env var must never be
+    able to trigger a corpus-wide rewrite from the scheduled workflow.
     """
     _ensure_corpus_git_repo(settings.lovverk_repo_path)
     _ensure_clean_corpus(settings.lovverk_repo_path)
@@ -238,6 +246,11 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
     changes = detect_changes(upstream_hashes, prior)
 
     renamed = _identify_renames(changes.unchanged, prior, upstream)
+    # Renames are detected from the *unchanged* partition, so promote only
+    # after they are known — and never promote a renamed doc, which the rename
+    # loop already re-renders at its new path.
+    if force_rerender:
+        changes = force_rerender_changeset(changes, exclude=set(renamed))
     if not (changes.new or changes.changed or changes.removed or renamed):
         return SyncReport(
             new_count=0,
@@ -304,9 +317,16 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
     rename_plan: list[tuple[str, Path, Path, tuple[Path, ...], ManifestRecord]] = []
 
     # Phase 1a: write all changed docs.
+    rerender_noop_ids: list[str] = []
     for doc_id in changes.changed:
-        upstream_doc = upstream[doc_id]
         prior_record = prior.documents[doc_id]
+        upstream_doc = _rerender_upstream(upstream[doc_id], prior_record)
+        if _rerender_is_noop(settings, upstream_doc, now, prior_record):
+            # Forced re-render that reproduces the file byte-for-byte: keep the
+            # prior record so last_seen and embedding_hash are not disturbed.
+            new_records[doc_id] = prior_record
+            rerender_noop_ids.append(doc_id)
+            continue
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
         written = _try_write_one(settings, upstream_doc, now, embedder)
         if written is None:
@@ -490,11 +510,13 @@ def run_sync(settings: Settings) -> SyncReport:  # noqa: PLR0912, PLR0915
         force_bulk_commit=_has_rename_path_overlap(actions),
     )
 
+    # A skipped no-op re-render wrote nothing, so report it as unchanged. The
+    # scheduled workflow reads these counts to decide whether anything happened.
     return SyncReport(
         new_count=len(changes.new),
-        changed_count=len(changes.changed),
+        changed_count=len(changes.changed) - len(rerender_noop_ids),
         removed_count=len(changes.removed),
-        unchanged_count=len(changes.unchanged),
+        unchanged_count=len(changes.unchanged) + len(rerender_noop_ids),
     )
 
 
@@ -640,6 +662,61 @@ def _with_retrieved_at(doc: _UpstreamDoc, retrieved_at: datetime) -> _UpstreamDo
     )
 
 
+def _frontmatter_context(upstream: _UpstreamDoc, now: datetime) -> FrontmatterContext:
+    return FrontmatterContext(
+        doc_id=upstream.doc_id,
+        slug=upstream.slug,
+        doc_type=doc_type_for_dataset(upstream.source_dataset),
+        xml_hash=upstream.xml_hash,
+        source_dataset=upstream.source_dataset,
+        retrieved_at=upstream.retrieved_at or now,
+    )
+
+
+def _rerender_upstream(doc: _UpstreamDoc, prior: ManifestRecord) -> _UpstreamDoc:
+    """Preserve ``retrieved_at`` when the upstream XML has not changed.
+
+    Frontmatter ``retrieved_at`` and manifest ``last_seen`` are stamped from the
+    same ``now`` inside ``_write_one``, so reusing the prior ``last_seen``
+    reproduces the timestamp already on disk. Without this a forced re-render
+    restamps every file and the whole corpus churns instead of only the
+    documents the renderer fix actually affects.
+
+    A genuinely changed doc (different hash) keeps ``now``, unchanged behaviour.
+    """
+    if doc.xml_hash != prior.xml_hash:
+        return doc
+    return _with_retrieved_at(doc, prior.last_seen)
+
+
+def _rerender_is_noop(
+    settings: Settings,
+    upstream: _UpstreamDoc,
+    now: datetime,
+    prior: ManifestRecord,
+) -> bool:
+    """True when re-rendering ``upstream`` reproduces the file already on disk.
+
+    Only reachable on a forced re-render, where the upstream hash still matches
+    the manifest. Skipping such a document is what keeps the backfill
+    self-limiting: no write, no embedding call, no commit, and no per-doc
+    history walk for a document the renderer fix does not touch.
+
+    An unrenderable document is not a no-op — it falls through so
+    ``_try_write_one`` logs the skip and leaves the prior version in place.
+    """
+    if upstream.xml_hash != prior.xml_hash:
+        return False
+    path = document_path(settings.lovverk_repo_path, upstream.source_dataset, upstream.slug)
+    if not path.exists():
+        return False
+    try:
+        rendered = render_full_document(upstream.xml_bytes, _frontmatter_context(upstream, now))
+    except (RenderError, ParseError):
+        return False
+    return path.read_text(encoding="utf-8") == rendered
+
+
 def _pick_archive(
     catalogue: dict[str, LovdataArchive],
     filename: str,
@@ -702,15 +779,7 @@ def _write_one(
         upstream.slug,
     )
     doc_type = doc_type_for_dataset(upstream.source_dataset)
-    context = FrontmatterContext(
-        doc_id=upstream.doc_id,
-        slug=upstream.slug,
-        doc_type=doc_type,
-        xml_hash=upstream.xml_hash,
-        source_dataset=upstream.source_dataset,
-        retrieved_at=upstream.retrieved_at or now,
-    )
-    rendered = render_full_document(upstream.xml_bytes, context)
+    rendered = render_full_document(upstream.xml_bytes, _frontmatter_context(upstream, now))
     write_document(path, rendered)
 
     written_paths: list[Path] = [path]
@@ -751,7 +820,8 @@ def _try_write_one(
     """Render+write a doc, or log and return ``None`` if it cannot render.
 
     A single unrenderable doc — an unhandled Lovdata structure such as a
-    ``futuretitle`` span, or malformed XML — must not abort the whole sync.
+    ``<div>`` carrying block-level text, or malformed XML — must not abort the
+    whole sync.
     Returning ``None`` lets the caller skip it, leaving any prior version and
     its manifest record untouched so the change detector retries it next run.
     """

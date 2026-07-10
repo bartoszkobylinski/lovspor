@@ -9,6 +9,7 @@ uv run lovspor --version       # show version
 uv run lovspor info            # project info
 uv run lovspor seed            # initial corpus population (first sync)
 uv run lovspor sync            # incremental update against latest tarballs
+uv run lovspor sync --force-rerender  # re-render every doc, to land a renderer fix (see Maintenance)
 uv run lovspor repair-embeddings  # flag under-embedded docs for re-embed (see Maintenance)
 uv run lovspor fetch-corpus    # clone/update the local lovverk corpus that `lovspor mcp` reads
 uv run lovspor mcp             # serve the corpus to AI assistants over MCP (stdio)
@@ -28,6 +29,25 @@ OPENAI_API_KEY=sk-... uv run lovspor sync  # Sprint 9 backfill re-embeds exactly
 ```
 
 It is idempotent — a no-op with no commit once every embedding matches its sections. When last run (2026-07-07) the affected set was ~2,333 acts (~$0.57 one-time at `text-embedding-3-large` pricing); that backfill has since completed. The churn is `.bin` rewrites only, markdown is untouched.
+
+### Maintenance: `sync --force-rerender`
+
+Change detection is driven entirely by the upstream XML hash. A **renderer** fix changes no XML, so every document stays `unchanged` and the corpus keeps serving whatever the renderer produced when it last wrote each file. Such a document never self-heals.
+
+`sync --force-rerender` re-renders every current document regardless of hash:
+
+```bash
+uv run lovspor sync --force-rerender
+```
+
+It is **self-limiting**. A document whose re-render is byte-identical is skipped outright — not written, not embedded, not committed — because `retrieved_at` is carried over from the prior manifest record instead of being restamped. Only genuinely different output reaches git. In practice a corpus-wide run touches the affected documents and nothing else.
+
+Two things to know before running it:
+
+- **Cost.** Embeddings are computed inside `_write_one`, so every document that *does* change is re-embedded. Budget accordingly, or run without `OPENAI_API_KEY` and let the Sprint 9 backfill re-embed on the next keyed sync.
+- **Commit volume.** In the default `per-document` mode each changed document gets its own commit plus a per-doc history walk. For a large backfill, prefer `LOVSPOR_GIT_COMMIT_MODE=single` to land one bulk commit.
+
+It is a CLI flag and a `run_sync` parameter, never a `Settings`/env field — a stray environment variable must not be able to rewrite the whole corpus from the scheduled workflow.
 
 ### Required environment
 
@@ -125,6 +145,8 @@ The keys live in GitHub now; you don't need them locally unless you want to debu
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
+
+`sync --force-rerender` preserves that property when the renderer has not changed: every document re-renders byte-identically, is skipped, and reports as `unchanged` — no commits. `test_force_rerender_is_a_noop_when_render_output_is_unchanged` asserts commit-count parity and a clean working tree.
 
 ## Recovery from a bad sync
 

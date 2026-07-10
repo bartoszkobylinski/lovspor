@@ -179,12 +179,46 @@ def test_sync_invokes_run_sync_and_reports_counts(
         removed_count=1,
         unchanged_count=774,
     )
-    monkeypatch.setattr("lovspor.cli.run_sync", lambda _settings: canned)
+    seen: dict[str, object] = {}
+
+    def _fake(settings: object, *, force_rerender: bool = False) -> SyncReport:
+        seen["force_rerender"] = force_rerender
+        return canned
+
+    monkeypatch.setattr("lovspor.cli.run_sync", _fake)
     result = runner.invoke(app, ["sync"])
     assert result.exit_code == 0
+    assert seen["force_rerender"] is False
     assert result.stdout == (
         f"Sync complete at {tmp_path}: 2 new, 5 changed, 1 removed, 774 unchanged.\n"
     )
+
+
+def test_sync_force_rerender_flag_reaches_run_sync(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: object,
+) -> None:
+    """The corpus-wide rewrite must be opt-in per invocation. It is a CLI flag,
+    not a Settings/env field, so a stray env var can never make the scheduled
+    workflow rewrite every document."""
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOVSPOR_OUTPUT_REPO_PATH", str(tmp_path))
+    monkeypatch.setenv("LOVSPOR_FORCE_RERENDER", "1")
+    canned = SyncReport(new_count=0, changed_count=1, removed_count=0, unchanged_count=0)
+    seen: dict[str, object] = {}
+
+    def _fake(settings: object, *, force_rerender: bool = False) -> SyncReport:
+        seen["force_rerender"] = force_rerender
+        return canned
+
+    monkeypatch.setattr("lovspor.cli.run_sync", _fake)
+
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+    assert seen["force_rerender"] is False, "env var must not enable a corpus-wide rewrite"
+
+    assert runner.invoke(app, ["sync", "--force-rerender"]).exit_code == 0
+    assert seen["force_rerender"] is True
 
 
 def test_sync_surfaces_config_error_on_missing_env(
