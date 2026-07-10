@@ -15,10 +15,16 @@ from lovspor.sync.change_detector import (
     ChangeSet,
     detect_changes,
     force_rerender_changeset,
+    stale_render_changeset,
 )
 
 
-def _record(*, xml_hash: str, status: str = "current") -> ManifestRecord:
+def _record(
+    *,
+    xml_hash: str,
+    status: str = "current",
+    renderer_version: int | None = None,
+) -> ManifestRecord:
     return ManifestRecord(
         doc_type="lov",
         xml_hash=xml_hash,
@@ -26,6 +32,7 @@ def _record(*, xml_hash: str, status: str = "current") -> ManifestRecord:
         source_dataset="gjeldende-lover",
         last_seen=datetime(2026, 4, 22, 1, 31, tzinfo=UTC),
         status=status,
+        renderer_version=renderer_version,
     )
 
 
@@ -271,3 +278,110 @@ def test_force_rerender_is_idempotent() -> None:
     twice = force_rerender_changeset(once, exclude=set())
 
     assert once == twice
+
+
+def test_stale_render_promotes_only_stale_stamped_unchanged() -> None:
+    """A renderer bump makes docs stale without touching their XML. Only the
+    unchanged docs whose stamp differs from the current version are promoted;
+    docs already on the current version stay unchanged (nothing to re-render)."""
+    changes = ChangeSet(new=["n"], changed=["c"], removed=["r"], unchanged=["old", "cur"])
+    manifest = _manifest(
+        {
+            "old": _record(xml_hash="a" * 64, renderer_version=1),
+            "cur": _record(xml_hash="b" * 64, renderer_version=2),
+        },
+    )
+
+    stale = stale_render_changeset(changes, manifest, current_version=2, exclude=set())
+
+    assert stale.changed == ["c", "old"]
+    assert stale.unchanged == ["cur"]
+    assert stale.new == ["n"]
+    assert stale.removed == ["r"]
+
+
+def test_stale_render_treats_none_stamp_as_stale() -> None:
+    """A record predating the stamp (renderer_version is None) is stale and
+    re-rendered once."""
+    changes = ChangeSet(new=[], changed=[], removed=[], unchanged=["legacy"])
+    manifest = _manifest({"legacy": _record(xml_hash="a" * 64, renderer_version=None)})
+
+    stale = stale_render_changeset(changes, manifest, current_version=1, exclude=set())
+
+    assert stale.changed == ["legacy"]
+    assert stale.unchanged == []
+
+
+def test_stale_render_excludes_renamed() -> None:
+    """Renamed docs are re-rendered at their new path by the rename loop, so
+    they must not be promoted here even when their stamp is stale."""
+    changes = ChangeSet(new=[], changed=[], removed=[], unchanged=["renamed", "plain"])
+    manifest = _manifest(
+        {
+            "renamed": _record(xml_hash="a" * 64, renderer_version=None),
+            "plain": _record(xml_hash="b" * 64, renderer_version=None),
+        },
+    )
+
+    stale = stale_render_changeset(changes, manifest, current_version=1, exclude={"renamed"})
+
+    assert stale.changed == ["plain"]
+    assert stale.unchanged == ["renamed"]
+
+
+def test_stale_render_does_not_touch_new_or_removed() -> None:
+    changes = ChangeSet(new=["fresh"], changed=[], removed=["gone"], unchanged=["u"])
+    manifest = _manifest({"u": _record(xml_hash="a" * 64, renderer_version=1)})
+
+    stale = stale_render_changeset(changes, manifest, current_version=1, exclude=set())
+
+    assert stale.new == ["fresh"]
+    assert stale.removed == ["gone"]
+    assert stale.changed == []
+    assert stale.unchanged == ["u"]
+
+
+def test_stale_render_output_is_sorted_and_disjoint() -> None:
+    changes = ChangeSet(new=[], changed=["z"], removed=[], unchanged=["m", "a"])
+    manifest = _manifest(
+        {
+            "m": _record(xml_hash="a" * 64, renderer_version=None),
+            "a": _record(xml_hash="b" * 64, renderer_version=None),
+        },
+    )
+
+    stale = stale_render_changeset(changes, manifest, current_version=1, exclude=set())
+
+    assert stale.changed == ["a", "m", "z"]
+    assert not set(stale.changed) & set(stale.unchanged)
+
+
+def test_stale_render_is_idempotent_after_promotion() -> None:
+    """Once promoted and (conceptually) re-rendered to the current version, a
+    second pass with everything current promotes nothing."""
+    changes = ChangeSet(new=[], changed=[], removed=[], unchanged=["a", "b"])
+    all_current = _manifest(
+        {
+            "a": _record(xml_hash="a" * 64, renderer_version=3),
+            "b": _record(xml_hash="b" * 64, renderer_version=3),
+        },
+    )
+
+    stale = stale_render_changeset(changes, all_current, current_version=3, exclude=set())
+
+    assert stale.changed == []
+    assert stale.unchanged == ["a", "b"]
+
+
+def test_stale_render_missing_manifest_record_is_not_promoted() -> None:
+    """A doc in unchanged but absent from the manifest cannot be judged stale;
+    leave it unchanged rather than guessing (defensive — detect_changes keeps
+    unchanged and manifest.current in lockstep, but the transform must not
+    KeyError if that ever drifts)."""
+    changes = ChangeSet(new=[], changed=[], removed=[], unchanged=["ghost"])
+    manifest = _manifest({})
+
+    stale = stale_render_changeset(changes, manifest, current_version=1, exclude=set())
+
+    assert stale.changed == []
+    assert stale.unchanged == ["ghost"]
