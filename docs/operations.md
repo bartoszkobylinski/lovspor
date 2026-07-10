@@ -30,22 +30,30 @@ OPENAI_API_KEY=sk-... uv run lovspor sync  # Sprint 9 backfill re-embeds exactly
 
 It is idempotent — a no-op with no commit once every embedding matches its sections. When last run (2026-07-07) the affected set was ~2,333 acts (~$0.57 one-time at `text-embedding-3-large` pricing); that backfill has since completed. The churn is `.bin` rewrites only, markdown is untouched.
 
+### Renderer versioning and self-healing re-renders
+
+Change detection is driven entirely by the upstream XML hash. A **renderer** fix changes no XML, so every document stays `unchanged` and the corpus keeps serving whatever the renderer produced when it last wrote each file.
+
+Every rendered record carries a `renderer_version` stamp (`ManifestRecord.renderer_version`, set from `RENDERER_VERSION` in `rendering/markdown_renderer.py`). When you change what the renderer emits, **bump `RENDERER_VERSION` in the same commit** — `tests/unit/test_rendering_golden.py` pins the output bytes to the version and fails if you forget. The scheduled sync then compares each current document's stamp against the code's version and re-renders any that are stale, so a renderer fix reaches the frozen backlog **on the next ordinary nightly run — no manual step**.
+
+The re-rendered documents are committed as one `migration: re-render N documents (renderer vK)` commit, whose subject the history classifier ignores (a re-render is not a legal change), so healing thousands of documents adds **no** phantom "Content updated" events and leaves every `last_changed` untouched. A document whose re-render is byte-identical (a bump whose fix did not touch it) is not committed; only its stamp is refreshed in the manifest so it is not re-promoted every run. `rerendered_count` in the sync report is separate from `changed_count`.
+
+Cost: re-rendered documents are re-embedded (embeddings derive from Markdown). A corpus-wide heal is a one-time cost the first sync after the bumped release ships — run it keyed, or let the Sprint 9 backfill re-embed on the next keyed sync.
+
 ### Maintenance: `sync --force-rerender`
 
-Change detection is driven entirely by the upstream XML hash. A **renderer** fix changes no XML, so every document stays `unchanged` and the corpus keeps serving whatever the renderer produced when it last wrote each file. Such a document never self-heals.
-
-`sync --force-rerender` re-renders every current document regardless of hash:
+`sync --force-rerender` re-renders **every** current document regardless of stamp or hash — the manual escape hatch for when you want to force the whole corpus through the current renderer without bumping the version (e.g. verifying a fix, or after an aborted heal):
 
 ```bash
 uv run lovspor sync --force-rerender
 ```
 
-It is **self-limiting**. A document whose re-render is byte-identical is skipped outright — not written, not embedded, not committed — because `retrieved_at` is carried over from the prior manifest record instead of being restamped. Only genuinely different output reaches git. In practice a corpus-wide run touches the affected documents and nothing else.
+It is **self-limiting**. A document whose re-render is byte-identical is skipped outright — not written, not embedded, not committed — because `retrieved_at` is carried over from the prior manifest record instead of being restamped. Only genuinely different output reaches git. Like the automatic heal, forced re-renders land under the `migration: re-render …` subject and report as `rerendered_count`, not `changed_count`.
 
 Two things to know before running it:
 
 - **Cost.** Embeddings are computed inside `_write_one`, so every document that *does* change is re-embedded. Budget accordingly, or run without `OPENAI_API_KEY` and let the Sprint 9 backfill re-embed on the next keyed sync.
-- **Commit volume.** In the default `per-document` mode each changed document gets its own commit plus a per-doc history walk. For a large backfill, prefer `LOVSPOR_GIT_COMMIT_MODE=single` to land one bulk commit.
+- **Commit volume.** The re-rendered documents land in one bulk `migration: re-render …` commit followed by the manifest/index/history commit; use `LOVSPOR_GIT_COMMIT_MODE=single` to keep any accompanying real changes to one commit too.
 
 It is a CLI flag and a `run_sync` parameter, never a `Settings`/env field — a stray environment variable must not be able to rewrite the whole corpus from the scheduled workflow.
 

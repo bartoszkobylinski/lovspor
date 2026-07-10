@@ -84,13 +84,17 @@ defaults) — the XML cannot supply provenance, so the caller provides it.
 | `last_changed` | `str \| None` | `None` |
 | `eu_basis` | `list[str] \| None` | `None` |
 | `embedding_hash` | `str \| None` | `None` |
+| `renderer_version` | `int \| None` | `None` |
 
 The optional fields default to `None` for backward compatibility with older-sprint
 manifests. `embedding_hash` records the `xml_hash` the doc's `.bin` was built from;
-`None` or a mismatch means the embeddings are stale and get rebuilt. A `removed`
-record is a **tombstone** — `status` is flipped to `"removed"`, `xml_hash` /
-`markdown_path` / `last_seen` / `slug` / `title` are kept, and
-`total_changes` / `last_changed` / `eu_basis` / `embedding_hash` revert to `None`.
+`None` or a mismatch means the embeddings are stale and get rebuilt. `renderer_version`
+records the `RENDERER_VERSION` that produced the Markdown; `None` or a mismatch means the
+renderer has moved on and the doc is re-rendered on the next sync (see
+`docs/operations.md`). A `removed` record is a **tombstone** — `status` is flipped to
+`"removed"`, `xml_hash` / `markdown_path` / `last_seen` / `slug` / `title` are kept, and
+`total_changes` / `last_changed` / `eu_basis` / `embedding_hash` / `renderer_version`
+revert to `None`.
 
 ### History
 
@@ -181,7 +185,8 @@ deterministic, keys sorted, Norwegian characters literal.
       "total_changes": 12,             // int | null
       "last_changed": "2026-04-15",    // ISO date str | null
       "eu_basis": ["32016R0679"],      // list[str] | null
-      "embedding_hash": "<hex>"        // str | null; == xml_hash when fresh
+      "embedding_hash": "<hex>",       // str | null; == xml_hash when fresh
+      "renderer_version": 1            // int | null; == RENDERER_VERSION when fresh
     }
   }
 }
