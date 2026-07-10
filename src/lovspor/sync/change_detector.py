@@ -93,3 +93,46 @@ def force_rerender_changeset(
         removed=changes.removed,
         unchanged=[doc_id for doc_id in changes.unchanged if doc_id in exclude],
     )
+
+
+def stale_render_changeset(
+    changes: ChangeSet,
+    manifest: Manifest,
+    *,
+    current_version: int,
+    exclude: Collection[str],
+) -> ChangeSet:
+    """Promote unchanged documents whose renderer stamp is stale to ``changed``.
+
+    The targeted counterpart of ``force_rerender_changeset``: instead of
+    re-rendering every unchanged document, promote only those whose manifest
+    ``renderer_version`` differs from ``current_version`` (``None`` — a record
+    predating the stamp — counts as stale). This is what lets a scheduled sync
+    self-heal after a renderer bump without a corpus-wide rewrite, so only the
+    documents an old renderer actually touched are rewritten.
+
+    ``exclude`` holds the renamed doc_ids, which the rename loop already
+    re-renders at their new path; ``new`` and ``removed`` pass through untouched
+    — same invariants as ``force_rerender_changeset``. A doc in ``unchanged``
+    but absent from the manifest is left unchanged rather than guessed stale
+    (``detect_changes`` keeps the two in lockstep; this only guards drift).
+    """
+    promoted = [
+        doc_id
+        for doc_id in changes.unchanged
+        if doc_id not in exclude and _render_is_stale(manifest, doc_id, current_version)
+    ]
+    promoted_set = set(promoted)
+    return ChangeSet(
+        new=changes.new,
+        changed=sorted(changes.changed + promoted),
+        removed=changes.removed,
+        unchanged=[doc_id for doc_id in changes.unchanged if doc_id not in promoted_set],
+    )
+
+
+def _render_is_stale(manifest: Manifest, doc_id: str, current_version: int) -> bool:
+    record = manifest.documents.get(doc_id)
+    if record is None:
+        return False
+    return record.renderer_version != current_version

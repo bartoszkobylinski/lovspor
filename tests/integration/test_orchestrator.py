@@ -4109,7 +4109,9 @@ def test_force_rerender_rewrites_documents_whose_render_changed(
         force_rerender=True,
     )
 
-    assert report.changed_count == 1
+    # A re-render is not a content change: counted as rerendered, not changed.
+    assert report.rerendered_count == 1
+    assert report.changed_count == 0
     assert report.unchanged_count == 0
     assert "Recovered text." in md_path.read_text(encoding="utf-8")
     assert _git_commit_count(corpus) > commits_before
@@ -4280,7 +4282,10 @@ def test_force_rerender_continues_past_a_noop_to_later_documents(
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     report = run_sync(settings, force_rerender=True)
 
-    assert report.changed_count == 1
+    # lov-1 re-renders byte-identical (unchanged); lov-2 re-renders new bytes
+    # (rerendered). Neither is a content change.
+    assert report.rerendered_count == 1
+    assert report.changed_count == 0
     assert report.unchanged_count == 1
     # The loop must have reached lov-2 despite lov-1 being a no-op.
     assert "Recovered text." in (corpus / "lover" / "second.md").read_text(encoding="utf-8")
@@ -4315,7 +4320,8 @@ def test_force_rerender_rewrites_a_document_whose_markdown_file_is_missing(
     report = run_sync(settings, force_rerender=True)
 
     assert md_path.exists(), "a missing file must be re-rendered, not skipped as a no-op"
-    assert report.changed_count == 1
+    assert report.rerendered_count == 1
+    assert report.changed_count == 0
 
 
 def test_force_rerender_reports_an_unrenderable_document_instead_of_skipping_it(
@@ -4346,3 +4352,122 @@ def test_force_rerender_reports_an_unrenderable_document_instead_of_skipping_it(
 
     assert "could not render" in caplog.text
     assert (corpus / "lover" / "first.md").exists()
+
+
+def test_renderer_bump_self_heals_on_a_normal_sync(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point of the stamp: after a renderer fix + version bump, a
+    PLAIN scheduled sync (no --force-rerender) re-renders the frozen document,
+    lands it under the history-exempt migration subject, and does NOT record it
+    as a legal change."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_extra("Skattie", "body"))])
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+    md_path = corpus / "lover" / "skattie.md"
+    changed_before = read_manifest(corpus / "manifest.json").documents["lov-1"].last_changed
+
+    # A renderer fix ships: bump the stamp AND change the output. Same XML in.
+    real_render = orchestrator_module.render_full_document
+    monkeypatch.setattr(orchestrator_module, "RENDERER_VERSION", 2)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "render_full_document",
+        lambda xml, ctx: real_render(xml, ctx) + "Recovered sign catalogue.\n",
+    )
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert report.rerendered_count == 1
+    assert report.changed_count == 0
+    assert "Recovered sign catalogue." in md_path.read_text(encoding="utf-8")
+
+    log = _git_log_subjects(corpus)
+    assert "migration: re-render 1 documents (renderer v2)" in log
+    assert "update(lov): skattie" not in log  # no phantom content-change commit
+
+    record = read_manifest(corpus / "manifest.json").documents["lov-1"]
+    assert record.renderer_version == 2
+    assert record.last_changed == changed_before  # no phantom legal-change bump
+
+    payload = json.loads((corpus / "lover" / "history" / "skattie.json").read_text("utf-8"))
+    assert [event["type"] for event in payload["events"]] == ["added"]
+
+
+def test_second_sync_after_heal_is_a_true_noop(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once healed to the current stamp, an unchanged corpus re-syncs to
+    nothing: no promotion, no commit."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_extra("Skattie", "body"))])
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+    commits_after_first = _git_commit_count(corpus)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert report.new_count == 0
+    assert report.changed_count == 0
+    assert report.removed_count == 0
+    assert report.unchanged_count == 1
+    assert report.rerendered_count == 0
+    assert _git_commit_count(corpus) == commits_after_first
+
+
+def test_renderer_bump_with_identical_output_restamps_without_a_rerender_commit(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A version bump whose fix does not touch THIS document's output: the doc
+    re-renders byte-identical, so there is no re-render commit, but its stamp
+    is refreshed via a manifest update so it is not re-promoted every sync."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_extra("Skattie", "body"))])
+    _build_tarball(forskrifter_tar, [])
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    # Bump the version but leave render output untouched.
+    monkeypatch.setattr(orchestrator_module, "RENDERER_VERSION", 2)
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert report.rerendered_count == 0
+    assert report.unchanged_count == 1
+    log = _git_log_subjects(corpus)
+    assert "migration: re-render" not in log  # byte-identical: no doc commit
+    assert read_manifest(corpus / "manifest.json").documents["lov-1"].renderer_version == 2
+
+    # And the refreshed stamp makes the NEXT sync a true no-op.
+    commits_before = _git_commit_count(corpus)
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    third = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+    assert third.unchanged_count == 1
+    assert third.rerendered_count == 0
+    assert _git_commit_count(corpus) == commits_before
