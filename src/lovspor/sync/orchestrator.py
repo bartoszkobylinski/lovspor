@@ -1114,6 +1114,12 @@ def _generate_and_apply_history(
             doc_id=doc_id,
             slug=record.slug,
         )
+        if not history.events and record.total_changes is not None:
+            # An empty extraction can only mean every commit touching the
+            # file is history-exempt (e.g. "migration: re-render"). Never
+            # let that erase previously recorded legal-history state or
+            # overwrite the doc's history files with an empty record.
+            continue
         history_target_dir = dataset_dir(repo, record.source_dataset)
         json_path, md_path = write_history(history, history_target_dir)
         written_paths.extend([json_path, md_path])

@@ -620,6 +620,123 @@ def test_record_with_history_and_generate_history_skip_rules(
     assert updated["legacy"] == legacy
 
 
+def test_empty_extracted_history_preserves_prior_record_and_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty extraction can only mean every commit touching the file is
+    history-exempt (e.g. 'migration: re-render'). It must never erase the
+    previously recorded total_changes / last_changed, nor overwrite the
+    doc's history files with an empty record."""
+    prior = _record("doc-1", xml_hash="a" * 64, slug="doc-1").model_copy(
+        update={"total_changes": 3, "last_changed": "2026-05-04"},
+    )
+    empty_history = HistoryRecord(slug="doc-1", doc_id="doc-1", events=[])
+    writes: list[str] = []
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "extract_history",
+        lambda **kwargs: empty_history,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "write_history",
+        lambda record, target_dir: (
+            writes.append(record.slug) or (target_dir / "x.json", target_dir / "x.md")
+        ),
+    )
+
+    updated, written = orchestrator_module._generate_and_apply_history(
+        tmp_path,
+        {"doc-1": prior},
+        ["doc-1"],
+    )
+
+    assert updated["doc-1"].total_changes == 3
+    assert updated["doc-1"].last_changed == "2026-05-04"
+    assert written == []
+    assert writes == []
+
+
+def test_nonempty_history_on_record_with_prior_state_still_updates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The preserve guard fires ONLY on an empty extraction: a doc that has
+    prior history state AND fresh real events must take the new values (a
+    genuine legal change on an already-tracked doc). Pins the guard's `and`
+    against an `or` mutation, which would freeze every tracked doc's history."""
+    prior = _record("doc-3", xml_hash="c" * 64, slug="doc-3").model_copy(
+        update={"total_changes": 3, "last_changed": "2026-05-04"},
+    )
+    fresh_history = HistoryRecord(
+        slug="doc-3",
+        doc_id="doc-3",
+        events=[
+            {
+                "date": "2026-06-01",
+                "commit": "abc123",
+                "type": "updated",
+                "subject": "update(lov): doc-3",
+            },
+        ],
+    )
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "extract_history",
+        lambda **kwargs: fresh_history,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "write_history",
+        lambda record, target_dir: (target_dir / "x.json", target_dir / "x.md"),
+    )
+
+    updated, written = orchestrator_module._generate_and_apply_history(
+        tmp_path,
+        {"doc-3": prior},
+        ["doc-3"],
+    )
+
+    assert updated["doc-3"].total_changes == 1
+    assert updated["doc-3"].last_changed == "2026-06-01"
+    assert len(written) == 2
+
+
+def test_empty_extracted_history_on_record_without_prior_state_stamps_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Boundary of the preserve guard: a record that never had history
+    applied (total_changes is None) takes the honest empty stamp."""
+    fresh = _record("doc-2", xml_hash="b" * 64, slug="doc-2")
+    assert fresh.total_changes is None
+    empty_history = HistoryRecord(slug="doc-2", doc_id="doc-2", events=[])
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "extract_history",
+        lambda **kwargs: empty_history,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "write_history",
+        lambda record, target_dir: (target_dir / "x.json", target_dir / "x.md"),
+    )
+
+    updated, written = orchestrator_module._generate_and_apply_history(
+        tmp_path,
+        {"doc-2": fresh},
+        ["doc-2"],
+    )
+
+    assert updated["doc-2"].total_changes == 0
+    assert updated["doc-2"].last_changed is None
+    assert len(written) == 2
+
+
 def test_commit_with_history_bulk_path_writes_manifest_indexes_and_followup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
