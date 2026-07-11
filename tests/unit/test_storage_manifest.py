@@ -349,6 +349,75 @@ def test_read_manifest_ignores_unknown_record_fields(
     assert not hasattr(record, "future_field")
 
 
+def test_read_manifest_drops_unknown_record_fields_on_round_trip(
+    tmp_path: Path,
+) -> None:
+    """Unknown record fields must be dropped, not retained or re-emitted on
+    write; round-tripping through the model must sanitize the on-disk
+    manifest."""
+    path = tmp_path / "manifest.json"
+    payload = {
+        "version": 1,
+        "generated_at": "2026-04-22T06:00:00+00:00",
+        "documents": {
+            "x": {
+                "doc_type": "lov",
+                "xml_hash": "a",
+                "markdown_path": "lover/x.md",
+                "source_dataset": "gjeldende-lover",
+                "last_seen": "2026-04-22T01:31:00+00:00",
+                "status": "current",
+                "renderer_version": 2,
+                "future_field": "stamped by a newer engine",
+            },
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    manifest = read_manifest(path)
+    record = manifest.documents["x"]
+
+    assert record.model_dump(mode="json") == {
+        "doc_type": "lov",
+        "xml_hash": "a",
+        "markdown_path": "lover/x.md",
+        "source_dataset": "gjeldende-lover",
+        "last_seen": "2026-04-22T01:31:00Z",
+        "status": "current",
+        "slug": None,
+        "title": None,
+        "total_changes": None,
+        "last_changed": None,
+        "eu_basis": None,
+        "embedding_hash": None,
+        "renderer_version": 2,
+    }
+
+    write_manifest(manifest, path)
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "generated_at": "2026-04-22T06:00:00Z",
+        "documents": {
+            "x": {
+                "doc_type": "lov",
+                "xml_hash": "a",
+                "markdown_path": "lover/x.md",
+                "source_dataset": "gjeldende-lover",
+                "last_seen": "2026-04-22T01:31:00Z",
+                "status": "current",
+                "slug": None,
+                "title": None,
+                "total_changes": None,
+                "last_changed": None,
+                "eu_basis": None,
+                "embedding_hash": None,
+                "renderer_version": 2,
+            },
+        },
+    }
+
+
 def test_read_manifest_ignores_unknown_top_level_fields(tmp_path: Path) -> None:
     """A top-level key written by a newer engine must be ignored, not
     rejected — same forward-compatibility contract as records."""
@@ -363,6 +432,71 @@ def test_read_manifest_ignores_unknown_top_level_fields(tmp_path: Path) -> None:
     manifest = read_manifest(path)
     assert manifest.documents == {}
     assert not hasattr(manifest, "future_top_level")
+
+
+def test_read_manifest_drops_unknown_top_level_fields_on_round_trip(
+    tmp_path: Path,
+) -> None:
+    """Unknown top-level fields must be ignored without being written back to
+    disk on the next deterministic manifest write."""
+    path = tmp_path / "manifest.json"
+    payload = {
+        "version": 1,
+        "generated_at": "2026-04-22T06:00:00+00:00",
+        "documents": {},
+        "future_top_level": "stamped by a newer engine",
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    manifest = read_manifest(path)
+
+    assert manifest.model_dump(mode="json") == {
+        "version": 1,
+        "generated_at": "2026-04-22T06:00:00Z",
+        "documents": {},
+    }
+
+    write_manifest(manifest, path)
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "generated_at": "2026-04-22T06:00:00Z",
+        "documents": {},
+    }
+
+
+def test_read_manifest_rejects_unsupported_version_even_with_unknown_fields(
+    tmp_path: Path,
+) -> None:
+    """The version gate must win over extra-field tolerance: a future manifest
+    version still fails even if the only other drift is additive unknown
+    fields."""
+    path = tmp_path / "future-with-extra.json"
+    payload = {
+        "version": 999,
+        "generated_at": "2026-04-22T06:00:00+00:00",
+        "documents": {
+            "x": {
+                "doc_type": "lov",
+                "xml_hash": "a",
+                "markdown_path": "lover/x.md",
+                "source_dataset": "gjeldende-lover",
+                "last_seen": "2026-04-22T01:31:00+00:00",
+                "status": "current",
+                "renderer_version": 2,
+                "future_field": "stamped by a newer engine",
+            },
+        },
+        "future_top_level": "stamped by a newer engine",
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ParseError) as exc_info:
+        read_manifest(path)
+
+    assert "unsupported manifest version 999; this engine reads version 1" in str(
+        exc_info.value,
+    )
 
 
 def test_read_manifest_rejects_unsupported_version(tmp_path: Path) -> None:
@@ -380,6 +514,38 @@ def test_read_manifest_rejects_unsupported_version(tmp_path: Path) -> None:
     assert "unsupported manifest version 999; this engine reads version 1" in str(
         exc_info.value,
     )
+
+
+def test_read_manifest_loads_renderer_version_and_future_additive_fields(
+    tmp_path: Path,
+) -> None:
+    """A production-shaped record with renderer_version must parse, and a later
+    additive field on top must still be tolerated for older readers."""
+    path = tmp_path / "renderer-version.json"
+    payload = {
+        "version": 1,
+        "generated_at": "2026-04-22T06:00:00+00:00",
+        "documents": {
+            "lov-1": {
+                "doc_type": "lov",
+                "xml_hash": "a" * 64,
+                "markdown_path": "lover/x.md",
+                "source_dataset": "gjeldende-lover",
+                "last_seen": "2026-04-22T01:31:00+00:00",
+                "status": "current",
+                "renderer_version": 2,
+                "future_field": {"added": "later"},
+            },
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    manifest = read_manifest(path)
+    record = manifest.documents["lov-1"]
+
+    assert record.renderer_version == 2
+    assert record.xml_hash == "a" * 64
+    assert not hasattr(record, "future_field")
 
 
 def test_read_manifest_wraps_unicode_decode_error_as_parse_error(
