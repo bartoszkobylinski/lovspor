@@ -24,6 +24,10 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.errors import ExtractionError
 
 _XML_SUFFIX = ".xml"
+# Lovdata XML members run KB to a few MB. A member declaring far more than
+# that is a corrupt archive or a decompression bomb, not a real law — refuse
+# to read it into memory. 64 MiB is a generous ceiling well above any real doc.
+_MAX_MEMBER_BYTES = 64 * 1024 * 1024
 
 
 class TarballMember(BaseModel):
@@ -51,6 +55,8 @@ def iter_tarball_xml(archive_path: Path) -> Iterator[TarballMember]:
     - member name contains a null byte
     - member name is absolute (starts with / or \\)
     - member name contains a ``..`` path component
+    - member declares a size over the per-member cap (decompression bomb /
+      corrupt archive guard)
     - archive is malformed or cannot be opened
     """
     try:
@@ -59,16 +65,18 @@ def iter_tarball_xml(archive_path: Path) -> Iterator[TarballMember]:
                 _check_safe_name(member.name, archive_path)
                 if not member.isfile() or not member.name.endswith(_XML_SUFFIX):
                     continue
+                if member.size > _MAX_MEMBER_BYTES:
+                    raise ExtractionError(
+                        f"{archive_path}: member {member.name!r} declares "
+                        f"{member.size} bytes, exceeding the "
+                        f"{_MAX_MEMBER_BYTES}-byte per-member cap",
+                    )
                 fh = tar.extractfile(member)
                 # Defensive: isfile() gate above already excludes the
                 # member types that would make extractfile() return None.
                 if fh is None:  # pragma: no cover
                     continue
                 with fh:
-                    # Lovdata archives contain XML files on the order of
-                    # KB to a few MB each; reading into memory per member
-                    # is fine at this scale. Revisit if individual members
-                    # ever grow to hundreds of MB.
                     yield TarballMember(name=member.name, content=fh.read())
     except tarfile.TarError as exc:
         raise ExtractionError(
