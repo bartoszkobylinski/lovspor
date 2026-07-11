@@ -280,7 +280,7 @@ def test_collect_upstream_downloads_tracked_datasets_and_resolves_per_dataset_sl
     monkeypatch.setattr(orchestrator_module, "LovdataClient", FakeClient)
     monkeypatch.setattr(orchestrator_module, "_index_tarball", fake_index)
 
-    upstream = _collect_upstream(settings, tmp_path / "cache")
+    upstream, drift = _collect_upstream(settings, tmp_path / "cache")
 
     assert client_kwargs == {
         "timeout_seconds": settings.http_timeout_seconds,
@@ -294,6 +294,59 @@ def test_collect_upstream_downloads_tracked_datasets_and_resolves_per_dataset_sl
     assert upstream["gjeldende-lover-2"].slug == "shared-2"
     assert upstream["gjeldende-sentrale-forskrifter-1"].slug == "shared"
     assert upstream["gjeldende-sentrale-forskrifter-2"].slug == "shared-2"
+    assert drift == ()
+
+
+def test_collect_upstream_surfaces_unknown_archive_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An additive field on the /list archives is surfaced (not swallowed) so
+    run_sync can carry it into SyncReport for notification."""
+    settings = _settings(tmp_path)
+    archives = [
+        LovdataArchive.model_validate(
+            {
+                "filename": "gjeldende-lover.tar.bz2",
+                "description": "Lover",
+                "sizeBytes": 1,
+                "lastModified": "2026-05-01T00:00:00Z",
+                "mimeType": "application/x-bzip2",
+            },
+        ),
+        LovdataArchive.model_validate(
+            {
+                "filename": "gjeldende-sentrale-forskrifter.tar.bz2",
+                "description": "Forskrifter",
+                "sizeBytes": 1,
+                "lastModified": "2026-05-01T00:00:00Z",
+            },
+        ),
+    ]
+
+    class FakeDownload:
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+    class FakeClient:
+        def __init__(self, **_kwargs: object) -> None: ...
+        def __enter__(self) -> "FakeClient":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def list_datasets(self) -> list[LovdataArchive]:
+            return archives
+
+        def download(self, arch: LovdataArchive, cache_dir: Path) -> FakeDownload:
+            return FakeDownload(cache_dir / arch.filename)
+
+    monkeypatch.setattr(orchestrator_module, "LovdataClient", FakeClient)
+    monkeypatch.setattr(orchestrator_module, "_index_tarball", lambda _p, _d: [])
+
+    _upstream, drift = _collect_upstream(settings, tmp_path / "cache")
+    assert drift == ("mimeType",)
 
 
 def test_index_tarball_builds_upstream_docs_from_member_metadata(
@@ -1404,7 +1457,7 @@ def test_run_sync_aborts_on_dirty_corpus_worktree(
         "_load_or_empty_manifest",
         lambda _path: Manifest(generated_at=datetime(2026, 5, 1, tzinfo=UTC), documents={}),
     )
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: ({}, ()))
 
     with pytest.raises(CorpusStateError, match="uncommitted"):
         run_sync(settings)
@@ -1499,7 +1552,7 @@ def test_run_sync_aborts_on_mass_removal(
     prior = _current_manifest("gjeldende-lover", 30)
     _disable_migrations(monkeypatch)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: ({}, ()))
 
     def fail_commit(*_args: object, **_kwargs: object) -> None:
         pytest.fail("mass-removal sync must not reach commit")
@@ -1527,9 +1580,10 @@ def test_run_sync_noops_without_rewriting_manifest_or_committing(
     monkeypatch.setattr(
         orchestrator_module,
         "_collect_upstream",
-        lambda *_args: {
-            "lov-same": _upstream("lov-same", xml_hash="a" * 64, slug="same"),
-        },
+        lambda *_args: (
+            {"lov-same": _upstream("lov-same", xml_hash="a" * 64, slug="same")},
+            (),
+        ),
     )
 
     def fail_commit(*_args: object, **_kwargs: object) -> None:
@@ -1590,7 +1644,7 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
 
     _disable_migrations(monkeypatch)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: upstream)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
     monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
     monkeypatch.setattr(orchestrator_module, "delete_document", deleted.append)
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
@@ -1679,7 +1733,7 @@ def test_run_sync_carries_prior_tombstone_forward(
 
     _disable_migrations(monkeypatch)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: upstream)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
     monkeypatch.setattr(orchestrator_module, "_write_one", _fake_write_one_slug_path)
     monkeypatch.setattr(orchestrator_module, "delete_document", lambda _p: None)
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
@@ -1716,7 +1770,7 @@ def test_run_sync_does_not_carry_reappeared_tombstone(
 
     _disable_migrations(monkeypatch)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: upstream)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
     monkeypatch.setattr(orchestrator_module, "_write_one", _fake_write_one_slug_path)
     monkeypatch.setattr(orchestrator_module, "delete_document", lambda _p: None)
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)

@@ -499,7 +499,7 @@ def test_run_sync_actions_do_not_double_stage_embedding_sidecars(
             monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _path: None)
             monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
             monkeypatch.setattr(
-                orchestrator_module, "_collect_upstream", lambda *_args: upstream_docs
+                orchestrator_module, "_collect_upstream", lambda *_args: (upstream_docs, ())
             )
             monkeypatch.setattr(
                 orchestrator_module,
@@ -614,7 +614,9 @@ def test_run_sync_add_rename_change_sidecar_collision_stages_each_sidecar_once(
     monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _path: None)
     monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _path: None)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: upstream_docs)
+    monkeypatch.setattr(
+        orchestrator_module, "_collect_upstream", lambda *_args: (upstream_docs, ())
+    )
     monkeypatch.setattr(
         orchestrator_module, "_needs_sprint5_history_migration", lambda *_args: False
     )
@@ -1700,7 +1702,7 @@ def test_run_sync_removed_slugless_doc_builds_remove_action_without_sidecars(
     monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _path: None)
     monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _path: None)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: {})
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: ({}, ()))
     monkeypatch.setattr(
         orchestrator_module,
         "_needs_sprint5_history_migration",
@@ -3891,7 +3893,7 @@ def test_run_sync_skips_unrenderable_doc_instead_of_aborting(
     monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _p: None)
     monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _p: None)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _p: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_a: upstream)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_a: (upstream, ()))
     monkeypatch.setattr(orchestrator_module, "_needs_sprint5_history_migration", lambda *_a: False)
     monkeypatch.setattr(orchestrator_module, "_needs_sprint8_eu_basis_migration", lambda *_a: False)
     monkeypatch.setattr(
@@ -4004,7 +4006,7 @@ def test_run_sync_deferred_carry_dropped_when_path_taken_by_rename(
     monkeypatch.setattr(orchestrator_module, "_ensure_corpus_git_repo", lambda _p: None)
     monkeypatch.setattr(orchestrator_module, "_ensure_clean_corpus", lambda _p: None)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _p: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_a: upstream)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_a: (upstream, ()))
     monkeypatch.setattr(orchestrator_module, "_needs_sprint5_history_migration", lambda *_a: False)
     monkeypatch.setattr(orchestrator_module, "_needs_sprint8_eu_basis_migration", lambda *_a: False)
     monkeypatch.setattr(

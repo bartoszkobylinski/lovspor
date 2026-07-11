@@ -29,6 +29,7 @@ from lovspor.sources.lovdata import (
     _parse_json_array,
     _raise_for_status,
     _RetryableNetworkError,
+    unknown_archive_fields,
 )
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -319,21 +320,63 @@ def test_list_datasets_raises_parse_error_on_invalid_schema(
         client.list_datasets()
 
 
-def test_list_datasets_raises_parse_error_on_extra_fields(
+def test_list_datasets_tolerates_extra_fields(
     httpx_mock: HTTPXMock,
 ) -> None:
+    """An additive field Lovdata adds to /list must NOT break the sync. The
+    archive still parses; the unknown field is retained (model_extra) so the
+    engine can surface it as schema drift rather than failing loudly."""
     payload = [
         {
             "filename": "x.tar.bz2",
             "description": "x",
             "sizeBytes": "1",
             "lastModified": "2026-04-22T01:31:00Z",
-            "rogue_field": True,
+            "mimeType": "application/x-bzip2",
         },
     ]
     httpx_mock.add_response(url=_LIST_URL, json=payload)
-    with LovdataClient() as client, pytest.raises(ParseError):
-        client.list_datasets()
+    with LovdataClient() as client:
+        archives = client.list_datasets()
+    assert archives[0].filename == "x.tar.bz2"
+    assert archives[0].model_extra == {"mimeType": "application/x-bzip2"}
+
+
+def test_unknown_archive_fields_reports_extra_keys() -> None:
+    archives = [
+        LovdataArchive.model_validate(
+            {
+                "filename": "a.tar.bz2",
+                "description": "a",
+                "sizeBytes": "1",
+                "lastModified": "2026-04-22T01:31:00Z",
+                "mimeType": "x",
+                "checksum": "y",
+            },
+        ),
+        LovdataArchive.model_validate(
+            {
+                "filename": "b.tar.bz2",
+                "description": "b",
+                "sizeBytes": "2",
+                "lastModified": "2026-04-22T01:31:00Z",
+                "mimeType": "x",
+            },
+        ),
+    ]
+    assert unknown_archive_fields(archives) == ["checksum", "mimeType"]
+
+
+def test_unknown_archive_fields_empty_when_schema_matches() -> None:
+    archive = LovdataArchive.model_validate(
+        {
+            "filename": "a.tar.bz2",
+            "description": "a",
+            "sizeBytes": "1",
+            "lastModified": "2026-04-22T01:31:00Z",
+        },
+    )
+    assert unknown_archive_fields([archive]) == []
 
 
 def test_lovdata_archive_is_frozen() -> None:

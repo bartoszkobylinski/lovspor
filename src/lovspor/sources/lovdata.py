@@ -9,6 +9,7 @@ docs/legal-and-sources.md.
 """
 
 import hashlib
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,8 @@ from lovspor.errors import (
     ParseError,
 )
 from lovspor.retry import retry_with_backoff
+
+_LOGGER = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://api.lovdata.no/v1/publicData"
 DEFAULT_TIMEOUT_SECONDS = 120.0
@@ -45,9 +48,13 @@ _DOWNLOAD_CHUNK_BYTES = 64 * 1024
 class LovdataArchive(BaseModel):
     """An archive entry from the Lovdata public-data /list endpoint."""
 
+    # extra="allow" (not "forbid"): an additive field Lovdata adds to /list must
+    # not take the nightly sync offline until a code deploy. Unknown fields are
+    # retained in model_extra so the engine can surface them as schema drift
+    # (unknown_archive_fields) and notify rather than fail loudly.
     model_config = ConfigDict(
         frozen=True,
-        extra="forbid",
+        extra="allow",
         populate_by_name=True,
     )
 
@@ -136,16 +143,37 @@ def _resolve_timeout(explicit: float | None) -> float:
         ) from exc
 
 
+def unknown_archive_fields(archives: list[LovdataArchive]) -> list[str]:
+    """Sorted, de-duplicated field names Lovdata returned that the schema does
+    not model — i.e. additive upstream drift retained via ``extra="allow"``.
+
+    Empty when every archive matches the known schema. The caller surfaces a
+    non-empty result as a notification so the model can be updated deliberately.
+    """
+    fields: set[str] = set()
+    for archive in archives:
+        fields.update(archive.model_extra or {})
+    return sorted(fields)
+
+
 def _parse_archives(
     payload: list[object],
     url: str,
 ) -> list[LovdataArchive]:
     try:
-        return [LovdataArchive.model_validate(item) for item in payload]
+        archives = [LovdataArchive.model_validate(item) for item in payload]
     except ValidationError as exc:
         raise ParseError(
             f"GET {url} schema validation failed: {exc}",
         ) from exc
+    drift = unknown_archive_fields(archives)
+    if drift:
+        _LOGGER.warning(
+            "Lovdata /list returned unknown field(s) %s; tolerated but "
+            "LovdataArchive should be updated to model them",
+            drift,
+        )
+    return archives
 
 
 class LovdataClient:
