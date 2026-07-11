@@ -67,13 +67,14 @@ _SURFACE = (
     "<ol><li>Første</li><li>Andre</li></ol>"
     "<ul><li>Kule</li></ul>"
     '<div aria-level="7" role="heading">Avsnitt 1<br/>Driftsansvarlige</div>'
+    '<p class="leddfortsettelse">►<strong>M7</strong> Endret ved forordning.◄</p>'
     '<article class="futureLegalArticle">Ikke i kraft ennå.</article>'
     '<article class="changesToParent">Endret ved lov 1 jan 2026.</article>'
     "</section></main></body></html>"
 ).encode()
 
-_PINNED_DOCUMENT = (2, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
-_PINNED_SURFACE = (2, "88f1c30d5190a46946129f20863f37a3b4ed8a00f79e64c68fa3042f1133ed94")
+_PINNED_DOCUMENT = (3, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
+_PINNED_SURFACE = (3, "45faa58a7d8a76a2efd6da947ea361ec6bae80a0af81cfc69a3d993fb100fd15")
 
 
 def _digest(text: str) -> str:
@@ -104,4 +105,5 @@ def test_surface_actually_exercises_the_table_paths() -> None:
     assert "Kjørefeltlinje" in md  # table under <article class="legalP">
     assert md.count("| --- |") >= 1  # GFM separator: rendered as a table, not flattened
     assert "###### Avsnitt 1" in md  # <div role="heading"> ARIA heading block
+    assert "►**M7** Endret ved forordning.◄" in md  # bare <p> with EU markers verbatim
     assert "Ikke i kraft" not in md  # not-in-force elision still applied

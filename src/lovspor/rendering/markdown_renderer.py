@@ -18,6 +18,7 @@ reconnaissance notes). Element-by-element mapping:
     <article class='numberedLegalP'>        -> plain paragraph (numbering is in text)
     <article class='listArticle'>           -> plain paragraph (marker is in text)
     <article class='changesToParent'>       -> > blockquote
+    <p> (bare, e.g. 'leddfortsettelse')     -> paragraph (EU consolidated regs)
     <ol>                                    -> 1. 2. 3. numbered list
     <ul>                                    -> -  -  -  bullet list
     <table>                                 -> GFM table (<caption> as a lead-in)
@@ -39,8 +40,8 @@ Unknown tags fall through to "walk children, skip this wrapper". That
 walk (``_render_children``) emits only child *elements*: an element's
 own ``.text`` and each child's ``.tail`` are not rendered. On the
 current Lovdata schema those are whitespace-only between block elements.
-If real text ever lands there — a ``<p>`` with direct text or any other
-unhandled text-bearing element — it guards against silent loss by raising
+If real text ever lands there — an unhandled text-bearing element, e.g. a
+future schema addition — it guards against silent loss by raising
 :class:`~lovspor.errors.RenderError` rather than committing an incomplete
 legal document. ``<table>`` is handled explicitly (``_render_table`` /
 ``_render_mixed_article``), so a table's cell text is never dropped.
@@ -57,7 +58,7 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
-RENDERER_VERSION = 2
+RENDERER_VERSION = 3
 """Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
 
 Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
@@ -215,7 +216,7 @@ def _render_element(elem: etree._Element) -> str:
     classes = (elem.get("class") or "").split()
     if tag in _HEADING_TAGS:
         return _render_heading(elem, tag, classes)
-    if tag == "article":
+    if tag in {"article", "p"}:
         return _render_article(elem, classes)
     if tag in {"ol", "ul"}:
         return _render_list(elem, ordered=(tag == "ol"))

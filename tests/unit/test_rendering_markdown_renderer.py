@@ -300,13 +300,29 @@ def test_render_unknown_tag_traverses_children() -> None:
     assert md == "Still visible.\n"
 
 
-def test_render_raises_when_block_level_text_would_be_dropped() -> None:
-    """A <p> carrying direct text is an unhandled text-bearing wrapper:
-    the block walk emits only child *elements*, so the text would vanish.
-    The lost-content guard must raise rather than silently commit an
-    incomplete legal document."""
-    with pytest.raises(RenderError, match="drop block-level text"):
-        render_markdown(_wrap(b"<p>Direct paragraph text in a plain p tag</p>"))
+def test_render_bare_p_renders_as_a_paragraph() -> None:
+    """Consolidated EU regulations embed running text in bare <p> blocks with
+    no <article> wrapper. They render as paragraphs; the block walk used to
+    trip the lost-content guard and skip the whole document (cluster P)."""
+    md = render_markdown(_wrap(b"<p>Direct paragraph text in a plain p tag</p>"))
+    assert md == "Direct paragraph text in a plain p tag\n"
+
+
+def test_render_leddfortsettelse_p_keeps_eu_consolidation_markers() -> None:
+    """The EU consolidation arrows (start/end of an amended passage) and the
+    M-labels are meaningful source markup — kept verbatim rather than
+    reinterpreting Lovdata's editorial layer."""
+    md = render_markdown(
+        _wrap(
+            '<p class="leddfortsettelse">►<strong>M7</strong> Endret ved forordning.◄</p>'.encode(),
+        ),
+    )
+    assert md == "►**M7** Endret ved forordning.◄\n"
+
+
+def test_render_bare_p_preserves_trailing_bracket() -> None:
+    md = render_markdown(_wrap(b"<p>VEDTATT DENNE FORORDNING:]</p>"))
+    assert md == "VEDTATT DENNE FORORDNING:]\n"
 
 
 def test_render_table_renders_as_gfm_not_dropped() -> None:
