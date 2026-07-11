@@ -55,9 +55,18 @@ class ManifestRecord(BaseModel):
     stamp against the current version and re-renders the doc when they differ. A
     record with ``renderer_version is None`` predates the stamp — treated as
     stale and re-rendered once, then carrying the current version thereafter.
+
+    Unknown fields are ignored, not rejected: a manifest written by a *newer*
+    engine (say, one that adds a per-record key after ``renderer_version``) must
+    still load in an older reader such as a cached ``uvx`` MCP build. Additive
+    fields are transparent to readers that don't use them; genuinely
+    incompatible changes are gated by ``MANIFEST_VERSION`` instead (see
+    ``Manifest._supported_version``). This is the fix for the 0.3.0
+    ``renderer_version`` rollout, which broke every older MCP reader with a
+    pydantic ``extra_forbidden`` error the moment it read a stamped manifest.
     """
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     doc_type: str
     xml_hash: str
@@ -77,7 +86,7 @@ class ManifestRecord(BaseModel):
 class Manifest(BaseModel):
     """The change-detection manifest. Documents keyed by doc_id."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     version: int = MANIFEST_VERSION
     generated_at: datetime
@@ -88,9 +97,13 @@ class Manifest(BaseModel):
     def _supported_version(cls, value: int) -> int:
         """Reject manifest versions this engine does not understand.
 
-        Forward compatibility comes via bumping ``MANIFEST_VERSION`` in
-        a coordinated way, not by silently accepting unknown payloads
-        that may carry incompatible semantics.
+        The version gate — not ``extra``-field strictness — is the real
+        forward-compatibility guard: a genuinely incompatible manifest must
+        bump ``MANIFEST_VERSION`` so older engines refuse it wholesale here.
+        Purely *additive* fields (a newer engine stamping a new per-record or
+        top-level key without bumping the version) are tolerated and ignored
+        instead (``extra="ignore"``), so a newer ``lovverk`` corpus never
+        breaks an older reader over a field it simply doesn't use.
         """
         if value != MANIFEST_VERSION:
             raise ValueError(
