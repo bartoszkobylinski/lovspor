@@ -36,6 +36,10 @@ data/state/
 *.tar.bz2
 *.tar.gz
 
+# Internal working notes — audits, backlogs, personal outreach notes. Never publish.
+analysis/
+notes/
+
 # Editor / OS
 .DS_Store
 .idea/
