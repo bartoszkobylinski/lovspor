@@ -12,6 +12,7 @@ reconnaissance notes). Element-by-element mapping:
     <section><h2>                           -> ## Heading
     <h3|h4 class='legalArticleHeader'>      -> ### § N. Title
     <h3..h6> (other)                        -> ### Heading
+    <div role='heading' aria-level='N'>     -> ###### ATX heading (level clamped)
     <article class='legalArticle'>          -> (container, walk children)
     <article class='legalP'>                -> plain paragraph
     <article class='numberedLegalP'>        -> plain paragraph (numbering is in text)
@@ -56,7 +57,7 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
-RENDERER_VERSION = 1
+RENDERER_VERSION = 2
 """Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
 
 Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
@@ -87,6 +88,10 @@ _PARAGRAPH_CLASSES = frozenset(
     {"legalP", "numberedLegalP", "listArticle"},
 )
 _CHANGE_NOTE_CLASS = "changesToParent"
+_HEADING_ROLE = "heading"
+_MAX_HEADING_LEVEL = 6
+_DEFAULT_HEADING_LEVEL = 6
+_HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 # Tags _render_element renders as blocks (mirrors its dispatch); everything
 # else is inline. Used by _render_mixed_article to keep block children (a
 # heading, a nested list, a table) out of the inline paragraph accumulator.
@@ -208,18 +213,57 @@ def _remove_preserving_tail(elem: etree._Element) -> None:
 def _render_element(elem: etree._Element) -> str:
     tag = elem.tag
     classes = (elem.get("class") or "").split()
-    if tag in {"h1", "h2"}:
-        marker = "#" if tag == "h1" else "##"
-        return f"{marker} {_inline(elem)}\n\n"
-    if tag in {"h3", "h4", "h5", "h6"}:
-        return _render_sub_heading(elem, classes)
+    if tag in _HEADING_TAGS:
+        return _render_heading(elem, tag, classes)
     if tag == "article":
         return _render_article(elem, classes)
     if tag in {"ol", "ul"}:
         return _render_list(elem, ordered=(tag == "ol"))
     if tag == "table":
         return _render_table(elem)
+    if tag == "div" and elem.get("role") == _HEADING_ROLE:
+        return _render_heading_div(elem)
     return _render_children(elem)
+
+
+def _render_heading(elem: etree._Element, tag: str, classes: list[str]) -> str:
+    if tag in {"h1", "h2"}:
+        marker = "#" if tag == "h1" else "##"
+        return f"{marker} {_inline(elem)}\n\n"
+    return _render_sub_heading(elem, classes)
+
+
+def _render_heading_div(elem: etree._Element) -> str:
+    """Render a ``<div role="heading">`` ARIA heading block.
+
+    EU-regulation annexes (animal health, food safety, sanctions) lay out
+    their section titles as generic heading divs
+    (``<div aria-level="7" role="heading">Avsnitt 1<br/>…</div>``) instead of
+    the ``legalArticle`` schema, so the block walk had no branch for them and
+    the lost-content guard froze ~29 forskrifter out of the corpus. Map the
+    div to an ATX heading clamped to Markdown's six levels; a ``<br/>``
+    separates a numbered label from a descriptive continuation, and a heading
+    cannot span lines, so the first line is the heading and the rest follows
+    as a paragraph.
+    """
+    level = _aria_heading_level(elem)
+    head, _, subtitle = _inline(elem).partition("\n")
+    heading = f"{'#' * level} {head}\n\n" if head else ""
+    subtitle = subtitle.strip()
+    if not subtitle:
+        return heading
+    return heading + f"{_escape_block_leading(subtitle)}\n\n"
+
+
+def _aria_heading_level(elem: etree._Element) -> int:
+    raw = elem.get("aria-level")
+    if raw is None:
+        return _DEFAULT_HEADING_LEVEL
+    try:
+        level = int(raw)
+    except ValueError:
+        return _DEFAULT_HEADING_LEVEL
+    return min(max(level, 1), _MAX_HEADING_LEVEL)
 
 
 def _render_sub_heading(

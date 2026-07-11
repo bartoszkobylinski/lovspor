@@ -797,3 +797,64 @@ def test_render_inline_without_tail_does_not_inject_placeholder_text() -> None:
     md = render_markdown(_wrap(b'<article class="legalP">Prefix <strong>Bold</strong></article>'))
 
     assert md == "Prefix **Bold**\n"
+
+
+# ---------------------------------------------------------------------------
+# <div role="heading"> ARIA heading blocks. EU-regulation annexes (animal
+# health, food safety, sanctions) lay out section titles as generic heading
+# divs instead of the legalArticle schema; the block walk had no branch for
+# them, so the lost-content guard froze ~29 forskrifter out of the corpus
+# (analysis/deep-35-forskrifter.md, cluster H).
+# ---------------------------------------------------------------------------
+
+
+def test_render_heading_div_renders_as_atx_heading() -> None:
+    md = render_markdown(_wrap(b'<div role="heading" aria-level="7">Avsnitt 1</div>'))
+    assert md == "###### Avsnitt 1\n"
+
+
+def test_render_heading_div_clamps_aria_level_to_six_markdown_levels() -> None:
+    """aria-level in these annexes runs 5-7; Markdown tops out at ######."""
+    md = render_markdown(_wrap(b'<div role="heading" aria-level="5">Underavsnitt 1</div>'))
+    assert md == "##### Underavsnitt 1\n"
+
+
+def test_render_heading_div_defaults_to_deepest_level_without_aria_level() -> None:
+    md = render_markdown(_wrap(b'<div role="heading">KAPITTEL 1</div>'))
+    assert md == "###### KAPITTEL 1\n"
+
+
+def test_render_heading_div_tolerates_non_numeric_aria_level() -> None:
+    md = render_markdown(_wrap(b'<div role="heading" aria-level="x">Tittel</div>'))
+    assert md == "###### Tittel\n"
+
+
+def test_render_heading_div_splits_br_subtitle_into_following_paragraph() -> None:
+    """A heading cannot span lines: the <br/> continuation (a descriptive
+    subtitle after the numbered label) renders as a following paragraph."""
+    md = render_markdown(
+        _wrap(
+            b'<div role="heading" aria-level="7">'
+            b"Avsnitt 1<br/>Driftsansvarlige og fagpersoner</div>",
+        ),
+    )
+    assert md == "###### Avsnitt 1\n\nDriftsansvarlige og fagpersoner\n"
+
+
+def test_render_heading_div_renders_inline_children() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<div role="heading" aria-level="6">'
+            b'Se <strong>vedlegg</strong> <a href="x">her</a></div>',
+        ),
+    )
+    assert md == "###### Se **vedlegg** [her](x)\n"
+
+
+def test_render_plain_div_without_heading_role_still_traverses_children() -> None:
+    """Only role="heading" divs become headings; a plain wrapper div keeps
+    its walk-children behaviour and must not be promoted to a heading."""
+    md = render_markdown(
+        _wrap(b'<div><article class="legalP">Br\xc3\xb8dtekst.</article></div>'),
+    )
+    assert md == "Brødtekst.\n"
