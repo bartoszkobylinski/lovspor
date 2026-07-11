@@ -93,10 +93,12 @@ _HEADING_ROLE = "heading"
 _MAX_HEADING_LEVEL = 6
 _DEFAULT_HEADING_LEVEL = 6
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
-# Tags _render_element renders as blocks (mirrors its dispatch); everything
-# else is inline. Used by _render_mixed_article to keep block children (a
-# heading, a nested list, a table) out of the inline paragraph accumulator.
-_BLOCK_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6", "article", "ol", "ul", "table"})
+# Tags _render_element renders as blocks. _render_mixed_article uses these (via
+# _is_block_element) to keep block children — a heading, a nested list, a table,
+# a bare <p> — out of the inline paragraph accumulator. A <div role="heading">
+# is block too, but conditional on its role, so _is_block_element adds it rather
+# than listing "div" here (a plain wrapper <div> must stay walk-children).
+_BLOCK_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6", "article", "p", "ol", "ul", "table"})
 
 _INLINE_ESCAPE = str.maketrans(
     {
@@ -337,6 +339,19 @@ def _render_legal_article_header(elem: etree._Element) -> str:
     return f"### {_inline(elem)}\n\n"
 
 
+def _is_block_element(elem: etree._Element) -> bool:
+    """Whether ``_render_element`` renders ``elem`` as a block, not inline.
+
+    ``_render_mixed_article`` uses this to keep block children out of the
+    inline accumulator. A ``<div role="heading">`` is block but conditional on
+    its role, so it is checked here rather than living in ``_BLOCK_TAGS`` (which
+    would also capture a plain wrapper ``<div>``). Mirrors the ``_render_element``
+    dispatch so a block nested inside a mixed article renders the same as one at
+    top level, instead of being flattened through the inline path.
+    """
+    return elem.tag in _BLOCK_TAGS or (elem.tag == "div" and elem.get("role") == _HEADING_ROLE)
+
+
 def _render_mixed_article(elem: etree._Element) -> str:
     """Render an ``<article>`` as a run of inline paragraphs and block children.
 
@@ -344,15 +359,15 @@ def _render_mixed_article(elem: etree._Element) -> str:
     blockquote: footnotes (``footnote``: label span + "Jf. <a/>" reference
     text), ``defaultP`` / ``centeredP`` notes, and the ``legalArticle``
     container (a header plus nested paragraph articles). Block children (a
-    ``legalArticleHeader``, a nested list, a table) go through
-    ``_render_element`` so a header stays a ``###`` heading and a table a GFM
-    block; genuinely-inline children (spans, links, ``<br/>``) accumulate into
-    the paragraphs between them, so no reference text is dropped.
+    ``legalArticleHeader``, a nested list, a table, a ``<div role="heading">``,
+    a bare ``<p>``) go through ``_render_element`` so a header stays a ``###``
+    heading and a table a GFM block; genuinely-inline children (spans, links,
+    ``<br/>``) accumulate into the paragraphs between them, so no text is lost.
     """
     blocks: list[str] = []
     inline: list[str] = [_escape_inline_text(elem.text or "")]
     for child in elem:
-        if child.tag in _BLOCK_TAGS:
+        if _is_block_element(child):
             blocks.append(_flush_inline(inline))
             blocks.append(_render_element(child))
             inline = [_escape_inline_text(child.tail or "")]

@@ -874,3 +874,46 @@ def test_render_plain_div_without_heading_role_still_traverses_children() -> Non
         _wrap(b'<div><article class="legalP">Br\xc3\xb8dtekst.</article></div>'),
     )
     assert md == "Brødtekst.\n"
+
+
+def test_render_heading_div_inside_mixed_article_preserves_heading_block() -> None:
+    """Regression (Codex, PR #126): a heading div nested inside an <article>
+    wrapper must still render as a heading, not be flattened through the inline
+    path. _render_mixed_article routes it through _render_element via
+    _is_block_element, not _inline_for_child."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="defaultP">'
+            b'<div role="heading" aria-level="7">Avsnitt 1<br/>Driftsansvarlige</div>'
+            b"</article>",
+        ),
+    )
+    assert md == "###### Avsnitt 1\n\nDriftsansvarlige\n"
+
+
+def test_render_heading_div_before_table_in_mixed_article() -> None:
+    """A genuinely-mixed article (heading div + table): the heading renders as
+    a heading block ahead of the GFM table, neither flattened nor dropped."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="defaultP">'
+            b'<div role="heading" aria-level="6">Tabell 1</div>'
+            b"<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>"
+            b"</article>",
+        ),
+    )
+    assert md == "###### Tabell 1\n\n|  |  |\n| --- | --- |\n| a | b |\n"
+
+
+def test_render_bare_p_inside_mixed_article_renders_as_block() -> None:
+    """A bare <p> nested in a mixed article renders as its own paragraph block,
+    not inline-merged into surrounding text."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="defaultP">'
+            b"<p>Plain lead paragraph.</p>"
+            b"<table><tbody><tr><td>x</td></tr></tbody></table>"
+            b"</article>",
+        ),
+    )
+    assert md == "Plain lead paragraph.\n\n|  |\n| --- |\n| x |\n"

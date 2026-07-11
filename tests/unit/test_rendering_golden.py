@@ -57,7 +57,8 @@ _SURFACE = (
     '<article class="legalP">Tekst med <strong>fet</strong>, <em>kursiv</em> og '
     '<a href="https://lovdata.no/lov/1965-06-18-4/x">lenke</a>.<br/>Ny linje.</article>'
     '<article class="numberedLegalP">1. Nummerert ledd.</article>'
-    '<article class="defaultP"><table><caption>Skiltkatalog</caption>'
+    '<article class="defaultP"><div aria-level="6" role="heading">Vedlegg 1</div>'
+    "<table><caption>Skiltkatalog</caption>"
     "<thead><tr><th>Nr</th><th>Betydning</th></tr></thead>"
     "<tbody><tr><td>306.8</td><td>Forbudt for gående</td></tr>"
     '<tr><td colspan="2">Spennende celle</td></tr></tbody></table></article>'
@@ -74,7 +75,7 @@ _SURFACE = (
 ).encode()
 
 _PINNED_DOCUMENT = (3, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
-_PINNED_SURFACE = (3, "45faa58a7d8a76a2efd6da947ea361ec6bae80a0af81cfc69a3d993fb100fd15")
+_PINNED_SURFACE = (3, "80bcb4a7665952633dcfac6e5f9abe4667bf66dc67dbeca77af7b40b4565a04e")
 
 
 def _digest(text: str) -> str:
@@ -104,6 +105,7 @@ def test_surface_actually_exercises_the_table_paths() -> None:
     assert "Forbudt for gående" in md  # table under <article class="defaultP">
     assert "Kjørefeltlinje" in md  # table under <article class="legalP">
     assert md.count("| --- |") >= 1  # GFM separator: rendered as a table, not flattened
-    assert "###### Avsnitt 1" in md  # <div role="heading"> ARIA heading block
+    assert "###### Avsnitt 1" in md  # <div role="heading"> ARIA heading block (top level)
+    assert "###### Vedlegg 1" in md  # heading div nested inside a mixed <article> (PR #126 fix)
     assert "►**M7** Endret ved forordning.◄" in md  # bare <p> with EU markers verbatim
     assert "Ikke i kraft" not in md  # not-in-force elision still applied
