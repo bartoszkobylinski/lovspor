@@ -300,13 +300,29 @@ def test_render_unknown_tag_traverses_children() -> None:
     assert md == "Still visible.\n"
 
 
-def test_render_raises_when_block_level_text_would_be_dropped() -> None:
-    """A <p> carrying direct text is an unhandled text-bearing wrapper:
-    the block walk emits only child *elements*, so the text would vanish.
-    The lost-content guard must raise rather than silently commit an
-    incomplete legal document."""
-    with pytest.raises(RenderError, match="drop block-level text"):
-        render_markdown(_wrap(b"<p>Direct paragraph text in a plain p tag</p>"))
+def test_render_bare_p_renders_as_a_paragraph() -> None:
+    """Consolidated EU regulations embed running text in bare <p> blocks with
+    no <article> wrapper. They render as paragraphs; the block walk used to
+    trip the lost-content guard and skip the whole document (cluster P)."""
+    md = render_markdown(_wrap(b"<p>Direct paragraph text in a plain p tag</p>"))
+    assert md == "Direct paragraph text in a plain p tag\n"
+
+
+def test_render_leddfortsettelse_p_keeps_eu_consolidation_markers() -> None:
+    """The EU consolidation arrows (start/end of an amended passage) and the
+    M-labels are meaningful source markup — kept verbatim rather than
+    reinterpreting Lovdata's editorial layer."""
+    md = render_markdown(
+        _wrap(
+            '<p class="leddfortsettelse">►<strong>M7</strong> Endret ved forordning.◄</p>'.encode(),
+        ),
+    )
+    assert md == "►**M7** Endret ved forordning.◄\n"
+
+
+def test_render_bare_p_preserves_trailing_bracket() -> None:
+    md = render_markdown(_wrap(b"<p>VEDTATT DENNE FORORDNING:]</p>"))
+    assert md == "VEDTATT DENNE FORORDNING:]\n"
 
 
 def test_render_table_renders_as_gfm_not_dropped() -> None:
@@ -797,3 +813,107 @@ def test_render_inline_without_tail_does_not_inject_placeholder_text() -> None:
     md = render_markdown(_wrap(b'<article class="legalP">Prefix <strong>Bold</strong></article>'))
 
     assert md == "Prefix **Bold**\n"
+
+
+# ---------------------------------------------------------------------------
+# <div role="heading"> ARIA heading blocks. EU-regulation annexes (animal
+# health, food safety, sanctions) lay out section titles as generic heading
+# divs instead of the legalArticle schema; the block walk had no branch for
+# them, so the lost-content guard froze ~29 forskrifter out of the corpus
+# (analysis/deep-35-forskrifter.md, cluster H).
+# ---------------------------------------------------------------------------
+
+
+def test_render_heading_div_renders_as_atx_heading() -> None:
+    md = render_markdown(_wrap(b'<div role="heading" aria-level="7">Avsnitt 1</div>'))
+    assert md == "###### Avsnitt 1\n"
+
+
+def test_render_heading_div_clamps_aria_level_to_six_markdown_levels() -> None:
+    """aria-level in these annexes runs 5-7; Markdown tops out at ######."""
+    md = render_markdown(_wrap(b'<div role="heading" aria-level="5">Underavsnitt 1</div>'))
+    assert md == "##### Underavsnitt 1\n"
+
+
+def test_render_heading_div_defaults_to_deepest_level_without_aria_level() -> None:
+    md = render_markdown(_wrap(b'<div role="heading">KAPITTEL 1</div>'))
+    assert md == "###### KAPITTEL 1\n"
+
+
+def test_render_heading_div_tolerates_non_numeric_aria_level() -> None:
+    md = render_markdown(_wrap(b'<div role="heading" aria-level="x">Tittel</div>'))
+    assert md == "###### Tittel\n"
+
+
+def test_render_heading_div_splits_br_subtitle_into_following_paragraph() -> None:
+    """A heading cannot span lines: the <br/> continuation (a descriptive
+    subtitle after the numbered label) renders as a following paragraph."""
+    md = render_markdown(
+        _wrap(
+            b'<div role="heading" aria-level="7">'
+            b"Avsnitt 1<br/>Driftsansvarlige og fagpersoner</div>",
+        ),
+    )
+    assert md == "###### Avsnitt 1\n\nDriftsansvarlige og fagpersoner\n"
+
+
+def test_render_heading_div_renders_inline_children() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<div role="heading" aria-level="6">'
+            b'Se <strong>vedlegg</strong> <a href="x">her</a></div>',
+        ),
+    )
+    assert md == "###### Se **vedlegg** [her](x)\n"
+
+
+def test_render_plain_div_without_heading_role_still_traverses_children() -> None:
+    """Only role="heading" divs become headings; a plain wrapper div keeps
+    its walk-children behaviour and must not be promoted to a heading."""
+    md = render_markdown(
+        _wrap(b'<div><article class="legalP">Br\xc3\xb8dtekst.</article></div>'),
+    )
+    assert md == "Brødtekst.\n"
+
+
+def test_render_heading_div_inside_mixed_article_preserves_heading_block() -> None:
+    """Regression (Codex, PR #126): a heading div nested inside an <article>
+    wrapper must still render as a heading, not be flattened through the inline
+    path. _render_mixed_article routes it through _render_element via
+    _is_block_element, not _inline_for_child."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="defaultP">'
+            b'<div role="heading" aria-level="7">Avsnitt 1<br/>Driftsansvarlige</div>'
+            b"</article>",
+        ),
+    )
+    assert md == "###### Avsnitt 1\n\nDriftsansvarlige\n"
+
+
+def test_render_heading_div_before_table_in_mixed_article() -> None:
+    """A genuinely-mixed article (heading div + table): the heading renders as
+    a heading block ahead of the GFM table, neither flattened nor dropped."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="defaultP">'
+            b'<div role="heading" aria-level="6">Tabell 1</div>'
+            b"<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>"
+            b"</article>",
+        ),
+    )
+    assert md == "###### Tabell 1\n\n|  |  |\n| --- | --- |\n| a | b |\n"
+
+
+def test_render_bare_p_inside_mixed_article_renders_as_block() -> None:
+    """A bare <p> nested in a mixed article renders as its own paragraph block,
+    not inline-merged into surrounding text."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="defaultP">'
+            b"<p>Plain lead paragraph.</p>"
+            b"<table><tbody><tr><td>x</td></tr></tbody></table>"
+            b"</article>",
+        ),
+    )
+    assert md == "Plain lead paragraph.\n\n|  |\n| --- |\n| x |\n"
