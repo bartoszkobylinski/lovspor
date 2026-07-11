@@ -37,6 +37,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from lovspor.atomic_io import atomic_write_text
 from lovspor.rendering.frontmatter import serialize_frontmatter
 
 HISTORY_SCHEMA_VERSION = 1
@@ -183,8 +184,8 @@ def write_history(record: HistoryRecord, dataset_dir: Path) -> tuple[Path, Path]
         indent=2,
         ensure_ascii=False,
     )
-    json_path.write_text(payload + "\n", encoding="utf-8")
-    md_path.write_text(render_history_markdown(record), encoding="utf-8")
+    atomic_write_text(json_path, payload + "\n")
+    atomic_write_text(md_path, render_history_markdown(record))
     return json_path, md_path
 
 

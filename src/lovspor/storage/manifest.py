@@ -18,6 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
+from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import ParseError
 
 MANIFEST_VERSION = 1
@@ -146,5 +147,4 @@ def write_manifest(manifest: Manifest, path: Path) -> None:
     """
     data = manifest.model_dump(mode="json")
     text = json.dumps(data, sort_keys=True, indent=2, ensure_ascii=False)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text + "\n", encoding="utf-8")
+    atomic_write_text(path, text + "\n")
