@@ -9,6 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from lovspor.atomic_io import atomic_write_text
 from lovspor.rendering.document import (
     FrontmatterContext,
     build_frontmatter,
@@ -108,9 +109,8 @@ def render_full_document(
 
 
 def write_document(path: Path, content: str) -> None:
-    """Write ``content`` to ``path`` as UTF-8, creating parent dirs."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    """Write ``content`` to ``path`` as UTF-8 atomically, creating parent dirs."""
+    atomic_write_text(path, content)
 
 
 def delete_document(path: Path) -> None:

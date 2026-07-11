@@ -132,6 +132,7 @@ def test_iter_tarball_xml_continues_when_extractfile_returns_none(
     class FakeMember:
         def __init__(self, name: str) -> None:
             self.name = name
+            self.size = 0
 
         def isfile(self) -> bool:
             return True
@@ -281,3 +282,33 @@ def test_tarball_member_preserves_content_bytes() -> None:
     member = TarballMember(name="binary.xml", content=raw)
     assert member.content == raw
     assert len(member.content) == 256
+
+
+def test_iter_tarball_xml_rejects_member_over_size_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A member whose declared size exceeds the per-member cap is refused
+    before it is read into memory — guards against a decompression bomb or a
+    corrupt archive OOMing the sync. _XML_ONE is 16 bytes; cap at 15."""
+    monkeypatch.setattr("lovspor.extraction.tarball._MAX_MEMBER_BYTES", 15)
+    archive = _build_tarball(
+        tmp_path / "big.tar.bz2",
+        lambda tar: _add_file(tar, "nl/huge.xml", _XML_ONE),
+    )
+    with pytest.raises(ExtractionError, match="exceed"):
+        list(iter_tarball_xml(archive))
+
+
+def test_iter_tarball_xml_allows_member_at_size_cap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A member exactly at the cap is allowed (boundary is inclusive)."""
+    monkeypatch.setattr("lovspor.extraction.tarball._MAX_MEMBER_BYTES", len(_XML_ONE))
+    archive = _build_tarball(
+        tmp_path / "atcap.tar.bz2",
+        lambda tar: _add_file(tar, "nl/ok.xml", _XML_ONE),
+    )
+    members = list(iter_tarball_xml(archive))
+    assert [m.content for m in members] == [_XML_ONE]
