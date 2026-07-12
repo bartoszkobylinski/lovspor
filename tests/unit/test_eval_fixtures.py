@@ -1450,6 +1450,34 @@ def test_no_console_script_resolves_into_evals() -> None:
     assert not [name for name, target in scripts.items() if target.startswith("evals")], scripts
 
 
+def test_embeddings_extra_exists_for_the_benchmark() -> None:
+    """The command the benchmark tells you to run must actually work.
+
+    ``benchmarks/embedding_comparison/README.md``, run.py's module docstring and
+    the ImportError it raises when sentence-transformers is missing all print
+    ``uv sync --extra embeddings``. With no extra declared that fails from a
+    clean clone — and the "+24% Recall@5" model choice in ``docs/embeddings.md``
+    rests on a benchmark nobody else can re-run.
+    """
+    extras = _pyproject()["project"]["optional-dependencies"]
+    declared = [d for d in extras["embeddings"] if d.lower().startswith("sentence-transformers")]
+
+    assert declared, extras
+
+
+def test_embeddings_extra_is_not_forced_on_installers() -> None:
+    """The extra exists precisely so torch stays optional.
+
+    sentence-transformers pulls torch — gigabytes — and only the benchmark's two
+    local NbAiLab models need it. Production embeds through the OpenAI API over
+    httpx and imports neither, so a ``pip install lovspor`` must not drag them in.
+    """
+    runtime = _pyproject()["project"]["dependencies"]
+    heavy = [d for d in runtime if d.lower().startswith(("sentence-transformers", "torch"))]
+
+    assert not heavy, runtime
+
+
 def test_pyyaml_is_not_forced_on_installers() -> None:
     """pyyaml is imported by evals/ only, never by src/lovspor.
 

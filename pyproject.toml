@@ -30,6 +30,15 @@ dependencies = [
     "tiktoken>=0.7.0",
 ]
 
+[project.optional-dependencies]
+# Benchmark-only, and deliberately not a runtime dependency: sentence-transformers
+# pulls torch (gigabytes), and nothing under src/lovspor imports either — the
+# production embedder talks to the OpenAI API over httpx. Only the two local
+# NbAiLab models in benchmarks/embedding_comparison/run.py need it. Declared as an
+# extra so `uv sync --extra embeddings` — the command that benchmark's README, its
+# module docstring and its ImportError all print — works from a clean clone.
+embeddings = ["sentence-transformers>=3.0.0"]
+
 [project.urls]
 Homepage = "https://github.com/bartoszkobylinski/lovspor"
 Corpus = "https://github.com/bartoszkobylinski/lovverk"
