@@ -50,21 +50,35 @@ jobs:
       - name: Sync engine dependencies
         run: uv sync --frozen
 
+      # This job holds two live secrets (LOVVERK_DEPLOY_KEY, OPENAI_API_KEY) and
+      # pushes to the corpus over SSH, so github.com's host key is pinned rather
+      # than harvested with ssh-keyscan — a scan trusts whatever answers at that
+      # moment, which is trust-on-first-use, not a check. The literal below is
+      # GitHub's published ed25519 host key (fingerprint
+      # SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU); the authoritative
+      # copy lives at https://api.github.com/meta under `.ssh_keys`. If GitHub
+      # rotates it this step fails closed — that is the intended behaviour. Re-pin
+      # from that endpoint, never from memory.
       - name: Configure SSH for lovverk push
         env:
           DEPLOY_KEY: ${{ secrets.LOVVERK_DEPLOY_KEY }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           echo "$DEPLOY_KEY" > ~/.ssh/lovverk_deploy_key
           chmod 600 ~/.ssh/lovverk_deploy_key
-          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/known_hosts <<'EOF'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          EOF
+          chmod 600 ~/.ssh/known_hosts
           cat > ~/.ssh/config <<'EOF'
           Host github.com
             HostName github.com
             User git
             IdentityFile ~/.ssh/lovverk_deploy_key
             IdentitiesOnly yes
+            StrictHostKeyChecking yes
           EOF
 
       - name: Clone lovverk corpus
