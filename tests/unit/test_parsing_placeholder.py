@@ -11,6 +11,8 @@ notice for the legal text. Across both public-data archives (5,913 documents)
 ``errorMessage`` occurs in that one document and nowhere else.
 """
 
+import pytest
+
 from lovspor.parsing.placeholder import is_content_placeholder
 
 
@@ -37,16 +39,29 @@ def test_ordinary_document_is_not_a_placeholder() -> None:
     assert is_content_placeholder(xml) is False
 
 
-def test_error_notice_alongside_real_legal_content_is_not_a_placeholder() -> None:
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param(
+            b"<article class='legalArticle'><p>Ekte lovtekst.</p></article>", id="article"
+        ),
+        pytest.param(b"<section><h2>Kapittel 1</h2><p>Ekte lovtekst.</p></section>", id="section"),
+    ],
+)
+def test_error_notice_alongside_real_legal_content_is_not_a_placeholder(content: bytes) -> None:
     """Conservative: a document that still carries law stays in the corpus.
 
     Tombstoning is reserved for the case where the notice *replaces* the
     document. A partial document keeps its current behaviour (render, and
     fail loudly if the renderer cannot handle it) rather than silently
     dropping law out of the corpus.
+
+    Both content tags matter. Exercising only ``<article>`` left the
+    ``<section>`` half of ``_CONTENT_TAGS`` unverified — a mutant that dropped
+    it survived, meaning a section-only document sitting next to an error
+    notice would have been withheld with no test to catch it.
     """
-    xml = _wrap(_ERROR_NOTICE + b"<article class='legalArticle'><p>Ekte lovtekst.</p></article>")
-    assert is_content_placeholder(xml) is False
+    assert is_content_placeholder(_wrap(_ERROR_NOTICE + content)) is False
 
 
 def test_document_without_main_is_not_a_placeholder() -> None:

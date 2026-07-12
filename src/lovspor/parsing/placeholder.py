@@ -44,7 +44,10 @@ def is_content_placeholder(xml_bytes: bytes) -> bool:
     already does. A parse failure must never become a silent corpus removal.
     """
     try:
-        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser(remove_blank_text=False))
+        # The renderer needs remove_blank_text=False to keep significant
+        # whitespace between inline elements. This predicate reads only tag
+        # names and class attributes, never text, so the default is correct.
+        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
     except etree.XMLSyntaxError:
         return False
     main = tree.find(".//main")
