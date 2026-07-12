@@ -30,6 +30,20 @@ def test_set_output_appends_rather_than_truncates(
     assert "k<<__EOF__\nv\n__EOF__\n" in out.read_text(encoding="utf-8")
 
 
+def test_set_output_preserves_multiline_value_with_heredoc_format(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out = tmp_path / "gh_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+
+    set_output("schema_drift_fields", "checksum\nmimeType")
+
+    assert out.read_text(encoding="utf-8") == (
+        "schema_drift_fields<<__EOF__\nchecksum\nmimeType\n__EOF__\n"
+    )
+
+
 def test_set_output_is_noop_when_env_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     set_output("k", "v")  # must not raise
