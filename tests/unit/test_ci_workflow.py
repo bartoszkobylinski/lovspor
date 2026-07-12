@@ -96,3 +96,16 @@ def test_sync_job_installs_runtime_dependencies_only() -> None:
 
     assert uv_commands, "expected the sync job to invoke uv"
     assert all("--no-dev" in cmd for cmd in uv_commands), uv_commands
+
+
+def test_host_key_freshness_check_can_never_block_the_sync() -> None:
+    """The rotation warning is diagnostics, not a gate.
+
+    The pin itself is what enforces trust. If api.github.com were unreachable and
+    this check were allowed to fail the job, a transient network blip at the
+    wrong moment would take the nightly corpus sync offline for a reason that has
+    nothing to do with the corpus.
+    """
+    check = next(s for s in _sync_steps() if str(s.get("name", "")).startswith("Warn if GitHub"))
+
+    assert check["continue-on-error"] is True, check
