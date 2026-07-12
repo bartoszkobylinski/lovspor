@@ -62,6 +62,7 @@ from lovspor.errors import (
 )
 from lovspor.extraction.tarball import iter_tarball_xml
 from lovspor.history import HistoryRecord, extract_history, write_history
+from lovspor.parsing.placeholder import is_content_placeholder
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.document import (
     FrontmatterContext,
@@ -96,6 +97,10 @@ from lovspor.sync.git_commit import commit as git_commit_msg
 from lovspor.sync.git_commit import has_staged_changes, has_uncommitted_changes
 
 logger = logging.getLogger(__name__)
+
+# ``ManifestRecord.removed_reason`` for a doc Lovdata still lists as current but
+# serves as an error notice rather than legal text.
+_PLACEHOLDER_REASON = "upstream_placeholder"
 
 _TRACKED_DATASETS = (
     "gjeldende-lover",
@@ -216,6 +221,7 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
     cache_dir = settings.data_dir / "cache" / "archives"
     cache_dir.mkdir(parents=True, exist_ok=True)
     upstream, drift_fields = _collect_upstream(settings, cache_dir)
+    upstream, placeholder_ids = _withhold_content_placeholders(upstream)
 
     # Sprint 8 PR-D eu_basis backfill: triggers once when the prior
     # manifest has any current record with eu_basis=None (Sprint 7-or-
@@ -494,7 +500,8 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
     for doc_id in changes.removed:
         prior_record = prior.documents[doc_id]
         prior_path = settings.lovverk_repo_path / prior_record.markdown_path
-        new_records[doc_id] = _tombstone(prior_record)
+        reason = _PLACEHOLDER_REASON if doc_id in placeholder_ids else None
+        new_records[doc_id] = _tombstone(prior_record, reason)
         # Production crash 2026-05-05 reproducer: a doc is removed
         # while another action (rename/update/add) has just written
         # to the SAME path (collision-resolution slug shuffle moves
@@ -1029,6 +1036,34 @@ def _carry_unchanged(
     return {doc_id: prior.documents[doc_id] for doc_id in unchanged_ids}
 
 
+def _withhold_content_placeholders(
+    upstream: dict[str, _UpstreamDoc],
+) -> tuple[dict[str, _UpstreamDoc], set[str]]:
+    """Drop documents Lovdata serves as an error notice instead of legal text.
+
+    Withholding them *before* change detection is what makes every downstream
+    mechanism do the right thing without special-casing: a doc that was current
+    is classified ``removed`` (tombstoned, stale Markdown deleted), one already
+    tombstoned is carried by ``_carry_tombstones`` — absent upstream, so the
+    manifest does not churn — and none of them ever reach ``_write_one``. That
+    last point is the fix: rendering one raises ``RenderError``, which skips the
+    doc and leaves its stale ``renderer_version``, so the stale-render promotion
+    re-queues it on the next sync, and the next, forever.
+
+    Self-healing: if Lovdata later publishes the real text the doc stops
+    matching, re-enters the upstream set as ``new``, and renders back to
+    ``current`` with no manual intervention.
+    """
+    withheld = {doc_id for doc_id, doc in upstream.items() if is_content_placeholder(doc.xml_bytes)}
+    for doc_id in sorted(withheld):
+        logger.warning(
+            "withholding %s: upstream serves an error notice, not legal text",
+            doc_id,
+        )
+    kept = {doc_id: doc for doc_id, doc in upstream.items() if doc_id not in withheld}
+    return kept, withheld
+
+
 def _carry_tombstones(
     prior: Manifest,
     upstream_ids: set[str],
@@ -1051,12 +1086,17 @@ def _carry_tombstones(
     }
 
 
-def _tombstone(old: ManifestRecord) -> ManifestRecord:
+def _tombstone(old: ManifestRecord, reason: str | None = None) -> ManifestRecord:
     """Mark a record as removed. Preserves all original fields so the
     audit trail remains intact: same xml_hash, same markdown_path,
     same last_seen (when the content was last observed), same slug and
     title (for cross-reference and historical INDEX inspection), only
-    status flips."""
+    status flips.
+
+    ``reason`` is ``None`` for an ordinary removal (the doc left the upstream
+    dataset) and set when the corpus withheld a doc upstream still lists — see
+    ``_withhold_content_placeholders``.
+    """
     return ManifestRecord(
         doc_type=old.doc_type,
         xml_hash=old.xml_hash,
@@ -1066,6 +1106,7 @@ def _tombstone(old: ManifestRecord) -> ManifestRecord:
         status="removed",
         slug=old.slug,
         title=old.title,
+        removed_reason=reason,
     )
 
 

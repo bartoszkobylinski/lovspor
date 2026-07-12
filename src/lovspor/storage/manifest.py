@@ -57,6 +57,15 @@ class ManifestRecord(BaseModel):
     record with ``renderer_version is None`` predates the stamp — treated as
     stale and re-rendered once, then carrying the current version thereafter.
 
+    ``removed_reason`` explains a ``removed`` status. ``None`` — the default,
+    and the case for every ordinary removal — means the document simply left
+    the upstream dataset. A value distinguishes a removal that upstream did not
+    ask for: ``"upstream_placeholder"`` marks a document Lovdata still lists as
+    current but serves as an error notice rather than legal text (see
+    ``lovspor.parsing.placeholder``). Without it the manifest would claim
+    Lovdata deleted a law it did not delete — a lie in the one artifact whose
+    entire value is being trustworthy.
+
     Unknown fields are ignored, not rejected: a manifest written by a *newer*
     engine (say, one that adds a per-record key after ``renderer_version``) must
     still load in an older reader such as a cached ``uvx`` MCP build. Additive
@@ -82,6 +91,7 @@ class ManifestRecord(BaseModel):
     eu_basis: list[str] | None = None
     embedding_hash: str | None = None
     renderer_version: int | None = None
+    removed_reason: str | None = None
 
 
 class Manifest(BaseModel):

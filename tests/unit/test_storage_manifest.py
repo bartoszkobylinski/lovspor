@@ -163,6 +163,33 @@ def test_manifest_default_version_is_literal_one() -> None:
     assert MANIFEST_VERSION == 1
 
 
+def test_removed_reason_defaults_to_none() -> None:
+    """The field is additive: manifests written before it still load.
+
+    Old readers ignore it (``extra="ignore"``) and old manifests omit it, so no
+    MANIFEST_VERSION bump is needed. This is the compat contract that a new
+    ``status`` *value* would have broken — ``status`` is a Literal, so an
+    unknown value ParseErrors the whole manifest in any older reader.
+    """
+    assert _record().removed_reason is None
+
+
+def test_removed_reason_survives_a_write_read_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "manifest.json"
+    record = ManifestRecord(
+        doc_type="forskrift",
+        xml_hash="a" * 64,
+        markdown_path="forskrifter/x.md",
+        source_dataset="gjeldende-sentrale-forskrifter",
+        last_seen=datetime(2026, 4, 22, 1, 31, tzinfo=UTC),
+        status="removed",
+        removed_reason="upstream_placeholder",
+    )
+    write_manifest(_manifest({"sf-720": record}), path)
+
+    assert read_manifest(path).documents["sf-720"].removed_reason == "upstream_placeholder"
+
+
 def test_manifest_record_status_rejects_unknown_value() -> None:
     """MEDIUM regression guard: ManifestRecord.status is constrained to
     'current' | 'removed'. A typo like 'curent' previously slipped
@@ -391,6 +418,7 @@ def test_read_manifest_drops_unknown_record_fields_on_round_trip(
         "eu_basis": None,
         "embedding_hash": None,
         "renderer_version": 2,
+        "removed_reason": None,
     }
 
     write_manifest(manifest, path)
@@ -413,6 +441,7 @@ def test_read_manifest_drops_unknown_record_fields_on_round_trip(
                 "eu_basis": None,
                 "embedding_hash": None,
                 "renderer_version": 2,
+                "removed_reason": None,
             },
         },
     }
