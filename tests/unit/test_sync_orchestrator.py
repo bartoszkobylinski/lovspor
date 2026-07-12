@@ -60,16 +60,31 @@ def _record(
     )
 
 
-def _upstream(doc_id: str, *, xml_hash: str, slug: str) -> _UpstreamDoc:
+def _upstream(
+    doc_id: str,
+    *,
+    xml_hash: str,
+    slug: str,
+    xml_bytes: bytes | None = None,
+) -> _UpstreamDoc:
     return _UpstreamDoc(
         doc_id=doc_id,
         source_dataset="gjeldende-lover",
-        xml_bytes=f"<xml>{doc_id}</xml>".encode(),
+        xml_bytes=xml_bytes if xml_bytes is not None else f"<xml>{doc_id}</xml>".encode(),
         xml_hash=xml_hash,
         slug=slug,
         title=doc_id,
         eu_basis=(),
     )
+
+
+# Lovdata's real markup for a document it lists as current but cannot serve —
+# the shape of sf-20200309-0720 upstream.
+_PLACEHOLDER_XML = (
+    b'<!DOCTYPE html><html lang="nb"><body><main class="documentBody">'
+    b'<span class="errorMessage"><strong>Vi klarer dessverre ikke vise hele '
+    b"dokumentet.</strong></span></main></body></html>"
+)
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -1780,6 +1795,203 @@ def test_run_sync_does_not_carry_reappeared_tombstone(
     new_records = captured["new_records"]
     assert new_records["lov-back"].status == "current"
     assert new_records["lov-back"].xml_hash == "f" * 64
+
+
+# --- upstream content placeholders (Lovdata serves an error notice, not law) ---
+
+
+def test_withhold_content_placeholders_partitions_upstream() -> None:
+    upstream = {
+        "lov-real": _upstream("lov-real", xml_hash="a" * 64, slug="real"),
+        "sf-placeholder": _upstream(
+            "sf-placeholder",
+            xml_hash="b" * 64,
+            slug="placeholder",
+            xml_bytes=_PLACEHOLDER_XML,
+        ),
+    }
+
+    kept, withheld = orchestrator_module._withhold_content_placeholders(upstream)
+
+    assert set(kept) == {"lov-real"}
+    assert withheld == {"sf-placeholder"}
+
+
+def test_run_sync_tombstones_a_document_upstream_serves_as_an_error_notice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The corpus must not publish an error notice as current Norwegian law.
+
+    The doc is still listed upstream, so nothing classifies it as removed on
+    its own — withholding it from the upstream set is what routes it into the
+    removal path, tombstoning the record and deleting the stale Markdown.
+    """
+    settings = _settings(tmp_path)
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "sf-720": _record("sf-720", xml_hash="a" * 64, slug="tom", renderer_version=None),
+        },
+    )
+    upstream = {
+        "sf-720": _upstream("sf-720", xml_hash="a" * 64, slug="tom", xml_bytes=_PLACEHOLDER_XML),
+    }
+    captured: dict[str, object] = {}
+    deleted: list[Path] = []
+
+    def capture_commit(*_args: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+    monkeypatch.setattr(orchestrator_module, "delete_document", deleted.append)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+
+    run_sync(settings)
+
+    record = captured["new_records"]["sf-720"]  # type: ignore[index]
+    assert record.status == "removed"
+    assert record.removed_reason == "upstream_placeholder"
+    assert deleted == [settings.lovverk_repo_path / "lover/tom.md"], (
+        "the stale Markdown must leave the corpus, not linger as an empty law"
+    )
+
+
+def test_run_sync_never_renders_a_content_placeholder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The anti-retry guarantee.
+
+    Rendering a placeholder raises RenderError, which skips the doc and leaves
+    its renderer_version stale — so the stale-render promotion re-queues it on
+    the next sync, forever. It must never reach the renderer at all.
+    """
+    settings = _settings(tmp_path)
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "sf-720": _record("sf-720", xml_hash="a" * 64, slug="tom", renderer_version=None),
+        },
+    )
+    upstream = {
+        "sf-720": _upstream("sf-720", xml_hash="a" * 64, slug="tom", xml_bytes=_PLACEHOLDER_XML),
+    }
+    rendered: list[str] = []
+
+    def spy_write_one(
+        settings: Settings,
+        doc: _UpstreamDoc,
+        now: datetime,
+        embedder: object = None,
+    ) -> tuple[ManifestRecord, list[Path]]:
+        rendered.append(doc.doc_id)
+        return _fake_write_one_slug_path(settings, doc, now, embedder)
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+    monkeypatch.setattr(orchestrator_module, "_write_one", spy_write_one)
+    monkeypatch.setattr(orchestrator_module, "delete_document", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", lambda *_a, **_k: None)
+
+    run_sync(settings)
+
+    assert rendered == [], "a withheld placeholder must never reach the renderer"
+
+
+def test_run_sync_carries_a_placeholder_tombstone_without_churn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Second sync onward: the tombstone is carried verbatim.
+
+    A record rebuilt each night with a fresh ``last_seen`` would commit a
+    meaningless manifest diff on every sync forever.
+    """
+    settings = _settings(tmp_path)
+    tombstone = ManifestRecord(
+        doc_type="lov",
+        xml_hash="a" * 64,
+        markdown_path="lover/tom.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 5, 1, tzinfo=UTC),
+        status="removed",
+        slug="tom",
+        title="sf-720",
+        removed_reason="upstream_placeholder",
+    )
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "sf-720": tombstone,
+            "lov-a": _record("lov-a", xml_hash="c" * 64, slug="a"),
+        },
+    )
+    upstream = {
+        "sf-720": _upstream("sf-720", xml_hash="a" * 64, slug="tom", xml_bytes=_PLACEHOLDER_XML),
+        "lov-a": _upstream("lov-a", xml_hash="c" * 64, slug="a"),
+    }
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+    monkeypatch.setattr(orchestrator_module, "_write_one", _fake_write_one_slug_path)
+    monkeypatch.setattr(orchestrator_module, "delete_document", lambda _p: None)
+
+    report = run_sync(settings)
+
+    assert report.removed_count == 0, "an already-withheld doc is not a fresh removal"
+    assert report.new_count == 0
+    assert report.changed_count == 0
+
+
+def test_run_sync_reinstates_a_placeholder_once_upstream_publishes_the_text(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Self-healing: the tombstone is a state, not a permanent blacklist.
+
+    When Lovdata publishes the real document it stops matching the placeholder
+    predicate, re-enters the upstream set as ``new``, and is rendered back to
+    ``current`` with no manual intervention.
+    """
+    settings = _settings(tmp_path)
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "sf-720": _record("sf-720", xml_hash="a" * 64, slug="tom", status="removed"),
+        },
+    )
+    upstream = {
+        "sf-720": _upstream("sf-720", xml_hash="f" * 64, slug="tom"),
+    }
+    captured: dict[str, object] = {}
+
+    def capture_commit(*_args: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+    monkeypatch.setattr(orchestrator_module, "_write_one", _fake_write_one_slug_path)
+    monkeypatch.setattr(orchestrator_module, "delete_document", lambda _p: None)
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+
+    run_sync(settings)
+
+    record = captured["new_records"]["sf-720"]  # type: ignore[index]
+    assert record.status == "current"
+    assert record.removed_reason is None
+
+
+def test_tombstone_defaults_to_no_reason() -> None:
+    """An ordinary removal — the doc left the dataset — carries no reason."""
+    old = _record("lov-gone", xml_hash="a" * 64, slug="gone")
+
+    assert orchestrator_module._tombstone(old).removed_reason is None
 
 
 def test_carry_tombstones_keeps_only_absent_removed_records() -> None:
