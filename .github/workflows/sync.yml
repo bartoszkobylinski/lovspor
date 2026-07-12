@@ -102,7 +102,18 @@ jobs:
             echo "::warning::Could not read api.github.com/meta — skipping the pin freshness check."
             exit 0
           fi
-          pinned=$(cut -d' ' -f2- < ~/.ssh/known_hosts)
+          # Extract exactly the key we pin — not "whatever is in known_hosts".
+          # `grep -F` reads a multi-line pattern as alternatives, so handing it the
+          # whole file would report a match whenever ANY entry is published. That
+          # passes even when our ed25519 pin has gone stale (e.g. alongside
+          # GitHub's still-published RSA key) — silent on the one event this check
+          # exists to catch.
+          pinned=$(awk '$1 == "github.com" && $2 == "ssh-ed25519" { print $2, $3 }' ~/.ssh/known_hosts)
+          if [ "$(printf '%s\n' "$pinned" | grep -c .)" -ne 1 ]; then
+            echo "::error::Expected exactly one pinned github.com ed25519 key in known_hosts."
+            echo "Found: ${pinned:-<none>}"
+            exit 0
+          fi
           if printf '%s\n' "$published" | grep -qxF "$pinned"; then
             echo "Pinned host key is still in GitHub's published list."
             exit 0

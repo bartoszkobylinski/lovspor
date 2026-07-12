@@ -9,9 +9,14 @@ pinned here, where a regression shows up as a failing test instead of a silently
 weaker nightly run.
 """
 
+import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml  # type: ignore[import-untyped]
 
 _WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "sync.yml"
@@ -109,3 +114,129 @@ def test_host_key_freshness_check_can_never_block_the_sync() -> None:
     check = next(s for s in _sync_steps() if str(s.get("name", "")).startswith("Warn if GitHub"))
 
     assert check["continue-on-error"] is True, check
+
+
+# ------------------------------------------------------------------ freshness check
+#
+# The tests below execute the freshness check's real shell — the script lifted
+# straight out of sync.yml — against a fake $HOME and a stubbed `curl`. Asserting
+# that the step merely *exists*, or that it sets continue-on-error, says nothing
+# about whether it can actually tell a rotated key from a current one.
+
+_RSA_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6"
+_STALE_ED25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMrqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
+
+
+def _freshness_script() -> str:
+    step = next(s for s in _sync_steps() if str(s.get("name", "")).startswith("Warn if GitHub"))
+    return str(step["run"])
+
+
+def _run_freshness_check(
+    tmp_path: Path,
+    known_hosts: str,
+    published: list[str] | None,
+) -> subprocess.CompletedProcess[str]:
+    """Run the step's own script. `published=None` simulates an unreachable endpoint."""
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "known_hosts").write_text(known_hosts, encoding="utf-8")
+
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    curl = stub_bin / "curl"
+    if published is None:
+        curl.write_text("#!/bin/sh\nexit 6\n", encoding="utf-8")  # could not resolve host
+    else:
+        body = json.dumps({"ssh_keys": published})
+        curl.write_text(f"#!/bin/sh\ncat <<'JSON'\n{body}\nJSON\n", encoding="utf-8")
+    curl.chmod(0o755)
+
+    env = {**os.environ, "HOME": str(home), "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}"}
+    return subprocess.run(
+        ["bash", "-c", _freshness_script()],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("jq") is None or shutil.which("bash") is None,
+    reason="the freshness check is shell; it needs bash and jq to execute",
+)
+
+
+def test_freshness_check_is_quiet_while_the_pin_is_still_published(tmp_path: Path) -> None:
+    result = _run_freshness_check(
+        tmp_path,
+        known_hosts=f"{GITHUB_ED25519_HOST_KEY}\n",
+        published=[GITHUB_ED25519_HOST_KEY.split(" ", 1)[1]],
+    )
+
+    assert "still in GitHub's published list" in result.stdout
+    assert "::error::" not in result.stdout
+    assert result.returncode == 0
+
+
+def test_freshness_check_reports_a_rotation_when_the_pin_is_no_longer_published(
+    tmp_path: Path,
+) -> None:
+    result = _run_freshness_check(
+        tmp_path,
+        known_hosts=f"{GITHUB_ED25519_HOST_KEY}\n",
+        published=[_RSA_KEY],  # our ed25519 key is gone from the published list
+    )
+
+    assert "::error::" in result.stdout
+    assert "rotated" in result.stdout
+    assert result.returncode == 0
+
+
+def test_freshness_check_still_sees_a_rotation_when_other_published_keys_are_present(
+    tmp_path: Path,
+) -> None:
+    """The regression this check nearly shipped with.
+
+    `grep -F` treats a multi-line pattern as alternatives. Comparing the whole of
+    known_hosts against the published list therefore matched whenever *any* entry
+    was published — so a stale ed25519 pin sitting next to GitHub's still-current
+    RSA key reported "still published", going silent on precisely the rotation it
+    exists to catch. The pinned key must be extracted on its own.
+    """
+    result = _run_freshness_check(
+        tmp_path,
+        known_hosts=f"github.com {_STALE_ED25519}\ngithub.com {_RSA_KEY}\n",
+        published=[_RSA_KEY],  # RSA still published; our pinned ed25519 is not
+    )
+
+    assert "::error::" in result.stdout, result.stdout
+    assert "still in GitHub's published list" not in result.stdout
+    assert result.returncode == 0
+
+
+def test_freshness_check_ignores_unrelated_hosts_in_known_hosts(tmp_path: Path) -> None:
+    result = _run_freshness_check(
+        tmp_path,
+        known_hosts=f"gitlab.com {_STALE_ED25519}\n{GITHUB_ED25519_HOST_KEY}\n",
+        published=[GITHUB_ED25519_HOST_KEY.split(" ", 1)[1]],
+    )
+
+    assert "still in GitHub's published list" in result.stdout, result.stdout
+    assert result.returncode == 0
+
+
+def test_freshness_check_warns_and_continues_when_the_endpoint_is_unreachable(
+    tmp_path: Path,
+) -> None:
+    """A network blip is not a drift signal, and must never stop the corpus sync."""
+    result = _run_freshness_check(
+        tmp_path,
+        known_hosts=f"{GITHUB_ED25519_HOST_KEY}\n",
+        published=None,
+    )
+
+    assert "::warning::" in result.stdout
+    assert "::error::" not in result.stdout
+    assert result.returncode == 0
