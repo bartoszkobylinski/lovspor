@@ -11,9 +11,9 @@ This suite exercises the MCP tool surface through realistic user personas withou
 # report as gap-revealed (skipped) with a clear note.
 export OPENAI_API_KEY=sk-...
 
-uv run lovspor-eval
-uv run lovspor-eval --persona anne
-uv run lovspor-eval --strict
+uv run python -m evals.runner
+uv run python -m evals.runner --persona anne
+uv run python -m evals.runner --strict
 ```
 
 `--strict` exits non-zero on `fail` or `partial`. Scenarios with `expected_outcome: gap_revealed` are informational and do not fail strict mode.
@@ -38,4 +38,4 @@ The `Gaps revealed` section ranks declared gaps by persona reach and scenario fr
 5. If a scenario needs new law text, update `evals/fixtures/synthetic_corpus.yaml`; do not clone the real `lovverk` corpus.
 6. For Sprint 9 anti-hallucination flow, the recommended chain is `semantic_search` (find candidates) → `get_section` (read verbatim text + see validated `cross_references`) → `verify_quote` (confirm the verbatim quote before citing). `validate_citation` is the off-ramp for ambiguous citations.
 
-Run `uv run lovspor-eval --strict` after edits. A clean strict run means every normal scenario passed and every known gap was explicitly declared.
+Run `uv run python -m evals.runner --strict` after edits. A clean strict run means every normal scenario passed and every known gap was explicitly declared.

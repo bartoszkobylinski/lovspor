@@ -1419,13 +1419,47 @@ def test_write_embeddings_empty_doc_writes_header_only_file(tmp_path: Path) -> N
     assert embedding_file.sections == []
 
 
-def test_pyyaml_is_a_declared_runtime_dependency() -> None:
-    """evals.runner (the lovspor-eval console script, shipped in the wheel)
-    imports yaml at module top. pyyaml must be a real runtime dependency,
-    not merely transitive via dev tooling, or `pip install lovspor` ships a
-    console script that ImportErrors on first use."""
-    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    deps = data["project"]["dependencies"]
+def _pyproject() -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
-    assert any(dep.lower().startswith("pyyaml") for dep in deps), deps
+
+def test_wheel_does_not_ship_a_top_level_evals_package() -> None:
+    """The PyPI import-name collision guard.
+
+    A top-level ``evals/`` in the wheel lands in site-packages under a
+    generic name that OpenAI's ``evals`` distribution also claims — co-install
+    both and one shadows the other. lovspor is published, so this was live,
+    not hypothetical.
+    """
+    packages = _pyproject()["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+
+    assert packages == ["src/lovspor"], packages
+
+
+def test_no_console_script_resolves_into_evals() -> None:
+    """``evals`` is repo-only tooling and cannot run from an installed wheel.
+
+    ``evals/runner.py`` resolves scenarios, personas and fixtures relative to
+    the source tree, and ``--llm-driven`` looks for the repo's pyproject.toml —
+    so a shipped entry point pointing into it is broken by construction. Run it
+    from a checkout: ``uv run python -m evals.runner``.
+    """
+    scripts = _pyproject()["project"]["scripts"]
+
+    assert not [name for name, target in scripts.items() if target.startswith("evals")], scripts
+
+
+def test_pyyaml_is_not_forced_on_installers() -> None:
+    """pyyaml is imported by evals/ only, never by src/lovspor.
+
+    With evals out of the wheel, keeping pyyaml as a runtime dependency would
+    force it on every ``pip install lovspor`` for code the wheel no longer
+    contains. It belongs in the dev group.
+    """
+    data = _pyproject()
+    runtime = data["project"]["dependencies"]
+    dev = data["dependency-groups"]["dev"]
+
+    assert not [d for d in runtime if d.lower().startswith("pyyaml")], runtime
+    assert [d for d in dev if d.lower().startswith("pyyaml")], dev
