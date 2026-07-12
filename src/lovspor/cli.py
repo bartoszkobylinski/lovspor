@@ -8,6 +8,7 @@ import typer
 from lovspor import __version__
 from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
+from lovspor.github_output import append_step_summary, set_output
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.settings import Settings, load_env
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
@@ -93,12 +94,35 @@ def sync(
     """
     settings = Settings.from_env()
     report = run_sync(settings, force_rerender=force_rerender)
+    _warn_schema_drift(report.unknown_archive_fields)
     typer.echo(
         f"Sync complete at {settings.lovverk_repo_path}: "
         f"{report.new_count} new, "
         f"{report.changed_count} changed, "
         f"{report.removed_count} removed, "
         f"{report.unchanged_count} unchanged.",
+    )
+
+
+def _warn_schema_drift(fields: tuple[str, ...]) -> None:
+    """Report unknown upstream fields to the user and the CI runner.
+
+    Non-fatal: the sync already ran. Echoes a warning, and — under GitHub
+    Actions — sets a step output (``schema_drift_fields``) and a job-summary
+    note so the workflow can open an issue. No-op when the schema matched.
+    """
+    if not fields:
+        return
+    joined = ", ".join(fields)
+    typer.echo(
+        f"WARNING: Lovdata /list returned unknown field(s): {joined}. "
+        "Tolerated; update LovdataArchive to model them.",
+        err=True,
+    )
+    set_output("schema_drift_fields", ",".join(fields))
+    append_step_summary(
+        f"### Lovdata schema drift\nUnknown `/list` field(s): `{joined}`. "
+        "Tolerated by the sync; update `LovdataArchive`.",
     )
 
 
