@@ -47,8 +47,13 @@ jobs:
       - name: Setup Python
         run: uv python install 3.12
 
+      # --no-dev on BOTH uv commands, not just this one: `uv run` re-syncs the
+      # environment before executing and re-installs the dev group by default, so
+      # `uv sync --frozen --no-dev` on its own is a no-op here. This job holds two
+      # live secrets; mutmut, ruff, pytest and pre-commit have no business being
+      # installed next to them. Runtime deps only — 46 packages instead of 76.
       - name: Sync engine dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --no-dev
 
       # This job holds two live secrets (LOVVERK_DEPLOY_KEY, OPENAI_API_KEY) and
       # pushes to the corpus over SSH, so github.com's host key is pinned rather
@@ -81,6 +86,43 @@ jobs:
             StrictHostKeyChecking yes
           EOF
 
+      # The pin above has exactly one way to decay: GitHub rotates its host key.
+      # The clone then fails with a bare "Host key verification failed" — correct,
+      # but it names neither the cause nor the fix, and it arrives at 04:00 UTC.
+      # So compare the pin against GitHub's published list first and say plainly
+      # what broke. This never blocks the sync: an unreachable endpoint is not a
+      # drift signal, and the pin — not this check — is what enforces trust. It
+      # only ever turns a cryptic ssh error into an actionable one.
+      - name: Warn if GitHub rotated its published host key
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          published=$(curl -sS --max-time 20 https://api.github.com/meta | jq -r '.ssh_keys[]?')
+          if [ -z "$published" ]; then
+            echo "::warning::Could not read api.github.com/meta — skipping the pin freshness check."
+            exit 0
+          fi
+          # Extract exactly the key we pin — not "whatever is in known_hosts".
+          # `grep -F` reads a multi-line pattern as alternatives, so handing it the
+          # whole file would report a match whenever ANY entry is published. That
+          # passes even when our ed25519 pin has gone stale (e.g. alongside
+          # GitHub's still-published RSA key) — silent on the one event this check
+          # exists to catch.
+          pinned=$(awk '$1 == "github.com" && $2 == "ssh-ed25519" { print $2, $3 }' ~/.ssh/known_hosts)
+          if [ "$(printf '%s\n' "$pinned" | grep -c .)" -ne 1 ]; then
+            echo "::error::Expected exactly one pinned github.com ed25519 key in known_hosts."
+            echo "Found: ${pinned:-<none>}"
+            exit 0
+          fi
+          if printf '%s\n' "$published" | grep -qxF "$pinned"; then
+            echo "Pinned host key is still in GitHub's published list."
+            exit 0
+          fi
+          echo "::error::GitHub's published host keys no longer include the key pinned in sync.yml."
+          echo "GitHub appears to have rotated its host key. The clone below will fail."
+          echo "Re-pin the ed25519 key from https://api.github.com/meta (.ssh_keys) in"
+          echo ".github/workflows/sync.yml and update tests/unit/test_ci_workflow.py."
+
       - name: Clone lovverk corpus
         run: git clone git@github.com:bartoszkobylinski/lovverk.git "$LOVVERK_PATH"
 
@@ -103,7 +145,7 @@ jobs:
         # timeout-minutes raised accordingly).
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: uv run lovspor sync
+        run: uv run --no-dev lovspor sync
 
       - name: Push corpus changes if any
         working-directory: ${{ env.LOVVERK_PATH }}
