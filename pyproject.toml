@@ -28,10 +28,6 @@ dependencies = [
     # truncation under the 8191-token API limit. It's tiny (~3 MB
     # wheel) so we don't gain anything by gating it behind an extra.
     "tiktoken>=0.7.0",
-    # pyyaml backs the `lovspor-eval` console script (evals.runner, which
-    # is shipped in the wheel). It was only ever present transitively via
-    # dev tooling, so `pip install lovspor` shipped a broken entry point.
-    "pyyaml>=6.0",
 ]
 
 [project.urls]
@@ -41,7 +37,6 @@ Issues = "https://github.com/bartoszkobylinski/lovspor/issues"
 
 [project.scripts]
 lovspor = "lovspor.cli:app"
-lovspor-eval = "evals.runner:main"
 
 [dependency-groups]
 dev = [
@@ -54,6 +49,11 @@ dev = [
     "pre-commit>=4.0.0",
     "lxml-stubs>=0.5.1",
     "hypothesis>=6.115.0",
+    # pyyaml is imported by evals/ only — never by src/lovspor. It belongs in
+    # the dev group now that evals is repo-only tooling rather than a shipped
+    # console script; making it a runtime dependency would force it on every
+    # `pip install lovspor` for code the wheel no longer contains.
+    "pyyaml>=6.0",
 ]
 
 [build-system]
@@ -61,7 +61,15 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/lovspor", "evals"]
+# `evals` is deliberately NOT here. Shipping it installed a generically-named
+# top-level `evals/` package into site-packages, colliding on the import name
+# with OpenAI's `evals` distribution: co-install both and one shadows the other.
+# It is repo-only tooling regardless — evals/runner.py resolves its scenarios,
+# personas, and fixtures relative to the source tree (and --llm-driven looks for
+# the repo's pyproject.toml), so the shipped `lovspor-eval` console script could
+# never have worked from a `pip install`. It ships in the sdist as source; run it
+# from a checkout with `uv run python -m evals.runner`.
+packages = ["src/lovspor"]
 
 [tool.hatch.build.targets.sdist]
 # Explicit allowlist: the sdist ships only package sources, evals, docs, and

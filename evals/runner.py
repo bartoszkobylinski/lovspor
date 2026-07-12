@@ -151,7 +151,11 @@ def run(argv: Sequence[str] | None = None) -> int:
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="lovspor-eval",
+        # Not "lovspor-eval": that console script is no longer shipped, because a
+        # top-level `evals` package in the wheel collides on the import name with
+        # OpenAI's `evals`. The runner is repo-only tooling — `--help` must show
+        # an invocation that actually exists.
+        prog="python -m evals.runner",
         description="Run persona-driven evals against a synthetic lovverk MCP corpus.",
     )
     parser.add_argument("--persona", help="Run one persona id, e.g. anne.")
