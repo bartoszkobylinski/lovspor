@@ -221,6 +221,56 @@ def test_sync_force_rerender_flag_reaches_run_sync(
     assert seen["force_rerender"] is True
 
 
+def _drift_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LOVSPOR_OUTPUT_REPO_PATH", str(tmp_path))
+    gh_output = tmp_path / "gh_output"
+    gh_summary = tmp_path / "gh_summary"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(gh_output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(gh_summary))
+    return gh_output, gh_summary
+
+
+def test_sync_signals_upstream_schema_drift_to_the_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Unknown upstream fields must not fail the sync, but they must reach the
+    workflow: a step output the issue-filing step keys on, plus a summary note."""
+    gh_output, gh_summary = _drift_env(monkeypatch, tmp_path)
+    canned = SyncReport(
+        new_count=0,
+        changed_count=0,
+        removed_count=0,
+        unchanged_count=1,
+        unknown_archive_fields=("checksum", "mimeType"),
+    )
+    monkeypatch.setattr("lovspor.cli.run_sync", lambda *_a, **_k: canned)
+
+    result = runner.invoke(app, ["sync"])
+
+    assert result.exit_code == 0
+    assert (
+        gh_output.read_text(encoding="utf-8")
+        == "schema_drift_fields<<__EOF__\nchecksum,mimeType\n__EOF__\n"
+    )
+    assert "Lovdata schema drift" in gh_summary.read_text(encoding="utf-8")
+
+
+def test_sync_emits_no_drift_signal_when_schema_matches(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    gh_output, gh_summary = _drift_env(monkeypatch, tmp_path)
+    canned = SyncReport(new_count=0, changed_count=0, removed_count=0, unchanged_count=1)
+    monkeypatch.setattr("lovspor.cli.run_sync", lambda *_a, **_k: canned)
+
+    assert runner.invoke(app, ["sync"]).exit_code == 0
+    assert not gh_output.exists()
+    assert not gh_summary.exists()
+
+
 def test_sync_surfaces_config_error_on_missing_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

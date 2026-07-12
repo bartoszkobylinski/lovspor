@@ -10,9 +10,11 @@ on:
   workflow_dispatch:
 
 # Engine repo only needs read access to itself; corpus push uses the deploy
-# key configured in repo secrets (LOVVERK_DEPLOY_KEY).
+# key configured in repo secrets (LOVVERK_DEPLOY_KEY). issues:write lets the
+# run file an upstream-schema-drift issue against this repo (see the last step).
 permissions:
   contents: read
+  issues: write
 
 # Only one sync at a time. A second invocation while one is running would
 # either race or duplicate work; queue with cancel-in-progress=false so
@@ -76,6 +78,7 @@ jobs:
           git config commit.gpgsign false
 
       - name: Run lovspor sync
+        id: sync
         # OPENAI_API_KEY enables the per-section embedding sidecars
         # (Sprint 9). Without it the engine still syncs Markdown
         # normally but silently skips every .bin write — which is how
@@ -97,3 +100,37 @@ jobs:
           else
             echo "No new commits — nothing to push."
           fi
+
+      # LovdataArchive tolerates unknown /list fields (extra="allow") so an
+      # additive upstream change can never take the nightly sync offline. That
+      # silence is the point of this step: it is what tells the maintainer to
+      # model the new field. Runs after the push so notification can never
+      # block the corpus write. Idempotent — while a drift issue is open we
+      # stay quiet rather than filing a fresh one every night.
+      - name: File an issue on upstream schema drift
+        if: steps.sync.outputs.schema_drift_fields != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FIELDS: ${{ steps.sync.outputs.schema_drift_fields }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="Lovdata schema drift: unmodelled /list field(s)"
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title \
+            --jq '[.[] | select(.title | startswith("Lovdata schema drift"))][0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Open drift issue #${existing} already tracks this — not filing another."
+            exit 0
+          fi
+          printf '%s\n' \
+            "The nightly sync saw field(s) in Lovdata's \`/list\` response that \`LovdataArchive\` does not model:" \
+            "" \
+            "**\`${FIELDS}\`**" \
+            "" \
+            'The sync **tolerated** them and ran normally (`extra="allow"`) — nothing is broken and no data was lost.' \
+            'Update `LovdataArchive` in `src/lovspor/sources/lovdata.py` to model the new field(s), then close this issue.' \
+            "" \
+            "Run: ${RUN_URL}" \
+            > drift-issue.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file drift-issue.md

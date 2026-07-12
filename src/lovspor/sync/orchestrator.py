@@ -70,7 +70,7 @@ from lovspor.rendering.document import (
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.rendering.slug import derive_slug, resolve_collisions
 from lovspor.settings import Settings
-from lovspor.sources.lovdata import LovdataArchive, LovdataClient
+from lovspor.sources.lovdata import LovdataArchive, LovdataClient, unknown_archive_fields
 from lovspor.storage.manifest import (
     Manifest,
     ManifestRecord,
@@ -124,6 +124,10 @@ class SyncReport(BaseModel):
     # stale (or force_rerender promoted them) AND the output actually differed.
     # Distinct from changed_count, which counts real upstream content changes.
     rerendered_count: int = 0
+    # Unknown fields Lovdata's /list response carried that the schema does not
+    # model (additive upstream drift, tolerated). Non-empty means the workflow
+    # should notify so LovdataArchive can be updated.
+    unknown_archive_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -211,7 +215,7 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
 
     cache_dir = settings.data_dir / "cache" / "archives"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    upstream = _collect_upstream(settings, cache_dir)
+    upstream, drift_fields = _collect_upstream(settings, cache_dir)
 
     # Sprint 8 PR-D eu_basis backfill: triggers once when the prior
     # manifest has any current record with eu_basis=None (Sprint 7-or-
@@ -282,6 +286,7 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
             changed_count=0,
             removed_count=0,
             unchanged_count=len(changes.unchanged),
+            unknown_archive_fields=drift_fields,
         )
 
     _guard_mass_removal(changes.removed, prior, settings.max_removal_ratio)
@@ -566,6 +571,7 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
         removed_count=len(changes.removed),
         unchanged_count=len(changes.unchanged) + len(rerender_noop_ids),
         rerendered_count=rerendered,
+        unknown_archive_fields=drift_fields,
     )
 
 
@@ -653,8 +659,12 @@ def _load_or_empty_manifest(path: Path) -> Manifest:
 def _collect_upstream(
     settings: Settings,
     cache_dir: Path,
-) -> dict[str, _UpstreamDoc]:
-    """Download both tarballs and return doc_id -> _UpstreamDoc.
+) -> tuple[dict[str, _UpstreamDoc], tuple[str, ...]]:
+    """Download both tarballs and return (doc_id -> _UpstreamDoc, schema drift).
+
+    The second element is any unknown fields Lovdata's /list response carried
+    (additive upstream drift, tolerated rather than fatal) so ``run_sync`` can
+    surface them for notification.
 
     Slug collisions are resolved **per dataset**, not globally. Each
     dataset writes into its own subdirectory (``lover/``, ``forskrifter/``)
@@ -669,7 +679,9 @@ def _collect_upstream(
     )
     by_dataset: dict[str, list[_UpstreamDoc]] = {}
     with client:
-        catalogue = {a.filename: a for a in client.list_datasets()}
+        archives = client.list_datasets()
+        drift = tuple(unknown_archive_fields(archives))
+        catalogue = {a.filename: a for a in archives}
         for dataset in _TRACKED_DATASETS:
             filename = f"{dataset}.tar.bz2"
             archive = _pick_archive(catalogue, filename)
@@ -682,7 +694,7 @@ def _collect_upstream(
         final_slugs = resolve_collisions(base_slugs)
         for doc in docs:
             upstream[doc.doc_id] = _with_slug(doc, final_slugs[doc.doc_id])
-    return upstream
+    return upstream, drift
 
 
 def _with_slug(doc: _UpstreamDoc, slug: str) -> _UpstreamDoc:
