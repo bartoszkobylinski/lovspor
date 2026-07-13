@@ -50,7 +50,7 @@ import unicodedata
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
 from mcp.server.fastmcp import FastMCP
@@ -222,6 +222,38 @@ class CorpusNotFoundError(LovsporError):
     """Raised when the requested doc or corpus path is not present."""
 
 
+class CorpusAmbiguousSectionError(LovsporError):
+    """Raised when a ``section_id`` matches more than one ``§`` in one act.
+
+    Section ids are NOT unique within a document. Two causes in the real
+    corpus (7 acts as of 2026-07-12): appendices that restart their own
+    numbering (``førerkortforskriften`` — ``Vedlegg 1`` and ``Vedlegg 2`` each
+    open with a ``§ 1``), and a genuine upstream repeat
+    (``betalingssystemloven`` — a ``§ 6-2`` in Kapittel 6 and another in
+    Kapittel 7).
+
+    Guessing here is a hallucination vector: an AI asking for ``§ 6-2`` would
+    be handed ``Endringer i andre lover`` and quote it as the answer. So the
+    caller is told what the options are and must pick one via ``occurrence``.
+    """
+
+
+class ParsedSection(TypedDict):
+    """One ``§`` section as parsed from a rendered act.
+
+    ``occurrence`` is 1-based *within its own ``section_id``*, in document
+    order — it is 1 for every section whose id is unique (the overwhelming
+    majority), and only climbs where an id genuinely repeats. It is what makes
+    an otherwise-ambiguous section addressable.
+    """
+
+    section_id: str
+    occurrence: int
+    heading: str
+    parent_chapter: str
+    body: str
+
+
 class CorpusReader:
     """Read-only view of a local lovverk corpus clone.
 
@@ -342,7 +374,12 @@ class CorpusReader:
             )
         return path.read_text(encoding="utf-8")
 
-    def get_section(self, slug: str, section_id: str) -> dict[str, Any]:
+    def get_section(
+        self,
+        slug: str,
+        section_id: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
         """Return a single ``§`` section of an act.
 
         ``section_id`` is the bare numeric / hyphenated identifier
@@ -350,6 +387,13 @@ class CorpusReader:
         leading ``§``, trailing dot, surrounding whitespace — are
         normalized away rather than costing an error round trip; the
         response always carries the canonical bare id.
+
+        ``occurrence`` disambiguates the rare act where one id names more
+        than one ``§``. Leave it unset: the unique case (virtually every
+        call) resolves without it, and an ambiguous id raises
+        ``CorpusAmbiguousSectionError`` listing the candidates rather than
+        silently handing back one of them. The response always reports the
+        ``occurrence`` it resolved to.
 
         The section body runs from the heading line to the next
         ``###`` or ``##`` heading. ``parent_chapter`` carries the
@@ -381,20 +425,19 @@ class CorpusReader:
         # query slug, so record.slug is non-None here even though the
         # type annotation allows None.
         body = self._body_for_record(record)
-        sections = _parse_sections(body)
-        if section_id not in sections:
-            available = ", ".join(
-                f"§ {sid}" for sid in sorted(sections.keys(), key=_natural_section_key)
-            )
+        by_id = _sections_by_id(_parse_sections(body))
+        matches = by_id.get(section_id)
+        if not matches:
+            available = ", ".join(f"§ {sid}" for sid in sorted(by_id, key=_natural_section_key))
             raise CorpusNotFoundError(
                 f"section {section_id!r} not found in {slug!r}; "
                 f"available: {available or '(no sections in this act)'}",
             )
-        section = sections[section_id]
+        section = _select_occurrence(slug, section_id, matches, occurrence)
         # The act's own section-id set is a free by-product of the
         # parse above — seed the cache so same-act cross-refs don't
         # re-parse the body.
-        self._section_ids_cache.setdefault(record.slug or "", set(sections.keys()))
+        self._section_ids_cache.setdefault(record.slug or "", set(by_id))
         # Skip cross-ref resolution for sections with no ``§``
         # patterns at all — most short sections have none.
         cross_references: list[dict[str, Any]] = []
@@ -408,20 +451,27 @@ class CorpusReader:
         return {
             "slug": record.slug,
             "section_id": section_id,
+            "occurrence": section["occurrence"],
             "heading": section["heading"],
             "parent_chapter": section["parent_chapter"],
             "body": section["body"],
             "cross_references": cross_references,
         }
 
-    def list_sections(self, slug: str) -> list[dict[str, str]]:
+    def list_sections(self, slug: str) -> list[dict[str, Any]]:
         """Table of contents for one act, in document order.
 
-        One row per ``§`` section: ``{section_id, heading,
+        One row per ``§`` section: ``{section_id, occurrence, heading,
         parent_chapter}``. The cheap navigation companion to
         ``get_section`` — an AI that doesn't know the exact section
         id can fetch the TOC instead of pulling the whole act
         through ``get_law`` (hundreds of KB for the big codes).
+
+        One row per *section*, not per id: where an id repeats, every
+        occurrence gets its own row (distinguished by ``occurrence``, and
+        usually by ``parent_chapter`` too). The map-keyed predecessor emitted
+        one row per id, so a repeated id meant a section was missing from the
+        TOC altogether — the AI could not learn it existed.
 
         Empty list for an act with no ``§`` sections. Unknown slug
         raises with the usual recovery hints.
@@ -432,14 +482,18 @@ class CorpusReader:
         """
         record = self._find_current_by_slug(slug)
         sections = _parse_sections(self._body_for_record(record))
-        self._section_ids_cache.setdefault(record.slug or "", set(sections.keys()))
+        self._section_ids_cache.setdefault(
+            record.slug or "",
+            {section["section_id"] for section in sections},
+        )
         return [
             {
-                "section_id": section_id,
-                "heading": data["heading"],
-                "parent_chapter": data["parent_chapter"],
+                "section_id": section["section_id"],
+                "occurrence": section["occurrence"],
+                "heading": section["heading"],
+                "parent_chapter": section["parent_chapter"],
             }
-            for section_id, data in sections.items()
+            for section in sections
         ]
 
     def validate_citation(self, citation: str) -> dict[str, Any]:
@@ -1037,7 +1091,7 @@ class CorpusReader:
         if not kept:
             best = max((hit.score for hit in hits), default=None)
             return {"results": [], "notice": _no_strong_match_notice(min_score, best)}
-        sections_memo: dict[str, dict[str, dict[str, str]]] = {}
+        sections_memo: dict[str, dict[str, list[ParsedSection]]] = {}
         return {
             "results": [self._grounded_hit(hit, sections_memo) for hit in kept],
             "notice": None,
@@ -1074,7 +1128,7 @@ class CorpusReader:
     def _grounded_hit(
         self,
         hit: SearchHit,
-        sections_memo: dict[str, dict[str, dict[str, str]]],
+        sections_memo: dict[str, dict[str, list[ParsedSection]]],
     ) -> dict[str, Any]:
         """Project a search hit into the grounded result row.
 
@@ -1084,15 +1138,24 @@ class CorpusReader:
         entry = self._load_slug_index().get(hit.slug)
         record = entry[1] if entry is not None else None
         subdir = ""
-        section: dict[str, str] | None = None
+        section: ParsedSection | None = None
         if record is not None:
             try:
                 subdir = _subdir_for_dataset(record.source_dataset)
             except CorpusNotFoundError:
                 subdir = ""
             if hit.slug not in sections_memo:
-                sections_memo[hit.slug] = _parse_sections(self._body_for_record(record))
-            section = sections_memo[hit.slug].get(hit.section_id)
+                sections_memo[hit.slug] = _sections_by_id(
+                    _parse_sections(self._body_for_record(record)),
+                )
+            # A hit carries a bare section_id, and the embedding store keys by
+            # that same bare id — so where an id repeats, the vector itself is
+            # already ambiguous and there is nothing here to disambiguate with.
+            # Take the first occurrence for the display heading; `citation_hint`
+            # still names the id, and get_section will refuse to guess if the
+            # caller follows up on it. Proper fix belongs in the embedding store.
+            matches = sections_memo[hit.slug].get(hit.section_id)
+            section = matches[0] if matches else None
         return {
             "slug": hit.slug,
             "section_id": hit.section_id,
@@ -1244,7 +1307,7 @@ class CorpusReader:
         if cached is None:
             entry = self._load_slug_index().get(slug)
             body = self._body_for_record(entry[1]) if entry is not None else ""
-            cached = set(_parse_sections(body).keys())
+            cached = {section["section_id"] for section in _parse_sections(body)}
             self._section_ids_cache[slug] = cached
         return cached
 
@@ -1554,10 +1617,15 @@ def _slug_token_in_citation(slug: str, citation_lower: str) -> bool:
     return False
 
 
-def _parse_sections(body: str) -> dict[str, dict[str, str]]:
-    """Walk a frontmatter-stripped body and return a section map.
+def _parse_sections(body: str) -> list[ParsedSection]:
+    """Walk a frontmatter-stripped body and return its sections, in order.
 
-    Output shape: ``{section_id: {heading, parent_chapter, body}}``.
+    Returns a **list**, not a map keyed by ``section_id``, because section ids
+    are not unique within a document — see ``CorpusAmbiguousSectionError``. The
+    previous dict-keyed version assigned last-wins, silently discarding
+    ``§ 6-2. Forskrifter`` from ``betalingssystemloven`` and every appendix
+    section whose id collided with the main body's. Callers that need lookup
+    build a map with ``_sections_by_id``.
 
     Boundary rules (every transition closes the current section, if
     any, before opening the new context):
@@ -1579,15 +1647,25 @@ def _parse_sections(body: str) -> dict[str, dict[str, str]]:
     line and the next boundary heading (``###`` or ``##``), stripped
     of leading / trailing whitespace.
     """
-    sections: dict[str, dict[str, str]] = {}
+    sections: list[ParsedSection] = []
+    seen: dict[str, int] = {}
     current_chapter = ""
     current_id: str | None = None
     current_data: dict[str, Any] | None = None
 
     def _close() -> None:
-        if current_id is not None and current_data is not None:
-            current_data["body"] = "\n".join(current_data.pop("body_lines")).strip()
-            sections[current_id] = current_data
+        if current_id is None or current_data is None:
+            return
+        seen[current_id] = seen.get(current_id, 0) + 1
+        sections.append(
+            ParsedSection(
+                section_id=current_id,
+                occurrence=seen[current_id],
+                heading=current_data["heading"],
+                parent_chapter=current_data["parent_chapter"],
+                body="\n".join(current_data["body_lines"]).strip(),
+            ),
+        )
 
     for line in body.split("\n"):
         # Section check MUST precede the chapter check: a flat act's ``## § 1.``
@@ -1627,6 +1705,52 @@ def _parse_sections(body: str) -> dict[str, dict[str, str]]:
     return sections
 
 
+def _sections_by_id(sections: list[ParsedSection]) -> dict[str, list[ParsedSection]]:
+    """Group parsed sections by id, preserving document order within each id.
+
+    A one-element list is the normal case. A longer one means the id repeats,
+    and the caller must disambiguate rather than pick.
+    """
+    grouped: dict[str, list[ParsedSection]] = {}
+    for section in sections:
+        grouped.setdefault(section["section_id"], []).append(section)
+    return grouped
+
+
+def _select_occurrence(
+    slug: str,
+    section_id: str,
+    matches: list[ParsedSection],
+    occurrence: int | None,
+) -> ParsedSection:
+    """Pick one section from the occurrences sharing ``section_id``.
+
+    With no ``occurrence`` the unique case resolves silently (the 99.9% path).
+    An ambiguous id raises rather than guessing, and the message carries every
+    candidate so an AI caller can re-ask correctly in one round trip instead of
+    unknowingly quoting the wrong provision.
+    """
+    if occurrence is None:
+        if len(matches) == 1:
+            return matches[0]
+        options = "; ".join(
+            f"occurrence={m['occurrence']}: {m['heading']}"
+            + (f" [{m['parent_chapter']}]" if m["parent_chapter"] else "")
+            for m in matches
+        )
+        raise CorpusAmbiguousSectionError(
+            f"section {section_id!r} is ambiguous in {slug!r}: {len(matches)} sections "
+            f"share that id — {options}. Re-call with occurrence=N to choose one.",
+        )
+    for match in matches:
+        if match["occurrence"] == occurrence:
+            return match
+    raise CorpusNotFoundError(
+        f"occurrence {occurrence} of section {section_id!r} not found in {slug!r}; "
+        f"it has {len(matches)} (valid: 1-{len(matches)})",
+    )
+
+
 def _natural_section_key(section_id: str) -> tuple[tuple[int, int | str], ...]:
     """Sort key that orders ``5-2``, ``5-10``, ``5-11`` numerically
     rather than lexicographically. Falls back to string for any non-
@@ -1645,7 +1769,7 @@ def _natural_section_key(section_id: str) -> tuple[tuple[int, int | str], ...]:
     return tuple((0, int(p)) if p.isdigit() else (1, p) for p in section_id.split("-"))
 
 
-def _section_text(data: dict[str, str]) -> str:
+def _section_text(data: ParsedSection) -> str:
     """Heading line + body as one block.
 
     Diffing the heading together with the body means a retitle (the section
@@ -1657,8 +1781,8 @@ def _section_text(data: dict[str, str]) -> str:
 
 
 def _classify_section_change(
-    before: dict[str, str] | None,
-    after: dict[str, str] | None,
+    before: ParsedSection | None,
+    after: ParsedSection | None,
 ) -> str | None:
     """Return ``added`` / ``removed`` / ``changed``, or ``None`` if identical."""
     if before is None:
@@ -1669,20 +1793,29 @@ def _classify_section_change(
 
 
 def _diff_section_maps(
-    sections_a: dict[str, dict[str, str]],
-    sections_b: dict[str, dict[str, str]],
+    sections_a: list[ParsedSection],
+    sections_b: list[ParsedSection],
 ) -> dict[str, Any]:
-    """Section-by-section diff of two parsed-section maps (``_parse_sections``
+    """Section-by-section diff of two parsed section lists (``_parse_sections``
     output). Sections present in both with identical heading+body are omitted;
-    every other id yields one entry carrying a stdlib unified diff. Entries are
+    every other one yields an entry carrying a stdlib unified diff. Entries are
     emitted in natural section order so the output is byte-stable for a given
     pair of inputs.
+
+    Sections are matched on ``(section_id, occurrence)``, not on ``section_id``
+    alone: an act with two ``§ 6-2`` has two sections to diff, and keying by id
+    would collapse them and hide any change to the first.
     """
+    map_a = {(s["section_id"], s["occurrence"]): s for s in sections_a}
+    map_b = {(s["section_id"], s["occurrence"]): s for s in sections_b}
     summary = {"sections_added": 0, "sections_removed": 0, "sections_changed": 0}
-    entries: list[dict[str, str]] = []
-    for sid in sorted(sections_a.keys() | sections_b.keys(), key=_natural_section_key):
-        before = sections_a.get(sid)
-        after = sections_b.get(sid)
+    entries: list[dict[str, Any]] = []
+    for key in sorted(
+        map_a.keys() | map_b.keys(),
+        key=lambda k: (_natural_section_key(k[0]), k[1]),
+    ):
+        before = map_a.get(key)
+        after = map_b.get(key)
         change = _classify_section_change(before, after)
         if change is None:
             continue
@@ -1690,7 +1823,8 @@ def _diff_section_maps(
         source = after if after is not None else before
         entries.append(
             {
-                "section_id": sid,
+                "section_id": key[0],
+                "occurrence": key[1],
                 "heading": source["heading"] if source is not None else "",
                 "change_type": change,
                 "unified_diff": _section_unified_diff(before, after),
@@ -1700,8 +1834,8 @@ def _diff_section_maps(
 
 
 def _section_unified_diff(
-    before: dict[str, str] | None,
-    after: dict[str, str] | None,
+    before: ParsedSection | None,
+    after: ParsedSection | None,
 ) -> str:
     """Deterministic unified diff between two section-text blocks; an absent
     side (added / removed) diffs against the empty document."""
@@ -2123,7 +2257,11 @@ def build_server(corpus_path: Path) -> FastMCP:
         return reader.get_law(slug)
 
     @mcp.tool()
-    def get_section(slug: str, section_id: str) -> dict[str, Any]:
+    def get_section(
+        slug: str,
+        section_id: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
         """Return a single ``§`` section of a Norwegian law or regulation.
 
         Use this when the user asks about a specific paragraph of an
@@ -2153,15 +2291,24 @@ def build_server(corpus_path: Path) -> FastMCP:
         list to decide whether a referenced section is safe to
         quote without a follow-up ``validate_citation`` call.
 
+        ``occurrence``: leave this unset. Section ids are almost always
+        unique within an act, and the call resolves without it. A handful
+        of acts repeat an id — an appendix that restarts its own numbering,
+        or two genuinely different ``§ 6-2`` in one chapter — and for those
+        the call raises, naming each candidate with its ``occurrence``
+        number and parent chapter. Re-call with ``occurrence=N`` to pick
+        one. It never guesses: being handed the wrong ``§ 6-2`` and quoting
+        it as the law is worse than an error you can recover from.
+
         Raises if the slug or the section is unknown — the error
         message lists the act's available section ids in natural
         order so the AI can recover without a separate ``get_law``
         call.
         """
-        return reader.get_section(slug, section_id)
+        return reader.get_section(slug, section_id, occurrence)
 
     @mcp.tool()
-    def list_sections(slug: str) -> list[dict[str, str]]:
+    def list_sections(slug: str) -> list[dict[str, Any]]:
         """List an act's table of contents: every ``§`` section id and heading.
 
         Use this BEFORE ``get_section`` when you don't know the exact
