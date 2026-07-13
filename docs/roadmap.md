@@ -304,7 +304,7 @@ Top three by **value × novelty** (unchanged by the Sprint 11 hardening wave, wh
 
 Top three by **adoption × reach**:
 
-4. **Docker image** (remaining half of Class E1; PyPI publish already shipped at 0.2.0). A `docker run lovspor mcp` path for users who don't use `uv`.
+4. **Docker image** (remaining half of Class E1; PyPI publish already shipped at 0.3.0). A `docker run lovspor mcp` path for users who don't use `uv`.
 5. **Public docs site + showcase** (Class E2). Discoverability.
 6. **`historiske-lover` + `gjeldende-lokale-forskrifter`** (Classes D-API-1, D-API-2). Pure pipeline work, no legal risk, closes two real corpus gaps. Local regulations likely as a separate `lovverk-lokal` repo for audience-separation reasons.
 

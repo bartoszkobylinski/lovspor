@@ -4,7 +4,7 @@ Single source of truth for why this project looks the way it does. Every non-obv
 
 Update this file whenever a new decision lands.
 
-Last updated: 2026-07-08
+Last updated: 2026-07-12
 
 ---
 
@@ -472,7 +472,7 @@ Tool count rose to **16**.
 
 A four-part code review (pipeline, rendering, ops, embeddings/MCP) was run over the whole engine on 2026-07-03; its findings were tracked in an internal fix backlog and closed over ~60 PRs in ten days. This was a **hardening sprint, not a feature sprint** — no new MCP tools, tool count still 16. This entry records the decisions, not every fix; the PR list is the changelog.
 
-**Renderer version stamp + self-healing re-renders (PRs #120–#123).** `RENDERER_VERSION` (currently 3) is stamped into every manifest record. A document whose stored `renderer_version` is older than the current one is re-rendered on sync **even when its XML hash is unchanged**, so a renderer bug fix heals the corpus without anyone hand-writing a migration. Three constraints fell out of §4's conservative-churn posture:
+**Renderer version stamp + self-healing re-renders (PRs #121, #122, #123, #125).** `RENDERER_VERSION` (currently 3) is stamped into every manifest record. A document whose stored `renderer_version` is older than the current one is re-rendered on sync **even when its XML hash is unchanged**, so a renderer bug fix heals the corpus without anyone hand-writing a migration. Three constraints fell out of §4's conservative-churn posture:
 - The backfill is **self-limiting** (PR #121) — a version bump does not rewrite ~5,900 documents in one commit.
 - Re-render migrations are **exempt from legal history** (PR #122). A re-render is an engine event, not a change in the law; letting it emit history events would pollute `history/<slug>.json` with non-legal churn.
 - The manifest reader **tolerates unknown fields** (PR #125), so a corpus written by a newer engine never breaks an older MCP reader. The `renderer_version` rollout itself broke every older reader before this landed — the lesson is that additive manifest keys are only safe if readers are permissive first.
