@@ -163,3 +163,23 @@ def test_documents_checked_counts_current_records_only(tmp_path: Path) -> None:
     )
 
     assert report.documents_checked == 1
+
+
+def test_history_files_are_never_reported_as_orphans(tmp_path: Path) -> None:
+    """A correct removal keeps `history/<slug>.{json,md}` — it is the legal audit
+    trail that the act existed and was repealed. Reporting it as drift would
+    invite a cleanup that destroys exactly the evidence the corpus preserves.
+    Pinned as a test because it is a tempting 'bug' for a future contributor.
+    """
+    _seed(tmp_path, "skatteloven")
+    history = tmp_path / "lover" / "history"
+    history.mkdir(parents=True)
+    # History for a repealed act with no manifest record at all — the exact shape
+    # left behind by the 48 orphans, and still not a finding.
+    (history / "opphevet-lov.json").write_text("{}", encoding="utf-8")
+    (history / "opphevet-lov.md").write_text("# history\n", encoding="utf-8")
+
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert report.findings == ()
+    assert report.clean is True

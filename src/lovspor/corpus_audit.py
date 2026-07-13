@@ -23,6 +23,13 @@ from lovspor.sync.document_io import dataset_dir
 _EMBEDDINGS_SUBDIR = "embeddings"
 _DATASET_SUBDIRS = ("lover", "forskrifter")
 
+# `history/<slug>.{json,md}` is deliberately NOT audited for orphans, and this is
+# not an oversight. A correct removal deletes the act's Markdown and its embedding
+# sidecar but *keeps* its history — that file is the legal audit trail, the record
+# that the act existed and was repealed. Tombstoned acts in the live corpus still
+# carry theirs. Flagging history as orphaned would invite a cleanup that destroys
+# exactly the evidence the corpus exists to preserve.
+
 
 class AuditFinding(BaseModel):
     """One reconciliation failure between the manifest and disk."""
