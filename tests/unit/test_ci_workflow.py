@@ -89,7 +89,7 @@ def test_sync_job_installs_runtime_dependencies_only() -> None:
     `uv run` re-syncs the environment before executing and re-installs the dev
     group by default — so `uv sync --frozen --no-dev` followed by a bare
     `uv run lovspor sync` puts mutmut, ruff, pytest and pre-commit right back
-    (verified: 46 packages, then 78 again). This job holds two live secrets; the
+    (verified: 44 packages, then 76 again). This job holds two live secrets; the
     dev toolchain has no business being installed next to them, and the no-op
     version of this fix is easy to reintroduce without noticing.
     """
