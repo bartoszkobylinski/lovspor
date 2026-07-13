@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from pathlib import Path
@@ -9,6 +10,8 @@ from lovspor import __version__
 from lovspor.cli import app
 from lovspor.corpus_fetch import FetchResult
 from lovspor.errors import ConfigError
+from lovspor.rendering.markdown_renderer import RENDERER_VERSION
+from lovspor.storage.manifest import MANIFEST_VERSION
 from lovspor.sync.orchestrator import SyncReport
 
 runner = CliRunner()
@@ -385,3 +388,65 @@ def test_mcp_existing_non_corpus_path_points_to_fetch_corpus(
     assert result.exit_code != 0
     assert isinstance(result.exception, ConfigError)
     assert "fetch-corpus" in str(result.exception)
+
+
+# --- audit: reconcile the corpus on disk against the manifest ---
+
+
+def _audit_corpus_fixture(root: Path, *, orphan: bool) -> None:
+    """Minimal corpus: one current act, optionally one orphaned file."""
+    (root / "lover").mkdir(parents=True, exist_ok=True)
+    (root / "lover" / "skatteloven.md").write_text("# Skatteloven\n", encoding="utf-8")
+    if orphan:
+        (root / "lover" / "opphevet.md").write_text("# Opphevet\n", encoding="utf-8")
+    manifest = {
+        "version": MANIFEST_VERSION,
+        "generated_at": "2026-07-12T00:00:00Z",
+        "documents": {
+            "nl-1": {
+                "doc_type": "lov",
+                "xml_hash": "a" * 64,
+                "markdown_path": "lover/skatteloven.md",
+                "source_dataset": "gjeldende-lover",
+                "last_seen": "2026-07-12T00:00:00Z",
+                "status": "current",
+                "slug": "skatteloven",
+                "renderer_version": RENDERER_VERSION,
+            },
+        },
+    }
+    (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
+def test_audit_reports_clean_corpus_and_exits_zero(tmp_path: Path) -> None:
+    _audit_corpus_fixture(tmp_path, orphan=False)
+
+    result = runner.invoke(app, ["audit", "--corpus-path", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "Corpus is clean" in result.stdout
+    assert "1 current document" in result.stdout
+
+
+def test_audit_exits_nonzero_on_drift_so_it_can_gate_ci(tmp_path: Path) -> None:
+    """A file no manifest record claims. Exit 1 is what makes this usable as a
+    CI gate rather than a report nobody reads."""
+    _audit_corpus_fixture(tmp_path, orphan=True)
+
+    result = runner.invoke(app, ["audit", "--corpus-path", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "orphan_document (1)" in result.stdout
+    assert "lover/opphevet.md" in result.stdout
+
+
+def test_audit_never_writes_or_deletes(tmp_path: Path) -> None:
+    """Read-only by contract: an audit that mutates the corpus it is auditing
+    is not an audit. Guards against a future 'while we're here, fix it' edit."""
+    _audit_corpus_fixture(tmp_path, orphan=True)
+    before = {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()}
+
+    runner.invoke(app, ["audit", "--corpus-path", str(tmp_path)])
+
+    after = {p: p.read_bytes() for p in sorted(tmp_path.rglob("*")) if p.is_file()}
+    assert after == before
