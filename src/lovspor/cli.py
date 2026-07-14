@@ -6,11 +6,14 @@ from typing import Annotated
 import typer
 
 from lovspor import __version__
+from lovspor.corpus_audit import AuditReport, audit_corpus
 from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
 from lovspor.github_output import append_step_summary, set_output
 from lovspor.mcp import serve as _mcp_serve
+from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
+from lovspor.storage.manifest import read_manifest
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
 
 app = typer.Typer(
@@ -143,6 +146,56 @@ def repair_embeddings() -> None:
         f"Flagged {count} document(s) for re-embed. "
         "Run `lovspor sync` with OPENAI_API_KEY set to rebuild their vectors.",
     )
+
+
+def _echo_audit(report: AuditReport) -> None:
+    """Print findings grouped by kind, most-common kind first."""
+    if report.clean:
+        typer.echo(f"Corpus is clean — {report.documents_checked} current document(s), no drift.")
+        return
+    by_kind: dict[str, list[str]] = {}
+    for finding in report.findings:
+        by_kind.setdefault(finding.kind, []).append(finding.path)
+    typer.echo(
+        f"Corpus drift: {len(report.findings)} finding(s) "
+        f"across {report.documents_checked} current document(s).\n",
+    )
+    for kind, paths in sorted(by_kind.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        typer.echo(f"{kind} ({len(paths)}):")
+        for path in paths:
+            typer.echo(f"  {path}")
+        typer.echo("")
+
+
+@app.command()
+def audit(
+    corpus_path: Annotated[
+        Path | None,
+        typer.Option("--corpus-path", help="Corpus to audit (default: the configured lovverk)."),
+    ] = None,
+) -> None:
+    """Reconcile the corpus on disk against the manifest, and report the drift.
+
+    Every change-detection path in the engine compares *upstream* against the
+    *manifest*; nothing compares the *manifest* against *disk*. A file that has
+    fallen out of the manifest is therefore invisible to all of them and can
+    never self-heal — which is how 48 repealed regulations sat in `lovverk` for
+    seven weeks. This is the check that catches that class of drift.
+
+    Reports: documents on disk that no record claims (`orphan_document`),
+    tombstoned records whose file was never deleted (`tombstoned_but_present`),
+    current records with no file (`missing_document`), embedding sidecars no
+    record owns (`orphan_embedding`), and documents left behind by a renderer
+    bump (`stale_render`).
+
+    Read-only — it never writes or deletes. Exits non-zero when drift is found,
+    so it can gate CI.
+    """
+    root = corpus_path or Settings.from_env().lovverk_repo_path
+    report = audit_corpus(root, read_manifest(root / "manifest.json"), RENDERER_VERSION)
+    _echo_audit(report)
+    if not report.clean:
+        raise typer.Exit(code=1)
 
 
 @app.command(name="fetch-corpus")
