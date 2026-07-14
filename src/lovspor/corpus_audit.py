@@ -97,17 +97,32 @@ def _expected_embedding(corpus_root: Path, record: ManifestRecord) -> str | None
     return _relative(corpus_root, directory / _EMBEDDINGS_SUBDIR / f"{record.slug}.bin")
 
 
+def _live_markdown_paths(manifest: Manifest) -> set[str]:
+    """Paths a *current* record renders to.
+
+    Two acts can slugify to one path: a new regulation replacing an old one
+    under the same short title gets a new doc id but the same markdown_path,
+    and the old record is tombstoned. The file then belongs to the live act, so
+    the removal correctly leaves it alone — a tombstone pointing here is not
+    drift, and reporting it invites a "cleanup" that deletes text in force.
+    """
+    return {
+        record.markdown_path for record in manifest.documents.values() if record.status == "current"
+    }
+
+
 def _document_findings(
     manifest: Manifest,
     on_disk: set[str],
     renderer_version: int | None,
 ) -> list[AuditFinding]:
     """Drift in both directions between manifest records and rendered files."""
+    live_paths = _live_markdown_paths(manifest)
     findings: list[AuditFinding] = []
     for doc_id, record in manifest.documents.items():
         path = record.markdown_path
         present = path in on_disk
-        if record.status == "removed" and present:
+        if record.status == "removed" and present and path not in live_paths:
             findings.append(
                 AuditFinding(
                     kind="tombstoned_but_present",
