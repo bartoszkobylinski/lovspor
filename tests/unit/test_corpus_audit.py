@@ -114,6 +114,22 @@ def test_detects_an_orphan_embedding_sidecar(tmp_path: Path) -> None:
     assert _kinds(report.findings) == [("orphan_embedding", "lover/embeddings/spøkelse.bin")]
 
 
+def test_a_removed_record_does_not_own_a_leftover_embedding_sidecar(tmp_path: Path) -> None:
+    """A tombstoned record is not a current owner of its sidecar; if the
+    embedding file is still on disk, the audit must still report it as drift."""
+    _seed(tmp_path, "skatteloven")
+    embeddings = tmp_path / "lover" / "embeddings"
+    embeddings.mkdir(parents=True)
+    (embeddings / "opphevet-lov.bin").write_bytes(b"\x00")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("opphevet-lov", status="removed")),
+    )
+
+    assert _kinds(report.findings) == [("orphan_embedding", "lover/embeddings/opphevet-lov.bin")]
+
+
 def test_detects_a_stale_render(tmp_path: Path) -> None:
     """Renderer-version self-healing re-renders these, but a doc stuck below the
     current version across many syncs means the backfill is not converging."""
