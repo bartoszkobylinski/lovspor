@@ -199,3 +199,28 @@ def test_history_files_are_never_reported_as_orphans(tmp_path: Path) -> None:
 
     assert report.findings == ()
     assert report.clean is True
+
+
+def test_a_missing_dataset_dir_does_not_stop_the_scan_of_the_others(tmp_path: Path) -> None:
+    """From the Codex mutmut run on PR #136: a surviving `continue` -> `break`
+    mutant in the dataset loop.
+
+    The code was right but nothing pinned it — every other fixture here creates
+    `lover/`, so no test exercised a corpus where the first dataset directory is
+    absent. If that `continue` ever became a `break`, the audit would silently
+    stop scanning and report a whole dataset as clean. A false negative in the
+    tool whose entire purpose is catching false negatives.
+    """
+    # No `lover/` directory at all — only regulations on disk.
+    (tmp_path / "forskrifter").mkdir()
+    (tmp_path / "forskrifter" / "spøkelse.md").write_text("# orphan\n", encoding="utf-8")
+    embeddings = tmp_path / "forskrifter" / "embeddings"
+    embeddings.mkdir()
+    (embeddings / "spøkelse.bin").write_bytes(b"\x00")
+
+    report = audit_corpus(tmp_path, _manifest())
+
+    assert _kinds(report.findings) == [
+        ("orphan_document", "forskrifter/spøkelse.md"),
+        ("orphan_embedding", "forskrifter/embeddings/spøkelse.bin"),
+    ]
