@@ -51,7 +51,7 @@ jobs:
       # environment before executing and re-installs the dev group by default, so
       # `uv sync --frozen --no-dev` on its own is a no-op here. This job holds two
       # live secrets; mutmut, ruff, pytest and pre-commit have no business being
-      # installed next to them. Runtime deps only — 46 packages instead of 76.
+      # installed next to them. Runtime deps only — 44 packages instead of 76.
       - name: Sync engine dependencies
         run: uv sync --frozen --no-dev
 

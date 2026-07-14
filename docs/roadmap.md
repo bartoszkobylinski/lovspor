@@ -8,20 +8,22 @@
 
 ### Engine (`lovspor`)
 - Downloads `gjeldende-lover` and `gjeldende-sentrale-forskrifter` from Lovdata's NLOD 2.0 public-data API.
-- Safely extracts XML members (XXE + billion-laughs blocked via lxml `safe_parser`; tar path traversal blocked by streaming members with `extractfile()` — never `extractall()`/`extract()`).
+- Safely extracts XML members (XXE + billion-laughs blocked via lxml `safe_parser`; tar path traversal blocked by streaming members with `extractfile()` — never `extractall()`/`extract()`; decompression bombs bounded by a per-member size cap).
 - Deterministic SHA256 over normalized XML.
-- Deterministic Markdown rendering (frontmatter + body).
+- Deterministic Markdown rendering (frontmatter + body), stamped with a `RENDERER_VERSION` (currently 3).
 - Change detection: new / changed / removed / unchanged + rename detection.
 - Per-document conventional commits (`add(lov):`, `update(forskrift):`, `rename(...)`, `remove(...)`).
 - Per-act history (`history/<slug>.{json,md}`) extracted via `git log --follow`.
 - Per-dataset `INDEX.md`.
-- Three self-healing migrations (Sprint 4 slug, Sprint 5 history, Sprint 8 `eu_basis`).
-- Daily 04:00 UTC scheduled sync via GitHub Actions.
-- 1056 tests, ~98% coverage, Codex review on every PR.
+- Self-healing migrations (Sprint 4 slug, Sprint 5 history, Sprint 8 `eu_basis`) plus renderer-version self-healing: a renderer bump re-renders stale documents on the next syncs, rate-limited so one bump never rewrites the whole corpus at once.
+- Upstream-drift tolerance: unknown Lovdata API fields no longer take the sync offline — they are accepted, surfaced, and auto-filed as a GitHub issue. Documents Lovdata serves as an error notice are withheld rather than published as placeholder text.
+- Atomic corpus writes (manifest, documents, history) so a crashed sync cannot leave a half-written corpus.
+- Daily 04:00 UTC scheduled sync via GitHub Actions; CI matrix across Python 3.12 / 3.13 / 3.14.
+- 1161 tests (1058 unit + 94 integration + 9 Hypothesis property tests), 98% coverage, Codex review on every PR.
 
 ### Corpus (`lovverk`)
-- ~5,900 Norwegian acts and central regulations rendered to Markdown.
-- Full git history. Time-travel "as of date" already exists for free — just not yet exposed.
+- ~5,900 Norwegian acts and central regulations rendered to Markdown (764 *lover* + 5,147 central *forskrifter* = 5,911 as of the 2026-07-12 sync; each dataset's `INDEX.md` carries the live count, and the MCP `corpus_status` tool reports it).
+- Full git history, exposed since Sprint 10 through the time-machine tools below.
 - Manifest as the single source of truth for change detection.
 
 ### MCP server (16 tools)
@@ -98,7 +100,7 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
 
 ### Distribution
-- **PyPI — SHIPPED.** `pip install lovspor` / `uvx lovspor` work (0.2.0, OIDC trusted publishing via `release.yml`).
+- **PyPI — SHIPPED.** `pip install lovspor` / `uvx lovspor` work (0.3.0, OIDC trusted publishing via `release.yml`).
 - **No Docker image.**
 - **No public docs site** (mkdocs).
 - **No hosted MCP endpoint.** Each user runs their own server (though `lovspor fetch-corpus` now automates the corpus clone/update).
@@ -246,7 +248,7 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ### Class E: Distribution
 
-**E1. PyPI publish — SHIPPED (0.2.0); Docker image — pending**
+**E1. PyPI publish — SHIPPED (0.3.0); Docker image — pending**
 - `pip install lovspor` / `uvx lovspor` are live via OIDC trusted publishing (`release.yml`). Remaining: `docker run lovspor mcp ...`.
 - **Leverage:** high in adoption terms.
 - **Effort:** Docker image ~low.
@@ -294,7 +296,7 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ## Recommendation
 
-Top three by **value × novelty** (refreshed after Sprint 10 ships Class B in full — the B1 time-machine and the B2 diff tool):
+Top three by **value × novelty** (unchanged by the Sprint 11 hardening wave, which paid down review debt rather than opening new capability — Class B remains complete, and no new option displaced these):
 
 1. **AST + cross-reference graph** (Classes A1, A2). With Class B now complete (`diff_law_versions` shipped), this is the next value×novelty target. A larger investment, but unblocks many later sprints. The AST enables: better `get_section`, structural diffs (complementing B2's textual diff), navigation tools, and a richer `cross_references` field on `get_section` (currently regex-based, B-tier scope).
 2. **Høyesterett via `domstol.no`** (Class D-DIRECT-1). The realistic version of the old Class D2 "Domsregister" entry — Lovdata's full case-law collection is legally blocked (§43; see "Currently out of scope"), but apex precedent via the courts' own publication is sprint-sized and legally clean. Closes the largest qualitative gap reachable without legislative change. Genuinely novel — no Norwegian-law MCP has case law.
@@ -302,7 +304,7 @@ Top three by **value × novelty** (refreshed after Sprint 10 ships Class B in fu
 
 Top three by **adoption × reach**:
 
-4. **Docker image** (remaining half of Class E1; PyPI publish already shipped at 0.2.0). A `docker run lovspor mcp` path for users who don't use `uv`.
+4. **Docker image** (remaining half of Class E1; PyPI publish already shipped at 0.3.0). A `docker run lovspor mcp` path for users who don't use `uv`.
 5. **Public docs site + showcase** (Class E2). Discoverability.
 6. **`historiske-lover` + `gjeldende-lokale-forskrifter`** (Classes D-API-1, D-API-2). Pure pipeline work, no legal risk, closes two real corpus gaps. Local regulations likely as a separate `lovverk-lokal` repo for audience-separation reasons.
 
@@ -332,4 +334,4 @@ Until (c), the following remain out of scope as a matter of Norwegian law, not p
 
 ---
 
-*Last reviewed: 2026-05-18 (post-Sprint-10-PR-A; Class D restructured around source-legality reality after the domstol.no / Lovdata §43 audit). Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
+*Last reviewed: 2026-07-12 (post-Sprint-11; "Where the project stands" reconciled against the shipped engine — test count, corpus count, PyPI version, renderer-version self-healing, upstream-drift tolerance. The 2026-05-18 review restructured Class D around source-legality reality after the domstol.no / Lovdata §43 audit; that structure stands.) Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
