@@ -115,6 +115,25 @@ def test_a_tombstone_superseded_at_the_same_path_is_not_a_finding(tmp_path: Path
     assert report.clean is True
 
 
+def test_a_missing_live_owner_on_a_tombstoned_shared_path_is_still_missing(tmp_path: Path) -> None:
+    """The tombstone suppression only applies when the shared path is present.
+
+    If a current record and a tombstone collide on one markdown_path but the file
+    is absent, the audit must still report the live record as missing — the new
+    tombstone guard must not mask a real drift on the current owner.
+    """
+    report = audit_corpus(
+        tmp_path,
+        _manifest(
+            old=_record("omregningsfaktorer", status="removed"),
+            new=_record("omregningsfaktorer"),
+        ),
+    )
+
+    assert _kinds(report.findings) == [("missing_document", "lover/omregningsfaktorer.md")]
+    assert report.documents_checked == 1
+
+
 def test_detects_a_current_document_missing_from_disk(tmp_path: Path) -> None:
     """The inverse drift: the manifest promises a law the corpus does not have.
     get_law would raise on a slug that INDEX.md advertises."""
