@@ -1155,20 +1155,29 @@ class CorpusReader:
                     _parse_sections(self._body_for_record(record)),
                 )
             # A hit carries a bare section_id, and the embedding store keys by
-            # that same bare id. Where an id repeats within an act, the store
-            # cannot say WHICH § 6-2 the matching vector came from — and the row
-            # ordinal cannot stand in for the occurrence either, because a long
-            # section is chunked into several vectors under that same id
-            # (embeddings/model.py: "callers embed every chunk under the same
-            # section_id"). Occurrence and chunk are indistinguishable on disk.
+            # that same bare id. Where an id repeats within an act, nothing in
+            # the hit says WHICH § 6-2 the matching vector came from. The row
+            # ordinal cannot stand in for the occurrence either: a long section
+            # is chunked into several vectors under that same id (see
+            # `_write_embeddings_for_doc`), so on disk "chunk 2 of § 5-12" and
+            # "occurrence 2 of § 6-2" have the same shape.
             #
-            # So do not guess. Showing the first § 6-2's heading and snippet for
-            # a hit that may have matched the second is precisely the false
-            # answer this project's anti-hallucination stack exists to prevent.
-            # Report the score and the id, withhold what cannot be known, and let
-            # the caller resolve it through get_section with an explicit
-            # occurrence. Fixing this properly means carrying the occurrence in
-            # the .bin format — a corpus-wide re-embed, out of scope here.
+            # It is not strictly unrecoverable. Rows are written in section order
+            # and chunk order within a section, so replaying `iter_sections` +
+            # `split_to_token_chunks` over the current body would rebuild the same
+            # id sequence and map a row back to its occurrence. But that is a
+            # RECONSTRUCTION, not a proof: the .bin carries no chunker version and
+            # no chunk count, so a change to the chunker would silently re-align
+            # every row and ground hits to the wrong § with no signal at all.
+            # `embedding_hash == xml_hash` pins the vectors to the current content
+            # but says nothing about the chunker that produced them.
+            #
+            # On the corpus's most safety-critical path, a reconstruction that can
+            # fail silently is not worth a snippet. So do not guess: report the
+            # score and the id, withhold what cannot be known, and let the caller
+            # resolve it via get_section with an explicit occurrence. Making this
+            # sound means the format carries the occurrence (or a chunker version)
+            # — a corpus-wide re-embed, out of scope here.
             matches = sections_memo[hit.slug].get(hit.section_id, [])
             section = matches[0] if len(matches) == 1 else None
             ambiguous = len(matches) > 1

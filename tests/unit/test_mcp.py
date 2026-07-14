@@ -4630,3 +4630,66 @@ def test_semantic_hit_on_a_chunked_section_still_grounds_normally(tmp_path: Path
     assert hit["heading"] == "§ 5-12. Boligsparing"
     assert hit["occurrence"] == 1
     assert "Lang tekst" in hit["snippet"]
+
+
+def _dup(occurrence: int, title: str, body: str) -> ParsedSection:
+    """One occurrence of the repeated id § 6-2."""
+    return ParsedSection(
+        section_id="6-2",
+        occurrence=occurrence,
+        heading=f"§ 6-2. {title}",
+        parent_chapter="Kapittel 6.",
+        body=body,
+    )
+
+
+def test_pair_occurrences_matches_identical_sections_before_matching_on_heading() -> None:
+    """Two `§ 6-2` can share a heading and differ only in body — Lovdata reuses
+    titles like 'Forskrifter'. If the FIRST is repealed, matching on heading
+    alone pairs the survivor against the deleted section's body and reports a
+    bogus change on top of the removal.
+
+    Pairing exact (heading + body) matches FIRST is what prevents that.
+    """
+    before = [_dup(1, "Forskrifter", "Gammel hjemmel."), _dup(2, "Forskrifter", "Uendret.")]
+    after = [_dup(1, "Forskrifter", "Uendret.")]
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 1,
+        "sections_changed": 0,
+    }
+    [entry] = result["sections"]
+    assert entry["change_type"] == "removed"
+    assert "-Gammel hjemmel." in entry["unified_diff"]
+
+
+def test_pair_occurrences_matches_on_heading_before_falling_back_to_position() -> None:
+    """When several occurrences of one id are reordered AND edited, position is a
+    lie: the section that moved must still be diffed against ITS OWN earlier text,
+    not against whatever now sits at its old index.
+
+    Without the heading pass the leftovers are paired positionally, and each
+    section's diff is computed against a different section's body — a confidently
+    wrong account of what the law changed, with the right summary counts to hide it.
+    """
+    before = [
+        _dup(1, "Alfa", "alfa-gammel"),
+        _dup(2, "Beta", "beta-gammel"),
+        _dup(3, "Gamma", "uendret"),
+    ]
+    after = [_dup(1, "Gamma", "uendret"), _dup(2, "Beta", "beta-ny"), _dup(3, "Alfa", "alfa-ny")]
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"]["sections_changed"] == 2
+    diffs = {e["heading"]: e["unified_diff"] for e in result["sections"]}
+    # Each section is diffed against its own prior text, not its neighbour's.
+    assert "-alfa-gammel" in diffs["§ 6-2. Alfa"]
+    assert "+alfa-ny" in diffs["§ 6-2. Alfa"]
+    assert "beta" not in diffs["§ 6-2. Alfa"]
+    assert "-beta-gammel" in diffs["§ 6-2. Beta"]
+    assert "+beta-ny" in diffs["§ 6-2. Beta"]
+    assert "alfa" not in diffs["§ 6-2. Beta"]
