@@ -12,6 +12,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+from pydantic import ValidationError
+
 from lovspor.corpus_audit import AuditFinding, audit_corpus
 from lovspor.storage.manifest import Manifest, ManifestRecord
 
@@ -224,3 +227,65 @@ def test_a_missing_dataset_dir_does_not_stop_the_scan_of_the_others(tmp_path: Pa
         ("orphan_document", "forskrifter/spøkelse.md"),
         ("orphan_embedding", "forskrifter/embeddings/spøkelse.bin"),
     ]
+
+
+def test_index_md_is_never_reported_as_an_orphan_document(tmp_path: Path) -> None:
+    """From Codex mutmut on PR #136: nothing pinned the INDEX.md exclusion.
+
+    INDEX.md is generated metadata, not an act, and no manifest record claims it.
+    If the exclusion ever broke, the audit would report it as an orphan in every
+    dataset on every run — permanently non-clean, permanently exiting 1 in CI.
+    An audit that always cries wolf is one nobody reads, which is how the 48
+    orphans stayed invisible in the first place.
+    """
+    _seed(tmp_path, "skatteloven")
+    (tmp_path / "lover" / "INDEX.md").write_text("# Lover\n\n_1 current documents_\n", "utf-8")
+
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert report.findings == ()
+    assert report.clean is True
+
+
+def test_findings_and_reports_are_immutable(tmp_path: Path) -> None:
+    """From Codex mutmut on PR #136: `model_config = {"frozen": True}` survived on
+    both models — nothing pinned it.
+
+    An audit result is evidence. A caller that can quietly mutate a finding, or
+    append to `findings` after the fact, can make the corpus look clean without
+    the corpus changing.
+    """
+    _seed(tmp_path, "skatteloven", "spøkelse")
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+    [finding] = report.findings
+
+    with pytest.raises(ValidationError):
+        finding.kind = "not_a_finding"  # type: ignore[misc]
+    with pytest.raises(ValidationError):
+        report.findings = ()  # type: ignore[misc]
+
+
+def test_a_finding_with_no_owning_record_carries_no_doc_id(tmp_path: Path) -> None:
+    """From Codex mutmut on PR #136: the `doc_id: str | None = None` default
+    survived being changed to `""`.
+
+    An orphan has no manifest record by definition, so there is no doc_id to
+    report. Empty-string would read as 'a document whose id is blank' rather than
+    'no record exists' — a small lie about provenance, and this project treats a
+    plausible-looking wrong value as worse than an absent one.
+    """
+    _seed(tmp_path, "skatteloven", "spøkelse")
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+    [orphan] = report.findings
+
+    assert orphan.kind == "orphan_document"
+    assert orphan.doc_id is None
+
+    # A finding that DOES have an owning record reports it.
+    _seed(tmp_path, "opphevet-lov")
+    tombstoned = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("opphevet-lov", status="removed")),
+    )
+    [f] = [x for x in tombstoned.findings if x.kind == "tombstoned_but_present"]
+    assert f.doc_id == "nl2"
