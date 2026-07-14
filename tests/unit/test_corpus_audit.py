@@ -92,6 +92,29 @@ def test_detects_a_tombstoned_document_whose_file_was_never_deleted(tmp_path: Pa
     ]
 
 
+def test_a_tombstone_superseded_at_the_same_path_is_not_a_finding(tmp_path: Path) -> None:
+    """Two acts can slugify to one path: when a new regulation replaces an old
+    one under the same short title, the old record is tombstoned while the new
+    one — a different doc id — renders to the *same* markdown_path.
+
+    The file on disk belongs to the live act. Flagging it is not a cosmetic
+    false positive: the finding reads "its file was never deleted", so acting on
+    it deletes text that is in force. Real case: sf-20090520-0534 (removed) and
+    sf-20260710-1545 (current) both own forskrift-om-omregningsfaktorer.md.
+    """
+    _seed(tmp_path, "omregningsfaktorer")
+    report = audit_corpus(
+        tmp_path,
+        _manifest(
+            old=_record("omregningsfaktorer", status="removed"),
+            new=_record("omregningsfaktorer"),
+        ),
+    )
+
+    assert report.findings == ()
+    assert report.clean is True
+
+
 def test_detects_a_current_document_missing_from_disk(tmp_path: Path) -> None:
     """The inverse drift: the manifest promises a law the corpus does not have.
     get_law would raise on a slug that INDEX.md advertises."""
