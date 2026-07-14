@@ -1103,6 +1103,8 @@ def test_semantic_search_returns_grounded_hits_with_metadata(tmp_path: Path) -> 
     assert rows[0] == {
         "slug": "husleieloven",
         "section_id": "2-10",
+        "occurrence": 1,
+        "ambiguous_section": False,
         "score": 1.0,
         "title": "Husleieloven",
         "dataset": "lover",
@@ -4518,3 +4520,113 @@ def test_diff_section_maps_diffs_each_occurrence_of_a_duplicate_id() -> None:
     assert entry["occurrence"] == 1
     assert entry["heading"] == "§ 6-2. Forskrifter"
     assert "+Ny forskriftshjemmel." in entry["unified_diff"]
+
+
+def test_diff_section_maps_does_not_misclassify_the_survivor_when_a_duplicate_id_disappears() -> (
+    None
+):
+    """From Codex review of PR #135.
+
+    `occurrence` is a POSITION, not an identity. If an act had two `§ 6-2` and
+    now has one, the survivor renumbers from 2 to 1 — and pairing on the number
+    alone diffs it against the DELETED section's text, reporting a bogus
+    changed+removed instead of a single removal.
+    """
+    before = [
+        ParsedSection(
+            section_id="6-2",
+            occurrence=1,
+            heading="§ 6-2. Forskrifter",
+            parent_chapter="Kapittel 6.",
+            body="Samme tekst.",
+        ),
+        ParsedSection(
+            section_id="6-2",
+            occurrence=2,
+            heading="§ 6-2. Endringer i andre lover",
+            parent_chapter="Kapittel 6.",
+            body="Samme tekst.",
+        ),
+    ]
+    after = [
+        ParsedSection(
+            section_id="6-2",
+            occurrence=1,
+            heading="§ 6-2. Endringer i andre lover",
+            parent_chapter="Kapittel 6.",
+            body="Samme tekst.",
+        ),
+    ]
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 1,
+        "sections_changed": 0,
+    }
+    assert [(e["section_id"], e["change_type"], e["heading"]) for e in result["sections"]] == [
+        ("6-2", "removed", "§ 6-2. Forskrifter"),
+    ]
+
+
+def test_semantic_hit_on_an_ambiguous_id_withholds_the_heading_instead_of_guessing(
+    tmp_path: Path,
+) -> None:
+    """From Codex review of PR #135: grounding a repeated-id hit to the first
+    occurrence is a false answer path — the vector may have matched the second.
+
+    Codex proposed grounding by row ordinal instead. That is unsafe: a long
+    section is chunked into SEVERAL vectors under the same section_id
+    (embeddings/model.py), so the ordinal cannot distinguish 'chunk 2 of § 5-12'
+    from 'occurrence 2 of § 6-2'. The store simply does not know which § matched.
+
+    So withhold what cannot be known. Report the score and the id, flag the
+    ambiguity, and let the caller resolve it via get_section(occurrence=N).
+    """
+    slug = "betalingssystemloven"
+    body = (
+        "## Kapittel 6. Øvrige bestemmelser\n\n"
+        "### § 6-2. Forskrifter\n\nFørste forekomst.\n\n"
+        "### § 6-2. Endringer i andre lover\n\nAndre forekomst.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug=slug, title="Betalingssystemloven")},
+        body_for={slug: body},
+    )
+    _write_embedding_file(tmp_path, "lover", slug, [("6-2", [1, 0]), ("6-2", [0, 1])])
+
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([0.0, 1.0]))
+    [hit] = reader.semantic_search("beta", limit=1)["results"]
+
+    assert hit["section_id"] == "6-2"
+    assert hit["ambiguous_section"] is True
+    assert hit["heading"] is None
+    assert hit["snippet"] is None
+    assert hit["occurrence"] is None
+    assert hit["citation_hint"] == "§ 6-2 betalingssystemloven"
+
+
+def test_semantic_hit_on_a_chunked_section_still_grounds_normally(tmp_path: Path) -> None:
+    """The regression guarding the fix above: a long section embeds as several
+    vectors under ONE section_id. That must NOT be mistaken for a repeated id —
+    the section is unambiguous and its heading and snippet must still be served.
+    """
+    slug = "skatteloven"
+    body = "## Kapittel 5. Inntekt\n\n### § 5-12. Boligsparing\n\nLang tekst om sparing.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug=slug, title="Skatteloven")},
+        body_for={slug: body},
+    )
+    # Two chunk vectors, same section_id — one section, not two.
+    _write_embedding_file(tmp_path, "lover", slug, [("5-12", [1, 0]), ("5-12", [0, 1])])
+
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([0.0, 1.0]))
+    [hit] = reader.semantic_search("sparing", limit=1)["results"]
+
+    assert hit["ambiguous_section"] is False
+    assert hit["heading"] == "§ 5-12. Boligsparing"
+    assert hit["occurrence"] == 1
+    assert "Lang tekst" in hit["snippet"]

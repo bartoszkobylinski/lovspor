@@ -1134,11 +1134,17 @@ class CorpusReader:
 
         ``sections_memo`` deduplicates the per-doc section parse when
         several hits land in the same act within one query.
+
+        ``ambiguous_section`` is true when the act has more than one ``§`` under
+        the hit's id. The embedding store cannot say which one matched, so
+        ``heading``, ``snippet`` and ``occurrence`` are withheld rather than
+        guessed — see the comment below.
         """
         entry = self._load_slug_index().get(hit.slug)
         record = entry[1] if entry is not None else None
         subdir = ""
         section: ParsedSection | None = None
+        ambiguous = False
         if record is not None:
             try:
                 subdir = _subdir_for_dataset(record.source_dataset)
@@ -1149,16 +1155,28 @@ class CorpusReader:
                     _parse_sections(self._body_for_record(record)),
                 )
             # A hit carries a bare section_id, and the embedding store keys by
-            # that same bare id — so where an id repeats, the vector itself is
-            # already ambiguous and there is nothing here to disambiguate with.
-            # Take the first occurrence for the display heading; `citation_hint`
-            # still names the id, and get_section will refuse to guess if the
-            # caller follows up on it. Proper fix belongs in the embedding store.
-            matches = sections_memo[hit.slug].get(hit.section_id)
-            section = matches[0] if matches else None
+            # that same bare id. Where an id repeats within an act, the store
+            # cannot say WHICH § 6-2 the matching vector came from — and the row
+            # ordinal cannot stand in for the occurrence either, because a long
+            # section is chunked into several vectors under that same id
+            # (embeddings/model.py: "callers embed every chunk under the same
+            # section_id"). Occurrence and chunk are indistinguishable on disk.
+            #
+            # So do not guess. Showing the first § 6-2's heading and snippet for
+            # a hit that may have matched the second is precisely the false
+            # answer this project's anti-hallucination stack exists to prevent.
+            # Report the score and the id, withhold what cannot be known, and let
+            # the caller resolve it through get_section with an explicit
+            # occurrence. Fixing this properly means carrying the occurrence in
+            # the .bin format — a corpus-wide re-embed, out of scope here.
+            matches = sections_memo[hit.slug].get(hit.section_id, [])
+            section = matches[0] if len(matches) == 1 else None
+            ambiguous = len(matches) > 1
         return {
             "slug": hit.slug,
             "section_id": hit.section_id,
+            "occurrence": section["occurrence"] if section is not None else None,
+            "ambiguous_section": ambiguous,
             "score": hit.score,
             "title": record.title if record is not None else None,
             "dataset": subdir,
@@ -1792,6 +1810,38 @@ def _classify_section_change(
     return "changed" if _section_text(before) != _section_text(after) else None
 
 
+def _pair_occurrences(
+    before: list[ParsedSection],
+    after: list[ParsedSection],
+) -> list[tuple[ParsedSection | None, ParsedSection | None]]:
+    """Align the occurrences that share one ``section_id`` across two versions.
+
+    ``occurrence`` is a POSITION, not a stable identity: delete the first of two
+    ``§ 6-2`` and the survivor renumbers from 2 to 1. Pairing on the number alone
+    therefore diffs the surviving section against the deleted one's text and
+    reports a bogus changed+removed instead of a single removal.
+
+    So align on content and fall back to position only for what is left over:
+    identical sections pair first, then same-heading (a body edit), then whatever
+    remains in document order (a retitle). Unmatched leftovers are the genuine
+    additions and removals.
+    """
+    unmatched_a, unmatched_b = list(before), list(after)
+    pairs: list[tuple[ParsedSection | None, ParsedSection | None]] = []
+    for key in (_section_text, lambda section: section["heading"]):
+        for candidate in list(unmatched_b):
+            match = next((s for s in unmatched_a if key(s) == key(candidate)), None)
+            if match is not None:
+                unmatched_a.remove(match)
+                unmatched_b.remove(candidate)
+                pairs.append((match, candidate))
+    while unmatched_a and unmatched_b:
+        pairs.append((unmatched_a.pop(0), unmatched_b.pop(0)))
+    pairs.extend((section, None) for section in unmatched_a)
+    pairs.extend((None, section) for section in unmatched_b)
+    return pairs
+
+
 def _diff_section_maps(
     sections_a: list[ParsedSection],
     sections_b: list[ParsedSection],
@@ -1802,34 +1852,30 @@ def _diff_section_maps(
     emitted in natural section order so the output is byte-stable for a given
     pair of inputs.
 
-    Sections are matched on ``(section_id, occurrence)``, not on ``section_id``
-    alone: an act with two ``§ 6-2`` has two sections to diff, and keying by id
-    would collapse them and hide any change to the first.
+    Sections are grouped by ``section_id`` and then aligned within that group by
+    ``_pair_occurrences`` — an act with two ``§ 6-2`` has two sections to diff,
+    and keying by id alone would collapse them and hide a change to the first.
     """
-    map_a = {(s["section_id"], s["occurrence"]): s for s in sections_a}
-    map_b = {(s["section_id"], s["occurrence"]): s for s in sections_b}
+    by_id_a, by_id_b = _sections_by_id(sections_a), _sections_by_id(sections_b)
     summary = {"sections_added": 0, "sections_removed": 0, "sections_changed": 0}
     entries: list[dict[str, Any]] = []
-    for key in sorted(
-        map_a.keys() | map_b.keys(),
-        key=lambda k: (_natural_section_key(k[0]), k[1]),
-    ):
-        before = map_a.get(key)
-        after = map_b.get(key)
-        change = _classify_section_change(before, after)
-        if change is None:
-            continue
-        summary[f"sections_{change}"] += 1
-        source = after if after is not None else before
-        entries.append(
-            {
-                "section_id": key[0],
-                "occurrence": key[1],
-                "heading": source["heading"] if source is not None else "",
-                "change_type": change,
-                "unified_diff": _section_unified_diff(before, after),
-            },
-        )
+    for sid in by_id_a.keys() | by_id_b.keys():
+        for before, after in _pair_occurrences(by_id_a.get(sid, []), by_id_b.get(sid, [])):
+            change = _classify_section_change(before, after)
+            if change is None:
+                continue
+            summary[f"sections_{change}"] += 1
+            source = after if after is not None else before
+            entries.append(
+                {
+                    "section_id": sid,
+                    "occurrence": source["occurrence"] if source is not None else 1,
+                    "heading": source["heading"] if source is not None else "",
+                    "change_type": change,
+                    "unified_diff": _section_unified_diff(before, after),
+                },
+            )
+    entries.sort(key=lambda e: (_natural_section_key(e["section_id"]), e["occurrence"]))
     return {"summary": summary, "sections": entries}
 
 
@@ -2521,11 +2567,21 @@ def build_server(corpus_path: Path) -> FastMCP:
         ``min_score`` are dropped), ``title``, ``dataset``,
         ``citation_hint`` (a paste-ready ``§ <id> <slug>`` string),
         ``heading`` (the section's actual heading), ``snippet`` (the
-        first ~200 chars of the section's real text), and
-        ``last_changed`` (the act's last content change — mention it
-        when currency matters). Null ``heading``/``snippet`` mean the
-        embedding is stale for that doc; verify via ``get_section``
-        before trusting such a hit.
+        first ~200 chars of the section's real text), ``occurrence``,
+        ``ambiguous_section``, and ``last_changed`` (the act's last
+        content change — mention it when currency matters). Null
+        ``heading``/``snippet`` mean the embedding is stale for that
+        doc; verify via ``get_section`` before trusting such a hit.
+
+        ``ambiguous_section: true`` means the act has more than one ``§``
+        under that id (a handful of acts repeat one — an appendix that
+        restarts its numbering, or a genuine upstream repeat). The
+        embedding index cannot say which of them the vector matched, so
+        ``heading``, ``snippet`` and ``occurrence`` come back null rather
+        than guessed. Do NOT quote such a hit from the snippet — there is
+        none. Call ``list_sections`` to see the candidates, then
+        ``get_section(slug, section_id, occurrence=N)`` to read the right
+        one.
 
         When ``results`` is empty, ``notice`` explains why (e.g. no
         section cleared ``min_score``). In that case say the corpus
