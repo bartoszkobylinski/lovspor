@@ -184,9 +184,9 @@ def test_embedding_and_mcp_splitters_agree_on_section_heading_matrix(line: str) 
     mcp_sections = parse_mcp_sections(f"{line}\n\nBody.\n")
 
     if embedding_match is None:
-        assert mcp_sections == {}
+        assert mcp_sections == []
     else:
-        assert set(mcp_sections) == {embedding_match.group(1)}
+        assert {s["section_id"] for s in mcp_sections} == {embedding_match.group(1)}
 
 
 def test_iter_sections_returns_empty_when_no_section_headings() -> None:

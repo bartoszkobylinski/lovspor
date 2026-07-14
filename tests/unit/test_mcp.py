@@ -25,9 +25,11 @@ from lovspor.mcp import (
     _MCP_EMBED_MAX_RETRIES,
     _MCP_EMBED_TIMEOUT_SECONDS,
     _SECTION_HEADING,
+    CorpusAmbiguousSectionError,
     CorpusNotFoundError,
     CorpusReader,
     OpenAIEmbedder,
+    ParsedSection,
     _bounded_limit,
     _build_embedder,
     _compute_match_owner_starts,
@@ -1101,6 +1103,8 @@ def test_semantic_search_returns_grounded_hits_with_metadata(tmp_path: Path) -> 
     assert rows[0] == {
         "slug": "husleieloven",
         "section_id": "2-10",
+        "occurrence": 1,
+        "ambiguous_section": False,
         "score": 1.0,
         "title": "Husleieloven",
         "dataset": "lover",
@@ -1459,21 +1463,25 @@ def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
     assert toc == [
         {
             "section_id": "1-1",
+            "occurrence": 1,
             "heading": "§ 1-1. Virkeområde",
             "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
         },
         {
             "section_id": "1-2",
+            "occurrence": 1,
             "heading": "§ 1-2. Hvem som pålegger skatt",
             "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
         },
         {
             "section_id": "5-12",
+            "occurrence": 1,
             "heading": "§ 5-12. Boligsparing for ungdom",
             "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
         },
         {
             "section_id": "5-13",
+            "occurrence": 1,
             "heading": "§ 5-13. Annet",
             "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
         },
@@ -3530,9 +3538,25 @@ def _sec(heading: str, body: str, chapter: str = "") -> dict[str, str]:
     return {"heading": heading, "parent_chapter": chapter, "body": body}
 
 
+def _secs(mapping: dict[str, dict[str, str]]) -> list[ParsedSection]:
+    """Adapt the ``{id: section}`` maps these tests are written in to the ordered
+    list _parse_sections now returns. Every id here is unique by construction, so
+    occurrence is always 1; duplicate-id diffing has its own test below."""
+    return [
+        ParsedSection(
+            section_id=sid,
+            occurrence=1,
+            heading=data["heading"],
+            parent_chapter=data["parent_chapter"],
+            body=data["body"],
+        )
+        for sid, data in mapping.items()
+    ]
+
+
 def test_diff_section_maps_identical_maps_is_empty() -> None:
     sections = {"1": _sec("§ 1. Formål", "Loven gjelder skatt.")}
-    result = _diff_section_maps(sections, sections)
+    result = _diff_section_maps(_secs(sections), _secs(sections))
     assert result["summary"] == {
         "sections_added": 0,
         "sections_removed": 0,
@@ -3544,7 +3568,7 @@ def test_diff_section_maps_identical_maps_is_empty() -> None:
 def test_diff_section_maps_added_section() -> None:
     before: dict[str, dict[str, str]] = {}
     after = {"2": _sec("§ 2. Virkeområde", "Ny paragraf.")}
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
     assert result["summary"]["sections_added"] == 1
     [entry] = result["sections"]
     assert entry["section_id"] == "2"
@@ -3556,7 +3580,7 @@ def test_diff_section_maps_added_section() -> None:
 def test_diff_section_maps_removed_section() -> None:
     before = {"3": _sec("§ 3. Opphevet", "Gammel tekst.")}
     after: dict[str, dict[str, str]] = {}
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
     assert result["summary"]["sections_removed"] == 1
     [entry] = result["sections"]
     assert entry["change_type"] == "removed"
@@ -3566,7 +3590,7 @@ def test_diff_section_maps_removed_section() -> None:
 def test_diff_section_maps_changed_body() -> None:
     before = {"1": _sec("§ 1. Formål", "Gammel setning.")}
     after = {"1": _sec("§ 1. Formål", "Ny setning.")}
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
     assert result["summary"]["sections_changed"] == 1
     [entry] = result["sections"]
     assert entry["change_type"] == "changed"
@@ -3580,7 +3604,7 @@ def test_diff_section_maps_retitle_with_identical_body_is_a_change() -> None:
     diffed text so the retitle surfaces."""
     before = {"1": _sec("§ 1. Gammelt navn", "Samme tekst.")}
     after = {"1": _sec("§ 1. Nytt navn", "Samme tekst.")}
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
     assert result["summary"]["sections_changed"] == 1
     diff = result["sections"][0]["unified_diff"]
     assert "-§ 1. Gammelt navn" in diff
@@ -3594,7 +3618,7 @@ def test_diff_section_maps_emits_sections_in_natural_order() -> None:
         "1": _sec("§ 1. En", "x"),
         "5-2": _sec("§ 5-2. To", "x"),
     }
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
     assert [e["section_id"] for e in result["sections"]] == ["1", "5-2", "5-10"]
 
 
@@ -3609,7 +3633,7 @@ def test_diff_section_maps_mixed_add_remove_change() -> None:
         "3": _sec("§ 3. Endres", "Etter."),
         "4": _sec("§ 4. Ny", "Lagt til."),
     }
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
     assert result["summary"] == {
         "sections_added": 1,
         "sections_removed": 1,
@@ -3622,7 +3646,9 @@ def test_diff_section_maps_mixed_add_remove_change() -> None:
 def test_diff_section_maps_is_deterministic() -> None:
     before = {"1": _sec("§ 1. A", "gammel")}
     after = {"1": _sec("§ 1. A", "ny"), "2": _sec("§ 2. B", "ny b")}
-    assert _diff_section_maps(before, after) == _diff_section_maps(before, after)
+    once = _diff_section_maps(_secs(before), _secs(after))
+    twice = _diff_section_maps(_secs(before), _secs(after))
+    assert once == twice
 
 
 def test_diff_section_maps_uses_natural_order_and_omits_unchanged() -> None:
@@ -3637,12 +3663,12 @@ def test_diff_section_maps_uses_natural_order_and_omits_unchanged() -> None:
         "5-10": _sec("§ 5-10. Ti", "ny ti"),
     }
 
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
 
     assert [entry["section_id"] for entry in result["sections"]] == ["5-2", "5-10"]
     assert all(entry["section_id"] != "1" for entry in result["sections"])
     assert json.dumps(result, sort_keys=True, ensure_ascii=False) == json.dumps(
-        _diff_section_maps(before, after),
+        _diff_section_maps(_secs(before), _secs(after)),
         sort_keys=True,
         ensure_ascii=False,
     )
@@ -3652,7 +3678,7 @@ def test_diff_section_maps_marks_retitle_as_changed() -> None:
     before = {"1-1": _sec("§ 1-1. Gammelt navn", "Uendret brødtekst.")}
     after = {"1-1": _sec("§ 1-1. Nytt navn", "Uendret brødtekst.")}
 
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
 
     assert result["summary"] == {
         "sections_added": 0,
@@ -3668,7 +3694,7 @@ def test_diff_section_maps_marks_empty_body_retitle_as_changed() -> None:
     before = {"1-1": _sec("§ 1-1. Gammelt navn", "")}
     after = {"1-1": _sec("§ 1-1. Nytt navn", "")}
 
-    result = _diff_section_maps(before, after)
+    result = _diff_section_maps(_secs(before), _secs(after))
 
     assert result["summary"]["sections_changed"] == 1
     assert result["sections"][0]["unified_diff"] == "\n".join(
@@ -4167,10 +4193,10 @@ def test_parse_sections_recognizes_h2_flat_law_sections() -> None:
         "## § 1. Formål\n\nLoven gjelder berging.\n\n## § 2. Virkeområde\n\nGjelder hele landet.\n"
     )
     sections = _parse_sections(body)
-    assert set(sections) == {"1", "2"}
-    assert sections["1"]["heading"] == "§ 1. Formål"
-    assert sections["1"]["parent_chapter"] == ""
-    assert sections["1"]["body"] == "Loven gjelder berging."
+    assert [s["section_id"] for s in sections] == ["1", "2"]
+    assert sections[0]["heading"] == "§ 1. Formål"
+    assert sections[0]["parent_chapter"] == ""
+    assert sections[0]["body"] == "Loven gjelder berging."
 
 
 def test_parse_sections_h2_titleless_section_with_trailing_dot() -> None:
@@ -4178,10 +4204,10 @@ def test_parse_sections_h2_titleless_section_with_trailing_dot() -> None:
     titleless paragraph — it must still parse as section 14."""
     body = "## § 13. (Opphevet)\n\nx\n\n## § 14.\n\nInnhold.\n"
     sections = _parse_sections(body)
-    assert set(sections) == {"13", "14"}
-    assert sections["13"]["heading"] == "§ 13. (Opphevet)"
-    assert sections["14"]["heading"] == "§ 14"
-    assert sections["14"]["body"] == "Innhold."
+    assert [s["section_id"] for s in sections] == ["13", "14"]
+    assert sections[0]["heading"] == "§ 13. (Opphevet)"
+    assert sections[1]["heading"] == "§ 14"
+    assert sections[1]["body"] == "Innhold."
 
 
 def test_parse_sections_still_handles_chaptered_h3_sections() -> None:
@@ -4189,18 +4215,18 @@ def test_parse_sections_still_handles_chaptered_h3_sections() -> None:
     ``### § N-M`` is the section under it."""
     body = "## Kapittel 1. Alminnelig\n\n### § 1-1. Start\n\nBody.\n"
     sections = _parse_sections(body)
-    assert set(sections) == {"1-1"}
-    assert sections["1-1"]["parent_chapter"] == "Kapittel 1. Alminnelig"
-    assert sections["1-1"]["body"] == "Body."
+    assert [s["section_id"] for s in sections] == ["1-1"]
+    assert sections[0]["parent_chapter"] == "Kapittel 1. Alminnelig"
+    assert sections[0]["body"] == "Body."
 
 
 def test_parse_sections_mixed_h2_section_and_h2_chapter() -> None:
     """``## §`` is a section; ``## Kapittel`` (no ``§``) is still a chapter."""
     body = "## Kapittel 1.\n\n### § 1-1. A\n\nx\n\n## § 2. B\n\ny\n"
     sections = _parse_sections(body)
-    assert set(sections) == {"1-1", "2"}
-    assert sections["1-1"]["parent_chapter"] == "Kapittel 1."
-    assert sections["2"]["parent_chapter"] == "Kapittel 1."
+    assert [s["section_id"] for s in sections] == ["1-1", "2"]
+    assert sections[0]["parent_chapter"] == "Kapittel 1."
+    assert sections[1]["parent_chapter"] == "Kapittel 1."
 
 
 def test_list_and_get_section_work_on_flat_h2_law(tmp_path: Path) -> None:
@@ -4320,3 +4346,350 @@ def test_diff_law_versions_diffs_flat_h2_law_sections(
         ("1", "changed"),
         ("3", "added"),
     ]
+
+
+# --- duplicate § ids: section ids are NOT unique within a document ---
+#
+# Two real shapes from the corpus (lovverk @ 1cac8a60, 7 documents affected):
+#   betalingssystemloven  — a `§ 6-2` in Kapittel 6 and another in Kapittel 7
+#   førerkortforskriften  — Vedlegg 1 and Vedlegg 2 each restart at `§ 1`
+# Before this fix `_parse_sections` keyed a dict by section_id and assigned
+# last-wins, so `§ 6-2. Forskrifter` was unreachable via get_section, absent
+# from list_sections, and invisible to diff_law_versions.
+
+_DUPLICATE_ID_BODY = (
+    "## Kapittel 6. Øvrige bestemmelser\n\n"
+    "### § 6-1. Tilsyn\n\nNoregs Bank fører tilsyn.\n\n"
+    "### § 6-2. Forskrifter\n\nKongen kan gi forskrifter.\n\n"
+    "### § 6-2. Endringer i andre lover\n\nFra den tid loven trer i kraft.\n"
+)
+
+_APPENDIX_BODY = (
+    "## Kapittel 1. Alminnelige bestemmelser\n\n"
+    "### § 1. Definisjoner\n\nHoveddelens definisjoner.\n\n"
+    "## Vedlegg 1 – Helsekrav\n\n"  # noqa: RUF001 — en dash is verbatim Lovdata text
+    "### Kapittel 1. Definisjoner\n\n"
+    "### § 1. Definisjoner\n\nVedleggets definisjoner.\n"
+)
+
+
+def test_parse_sections_preserves_both_occurrences_of_a_duplicate_id() -> None:
+    """Two `§ 6-2` headings in one act are two sections, not one.
+
+    Regression for betalingssystemloven: the dict-keyed parser dropped
+    `§ 6-2. Forskrifter` entirely.
+    """
+    sections = _parse_sections(_DUPLICATE_ID_BODY)
+    dupes = [s for s in sections if s["section_id"] == "6-2"]
+    assert [s["heading"] for s in dupes] == [
+        "§ 6-2. Forskrifter",
+        "§ 6-2. Endringer i andre lover",
+    ]
+    assert [s["occurrence"] for s in dupes] == [1, 2]
+    assert dupes[0]["body"] == "Kongen kan gi forskrifter."
+
+
+def test_parse_sections_keeps_appendix_sections_separate_from_the_main_body() -> None:
+    """An appendix restarts § numbering; its § 1 must not shadow the body's § 1."""
+    sections = _parse_sections(_APPENDIX_BODY)
+    ones = [s for s in sections if s["section_id"] == "1"]
+    assert len(ones) == 2
+    assert ones[0]["parent_chapter"] == "Kapittel 1. Alminnelige bestemmelser"
+    assert ones[0]["body"] == "Hoveddelens definisjoner."
+    assert ones[1]["parent_chapter"] == "Vedlegg 1 – Helsekrav"  # noqa: RUF001
+    assert ones[1]["body"] == "Vedleggets definisjoner."
+
+
+def test_parse_sections_numbers_occurrences_per_id_not_globally() -> None:
+    """`occurrence` counts within one section_id — a unique id is always 1."""
+    sections = _parse_sections(_DUPLICATE_ID_BODY)
+    by_id = {(s["section_id"], s["occurrence"]) for s in sections}
+    assert by_id == {("6-1", 1), ("6-2", 1), ("6-2", 2)}
+
+
+def test_list_sections_lists_every_occurrence_of_a_duplicate_id(tmp_path: Path) -> None:
+    """The TOC must not silently omit a section that shares an id with another."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="betalingssystemloven", title="Betalingssystemloven")},
+        body_for={"betalingssystemloven": _DUPLICATE_ID_BODY},
+    )
+    rows = CorpusReader(tmp_path).list_sections("betalingssystemloven")
+    assert [(r["section_id"], r["heading"]) for r in rows] == [
+        ("6-1", "§ 6-1. Tilsyn"),
+        ("6-2", "§ 6-2. Forskrifter"),
+        ("6-2", "§ 6-2. Endringer i andre lover"),
+    ]
+    assert [r["occurrence"] for r in rows] == [1, 1, 2]
+
+
+def test_get_section_refuses_to_guess_on_an_ambiguous_id(tmp_path: Path) -> None:
+    """Silently returning one of two `§ 6-2` is a hallucination vector: the AI
+    would quote 'Endringer i andre lover' when asked about § 6-2. Raise, and
+    name both occurrences so the caller can recover in one round trip."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="betalingssystemloven", title="Betalingssystemloven")},
+        body_for={"betalingssystemloven": _DUPLICATE_ID_BODY},
+    )
+    reader = CorpusReader(tmp_path)
+    with pytest.raises(CorpusAmbiguousSectionError) as excinfo:
+        reader.get_section("betalingssystemloven", "6-2")
+    message = str(excinfo.value)
+    assert "6-2" in message
+    assert "Forskrifter" in message
+    assert "Endringer i andre lover" in message
+    assert "occurrence" in message
+
+
+def test_get_section_returns_the_requested_occurrence(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="betalingssystemloven", title="Betalingssystemloven")},
+        body_for={"betalingssystemloven": _DUPLICATE_ID_BODY},
+    )
+    reader = CorpusReader(tmp_path)
+    first = reader.get_section("betalingssystemloven", "6-2", occurrence=1)
+    second = reader.get_section("betalingssystemloven", "6-2", occurrence=2)
+    assert first["heading"] == "§ 6-2. Forskrifter"
+    assert first["body"] == "Kongen kan gi forskrifter."
+    assert first["occurrence"] == 1
+    assert second["heading"] == "§ 6-2. Endringer i andre lover"
+    assert second["occurrence"] == 2
+
+
+def test_get_section_rejects_an_out_of_range_occurrence(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="betalingssystemloven", title="Betalingssystemloven")},
+        body_for={"betalingssystemloven": _DUPLICATE_ID_BODY},
+    )
+    reader = CorpusReader(tmp_path)
+    with pytest.raises(CorpusNotFoundError, match="occurrence"):
+        reader.get_section("betalingssystemloven", "6-2", occurrence=3)
+
+
+def test_get_section_unique_id_is_unaffected_by_the_occurrence_machinery(
+    tmp_path: Path,
+) -> None:
+    """Regression: the 99.9% case must behave exactly as before — no occurrence
+    argument needed, no error, and the response still reports occurrence 1."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="betalingssystemloven", title="Betalingssystemloven")},
+        body_for={"betalingssystemloven": _DUPLICATE_ID_BODY},
+    )
+    section = CorpusReader(tmp_path).get_section("betalingssystemloven", "6-1")
+    assert section["heading"] == "§ 6-1. Tilsyn"
+    assert section["occurrence"] == 1
+
+
+def test_diff_section_maps_diffs_each_occurrence_of_a_duplicate_id() -> None:
+    """Keying the diff by section_id alone collapsed an act's two `§ 6-2` into
+    one, so a change to the FIRST was invisible — diff_law_versions would report
+    'no change' on a section that had in fact been rewritten."""
+    before = [
+        ParsedSection(
+            section_id="6-2",
+            occurrence=1,
+            heading="§ 6-2. Forskrifter",
+            parent_chapter="Kapittel 6.",
+            body="Gammel forskriftshjemmel.",
+        ),
+        ParsedSection(
+            section_id="6-2",
+            occurrence=2,
+            heading="§ 6-2. Endringer i andre lover",
+            parent_chapter="Kapittel 6.",
+            body="Uendret.",
+        ),
+    ]
+    after = [
+        {**before[0], "body": "Ny forskriftshjemmel."},
+        before[1],
+    ]
+    result = _diff_section_maps(before, after)  # type: ignore[arg-type]
+
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 0,
+        "sections_changed": 1,
+    }
+    [entry] = result["sections"]
+    assert entry["section_id"] == "6-2"
+    assert entry["occurrence"] == 1
+    assert entry["heading"] == "§ 6-2. Forskrifter"
+    assert "+Ny forskriftshjemmel." in entry["unified_diff"]
+
+
+def test_diff_section_maps_does_not_misclassify_the_survivor_when_a_duplicate_id_disappears() -> (
+    None
+):
+    """From Codex review of PR #135.
+
+    `occurrence` is a POSITION, not an identity. If an act had two `§ 6-2` and
+    now has one, the survivor renumbers from 2 to 1 — and pairing on the number
+    alone diffs it against the DELETED section's text, reporting a bogus
+    changed+removed instead of a single removal.
+    """
+    before = [
+        ParsedSection(
+            section_id="6-2",
+            occurrence=1,
+            heading="§ 6-2. Forskrifter",
+            parent_chapter="Kapittel 6.",
+            body="Samme tekst.",
+        ),
+        ParsedSection(
+            section_id="6-2",
+            occurrence=2,
+            heading="§ 6-2. Endringer i andre lover",
+            parent_chapter="Kapittel 6.",
+            body="Samme tekst.",
+        ),
+    ]
+    after = [
+        ParsedSection(
+            section_id="6-2",
+            occurrence=1,
+            heading="§ 6-2. Endringer i andre lover",
+            parent_chapter="Kapittel 6.",
+            body="Samme tekst.",
+        ),
+    ]
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 1,
+        "sections_changed": 0,
+    }
+    assert [(e["section_id"], e["change_type"], e["heading"]) for e in result["sections"]] == [
+        ("6-2", "removed", "§ 6-2. Forskrifter"),
+    ]
+
+
+def test_semantic_hit_on_an_ambiguous_id_withholds_the_heading_instead_of_guessing(
+    tmp_path: Path,
+) -> None:
+    """From Codex review of PR #135: grounding a repeated-id hit to the first
+    occurrence is a false answer path — the vector may have matched the second.
+
+    Codex proposed grounding by row ordinal instead. That is unsafe: a long
+    section is chunked into SEVERAL vectors under the same section_id
+    (embeddings/model.py), so the ordinal cannot distinguish 'chunk 2 of § 5-12'
+    from 'occurrence 2 of § 6-2'. The store simply does not know which § matched.
+
+    So withhold what cannot be known. Report the score and the id, flag the
+    ambiguity, and let the caller resolve it via get_section(occurrence=N).
+    """
+    slug = "betalingssystemloven"
+    body = (
+        "## Kapittel 6. Øvrige bestemmelser\n\n"
+        "### § 6-2. Forskrifter\n\nFørste forekomst.\n\n"
+        "### § 6-2. Endringer i andre lover\n\nAndre forekomst.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug=slug, title="Betalingssystemloven")},
+        body_for={slug: body},
+    )
+    _write_embedding_file(tmp_path, "lover", slug, [("6-2", [1, 0]), ("6-2", [0, 1])])
+
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([0.0, 1.0]))
+    [hit] = reader.semantic_search("beta", limit=1)["results"]
+
+    assert hit["section_id"] == "6-2"
+    assert hit["ambiguous_section"] is True
+    assert hit["heading"] is None
+    assert hit["snippet"] is None
+    assert hit["occurrence"] is None
+    assert hit["citation_hint"] == "§ 6-2 betalingssystemloven"
+
+
+def test_semantic_hit_on_a_chunked_section_still_grounds_normally(tmp_path: Path) -> None:
+    """The regression guarding the fix above: a long section embeds as several
+    vectors under ONE section_id. That must NOT be mistaken for a repeated id —
+    the section is unambiguous and its heading and snippet must still be served.
+    """
+    slug = "skatteloven"
+    body = "## Kapittel 5. Inntekt\n\n### § 5-12. Boligsparing\n\nLang tekst om sparing.\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug=slug, title="Skatteloven")},
+        body_for={slug: body},
+    )
+    # Two chunk vectors, same section_id — one section, not two.
+    _write_embedding_file(tmp_path, "lover", slug, [("5-12", [1, 0]), ("5-12", [0, 1])])
+
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([0.0, 1.0]))
+    [hit] = reader.semantic_search("sparing", limit=1)["results"]
+
+    assert hit["ambiguous_section"] is False
+    assert hit["heading"] == "§ 5-12. Boligsparing"
+    assert hit["occurrence"] == 1
+    assert "Lang tekst" in hit["snippet"]
+
+
+def _dup(occurrence: int, title: str, body: str) -> ParsedSection:
+    """One occurrence of the repeated id § 6-2."""
+    return ParsedSection(
+        section_id="6-2",
+        occurrence=occurrence,
+        heading=f"§ 6-2. {title}",
+        parent_chapter="Kapittel 6.",
+        body=body,
+    )
+
+
+def test_pair_occurrences_matches_identical_sections_before_matching_on_heading() -> None:
+    """Two `§ 6-2` can share a heading and differ only in body — Lovdata reuses
+    titles like 'Forskrifter'. If the FIRST is repealed, matching on heading
+    alone pairs the survivor against the deleted section's body and reports a
+    bogus change on top of the removal.
+
+    Pairing exact (heading + body) matches FIRST is what prevents that.
+    """
+    before = [_dup(1, "Forskrifter", "Gammel hjemmel."), _dup(2, "Forskrifter", "Uendret.")]
+    after = [_dup(1, "Forskrifter", "Uendret.")]
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"] == {
+        "sections_added": 0,
+        "sections_removed": 1,
+        "sections_changed": 0,
+    }
+    [entry] = result["sections"]
+    assert entry["change_type"] == "removed"
+    assert "-Gammel hjemmel." in entry["unified_diff"]
+
+
+def test_pair_occurrences_matches_on_heading_before_falling_back_to_position() -> None:
+    """When several occurrences of one id are reordered AND edited, position is a
+    lie: the section that moved must still be diffed against ITS OWN earlier text,
+    not against whatever now sits at its old index.
+
+    Without the heading pass the leftovers are paired positionally, and each
+    section's diff is computed against a different section's body — a confidently
+    wrong account of what the law changed, with the right summary counts to hide it.
+    """
+    before = [
+        _dup(1, "Alfa", "alfa-gammel"),
+        _dup(2, "Beta", "beta-gammel"),
+        _dup(3, "Gamma", "uendret"),
+    ]
+    after = [_dup(1, "Gamma", "uendret"), _dup(2, "Beta", "beta-ny"), _dup(3, "Alfa", "alfa-ny")]
+
+    result = _diff_section_maps(before, after)
+
+    assert result["summary"]["sections_changed"] == 2
+    diffs = {e["heading"]: e["unified_diff"] for e in result["sections"]}
+    # Each section is diffed against its own prior text, not its neighbour's.
+    assert "-alfa-gammel" in diffs["§ 6-2. Alfa"]
+    assert "+alfa-ny" in diffs["§ 6-2. Alfa"]
+    assert "beta" not in diffs["§ 6-2. Alfa"]
+    assert "-beta-gammel" in diffs["§ 6-2. Beta"]
+    assert "+beta-ny" in diffs["§ 6-2. Beta"]
+    assert "alfa" not in diffs["§ 6-2. Beta"]
