@@ -24,7 +24,7 @@ This document covers the full setup: prerequisites, configuration for two common
 1. **The `lovverk` corpus.** One command fetches it:
 
    ```bash
-   uv run lovspor fetch-corpus
+   uv run --project /path/to/lovspor lovspor fetch-corpus
    ```
 
    This shallow-clones the corpus into `~/.cache/lovverk` (honouring

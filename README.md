@@ -18,12 +18,12 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 
 **Setup — three steps:**
 
-1. **Install [`uv`](https://docs.astral.sh/uv/) and clone this repo.** The engine is private and no longer on PyPI, so the server runs from your checkout via `uv run lovspor` (see the distribution note above).
+1. **Install [`uv`](https://docs.astral.sh/uv/) and clone this repo.** The engine is private and no longer on PyPI, so the server runs from your checkout via `uv run --project /path/to/lovspor lovspor` (see the distribution note above). The commands below use that `--project` form so they work from any directory; drop `--project /path/to/lovspor` if you run them from inside the checkout.
 
 2. **Fetch the corpus.** One command shallow-clones the legal text to the default cache (`~/.cache/lovverk`):
 
    ```bash
-   uv run lovspor fetch-corpus
+   uv run --project /path/to/lovspor lovspor fetch-corpus
    ```
 
    Re-run it any time to update — it reports `cloned`, `updated`, or `unchanged`.
@@ -65,7 +65,7 @@ Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen
 
 It's your key in your own local config file — keep that file private and never commit it. Without a key, `semantic_search` is simply disabled; the other fifteen tools are unaffected.
 
-Keep the corpus fresh by re-running `uv run lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
+Keep the corpus fresh by re-running `uv run --project /path/to/lovspor lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
 
 > **On invocation:** the commands above run the server from a local checkout via `uv run` (the `--project` flag points at wherever you cloned this repo). The former PyPI / `uvx lovspor` and `--from git+…` paths were retired with the 2026-07-14 pivot — see the distribution note under [Status](#status).
 
