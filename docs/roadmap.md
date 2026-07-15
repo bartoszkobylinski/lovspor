@@ -2,6 +2,8 @@
 
 > **Strategic options under evaluation.** This document is not a commitment. It is a structured menu of directions to argue against during sprint planning, written 2026-04-29 immediately after Sprint 8 closeout (PR #35 merged). It complements [`decisions.md`](decisions.md), which logs decisions actually made.
 
+> **Commercial priority changed 2026-07-14.** The option catalogue below is preserved, but its previous priority ordering is superseded by the Hosted Lovspor MCP pivot. Sprint 12 now focuses on turning the existing local read-only MCP into a paid remote service. Structural depth, domain expansion, and local distribution remain candidate follow-ups rather than the immediate plan.
+
 ---
 
 ## Where the project stands today
@@ -40,14 +42,45 @@
 | `search_laws` | slug + title metadata search |
 | `search_body` | full-text body search, lazy 45 MB index |
 | `semantic_search` | top-K cosine over per-section embeddings (Sprint 9) |
-| `validate_citation` | zero-hallucination guard for citations |
+| `validate_citation` | structured validation guard for citations |
 | `verify_quote` | verbatim-quote anti-hallucination check (Sprint 9) |
 | `get_eu_basis` | Norwegian act → CELEX list |
 | `search_eu_implementations` | CELEX → list of acts |
 | `corpus_status` | freshness / staleness signal |
 
 ### Positioning
-Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 16 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer anti-hallucination story (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 adding a git-history time-machine set (`get_law_at`, `list_law_versions`, `diff_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
+Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 16 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer grounding and verification path (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 adding a git-history time-machine set (`get_law_at`, `list_law_versions`, `diff_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
+
+---
+
+## Commercial pivot — Hosted Lovspor MCP (decided 2026-07-14)
+
+The primary product is now a **paid remote MCP service for grounded conversations about Norwegian law**, not a locally distributed Python package. A user connects Lovspor to an MCP-capable AI client and can ask about current provisions, available historical revisions, exact changes, EU/EEA relationships, and citations without installing the engine or cloning the corpus.
+
+The product promise is deliberately narrower than "no hallucinations": Lovspor supplies current, versioned legal text and machine-checkable evidence, while the AI client remains responsible for interpreting that evidence. Public language should say **grounded answers with verifiable citations**, never guarantee that an LLM cannot make a mistake.
+
+### Product boundary
+
+- `lovverk` remains public under NLOD 2.0 as the auditable corpus and provenance layer.
+- The engine and hosted service remain private while the commercial direction is evaluated.
+- The previously published MIT releases `0.2.0`–`0.3.0` were removed from PyPI on 2026-07-14. Copies already obtained remain governed by their original licence; future hosted-service code is not distributed through PyPI.
+- Local stdio remains useful for development, tests, and operations, but is no longer the primary consumer distribution model.
+- Monitoring and alerts remain possible follow-up products. They do not replace the core MCP experience.
+
+### Sprint 12 — Hosted MCP foundation (active priority)
+
+1. **Remote transport.** Expose the existing read-only tool surface over HTTPS using the MCP Streamable HTTP transport. Keep the stdio entry point as an internal development path.
+2. **Hosted corpus runtime.** Run against an automatically refreshed `lovverk` clone, with health/readiness checks and an operator-visible freshness signal.
+3. **Access control.** Add revocable beta credentials, per-user quotas, rate limiting, and usage counters. Start with manually issued access; add self-service OAuth before a broad launch.
+4. **Grounded research workflow.** Evaluate a high-level `research_law` tool that returns an evidence bundle: matched sections, exact quotes, corpus revision, validation results, and source links. Preserve the 16 lower-level tools for composability.
+5. **Trust layer.** Promote per-section Lovdata deep links (F1) and extend evals to measure tool selection, citation validity, quote fidelity, temporal-boundary handling, and unsupported-claim behaviour.
+6. **Client adoption.** Publish connection instructions and tested examples for supported AI clients, plus a short comparison showing an ungrounded answer versus a Lovspor-grounded answer.
+7. **Operational hardening.** Add deployment automation, timeouts, abuse controls, availability monitoring, backup/recovery, and a privacy policy that avoids retaining full legal queries by default.
+8. **Commercial layer after company formation.** Add billing, subscriptions, self-service accounts, and production OAuth after the beta proves recurring use.
+
+### Deferred, not rejected
+
+Until the hosted beta is usable, do not start AST, Høyesterett ingestion, local regulations, FTS5, Docker, a broad web UI, or multi-jurisdiction work. Every option remains documented below and can be promoted when beta evidence shows that it removes a real adoption or answer-quality constraint.
 
 ---
 
@@ -100,10 +133,10 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
 
 ### Distribution
-- **PyPI — SHIPPED.** `pip install lovspor` / `uvx lovspor` work (0.3.0, OIDC trusted publishing via `release.yml`).
-- **No Docker image.**
+- **PyPI local distribution — WITHDRAWN 2026-07-14.** Versions `0.2.0`–`0.3.0` shipped, then were removed when the engine moved to a private hosted-service strategy. The `lovspor` project name remains reserved by its sole owner with no downloadable releases.
+- **No Docker image.** Retained as a future private-deployment or enterprise option, not a current adoption priority.
 - **No public docs site** (mkdocs).
-- **No hosted MCP endpoint.** Each user runs their own server (though `lovspor fetch-corpus` now automates the corpus clone/update).
+- **No hosted MCP endpoint yet.** This is now the active Sprint 12 priority; the shipped implementation is still local stdio with `lovspor fetch-corpus` automating the corpus clone/update.
 
 ---
 
@@ -248,21 +281,23 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ### Class E: Distribution
 
-**E1. PyPI publish — SHIPPED (0.3.0); Docker image — pending**
-- `pip install lovspor` / `uvx lovspor` are live via OIDC trusted publishing (`release.yml`). Remaining: `docker run lovspor mcp ...`.
-- **Leverage:** high in adoption terms.
+**E1. Local package distribution — SHIPPED, THEN WITHDRAWN; Docker image — deferred**
+- `pip install lovspor` / `uvx lovspor` shipped through `0.3.0`, then the releases were removed from PyPI on 2026-07-14 after the commercial pivot. This remains part of the project's distribution history, not the current consumer path.
+- `docker run lovspor mcp ...` remains an option for private deployments and enterprise customers that require their own infrastructure.
+- **Leverage:** low for the hosted default; potentially high for enterprise deployment.
 - **Effort:** Docker image ~low.
 
 **E2. Public docs site (mkdocs-material)**
 - GitHub Pages.
-- Showcase + tutorials + API reference.
+- Showcase + remote-MCP connection tutorials + API/tool reference.
 - **Effort:** low.
 
-**E3. Hosted MCP endpoint**
+**E3. Hosted MCP endpoint — PROMOTED TO ACTIVE SPRINT 12**
 - Cloud-hosted server with auto-refreshing `lovverk`.
-- Users configure a URL instead of cloning the corpus.
+- Users configure a URL and authenticate instead of installing the engine or cloning the corpus.
+- Commercial requirements: HTTPS MCP transport, credentials/OAuth, quotas, rate limits, usage metering, privacy controls, deployment, monitoring, and eventually billing.
 - **Effort:** high (auth, hosting, SLA).
-- **Risk:** the project becomes a SaaS, which is a different problem domain.
+- **Risk:** the project becomes a SaaS, which is a different problem domain. This risk is now accepted deliberately and managed through a bounded beta before billing work.
 
 ### Class F: Trust and provenance
 
@@ -296,6 +331,17 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ## Recommendation
 
+> **Status change 2026-07-14:** Hosted MCP (E3) supersedes the ordering below as the active commercial priority. The earlier recommendations are retained as the option backlog and should be reconsidered after the hosted beta identifies concrete retrieval, coverage, or adoption gaps.
+
+### Active commercial priority
+
+1. **Hosted Lovspor MCP foundation** (E3 / Sprint 12): remote transport, hosted corpus runtime, access control, quotas, privacy, and operational hardening.
+2. **Grounded research workflow:** evaluate a high-level evidence-bundle tool while preserving the existing 16 composable tools.
+3. **Per-section Lovdata deep links** (F1): make every answer easier to verify against the source provider.
+4. **Client onboarding and eval evidence** (E2): tested connection paths, scenario demos, and measured citation/quote/tool-selection quality.
+
+### Preserved option backlog
+
 Top three by **value × novelty** (unchanged by the Sprint 11 hardening wave, which paid down review debt rather than opening new capability — Class B remains complete, and no new option displaced these):
 
 1. **AST + cross-reference graph** (Classes A1, A2). With Class B now complete (`diff_law_versions` shipped), this is the next value×novelty target. A larger investment, but unblocks many later sprints. The AST enables: better `get_section`, structural diffs (complementing B2's textual diff), navigation tools, and a richer `cross_references` field on `get_section` (currently regex-based, B-tier scope).
@@ -304,7 +350,7 @@ Top three by **value × novelty** (unchanged by the Sprint 11 hardening wave, wh
 
 Top three by **adoption × reach**:
 
-4. **Docker image** (remaining half of Class E1; PyPI publish already shipped at 0.3.0). A `docker run lovspor mcp` path for users who don't use `uv`.
+4. **Docker image** (remaining half of Class E1; local PyPI distribution shipped through 0.3.0 before being withdrawn). A `docker run lovspor mcp` path for private or enterprise deployments.
 5. **Public docs site + showcase** (Class E2). Discoverability.
 6. **`historiske-lover` + `gjeldende-lokale-forskrifter`** (Classes D-API-1, D-API-2). Pure pipeline work, no legal risk, closes two real corpus gaps. Local regulations likely as a separate `lovverk-lokal` repo for audience-separation reasons.
 
@@ -312,9 +358,10 @@ Top three by **adoption × reach**:
 
 ## Currently out of scope
 
+**Promoted out of this section:** Hosted MCP endpoint (E3) was previously deferred because it moves the project into SaaS territory. That consequence is now accepted; E3 is the active Sprint 12 priority described above.
+
 **Strategic deferrals:**
 - **Multi-jurisdiction** (G1) — premature; would dilute focus.
-- **Hosted MCP endpoint** (E3) — moves the project into SaaS territory, a different problem from the OSS engine.
 - **Web UI** (G2) — the audience is AI agents, not humans.
 
 **Legally inaccessible** (see Class D-BLOCKED above):
@@ -334,4 +381,4 @@ Until (c), the following remain out of scope as a matter of Norwegian law, not p
 
 ---
 
-*Last reviewed: 2026-07-12 (post-Sprint-11; "Where the project stands" reconciled against the shipped engine — test count, corpus count, PyPI version, renderer-version self-healing, upstream-drift tolerance. The 2026-05-18 review restructured Class D around source-legality reality after the domstol.no / Lovdata §43 audit; that structure stands.) Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
+*Last reviewed: 2026-07-14 (commercial pivot to Hosted Lovspor MCP; PyPI withdrawal; E3 promoted to active Sprint 12 without removing the prior option catalogue). The post-Sprint-11 engine/corpus inventory and the 2026-05-18 source-legality structure remain in force. Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
