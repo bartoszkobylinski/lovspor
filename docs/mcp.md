@@ -2,7 +2,9 @@
 
 `lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets sixteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
-Sprint 9 added a four-layer anti-hallucination story for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
+> **Distribution changed 2026-07-14 (commercial pivot).** The engine is now private and the PyPI releases (`0.2.0`–`0.3.0`) were withdrawn. A hosted Lovspor MCP endpoint (Sprint 12) will be the supported consumer path; until it ships, run the server locally from a checkout of this repo via `uv run --project /path/to/lovspor lovspor …`. Read that form wherever the commands below say `uvx lovspor …`. See [`roadmap.md`](roadmap.md).
+
+Sprint 9 added a four-layer grounding-and-verification path for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
 This document covers the full setup: prerequisites, configuration for two common clients, every tool with sample input and output, the typical discovery flow, troubleshooting, limitations, and legal attribution.
 
@@ -22,7 +24,7 @@ This document covers the full setup: prerequisites, configuration for two common
 1. **The `lovverk` corpus.** One command fetches it:
 
    ```bash
-   uvx lovspor fetch-corpus
+   uv run --project /path/to/lovspor lovspor fetch-corpus
    ```
 
    This shallow-clones the corpus into `~/.cache/lovverk` (honouring
@@ -38,9 +40,9 @@ This document covers the full setup: prerequisites, configuration for two common
    git clone https://github.com/bartoszkobylinski/lovverk.git ~/lovverk
    ```
 
-2. **`uv`** (or `uvx`) installed locally — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server via `uvx lovspor`, which fetches and runs the published package from PyPI on demand — no manual clone or install.
+2. **`uv` installed locally + a checkout of this repo** — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server from your checkout via `uv run --project /path/to/lovspor lovspor`. The engine is private and no longer on PyPI, so there is no on-demand `uvx` install.
 
-   `lovspor` is on [PyPI](https://pypi.org/project/lovspor/); `pip install lovspor` works too — see [§ If you prefer pip install](#if-you-prefer-pip-install) below.
+   The former PyPI / `pip install lovspor` path was retired with the 2026-07-14 pivot — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
 
 3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fifteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
@@ -54,8 +56,8 @@ Add the following to your Claude Desktop config (path varies by OS — see [Clau
 {
   "mcpServers": {
     "lovverk": {
-      "command": "uvx",
-      "args": ["lovspor", "mcp"]
+      "command": "uv",
+      "args": ["run", "--project", "/path/to/lovspor", "lovspor", "mcp"]
     }
   }
 }
@@ -70,7 +72,7 @@ Try it: ask Claude *"Use the lovverk MCP tools to tell me when Skatteloven was l
 Same config shape, registered via the Claude Code CLI:
 
 ```bash
-claude mcp add lovverk -- uvx lovspor mcp
+claude mcp add lovverk -- uv run --project /path/to/lovspor lovspor mcp
 ```
 
 (Add `--corpus-path <path>` after `mcp` only to override the default cache.) Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh session — `/mcp` lists the registered servers.
@@ -430,7 +432,7 @@ If the corpus has no `.bin` files (early bootstrap state) or every `.bin` is fro
 
 ### `validate_citation(citation)`
 
-Verify that a Norwegian-law citation string actually resolves in the corpus. **Zero-hallucination guard** — call this before quoting a citation in a final answer to confirm both the act and the section exist.
+Verify that a Norwegian-law citation string actually resolves in the corpus. **Citation-grounding guard** — call this before quoting a citation in a final answer to confirm both the act and the section exist.
 
 - **`citation`** — a free-form citation string. The parser is permissive about order: `"§ 5-12 skatteloven-sktl"`, `"skatteloven-sktl § 5-12"`, `"§ 5-12 i skatteloven-sktl"`, `"§5-12 skatteloven-sktl"` all work.
 
@@ -668,24 +670,9 @@ The sixteen tools compose: an assistant can stitch together a research workflow 
 
 ---
 
-## If you prefer pip install
+## Running from a local checkout
 
-`lovspor` is published on [PyPI](https://pypi.org/project/lovspor/), so the config is simply:
-
-```jsonc
-{
-  "mcpServers": {
-    "lovverk": {
-      "command": "uvx",
-      "args": ["lovspor", "mcp"]
-    }
-  }
-}
-```
-
-(or `pip install lovspor` + `lovspor mcp` if you don't use `uv`). Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache. To pin an unreleased build, use the `--from git+https://...` form instead.
-
-You can also clone `lovspor` and run from source if you want to develop or pin a specific commit:
+The engine is private and its earlier PyPI releases (`0.2.0`–`0.3.0`) were withdrawn on 2026-07-14 (see the distribution note at the top). Until the hosted Lovspor MCP endpoint ships (Sprint 12), the server runs from a clone of this repo. Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache:
 
 ```jsonc
 {
@@ -747,8 +734,8 @@ Defensive error. Should not happen with a clean `lovverk` clone — the manifest
 ### Server doesn't appear in the client's MCP list
 
 - Check the client's MCP logs (Claude Desktop: `~/Library/Logs/Claude/mcp*.log` on macOS).
-- Verify `uvx` is on your `PATH` — MCP clients often launch in a minimal shell environment without your full `PATH`.
-- Try the command standalone: `uvx lovspor mcp` should start and wait for stdio input (append `--corpus-path /path/to/lovverk` if you use a custom clone).
+- Verify `uv` is on your `PATH` — MCP clients often launch in a minimal shell environment without your full `PATH`.
+- Try the command standalone: `uv run --project /path/to/lovspor lovspor mcp` should start and wait for stdio input (append `--corpus-path /path/to/lovverk` if you use a custom clone).
 
 ---
 
