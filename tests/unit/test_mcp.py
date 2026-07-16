@@ -11,6 +11,10 @@ import json
 import os
 import shlex
 import subprocess
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -252,6 +256,79 @@ def test_build_embedder_uses_tight_interactive_timeout_budget(
     # Strictly tighter than the batch defaults it previously inherited.
     assert embedder._timeout_seconds < 180.0
     assert embedder._max_retries < 3
+
+
+def _hammer_cold_cache(
+    trigger: Callable[[], object],
+    *,
+    workers: int = 8,
+) -> None:
+    """Fire ``trigger`` from ``workers`` threads that all start together.
+
+    A barrier releases every thread at once so they hit a cold cache
+    simultaneously; the seam under test sleeps briefly while building,
+    which guarantees every caller clears the ``is None`` check before the
+    first one populates the cache. ``future.result()`` re-raises any
+    worker exception in the main thread.
+    """
+    barrier = threading.Barrier(workers)
+
+    def worker() -> None:
+        barrier.wait(timeout=5)
+        trigger()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(worker) for _ in range(workers)]
+        for future in futures:
+            future.result()
+
+
+def test_concurrent_cold_manifest_load_builds_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+    builds: list[int] = []
+    real_read_manifest = mcp_module.read_manifest
+
+    def slow_counting(path: Path) -> Manifest:
+        builds.append(1)
+        time.sleep(0.05)
+        return real_read_manifest(path)
+
+    monkeypatch.setattr(mcp_module, "read_manifest", slow_counting)
+
+    _hammer_cold_cache(lambda: reader.get_law("skatteloven"))
+
+    assert builds == [1]  # one build under concurrency, not one per racing thread
+
+
+def test_concurrent_cold_body_index_builds_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "## Kapittel 1\n### § 1. Start\nbody text"},
+    )
+    reader = CorpusReader(tmp_path)
+    strips: list[int] = []
+    real_strip = mcp_module._strip_frontmatter_and_h1
+
+    def slow_counting(text: str) -> str:
+        strips.append(1)
+        time.sleep(0.05)
+        return real_strip(text)
+
+    monkeypatch.setattr(mcp_module, "_strip_frontmatter_and_h1", slow_counting)
+
+    _hammer_cold_cache(lambda: reader.search_body("body"))
+
+    # One current doc => the 45 MB body index strips exactly once per build;
+    # a lock-free double build strips once per racing thread instead.
+    assert strips == [1]
 
 
 def _write_embedding_file(

@@ -46,6 +46,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import unicodedata
 from collections.abc import Callable
 from datetime import UTC, date, datetime
@@ -328,6 +329,14 @@ class CorpusReader:
         # cache against a ``git pull`` landing underneath the long-lived
         # server (see _refresh_if_stale). None until the first read.
         self._manifest_mtime_ns: int | None = None
+        # Serializes cache invalidation (_refresh_if_stale) and every lazy
+        # index build. The stdio transport runs one tool at a time, but the
+        # hosted HTTP transport offloads blocking tool bodies to worker
+        # threads (and refreshes the corpus on a background thread), so two
+        # callers could otherwise tear a half-reset cache set or each pay to
+        # build the same ~45 MB / ~200 MB index. Reentrant because the
+        # loaders acquire it while already holding it via ``self.manifest``.
+        self._lock = threading.RLock()
 
     def _refresh_if_stale(self) -> None:
         """Drop all in-memory caches when ``manifest.json`` changed on disk.
@@ -345,22 +354,28 @@ class CorpusReader:
             mtime = (self.corpus_path / "manifest.json").stat().st_mtime_ns
         except OSError:
             return  # manifest vanished mid-session; the next read raises clearly
-        if mtime == self._manifest_mtime_ns:
-            return
-        self._manifest_mtime_ns = mtime
-        self._manifest = None
-        self._slug_index = None
-        self._body_index = None
-        self._embedding_index = None
-        self._stale_bin_count = 0
-        self._doc_bodies = {}
-        self._section_ids_cache = {}
+        with self._lock:
+            if mtime == self._manifest_mtime_ns:
+                return
+            # Stamp the mtime and drop every cache as one atomic step: a
+            # concurrent caller must see either the whole pre-refresh set or
+            # the whole reset set, never a half-nulled mix.
+            self._manifest_mtime_ns = mtime
+            self._manifest = None
+            self._slug_index = None
+            self._body_index = None
+            self._embedding_index = None
+            self._stale_bin_count = 0
+            self._doc_bodies = {}
+            self._section_ids_cache = {}
 
     @property
     def manifest(self) -> Manifest:
         self._refresh_if_stale()
         if self._manifest is None:
-            self._manifest = read_manifest(self.corpus_path / "manifest.json")
+            with self._lock:
+                if self._manifest is None:
+                    self._manifest = read_manifest(self.corpus_path / "manifest.json")
         return self._manifest
 
     def get_law(self, slug: str) -> str:
@@ -1280,7 +1295,11 @@ class CorpusReader:
         tool offline.
         """
         self._refresh_if_stale()
-        if self._embedding_index is None:
+        if self._embedding_index is not None:
+            return self._embedding_index
+        with self._lock:
+            if self._embedding_index is not None:
+                return self._embedding_index
             entries: list[tuple[str, str, np.ndarray, float]] = []
             stale = 0
             for record in self.manifest.documents.values():
@@ -1319,7 +1338,7 @@ class CorpusReader:
                     entries.append((record.slug, section_id, vector, embedding_file.scale))
             self._embedding_index = EmbeddingIndex.from_entries(entries)
             self._stale_bin_count = stale
-        return self._embedding_index
+            return self._embedding_index
 
     def _section_ids_for(self, slug: str) -> set[str]:
         """Section-id set for one act, parsed lazily and cached.
@@ -1347,8 +1366,11 @@ class CorpusReader:
         empty body — the same defensive posture as the full index.
         """
         slug = record.slug or ""
-        if self._body_index is not None:
-            return self._body_index.get(slug, "")
+        # Local ref: a background refresh can null _body_index between this
+        # check and the read, which would raise on None.get(...).
+        body_index = self._body_index
+        if body_index is not None:
+            return body_index.get(slug, "")
         cached = self._doc_bodies.get(slug)
         if cached is None:
             cached = self._read_stripped_body(record)
@@ -1383,7 +1405,11 @@ class CorpusReader:
         round 1 reproducer).
         """
         self._refresh_if_stale()
-        if self._body_index is None:
+        if self._body_index is not None:
+            return self._body_index
+        with self._lock:
+            if self._body_index is not None:
+                return self._body_index
             index: dict[str, str] = {}
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
@@ -1399,7 +1425,7 @@ class CorpusReader:
                 raw = path.read_text(encoding="utf-8")
                 index[record.slug] = _strip_frontmatter_and_h1(raw)
             self._body_index = index
-        return self._body_index
+            return self._body_index
 
     def corpus_status(self) -> dict[str, Any]:
         """Return manifest + git HEAD freshness metadata.
@@ -1520,14 +1546,18 @@ class CorpusReader:
         corpus changes on disk — the same contract as the cached manifest.
         """
         self._refresh_if_stale()
-        if self._slug_index is None:
+        if self._slug_index is not None:
+            return self._slug_index
+        with self._lock:
+            if self._slug_index is not None:
+                return self._slug_index
             index: dict[str, tuple[str, ManifestRecord]] = {}
             for doc_id, record in self.manifest.documents.items():
                 if record.status != "current" or record.slug is None:
                     continue
                 index.setdefault(record.slug, (doc_id, record))
             self._slug_index = index
-        return self._slug_index
+            return self._slug_index
 
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
         entry = self._load_slug_index().get(slug)
