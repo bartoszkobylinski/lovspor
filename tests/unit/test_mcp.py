@@ -7,6 +7,8 @@ glue is tested by constructing the server instance and verifying the
 four expected tool names are registered.
 """
 
+import asyncio
+import inspect
 import json
 import os
 import shlex
@@ -20,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from starlette.testclient import TestClient
 
 import lovspor.mcp as mcp_module
 from lovspor.embeddings import write_embeddings
@@ -32,14 +35,17 @@ from lovspor.mcp import (
     CorpusAmbiguousSectionError,
     CorpusNotFoundError,
     CorpusReader,
+    HttpConfig,
     OpenAIEmbedder,
     ParsedSection,
+    _add_health_routes,
     _bounded_limit,
     _build_embedder,
     _compute_match_owner_starts,
     _diff_section_maps,
     _extract_cross_references,
     _normalize_for_quote_match,
+    _offload_to_thread,
     _parse_sections,
     _record_summary,
     _resolve_dataset,
@@ -3410,6 +3416,166 @@ def test_build_server_raises_eagerly_on_bad_corpus(tmp_path: Path) -> None:
     """Misconfigured corpus path fails at server startup, not first call."""
     with pytest.raises(CorpusNotFoundError):
         build_server(tmp_path / "nonexistent")
+
+
+# ---------- Sprint 12: Streamable HTTP transport ----------
+
+
+def test_offload_to_thread_preserves_signature_and_leaves_the_caller_thread() -> None:
+    """FastMCP derives a tool's schema from the signature and decides
+    await-vs-inline from the callable itself, so the wrapper has to look like
+    the original (via ``__wrapped__``) while being a coroutine function."""
+
+    def probe(slug: str, limit: int = 5) -> str:
+        """Probe docstring."""
+        return f"{slug}|{limit}|{threading.current_thread().name}"
+
+    wrapped = _offload_to_thread(probe)
+
+    assert inspect.iscoroutinefunction(wrapped)
+    assert inspect.signature(wrapped) == inspect.signature(probe)
+    assert wrapped.__doc__ == "Probe docstring."
+
+    result = asyncio.run(wrapped(slug="x", limit=2))
+
+    assert result.startswith("x|2|")
+    assert not result.endswith(threading.current_thread().name)
+
+
+def test_http_mode_registers_offloaded_async_tools_with_intact_schemas(
+    tmp_path: Path,
+) -> None:
+    """Async registration is what keeps a blocking body off the event loop;
+    the schema must survive the wrapping or every tool call breaks."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    server = build_server(tmp_path, http=HttpConfig(host="127.0.0.1", port=9999))
+
+    tools = server._tool_manager._tools
+    assert len(tools) == 16
+    assert all(tool.is_async for tool in tools.values())
+    get_law = tools["get_law"]
+    assert get_law.parameters["required"] == ["slug"]
+    assert get_law.parameters["properties"]["slug"]["type"] == "string"
+
+
+def test_stdio_mode_registers_inline_sync_tools(tmp_path: Path) -> None:
+    """stdio serves one client, one tool at a time — the thread hop would buy
+    nothing, so it must not be applied there."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    server = build_server(tmp_path)
+
+    tools = server._tool_manager._tools
+    assert len(tools) == 16
+    assert not any(tool.is_async for tool in tools.values())
+
+
+def test_http_mode_warms_caches_while_stdio_stays_lazy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cold index build holds the cache lock for its whole duration and
+    stalls every concurrent request; the hosted server pays it at startup
+    instead. stdio keeps the lazy path so a metadata-only client starts fast."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    warmed: list[int] = []
+    monkeypatch.setattr(CorpusReader, "warm", lambda _self: warmed.append(1))
+
+    build_server(tmp_path)
+    assert warmed == []
+
+    build_server(tmp_path, http=HttpConfig())
+    assert warmed == [1]
+
+
+def test_warm_builds_indices_and_skips_embeddings_without_an_embedder(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+
+    reader.warm()
+
+    assert reader._slug_index is not None
+    assert reader._body_index is not None
+    # semantic_search is disabled without an embedder, so the ~200 MB index
+    # would be dead weight.
+    assert reader._embedding_index is None
+
+
+def test_warm_builds_the_embedding_index_when_an_embedder_is_configured(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("1", [1, 0])])
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0]))
+
+    reader.warm()
+
+    assert reader._embedding_index is not None
+
+
+def test_health_routes_report_process_and_corpus_readiness(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    server = build_server(tmp_path, http=HttpConfig())
+    _add_health_routes(server, tmp_path)
+
+    client = TestClient(server.streamable_http_app())
+
+    healthz = client.get("/healthz")
+    assert healthz.status_code == 200
+    assert healthz.json() == {"status": "ok"}
+
+    readyz = client.get("/readyz")
+    assert readyz.status_code == 200
+    assert readyz.json() == {"status": "ready"}
+
+
+def test_readyz_reports_unavailable_when_the_corpus_manifest_disappears(
+    tmp_path: Path,
+) -> None:
+    """A probe must fail the instance out when the corpus vanishes underneath
+    it rather than letting it serve on."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    server = build_server(tmp_path, http=HttpConfig())
+    _add_health_routes(server, tmp_path)
+    (tmp_path / "manifest.json").unlink()
+
+    response = TestClient(server.streamable_http_app()).get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "unavailable"}
+
+
+def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same .env ordering contract as serve(), plus the bind address has to
+    reach build_server so FastMCP configures its transport security for it."""
+    calls: list[str] = []
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(mcp_module, "load_env", lambda: calls.append("load_env"))
+
+    class _FakeServer:
+        def run(self, transport: str) -> None:
+            calls.append(f"run:{transport}")
+
+    def fake_build(path: Path, *, http: HttpConfig | None = None) -> _FakeServer:
+        captured["path"] = path
+        captured["http"] = http
+        calls.append("build")
+        return _FakeServer()
+
+    monkeypatch.setattr(mcp_module, "build_server", fake_build)
+    monkeypatch.setattr(mcp_module, "_add_health_routes", lambda *_: calls.append("health"))
+
+    mcp_module.serve_http(tmp_path, "127.0.0.1", 9001)
+
+    assert calls == ["load_env", "build", "health", "run:streamable-http"]
+    assert captured["path"] == tmp_path
+    assert captured["http"] == HttpConfig(host="127.0.0.1", port=9001)
 
 
 # ---------------------------------------------------------------------------

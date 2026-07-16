@@ -150,6 +150,42 @@ def test_mcp_command_reads_corpus_path_from_real_dotenv_in_cwd(
     assert captured["path"] == tmp_path.resolve()
 
 
+def test_mcp_http_passes_bind_address_and_resolved_corpus_to_the_server(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The hosted transport is only safe behind a proxy today, so the bind
+    address the operator asked for must reach serve_http verbatim."""
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "lovspor.cli._mcp_serve_http",
+        lambda path, host, port: captured.update(path=path, host=host, port=port),
+    )
+
+    result = runner.invoke(
+        app,
+        ["mcp-http", "--host", "127.0.0.1", "--port", "9123", "--corpus-path", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {"path": tmp_path.resolve(), "host": "127.0.0.1", "port": 9123}
+
+
+def test_mcp_http_refuses_to_start_without_a_corpus(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Fail at startup with a fixable message rather than serving an empty
+    corpus over the network."""
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+
+    result = runner.invoke(app, ["mcp-http", "--corpus-path", str(tmp_path / "nope")])
+
+    assert result.exit_code != 0
+
+
 def test_seed_invokes_run_sync_and_reports_count(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: object,

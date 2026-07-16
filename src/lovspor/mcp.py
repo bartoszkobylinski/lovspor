@@ -39,7 +39,9 @@ Why dataset aliases: legal text consumers think in Norwegian terms
 inputs accept either form and normalize internally.
 """
 
+import asyncio
 import difflib
+import functools
 import json
 import os
 import re
@@ -48,13 +50,16 @@ import subprocess
 import sys
 import threading
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
 import numpy as np
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from lovspor.embeddings import (
     EmbeddingIndex,
@@ -377,6 +382,27 @@ class CorpusReader:
                 if self._manifest is None:
                     self._manifest = read_manifest(self.corpus_path / "manifest.json")
         return self._manifest
+
+    def warm(self) -> None:
+        """Pre-build the lazy indices so no request pays a cold build.
+
+        The hosted HTTP server shares one reader across clients, and a cold
+        build holds the cache lock for the whole build (~45 MB body index),
+        stalling every concurrent request behind it — measured at ~1.6 s of
+        lock wait for a trivial ``corpus_status`` racing a first
+        ``search_body``. Warming before the server accepts traffic keeps the
+        lock uncontended in steady state.
+
+        stdio deliberately stays lazy: a client that only queries metadata
+        should not pay a 3-5 s startup for an index it may never touch.
+
+        Embeddings warm only when an embedder is configured — ``semantic_search``
+        is disabled without one, so the ~200 MB index would be dead weight.
+        """
+        self._load_slug_index()
+        self._load_body_index()
+        if self._embedder is not None:
+            self._load_embedding_index()
 
     def get_law(self, slug: str) -> str:
         """Return the rendered Markdown (frontmatter + body) for ``slug``."""
@@ -2306,7 +2332,39 @@ def _build_embedder() -> EmbeddingModel | None:
     )
 
 
-def build_server(corpus_path: Path) -> FastMCP:
+class HttpConfig(BaseModel):
+    """Bind address for the Streamable HTTP transport.
+
+    Passing this to :func:`build_server` selects hosted mode: tool bodies are
+    offloaded to worker threads and the corpus indices are warmed before the
+    server accepts traffic. Omit it for stdio, which stays lazy and inline.
+    """
+
+    host: str = "127.0.0.1"
+    port: int = 8000
+
+
+def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
+    """Wrap a synchronous tool body as an async tool run on a worker thread.
+
+    mcp 1.27.0 calls a synchronous tool handler inline on the single event-
+    loop thread, so one blocking call — a cold-cache ``search_body``, a
+    ``semantic_search`` embedding round-trip, a ``git`` subprocess — would
+    stall every other client on an HTTP server. Offloading to a thread lets
+    the loop serve other requests while the body runs. ``functools.wraps``
+    preserves ``__wrapped__`` so FastMCP still derives the tool's argument
+    schema from the original signature; the wrapper is ``async`` so FastMCP
+    awaits it instead of calling it inline.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(**kwargs: Any) -> Any:
+        return await asyncio.to_thread(fn, **kwargs)
+
+    return wrapper
+
+
+def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMCP:
     """Build a FastMCP server bound to ``corpus_path``.
 
     The reader is constructed eagerly so configuration errors (missing
@@ -2325,9 +2383,23 @@ def build_server(corpus_path: Path) -> FastMCP:
     """
     embedder = _build_embedder()
     reader = CorpusReader(corpus_path, embedder=embedder)
-    mcp = FastMCP("lovverk")
+    if http is not None:
+        reader.warm()
+    bind = http or HttpConfig()
+    mcp = FastMCP("lovverk", host=bind.host, port=bind.port)
 
-    @mcp.tool()
+    def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register a tool, offloading its blocking body to a worker thread
+        in hosted mode (see ``_offload_to_thread``). stdio keeps the direct
+        sync call: one tool at a time, no thread hop."""
+
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+            mcp.add_tool(_offload_to_thread(fn) if http is not None else fn)
+            return fn
+
+        return decorator
+
+    @_tool()
     def get_law(slug: str) -> str:
         """Return the full Markdown (frontmatter + body) of a Norwegian law or regulation.
 
@@ -2341,7 +2413,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_law(slug)
 
-    @mcp.tool()
+    @_tool()
     def get_section(
         slug: str,
         section_id: str,
@@ -2392,7 +2464,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_section(slug, section_id, occurrence)
 
-    @mcp.tool()
+    @_tool()
     def list_sections(slug: str) -> list[dict[str, Any]]:
         """List an act's table of contents: every ``§`` section id and heading.
 
@@ -2415,7 +2487,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.list_sections(slug)
 
-    @mcp.tool()
+    @_tool()
     def get_law_history(slug: str) -> dict[str, Any]:
         """Return the per-act change history of a law as structured JSON.
 
@@ -2426,7 +2498,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_law_history(slug)
 
-    @mcp.tool()
+    @_tool()
     def get_law_at(slug: str, target_date: str) -> str:
         """Return a law's full Markdown as it stood on a given calendar date.
 
@@ -2462,7 +2534,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_law_at(slug, target_date)
 
-    @mcp.tool()
+    @_tool()
     def list_law_versions(slug: str) -> list[dict[str, Any]]:
         """List the dates on which a law had distinct content versions.
 
@@ -2483,7 +2555,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.list_law_versions(slug)
 
-    @mcp.tool()
+    @_tool()
     def diff_law_versions(slug: str, date_a: str, date_b: str) -> dict[str, Any]:
         """Show what changed in a law between two dates, section by section.
 
@@ -2513,7 +2585,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.diff_law_versions(slug, date_a, date_b)
 
-    @mcp.tool()
+    @_tool()
     def list_recent_changes(
         dataset: str | None = None,
         since: str | None = None,
@@ -2529,7 +2601,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.list_recent_changes(dataset=dataset, since=since, limit=limit)
 
-    @mcp.tool()
+    @_tool()
     def search_laws(
         query: str,
         dataset: str | None = None,
@@ -2547,7 +2619,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.search_laws(query, dataset=dataset, limit=limit)
 
-    @mcp.tool()
+    @_tool()
     def search_body(
         query: str,
         dataset: str | None = None,
@@ -2577,7 +2649,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.search_body(query, dataset=dataset, limit=limit)
 
-    @mcp.tool()
+    @_tool()
     def semantic_search(
         query: str,
         dataset: str | None = None,
@@ -2647,7 +2719,7 @@ def build_server(corpus_path: Path) -> FastMCP:
             min_score=min_score,
         )
 
-    @mcp.tool()
+    @_tool()
     def validate_citation(citation: str) -> dict[str, Any]:
         """Verify that a Norwegian-law citation string actually resolves.
 
@@ -2679,7 +2751,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.validate_citation(citation)
 
-    @mcp.tool()
+    @_tool()
     def verify_quote(slug: str, section_id: str, quote: str) -> dict[str, Any]:
         """Verify a verbatim quote actually appears in a specific section.
 
@@ -2711,7 +2783,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.verify_quote(slug, section_id, quote)
 
-    @mcp.tool()
+    @_tool()
     def get_eu_basis(slug: str) -> dict[str, Any]:
         """Return the EU / EEA legal basis of a Norwegian law or regulation.
 
@@ -2740,7 +2812,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_eu_basis(slug)
 
-    @mcp.tool()
+    @_tool()
     def search_eu_implementations(eu_doc_id: str) -> list[dict[str, Any]]:
         """Reverse-lookup Norwegian acts that implement a given EU document.
 
@@ -2763,7 +2835,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.search_eu_implementations(eu_doc_id)
 
-    @mcp.tool()
+    @_tool()
     def corpus_status() -> dict[str, Any]:
         """Return the current state of the local corpus + freshness metadata.
 
@@ -2809,3 +2881,41 @@ def serve(corpus_path: Path) -> None:
     """
     load_env()
     build_server(corpus_path).run()
+
+
+def serve_http(corpus_path: Path, host: str, port: int) -> None:
+    """Start the MCP server over the Streamable HTTP transport.
+
+    Exposes the same read-only tool surface as :func:`serve` (stdio) to remote
+    clients. Tool bodies run on worker threads (see :func:`_offload_to_thread`)
+    so one slow call never blocks other clients on the shared event loop.
+
+    There is no authentication or TLS here yet: bind to localhost and front it
+    with an authenticating reverse proxy that terminates TLS until the access-
+    control layer lands (Sprint 12 item 3). Blocks until the process stops.
+    """
+    load_env()
+    server = build_server(corpus_path, http=HttpConfig(host=host, port=port))
+    _add_health_routes(server, corpus_path)
+    server.run(transport="streamable-http")
+
+
+def _add_health_routes(server: FastMCP, corpus_path: Path) -> None:
+    """Attach ``/healthz`` (process up) and ``/readyz`` (corpus present).
+
+    Kept deliberately cheap so a probe hammering them cannot stall the event
+    loop: readiness only stats ``manifest.json`` rather than parsing it or
+    shelling out to git. Richer freshness stays behind the ``corpus_status``
+    tool. custom_route endpoints are unauthenticated by design (FastMCP).
+    """
+
+    # FastMCP's custom_route decorator is untyped; scope the ignore tightly.
+    @server.custom_route("/healthz", methods=["GET"])  # type: ignore[untyped-decorator]
+    async def healthz(request: Request) -> Response:
+        return JSONResponse({"status": "ok"})
+
+    @server.custom_route("/readyz", methods=["GET"])  # type: ignore[untyped-decorator]
+    async def readyz(request: Request) -> Response:
+        if (corpus_path / "manifest.json").is_file():
+            return JSONResponse({"status": "ready"})
+        return JSONResponse({"status": "unavailable"}, status_code=503)
