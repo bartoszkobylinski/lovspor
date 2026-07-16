@@ -22,7 +22,12 @@ dependencies = [
     "pydantic>=2.9.0",
     "typer>=0.12.5",
     "python-dotenv>=1.0.1",
-    "mcp>=1.0.0",
+    # Floor is a security floor, not a feature floor. <1.27.2 routes an
+    # HTTP session by its id alone without checking that the request
+    # authenticates as the principal that opened it (CVE-2026-52869), so
+    # a leaked or guessed Mcp-Session-Id bypasses the bearer auth this
+    # server relies on. 1.28.1 additionally covers CVE-2026-59950.
+    "mcp>=1.28.1",
     "numpy>=1.26.0",
     # tiktoken is required by the OpenAI embedder for token-aware
     # truncation under the 8191-token API limit. It's tiny (~3 MB
