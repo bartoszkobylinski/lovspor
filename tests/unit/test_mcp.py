@@ -25,7 +25,9 @@ import pytest
 from starlette.testclient import TestClient
 
 import lovspor.mcp as mcp_module
+from lovspor.access import CredentialStore, write_credential_file
 from lovspor.embeddings import write_embeddings
+from lovspor.errors import ConfigError
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
     _MAX_RESULT_LIMIT,
@@ -3702,11 +3704,65 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
     monkeypatch.setattr(mcp_module, "build_server", fake_build)
     monkeypatch.setattr(mcp_module, "_add_health_routes", lambda *_: calls.append("health"))
 
-    mcp_module.serve_http(tmp_path, "127.0.0.1", 9001)
+    config = HttpConfig(host="127.0.0.1", port=9001, credentials_path=tmp_path / "creds.json")
+    mcp_module.serve_http(tmp_path, config)
 
     assert calls == ["load_env", "build", "health", "run:streamable-http"]
     assert captured["path"] == tmp_path
-    assert captured["http"] == HttpConfig(host="127.0.0.1", port=9001)
+    assert captured["http"] == config
+
+
+def test_serve_http_refuses_to_start_without_authentication(tmp_path: Path) -> None:
+    """An unauthenticated server hands the whole tool surface to anyone who can
+    reach the port. That must not be one forgotten flag away."""
+    with pytest.raises(ConfigError, match="refusing to serve HTTP without authentication"):
+        mcp_module.serve_http(tmp_path, HttpConfig())
+
+
+def test_serve_http_allows_no_auth_only_when_explicitly_asked_and_says_so(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(mcp_module, "load_env", lambda: None)
+
+    class _FakeServer:
+        def run(self, transport: str) -> None:
+            pass
+
+    monkeypatch.setattr(mcp_module, "build_server", lambda *_a, **_k: _FakeServer())
+    monkeypatch.setattr(mcp_module, "_add_health_routes", lambda *_: None)
+
+    mcp_module.serve_http(tmp_path, HttpConfig(allow_insecure=True))
+
+    assert "SERVING WITHOUT AUTHENTICATION" in capsys.readouterr().err
+
+
+def test_http_mode_without_credentials_registers_no_auth(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    server = build_server(tmp_path, http=HttpConfig(allow_insecure=True))
+
+    assert server.settings.auth is None
+
+
+def test_http_mode_with_credentials_installs_the_store_as_token_verifier(
+    tmp_path: Path,
+) -> None:
+    """A bare token_verifier is a resource-server-only config: no authorization
+    server, no /token, no /authorize, no discovery routes get mounted."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    write_credential_file(creds, [])
+
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    assert isinstance(server._token_verifier, CredentialStore)
+    assert server.settings.auth is not None
+    # None keeps /.well-known/oauth-protected-resource off the app entirely.
+    assert server.settings.auth.resource_server_url is None
+    paths = {route.path for route in server.streamable_http_app().routes}
+    assert not any(p.startswith("/.well-known") or p in {"/token", "/authorize"} for p in paths)
 
 
 # ---------------------------------------------------------------------------

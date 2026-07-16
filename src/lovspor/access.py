@@ -21,10 +21,11 @@ want mutation coverage on.
 
 import hashlib
 import json
+import os
 import secrets
 import sys
 import threading
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from mcp.server.auth.provider import AccessToken
@@ -114,6 +115,77 @@ def hash_token(token: str) -> str:
     reason KDFs exist — low-entropy, human-chosen secrets — does not apply.
     """
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def default_credentials_path() -> Path:
+    """Default credential-store location.
+
+    ``$XDG_CONFIG_HOME/lovspor/credentials.json`` when the XDG variable is set,
+    else ``~/.config/lovspor/credentials.json``. Config rather than cache: a
+    cache is something you can delete, and deleting this locks every beta user
+    out.
+    """
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".config"
+    return (base / "lovspor" / "credentials.json").expanduser()
+
+
+def load_credentials(path: Path) -> list[Credential]:
+    """Read the store for the issuing CLI. Missing file reads as empty so the
+    first ``tokens issue`` can create it."""
+    if not path.is_file():
+        return []
+    try:
+        return list(_load_credential_file(path).credentials)
+    except (OSError, ValueError, ValidationError) as exc:
+        raise ConfigError(f"unreadable credential store at {path}: {exc}") from exc
+
+
+def issue_credential(
+    credentials: list[Credential],
+    label: str,
+    expires_in_days: int | None,
+) -> tuple[Credential, str]:
+    """Mint a credential, returning it alongside the plaintext token.
+
+    The token is returned once and never stored — only its hash goes to disk,
+    so a lost token is reissued, not recovered.
+
+    ``expires_in_days`` of ``None`` means the credential never expires, which
+    the SDK honours literally. The CLI defaults to a real expiry so that stays
+    a deliberate choice rather than an accident of a forgotten beta token.
+    """
+    existing = {c.credential_id for c in credentials}
+    index = 1
+    while f"beta-{index:03d}" in existing:
+        index += 1
+    token = generate_token()
+    credential = Credential(
+        credential_id=f"beta-{index:03d}",
+        label=label,
+        token_sha256=hash_token(token),
+        expires_at=(
+            datetime.now(UTC) + timedelta(days=expires_in_days)
+            if expires_in_days is not None
+            else None
+        ),
+    )
+    return credential, token
+
+
+def revoke_credential(credentials: list[Credential], credential_id: str) -> list[Credential]:
+    """Mark a credential revoked.
+
+    Kept as a tombstone rather than deleted: the id stays reserved and the
+    label survives, so the store still answers "who did we give access to?"
+    after the fact.
+    """
+    if not any(c.credential_id == credential_id for c in credentials):
+        raise ConfigError(f"no credential {credential_id!r} in the store")
+    return [
+        c.model_copy(update={"revoked": True}) if c.credential_id == credential_id else c
+        for c in credentials
+    ]
 
 
 def _load_credential_file(path: Path) -> CredentialFile:

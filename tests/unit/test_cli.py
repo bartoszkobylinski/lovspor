@@ -1,15 +1,19 @@
+import asyncio
 import json
 import os
 import re
+import stat
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from lovspor import __version__
+from lovspor.access import CredentialStore, hash_token
 from lovspor.cli import app
 from lovspor.corpus_fetch import FetchResult
 from lovspor.errors import ConfigError
+from lovspor.mcp import HttpConfig
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.storage.manifest import MANIFEST_VERSION
 from lovspor.sync.orchestrator import SyncReport
@@ -157,20 +161,144 @@ def test_mcp_http_passes_bind_address_and_resolved_corpus_to_the_server(
     """The hosted transport is only safe behind a proxy today, so the bind
     address the operator asked for must reach serve_http verbatim."""
     monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
     (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    creds = tmp_path / "creds.json"
     captured: dict[str, object] = {}
     monkeypatch.setattr(
         "lovspor.cli._mcp_serve_http",
-        lambda path, host, port: captured.update(path=path, host=host, port=port),
+        lambda path, http: captured.update(path=path, http=http),
     )
 
     result = runner.invoke(
         app,
-        ["mcp-http", "--host", "127.0.0.1", "--port", "9123", "--corpus-path", str(tmp_path)],
+        [
+            "mcp-http",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "9123",
+            "--corpus-path",
+            str(tmp_path),
+            "--credentials",
+            str(creds),
+        ],
     )
 
     assert result.exit_code == 0, result.output
-    assert captured == {"path": tmp_path.resolve(), "host": "127.0.0.1", "port": 9123}
+    assert captured["path"] == tmp_path.resolve()
+    assert captured["http"] == HttpConfig(host="127.0.0.1", port=9123, credentials_path=creds)
+
+
+def test_mcp_http_defaults_to_the_credential_store_not_to_open_access(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Omitting --credentials must resolve the default store, never silently
+    serve unauthenticated."""
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "lovspor.cli._mcp_serve_http",
+        lambda path, http: captured.update(path=path, http=http),
+    )
+
+    result = runner.invoke(app, ["mcp-http", "--corpus-path", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    http = captured["http"]
+    assert isinstance(http, HttpConfig)
+    assert http.allow_insecure is False
+    assert http.credentials_path == tmp_path / "cfg" / "lovspor" / "credentials.json"
+
+
+def test_mcp_http_insecure_flag_clears_the_credential_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "lovspor.cli._mcp_serve_http",
+        lambda path, http: captured.update(path=path, http=http),
+    )
+
+    result = runner.invoke(
+        app,
+        ["mcp-http", "--corpus-path", str(tmp_path), "--insecure-no-auth"],
+    )
+
+    assert result.exit_code == 0, result.output
+    http = captured["http"]
+    assert isinstance(http, HttpConfig)
+    assert http.credentials_path is None
+    assert http.allow_insecure is True
+
+
+def test_tokens_issue_prints_the_token_once_and_stores_only_its_hash(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
+    creds = tmp_path / "credentials.json"
+
+    result = runner.invoke(
+        app,
+        ["tokens", "issue", "--label", "Beta tester", "--credentials", str(creds)],
+    )
+
+    assert result.exit_code == 0, result.output
+    token = next(w for w in result.stdout.split() if w.startswith("lsp_"))
+    stored = creds.read_text(encoding="utf-8")
+    assert token not in stored
+    assert hash_token(token) in stored
+    # 0600: the store is a set of live credentials.
+    assert stat.S_IMODE(creds.stat().st_mode) == 0o600
+
+
+def test_tokens_revoke_then_the_store_rejects_that_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """End-to-end through the real files: issue, verify, revoke, verify again."""
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
+    creds = tmp_path / "credentials.json"
+    issued = runner.invoke(
+        app,
+        ["tokens", "issue", "--label", "Beta tester", "--credentials", str(creds)],
+    )
+    token = next(w for w in issued.stdout.split() if w.startswith("lsp_"))
+    assert asyncio.run(CredentialStore(creds).verify_token(token)) is not None
+
+    result = runner.invoke(app, ["tokens", "revoke", "beta-001", "--credentials", str(creds)])
+
+    assert result.exit_code == 0, result.output
+    assert asyncio.run(CredentialStore(creds).verify_token(token)) is None
+
+
+def test_tokens_list_never_prints_a_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
+    creds = tmp_path / "credentials.json"
+    issued = runner.invoke(
+        app,
+        ["tokens", "issue", "--label", "Beta tester", "--credentials", str(creds)],
+    )
+    token = next(w for w in issued.stdout.split() if w.startswith("lsp_"))
+
+    result = runner.invoke(app, ["tokens", "list", "--credentials", str(creds)])
+
+    assert result.exit_code == 0, result.output
+    assert "beta-001" in result.stdout
+    assert "Beta tester" in result.stdout
+    assert token not in result.stdout
 
 
 def test_mcp_http_refuses_to_start_without_a_corpus(

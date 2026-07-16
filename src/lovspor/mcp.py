@@ -56,11 +56,13 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import numpy as np
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel
+from pydantic import AnyHttpUrl, BaseModel
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from lovspor.access import CredentialStore
 from lovspor.embeddings import (
     EmbeddingIndex,
     EmbeddingModel,
@@ -68,7 +70,7 @@ from lovspor.embeddings import (
     SearchHit,
     read_embeddings,
 )
-from lovspor.errors import LovsporError
+from lovspor.errors import ConfigError, LovsporError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import (
@@ -2393,7 +2395,7 @@ def _build_embedder() -> EmbeddingModel | None:
 
 
 class HttpConfig(BaseModel):
-    """Bind address for the Streamable HTTP transport.
+    """Bind address and access control for the Streamable HTTP transport.
 
     Passing this to :func:`build_server` selects hosted mode: tool bodies are
     offloaded to worker threads and the corpus indices are warmed before the
@@ -2402,6 +2404,41 @@ class HttpConfig(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = 8000
+    # None disables authentication entirely, which serve_http refuses unless
+    # allow_insecure is also set. The default is "no credentials configured",
+    # so forgetting the flag fails to start rather than silently serving the
+    # whole corpus surface to anyone who can reach the port.
+    credentials_path: Path | None = None
+    allow_insecure: bool = False
+
+
+def _auth_kwargs(bind: HttpConfig) -> dict[str, Any]:
+    """FastMCP auth kwargs for a bind config, or empty when unauthenticated.
+
+    A bare ``token_verifier`` is a resource-server-only configuration: the SDK
+    mounts no authorization server, no ``/token``, no ``/authorize`` and no
+    discovery routes, and only wraps ``/mcp`` in its RequireAuth middleware. It
+    then owns bearer parsing, expiry, scopes and the spec-compliant 401/403.
+
+    ``auth`` and ``token_verifier`` must be passed together or not at all — the
+    SDK raises on either alone.
+    """
+    if bind.credentials_path is None:
+        return {}
+    return {
+        "token_verifier": CredentialStore(bind.credentials_path),
+        "auth": AuthSettings(
+            # Inert here: issuer_url is only ever advertised by the
+            # protected-resource discovery route, which resource_server_url=None
+            # suppresses. It still has to be a well-formed URL — the SDK
+            # validates it — hence the bind address rather than a placeholder.
+            issuer_url=AnyHttpUrl(f"http://{bind.host}:{bind.port}/"),
+            # Required-but-nullable: the `| None` reads optional but the field
+            # is mandatory to PASS. None is what keeps /.well-known off.
+            resource_server_url=None,
+            required_scopes=None,
+        ),
+    }
 
 
 def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
@@ -2446,7 +2483,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     if http is not None:
         reader.warm()
     bind = http or HttpConfig()
-    mcp = FastMCP("lovverk", host=bind.host, port=bind.port)
+    mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind))
 
     def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a tool, offloading its blocking body to a worker thread
@@ -2943,19 +2980,35 @@ def serve(corpus_path: Path) -> None:
     build_server(corpus_path).run()
 
 
-def serve_http(corpus_path: Path, host: str, port: int) -> None:
+def serve_http(corpus_path: Path, http: HttpConfig) -> None:
     """Start the MCP server over the Streamable HTTP transport.
 
     Exposes the same read-only tool surface as :func:`serve` (stdio) to remote
     clients. Tool bodies run on worker threads (see :func:`_offload_to_thread`)
     so one slow call never blocks other clients on the shared event loop.
 
-    There is no authentication or TLS here yet: bind to localhost and front it
-    with an authenticating reverse proxy that terminates TLS until the access-
-    control layer lands (Sprint 12 item 3). Blocks until the process stops.
+    Requires a credential store unless ``allow_insecure`` is set: an
+    unauthenticated server hands the whole tool surface to anyone who can reach
+    the port, and that is not something to leave one forgotten flag away.
+
+    TLS is still terminated upstream — run this behind a reverse proxy.
+    Blocks until the process stops.
     """
     load_env()
-    server = build_server(corpus_path, http=HttpConfig(host=host, port=port))
+    if http.credentials_path is None and not http.allow_insecure:
+        raise ConfigError(
+            "refusing to serve HTTP without authentication. Issue a credential "
+            "with `lovspor tokens issue --label ...`, or pass --insecure-no-auth "
+            "for a local development run.",
+        )
+    if http.credentials_path is None:
+        print(
+            "access: SERVING WITHOUT AUTHENTICATION (--insecure-no-auth). Every "
+            "tool is open to anyone who can reach this port. Development only.",
+            file=sys.stderr,
+            flush=True,
+        )
+    server = build_server(corpus_path, http=http)
     _add_health_routes(server, corpus_path)
     server.run(transport="streamable-http")
 

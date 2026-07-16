@@ -6,10 +6,19 @@ from typing import Annotated
 import typer
 
 from lovspor import __version__
+from lovspor.access import (
+    Credential,
+    default_credentials_path,
+    issue_credential,
+    load_credentials,
+    revoke_credential,
+    write_credential_file,
+)
 from lovspor.corpus_audit import AuditReport, audit_corpus
 from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
 from lovspor.github_output import append_step_summary, set_output
+from lovspor.mcp import HttpConfig
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
@@ -25,10 +34,85 @@ app = typer.Typer(
 )
 
 
+tokens_app = typer.Typer(
+    name="tokens",
+    help="Issue, list and revoke hosted-MCP beta credentials.",
+    no_args_is_help=True,
+)
+app.add_typer(tokens_app)
+
+_CredentialsOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--credentials",
+        help="Path to the credential store (default: ~/.config/lovspor/credentials.json).",
+        envvar="LOVSPOR_CREDENTIALS",
+    ),
+]
+
+
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"lovspor {__version__}")
         raise typer.Exit
+
+
+@tokens_app.command("issue")
+def tokens_issue(
+    label: Annotated[str, typer.Option("--label", help="Who this credential is for.")],
+    expires_in_days: Annotated[
+        int,
+        typer.Option("--expires-in-days", help="Lifetime in days. 0 means never expires."),
+    ] = 90,
+    credentials_path: _CredentialsOption = None,
+) -> None:
+    """Mint a beta credential and print its token once.
+
+    The token is never stored — only its SHA-256 — so it cannot be recovered
+    later, only reissued.
+    """
+    path = (credentials_path or default_credentials_path()).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = load_credentials(path)
+    credential, token = issue_credential(existing, label, expires_in_days or None)
+    write_credential_file(path, [*existing, credential])
+    typer.echo(f"Issued {credential.credential_id} ({label}) -> {path}")
+    expiry = credential.expires_at.date().isoformat() if credential.expires_at else "never"
+    typer.echo(f"Expires: {expiry}")
+    typer.echo("\nToken (shown once, store it now):\n")
+    typer.echo(f"  {token}\n")
+    typer.echo("The server re-reads the store on change, so it is live immediately.")
+
+
+@tokens_app.command("list")
+def tokens_list(credentials_path: _CredentialsOption = None) -> None:
+    """List issued credentials. Never prints tokens — they are not stored."""
+    path = (credentials_path or default_credentials_path()).expanduser()
+    credentials = load_credentials(path)
+    if not credentials:
+        typer.echo(f"No credentials in {path}.")
+        return
+    for credential in credentials:
+        typer.echo(f"{credential.credential_id}  {_describe(credential)}  {credential.label}")
+
+
+def _describe(credential: Credential) -> str:
+    if credential.revoked:
+        return "revoked"
+    if credential.expires_at is None:
+        return "active (no expiry)"
+    return f"active until {credential.expires_at.date().isoformat()}"
+
+
+@tokens_app.command("revoke")
+def tokens_revoke(
+    credential_id: Annotated[str, typer.Argument(help="Credential id, e.g. beta-001.")],
+    credentials_path: _CredentialsOption = None,
+) -> None:
+    """Revoke a credential. Takes effect on the running server without a restart."""
+    path = (credentials_path or default_credentials_path()).expanduser()
+    write_credential_file(path, revoke_credential(load_credentials(path), credential_id))
+    typer.echo(f"Revoked {credential_id}. The running server picks this up on its next call.")
 
 
 @app.callback()
@@ -260,7 +344,7 @@ def mcp(
 def mcp_http(
     host: Annotated[
         str,
-        typer.Option("--host", help="Interface to bind. Keep on localhost until auth lands."),
+        typer.Option("--host", help="Interface to bind. Keep on localhost behind a proxy."),
     ] = "127.0.0.1",
     port: Annotated[
         int,
@@ -274,14 +358,23 @@ def mcp_http(
             envvar="LOVVERK_CORPUS_PATH",
         ),
     ] = None,
+    credentials_path: _CredentialsOption = None,
+    insecure_no_auth: Annotated[
+        bool,
+        typer.Option(
+            "--insecure-no-auth",
+            help="Serve with NO authentication. Development only.",
+        ),
+    ] = False,
 ) -> None:
     """Serve the lovverk corpus over the MCP Streamable HTTP transport.
 
     Exposes the same sixteen read-only tools as ``mcp`` (stdio) to remote
-    clients over HTTP. Tool bodies run on worker threads so one slow call
-    cannot block other clients. No authentication or TLS yet: bind to
-    localhost and front it with an authenticating reverse proxy until the
-    access-control layer lands.
+    clients, authenticated with bearer credentials from the store (see
+    ``lovspor tokens issue``). Tool bodies run on worker threads so one slow
+    call cannot block other clients.
+
+    TLS is terminated upstream: run this behind a reverse proxy.
     """
     target = (corpus_path or default_corpus_path()).expanduser()
     if not is_corpus(target):
@@ -289,4 +382,13 @@ def mcp_http(
             f"No lovverk corpus at {target}. Run `lovspor fetch-corpus` first, "
             "or pass --corpus-path / set LOVVERK_CORPUS_PATH.",
         )
-    _mcp_serve_http(target.resolve(), host, port)
+    store = None if insecure_no_auth else (credentials_path or default_credentials_path())
+    _mcp_serve_http(
+        target.resolve(),
+        HttpConfig(
+            host=host,
+            port=port,
+            credentials_path=store.expanduser() if store else None,
+            allow_insecure=insecure_no_auth,
+        ),
+    )
