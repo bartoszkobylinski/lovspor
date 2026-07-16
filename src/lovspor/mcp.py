@@ -334,6 +334,15 @@ class CorpusReader:
         # cache against a ``git pull`` landing underneath the long-lived
         # server (see _refresh_if_stale). None until the first read.
         self._manifest_mtime_ns: int | None = None
+        # Cache generation, bumped on every invalidation. The per-doc caches
+        # are filled from work done OUTSIDE the lock (a doc read + parse can
+        # be ~1 MB and would stall every other tool call under it), so a value
+        # can arrive describing a corpus that has since been refreshed away.
+        # Writers snapshot this first and drop the write if it moved — the
+        # write itself is atomic, but the DATA would be stale, and a stale
+        # cache entry is served until the next refresh. Codex caught this on
+        # PR #139: the naive version cached a pre-refresh body forever.
+        self._epoch: int = 0
         # Serializes cache invalidation (_refresh_if_stale) and every lazy
         # index build. The stdio transport runs one tool at a time, but the
         # hosted HTTP transport offloads blocking tool bodies to worker
@@ -366,6 +375,7 @@ class CorpusReader:
             # concurrent caller must see either the whole pre-refresh set or
             # the whole reset set, never a half-nulled mix.
             self._manifest_mtime_ns = mtime
+            self._epoch += 1
             self._manifest = None
             self._slug_index = None
             self._body_index = None
@@ -462,6 +472,7 @@ class CorpusReader:
         """
         section_id = _normalize_section_id(section_id)
         record = self._find_current_by_slug(slug)
+        epoch = self._current_epoch()
         # _find_current_by_slug only returns records whose slug == the
         # query slug, so record.slug is non-None here even though the
         # type annotation allows None.
@@ -478,7 +489,7 @@ class CorpusReader:
         # The act's own section-id set is a free by-product of the
         # parse above — seed the cache so same-act cross-refs don't
         # re-parse the body.
-        self._section_ids_cache.setdefault(record.slug or "", set(by_id))
+        self._remember_section_ids(record.slug or "", set(by_id), epoch)
         # Skip cross-ref resolution for sections with no ``§``
         # patterns at all — most short sections have none.
         cross_references: list[dict[str, Any]] = []
@@ -522,10 +533,12 @@ class CorpusReader:
         by-product.
         """
         record = self._find_current_by_slug(slug)
+        epoch = self._current_epoch()
         sections = _parse_sections(self._body_for_record(record))
-        self._section_ids_cache.setdefault(
+        self._remember_section_ids(
             record.slug or "",
             {section["section_id"] for section in sections},
+            epoch,
         )
         return [
             {
@@ -1366,6 +1379,28 @@ class CorpusReader:
             self._stale_bin_count = stale
             return self._embedding_index
 
+    def _current_epoch(self) -> int:
+        """Snapshot the cache generation before computing a value off-lock."""
+        with self._lock:
+            return self._epoch
+
+    def _remember_body(self, slug: str, body: str, epoch: int) -> None:
+        """Cache a doc body unless the corpus refreshed since ``epoch``.
+
+        Dropping the write costs one re-read; keeping it would serve the
+        pre-refresh text until the next refresh. See ``_epoch``.
+        """
+        with self._lock:
+            if epoch == self._epoch:
+                self._doc_bodies.setdefault(slug, body)
+
+    def _remember_section_ids(self, slug: str, ids: set[str], epoch: int) -> None:
+        """Cache an act's section-id set unless the corpus refreshed since
+        ``epoch``. Same staleness reasoning as ``_remember_body``."""
+        with self._lock:
+            if epoch == self._epoch:
+                self._section_ids_cache.setdefault(slug, ids)
+
     def _section_ids_for(self, slug: str) -> set[str]:
         """Section-id set for one act, parsed lazily and cached.
 
@@ -1375,13 +1410,16 @@ class CorpusReader:
         distinguishes "known act, missing §" from "unknown act" via
         the slug index, not via this lookup.
         """
-        cached = self._section_ids_cache.get(slug)
-        if cached is None:
-            entry = self._load_slug_index().get(slug)
-            body = self._body_for_record(entry[1]) if entry is not None else ""
-            cached = {section["section_id"] for section in _parse_sections(body)}
-            self._section_ids_cache[slug] = cached
-        return cached
+        with self._lock:
+            cached = self._section_ids_cache.get(slug)
+            if cached is not None:
+                return cached
+            epoch = self._epoch
+        entry = self._load_slug_index().get(slug)
+        body = self._body_for_record(entry[1]) if entry is not None else ""
+        ids = {section["section_id"] for section in _parse_sections(body)}
+        self._remember_section_ids(slug, ids, epoch)
+        return ids
 
     def _body_for_record(self, record: ManifestRecord) -> str:
         """Frontmatter/H1-stripped body text for one doc.
@@ -1392,16 +1430,19 @@ class CorpusReader:
         empty body — the same defensive posture as the full index.
         """
         slug = record.slug or ""
-        # Local ref: a background refresh can null _body_index between this
-        # check and the read, which would raise on None.get(...).
-        body_index = self._body_index
-        if body_index is not None:
-            return body_index.get(slug, "")
-        cached = self._doc_bodies.get(slug)
-        if cached is None:
-            cached = self._read_stripped_body(record)
-            self._doc_bodies[slug] = cached
-        return cached
+        with self._lock:
+            body_index = self._body_index
+            if body_index is not None:
+                return body_index.get(slug, "")
+            cached = self._doc_bodies.get(slug)
+            if cached is not None:
+                return cached
+            epoch = self._epoch
+        # Read off-lock: an act can be ~1 MB, and stripping it while holding
+        # the lock would stall every other tool call behind this one doc.
+        body = self._read_stripped_body(record)
+        self._remember_body(slug, body, epoch)
+        return body
 
     def _read_stripped_body(self, record: ManifestRecord) -> str:
         try:

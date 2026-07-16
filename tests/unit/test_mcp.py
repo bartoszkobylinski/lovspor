@@ -3418,6 +3418,96 @@ def test_build_server_raises_eagerly_on_bad_corpus(tmp_path: Path) -> None:
         build_server(tmp_path / "nonexistent")
 
 
+def _bump_manifest_mtime(root: Path) -> None:
+    """Force a mtime move so _refresh_if_stale fires regardless of the
+    filesystem's timestamp granularity."""
+    manifest = root / "manifest.json"
+    bumped = manifest.stat().st_mtime_ns + 1_000_000_000
+    os.utime(manifest, ns=(bumped, bumped))
+
+
+def test_doc_body_read_before_a_refresh_is_not_cached_after_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A body read that began before a corpus refresh must not land in the
+    post-refresh cache. The write is atomic, but the DATA describes the old
+    corpus — caching it serves the superseded legal text until the next
+    refresh, which is worse than re-reading. (Codex, PR #139.)"""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "OLD"},
+    )
+    reader = CorpusReader(tmp_path)
+    record = reader._find_current_by_slug("skatteloven")
+    reading = threading.Event()
+    may_finish = threading.Event()
+    real_read = reader._read_stripped_body
+
+    def blocking_read(rec: ManifestRecord) -> str:
+        body = real_read(rec)
+        reading.set()
+        may_finish.wait(timeout=5)
+        return body
+
+    monkeypatch.setattr(reader, "_read_stripped_body", blocking_read)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        in_flight = pool.submit(reader._body_for_record, record)
+        assert reading.wait(timeout=5)
+        # The corpus changes underneath the in-flight read.
+        _seed_corpus(
+            tmp_path,
+            {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+            body_for={"skatteloven": "NEW"},
+        )
+        _bump_manifest_mtime(tmp_path)
+        reader._refresh_if_stale()
+        may_finish.set()
+        in_flight.result()
+
+    assert reader._doc_bodies.get("skatteloven") != "OLD"
+    assert reader._body_for_record(reader._find_current_by_slug("skatteloven")) == "NEW"
+
+
+def test_section_ids_parsed_before_a_refresh_are_not_cached_after_it(
+    tmp_path: Path,
+) -> None:
+    """Same staleness guard as the body cache, for the cross-reference
+    section-id cache: an epoch captured before a refresh must not write back."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "### § 1-1. Old\nbody"},
+    )
+    reader = CorpusReader(tmp_path)
+    stale_epoch = reader._current_epoch()
+
+    _bump_manifest_mtime(tmp_path)
+    reader._refresh_if_stale()
+
+    reader._remember_section_ids("skatteloven", {"9-9"}, stale_epoch)
+
+    assert "skatteloven" not in reader._section_ids_cache
+
+
+def test_refresh_bumps_the_cache_epoch(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+    reader._refresh_if_stale()
+    first = reader._current_epoch()
+
+    _bump_manifest_mtime(tmp_path)
+    reader._refresh_if_stale()
+
+    assert reader._current_epoch() == first + 1
+    # An unchanged manifest must not churn the epoch, or every call would
+    # discard its own cache write.
+    reader._refresh_if_stale()
+    assert reader._current_epoch() == first + 1
+
+
 # ---------- Sprint 12: Streamable HTTP transport ----------
 
 
