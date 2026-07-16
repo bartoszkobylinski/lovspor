@@ -39,21 +39,27 @@ Why dataset aliases: legal text consumers think in Norwegian terms
 inputs accept either form and normalize internally.
 """
 
+import asyncio
 import difflib
+import functools
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import threading
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
 import numpy as np
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
 from lovspor.embeddings import (
     EmbeddingIndex,
@@ -328,6 +334,23 @@ class CorpusReader:
         # cache against a ``git pull`` landing underneath the long-lived
         # server (see _refresh_if_stale). None until the first read.
         self._manifest_mtime_ns: int | None = None
+        # Cache generation, bumped on every invalidation. The per-doc caches
+        # are filled from work done OUTSIDE the lock (a doc read + parse can
+        # be ~1 MB and would stall every other tool call under it), so a value
+        # can arrive describing a corpus that has since been refreshed away.
+        # Writers snapshot this first and drop the write if it moved — the
+        # write itself is atomic, but the DATA would be stale, and a stale
+        # cache entry is served until the next refresh. Codex caught this on
+        # PR #139: the naive version cached a pre-refresh body forever.
+        self._epoch: int = 0
+        # Serializes cache invalidation (_refresh_if_stale) and every lazy
+        # index build. The stdio transport runs one tool at a time, but the
+        # hosted HTTP transport offloads blocking tool bodies to worker
+        # threads (and refreshes the corpus on a background thread), so two
+        # callers could otherwise tear a half-reset cache set or each pay to
+        # build the same ~45 MB / ~200 MB index. Reentrant because the
+        # loaders acquire it while already holding it via ``self.manifest``.
+        self._lock = threading.RLock()
 
     def _refresh_if_stale(self) -> None:
         """Drop all in-memory caches when ``manifest.json`` changed on disk.
@@ -345,23 +368,51 @@ class CorpusReader:
             mtime = (self.corpus_path / "manifest.json").stat().st_mtime_ns
         except OSError:
             return  # manifest vanished mid-session; the next read raises clearly
-        if mtime == self._manifest_mtime_ns:
-            return
-        self._manifest_mtime_ns = mtime
-        self._manifest = None
-        self._slug_index = None
-        self._body_index = None
-        self._embedding_index = None
-        self._stale_bin_count = 0
-        self._doc_bodies = {}
-        self._section_ids_cache = {}
+        with self._lock:
+            if mtime == self._manifest_mtime_ns:
+                return
+            # Stamp the mtime and drop every cache as one atomic step: a
+            # concurrent caller must see either the whole pre-refresh set or
+            # the whole reset set, never a half-nulled mix.
+            self._manifest_mtime_ns = mtime
+            self._epoch += 1
+            self._manifest = None
+            self._slug_index = None
+            self._body_index = None
+            self._embedding_index = None
+            self._stale_bin_count = 0
+            self._doc_bodies = {}
+            self._section_ids_cache = {}
 
     @property
     def manifest(self) -> Manifest:
         self._refresh_if_stale()
         if self._manifest is None:
-            self._manifest = read_manifest(self.corpus_path / "manifest.json")
+            with self._lock:
+                if self._manifest is None:
+                    self._manifest = read_manifest(self.corpus_path / "manifest.json")
         return self._manifest
+
+    def warm(self) -> None:
+        """Pre-build the lazy indices so no request pays a cold build.
+
+        The hosted HTTP server shares one reader across clients, and a cold
+        build holds the cache lock for the whole build (~45 MB body index),
+        stalling every concurrent request behind it — measured at ~1.6 s of
+        lock wait for a trivial ``corpus_status`` racing a first
+        ``search_body``. Warming before the server accepts traffic keeps the
+        lock uncontended in steady state.
+
+        stdio deliberately stays lazy: a client that only queries metadata
+        should not pay a 3-5 s startup for an index it may never touch.
+
+        Embeddings warm only when an embedder is configured — ``semantic_search``
+        is disabled without one, so the ~200 MB index would be dead weight.
+        """
+        self._load_slug_index()
+        self._load_body_index()
+        if self._embedder is not None:
+            self._load_embedding_index()
 
     def get_law(self, slug: str) -> str:
         """Return the rendered Markdown (frontmatter + body) for ``slug``."""
@@ -420,11 +471,11 @@ class CorpusReader:
         index that ``search_body`` needs.
         """
         section_id = _normalize_section_id(section_id)
-        record = self._find_current_by_slug(slug)
+        record, epoch = self._resolve_current(slug)
         # _find_current_by_slug only returns records whose slug == the
         # query slug, so record.slug is non-None here even though the
         # type annotation allows None.
-        body = self._body_for_record(record)
+        body = self._body_for_record(record, epoch)
         by_id = _sections_by_id(_parse_sections(body))
         matches = by_id.get(section_id)
         if not matches:
@@ -437,7 +488,7 @@ class CorpusReader:
         # The act's own section-id set is a free by-product of the
         # parse above — seed the cache so same-act cross-refs don't
         # re-parse the body.
-        self._section_ids_cache.setdefault(record.slug or "", set(by_id))
+        self._remember_section_ids(record.slug or "", set(by_id), epoch)
         # Skip cross-ref resolution for sections with no ``§``
         # patterns at all — most short sections have none.
         cross_references: list[dict[str, Any]] = []
@@ -480,11 +531,12 @@ class CorpusReader:
         set is seeded into the cross-reference cache as a free
         by-product.
         """
-        record = self._find_current_by_slug(slug)
-        sections = _parse_sections(self._body_for_record(record))
-        self._section_ids_cache.setdefault(
+        record, epoch = self._resolve_current(slug)
+        sections = _parse_sections(self._body_for_record(record, epoch))
+        self._remember_section_ids(
             record.slug or "",
             {section["section_id"] for section in sections},
+            epoch,
         )
         return [
             {
@@ -1140,8 +1192,7 @@ class CorpusReader:
         ``heading``, ``snippet`` and ``occurrence`` are withheld rather than
         guessed — see the comment below.
         """
-        entry = self._load_slug_index().get(hit.slug)
-        record = entry[1] if entry is not None else None
+        record, epoch = self._lookup_current(hit.slug)
         subdir = ""
         section: ParsedSection | None = None
         ambiguous = False
@@ -1152,7 +1203,7 @@ class CorpusReader:
                 subdir = ""
             if hit.slug not in sections_memo:
                 sections_memo[hit.slug] = _sections_by_id(
-                    _parse_sections(self._body_for_record(record)),
+                    _parse_sections(self._body_for_record(record, epoch)),
                 )
             # A hit carries a bare section_id, and the embedding store keys by
             # that same bare id. Where an id repeats within an act, nothing in
@@ -1280,7 +1331,11 @@ class CorpusReader:
         tool offline.
         """
         self._refresh_if_stale()
-        if self._embedding_index is None:
+        if self._embedding_index is not None:
+            return self._embedding_index
+        with self._lock:
+            if self._embedding_index is not None:
+                return self._embedding_index
             entries: list[tuple[str, str, np.ndarray, float]] = []
             stale = 0
             for record in self.manifest.documents.values():
@@ -1319,7 +1374,48 @@ class CorpusReader:
                     entries.append((record.slug, section_id, vector, embedding_file.scale))
             self._embedding_index = EmbeddingIndex.from_entries(entries)
             self._stale_bin_count = stale
-        return self._embedding_index
+            return self._embedding_index
+
+    def _resolve_current(self, slug: str) -> tuple[ManifestRecord, int]:
+        """Resolve a slug to a current record, paired with its own generation.
+
+        The record and the epoch MUST be read under one lock. Resolving the
+        record first and snapshotting the epoch after leaves a window where a
+        refresh lands between the two: the caller then holds a *pre*-refresh
+        record stamped with the *post*-refresh epoch, so everything derived
+        from that record (notably its ``markdown_path``) sails through the
+        write-back guard and poisons the fresh cache. That is the second bug
+        Codex found on PR #139, and it is why there is no way to obtain an
+        epoch that is not already bound to a record.
+
+        Raises ``CorpusNotFoundError`` for an unknown slug.
+        """
+        with self._lock:
+            return self._find_current_by_slug(slug), self._epoch
+
+    def _lookup_current(self, slug: str) -> tuple[ManifestRecord | None, int]:
+        """``_resolve_current`` for callers that tolerate an unknown slug:
+        returns ``(None, epoch)`` instead of raising. Same atomicity contract."""
+        with self._lock:
+            entry = self._load_slug_index().get(slug)
+            return (entry[1] if entry is not None else None), self._epoch
+
+    def _remember_body(self, slug: str, body: str, epoch: int) -> None:
+        """Cache a doc body unless the corpus refreshed since ``epoch``.
+
+        Dropping the write costs one re-read; keeping it would serve the
+        pre-refresh text until the next refresh. See ``_epoch``.
+        """
+        with self._lock:
+            if epoch == self._epoch:
+                self._doc_bodies.setdefault(slug, body)
+
+    def _remember_section_ids(self, slug: str, ids: set[str], epoch: int) -> None:
+        """Cache an act's section-id set unless the corpus refreshed since
+        ``epoch``. Same staleness reasoning as ``_remember_body``."""
+        with self._lock:
+            if epoch == self._epoch:
+                self._section_ids_cache.setdefault(slug, ids)
 
     def _section_ids_for(self, slug: str) -> set[str]:
         """Section-id set for one act, parsed lazily and cached.
@@ -1330,30 +1426,42 @@ class CorpusReader:
         distinguishes "known act, missing §" from "unknown act" via
         the slug index, not via this lookup.
         """
-        cached = self._section_ids_cache.get(slug)
-        if cached is None:
-            entry = self._load_slug_index().get(slug)
-            body = self._body_for_record(entry[1]) if entry is not None else ""
-            cached = {section["section_id"] for section in _parse_sections(body)}
-            self._section_ids_cache[slug] = cached
-        return cached
+        with self._lock:
+            cached = self._section_ids_cache.get(slug)
+            if cached is not None:
+                return cached
+        record, epoch = self._lookup_current(slug)
+        body = self._body_for_record(record, epoch) if record is not None else ""
+        ids = {section["section_id"] for section in _parse_sections(body)}
+        self._remember_section_ids(slug, ids, epoch)
+        return ids
 
-    def _body_for_record(self, record: ManifestRecord) -> str:
+    def _body_for_record(self, record: ManifestRecord, epoch: int) -> str:
         """Frontmatter/H1-stripped body text for one doc.
 
         Reuses the corpus-wide body index when ``search_body`` has
         already paid for it; otherwise reads and caches just this
         doc's file. Missing or path-escaping files resolve to an
         empty body — the same defensive posture as the full index.
+
+        ``epoch`` is the generation ``record`` was resolved in — it must come
+        from ``_resolve_current`` / ``_lookup_current`` alongside the record,
+        never be snapshotted here. Reading it here would stamp a caller's stale
+        record with the current generation and cache the wrong body under it.
         """
         slug = record.slug or ""
-        if self._body_index is not None:
-            return self._body_index.get(slug, "")
-        cached = self._doc_bodies.get(slug)
-        if cached is None:
-            cached = self._read_stripped_body(record)
-            self._doc_bodies[slug] = cached
-        return cached
+        with self._lock:
+            body_index = self._body_index
+            if body_index is not None:
+                return body_index.get(slug, "")
+            cached = self._doc_bodies.get(slug)
+            if cached is not None:
+                return cached
+        # Read off-lock: an act can be ~1 MB, and stripping it while holding
+        # the lock would stall every other tool call behind this one doc.
+        body = self._read_stripped_body(record)
+        self._remember_body(slug, body, epoch)
+        return body
 
     def _read_stripped_body(self, record: ManifestRecord) -> str:
         try:
@@ -1383,7 +1491,11 @@ class CorpusReader:
         round 1 reproducer).
         """
         self._refresh_if_stale()
-        if self._body_index is None:
+        if self._body_index is not None:
+            return self._body_index
+        with self._lock:
+            if self._body_index is not None:
+                return self._body_index
             index: dict[str, str] = {}
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
@@ -1399,7 +1511,7 @@ class CorpusReader:
                 raw = path.read_text(encoding="utf-8")
                 index[record.slug] = _strip_frontmatter_and_h1(raw)
             self._body_index = index
-        return self._body_index
+            return self._body_index
 
     def corpus_status(self) -> dict[str, Any]:
         """Return manifest + git HEAD freshness metadata.
@@ -1520,14 +1632,18 @@ class CorpusReader:
         corpus changes on disk — the same contract as the cached manifest.
         """
         self._refresh_if_stale()
-        if self._slug_index is None:
+        if self._slug_index is not None:
+            return self._slug_index
+        with self._lock:
+            if self._slug_index is not None:
+                return self._slug_index
             index: dict[str, tuple[str, ManifestRecord]] = {}
             for doc_id, record in self.manifest.documents.items():
                 if record.status != "current" or record.slug is None:
                     continue
                 index.setdefault(record.slug, (doc_id, record))
             self._slug_index = index
-        return self._slug_index
+            return self._slug_index
 
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
         entry = self._load_slug_index().get(slug)
@@ -2276,7 +2392,39 @@ def _build_embedder() -> EmbeddingModel | None:
     )
 
 
-def build_server(corpus_path: Path) -> FastMCP:
+class HttpConfig(BaseModel):
+    """Bind address for the Streamable HTTP transport.
+
+    Passing this to :func:`build_server` selects hosted mode: tool bodies are
+    offloaded to worker threads and the corpus indices are warmed before the
+    server accepts traffic. Omit it for stdio, which stays lazy and inline.
+    """
+
+    host: str = "127.0.0.1"
+    port: int = 8000
+
+
+def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
+    """Wrap a synchronous tool body as an async tool run on a worker thread.
+
+    mcp 1.27.0 calls a synchronous tool handler inline on the single event-
+    loop thread, so one blocking call — a cold-cache ``search_body``, a
+    ``semantic_search`` embedding round-trip, a ``git`` subprocess — would
+    stall every other client on an HTTP server. Offloading to a thread lets
+    the loop serve other requests while the body runs. ``functools.wraps``
+    preserves ``__wrapped__`` so FastMCP still derives the tool's argument
+    schema from the original signature; the wrapper is ``async`` so FastMCP
+    awaits it instead of calling it inline.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(**kwargs: Any) -> Any:
+        return await asyncio.to_thread(fn, **kwargs)
+
+    return wrapper
+
+
+def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMCP:
     """Build a FastMCP server bound to ``corpus_path``.
 
     The reader is constructed eagerly so configuration errors (missing
@@ -2295,9 +2443,23 @@ def build_server(corpus_path: Path) -> FastMCP:
     """
     embedder = _build_embedder()
     reader = CorpusReader(corpus_path, embedder=embedder)
-    mcp = FastMCP("lovverk")
+    if http is not None:
+        reader.warm()
+    bind = http or HttpConfig()
+    mcp = FastMCP("lovverk", host=bind.host, port=bind.port)
 
-    @mcp.tool()
+    def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register a tool, offloading its blocking body to a worker thread
+        in hosted mode (see ``_offload_to_thread``). stdio keeps the direct
+        sync call: one tool at a time, no thread hop."""
+
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+            mcp.add_tool(_offload_to_thread(fn) if http is not None else fn)
+            return fn
+
+        return decorator
+
+    @_tool()
     def get_law(slug: str) -> str:
         """Return the full Markdown (frontmatter + body) of a Norwegian law or regulation.
 
@@ -2311,7 +2473,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_law(slug)
 
-    @mcp.tool()
+    @_tool()
     def get_section(
         slug: str,
         section_id: str,
@@ -2362,7 +2524,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_section(slug, section_id, occurrence)
 
-    @mcp.tool()
+    @_tool()
     def list_sections(slug: str) -> list[dict[str, Any]]:
         """List an act's table of contents: every ``§`` section id and heading.
 
@@ -2385,7 +2547,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.list_sections(slug)
 
-    @mcp.tool()
+    @_tool()
     def get_law_history(slug: str) -> dict[str, Any]:
         """Return the per-act change history of a law as structured JSON.
 
@@ -2396,7 +2558,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_law_history(slug)
 
-    @mcp.tool()
+    @_tool()
     def get_law_at(slug: str, target_date: str) -> str:
         """Return a law's full Markdown as it stood on a given calendar date.
 
@@ -2432,7 +2594,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_law_at(slug, target_date)
 
-    @mcp.tool()
+    @_tool()
     def list_law_versions(slug: str) -> list[dict[str, Any]]:
         """List the dates on which a law had distinct content versions.
 
@@ -2453,7 +2615,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.list_law_versions(slug)
 
-    @mcp.tool()
+    @_tool()
     def diff_law_versions(slug: str, date_a: str, date_b: str) -> dict[str, Any]:
         """Show what changed in a law between two dates, section by section.
 
@@ -2483,7 +2645,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.diff_law_versions(slug, date_a, date_b)
 
-    @mcp.tool()
+    @_tool()
     def list_recent_changes(
         dataset: str | None = None,
         since: str | None = None,
@@ -2499,7 +2661,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.list_recent_changes(dataset=dataset, since=since, limit=limit)
 
-    @mcp.tool()
+    @_tool()
     def search_laws(
         query: str,
         dataset: str | None = None,
@@ -2517,7 +2679,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.search_laws(query, dataset=dataset, limit=limit)
 
-    @mcp.tool()
+    @_tool()
     def search_body(
         query: str,
         dataset: str | None = None,
@@ -2547,7 +2709,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.search_body(query, dataset=dataset, limit=limit)
 
-    @mcp.tool()
+    @_tool()
     def semantic_search(
         query: str,
         dataset: str | None = None,
@@ -2617,7 +2779,7 @@ def build_server(corpus_path: Path) -> FastMCP:
             min_score=min_score,
         )
 
-    @mcp.tool()
+    @_tool()
     def validate_citation(citation: str) -> dict[str, Any]:
         """Verify that a Norwegian-law citation string actually resolves.
 
@@ -2649,7 +2811,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.validate_citation(citation)
 
-    @mcp.tool()
+    @_tool()
     def verify_quote(slug: str, section_id: str, quote: str) -> dict[str, Any]:
         """Verify a verbatim quote actually appears in a specific section.
 
@@ -2681,7 +2843,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.verify_quote(slug, section_id, quote)
 
-    @mcp.tool()
+    @_tool()
     def get_eu_basis(slug: str) -> dict[str, Any]:
         """Return the EU / EEA legal basis of a Norwegian law or regulation.
 
@@ -2710,7 +2872,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.get_eu_basis(slug)
 
-    @mcp.tool()
+    @_tool()
     def search_eu_implementations(eu_doc_id: str) -> list[dict[str, Any]]:
         """Reverse-lookup Norwegian acts that implement a given EU document.
 
@@ -2733,7 +2895,7 @@ def build_server(corpus_path: Path) -> FastMCP:
         """
         return reader.search_eu_implementations(eu_doc_id)
 
-    @mcp.tool()
+    @_tool()
     def corpus_status() -> dict[str, Any]:
         """Return the current state of the local corpus + freshness metadata.
 
@@ -2779,3 +2941,41 @@ def serve(corpus_path: Path) -> None:
     """
     load_env()
     build_server(corpus_path).run()
+
+
+def serve_http(corpus_path: Path, host: str, port: int) -> None:
+    """Start the MCP server over the Streamable HTTP transport.
+
+    Exposes the same read-only tool surface as :func:`serve` (stdio) to remote
+    clients. Tool bodies run on worker threads (see :func:`_offload_to_thread`)
+    so one slow call never blocks other clients on the shared event loop.
+
+    There is no authentication or TLS here yet: bind to localhost and front it
+    with an authenticating reverse proxy that terminates TLS until the access-
+    control layer lands (Sprint 12 item 3). Blocks until the process stops.
+    """
+    load_env()
+    server = build_server(corpus_path, http=HttpConfig(host=host, port=port))
+    _add_health_routes(server, corpus_path)
+    server.run(transport="streamable-http")
+
+
+def _add_health_routes(server: FastMCP, corpus_path: Path) -> None:
+    """Attach ``/healthz`` (process up) and ``/readyz`` (corpus present).
+
+    Kept deliberately cheap so a probe hammering them cannot stall the event
+    loop: readiness only stats ``manifest.json`` rather than parsing it or
+    shelling out to git. Richer freshness stays behind the ``corpus_status``
+    tool. custom_route endpoints are unauthenticated by design (FastMCP).
+    """
+
+    # FastMCP's custom_route decorator is untyped; scope the ignore tightly.
+    @server.custom_route("/healthz", methods=["GET"])  # type: ignore[untyped-decorator]
+    async def healthz(request: Request) -> Response:
+        return JSONResponse({"status": "ok"})
+
+    @server.custom_route("/readyz", methods=["GET"])  # type: ignore[untyped-decorator]
+    async def readyz(request: Request) -> Response:
+        if (corpus_path / "manifest.json").is_file():
+            return JSONResponse({"status": "ready"})
+        return JSONResponse({"status": "unavailable"}, status_code=503)

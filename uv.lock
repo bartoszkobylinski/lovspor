@@ -725,8 +725,10 @@ dependencies = [
     { name = "numpy" },
     { name = "pydantic" },
     { name = "python-dotenv" },
+    { name = "starlette" },
     { name = "tiktoken" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -757,8 +759,10 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.9.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0.0" },
+    { name = "starlette", specifier = ">=0.27" },
     { name = "tiktoken", specifier = ">=0.7.0" },
     { name = "typer", specifier = ">=0.12.5" },
+    { name = "uvicorn", specifier = ">=0.31.1" },
 ]
 provides-extras = ["embeddings"]
 

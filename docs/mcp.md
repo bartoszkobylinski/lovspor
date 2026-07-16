@@ -12,10 +12,38 @@ This document covers the full setup: prerequisites, configuration for two common
 
 ## At a glance
 
-- **Transport:** stdio. Each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note.
+- **Transport:** stdio by default (`lovspor mcp`) — each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note. A Streamable HTTP transport (`lovspor mcp-http`) also exists for the forthcoming hosted service; it is **not** production-ready — see [§ Streamable HTTP transport](#streamable-http-transport).
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user re-runs `lovspor fetch-corpus` (which fast-forwards the cache) to pick up updates.
 - **Tools:** sixteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the sixteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history.
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
+
+---
+
+## Streamable HTTP transport
+
+`lovspor mcp-http` serves the same sixteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is the foundation of the hosted service (Sprint 12 item 1), **not a finished product**:
+
+> ⚠️ **No authentication, no authorization, no TLS, no rate limiting or quotas yet.** Anyone who can reach the port gets the full tool surface. Bind it to localhost and put an authenticating reverse proxy that terminates TLS in front of it. Do not expose it to the internet until access control lands (Sprint 12 item 3).
+
+```bash
+uv run --project /path/to/lovspor lovspor mcp-http --host 127.0.0.1 --port 8000
+```
+
+Defaults are `--host 127.0.0.1 --port 8000`; `--corpus-path` behaves exactly as it does for `lovspor mcp`. The MCP endpoint is served at `/mcp`.
+
+**How it differs from stdio** — both differences exist because an HTTP server shares one process across many clients, while stdio serves exactly one:
+
+- **Tool bodies run on worker threads.** The MCP SDK calls a synchronous tool handler inline on its single event-loop thread, so one slow call (a `search_body` scan, a `semantic_search` embedding round-trip, a `git` subprocess for the time-machine tools) would stall *every* other client. Over HTTP each tool body is offloaded to a thread, so calls make progress concurrently.
+- **Indices are warmed at startup.** The corpus indices (~45 MB body index, ~200 MB embeddings when an OpenAI key is configured) are built before the server accepts traffic, so no request pays a multi-second cold build while holding the reader's cache lock. The cost is a slower start and a higher memory floor. stdio deliberately stays lazy: a client that only queries metadata should never pay for an index it may not touch.
+
+Two probes are exposed for operators, both unauthenticated and deliberately cheap (readiness stats `manifest.json` rather than parsing it or shelling out to git, so a probe loop cannot stall the server):
+
+| Endpoint | Meaning |
+|---|---|
+| `GET /healthz` | process is up — `{"status": "ok"}` |
+| `GET /readyz` | corpus is present — `{"status": "ready"}`, or `503` `{"status": "unavailable"}` |
+
+Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_status`](#corpus_status) tool rather than the probes.
 
 ---
 

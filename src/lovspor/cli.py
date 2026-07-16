@@ -11,6 +11,7 @@ from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
 from lovspor.github_output import append_step_summary, set_output
 from lovspor.mcp import serve as _mcp_serve
+from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.storage.manifest import read_manifest
@@ -253,3 +254,39 @@ def mcp(
             "or pass --corpus-path / set LOVVERK_CORPUS_PATH.",
         )
     _mcp_serve(target.resolve())
+
+
+@app.command(name="mcp-http")
+def mcp_http(
+    host: Annotated[
+        str,
+        typer.Option("--host", help="Interface to bind. Keep on localhost until auth lands."),
+    ] = "127.0.0.1",
+    port: Annotated[
+        int,
+        typer.Option("--port", help="TCP port for the Streamable HTTP server."),
+    ] = 8000,
+    corpus_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--corpus-path",
+            help="Path to a local lovverk clone (default: the fetch-corpus cache).",
+            envvar="LOVVERK_CORPUS_PATH",
+        ),
+    ] = None,
+) -> None:
+    """Serve the lovverk corpus over the MCP Streamable HTTP transport.
+
+    Exposes the same sixteen read-only tools as ``mcp`` (stdio) to remote
+    clients over HTTP. Tool bodies run on worker threads so one slow call
+    cannot block other clients. No authentication or TLS yet: bind to
+    localhost and front it with an authenticating reverse proxy until the
+    access-control layer lands.
+    """
+    target = (corpus_path or default_corpus_path()).expanduser()
+    if not is_corpus(target):
+        raise ConfigError(
+            f"No lovverk corpus at {target}. Run `lovspor fetch-corpus` first, "
+            "or pass --corpus-path / set LOVVERK_CORPUS_PATH.",
+        )
+    _mcp_serve_http(target.resolve(), host, port)

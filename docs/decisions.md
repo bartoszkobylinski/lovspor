@@ -489,6 +489,39 @@ A four-part code review (pipeline, rendering, ops, embeddings/MCP) was run over 
 
 **Packaging (PRs #81, #124, #131, #132).** `pyyaml` declared as a runtime dependency (#81); `evals` no longer ships as a top-level wheel package (#131) — it collided with OpenAI's `evals` on PyPI and is repo-only tooling anyway, run via `python -m evals.runner`; the embeddings benchmark extra declared so the documented benchmark is reproducible (#132); released **0.3.0** (#124).
 
+### Sprint 12 — Hosted MCP foundation: Streamable HTTP transport (2026-07-16)
+
+First item of the [commercial pivot](roadmap.md): expose the existing sixteen read-only tools over the MCP Streamable HTTP transport. No tool logic changed. stdio stays the development path.
+
+**The SDK dispatch finding that shaped everything.** mcp 1.27.0 calls a **synchronous** tool handler *inline on its single event-loop thread* (`func_metadata.call_fn_with_arg_validation` → `fn(**args)`; the only `anyio.to_thread` in the fastmcp package is in the resource path, never tools). The lowlevel server does start each request as its own task, but a blocking sync body never yields, so concurrent tool calls **serialize**. Consequences, both counter-intuitive:
+- On stdio this is harmless and the reader needed no locking, which is why `CorpusReader` was correct as written despite documenting itself as single-session.
+- On HTTP it means one slow call (cold `search_body`, a `semantic_search` embedding round-trip, a `git` subprocess) stalls *every* client. Verified before writing any lock — a lock alone would have guarded a race that could not yet occur.
+
+**Offload tool bodies to worker threads.** In hosted mode each tool is registered as an async wrapper that runs the sync body via `asyncio.to_thread`. `functools.wraps` preserves `__wrapped__`, and FastMCP derives the argument schema through `inspect.signature` (which follows it) while deciding await-vs-inline from the callable itself — so the wrapper keeps the exact tool schema while becoming awaitable. Confirmed empirically against the SDK before adopting it; a bare `**kwargs` wrapper would have silently produced empty schemas for all sixteen tools.
+
+**Thread-safety became necessary only because of the offload.** Once bodies run on threads (and once item 2 refreshes the corpus on a background thread), two callers can tear `_refresh_if_stale`'s cache reset — it stamps the new mtime *before* nulling the six caches, so a second thread sees the fresh mtime, skips the refresh, and reads a half-reset set — or each pay to build the same ~45 MB / ~200 MB index. Added a **reentrant** lock (the loaders re-enter it via `self.manifest`) guarding invalidation and every lazy build with double-checked locking. stdio behaviour is unchanged: one uncontended acquire per call.
+
+**Locking the four index caches was not enough — the per-doc caches needed an epoch guard (Codex, PR #139).** `_doc_bodies` and `_section_ids_cache` were left lock-free on the argument that their races were benign: single dict ops are atomic under the GIL and nothing iterates them. That reasoning was wrong, because the hazard is not corruption but **staleness across a refresh**. A reader that starts `_read_stripped_body` before a refresh, and finishes after it, writes pre-refresh text into the *post*-refresh cache; every later caller is then served the superseded legal text until the next refresh. Reproduced deterministically (pause the read, refresh, resume → `_doc_bodies["skatteloven"] == "OLD"`), and pinned by a regression test.
+
+The fix is a monotonic `_epoch`, bumped inside the same locked block that drops the caches. Anything computed off-lock snapshots the epoch first and writes back only if it has not moved; a mismatch discards the value and costs one re-read. The alternative — holding the lock across the read — was rejected: an act can be ~1 MB, so stripping it under the lock would stall every other tool call and undo the offload the transport exists for. The lesson generalises: for a cache behind an invalidation boundary, "is this write atomic?" is the wrong question; the question is "does this value still describe the corpus the cache now represents?"
+
+**The epoch must be bound to the record, not snapshotted separately (Codex, PR #139 round 2).** The first epoch fix still resolved the record and *then* read the epoch:
+
+```
+record = self._find_current_by_slug(slug)   # record from generation N
+epoch  = self._current_epoch()              # a refresh here => generation N+1
+```
+
+A refresh landing between those two lines yields a pre-refresh record stamped with the post-refresh epoch, so data derived from the old record — notably its `markdown_path`, which a refresh can repoint at a different file — passes the write-back guard and poisons the fresh cache. Guarding the *value* against the epoch is worthless if the *record* is not bound to it too. Resolution is now atomic (`_resolve_current` / `_lookup_current` return `(record, epoch)` under one lock), `_body_for_record` takes the epoch from its caller instead of reading it, and the free-floating `_current_epoch()` accessor was **deleted** — an epoch detached from a record is the footgun that produced this bug, so the API no longer offers one. Both rounds are pinned by regression tests that fail on the previous code.
+
+**Warm the indices at startup — the lock created a new stall.** Holding the cache lock for the whole cold build means a trivial call racing a first `search_body` waits for the entire build. Measured against the production corpus: `corpus_status` took **1.60 s** (vs ~0.27 s warm) while a cold `search_body` held the lock. Hosted mode therefore builds the indices *before* accepting traffic; the same call then took **0.27 s** on a freshly booted server. Trade-off accepted: slower start, higher memory floor. Embeddings warm only when an embedder is configured (`semantic_search` is disabled without one, so ~200 MB would be dead weight). **stdio stays lazy** — a metadata-only client should not pay a 3-5 s startup for an index it may never touch.
+
+**`HttpConfig` selects hosted mode.** Passing it to `build_server` implies offload + warm and carries the bind address (FastMCP configures its transport-security allowlist from the constructor host, so it cannot be set after the fact). Bundling them also keeps `build_server` within the four-parameter limit (§ code rules).
+
+**Security posture — deliberately incomplete.** There is **no authentication, authorization, TLS, rate limiting, quota, or metering**. `mcp-http` binds `127.0.0.1` by default and must stay behind an authenticating, TLS-terminating reverse proxy until access control lands (Sprint 12 item 3). `/healthz` and `/readyz` are unauthenticated by design (FastMCP `custom_route` bypasses auth) and deliberately cheap — readiness stats `manifest.json` rather than parsing it or shelling out to git, so a probe loop cannot stall the loop. Richer freshness stays behind `corpus_status`.
+
+**Packaging.** `starlette` and `uvicorn` were already unconditional `mcp` requirements; declared explicitly since the HTTP entry point imports starlette and runs uvicorn directly — same "declare what you import" reasoning as `pyyaml` in PR #81.
+
 ## 12b. Slug-based filenames (Sprint 4)
 
 Decided 2026-04-26. Markdown filenames in `lovverk/lover/` and `lovverk/forskrifter/` use a human-readable slug derived from the law's `short_title` (Lovdata's official kortform), not the opaque `nl-YYYYMMDD-NNN` doc_id from the source XML.

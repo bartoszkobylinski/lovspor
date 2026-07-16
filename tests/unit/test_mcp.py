@@ -7,15 +7,22 @@ glue is tested by constructing the server instance and verifying the
 four expected tool names are registered.
 """
 
+import asyncio
+import inspect
 import json
 import os
 import shlex
 import subprocess
+import threading
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pytest
+from starlette.testclient import TestClient
 
 import lovspor.mcp as mcp_module
 from lovspor.embeddings import write_embeddings
@@ -28,14 +35,17 @@ from lovspor.mcp import (
     CorpusAmbiguousSectionError,
     CorpusNotFoundError,
     CorpusReader,
+    HttpConfig,
     OpenAIEmbedder,
     ParsedSection,
+    _add_health_routes,
     _bounded_limit,
     _build_embedder,
     _compute_match_owner_starts,
     _diff_section_maps,
     _extract_cross_references,
     _normalize_for_quote_match,
+    _offload_to_thread,
     _parse_sections,
     _record_summary,
     _resolve_dataset,
@@ -252,6 +262,79 @@ def test_build_embedder_uses_tight_interactive_timeout_budget(
     # Strictly tighter than the batch defaults it previously inherited.
     assert embedder._timeout_seconds < 180.0
     assert embedder._max_retries < 3
+
+
+def _hammer_cold_cache(
+    trigger: Callable[[], object],
+    *,
+    workers: int = 8,
+) -> None:
+    """Fire ``trigger`` from ``workers`` threads that all start together.
+
+    A barrier releases every thread at once so they hit a cold cache
+    simultaneously; the seam under test sleeps briefly while building,
+    which guarantees every caller clears the ``is None`` check before the
+    first one populates the cache. ``future.result()`` re-raises any
+    worker exception in the main thread.
+    """
+    barrier = threading.Barrier(workers)
+
+    def worker() -> None:
+        barrier.wait(timeout=5)
+        trigger()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(worker) for _ in range(workers)]
+        for future in futures:
+            future.result()
+
+
+def test_concurrent_cold_manifest_load_builds_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+    builds: list[int] = []
+    real_read_manifest = mcp_module.read_manifest
+
+    def slow_counting(path: Path) -> Manifest:
+        builds.append(1)
+        time.sleep(0.05)
+        return real_read_manifest(path)
+
+    monkeypatch.setattr(mcp_module, "read_manifest", slow_counting)
+
+    _hammer_cold_cache(lambda: reader.get_law("skatteloven"))
+
+    assert builds == [1]  # one build under concurrency, not one per racing thread
+
+
+def test_concurrent_cold_body_index_builds_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "## Kapittel 1\n### § 1. Start\nbody text"},
+    )
+    reader = CorpusReader(tmp_path)
+    strips: list[int] = []
+    real_strip = mcp_module._strip_frontmatter_and_h1
+
+    def slow_counting(text: str) -> str:
+        strips.append(1)
+        time.sleep(0.05)
+        return real_strip(text)
+
+    monkeypatch.setattr(mcp_module, "_strip_frontmatter_and_h1", slow_counting)
+
+    _hammer_cold_cache(lambda: reader.search_body("body"))
+
+    # One current doc => the 45 MB body index strips exactly once per build;
+    # a lock-free double build strips once per racing thread instead.
+    assert strips == [1]
 
 
 def _write_embedding_file(
@@ -3333,6 +3416,297 @@ def test_build_server_raises_eagerly_on_bad_corpus(tmp_path: Path) -> None:
     """Misconfigured corpus path fails at server startup, not first call."""
     with pytest.raises(CorpusNotFoundError):
         build_server(tmp_path / "nonexistent")
+
+
+def _bump_manifest_mtime(root: Path) -> None:
+    """Force a mtime move so _refresh_if_stale fires regardless of the
+    filesystem's timestamp granularity."""
+    manifest = root / "manifest.json"
+    bumped = manifest.stat().st_mtime_ns + 1_000_000_000
+    os.utime(manifest, ns=(bumped, bumped))
+
+
+def test_doc_body_read_before_a_refresh_is_not_cached_after_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A body read that began before a corpus refresh must not land in the
+    post-refresh cache. The write is atomic, but the DATA describes the old
+    corpus — caching it serves the superseded legal text until the next
+    refresh, which is worse than re-reading. (Codex, PR #139.)"""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "OLD"},
+    )
+    reader = CorpusReader(tmp_path)
+    record, epoch = reader._resolve_current("skatteloven")
+    reading = threading.Event()
+    may_finish = threading.Event()
+    real_read = reader._read_stripped_body
+
+    def blocking_read(rec: ManifestRecord) -> str:
+        body = real_read(rec)
+        reading.set()
+        may_finish.wait(timeout=5)
+        return body
+
+    monkeypatch.setattr(reader, "_read_stripped_body", blocking_read)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        in_flight = pool.submit(reader._body_for_record, record, epoch)
+        assert reading.wait(timeout=5)
+        # The corpus changes underneath the in-flight read.
+        _seed_corpus(
+            tmp_path,
+            {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+            body_for={"skatteloven": "NEW"},
+        )
+        _bump_manifest_mtime(tmp_path)
+        reader._refresh_if_stale()
+        may_finish.set()
+        in_flight.result()
+
+    assert reader._doc_bodies.get("skatteloven") != "OLD"
+    assert reader._body_for_record(*reader._resolve_current("skatteloven")) == "NEW"
+
+
+def test_record_resolved_before_a_refresh_cannot_poison_the_new_epoch(
+    tmp_path: Path,
+) -> None:
+    """A record and its epoch must be resolved atomically. Pairing a
+    pre-refresh record with a post-refresh epoch would let the old record's
+    markdown_path pass the write-back guard and poison the fresh cache — the
+    slug can point at a different file after a refresh. (Codex, PR #139 rd 2.)"""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "old-body"},
+    )
+    reader = CorpusReader(tmp_path)
+    old_record, old_epoch = reader._resolve_current("skatteloven")
+
+    # The slug now resolves to a different file with different content.
+    old_path = tmp_path / "lover" / "skatteloven.md"
+    new_record = _record(slug="skatteloven", title="Skatteloven")
+    new_record = new_record.model_copy(update={"markdown_path": "lover/skatteloven-ny.md"})
+    write_manifest(
+        Manifest(generated_at=datetime.now(UTC), documents={"nl-1": new_record}),
+        tmp_path / "manifest.json",
+    )
+    (tmp_path / "lover" / "skatteloven-ny.md").write_text(
+        "---\nid: x\ntitle: Skatteloven\n---\n\nnew-body",
+        encoding="utf-8",
+    )
+    old_path.write_text("---\nid: x\ntitle: Skatteloven\n---\n\nold-body", encoding="utf-8")
+    _bump_manifest_mtime(tmp_path)
+    reader._refresh_if_stale()
+
+    # A caller still holding the pre-refresh record must not cache its body.
+    assert reader._body_for_record(old_record, old_epoch) == "old-body"
+    assert "skatteloven" not in reader._doc_bodies
+
+    # And resolution after the refresh pairs the NEW record with the NEW epoch.
+    fresh_record, fresh_epoch = reader._resolve_current("skatteloven")
+    assert fresh_record.markdown_path == "lover/skatteloven-ny.md"
+    assert fresh_epoch == old_epoch + 1
+    assert reader._body_for_record(fresh_record, fresh_epoch) == "new-body"
+
+
+def test_section_ids_parsed_before_a_refresh_are_not_cached_after_it(
+    tmp_path: Path,
+) -> None:
+    """Same staleness guard as the body cache, for the cross-reference
+    section-id cache: an epoch captured before a refresh must not write back."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "### § 1-1. Old\nbody"},
+    )
+    reader = CorpusReader(tmp_path)
+    _, stale_epoch = reader._resolve_current("skatteloven")
+
+    _bump_manifest_mtime(tmp_path)
+    reader._refresh_if_stale()
+
+    reader._remember_section_ids("skatteloven", {"9-9"}, stale_epoch)
+
+    assert "skatteloven" not in reader._section_ids_cache
+
+
+def test_refresh_bumps_the_cache_epoch(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+    _, first = reader._resolve_current("skatteloven")
+
+    _bump_manifest_mtime(tmp_path)
+    reader._refresh_if_stale()
+
+    assert reader._resolve_current("skatteloven")[1] == first + 1
+    # An unchanged manifest must not churn the epoch, or every call would
+    # discard its own cache write.
+    reader._refresh_if_stale()
+    assert reader._resolve_current("skatteloven")[1] == first + 1
+
+
+# ---------- Sprint 12: Streamable HTTP transport ----------
+
+
+def test_offload_to_thread_preserves_signature_and_leaves_the_caller_thread() -> None:
+    """FastMCP derives a tool's schema from the signature and decides
+    await-vs-inline from the callable itself, so the wrapper has to look like
+    the original (via ``__wrapped__``) while being a coroutine function."""
+
+    def probe(slug: str, limit: int = 5) -> str:
+        """Probe docstring."""
+        return f"{slug}|{limit}|{threading.current_thread().name}"
+
+    wrapped = _offload_to_thread(probe)
+
+    assert inspect.iscoroutinefunction(wrapped)
+    assert inspect.signature(wrapped) == inspect.signature(probe)
+    assert wrapped.__doc__ == "Probe docstring."
+
+    result = asyncio.run(wrapped(slug="x", limit=2))
+
+    assert result.startswith("x|2|")
+    assert not result.endswith(threading.current_thread().name)
+
+
+def test_http_mode_registers_offloaded_async_tools_with_intact_schemas(
+    tmp_path: Path,
+) -> None:
+    """Async registration is what keeps a blocking body off the event loop;
+    the schema must survive the wrapping or every tool call breaks."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    server = build_server(tmp_path, http=HttpConfig(host="127.0.0.1", port=9999))
+
+    tools = server._tool_manager._tools
+    assert len(tools) == 16
+    assert all(tool.is_async for tool in tools.values())
+    get_law = tools["get_law"]
+    assert get_law.parameters["required"] == ["slug"]
+    assert get_law.parameters["properties"]["slug"]["type"] == "string"
+
+
+def test_stdio_mode_registers_inline_sync_tools(tmp_path: Path) -> None:
+    """stdio serves one client, one tool at a time — the thread hop would buy
+    nothing, so it must not be applied there."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    server = build_server(tmp_path)
+
+    tools = server._tool_manager._tools
+    assert len(tools) == 16
+    assert not any(tool.is_async for tool in tools.values())
+
+
+def test_http_mode_warms_caches_while_stdio_stays_lazy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cold index build holds the cache lock for its whole duration and
+    stalls every concurrent request; the hosted server pays it at startup
+    instead. stdio keeps the lazy path so a metadata-only client starts fast."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    warmed: list[int] = []
+    monkeypatch.setattr(CorpusReader, "warm", lambda _self: warmed.append(1))
+
+    build_server(tmp_path)
+    assert warmed == []
+
+    build_server(tmp_path, http=HttpConfig())
+    assert warmed == [1]
+
+
+def test_warm_builds_indices_and_skips_embeddings_without_an_embedder(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+
+    reader.warm()
+
+    assert reader._slug_index is not None
+    assert reader._body_index is not None
+    # semantic_search is disabled without an embedder, so the ~200 MB index
+    # would be dead weight.
+    assert reader._embedding_index is None
+
+
+def test_warm_builds_the_embedding_index_when_an_embedder_is_configured(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("1", [1, 0])])
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0]))
+
+    reader.warm()
+
+    assert reader._embedding_index is not None
+
+
+def test_health_routes_report_process_and_corpus_readiness(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    server = build_server(tmp_path, http=HttpConfig())
+    _add_health_routes(server, tmp_path)
+
+    client = TestClient(server.streamable_http_app())
+
+    healthz = client.get("/healthz")
+    assert healthz.status_code == 200
+    assert healthz.json() == {"status": "ok"}
+
+    readyz = client.get("/readyz")
+    assert readyz.status_code == 200
+    assert readyz.json() == {"status": "ready"}
+
+
+def test_readyz_reports_unavailable_when_the_corpus_manifest_disappears(
+    tmp_path: Path,
+) -> None:
+    """A probe must fail the instance out when the corpus vanishes underneath
+    it rather than letting it serve on."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    server = build_server(tmp_path, http=HttpConfig())
+    _add_health_routes(server, tmp_path)
+    (tmp_path / "manifest.json").unlink()
+
+    response = TestClient(server.streamable_http_app()).get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "unavailable"}
+
+
+def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same .env ordering contract as serve(), plus the bind address has to
+    reach build_server so FastMCP configures its transport security for it."""
+    calls: list[str] = []
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(mcp_module, "load_env", lambda: calls.append("load_env"))
+
+    class _FakeServer:
+        def run(self, transport: str) -> None:
+            calls.append(f"run:{transport}")
+
+    def fake_build(path: Path, *, http: HttpConfig | None = None) -> _FakeServer:
+        captured["path"] = path
+        captured["http"] = http
+        calls.append("build")
+        return _FakeServer()
+
+    monkeypatch.setattr(mcp_module, "build_server", fake_build)
+    monkeypatch.setattr(mcp_module, "_add_health_routes", lambda *_: calls.append("health"))
+
+    mcp_module.serve_http(tmp_path, "127.0.0.1", 9001)
+
+    assert calls == ["load_env", "build", "health", "run:streamable-http"]
+    assert captured["path"] == tmp_path
+    assert captured["http"] == HttpConfig(host="127.0.0.1", port=9001)
 
 
 # ---------------------------------------------------------------------------

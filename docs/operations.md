@@ -13,7 +13,10 @@ uv run lovspor sync --force-rerender  # re-render every doc, to land a renderer 
 uv run lovspor repair-embeddings  # flag under-embedded docs for re-embed (see Maintenance)
 uv run lovspor fetch-corpus    # clone/update the local lovverk corpus that `lovspor mcp` reads
 uv run lovspor mcp             # serve the corpus to AI assistants over MCP (stdio)
+uv run lovspor mcp-http        # serve the same tools over MCP Streamable HTTP (localhost only — no auth yet)
 ```
+
+`mcp-http` is the hosted-service foundation (Sprint 12 item 1). It has **no authentication, authorization, TLS, or rate limiting**: keep it bound to localhost behind an authenticating reverse proxy and do not expose it to the internet until access control lands. It serves `/mcp` plus unauthenticated `/healthz` and `/readyz` probes. See [`mcp.md` § Streamable HTTP transport](mcp.md#streamable-http-transport).
 
 `seed` and `sync` are aliases at the engine level — both call the same orchestrator. Use `seed` semantically for the first run on an empty corpus, `sync` for repeated invocations. Settings are read from environment variables (or a `.env` file at the engine repo root). See `.env.example` for the required variables.
 

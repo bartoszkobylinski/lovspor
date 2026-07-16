@@ -28,6 +28,12 @@ dependencies = [
     # truncation under the 8191-token API limit. It's tiny (~3 MB
     # wheel) so we don't gain anything by gating it behind an extra.
     "tiktoken>=0.7.0",
+    # The hosted MCP transport (Sprint 12) serves the tool surface over
+    # Streamable HTTP. mcp already requires starlette + uvicorn, but the
+    # HTTP entry point imports starlette directly and runs uvicorn, so we
+    # declare both here rather than lean on a transitive pin.
+    "starlette>=0.27",
+    "uvicorn>=0.31.1",
 ]
 
 [project.optional-dependencies]
