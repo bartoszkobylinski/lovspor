@@ -9,6 +9,7 @@ the fail-closed reload behaviour.
 import asyncio
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -197,6 +198,23 @@ def test_a_file_that_breaks_while_running_fails_closed(
     assert "credential store" in capsys.readouterr().err
 
 
+def test_a_file_fixed_after_breakage_recovers_without_a_restart(tmp_path: Path) -> None:
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token)])
+    store = CredentialStore(store_path)
+    assert asyncio.run(store.verify_token(token)) is not None
+
+    store_path.write_text("{ oops", encoding="utf-8")
+    _bump_mtime(store_path)
+    assert asyncio.run(store.verify_token(token)) is None
+
+    _write_store(store_path, [_credential(token)])
+    _bump_mtime(store_path)
+
+    assert asyncio.run(store.verify_token(token)) is not None
+
+
 def test_a_deleted_file_while_running_fails_closed(tmp_path: Path) -> None:
     token = generate_token()
     store_path = tmp_path / "credentials.json"
@@ -206,6 +224,41 @@ def test_a_deleted_file_while_running_fails_closed(tmp_path: Path) -> None:
 
     store_path.unlink()
 
+    assert asyncio.run(store.verify_token(token)) is None
+
+
+def test_a_deleted_file_restored_later_recovers_without_a_restart(tmp_path: Path) -> None:
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token)])
+    store = CredentialStore(store_path)
+    assert asyncio.run(store.verify_token(token)) is not None
+
+    store_path.unlink()
+    assert asyncio.run(store.verify_token(token)) is None
+
+    _write_store(store_path, [_credential(token)])
+    _bump_mtime(store_path)
+
+    assert asyncio.run(store.verify_token(token)) is not None
+
+
+def test_concurrent_stale_reload_fails_closed_without_raising(tmp_path: Path) -> None:
+    """The verifier runs on worker threads under Streamable HTTP, so one
+    reload-triggering request must not race another into an exception."""
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token)])
+    store = CredentialStore(store_path)
+    assert asyncio.run(store.verify_token(token)) is not None
+
+    store_path.write_text("{ oops", encoding="utf-8")
+    _bump_mtime(store_path)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: asyncio.run(store.verify_token(token)), range(16)))
+
+    assert all(result is None or isinstance(result, LovsporAccessToken) for result in results)
     assert asyncio.run(store.verify_token(token)) is None
 
 

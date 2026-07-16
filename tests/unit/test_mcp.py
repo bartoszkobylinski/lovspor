@@ -25,7 +25,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import lovspor.mcp as mcp_module
-from lovspor.access import CredentialStore, write_credential_file
+from lovspor.access import Credential, CredentialStore, hash_token, write_credential_file
 from lovspor.embeddings import write_embeddings
 from lovspor.errors import ConfigError
 from lovspor.mcp import (
@@ -3763,6 +3763,76 @@ def test_http_mode_with_credentials_installs_the_store_as_token_verifier(
     assert server.settings.auth.resource_server_url is None
     paths = {route.path for route in server.streamable_http_app().routes}
     assert not any(p.startswith("/.well-known") or p in {"/token", "/authorize"} for p in paths)
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {},
+        {"Authorization": "Basic abc"},
+        {"Authorization": "Bearer nope"},
+    ],
+)
+def test_http_mode_rejects_missing_and_malformed_bearers_before_reaching_mcp(
+    tmp_path: Path,
+    headers: dict[str, str],
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    write_credential_file(creds, [])
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    response = TestClient(
+        server.streamable_http_app(),
+        raise_server_exceptions=False,
+    ).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+        headers=headers,
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"].startswith("Bearer ")
+    assert response.json() == {
+        "error": "invalid_token",
+        "error_description": "Authentication required",
+    }
+
+
+def test_http_mode_rejects_an_expired_bearer_before_reaching_mcp(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    token = "lsp_expired_test_token"
+    write_credential_file(
+        creds,
+        [
+            Credential(
+                credential_id="beta-001",
+                label="expired tester",
+                token_sha256=hash_token(token),
+                expires_at=datetime.now(UTC) - timedelta(days=1),
+            ),
+        ],
+    )
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    response = TestClient(
+        server.streamable_http_app(),
+        raise_server_exceptions=False,
+    ).post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 1, "method": "ping", "params": {}},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"].startswith("Bearer ")
+    assert response.json() == {
+        "error": "invalid_token",
+        "error_description": "Authentication required",
+    }
 
 
 # ---------------------------------------------------------------------------

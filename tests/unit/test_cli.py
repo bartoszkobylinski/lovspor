@@ -301,6 +301,34 @@ def test_tokens_list_never_prints_a_token(
     assert token not in result.stdout
 
 
+def test_tokens_issue_list_revoke_round_trip_tracks_ids_and_statuses(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
+    creds = tmp_path / "credentials.json"
+
+    first = runner.invoke(
+        app,
+        ["tokens", "issue", "--label", "Alpha", "--credentials", str(creds)],
+    )
+    second = runner.invoke(
+        app,
+        ["tokens", "issue", "--label", "Beta", "--credentials", str(creds)],
+    )
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+
+    revoked = runner.invoke(app, ["tokens", "revoke", "beta-001", "--credentials", str(creds)])
+    listed = runner.invoke(app, ["tokens", "list", "--credentials", str(creds)])
+
+    assert revoked.exit_code == 0, revoked.output
+    assert listed.exit_code == 0, listed.output
+    assert "beta-001  revoked  Alpha" in listed.stdout
+    assert "beta-002  active until " in listed.stdout
+    assert "Beta" in listed.stdout
+
+
 def test_mcp_http_refuses_to_start_without_a_corpus(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
