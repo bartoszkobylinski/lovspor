@@ -3440,7 +3440,7 @@ def test_doc_body_read_before_a_refresh_is_not_cached_after_it(
         body_for={"skatteloven": "OLD"},
     )
     reader = CorpusReader(tmp_path)
-    record = reader._find_current_by_slug("skatteloven")
+    record, epoch = reader._resolve_current("skatteloven")
     reading = threading.Event()
     may_finish = threading.Event()
     real_read = reader._read_stripped_body
@@ -3454,7 +3454,7 @@ def test_doc_body_read_before_a_refresh_is_not_cached_after_it(
     monkeypatch.setattr(reader, "_read_stripped_body", blocking_read)
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        in_flight = pool.submit(reader._body_for_record, record)
+        in_flight = pool.submit(reader._body_for_record, record, epoch)
         assert reading.wait(timeout=5)
         # The corpus changes underneath the in-flight read.
         _seed_corpus(
@@ -3468,7 +3468,49 @@ def test_doc_body_read_before_a_refresh_is_not_cached_after_it(
         in_flight.result()
 
     assert reader._doc_bodies.get("skatteloven") != "OLD"
-    assert reader._body_for_record(reader._find_current_by_slug("skatteloven")) == "NEW"
+    assert reader._body_for_record(*reader._resolve_current("skatteloven")) == "NEW"
+
+
+def test_record_resolved_before_a_refresh_cannot_poison_the_new_epoch(
+    tmp_path: Path,
+) -> None:
+    """A record and its epoch must be resolved atomically. Pairing a
+    pre-refresh record with a post-refresh epoch would let the old record's
+    markdown_path pass the write-back guard and poison the fresh cache — the
+    slug can point at a different file after a refresh. (Codex, PR #139 rd 2.)"""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "old-body"},
+    )
+    reader = CorpusReader(tmp_path)
+    old_record, old_epoch = reader._resolve_current("skatteloven")
+
+    # The slug now resolves to a different file with different content.
+    old_path = tmp_path / "lover" / "skatteloven.md"
+    new_record = _record(slug="skatteloven", title="Skatteloven")
+    new_record = new_record.model_copy(update={"markdown_path": "lover/skatteloven-ny.md"})
+    write_manifest(
+        Manifest(generated_at=datetime.now(UTC), documents={"nl-1": new_record}),
+        tmp_path / "manifest.json",
+    )
+    (tmp_path / "lover" / "skatteloven-ny.md").write_text(
+        "---\nid: x\ntitle: Skatteloven\n---\n\nnew-body",
+        encoding="utf-8",
+    )
+    old_path.write_text("---\nid: x\ntitle: Skatteloven\n---\n\nold-body", encoding="utf-8")
+    _bump_manifest_mtime(tmp_path)
+    reader._refresh_if_stale()
+
+    # A caller still holding the pre-refresh record must not cache its body.
+    assert reader._body_for_record(old_record, old_epoch) == "old-body"
+    assert "skatteloven" not in reader._doc_bodies
+
+    # And resolution after the refresh pairs the NEW record with the NEW epoch.
+    fresh_record, fresh_epoch = reader._resolve_current("skatteloven")
+    assert fresh_record.markdown_path == "lover/skatteloven-ny.md"
+    assert fresh_epoch == old_epoch + 1
+    assert reader._body_for_record(fresh_record, fresh_epoch) == "new-body"
 
 
 def test_section_ids_parsed_before_a_refresh_are_not_cached_after_it(
@@ -3482,7 +3524,7 @@ def test_section_ids_parsed_before_a_refresh_are_not_cached_after_it(
         body_for={"skatteloven": "### § 1-1. Old\nbody"},
     )
     reader = CorpusReader(tmp_path)
-    stale_epoch = reader._current_epoch()
+    _, stale_epoch = reader._resolve_current("skatteloven")
 
     _bump_manifest_mtime(tmp_path)
     reader._refresh_if_stale()
@@ -3495,17 +3537,16 @@ def test_section_ids_parsed_before_a_refresh_are_not_cached_after_it(
 def test_refresh_bumps_the_cache_epoch(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
     reader = CorpusReader(tmp_path)
-    reader._refresh_if_stale()
-    first = reader._current_epoch()
+    _, first = reader._resolve_current("skatteloven")
 
     _bump_manifest_mtime(tmp_path)
     reader._refresh_if_stale()
 
-    assert reader._current_epoch() == first + 1
+    assert reader._resolve_current("skatteloven")[1] == first + 1
     # An unchanged manifest must not churn the epoch, or every call would
     # discard its own cache write.
     reader._refresh_if_stale()
-    assert reader._current_epoch() == first + 1
+    assert reader._resolve_current("skatteloven")[1] == first + 1
 
 
 # ---------- Sprint 12: Streamable HTTP transport ----------

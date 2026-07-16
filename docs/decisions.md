@@ -505,6 +505,15 @@ First item of the [commercial pivot](roadmap.md): expose the existing sixteen re
 
 The fix is a monotonic `_epoch`, bumped inside the same locked block that drops the caches. Anything computed off-lock snapshots the epoch first and writes back only if it has not moved; a mismatch discards the value and costs one re-read. The alternative — holding the lock across the read — was rejected: an act can be ~1 MB, so stripping it under the lock would stall every other tool call and undo the offload the transport exists for. The lesson generalises: for a cache behind an invalidation boundary, "is this write atomic?" is the wrong question; the question is "does this value still describe the corpus the cache now represents?"
 
+**The epoch must be bound to the record, not snapshotted separately (Codex, PR #139 round 2).** The first epoch fix still resolved the record and *then* read the epoch:
+
+```
+record = self._find_current_by_slug(slug)   # record from generation N
+epoch  = self._current_epoch()              # a refresh here => generation N+1
+```
+
+A refresh landing between those two lines yields a pre-refresh record stamped with the post-refresh epoch, so data derived from the old record — notably its `markdown_path`, which a refresh can repoint at a different file — passes the write-back guard and poisons the fresh cache. Guarding the *value* against the epoch is worthless if the *record* is not bound to it too. Resolution is now atomic (`_resolve_current` / `_lookup_current` return `(record, epoch)` under one lock), `_body_for_record` takes the epoch from its caller instead of reading it, and the free-floating `_current_epoch()` accessor was **deleted** — an epoch detached from a record is the footgun that produced this bug, so the API no longer offers one. Both rounds are pinned by regression tests that fail on the previous code.
+
 **Warm the indices at startup — the lock created a new stall.** Holding the cache lock for the whole cold build means a trivial call racing a first `search_body` waits for the entire build. Measured against the production corpus: `corpus_status` took **1.60 s** (vs ~0.27 s warm) while a cold `search_body` held the lock. Hosted mode therefore builds the indices *before* accepting traffic; the same call then took **0.27 s** on a freshly booted server. Trade-off accepted: slower start, higher memory floor. Embeddings warm only when an embedder is configured (`semantic_search` is disabled without one, so ~200 MB would be dead weight). **stdio stays lazy** — a metadata-only client should not pay a 3-5 s startup for an index it may never touch.
 
 **`HttpConfig` selects hosted mode.** Passing it to `build_server` implies offload + warm and carries the bind address (FastMCP configures its transport-security allowlist from the constructor host, so it cannot be set after the fact). Bundling them also keeps `build_server` within the four-parameter limit (§ code rules).

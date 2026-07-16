@@ -471,12 +471,11 @@ class CorpusReader:
         index that ``search_body`` needs.
         """
         section_id = _normalize_section_id(section_id)
-        record = self._find_current_by_slug(slug)
-        epoch = self._current_epoch()
+        record, epoch = self._resolve_current(slug)
         # _find_current_by_slug only returns records whose slug == the
         # query slug, so record.slug is non-None here even though the
         # type annotation allows None.
-        body = self._body_for_record(record)
+        body = self._body_for_record(record, epoch)
         by_id = _sections_by_id(_parse_sections(body))
         matches = by_id.get(section_id)
         if not matches:
@@ -532,9 +531,8 @@ class CorpusReader:
         set is seeded into the cross-reference cache as a free
         by-product.
         """
-        record = self._find_current_by_slug(slug)
-        epoch = self._current_epoch()
-        sections = _parse_sections(self._body_for_record(record))
+        record, epoch = self._resolve_current(slug)
+        sections = _parse_sections(self._body_for_record(record, epoch))
         self._remember_section_ids(
             record.slug or "",
             {section["section_id"] for section in sections},
@@ -1194,8 +1192,7 @@ class CorpusReader:
         ``heading``, ``snippet`` and ``occurrence`` are withheld rather than
         guessed — see the comment below.
         """
-        entry = self._load_slug_index().get(hit.slug)
-        record = entry[1] if entry is not None else None
+        record, epoch = self._lookup_current(hit.slug)
         subdir = ""
         section: ParsedSection | None = None
         ambiguous = False
@@ -1206,7 +1203,7 @@ class CorpusReader:
                 subdir = ""
             if hit.slug not in sections_memo:
                 sections_memo[hit.slug] = _sections_by_id(
-                    _parse_sections(self._body_for_record(record)),
+                    _parse_sections(self._body_for_record(record, epoch)),
                 )
             # A hit carries a bare section_id, and the embedding store keys by
             # that same bare id. Where an id repeats within an act, nothing in
@@ -1379,10 +1376,29 @@ class CorpusReader:
             self._stale_bin_count = stale
             return self._embedding_index
 
-    def _current_epoch(self) -> int:
-        """Snapshot the cache generation before computing a value off-lock."""
+    def _resolve_current(self, slug: str) -> tuple[ManifestRecord, int]:
+        """Resolve a slug to a current record, paired with its own generation.
+
+        The record and the epoch MUST be read under one lock. Resolving the
+        record first and snapshotting the epoch after leaves a window where a
+        refresh lands between the two: the caller then holds a *pre*-refresh
+        record stamped with the *post*-refresh epoch, so everything derived
+        from that record (notably its ``markdown_path``) sails through the
+        write-back guard and poisons the fresh cache. That is the second bug
+        Codex found on PR #139, and it is why there is no way to obtain an
+        epoch that is not already bound to a record.
+
+        Raises ``CorpusNotFoundError`` for an unknown slug.
+        """
         with self._lock:
-            return self._epoch
+            return self._find_current_by_slug(slug), self._epoch
+
+    def _lookup_current(self, slug: str) -> tuple[ManifestRecord | None, int]:
+        """``_resolve_current`` for callers that tolerate an unknown slug:
+        returns ``(None, epoch)`` instead of raising. Same atomicity contract."""
+        with self._lock:
+            entry = self._load_slug_index().get(slug)
+            return (entry[1] if entry is not None else None), self._epoch
 
     def _remember_body(self, slug: str, body: str, epoch: int) -> None:
         """Cache a doc body unless the corpus refreshed since ``epoch``.
@@ -1414,20 +1430,24 @@ class CorpusReader:
             cached = self._section_ids_cache.get(slug)
             if cached is not None:
                 return cached
-            epoch = self._epoch
-        entry = self._load_slug_index().get(slug)
-        body = self._body_for_record(entry[1]) if entry is not None else ""
+        record, epoch = self._lookup_current(slug)
+        body = self._body_for_record(record, epoch) if record is not None else ""
         ids = {section["section_id"] for section in _parse_sections(body)}
         self._remember_section_ids(slug, ids, epoch)
         return ids
 
-    def _body_for_record(self, record: ManifestRecord) -> str:
+    def _body_for_record(self, record: ManifestRecord, epoch: int) -> str:
         """Frontmatter/H1-stripped body text for one doc.
 
         Reuses the corpus-wide body index when ``search_body`` has
         already paid for it; otherwise reads and caches just this
         doc's file. Missing or path-escaping files resolve to an
         empty body — the same defensive posture as the full index.
+
+        ``epoch`` is the generation ``record`` was resolved in — it must come
+        from ``_resolve_current`` / ``_lookup_current`` alongside the record,
+        never be snapshotted here. Reading it here would stamp a caller's stale
+        record with the current generation and cache the wrong body under it.
         """
         slug = record.slug or ""
         with self._lock:
@@ -1437,7 +1457,6 @@ class CorpusReader:
             cached = self._doc_bodies.get(slug)
             if cached is not None:
                 return cached
-            epoch = self._epoch
         # Read off-lock: an act can be ~1 MB, and stripping it while holding
         # the lock would stall every other tool call behind this one doc.
         body = self._read_stripped_body(record)
