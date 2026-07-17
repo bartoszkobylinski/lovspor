@@ -18,6 +18,7 @@ import pytest
 
 from lovspor.access import (
     _TOKEN_PREFIX,
+    CREDENTIALS_SCHEMA_VERSION,
     Credential,
     CredentialStore,
     Limits,
@@ -25,6 +26,7 @@ from lovspor.access import (
     default_credentials_path,
     generate_token,
     hash_token,
+    write_credential_file,
 )
 from lovspor.errors import ConfigError
 
@@ -192,6 +194,75 @@ def test_a_credential_without_an_expiry_never_expires(tmp_path: Path) -> None:
 
     assert access is not None
     assert access.expires_at is None
+
+
+def _write_raw(path: Path, payload: dict[str, object]) -> None:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_a_store_written_by_this_build_declares_the_current_schema_version(
+    tmp_path: Path,
+) -> None:
+    """Writer and reader share one constant, so a bump cannot land on one side
+    only and leave this build unable to read what it just wrote."""
+    store_path = tmp_path / "credentials.json"
+    write_credential_file(store_path, [_credential(generate_token())])
+
+    written = json.loads(store_path.read_text(encoding="utf-8"))
+
+    assert written["schema_version"] == CREDENTIALS_SCHEMA_VERSION
+    assert CredentialStore(store_path) is not None
+
+
+def test_a_store_with_no_schema_version_reads_as_the_current_one(tmp_path: Path) -> None:
+    """A hand-written file that omits the field is the original v1 shape —
+    the most conservative reading, and the one this build writes."""
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_raw(store_path, {"credentials": [json.loads(_credential(token).model_dump_json())]})
+
+    store = CredentialStore(store_path)
+
+    assert asyncio.run(store.verify_token(token)) is not None
+
+
+def test_store_refuses_to_start_on_a_schema_version_from_the_future(tmp_path: Path) -> None:
+    """A newer store must not be read with today's rules: v2 may withdraw
+    access in a way v1 code cannot see, so refusing beats guessing."""
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_raw(
+        store_path,
+        {
+            "schema_version": CREDENTIALS_SCHEMA_VERSION + 1,
+            "credentials": [json.loads(_credential(token).model_dump_json())],
+        },
+    )
+
+    with pytest.raises(ConfigError, match="unreadable credential store"):
+        CredentialStore(store_path)
+
+
+def test_a_store_upgraded_under_a_running_server_fails_closed(tmp_path: Path) -> None:
+    """The dangerous ordering: a deploy rewrites the store as v2 while the old
+    binary is still serving. It must stop admitting tokens, not keep reading
+    the file with v1 rules."""
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token)])
+    store = CredentialStore(store_path)
+    assert asyncio.run(store.verify_token(token)) is not None
+
+    _write_raw(
+        store_path,
+        {
+            "schema_version": CREDENTIALS_SCHEMA_VERSION + 1,
+            "credentials": [json.loads(_credential(token).model_dump_json())],
+        },
+    )
+    _bump_mtime(store_path)
+
+    assert _hammer(store, token) == [None] * 16
 
 
 def test_store_refuses_to_start_without_a_credential_file(tmp_path: Path) -> None:

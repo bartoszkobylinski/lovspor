@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from mcp.server.auth.provider import AccessToken
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from lovspor.errors import ConfigError
 
@@ -37,6 +37,11 @@ from lovspor.errors import ConfigError
 # recognisable as a lovspor credential (and greppable in logs/secret scanners).
 _TOKEN_PREFIX = "lsp_"  # noqa: S105
 _TOKEN_BYTES = 32
+
+# The on-disk store shape this build understands. One source of truth: the
+# writer stamps it and the reader refuses anything else, so the two cannot
+# drift apart the way a hardcoded literal on each side would.
+CREDENTIALS_SCHEMA_VERSION = 1
 
 
 class Limits(BaseModel):
@@ -85,8 +90,38 @@ class Credential(BaseModel):
 class CredentialFile(BaseModel):
     """On-disk shape of the credential store."""
 
-    schema_version: int = 1
+    # validate_default so a wrong default is caught here rather than shipped:
+    # the version is the one field whose in-code default is itself a claim.
+    model_config = ConfigDict(validate_default=True)
+
+    schema_version: int = CREDENTIALS_SCHEMA_VERSION
     credentials: list[Credential] = Field(default_factory=list)
+
+    @field_validator("schema_version")
+    @classmethod
+    def _reject_unknown_version(cls, value: int) -> int:
+        """Refuse a store this build does not understand instead of reading it
+        with today's rules.
+
+        A *newer* file is the dangerous direction. v2 may add a field that
+        withdraws access — a second revocation flag, a narrower scope, an
+        allow-list — and v1 code, not knowing to look for it, would admit a
+        credential the operator believes is shut off. That is the silent
+        failure this module exists to avoid, so an unknown version fails the
+        parse: the constructor turns that into a startup refusal and the
+        reloader into fail-closed, exactly as for a corrupt file.
+
+        Deliberately not widened to "accept anything older". Whoever adds v2
+        has to write the migration and decide what a v1 file means to it,
+        rather than inherit a guess made here before v2 existed.
+        """
+        if value != CREDENTIALS_SCHEMA_VERSION:
+            raise ValueError(
+                f"credential store schema_version is {value}, but this build only "
+                f"understands {CREDENTIALS_SCHEMA_VERSION}. Upgrade lovspor, or point "
+                "--credentials at a store this build wrote.",
+            )
+        return value
 
 
 class LovsporAccessToken(AccessToken):
@@ -201,7 +236,7 @@ def write_credential_file(path: Path, credentials: list[Credential]) -> None:
     path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": CREDENTIALS_SCHEMA_VERSION,
                 "credentials": [json.loads(c.model_dump_json()) for c in credentials],
             },
             indent=2,
