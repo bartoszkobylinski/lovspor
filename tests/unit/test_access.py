@@ -22,6 +22,7 @@ from lovspor.access import (
     CredentialStore,
     Limits,
     LovsporAccessToken,
+    default_credentials_path,
     generate_token,
     hash_token,
 )
@@ -89,6 +90,27 @@ def test_hash_token_is_stable_and_hides_the_token() -> None:
     assert len(digest) == 64
     assert token not in digest
     assert hash_token(generate_token()) != digest
+
+
+def test_default_credentials_path_uses_xdg_config_home_when_set(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+
+    assert default_credentials_path() == tmp_path / "lovspor" / "credentials.json"
+
+
+def test_default_credentials_path_falls_back_to_home_dot_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The fallback is the branch that ships: XDG_CONFIG_HOME is unset on a
+    stock macOS box, so ~/.config is where a real operator's store lands."""
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+    assert default_credentials_path() == tmp_path / ".config" / "lovspor" / "credentials.json"
 
 
 def test_verify_token_admits_a_valid_credential_and_carries_its_limits(
@@ -283,6 +305,26 @@ def test_concurrent_stale_reload_fails_closed_without_raising(tmp_path: Path) ->
 
     assert _hammer(store, token) == [None] * 16
     assert asyncio.run(store.verify_token(token)) is None
+
+
+def test_concurrent_broken_reload_warns_once_after_claiming_the_failed_mtime(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The first thread that sees a broken edit owns the failure for that
+    mtime. Everyone else must reject against the failed-closed empty map,
+    rather than re-parsing the same broken file and flooding stderr."""
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token)])
+    store = CredentialStore(store_path)
+    assert asyncio.run(store.verify_token(token)) is not None
+
+    store_path.write_text("{ oops", encoding="utf-8")
+    _bump_mtime(store_path)
+
+    assert _hammer(store, token) == [None] * 16
+    assert capsys.readouterr().err.count("credential store unusable") == 1
 
 
 def test_a_revocation_lands_for_every_concurrent_caller_not_just_the_reloader(
