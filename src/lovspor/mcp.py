@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 import numpy as np
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from pydantic import AnyHttpUrl, BaseModel
@@ -71,6 +72,7 @@ from lovspor.embeddings import (
     read_embeddings,
 )
 from lovspor.errors import ConfigError, LovsporError
+from lovspor.quota import QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import (
@@ -2412,7 +2414,7 @@ class HttpConfig(BaseModel):
     allow_insecure: bool = False
 
 
-def _auth_kwargs(bind: HttpConfig) -> dict[str, Any]:
+def _auth_kwargs(bind: HttpConfig, store: CredentialStore | None) -> dict[str, Any]:
     """FastMCP auth kwargs for a bind config, or empty when unauthenticated.
 
     A bare ``token_verifier`` is a resource-server-only configuration: the SDK
@@ -2423,10 +2425,10 @@ def _auth_kwargs(bind: HttpConfig) -> dict[str, Any]:
     ``auth`` and ``token_verifier`` must be passed together or not at all — the
     SDK raises on either alone.
     """
-    if bind.credentials_path is None:
+    if store is None:
         return {}
     return {
-        "token_verifier": CredentialStore(bind.credentials_path),
+        "token_verifier": store,
         "auth": AuthSettings(
             # Inert here: issuer_url is only ever advertised by the
             # protected-resource discovery route, which resource_server_url=None
@@ -2461,6 +2463,32 @@ def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     return wrapper
 
 
+def _with_quota(
+    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer
+) -> Callable[..., Awaitable[Any]]:
+    """Charge a tool call against its credential's limits before it runs.
+
+    Wraps *outside* ``_offload_to_thread`` on purpose: the guard then refuses a
+    throttled call on the event loop, before it can take one of the shared
+    pool's worker threads. Inverting the two would make ``max_in_flight`` — the
+    brake that exists to protect exactly that pool — occupy a thread in order to
+    decide it should not have one.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(**kwargs: Any) -> Any:
+        token = get_access_token()
+        if token is None:
+            # Unreachable while RequireAuthMiddleware fronts /mcp, and fatal if
+            # it ever is: an unidentified caller cannot be metered, so refuse
+            # rather than serve one client's quota to everybody.
+            raise QuotaExceededError("request carries no identified credential", 1)
+        with enforcer.guard(token.client_id):
+            return await fn(**kwargs)
+
+    return wrapper
+
+
 def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMCP:
     """Build a FastMCP server bound to ``corpus_path``.
 
@@ -2483,15 +2511,24 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     if http is not None:
         reader.warm()
     bind = http or HttpConfig()
-    mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind))
+    store = CredentialStore(bind.credentials_path) if bind.credentials_path else None
+    mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind, store))
+    # No store means --allow-insecure: no credential to meter, so no brakes.
+    # serve_http already refuses that combination unless it was asked for.
+    enforcer = QuotaEnforcer(store) if store is not None else None
 
     def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a tool, offloading its blocking body to a worker thread
-        in hosted mode (see ``_offload_to_thread``). stdio keeps the direct
-        sync call: one tool at a time, no thread hop."""
+        in hosted mode (see ``_offload_to_thread``) and metering it against the
+        caller's credential (see ``_with_quota``). stdio keeps the direct sync
+        call: one tool at a time, no thread hop, one local user to meter."""
 
         def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-            mcp.add_tool(_offload_to_thread(fn) if http is not None else fn)
+            if http is None:
+                mcp.add_tool(fn)
+                return fn
+            hosted = _offload_to_thread(fn)
+            mcp.add_tool(hosted if enforcer is None else _with_quota(hosted, enforcer))
             return fn
 
         return decorator

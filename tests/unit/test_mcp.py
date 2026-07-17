@@ -22,10 +22,21 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from mcp.server.auth.middleware.auth_context import auth_context_var
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+from mcp.server.auth.provider import AccessToken
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from starlette.testclient import TestClient
 
 import lovspor.mcp as mcp_module
-from lovspor.access import Credential, CredentialStore, hash_token, write_credential_file
+from lovspor.access import (
+    Credential,
+    CredentialStore,
+    Limits,
+    hash_token,
+    write_credential_file,
+)
 from lovspor.embeddings import write_embeddings
 from lovspor.errors import ConfigError
 from lovspor.mcp import (
@@ -5193,3 +5204,116 @@ def test_pair_occurrences_matches_on_heading_before_falling_back_to_position() -
     assert "-beta-gammel" in diffs["§ 6-2. Beta"]
     assert "+beta-ny" in diffs["§ 6-2. Beta"]
     assert "alfa" not in diffs["§ 6-2. Beta"]
+
+
+def _authed_call(server: FastMCP, credential_id: str, name: str, args: dict[str, object]) -> object:
+    """Invoke a registered tool as `credential_id` would, through the real
+    contextvar AuthContextMiddleware sets on an authenticated request."""
+
+    async def run() -> object:
+        user = AuthenticatedUser(AccessToken(token="t", client_id=credential_id, scopes=[]))
+        reset = auth_context_var.set(user)
+        try:
+            return await server._tool_manager.call_tool(
+                name, args, context=None, convert_result=False
+            )
+        finally:
+            auth_context_var.reset(reset)
+
+    return asyncio.run(run())
+
+
+def _quota_corpus(tmp_path: Path, limits: Limits) -> Path:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    write_credential_file(
+        creds,
+        [
+            Credential(
+                credential_id="beta-001",
+                label="tester",
+                token_sha256=hash_token("lsp_x"),
+                limits=limits,
+            )
+        ],
+    )
+    return creds
+
+
+def test_hosted_tools_are_metered_against_the_callers_credential(tmp_path: Path) -> None:
+    creds = _quota_corpus(tmp_path, Limits(daily_quota=1, max_in_flight=9, rate_burst=9))
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
+
+    with pytest.raises(ToolError, match="daily quota"):
+        _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
+
+
+def test_metering_is_per_credential_not_global(tmp_path: Path) -> None:
+    """One tester burning their quota must not brake everyone else."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    write_credential_file(
+        creds,
+        [
+            Credential(
+                credential_id=cid,
+                label=cid,
+                token_sha256=hash_token(f"lsp_{cid}"),
+                limits=Limits(daily_quota=1, max_in_flight=9, rate_burst=9),
+            )
+            for cid in ("beta-001", "beta-002")
+        ],
+    )
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
+    with pytest.raises(ToolError, match="daily quota"):
+        _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
+
+    _authed_call(server, "beta-002", "get_law", {"slug": "skatteloven"})  # unaffected
+
+
+def test_hosted_tools_refuse_a_call_that_carries_no_credential(tmp_path: Path) -> None:
+    """RequireAuthMiddleware should make this unreachable. If it ever is
+    reachable, an unidentifiable caller must not be served unmetered."""
+    creds = _quota_corpus(tmp_path, Limits())
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    async def run() -> object:
+        return await server._tool_manager.call_tool(
+            "get_law", {"slug": "skatteloven"}, context=None, convert_result=False
+        )
+
+    with pytest.raises(ToolError, match="no identified credential"):
+        asyncio.run(run())
+
+
+def test_insecure_hosted_mode_meters_nothing(tmp_path: Path) -> None:
+    """--allow-insecure has no credential to meter; the brakes must not fire
+    on an anonymous caller and lock the server out of its own tools."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    server = build_server(tmp_path, http=HttpConfig(allow_insecure=True))
+
+    async def run() -> object:
+        return await server._tool_manager.call_tool(
+            "get_law", {"slug": "skatteloven"}, context=None, convert_result=False
+        )
+
+    for _ in range(3):
+        asyncio.run(run())  # no raise
+
+
+def test_quota_wrapper_preserves_the_tool_argument_schema(tmp_path: Path) -> None:
+    """The wrapper stack has to keep __wrapped__ intact or FastMCP derives every
+    tool's schema from (**kwargs) and the whole surface breaks silently."""
+    creds = _quota_corpus(tmp_path, Limits())
+    metered = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+    plain = build_server(tmp_path)
+
+    for name in ("get_law", "search_laws", "get_section"):
+        assert (
+            metered._tool_manager.get_tool(name).parameters
+            == plain._tool_manager.get_tool(name).parameters
+        )
