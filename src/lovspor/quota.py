@@ -62,7 +62,11 @@ def _utc_now() -> datetime:
 
 def _seconds_to_utc_midnight(now: datetime) -> int:
     midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-    return int((midnight - now).total_seconds())
+    # Ceil, and never below 1: int() truncation returns 0 in the last second
+    # before midnight, and a Retry-After of 0 sends the client straight back
+    # into a quota that has not reset yet — a hot rejection loop. Round up so the
+    # hint always points past the reset, matching the rate path's max(1, ...).
+    return max(1, math.ceil((midnight - now).total_seconds()))
 
 
 class _Bucket:
@@ -137,6 +141,12 @@ class QuotaEnforcer:
     of unapplied-intent failure the credential store's live reload exists to
     prevent. A store lookup is a stat plus a dict hit; ``verify_token`` already
     pays it on every request.
+
+    Counters are per-process and in memory — a restart forgives the day (the
+    ``Limits`` docstring says as much). The hosted server runs single-process
+    today; if it is ever run with N workers, each keeps its own counters and a
+    credential's effective quota and in-flight allowance multiply by N. A
+    multi-worker deploy would need shared counters (e.g. Redis), not just this.
     """
 
     def __init__(
@@ -158,7 +168,14 @@ class QuotaEnforcer:
         """Calls billed to ``credential_id`` today. For tests and diagnostics."""
         with self._lock:
             state = self._states.get(credential_id)
-        return state.daily.used if state else 0
+        if state is None:
+            return 0
+        # Roll first: without it this reports yesterday's total across the UTC
+        # midnight boundary until the next guard() happens to roll the counter.
+        # Enforcement itself always rolls before admitting, so only this readout
+        # was stale — but a diagnostic that lies about the day is worse than one.
+        state.daily.roll()
+        return state.daily.used
 
     def _state_for(self, credential_id: str) -> _State:
         with self._lock:

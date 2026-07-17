@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,6 +55,11 @@ def _write(path: Path, limits: Limits, credential_id: str = "beta-001") -> None:
     )
 
 
+def _force_reload(path: Path) -> None:
+    bumped = path.stat().st_mtime_ns + 1_000_000_000
+    os.utime(path, ns=(bumped, bumped))
+
+
 def _enforcer(tmp_path: Path, limits: Limits, clock: _Clock) -> QuotaEnforcer:
     path = tmp_path / "credentials.json"
     _write(path, limits)
@@ -78,8 +84,8 @@ def test_rejects_beyond_max_in_flight(tmp_path: Path, clock: _Clock) -> None:
 
     with enforcer.guard("beta-001"), enforcer.guard("beta-001"):
         error = _refused(enforcer)
-    assert "in flight" in str(error)
-    assert error.retry_after_seconds >= 1
+    assert str(error) == "2 calls already in flight for this credential"
+    assert error.retry_after_seconds == 1
 
 
 def test_in_flight_slot_frees_on_exit(tmp_path: Path, clock: _Clock) -> None:
@@ -87,7 +93,7 @@ def test_in_flight_slot_frees_on_exit(tmp_path: Path, clock: _Clock) -> None:
     with enforcer.guard("beta-001"):
         pass
     with enforcer.guard("beta-001"):
-        pass  # the first call released its slot
+        assert "in flight" in str(_refused(enforcer))
 
 
 def test_in_flight_slot_frees_when_the_tool_body_raises(tmp_path: Path, clock: _Clock) -> None:
@@ -107,8 +113,7 @@ def test_burst_is_allowed_then_the_rate_brake_bites(tmp_path: Path, clock: _Cloc
     for _ in range(3):
         with enforcer.guard("beta-001"):
             pass
-    with pytest.raises(QuotaExceededError, match="rate"), enforcer.guard("beta-001"):
-        pass
+    assert str(_refused(enforcer)) == "rate limit of 60/min exceeded"
 
 
 def test_bucket_refills_over_time(tmp_path: Path, clock: _Clock) -> None:
@@ -125,6 +130,60 @@ def test_bucket_refills_over_time(tmp_path: Path, clock: _Clock) -> None:
         pass
 
 
+def test_fractional_refill_reports_exact_wait_then_admits_at_boundary(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    limits = Limits(
+        daily_quota=10,
+        max_in_flight=10,
+        rate_burst=1,
+        rate_per_minute=30,
+    )
+    enforcer = _enforcer(tmp_path, limits, clock)
+
+    with enforcer.guard("beta-001"):
+        pass
+    clock.advance(1.0)
+
+    error = _refused(enforcer)
+
+    assert error.retry_after_seconds == 1
+    assert enforcer.daily_used("beta-001") == 1
+
+    clock.advance(1.0)
+    with enforcer.guard("beta-001"):
+        pass
+    assert enforcer.daily_used("beta-001") == 2
+
+
+def test_rate_retry_reports_full_time_until_next_token(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    limits = Limits(max_in_flight=10, rate_burst=1, rate_per_minute=6)
+    enforcer = _enforcer(tmp_path, limits, clock)
+
+    with enforcer.guard("beta-001"):
+        pass
+
+    assert _refused(enforcer).retry_after_seconds == 10
+
+
+def test_repeated_rate_refusals_cannot_reopen_a_fresh_bucket(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    limits = Limits(max_in_flight=10, rate_burst=1, rate_per_minute=60)
+    enforcer = _enforcer(tmp_path, limits, clock)
+
+    with enforcer.guard("beta-001"):
+        pass
+
+    assert "rate limit" in str(_refused(enforcer))
+    assert "rate limit" in str(_refused(enforcer))
+
+
 def test_bucket_does_not_refill_past_burst(tmp_path: Path, clock: _Clock) -> None:
     limits = Limits(rate_burst=2, rate_per_minute=60, max_in_flight=100)
     enforcer = _enforcer(tmp_path, limits, clock)
@@ -137,6 +196,31 @@ def test_bucket_does_not_refill_past_burst(tmp_path: Path, clock: _Clock) -> Non
         pass
 
 
+def test_lowered_burst_clamps_tokens_already_banked(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    path = tmp_path / "credentials.json"
+    _write(
+        path,
+        Limits(max_in_flight=10, rate_burst=5, rate_per_minute=60),
+    )
+    enforcer = QuotaEnforcer(CredentialStore(path), clock.monotonic, clock.utc_now)
+
+    with enforcer.guard("beta-001"):
+        pass
+    clock.advance(60.0)
+    _write(
+        path,
+        Limits(max_in_flight=10, rate_burst=1, rate_per_minute=60),
+    )
+    _force_reload(path)
+
+    with enforcer.guard("beta-001"):
+        pass
+    assert "rate limit" in str(_refused(enforcer))
+
+
 def test_daily_quota_is_exhaustible(tmp_path: Path, clock: _Clock) -> None:
     limits = Limits(daily_quota=2, max_in_flight=100, rate_burst=100)
     enforcer = _enforcer(tmp_path, limits, clock)
@@ -144,8 +228,7 @@ def test_daily_quota_is_exhaustible(tmp_path: Path, clock: _Clock) -> None:
     for _ in range(2):
         with enforcer.guard("beta-001"):
             pass
-    with pytest.raises(QuotaExceededError, match="daily"), enforcer.guard("beta-001"):
-        pass
+    assert str(_refused(enforcer)) == "daily quota of 2 calls is exhausted"
 
 
 def test_daily_quota_resets_on_the_utc_day_boundary(tmp_path: Path, clock: _Clock) -> None:
@@ -162,6 +245,45 @@ def test_daily_quota_resets_on_the_utc_day_boundary(tmp_path: Path, clock: _Cloc
         pass
 
 
+def test_daily_quota_rolls_at_exact_utc_midnight(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    clock.now = datetime(2026, 7, 17, 23, 59, 59, tzinfo=UTC)
+    limits = Limits(daily_quota=1, max_in_flight=10, rate_burst=10)
+    enforcer = _enforcer(tmp_path, limits, clock)
+
+    with enforcer.guard("beta-001"):
+        pass
+    assert _refused(enforcer).retry_after_seconds == 1
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+    with enforcer.guard("beta-001"):
+        pass
+    assert enforcer.daily_used("beta-001") == 1
+
+
+def test_daily_refusal_does_not_spend_a_rate_token(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    limits = Limits(
+        daily_quota=1,
+        max_in_flight=10,
+        rate_burst=2,
+        rate_per_minute=1,
+    )
+    enforcer = _enforcer(tmp_path, limits, clock)
+
+    with enforcer.guard("beta-001"):
+        pass
+    assert "daily quota" in str(_refused(enforcer))
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+    with enforcer.guard("beta-001"):
+        pass
+
+
 def test_rejected_call_does_not_spend_the_daily_quota(tmp_path: Path, clock: _Clock) -> None:
     """A call refused by one brake must not bill against another, or a client
     stuck in a retry loop burns its whole day on rejections."""
@@ -173,6 +295,10 @@ def test_rejected_call_does_not_spend_the_daily_quota(tmp_path: Path, clock: _Cl
             with pytest.raises(QuotaExceededError), enforcer.guard("beta-001"):
                 pass
     assert enforcer.daily_used("beta-001") == 1
+
+    with enforcer.guard("beta-001"):
+        pass
+    assert enforcer.daily_used("beta-001") == 2
 
 
 def test_credentials_do_not_share_state(tmp_path: Path, clock: _Clock) -> None:
@@ -193,6 +319,41 @@ def test_credentials_do_not_share_state(tmp_path: Path, clock: _Clock) -> None:
 
     with enforcer.guard("beta-001"), enforcer.guard("beta-002"):
         pass  # beta-001 saturated must not touch beta-002
+
+
+def test_exhausted_daily_and_rate_counters_are_isolated_per_credential(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    path = tmp_path / "credentials.json"
+    limits = Limits(
+        daily_quota=1,
+        max_in_flight=10,
+        rate_burst=1,
+        rate_per_minute=1,
+    )
+    write_credential_file(
+        path,
+        [
+            Credential(
+                credential_id=credential_id,
+                label=credential_id,
+                token_sha256=hash_token(generate_token()),
+                limits=limits,
+            )
+            for credential_id in ("beta-001", "beta-002")
+        ],
+    )
+    enforcer = QuotaEnforcer(CredentialStore(path), clock.monotonic, clock.utc_now)
+
+    with enforcer.guard("beta-001"):
+        pass
+    assert "daily quota" in str(_refused(enforcer, "beta-001"))
+
+    with enforcer.guard("beta-002"):
+        pass
+    assert enforcer.daily_used("beta-001") == 1
+    assert enforcer.daily_used("beta-002") == 1
 
 
 def test_limits_are_read_fresh_from_the_store(tmp_path: Path, clock: _Clock) -> None:
@@ -231,11 +392,67 @@ def test_unknown_credential_fails_closed(tmp_path: Path, clock: _Clock) -> None:
     """A credential deleted from the store between auth and the tool body has
     no limits to enforce; admitting it unlimited would invert the brake."""
     enforcer = _enforcer(tmp_path, Limits(), clock)
-    with (
-        pytest.raises(QuotaExceededError, match="unknown credential"),
-        enforcer.guard("beta-nonexistent"),
-    ):
+    error = _refused(enforcer, "beta-nonexistent")
+
+    assert str(error) == "unknown credential beta-nonexistent"
+    assert error.retry_after_seconds == 1
+    assert enforcer.daily_used("beta-nonexistent") == 0
+
+
+def test_revoked_credential_fails_closed_without_billing_a_call(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    path = tmp_path / "credentials.json"
+    token_hash = hash_token(generate_token())
+    write_credential_file(
+        path,
+        [
+            Credential(
+                credential_id="beta-001",
+                label="tester",
+                token_sha256=token_hash,
+                limits=Limits(rate_burst=10),
+            )
+        ],
+    )
+    enforcer = QuotaEnforcer(CredentialStore(path), clock.monotonic, clock.utc_now)
+    with enforcer.guard("beta-001"):
         pass
+
+    write_credential_file(
+        path,
+        [
+            Credential(
+                credential_id="beta-001",
+                label="tester",
+                token_sha256=token_hash,
+                revoked=True,
+                limits=Limits(rate_burst=10),
+            )
+        ],
+    )
+    _force_reload(path)
+
+    assert "unknown credential" in str(_refused(enforcer))
+    assert enforcer.daily_used("beta-001") == 1
+
+
+def test_broken_store_fails_closed_without_billing_a_call(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    path = tmp_path / "credentials.json"
+    _write(path, Limits(rate_burst=10))
+    enforcer = QuotaEnforcer(CredentialStore(path), clock.monotonic, clock.utc_now)
+    with enforcer.guard("beta-001"):
+        pass
+
+    path.write_text("{broken", encoding="utf-8")
+    _force_reload(path)
+
+    assert "unknown credential" in str(_refused(enforcer))
+    assert enforcer.daily_used("beta-001") == 1
 
 
 def test_daily_retry_after_points_past_utc_midnight(tmp_path: Path, clock: _Clock) -> None:
@@ -248,3 +465,32 @@ def test_daily_retry_after_points_past_utc_midnight(tmp_path: Path, clock: _Cloc
         pass
     # 12:00:00 UTC -> midnight is 12h out.
     assert excinfo.value.retry_after_seconds == 12 * 3600
+
+
+def test_daily_retry_after_never_rounds_down_to_zero(tmp_path: Path, clock: _Clock) -> None:
+    """In the last fraction of the UTC day, int() truncation returned a
+    Retry-After of 0 — sending the client straight back into a quota that has
+    not reset. The hint must round up to at least 1."""
+    clock.now = datetime(2026, 7, 17, 23, 59, 59, 999999, tzinfo=UTC)
+    enforcer = _enforcer(tmp_path, Limits(daily_quota=1, max_in_flight=10, rate_burst=10), clock)
+
+    with enforcer.guard("beta-001"):
+        pass
+
+    assert _refused(enforcer).retry_after_seconds >= 1
+
+
+def test_daily_used_reports_zero_after_the_day_turns_without_a_guard(
+    tmp_path: Path,
+    clock: _Clock,
+) -> None:
+    """daily_used claims to report 'today'; across UTC midnight it must not keep
+    returning yesterday's count until the next guard() happens to roll it."""
+    enforcer = _enforcer(tmp_path, Limits(daily_quota=5, max_in_flight=10, rate_burst=10), clock)
+
+    with enforcer.guard("beta-001"):
+        pass
+    assert enforcer.daily_used("beta-001") == 1
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 1, tzinfo=UTC)
+    assert enforcer.daily_used("beta-001") == 0  # rolled without needing a guard()
