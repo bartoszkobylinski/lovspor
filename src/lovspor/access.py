@@ -124,18 +124,6 @@ class CredentialFile(BaseModel):
         return value
 
 
-class LovsporAccessToken(AccessToken):
-    """``AccessToken`` carrying the credential's limits to the quota layer.
-
-    mcp blesses subclassing for server-side fields (``provider.py``: FastMCP
-    never renders these into a response), which lets the quota middleware read
-    the limits straight off ``get_access_token()`` instead of doing its own
-    store lookup on every request.
-    """
-
-    limits: Limits
-
-
 def generate_token() -> str:
     """Mint a new opaque bearer token. Shown once, never stored."""
     return _TOKEN_PREFIX + secrets.token_urlsafe(_TOKEN_BYTES)
@@ -258,6 +246,7 @@ class CredentialStore:
         self._path = path
         self._lock = threading.Lock()
         self._by_hash: dict[str, Credential] = {}
+        self._by_id: dict[str, Credential] = {}
         self._mtime_ns: int | None = None
         if not path.is_file():
             raise ConfigError(
@@ -275,6 +264,7 @@ class CredentialStore:
 
     def _install_locked(self, parsed: CredentialFile, mtime_ns: int) -> None:
         self._by_hash = {c.token_sha256: c for c in parsed.credentials}
+        self._by_id = {c.credential_id: c for c in parsed.credentials}
         self._mtime_ns = mtime_ns
 
     def _warn(self, reason: str) -> None:
@@ -318,6 +308,7 @@ class CredentialStore:
             mtime = self._path.stat().st_mtime_ns
         except OSError:
             self._by_hash = {}
+            self._by_id = {}
             self._mtime_ns = None
             return f"{self._path} is gone"
         if mtime == self._mtime_ns:
@@ -326,6 +317,7 @@ class CredentialStore:
             parsed = _load_credential_file(self._path)
         except (OSError, ValueError, ValidationError) as exc:
             self._by_hash = {}
+            self._by_id = {}
             # Claim the mtime even on failure: a file that is broken stays
             # rejected without us re-parsing it on every single request.
             self._mtime_ns = mtime
@@ -333,15 +325,45 @@ class CredentialStore:
         self._install_locked(parsed, mtime)
         return None
 
+    def limits_for(self, credential_id: str) -> Limits | None:
+        """Current limits for a credential, or ``None`` if it cannot be served.
+
+        Reads through to disk (via the same staleness check as ``verify_token``)
+        so an operator's edit applies to sessions already open. The quota layer
+        must not take the caller's word for its own limits: the token a tool
+        body sees is pinned to the request that opened the session, so its copy
+        of ``limits`` can be hours stale. See :mod:`lovspor.quota`.
+
+        ``None`` for a credential that is revoked or absent, which the caller
+        turns into a refusal — the store going unusable already empties the map,
+        so a broken file refuses limits exactly as it refuses authentication.
+        """
+        self._reload_if_stale()
+        with self._lock:
+            credential = self._by_id.get(credential_id)
+        if credential is None or credential.revoked:
+            return None
+        return credential.limits
+
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token. ``None`` rejects, which the SDK turns into a
-        401 with ``WWW-Authenticate``."""
+        401 with ``WWW-Authenticate``.
+
+        Deliberately carries identity only, not the credential's ``Limits``. An
+        earlier version subclassed ``AccessToken`` to ride the limits along for
+        the quota layer; that layer cannot use them. The token a tool body reads
+        via ``get_access_token()`` is pinned to the request that opened the
+        session, so its copy goes stale the moment an operator edits the store —
+        :meth:`limits_for` is the authority instead. (A future transport-level
+        limiter *could* re-add them: ``scope["user"]`` is rebuilt per request, so
+        limits are fresh at the ASGI layer. Only the tool body's copy is pinned.)
+        """
         self._reload_if_stale()
         with self._lock:
             credential = self._by_hash.get(hash_token(token))
         if credential is None or credential.revoked:
             return None
-        return LovsporAccessToken(
+        return AccessToken(
             token=token,
             client_id=credential.credential_id,
             scopes=list(credential.scopes),
@@ -349,5 +371,4 @@ class CredentialStore:
             # means "never expires" — deliberate, and the issuing CLI defaults
             # to a real expiry so it cannot happen by accident.
             expires_at=(int(credential.expires_at.timestamp()) if credential.expires_at else None),
-            limits=credential.limits,
         )

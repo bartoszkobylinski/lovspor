@@ -22,7 +22,6 @@ from lovspor.access import (
     Credential,
     CredentialStore,
     Limits,
-    LovsporAccessToken,
     default_credentials_path,
     generate_token,
     hash_token,
@@ -115,11 +114,12 @@ def test_default_credentials_path_falls_back_to_home_dot_config(
     assert default_credentials_path() == tmp_path / ".config" / "lovspor" / "credentials.json"
 
 
-def test_verify_token_admits_a_valid_credential_and_carries_its_limits(
+def test_verify_token_admits_a_valid_credential_and_identifies_it(
     tmp_path: Path,
 ) -> None:
-    """The limits ride on the AccessToken so the quota middleware can read them
-    via get_access_token() without a second store lookup."""
+    """The token carries identity only. The quota layer keys off client_id and
+    reads the limits back from the store, because a tool body's copy of the
+    token is pinned to the request that opened the session."""
     token = generate_token()
     limits = Limits(max_in_flight=2, rate_per_minute=30, rate_burst=5, daily_quota=100)
     store_path = tmp_path / "credentials.json"
@@ -128,9 +128,9 @@ def test_verify_token_admits_a_valid_credential_and_carries_its_limits(
 
     access = asyncio.run(store.verify_token(token))
 
-    assert isinstance(access, LovsporAccessToken)
+    assert access is not None
     assert access.client_id == "beta-001"
-    assert access.limits == limits
+    assert store.limits_for(access.client_id) == limits
 
 
 def test_verify_token_rejects_an_unknown_token(tmp_path: Path) -> None:
@@ -438,3 +438,61 @@ def test_limit_defaults_match_the_approved_beta_brakes() -> None:
     assert limits.rate_per_minute == 120
     assert limits.rate_burst == 30
     assert limits.daily_quota == 5000
+
+
+def test_limits_for_returns_the_credentials_limits(tmp_path: Path) -> None:
+    limits = Limits(max_in_flight=7, rate_per_minute=30, rate_burst=5, daily_quota=100)
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(generate_token(), limits=limits)])
+
+    assert CredentialStore(store_path).limits_for("beta-001") == limits
+
+
+def test_limits_for_reads_through_to_an_edited_store(tmp_path: Path) -> None:
+    """The quota layer's whole reason for asking the store instead of the
+    caller's token: an operator's edit has to apply to sessions already open."""
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token, limits=Limits(daily_quota=10))])
+    store = CredentialStore(store_path)
+    assert store.limits_for("beta-001") is not None
+    assert store.limits_for("beta-001").daily_quota == 10
+
+    _write_store(store_path, [_credential(token, limits=Limits(daily_quota=99))])
+    _bump_mtime(store_path)
+
+    assert store.limits_for("beta-001").daily_quota == 99
+
+
+def test_limits_for_refuses_an_unknown_or_revoked_credential(tmp_path: Path) -> None:
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(generate_token(), revoked=True)])
+    store = CredentialStore(store_path)
+
+    assert store.limits_for("beta-001") is None
+    assert store.limits_for("beta-nope") is None
+
+
+def test_limits_for_refuses_everything_once_the_store_breaks(tmp_path: Path) -> None:
+    """A broken store already fails authentication closed; limits must fail the
+    same way, or a botched edit would leave the brakes off."""
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(generate_token())])
+    store = CredentialStore(store_path)
+    assert store.limits_for("beta-001") is not None
+
+    store_path.write_text("{ oops", encoding="utf-8")
+    _bump_mtime(store_path)
+
+    assert store.limits_for("beta-001") is None
+
+
+def test_limits_for_refuses_everything_once_the_store_disappears(tmp_path: Path) -> None:
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(generate_token())])
+    store = CredentialStore(store_path)
+    assert store.limits_for("beta-001") is not None
+
+    store_path.unlink()
+
+    assert store.limits_for("beta-001") is None
