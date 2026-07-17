@@ -55,20 +55,26 @@ class Limits(BaseModel):
     editing one line, without a deploy.
     """
 
+    # ge=1 on every brake: a store is hand-editable, and a zero or negative
+    # value is not a looser limit, it is a broken one — rate_per_minute=0 makes
+    # the token bucket divide by zero, rate_burst=0 refuses every call. Reject it
+    # at parse time (fail-closed, same path as a bad schema_version) rather than
+    # let it reach enforcement.
+
     # The shared asyncio.to_thread pool is min(32, cpu + 4). A rate limit does
     # not protect it: 50 calls fired in one instant satisfy any per-minute cap
     # while occupying every worker. This is the brake that actually matters.
-    max_in_flight: int = 4
+    max_in_flight: int = Field(default=4, ge=1)
     # search_body measured ~0.57 s warm on the production corpus, so 120/min of
     # the heaviest tool is roughly one worker thread held continuously.
-    rate_per_minute: int = 120
+    rate_per_minute: int = Field(default=120, ge=1)
     # An AI client fans out ~15-20 calls answering one legal question
     # (semantic_search -> get_section xN -> verify_quote -> validate_citation),
     # so a burst allowance below that would break normal use.
-    rate_burst: int = 30
+    rate_burst: int = Field(default=30, ge=1)
     # ~5x a heavy researcher's day (20 calls x 50 questions). Approximate by
     # construction: counters live in memory and reset on restart.
-    daily_quota: int = 5000
+    daily_quota: int = Field(default=5000, ge=1)
 
 
 class Credential(BaseModel):
@@ -120,6 +126,35 @@ class CredentialFile(BaseModel):
                 f"credential store schema_version is {value}, but this build only "
                 f"understands {CREDENTIALS_SCHEMA_VERSION}. Upgrade lovspor, or point "
                 "--credentials at a store this build wrote.",
+            )
+        return value
+
+    @field_validator("credentials")
+    @classmethod
+    def _reject_duplicate_ids(cls, value: list[Credential]) -> list[Credential]:
+        """Refuse a store where two credentials share a ``credential_id``.
+
+        The store is indexed twice — by token hash for authentication, by id for
+        limits — and a hand edit can introduce a collision the two indexes
+        resolve differently: both tokens authenticate, but ``limits_for(id)``
+        returns whichever record landed last, so one credential silently borrows
+        another's quota and their counters merge. The id is the join key between
+        auth and enforcement; a duplicate makes that join ambiguous, so it fails
+        the parse like any other unusable store rather than resolve it by luck of
+        ordering.
+        """
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for credential in value:
+            if credential.credential_id in seen:
+                duplicates.add(credential.credential_id)
+            seen.add(credential.credential_id)
+        if duplicates:
+            listed = ", ".join(sorted(duplicates))
+            raise ValueError(
+                f"credential store has duplicate credential_id(s): {listed}. "
+                "Each credential_id must be unique — it is the key limits and quota "
+                "counters are stored under.",
             )
         return value
 

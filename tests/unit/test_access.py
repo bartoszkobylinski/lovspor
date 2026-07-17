@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.access import (
     _TOKEN_PREFIX,
@@ -25,6 +26,7 @@ from lovspor.access import (
     default_credentials_path,
     generate_token,
     hash_token,
+    issue_credential,
     write_credential_file,
 )
 from lovspor.errors import ConfigError
@@ -80,6 +82,17 @@ def test_generated_tokens_are_prefixed_unique_and_high_entropy() -> None:
         # anything. Too few bytes is the security bug; an unpinned constant is
         # how you stop noticing which you have.
         assert len(token) - len(_TOKEN_PREFIX) == 43
+
+
+def test_issued_credential_expiry_is_in_the_future() -> None:
+    before = datetime.now(UTC)
+
+    credential, _token = issue_credential([], "beta tester", expires_in_days=30)
+
+    after = datetime.now(UTC)
+    assert credential.expires_at is not None
+    assert before + timedelta(days=30) <= credential.expires_at
+    assert credential.expires_at <= after + timedelta(days=30)
 
 
 def test_hash_token_is_stable_and_hides_the_token() -> None:
@@ -226,6 +239,16 @@ def test_a_store_with_no_schema_version_reads_as_the_current_one(tmp_path: Path)
     assert asyncio.run(store.verify_token(token)) is not None
 
 
+def test_a_store_with_no_credentials_field_reads_as_empty(tmp_path: Path) -> None:
+    store_path = tmp_path / "credentials.json"
+    _write_raw(store_path, {})
+
+    store = CredentialStore(store_path)
+
+    assert asyncio.run(store.verify_token(generate_token())) is None
+    assert store.limits_for("beta-001") is None
+
+
 def test_store_refuses_to_start_on_a_schema_version_from_the_future(tmp_path: Path) -> None:
     """A newer store must not be read with today's rules: v2 may withdraw
     access in a way v1 code cannot see, so refusing beats guessing."""
@@ -355,6 +378,22 @@ def _hammer(store: CredentialStore, token: str, *, workers: int = 16) -> list[ob
     def hit(_: int) -> object:
         barrier.wait()
         return asyncio.run(store.verify_token(token))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(hit, range(workers)))
+
+
+def _hammer_limits(
+    store: CredentialStore,
+    credential_id: str,
+    *,
+    workers: int = 16,
+) -> list[Limits | None]:
+    barrier = threading.Barrier(workers)
+
+    def hit(_: int) -> Limits | None:
+        barrier.wait()
+        return store.limits_for(credential_id)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(hit, range(workers)))
@@ -496,3 +535,75 @@ def test_limits_for_refuses_everything_once_the_store_disappears(tmp_path: Path)
     store_path.unlink()
 
     assert store.limits_for("beta-001") is None
+
+
+def test_limits_for_publishes_an_edit_to_every_concurrent_caller(
+    tmp_path: Path,
+) -> None:
+    token = generate_token()
+    old_limits = Limits(daily_quota=100)
+    new_limits = Limits(daily_quota=1)
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token, limits=old_limits)])
+    store = CredentialStore(store_path)
+    assert store.limits_for("beta-001") == old_limits
+
+    _write_store(store_path, [_credential(token, limits=new_limits)])
+    _bump_mtime(store_path)
+
+    assert _hammer_limits(store, "beta-001") == [new_limits] * 16
+
+
+def test_limits_for_concurrently_fails_closed_when_the_store_breaks(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(generate_token())])
+    store = CredentialStore(store_path)
+    assert store.limits_for("beta-001") is not None
+
+    store_path.write_text("{ oops", encoding="utf-8")
+    _bump_mtime(store_path)
+
+    assert _hammer_limits(store, "beta-001") == [None] * 16
+    assert capsys.readouterr().err.count("credential store unusable") == 1
+
+
+def test_a_store_with_duplicate_credential_ids_fails_closed(tmp_path: Path) -> None:
+    """The store is indexed by token AND by id; a hand edit that repeats an id
+    would let both tokens authenticate while limits_for returned one record's
+    limits for the other. It must fail the parse, not resolve by ordering."""
+    store_path = tmp_path / "credentials.json"
+    _write_store(
+        store_path,
+        [
+            _credential(generate_token(), credential_id="beta-001"),
+            _credential(generate_token(), credential_id="beta-001"),
+        ],
+    )
+
+    with pytest.raises(ConfigError, match="duplicate credential_id"):
+        CredentialStore(store_path)
+
+
+@pytest.mark.parametrize("field", ["max_in_flight", "rate_per_minute", "rate_burst", "daily_quota"])
+@pytest.mark.parametrize("bad", [0, -1])
+def test_limits_reject_non_positive_brakes(field: str, bad: int) -> None:
+    """A zero or negative brake is not a looser limit, it is a broken one —
+    rate_per_minute=0 divides by zero at enforcement. Reject it at the model."""
+    with pytest.raises(ValidationError):
+        Limits(**{field: bad})
+
+
+def test_a_store_with_a_zero_rate_fails_closed_instead_of_crashing(tmp_path: Path) -> None:
+    """A store carrying rate_per_minute=0 must be refused at load, so the bad
+    value never reaches the token bucket where it would raise ZeroDivisionError
+    mid-request."""
+    store_path = tmp_path / "credentials.json"
+    record = json.loads(_credential(generate_token()).model_dump_json())
+    record["limits"]["rate_per_minute"] = 0
+    _write_raw(store_path, {"schema_version": 1, "credentials": [record]})
+
+    with pytest.raises(ConfigError):
+        CredentialStore(store_path)
