@@ -22,7 +22,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from mcp.server.auth.middleware.auth_context import auth_context_var
+from httpx import Response
+from mcp.server.auth.middleware.auth_context import auth_context_var, get_access_token
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.provider import AccessToken
 from mcp.server.fastmcp import FastMCP
@@ -67,8 +68,10 @@ from lovspor.mcp import (
     _snippet,
     _strip_frontmatter_and_h1,
     _subdir_for_dataset,
+    _with_quota,
     build_server,
 )
+from lovspor.quota import QuotaEnforcer, QuotaExceededError
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 from lovspor.timetravel import RevisionNotFoundError, RevisionResult
 
@@ -5240,6 +5243,76 @@ def _quota_corpus(tmp_path: Path, limits: Limits) -> Path:
     return creds
 
 
+def _sse_payload(response: Response) -> dict[str, object]:
+    data = next(
+        line.removeprefix("data: ")
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    )
+    payload = json.loads(data)
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _initialize_mcp_session(
+    client: TestClient,
+    token: str,
+) -> dict[str, str]:
+    base_headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json, text/event-stream",
+    }
+    response = client.post(
+        "/mcp",
+        headers=base_headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "quota-test", "version": "1"},
+            },
+        },
+    )
+    assert response.status_code == 200
+    session_headers = {
+        **base_headers,
+        "Mcp-Session-Id": response.headers["mcp-session-id"],
+        "MCP-Protocol-Version": "2025-06-18",
+    }
+    initialized = client.post(
+        "/mcp",
+        headers=session_headers,
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+    )
+    assert initialized.status_code == 202
+    return session_headers
+
+
+def _call_mcp_tool(
+    client: TestClient,
+    headers: dict[str, str],
+    name: str,
+    arguments: dict[str, object],
+    *,
+    request_id: int = 2,
+) -> dict[str, object]:
+    response = client.post(
+        "/mcp",
+        headers=headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        },
+    )
+    assert response.status_code == 200
+    return _sse_payload(response)
+
+
 def test_hosted_tools_are_metered_against_the_callers_credential(tmp_path: Path) -> None:
     creds = _quota_corpus(tmp_path, Limits(daily_quota=1, max_in_flight=9, rate_burst=9))
     server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
@@ -5273,6 +5346,153 @@ def test_metering_is_per_credential_not_global(tmp_path: Path) -> None:
         _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
 
     _authed_call(server, "beta-002", "get_law", {"slug": "skatteloven"})  # unaffected
+
+
+def test_streamable_http_tool_body_keeps_session_identity_through_thread_hop(
+    tmp_path: Path,
+) -> None:
+    """Re-derive the mcp 1.28.1 premise at the real transport boundary.
+
+    The session task inherits the token from initialize. A later request
+    authenticates again, but its refreshed token does not replace the context
+    visible to the session task or the asyncio.to_thread worker.
+    """
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    credentials_path = tmp_path / "credentials.json"
+    token = "lsp_session_identity"
+
+    def write(scopes: list[str]) -> None:
+        write_credential_file(
+            credentials_path,
+            [
+                Credential(
+                    credential_id="beta-001",
+                    label="tester",
+                    token_sha256=hash_token(token),
+                    scopes=scopes,
+                    limits=Limits(),
+                )
+            ],
+        )
+
+    write(["session-creating-scope"])
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=credentials_path))
+
+    def session_identity() -> str:
+        access = get_access_token()
+        assert access is not None
+        return f"{access.client_id}|{','.join(access.scopes)}"
+
+    server.add_tool(_offload_to_thread(session_identity))
+
+    with TestClient(
+        server.streamable_http_app(),
+        base_url="http://127.0.0.1:8000",
+    ) as client:
+        headers = _initialize_mcp_session(client, token)
+        write(["later-request-scope"])
+        _bump_mtime(credentials_path)
+
+        payload = _call_mcp_tool(client, headers, "session_identity", {})
+
+    result = payload["result"]
+    assert isinstance(result, dict)
+    assert result["isError"] is False
+    assert "beta-001|session-creating-scope" in str(result["content"])
+    assert "later-request-scope" not in str(result["content"])
+
+
+def test_streamable_http_quota_reads_tightened_limits_from_store(
+    tmp_path: Path,
+) -> None:
+    """The token identity stays pinned, but mutable limits must not."""
+    credentials_path = _quota_corpus(
+        tmp_path,
+        Limits(daily_quota=2, max_in_flight=10, rate_burst=10),
+    )
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=credentials_path))
+    token = "lsp_x"
+
+    with TestClient(
+        server.streamable_http_app(),
+        base_url="http://127.0.0.1:8000",
+    ) as client:
+        headers = _initialize_mcp_session(client, token)
+        first = _call_mcp_tool(
+            client,
+            headers,
+            "get_law",
+            {"slug": "skatteloven"},
+        )
+        write_credential_file(
+            credentials_path,
+            [
+                Credential(
+                    credential_id="beta-001",
+                    label="tester",
+                    token_sha256=hash_token(token),
+                    limits=Limits(daily_quota=1, max_in_flight=10, rate_burst=10),
+                )
+            ],
+        )
+        _bump_mtime(credentials_path)
+
+        second = _call_mcp_tool(
+            client,
+            headers,
+            "get_law",
+            {"slug": "skatteloven"},
+            request_id=3,
+        )
+
+    first_result = first["result"]
+    second_result = second["result"]
+    assert isinstance(first_result, dict)
+    assert isinstance(second_result, dict)
+    assert first_result["isError"] is False
+    assert second_result["isError"] is True
+    assert "daily quota of 1 calls is exhausted" in str(second_result["content"])
+
+
+def test_quota_guard_holds_slot_before_thread_hop_under_concurrency(
+    tmp_path: Path,
+) -> None:
+    credentials_path = _quota_corpus(
+        tmp_path,
+        Limits(daily_quota=10, max_in_flight=1, rate_burst=10),
+    )
+    enforcer = QuotaEnforcer(CredentialStore(credentials_path))
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[tuple[str, str]] = []
+
+    def blocking_tool(value: str) -> str:
+        calls.append((value, threading.current_thread().name))
+        entered.set()
+        assert release.wait(timeout=5)
+        return value
+
+    wrapped = _with_quota(_offload_to_thread(blocking_tool), enforcer)
+
+    async def run() -> str:
+        user = AuthenticatedUser(
+            AccessToken(token="t", client_id="beta-001", scopes=[]),
+        )
+        reset = auth_context_var.set(user)
+        first = asyncio.create_task(wrapped(value="accepted"))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            with pytest.raises(QuotaExceededError, match="in flight"):
+                await wrapped(value="refused")
+        finally:
+            release.set()
+            auth_context_var.reset(reset)
+        return await first
+
+    assert asyncio.run(run()) == "accepted"
+    assert [value for value, _thread_name in calls] == ["accepted"]
+    assert calls[0][1] != threading.current_thread().name
+    assert enforcer.daily_used("beta-001") == 1
 
 
 def test_hosted_tools_refuse_a_call_that_carries_no_credential(tmp_path: Path) -> None:
@@ -5312,7 +5532,10 @@ def test_quota_wrapper_preserves_the_tool_argument_schema(tmp_path: Path) -> Non
     metered = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
     plain = build_server(tmp_path)
 
-    for name in ("get_law", "search_laws", "get_section"):
+    metered_tools = metered._tool_manager._tools
+    plain_tools = plain._tool_manager._tools
+    assert set(metered_tools) == set(plain_tools)
+    for name in plain_tools:
         assert (
             metered._tool_manager.get_tool(name).parameters
             == plain._tool_manager.get_tool(name).parameters
