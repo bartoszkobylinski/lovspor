@@ -9,6 +9,7 @@ the fail-closed reload behaviour.
 import asyncio
 import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from lovspor.access import (
+    _TOKEN_PREFIX,
     Credential,
     CredentialStore,
     Limits,
@@ -69,8 +71,13 @@ def test_generated_tokens_are_prefixed_unique_and_high_entropy() -> None:
     assert len(tokens) == 50
     for token in tokens:
         assert token.startswith("lsp_")
-        # 32 CSPRNG bytes, urlsafe-base64 => >=43 chars after the prefix.
-        assert len(token) - len("lsp_") >= 43
+        # Exactly 32 CSPRNG bytes, urlsafe-base64 => exactly 43 chars after the
+        # prefix. Pinned rather than a >= floor: a floor silently accepts
+        # _TOKEN_BYTES drifting to None (which falls back to the library
+        # default) or to any larger value, so the constant would stop meaning
+        # anything. Too few bytes is the security bug; an unpinned constant is
+        # how you stop noticing which you have.
+        assert len(token) - len(_TOKEN_PREFIX) == 43
 
 
 def test_hash_token_is_stable_and_hides_the_token() -> None:
@@ -243,9 +250,28 @@ def test_a_deleted_file_restored_later_recovers_without_a_restart(tmp_path: Path
     assert asyncio.run(store.verify_token(token)) is not None
 
 
+def _hammer(store: CredentialStore, token: str, *, workers: int = 16) -> list[object]:
+    """Fire ``workers`` verify_token calls that all start together.
+
+    The barrier matters: it lands every thread inside the reload window at
+    once, which is exactly where a mtime published before the parse finished
+    lets the losers read the pre-edit map.
+    """
+    barrier = threading.Barrier(workers)
+
+    def hit(_: int) -> object:
+        barrier.wait()
+        return asyncio.run(store.verify_token(token))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(hit, range(workers)))
+
+
 def test_concurrent_stale_reload_fails_closed_without_raising(tmp_path: Path) -> None:
     """The verifier runs on worker threads under Streamable HTTP, so one
-    reload-triggering request must not race another into an exception."""
+    reload-triggering request must not race another into an exception — nor
+    into a stale answer. A broken file rejects *every* concurrent caller, not
+    merely the one that happened to notice."""
     token = generate_token()
     store_path = tmp_path / "credentials.json"
     _write_store(store_path, [_credential(token)])
@@ -255,11 +281,29 @@ def test_concurrent_stale_reload_fails_closed_without_raising(tmp_path: Path) ->
     store_path.write_text("{ oops", encoding="utf-8")
     _bump_mtime(store_path)
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        results = list(pool.map(lambda _: asyncio.run(store.verify_token(token)), range(16)))
-
-    assert all(result is None or isinstance(result, LovsporAccessToken) for result in results)
+    assert _hammer(store, token) == [None] * 16
     assert asyncio.run(store.verify_token(token)) is None
+
+
+def test_a_revocation_lands_for_every_concurrent_caller_not_just_the_reloader(
+    tmp_path: Path,
+) -> None:
+    """Revocation is the whole point of the store, and requests arrive in
+    parallel on the HTTP transport. If the reloading thread publishes the new
+    mtime before it has finished parsing, every other in-flight thread decides
+    the store is already current and keeps authenticating the credential that
+    was just revoked — the breach the fail-closed design exists to rule out.
+    """
+    token = generate_token()
+    store_path = tmp_path / "credentials.json"
+    _write_store(store_path, [_credential(token)])
+    store = CredentialStore(store_path)
+    assert asyncio.run(store.verify_token(token)) is not None
+
+    _write_store(store_path, [_credential(token, revoked=True)])
+    _bump_mtime(store_path)
+
+    assert _hammer(store, token) == [None] * 16
 
 
 def test_the_store_file_never_holds_the_plaintext_token(tmp_path: Path) -> None:

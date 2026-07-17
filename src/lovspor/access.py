@@ -236,12 +236,13 @@ class CredentialStore:
 
     def _install(self, parsed: CredentialFile, mtime_ns: int) -> None:
         with self._lock:
-            self._by_hash = {c.token_sha256: c for c in parsed.credentials}
-            self._mtime_ns = mtime_ns
+            self._install_locked(parsed, mtime_ns)
 
-    def _fail_closed(self, reason: str) -> None:
-        with self._lock:
-            self._by_hash = {}
+    def _install_locked(self, parsed: CredentialFile, mtime_ns: int) -> None:
+        self._by_hash = {c.token_sha256: c for c in parsed.credentials}
+        self._mtime_ns = mtime_ns
+
+    def _warn(self, reason: str) -> None:
         print(
             f"access: credential store unusable ({reason}); rejecting all",
             file=sys.stderr,
@@ -258,26 +259,44 @@ class CredentialStore:
         notice in minutes, an unapplied revocation is a breach we would never
         notice.
 
-        The whole read happens under the lock. That is safe here precisely
-        because the file is tiny — unlike the corpus indices, which are read
-        off-lock and need the epoch guard (docs/decisions.md Sprint 12).
+        The whole read — stat, parse and swap — happens under the lock. That is
+        safe here precisely because the file is tiny, unlike the corpus indices,
+        which are read off-lock and need the epoch guard (docs/decisions.md
+        Sprint 12). It is also load-bearing: publishing the new mtime before the
+        parse finished would let every other thread conclude the store is
+        already current, skip the reload, and keep authenticating against the
+        pre-edit map for the width of the parse — serving a credential revoked
+        moments ago, which is the one outcome this store exists to prevent.
+        """
+        with self._lock:
+            reason = self._refresh_locked()
+        if reason is not None:
+            self._warn(reason)
+
+    def _refresh_locked(self) -> str | None:
+        """Reload the store if its mtime moved; caller holds the lock.
+
+        Returns the failure reason when the store went unusable, else ``None``.
+        Reporting it back instead of printing here keeps stderr I/O off the lock.
         """
         try:
             mtime = self._path.stat().st_mtime_ns
         except OSError:
-            self._fail_closed(f"{self._path} is gone")
+            self._by_hash = {}
             self._mtime_ns = None
-            return
-        with self._lock:
-            if mtime == self._mtime_ns:
-                return
-            self._mtime_ns = mtime
+            return f"{self._path} is gone"
+        if mtime == self._mtime_ns:
+            return None
         try:
             parsed = _load_credential_file(self._path)
         except (OSError, ValueError, ValidationError) as exc:
-            self._fail_closed(str(exc))
-            return
-        self._install(parsed, mtime)
+            self._by_hash = {}
+            # Claim the mtime even on failure: a file that is broken stays
+            # rejected without us re-parsing it on every single request.
+            self._mtime_ns = mtime
+            return str(exc)
+        self._install_locked(parsed, mtime)
+        return None
 
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify a bearer token. ``None`` rejects, which the SDK turns into a
