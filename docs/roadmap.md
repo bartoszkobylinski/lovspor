@@ -69,9 +69,9 @@ The product promise is deliberately narrower than "no hallucinations": Lovspor s
 
 ### Sprint 12 — Hosted MCP foundation (active priority)
 
-1. **Remote transport — SHIPPED (transport only).** `lovspor mcp-http` exposes the existing read-only tool surface over the MCP Streamable HTTP transport; stdio remains the development path. Tool bodies are offloaded to worker threads (the SDK calls sync handlers inline on its event loop, so one slow call would otherwise stall every client) and the corpus indices are warmed at startup (a cold build holds the reader's cache lock for seconds). `/healthz` and `/readyz` probes included. **Still unauthenticated and TLS-less** — localhost-behind-a-proxy only until item 3 lands; it is not yet a deployable service.
+1. **Remote transport — SHIPPED (transport only).** `lovspor mcp-http` exposes the existing read-only tool surface over the MCP Streamable HTTP transport; stdio remains the development path. Tool bodies are offloaded to worker threads (the SDK calls sync handlers inline on its event loop, so one slow call would otherwise stall every client) and the corpus indices are warmed at startup (a cold build holds the reader's cache lock for seconds). `/healthz` and `/readyz` probes included. **Bearer auth and per-credential quotas now enforced (item 3), but still TLS-less** — localhost behind a TLS-terminating proxy only; it is not yet a deployable service.
 2. **Hosted corpus runtime.** Run against an automatically refreshed `lovverk` clone, with health/readiness checks and an operator-visible freshness signal.
-3. **Access control.** Add revocable beta credentials, per-user quotas, rate limiting, and usage counters. Start with manually issued access; add self-service OAuth before a broad launch.
+3. **Access control — SHIPPED except self-service OAuth and TLS.** Revocable beta credentials, per-credential quotas, rate limiting, and in-memory usage counters are enforced against manually issued tokens. Remaining: TLS (terminated upstream by a reverse proxy) and self-service OAuth before a broad launch.
 4. **Grounded research workflow.** Evaluate a high-level `research_law` tool that returns an evidence bundle: matched sections, exact quotes, corpus revision, validation results, and source links. Preserve the 16 lower-level tools for composability.
 5. **Trust layer.** Promote per-section Lovdata deep links (F1) and extend evals to measure tool selection, citation validity, quote fidelity, temporal-boundary handling, and unsupported-claim behaviour.
 6. **Client adoption.** Publish connection instructions and tested examples for supported AI clients, plus a short comparison showing an ungrounded answer versus a Lovspor-grounded answer.
@@ -136,7 +136,7 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **PyPI local distribution — WITHDRAWN 2026-07-14.** Versions `0.2.0`–`0.3.0` shipped, then were removed when the engine moved to a private hosted-service strategy. The `lovspor` project name remains reserved by its sole owner with no downloadable releases.
 - **No Docker image.** Retained as a future private-deployment or enterprise option, not a current adoption priority.
 - **No public docs site** (mkdocs).
-- **No hosted MCP endpoint yet.** This is the active Sprint 12 priority. The Streamable HTTP *transport* now exists (`lovspor mcp-http`, with thread-offloaded tool bodies, startup index warming, and health/readiness probes), but it has no authentication, TLS, quotas, or deployment, so there is still nothing a consumer can connect to. stdio plus `lovspor fetch-corpus` remains the only usable path.
+- **No hosted MCP endpoint yet.** This is the active Sprint 12 priority. The Streamable HTTP *transport* now exists (`lovspor mcp-http`, with thread-offloaded tool bodies, startup index warming, and health/readiness probes), and it now enforces bearer-token auth and per-credential quotas + rate limiting — but it still has no TLS or deployment, so there is still nothing a consumer can connect to over the internet. stdio plus `lovspor fetch-corpus` remains the only usable path.
 
 ---
 
@@ -296,7 +296,7 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 - Cloud-hosted server with auto-refreshing `lovverk`.
 - Users configure a URL and authenticate instead of installing the engine or cloning the corpus.
 - Commercial requirements: HTTPS MCP transport, credentials/OAuth, quotas, rate limits, usage metering, privacy controls, deployment, monitoring, and eventually billing.
-- **Progress:** the Streamable HTTP transport exists (`lovspor mcp-http`); everything else on that list — auth, TLS, quotas, metering, deployment, monitoring — is outstanding, so there is still no endpoint a consumer can use.
+- **Progress:** the Streamable HTTP transport exists (`lovspor mcp-http`) with bearer-token auth and per-credential quotas + rate limiting now enforced; TLS, usage metering, deployment, and monitoring remain outstanding, so there is still no endpoint a consumer can use over the internet.
 - **Effort:** high (auth, hosting, SLA).
 - **Risk:** the project becomes a SaaS, which is a different problem domain. This risk is now accepted deliberately and managed through a bounded beta before billing work.
 
