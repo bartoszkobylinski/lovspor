@@ -7,10 +7,19 @@
 # no certbot, no cron, no manual cert steps.
 
 {$LOVSPOR_DOMAIN} {
-	# The app binds 127.0.0.1:8000 and speaks plaintext HTTP; TLS stops here.
-	reverse_proxy 127.0.0.1:8000
-
 	encode zstd gzip
+
+	# MCP app + health probes → the localhost-bound server (TLS stops here).
+	@app path /mcp /mcp/* /healthz /readyz
+	handle @app {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	# Everything else → the static landing page.
+	handle {
+		root * /var/www/lovspor
+		file_server
+	}
 
 	header {
 		# HSTS: only meaningful once you're confident the domain is HTTPS-only.

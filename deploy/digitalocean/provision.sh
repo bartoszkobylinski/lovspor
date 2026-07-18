@@ -180,6 +180,8 @@ install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.service" /etc/s
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.timer" /etc/systemd/system/
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
+install -d /var/www/lovspor
+install -m644 "$APP_DIR/deploy/digitalocean/site/index.html" /var/www/lovspor/index.html
 systemctl daemon-reload
 # mcp stays enable-only (it refuses to start until a credential is issued at go-live);
 # the timer is enabled AND started now (enable alone won't activate it this boot).
