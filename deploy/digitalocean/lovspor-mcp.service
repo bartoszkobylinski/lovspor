@@ -39,8 +39,12 @@ ProtectSystem=strict
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectControlGroups=yes
-# The app writes only under its own tree (corpus cache + credential store + config).
-ReadWritePaths=/opt/lovspor
+# The running server writes ONLY the corpus cache and the credential store — never the
+# app checkout, venv, systemd units, or the deploy key. Narrow write access so a
+# compromised tool body cannot tamper with files provision.sh later installs as root.
+ReadWritePaths=/opt/lovspor/.cache /opt/lovspor/.config
+# The read-only deploy key is for git deploys only, never the server — hide it entirely.
+InaccessiblePaths=/opt/lovspor/.ssh
 # DELIBERATELY OMITTED: RestrictNamespaces / MemoryDenyWriteExecute / SystemCallFilter.
 # mcp-http offloads every tool body to a worker thread (pthread_create -> clone3). A
 # namespace/seccomp filter can block clone3 on some kernel+glibc combos and kill the

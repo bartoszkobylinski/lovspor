@@ -55,11 +55,13 @@ ssh root@<DROPLET_IP> 'bash /root/provision.sh'
 **Pass 1** installs swap + packages + Caddy + `uv`, creates the `lovspor` user, and
 prints a **read-only deploy key**. Add it here:
 `https://github.com/bartoszkobylinski/lovspor/settings/keys` (Deploy keys → Add,
-read-only). Then:
+read-only). Then run **pass 2** — note the `ssh` one-liner above already returned you
+to your Mac, so SSH back in:
 
 ```bash
-sudo bash provision.sh     # pass 2: clones the app, uv sync, fetches the corpus,
-                           # installs the systemd units + Caddyfile
+# from your Mac, after adding the deploy key on GitHub:
+ssh root@<DROPLET_IP> 'bash /root/provision.sh'   # clones the app, uv sync, fetches
+                                                  # the corpus, installs units + Caddyfile
 ```
 
 ## 3. Go live
@@ -99,7 +101,7 @@ Header: Authorization: Bearer <the token from step 2>
 
 ```bash
 sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
-sudo -u lovspor sh -c 'cd /opt/lovspor/app && ~/.local/bin/uv sync --frozen --no-dev'
+sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
 sudo systemctl restart lovspor-mcp
 sudo journalctl -u lovspor-mcp -n 40 --no-pager
 ```
@@ -117,11 +119,26 @@ curl -fsS https://lovspor.yourdomain.com/readyz   # corpus present + reader read
 sudo systemctl status lovspor-mcp caddy
 ```
 
-**Revoke a credential:** `sudo -u lovspor .../lovspor tokens list` then
-`... tokens revoke <id>` — the server re-reads the store live.
+**Revoke a credential** — the server re-reads the store live:
 
-**Rollback:** `sudo -u lovspor git -C /opt/lovspor/app checkout <good-sha>` then
-`uv sync` + `systemctl restart lovspor-mcp`.
+```bash
+sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens list
+sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens revoke <id>
+```
+
+**Rollback** (emergency, on-box — detached HEAD is expected and temporary):
+
+```bash
+sudo -u lovspor git -C /opt/lovspor/app checkout <good-sha>
+sudo -u lovspor sh -c 'cd /opt/lovspor/app && /opt/lovspor/.local/bin/uv sync --frozen --no-dev'
+sudo systemctl restart lovspor-mcp
+# return to the tip once the fix is in — leaves a clean, trackable branch for future pulls:
+sudo -u lovspor git -C /opt/lovspor/app checkout main
+sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
+```
+
+The durable fix for a bad release is `git revert` on `main` + redeploy, not a
+long-lived detached checkout.
 
 ---
 

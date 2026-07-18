@@ -25,7 +25,19 @@ warn() { printf '\n\033[1;33m!!  %s\033[0m\n' "$*"; }
 [ "$(id -u)" -eq 0 ] || { echo "run as root: sudo bash provision.sh"; exit 1; }
 
 # --- 1. Swap (DO droplets ship with none; smooths the ~1.24 GB startup warm peak) ---
-if ! swapon --show=NAME --noheadings | grep -q '/swapfile'; then
+SWAP_ACTIVE="$(swapon --show=NAME --noheadings || true)"
+if printf '%s\n' "$SWAP_ACTIVE" | grep -qx '/swapfile'; then
+	: # already active
+elif [ -e /swapfile ] || [ -L /swapfile ]; then
+	# Do not clobber/follow an unexpected path — only reuse a plain regular file.
+	if [ -L /swapfile ] || [ ! -f /swapfile ]; then
+		echo "refusing: /swapfile exists but is not a regular file"; exit 1
+	fi
+	log "Reusing existing /swapfile"
+	chmod 600 /swapfile
+	swapon /swapfile 2>/dev/null || { mkswap /swapfile >/dev/null && swapon /swapfile; }
+	grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+else
 	log "Creating ${SWAP_GB}G swapfile"
 	fallocate -l "${SWAP_GB}G" /swapfile
 	chmod 600 /swapfile
@@ -43,8 +55,10 @@ apt-get install -y -qq git curl ca-certificates gnupg debian-keyring debian-arch
 # --- 3. Caddy (official apt repo) ---
 if ! command -v caddy >/dev/null; then
 	log "Installing Caddy"
+	# --batch --yes so a keyring left by an interrupted earlier run is overwritten
+	# without an interactive prompt in the non-interactive SSH flow.
 	curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-		| gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+		| gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 	curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
 		>/etc/apt/sources.list.d/caddy-stable.list
 	apt-get update -qq
@@ -66,11 +80,23 @@ fi
 
 # --- 6. Deploy key (repo is PRIVATE) ---
 KEY="$APP_HOME/.ssh/id_ed25519"
+KNOWN="$APP_HOME/.ssh/known_hosts"
+sudo -u "$APP_USER" mkdir -p "$APP_HOME/.ssh"
+chmod 700 "$APP_HOME/.ssh"
+
+# Pin GitHub's PUBLISHED Ed25519 host key. Do NOT trust ssh-keyscan — it accepts
+# whatever the network returns, so a provisioning-time MITM could serve a malicious
+# repo whose systemd unit is later installed by root. Idempotent and run every pass
+# (repairs an interrupted first run). Source: https://api.github.com/meta
+GH_HOSTKEY='github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl'
+if ! sudo -u "$APP_USER" grep -qF "$GH_HOSTKEY" "$KNOWN" 2>/dev/null; then
+	log "Pinning GitHub host key"
+	printf '%s\n' "$GH_HOSTKEY" | sudo -u "$APP_USER" tee -a "$KNOWN" >/dev/null
+fi
+
 if [ ! -f "$KEY" ]; then
 	log "Generating read-only deploy key"
-	sudo -u "$APP_USER" mkdir -p "$APP_HOME/.ssh"
 	sudo -u "$APP_USER" ssh-keygen -t ed25519 -N '' -f "$KEY" -C "lovspor-droplet-deploy" >/dev/null
-	sudo -u "$APP_USER" sh -c "ssh-keyscan -t ed25519 github.com >> '$APP_HOME/.ssh/known_hosts' 2>/dev/null"
 fi
 # `ssh -T git@github.com` exits 1 even on success, so capture output and test the
 # message — piping straight into grep would trip pipefail on the benign exit code.
@@ -101,16 +127,20 @@ log "Fetching lovverk corpus"
 sudo -u "$APP_USER" sh -c "cd '$APP_DIR' && LOVVERK_CORPUS_PATH='$CORPUS_DIR' '$APP_DIR/.venv/bin/lovspor' fetch-corpus"
 
 # --- 10. Secrets env file (placeholder; NEVER commit real keys) ---
+mkdir -p /etc/lovspor
 if [ ! -f "$ENV_FILE" ]; then
 	log "Creating $ENV_FILE (fill in OPENAI_API_KEY)"
-	mkdir -p /etc/lovspor
 	printf '%s\n' \
 		'# lovspor MCP secrets — read by systemd at start (restart after editing).' \
 		'# Required for semantic_search; the other 15 tools work without it.' \
 		'OPENAI_API_KEY=' >"$ENV_FILE"
-	chmod 640 "$ENV_FILE"
-	chown root:"$APP_USER" "$ENV_FILE"
 fi
+# Enforce ownership + mode every run (never overwrite contents) so a rerun repairs
+# a loosened secret file rather than leaving it world-readable.
+chown root:"$APP_USER" "$ENV_FILE"
+chmod 640 "$ENV_FILE"
+# Ensure the service's writable dirs exist (ReadWritePaths requires them at start).
+sudo -u "$APP_USER" mkdir -p "$APP_HOME/.cache" "$APP_HOME/.config"
 
 # --- 11. Caddy domain via env (keeps the committed Caddyfile domain-free) ---
 if [ ! -f /etc/default/caddy-lovspor ]; then
@@ -120,7 +150,23 @@ mkdir -p /etc/systemd/system/caddy.service.d
 printf '%s\n' '[Service]' 'EnvironmentFile=/etc/default/caddy-lovspor' \
 	>/etc/systemd/system/caddy.service.d/lovspor.conf
 
-# --- 12. Install units + Caddyfile from the repo ---
+# --- 12. Verify the checkout before root installs anything from it ---
+# The next step copies unit files into /etc/systemd/system as root, but the checkout
+# is owned by the network-facing service user. Confirm origin + cleanliness + that HEAD
+# matches upstream, so a locally tampered unit can never be installed with root rights.
+# (The deploy key is read-only, so an attacker cannot push tampered content upstream.)
+log "Verifying checkout integrity before install"
+ORIGIN="$(sudo -u "$APP_USER" git -C "$APP_DIR" remote get-url origin)"
+[ "$ORIGIN" = "$REPO_SSH" ] || { warn "unexpected origin: $ORIGIN"; exit 1; }
+[ -z "$(sudo -u "$APP_USER" git -C "$APP_DIR" status --porcelain)" ] \
+	|| { warn "working tree at $APP_DIR is dirty — refusing to install units from it"; exit 1; }
+sudo -u "$APP_USER" git -C "$APP_DIR" fetch -q origin
+LOCAL_HEAD="$(sudo -u "$APP_USER" git -C "$APP_DIR" rev-parse HEAD)"
+UPSTREAM_HEAD="$(sudo -u "$APP_USER" git -C "$APP_DIR" rev-parse '@{upstream}')"
+[ "$LOCAL_HEAD" = "$UPSTREAM_HEAD" ] \
+	|| { warn "HEAD ($LOCAL_HEAD) != upstream ($UPSTREAM_HEAD) — refusing"; exit 1; }
+
+# --- 13. Install units + Caddyfile from the (verified) repo ---
 log "Installing systemd units and Caddyfile"
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-mcp.service" /etc/systemd/system/
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.service" /etc/systemd/system/
@@ -128,7 +174,10 @@ install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.timer" /etc/sys
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
 systemctl daemon-reload
-systemctl enable lovspor-mcp.service lovspor-fetch-corpus.timer >/dev/null
+# mcp stays enable-only (it refuses to start until a credential is issued at go-live);
+# the timer is enabled AND started now (enable alone won't activate it this boot).
+systemctl enable lovspor-mcp.service >/dev/null
+systemctl enable --now lovspor-fetch-corpus.timer >/dev/null
 
 log "Base provisioning complete. Finish going live (see README.md § Go live):"
 cat <<EOF
