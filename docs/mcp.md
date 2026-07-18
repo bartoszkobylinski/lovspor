@@ -23,7 +23,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 `lovspor mcp-http` serves the same sixteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is the foundation of the hosted service (Sprint 12 item 1), **not a finished product**:
 
-> ⚠️ **Bearer-token auth and per-credential rate limiting + quotas now exist — but there is still no TLS.** A credentialed store gates the tool surface (revocable tokens, per-credential `Limits`), yet the transport speaks plaintext HTTP, so a bearer token on an exposed port travels in the clear and can be read and replayed. TLS is terminated upstream by design: bind it to localhost and put a reverse proxy that terminates TLS in front of it. Do not expose it to the internet until that proxy is in place.
+> ⚠️ **Bearer-token auth and per-credential rate limiting + quotas now exist. TLS terminates in a reverse proxy — a deploy recipe now exists (`deploy/digitalocean/`, Caddy with automatic Let's Encrypt) but is not yet deployed, so there is still no live HTTPS endpoint.** A credentialed store gates the tool surface (revocable tokens, per-credential `Limits`), yet the app speaks plaintext HTTP, so a bearer token on an exposed port travels in the clear and can be read and replayed. TLS is terminated upstream by design: the app binds localhost, a proxy terminates TLS in front of it. Until you provision that proxy (see `deploy/digitalocean/README.md`), keep it bound to localhost and do not expose it to the internet.
 
 ```bash
 uv run --project /path/to/lovspor lovspor mcp-http --host 127.0.0.1 --port 8000
