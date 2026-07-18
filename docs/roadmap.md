@@ -91,8 +91,8 @@ Until the hosted beta is usable, do not start AST, Høyesterett ingestion, local
 Grouped by source availability (restructured 2026-05-18 — see Class D for execution detail and "Currently out of scope" for the §43 reasoning behind the blocked items).
 
 **In Lovdata's `publicData` API — pipeline work only:**
-- **`gjeldende-lokale-forskrifter`** — municipal + county regulations, ~10× volume of central regulations (~37k docs).
-- **`historiske-lover`** — repealed acts, for "what was the law in 2015?" questions that the time-machine tool can't reach (it can only see commits we have made).
+- **`gjeldende-lokale-forskrifter`** — ⚠️ **NOT in the `publicData` catalogue** (verified 2026-07-18): municipal + county regs are Norsk Lovtidend avd. II, which this API doesn't serve. **Moved to D-DIRECT-6** (direct municipal sourcing; Lovdata's compiled version is §43-blocked). ~37k docs at full scope.
+- **`historiske-lover`** — repealed acts, for "what was the law in 2015?" questions the time-machine can't reach. ⚠️ **NOT in the live catalogue as of 2026-07-18** — availability unconfirmed.
 - **`lovtidend-avd1-{year}`** — official change announcements (Norwegian Federal Register equivalent). Explains *why* a law changed, complementing our existing change-detection.
 - **Sami-language datasets** — northern Sami, Lule Sami translations of selected acts.
 
@@ -209,13 +209,11 @@ Restructured 2026-05-18 around source-legality reality (see "Domain coverage" ab
 
 Pure pipeline extension. Same engine, same legal posture, same MCP contract. New dataset key + slug-prefix per item.
 
-**D-API-1. `gjeldende-lokale-forskrifter`** — local regulations.
-- ~37k docs, ~10× current central forskrifter. Pushes `lovverk` toward GitHub's 1 GB soft repo-size warning; embeddings would push past it.
-- Open question: subfolder (`lovverk/lokale-forskrifter/`) vs separate repo (`lovverk-lokal`). Leaning separate repo for audience-separation reasons — 95% of users don't need municipal regs and shouldn't pay the clone/RAM/embedding-disk cost.
-- **Leverage:** medium. Niche audience — municipal lawyers, urban planners, building consultants.
-- **Effort:** 2 sprints (pipeline + MCP-side dataset-filter adjustments).
+> **Live catalogue check (verified 2026-07-18 against `publicData/list`):** the API serves exactly four archives — `gjeldende-lover`, `gjeldende-sentrale-forskrifter` (both already ingested), and `lovtidend-avd1-{2001-2025, 2026}`. So the **only** dataset actually addable here beyond the current corpus is **D-API-3 (`lovtidend-avd1`)**. `gjeldende-lokale-forskrifter` and `historiske-lover` were assumed available and are **not in the catalogue** — local regs are moved to D-DIRECT-6, and `historiske-lover` is flagged pending a real `/list` confirmation.
 
-**D-API-2. `historiske-lover`** — repealed acts.
+**D-API-1. `gjeldende-lokale-forskrifter` — MOVED to D-DIRECT-6.** Verified 2026-07-18: **not** in the `publicData` catalogue. Local/municipal regs are Norsk Lovtidend **avd. II**; `publicData` publishes only **avd. I**. Lovdata's compiled local-regs collection is §43-protected (see D-BLOCKED), so the viable route is direct municipal sourcing — a D-DIRECT fetcher, not a pipeline toggle.
+
+**D-API-2. `historiske-lover`** — repealed acts. ⚠️ **NOT in the live catalogue as of 2026-07-18** — availability unconfirmed; treat as aspirational until a `/list` check shows it.
 - Modest volume. Static — no daily update cadence required.
 - Enables "what was the law in 2015?" answers beyond the time-machine's reach (the time-machine can only see commits we have made; repealed-before-corpus laws need this dataset).
 - **Leverage:** medium-high. Closes a real query type.
@@ -243,6 +241,7 @@ New fetcher per source (no Lovdata involvement, no §43 risk). Each source has i
 - **Leverage:** very high. Closes the apex-precedent gap that the project has called "the largest qualitative gap" (the rest of case law sits behind §43; see "Currently out of scope").
 - **Novelty:** unique. No other Norwegian-law MCP server has case law.
 - **Effort:** 2 sprints (crawl + PDF→Markdown + new domain model + MCP tools).
+- **Parked 2026-07-18** as future work, gated on a legal/sourcing feasibility check of `domstol.no` before any build.
 
 **D-DIRECT-2. EUR-Lex CELEX resolution**
 - We already extract `eu_basis` as CELEX identifiers (Sprint 8). Fetch the actual directive text on demand.
@@ -268,6 +267,12 @@ New fetcher per source (no Lovdata involvement, no §43 risk). Each source has i
 - Demand-driven: ship one when a real user surfaces an ask for that domain.
 - **Leverage:** specialist value per industry.
 - **Effort:** 1 sprint per institution.
+
+**D-DIRECT-6. Local/municipal regulations (`lokale forskrifter`)** — moved here from D-API-1 (2026-07-18).
+- **Not** in Lovdata `publicData` (avd. II is unpublished there); Lovdata's compiled collection is §43-blocked. The clean route is the municipalities/counties themselves — each publishes its own forskrifter — i.e. fragmented, per-issuer fetchers.
+- ~37k docs at full scope → a 2–4× corpus; would trigger a droplet resize (4–8 GB) and likely the embedding warm-transient / on-disk vector-store rework before ingesting.
+- **Leverage:** medium, niche (municipal lawyers, planners — "95% of users don't need municipal regs").
+- **Effort:** high — heavy multi-source engineering. **Parked 2026-07-18** as future work alongside D-DIRECT-1.
 
 #### D-BLOCKED — legally inaccessible
 
@@ -353,7 +358,7 @@ Top three by **adoption × reach**:
 
 4. **Docker image** (remaining half of Class E1; local PyPI distribution shipped through 0.3.0 before being withdrawn). A `docker run lovspor mcp` path for private or enterprise deployments.
 5. **Public docs site + showcase** (Class E2). Discoverability.
-6. **`historiske-lover` + `gjeldende-lokale-forskrifter`** (Classes D-API-1, D-API-2). Pure pipeline work, no legal risk, closes two real corpus gaps. Local regulations likely as a separate `lovverk-lokal` repo for audience-separation reasons.
+6. **`lovtidend-avd1`** (Class D-API-3) — the one remaining pure-pipeline `publicData` add (change-announcement overlay). NB (2026-07-18): the previously-listed `historiske-lover` + `gjeldende-lokale-forskrifter` are **not** in the live catalogue — local regs moved to D-DIRECT-6 (municipal sourcing, not pipeline), `historiske-lover` unconfirmed.
 
 ---
 
