@@ -366,6 +366,24 @@ def mcp_http(
             help="Serve with NO authentication. Development only.",
         ),
     ] = False,
+    authkit_domain: Annotated[
+        str | None,
+        typer.Option(
+            "--authkit-domain",
+            help="WorkOS AuthKit issuer URL. With --public-url, enables self-service "
+            "OAuth connectors (ChatGPT/Claude) alongside hand-issued tokens.",
+            envvar="LOVSPOR_AUTHKIT_DOMAIN",
+        ),
+    ] = None,
+    public_url: Annotated[
+        str | None,
+        typer.Option(
+            "--public-url",
+            help="This server's public /mcp URL (the OAuth resource identifier the "
+            "token is bound to).",
+            envvar="LOVSPOR_PUBLIC_URL",
+        ),
+    ] = None,
 ) -> None:
     """Serve the lovverk corpus over the MCP Streamable HTTP transport.
 
@@ -390,5 +408,7 @@ def mcp_http(
             port=port,
             credentials_path=store.expanduser() if store else None,
             allow_insecure=insecure_no_auth,
+            authkit_domain=authkit_domain,
+            public_url=public_url,
         ),
     )
