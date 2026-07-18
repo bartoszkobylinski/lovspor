@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh the local lovverk corpus clone
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lovspor
+Group=lovspor
+Environment=HOME=/opt/lovspor
+Environment=LOVVERK_CORPUS_PATH=/opt/lovspor/.cache/lovverk
+WorkingDirectory=/opt/lovspor/app
+ExecStart=/opt/lovspor/app/.venv/bin/lovspor fetch-corpus
+# No mcp restart needed: the running reader drops every cache when manifest.json
+# changes (_refresh_if_stale) and rebuilds indices on the next query.

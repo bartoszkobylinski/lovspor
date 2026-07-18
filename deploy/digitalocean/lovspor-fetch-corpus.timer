@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily lovverk corpus refresh
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
+
+[Timer]
+# Daily, a bit after the upstream sync cron; Persistent catches a missed run
+# (droplet was off/rebooted) on next boot.
+OnCalendar=*-*-* 05:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

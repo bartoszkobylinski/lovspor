@@ -1,0 +1,150 @@
+# Deploy: lovspor hosted MCP on a DigitalOcean droplet
+
+The named blocker for the hosted MCP is **TLS** (the transport is plaintext, so a
+bearer token on an open port is cleartext on the wire). This recipe terminates TLS
+in **Caddy** in front of the localhost-bound app — matching the documented
+"TLS terminated upstream" design — and Caddy obtains + renews the Let's Encrypt
+certificate automatically.
+
+```
+Internet ──HTTPS/443──▶ Caddy (auto Let's Encrypt) ──HTTP──▶ 127.0.0.1:8000
+                         TLS terminates here            lovspor mcp-http
+                                                        (bearer auth + quotas)
+```
+
+## Why a 2 GB droplet
+
+Measured on the real corpus (85,426 sections × 3072-dim int8 embeddings):
+**~672 MB steady-state, ~1.24 GB peak during startup warm.** The **$12 / 2 GB**
+plan fits both with headroom; 1 GB dies on the warm peak. See the memory cap in
+`lovspor-mcp.service`. Re-measure with `deploy/digitalocean/../../` tooling if the
+corpus grows a lot (linear in section count) — that's your cue to move to 4 GB.
+
+---
+
+## 1. Create the droplet (your account, your card — this step is yours)
+
+**Console:** Create → Droplet → Ubuntu 24.04 (LTS) → **Basic / Regular / $12 (2 GB /
+1 vCPU / 50 GB)** → region **`fra1`** (Frankfurt, EU) → add your SSH key → Create.
+
+**Or `doctl`** (after `doctl auth init` with your token):
+
+```bash
+doctl compute ssh-key list            # copy your key's fingerprint
+doctl compute droplet create lovspor-mcp \
+  --region fra1 \
+  --image ubuntu-24-04-x64 \
+  --size s-1vcpu-2gb \
+  --ssh-keys <YOUR_SSH_KEY_FINGERPRINT> \
+  --wait
+doctl compute droplet get lovspor-mcp --format PublicIPv4 --no-header   # note the IP
+```
+
+## 2. Provision the box
+
+Copy the bootstrap up and run it. It is **idempotent** and runs in **two passes**
+because the lovspor repo is private (`provision.sh` is self-contained — it doesn't
+need the repo cloned to start):
+
+```bash
+# from your Mac:
+scp deploy/digitalocean/provision.sh root@<DROPLET_IP>:/root/
+ssh root@<DROPLET_IP> 'bash /root/provision.sh'
+```
+
+**Pass 1** installs swap + packages + Caddy + `uv`, creates the `lovspor` user, and
+prints a **read-only deploy key**. Add it here:
+`https://github.com/bartoszkobylinski/lovspor/settings/keys` (Deploy keys → Add,
+read-only). Then:
+
+```bash
+sudo bash provision.sh     # pass 2: clones the app, uv sync, fetches the corpus,
+                           # installs the systemd units + Caddyfile
+```
+
+## 3. Go live
+
+```bash
+# 1. OpenAI key (enables semantic_search; the other 15 tools work without it)
+sudo nano /etc/lovspor/lovspor.env          # set OPENAI_API_KEY=sk-...
+
+# 2. Issue a beta credential — the token prints ONCE, store it now
+sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens issue --label "you@beta"
+
+# 3. Your hostname
+echo 'LOVSPOR_DOMAIN=lovspor.yourdomain.com' | sudo tee /etc/default/caddy-lovspor
+
+# 4. DNS: create an A record   lovspor.yourdomain.com -> <DROPLET_IP>
+#    (Caddy grabs the cert automatically once this resolves.)
+
+# 5. Start
+sudo systemctl restart caddy lovspor-mcp
+
+# 6. Verify
+curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
+```
+
+## Connect a client
+
+```
+URL:    https://lovspor.yourdomain.com/mcp
+Header: Authorization: Bearer <the token from step 2>
+```
+
+---
+
+## Operating it
+
+**Deploy an update** (after merging to `main`):
+
+```bash
+sudo -u lovspor git -C /opt/lovspor/app pull --ff-only
+sudo -u lovspor sh -c 'cd /opt/lovspor/app && ~/.local/bin/uv sync --frozen --no-dev'
+sudo systemctl restart lovspor-mcp
+sudo journalctl -u lovspor-mcp -n 40 --no-pager
+```
+
+**Corpus refresh** is automatic — `lovspor-fetch-corpus.timer` runs daily at
+05:30 UTC and the running server picks up changes on the next query (no restart).
+Force one now: `sudo systemctl start lovspor-fetch-corpus`.
+
+**Logs / health:**
+
+```bash
+sudo journalctl -u lovspor-mcp -f                 # app
+sudo tail -f /var/log/caddy/lovspor.log           # proxy / TLS
+curl -fsS https://lovspor.yourdomain.com/readyz   # corpus present + reader ready
+sudo systemctl status lovspor-mcp caddy
+```
+
+**Revoke a credential:** `sudo -u lovspor .../lovspor tokens list` then
+`... tokens revoke <id>` — the server re-reads the store live.
+
+**Rollback:** `sudo -u lovspor git -C /opt/lovspor/app checkout <good-sha>` then
+`uv sync` + `systemctl restart lovspor-mcp`.
+
+---
+
+## What was verified locally vs. on the droplet
+
+Built and checked on a dev machine before any droplet exists:
+
+- ✅ `lovspor mcp-http` (the exact command the unit runs) **warms, binds, and
+  serves**; `/healthz` + `/readyz` return 200; the `/mcp` surface **401s without a
+  bearer token and accepts a valid one** (auth + quota enforcement is live).
+- ✅ Memory figures above are measured, not estimated.
+
+Verified only on the live droplet (the well-trodden last mile):
+
+- Let's Encrypt issuance (needs public IP + DNS), `apt` installs on fresh Ubuntu,
+  systemd activation. Caddy's automatic HTTPS makes this the least fragile part.
+
+## Notes
+
+- **nginx + certbot alternative:** if you'd rather match your other boxes, drop the
+  Caddyfile and put the app behind an nginx vhost with a certbot (`--nginx`) cert
+  for the same `proxy_pass http://127.0.0.1:8000`. Caddy is the default here purely
+  because auto-HTTPS on a clean public droplet is one file and zero cron.
+- **Secrets never enter git.** `/etc/lovspor/lovspor.env` holds `OPENAI_API_KEY`;
+  the credential store lives at `/opt/lovspor/.config/lovspor/credentials.json`.
+- **Cost:** $12/mo droplet + $0 TLS. Egress for a text MCP stays well under any cap.

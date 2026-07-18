@@ -1,0 +1,51 @@
+[Unit]
+Description=lovspor MCP — Streamable HTTP transport (bearer auth + per-credential quotas)
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lovspor
+Group=lovspor
+# HOME so XDG defaults resolve under the service tree:
+#   corpus      -> $HOME/.cache/lovverk        (also pinned via LOVVERK_CORPUS_PATH)
+#   credentials -> $HOME/.config/lovspor/credentials.json
+Environment=HOME=/opt/lovspor
+Environment=LOVVERK_CORPUS_PATH=/opt/lovspor/.cache/lovverk
+# Secrets (OPENAI_API_KEY for semantic_search) live here, NOT in the repo.
+# Read ONLY at start — run `systemctl restart lovspor-mcp` after editing it.
+EnvironmentFile=/etc/lovspor/lovspor.env
+WorkingDirectory=/opt/lovspor/app
+# Run the venv console script directly — no `uv` at runtime.
+ExecStart=/opt/lovspor/app/.venv/bin/lovspor mcp-http --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+# Warming ~5,900 docs + the embedding index at boot is IO/CPU heavy; don't let
+# systemd treat a slow warm as a start failure. (Type=simple => "active" on exec,
+# so Caddy may 502 for the first few seconds until the port is listening.)
+TimeoutStartSec=180
+
+# --- Memory (2 GB droplet, ZERO swap by default — add the swapfile, see README) ---
+# Measured on the real corpus: ~672 MB steady-state, ~1.24 GB PEAK during startup warm.
+# Cap below total RAM so a runaway can never take the whole droplet down, but above
+# the warm peak so boot always succeeds. Re-measure and raise if the corpus grows.
+MemoryHigh=1400M
+MemoryMax=1700M
+
+# --- Hardening: filesystem/kernel protections that are SAFE for asyncio + a thread pool ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+# The app writes only under its own tree (corpus cache + credential store + config).
+ReadWritePaths=/opt/lovspor
+# DELIBERATELY OMITTED: RestrictNamespaces / MemoryDenyWriteExecute / SystemCallFilter.
+# mcp-http offloads every tool body to a worker thread (pthread_create -> clone3). A
+# namespace/seccomp filter can block clone3 on some kernel+glibc combos and kill the
+# service the moment it spawns a thread. Do not add these without testing thread spawn
+# on the target kernel first.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+# lovspor hosted MCP — TLS terminated here, proxied to the localhost-bound app.
+#
+# {$LOVSPOR_DOMAIN} is read from Caddy's environment (see the caddy.service
+# drop-in that provision.sh installs, sourcing /etc/default/caddy-lovspor).
+# On a public droplet Caddy AUTOMATICALLY obtains and renews a Let's Encrypt
+# certificate for this name on first request, once DNS points the name here —
+# no certbot, no cron, no manual cert steps.
+
+{$LOVSPOR_DOMAIN} {
+	# The app binds 127.0.0.1:8000 and speaks plaintext HTTP; TLS stops here.
+	reverse_proxy 127.0.0.1:8000
+
+	encode zstd gzip
+
+	header {
+		# HSTS: only meaningful once you're confident the domain is HTTPS-only.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/lovspor.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
