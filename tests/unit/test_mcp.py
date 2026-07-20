@@ -74,6 +74,10 @@ from lovspor.mcp import (
 from lovspor.quota import QuotaEnforcer, QuotaExceededError
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 from lovspor.timetravel import RevisionNotFoundError, RevisionResult
+from lovspor.workos_auth import CompositeVerifier
+
+_AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
+_PUBLIC_URL = "https://lovspor.bartoszkobylinski.com/mcp"
 
 
 def _record(
@@ -3777,6 +3781,46 @@ def test_http_mode_with_credentials_installs_the_store_as_token_verifier(
     assert server.settings.auth.resource_server_url is None
     paths = {route.path for route in server.streamable_http_app().routes}
     assert not any(p.startswith("/.well-known") or p in {"/token", "/authorize"} for p in paths)
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        {"authkit_domain": _AUTHKIT_DOMAIN},
+        {"public_url": _PUBLIC_URL},
+    ],
+)
+def test_half_configured_hosted_oauth_is_rejected(partial: dict[str, str]) -> None:
+    """Half a pair used to boot into the legacy opaque-token mode with discovery
+    off and WorkOS JWTs never verified — a broken auth boundary that looks healthy."""
+    with pytest.raises(ConfigError, match="together"):
+        HttpConfig(credentials_path=Path("creds.json"), **partial)
+
+
+def test_hosted_oauth_installs_workos_verification_and_turns_discovery_on(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    write_credential_file(creds, [])
+
+    server = build_server(
+        tmp_path,
+        http=HttpConfig(
+            credentials_path=creds,
+            authkit_domain=_AUTHKIT_DOMAIN,
+            public_url=_PUBLIC_URL,
+        ),
+    )
+
+    assert isinstance(server._token_verifier, CompositeVerifier)
+    assert server.settings.auth is not None
+    # WorkOS is advertised as the authorization server, lovspor as the RFC 8707
+    # resource — that pair is what makes a ChatGPT/Claude connector able to log in.
+    assert str(server.settings.auth.issuer_url).rstrip("/") == _AUTHKIT_DOMAIN
+    assert str(server.settings.auth.resource_server_url).rstrip("/") == _PUBLIC_URL
+    paths = {route.path for route in server.streamable_http_app().routes}
+    assert "/.well-known/oauth-protected-resource/mcp" in paths
 
 
 @pytest.mark.parametrize(

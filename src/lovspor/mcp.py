@@ -53,14 +53,14 @@ import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Self, TypedDict
 
 import numpy as np
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
-from pydantic import AnyHttpUrl, BaseModel
+from pydantic import AnyHttpUrl, BaseModel, model_validator
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -2421,10 +2421,38 @@ class HttpConfig(BaseModel):
     # WorkOS AuthKit as the rented OAuth authorization server for self-service
     # connectors. Both set => hosted-OAuth mode: verify WorkOS-issued JWTs and
     # advertise WorkOS via RFC 9728 discovery. Neither set => opaque-token,
-    # resource-server-only mode (developer clients paste a token). ``public_url``
-    # is lovspor's own ``/mcp`` URL — the RFC 8707 resource the token is bound to.
+    # resource-server-only mode (developer clients paste a token). One without the
+    # other is rejected outright, see the validator below. ``public_url`` is
+    # lovspor's own ``/mcp`` URL — the RFC 8707 resource the token is bound to.
     authkit_domain: str | None = None
     public_url: str | None = None
+
+    @model_validator(mode="after")
+    def _reject_half_configured_oauth(self) -> Self:
+        """Refuse one of the OAuth pair without the other.
+
+        Half a config used to boot: the server silently fell back to the legacy
+        opaque-token mode with discovery off and WorkOS JWTs never verified, so a
+        typo'd deploy unit looks healthy while every self-service connector fails
+        to authenticate. An auth boundary must not degrade quietly.
+        """
+        if bool(self.authkit_domain) != bool(self.public_url):
+            raise ConfigError(
+                "hosted OAuth needs --authkit-domain and --public-url together "
+                "(LOVSPOR_AUTHKIT_DOMAIN / LOVSPOR_PUBLIC_URL). Pass both to enable "
+                "self-service connectors, or neither for opaque-token mode.",
+            )
+        return self
+
+    def oauth_pair(self) -> tuple[str, str] | None:
+        """``(issuer, resource)`` when hosted OAuth is on, else ``None``.
+
+        One place decides the mode, so the auth kwargs and the token verifier can
+        never disagree about which one they are building.
+        """
+        if self.authkit_domain and self.public_url:
+            return self.authkit_domain, self.public_url
+        return None
 
 
 def _auth_kwargs(bind: HttpConfig, verifier: TokenVerifier | None) -> dict[str, Any]:
@@ -2446,10 +2474,12 @@ def _auth_kwargs(bind: HttpConfig, verifier: TokenVerifier | None) -> dict[str, 
     """
     if verifier is None:
         return {}
-    if bind.authkit_domain and bind.public_url:
+    pair = bind.oauth_pair()
+    if pair is not None:
+        issuer, resource = pair
         auth = AuthSettings(
-            issuer_url=AnyHttpUrl(bind.authkit_domain),
-            resource_server_url=AnyHttpUrl(bind.public_url),
+            issuer_url=AnyHttpUrl(issuer),
+            resource_server_url=AnyHttpUrl(resource),
             required_scopes=None,
         )
     else:
@@ -2473,12 +2503,14 @@ def _build_verifier(
     """
     if store is None:
         return None, None
-    if bind.authkit_domain and bind.public_url:
+    pair = bind.oauth_pair()
+    if pair is not None:
+        issuer, resource = pair
         composite = CompositeVerifier(
             credentials=store,
             workos=WorkOSTokenVerifier(
-                authkit_domain=bind.authkit_domain,
-                resource_url=bind.public_url,
+                authkit_domain=issuer,
+                resource_url=resource,
             ),
             workos_default_limits=DEFAULT_WORKOS_LIMITS,
         )
