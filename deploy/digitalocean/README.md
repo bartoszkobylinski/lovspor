@@ -69,6 +69,10 @@ ssh root@<DROPLET_IP> 'bash /root/provision.sh'   # clones the app, uv sync, fet
 ```bash
 # 1. OpenAI key (enables semantic_search; the other 15 tools work without it)
 sudo nano /etc/lovspor/lovspor.env          # set OPENAI_API_KEY=sk-...
+#    The same file carries the OPTIONAL self-service OAuth pair (commented out by
+#    default). Uncomment BOTH or NEITHER — one alone and lovspor-mcp exits on start:
+#      LOVSPOR_AUTHKIT_DOMAIN=https://your-project.authkit.app
+#      LOVSPOR_PUBLIC_URL=https://lovspor.yourdomain.com/mcp   <- must match step 3
 
 # 2. Issue a beta credential — the token prints ONCE, store it now
 sudo -u lovspor /opt/lovspor/app/.venv/bin/lovspor tokens issue --label "you@beta"
@@ -92,6 +96,19 @@ curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
 URL:    https://lovspor.yourdomain.com/mcp
 Header: Authorization: Bearer <the token from step 2>
 ```
+
+If you enabled the OAuth pair in step 1, chat-app connectors (ChatGPT, Claude.ai) can
+instead add that same URL and log in through WorkOS — no token to paste. Confirm the
+server is advertising it before pointing a connector at it:
+
+```bash
+curl -fsS https://lovspor.yourdomain.com/.well-known/oauth-protected-resource/mcp
+# 200 + a JSON body naming your AuthKit domain => hosted OAuth is live.
+# 404 => the pair is not set; the server is in opaque-token mode (paste-a-token only).
+```
+
+Hand-issued `lsp_…` tokens keep working either way — see
+[`docs/mcp.md` § Authentication](../../docs/mcp.md#authentication-two-modes).
 
 ---
 
