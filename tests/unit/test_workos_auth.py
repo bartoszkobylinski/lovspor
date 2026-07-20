@@ -18,11 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from mcp.server.auth.provider import AccessToken
 
 from lovspor.access import Limits
-from lovspor.workos_auth import (
-    WORKOS_CLIENT_ID_PREFIX,
-    CompositeVerifier,
-    WorkOSTokenVerifier,
-)
+from lovspor.workos_auth import CompositeVerifier, WorkOSTokenVerifier
 
 ISSUER = "https://vigilant-beacon-78-staging.authkit.app"
 RESOURCE = "https://lovspor.bartoszkobylinski.com/mcp"
@@ -84,7 +80,10 @@ def test_valid_jwt_returns_access_token(keypair: tuple[Any, Any]) -> None:
     private, public = keypair
     result = asyncio.run(_verifier(public).verify_token(_sign(private)))
     assert isinstance(result, AccessToken)
-    assert result.client_id == f"{WORKOS_CLIENT_ID_PREFIX}user_123"
+    # The literal is deliberate, do not rewrite it as f"{WORKOS_CLIENT_ID_PREFIX}…":
+    # `workos:` is the quota-key contract shared with limits_for and the metering
+    # store, so an expectation built from the constant would follow it anywhere.
+    assert result.client_id == "workos:user_123"
     assert "openid" in result.scopes
     assert result.expires_at is not None
 
@@ -141,7 +140,7 @@ def test_composite_routes_jwt_to_workos(keypair: tuple[Any, Any]) -> None:
     )
     result = asyncio.run(composite.verify_token(_sign(private)))
     assert result is not None
-    assert result.client_id.startswith(WORKOS_CLIENT_ID_PREFIX)
+    assert result.client_id == "workos:user_123"
     assert creds.verify_called is False  # never reached the opaque path
 
 
@@ -157,12 +156,18 @@ def test_composite_routes_opaque_to_credentials(keypair: tuple[Any, Any]) -> Non
 
 
 def test_composite_limits_for_workos_user_is_default(keypair: tuple[Any, Any]) -> None:
+    """A `workos:`-namespaced id must resolve to the shared default bucket, not fall
+    through to the credential store. Literal prefix on purpose — see the note in
+    test_valid_jwt_returns_access_token; the store's limits differ so a prefix that
+    stopped matching shows up as the wrong quota rather than passing silently."""
     _, public = keypair
     default = Limits(daily_quota=42)
     composite = CompositeVerifier(
-        credentials=_FakeCreds(), workos=_verifier(public), workos_default_limits=default
+        credentials=_FakeCreds(limits=Limits(daily_quota=7)),
+        workos=_verifier(public),
+        workos_default_limits=default,
     )
-    assert composite.limits_for(f"{WORKOS_CLIENT_ID_PREFIX}user_abc") == default
+    assert composite.limits_for("workos:user_abc") == default
 
 
 def test_composite_limits_for_credential_reads_store(keypair: tuple[Any, Any]) -> None:
