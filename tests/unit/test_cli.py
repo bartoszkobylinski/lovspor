@@ -20,6 +20,9 @@ from lovspor.sync.orchestrator import SyncReport
 
 runner = CliRunner()
 
+_AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
+_PUBLIC_URL = "https://lovspor.example.com/mcp"
+
 # Typer >= 0.12 renders --help through Rich panels, which interleave the
 # usage text with ANSI escape sequences and box-drawing characters. The
 # literal "Usage: lovspor [OPTIONS] COMMAND [ARGS]..." chunk only appears
@@ -238,6 +241,106 @@ def test_mcp_http_insecure_flag_clears_the_credential_store(
     assert isinstance(http, HttpConfig)
     assert http.credentials_path is None
     assert http.allow_insecure is True
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("--authkit-domain", _AUTHKIT_DOMAIN),
+        ("--public-url", _PUBLIC_URL),
+    ],
+)
+def test_mcp_http_half_configured_oauth_flag_surfaces_config_error_before_serve(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    option: str,
+    value: str,
+) -> None:
+    _clear_env(monkeypatch)
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    served: list[object] = []
+    monkeypatch.setattr("lovspor.cli._mcp_serve_http", lambda *args: served.append(args))
+
+    result = runner.invoke(
+        app,
+        ["mcp-http", "--corpus-path", str(tmp_path), option, value],
+    )
+
+    assert result.exit_code == 1
+    assert type(result.exception) is ConfigError
+    assert "needs --authkit-domain and --public-url together" in str(result.exception)
+    assert served == []
+
+
+@pytest.mark.parametrize(
+    ("env_name", "value"),
+    [
+        ("LOVSPOR_AUTHKIT_DOMAIN", _AUTHKIT_DOMAIN),
+        ("LOVSPOR_PUBLIC_URL", _PUBLIC_URL),
+        ("LOVSPOR_AUTHKIT_DOMAIN", "   "),
+    ],
+)
+def test_mcp_http_half_configured_oauth_env_surfaces_config_error_before_serve(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    env_name: str,
+    value: str,
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv(env_name, value)
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    served: list[object] = []
+    monkeypatch.setattr("lovspor.cli._mcp_serve_http", lambda *args: served.append(args))
+
+    result = runner.invoke(app, ["mcp-http", "--corpus-path", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert type(result.exception) is ConfigError
+    assert "needs --authkit-domain and --public-url together" in str(result.exception)
+    assert served == []
+
+
+def test_mcp_http_empty_oauth_env_is_treated_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_AUTHKIT_DOMAIN", "")
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "lovspor.cli._mcp_serve_http",
+        lambda path, http: captured.update(path=path, http=http),
+    )
+
+    result = runner.invoke(app, ["mcp-http", "--corpus-path", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    http = captured["http"]
+    assert isinstance(http, HttpConfig)
+    assert http.oauth_pair() is None
+
+
+def test_mcp_http_reads_complete_oauth_pair_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("LOVSPOR_AUTHKIT_DOMAIN", _AUTHKIT_DOMAIN)
+    monkeypatch.setenv("LOVSPOR_PUBLIC_URL", _PUBLIC_URL)
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "lovspor.cli._mcp_serve_http",
+        lambda path, http: captured.update(path=path, http=http),
+    )
+
+    result = runner.invoke(app, ["mcp-http", "--corpus-path", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    http = captured["http"]
+    assert isinstance(http, HttpConfig)
+    assert http.oauth_pair() == (_AUTHKIT_DOMAIN, _PUBLIC_URL)
 
 
 def test_tokens_issue_prints_the_token_once_and_stores_only_its_hash(

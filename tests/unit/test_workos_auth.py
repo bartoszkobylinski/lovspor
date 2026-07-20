@@ -15,10 +15,15 @@ from typing import Any
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt.exceptions import PyJWKClientError
 from mcp.server.auth.provider import AccessToken
 
 from lovspor.access import Limits
-from lovspor.workos_auth import CompositeVerifier, WorkOSTokenVerifier
+from lovspor.workos_auth import (
+    DEFAULT_WORKOS_LIMITS,
+    CompositeVerifier,
+    WorkOSTokenVerifier,
+)
 
 ISSUER = "https://vigilant-beacon-78-staging.authkit.app"
 RESOURCE = "https://lovspor.bartoszkobylinski.com/mcp"
@@ -38,6 +43,13 @@ class _StubJWKS:
 
     def get_signing_key_from_jwt(self, token: str) -> SimpleNamespace:
         return SimpleNamespace(key=self._key)
+
+
+class _UnavailableJWKS:
+    """Model an AuthKit JWKS endpoint that cannot be reached."""
+
+    def get_signing_key_from_jwt(self, token: str) -> SimpleNamespace:
+        raise PyJWKClientError("JWKS unavailable")
 
 
 class _FakeCreds:
@@ -76,6 +88,15 @@ def _sign(private: Any, **overrides: Any) -> str:
     return jwt.encode(claims, private, algorithm="RS256")
 
 
+def test_default_workos_limits_are_a_real_limits_bucket() -> None:
+    assert Limits() == DEFAULT_WORKOS_LIMITS
+
+
+def test_default_jwks_client_uses_the_authkit_oauth2_endpoint() -> None:
+    verifier = WorkOSTokenVerifier(authkit_domain=f"{ISSUER}/", resource_url=RESOURCE)
+    assert verifier._jwks.uri == f"{ISSUER}/oauth2/jwks"
+
+
 def test_valid_jwt_returns_access_token(keypair: tuple[Any, Any]) -> None:
     private, public = keypair
     result = asyncio.run(_verifier(public).verify_token(_sign(private)))
@@ -111,6 +132,38 @@ def test_missing_sub_rejected(keypair: tuple[Any, Any]) -> None:
     private, public = keypair
     token = _sign(private, sub=None)
     assert asyncio.run(_verifier(public).verify_token(token)) is None
+
+
+@pytest.mark.parametrize("claim", ["exp", "iat", "aud", "iss"])
+def test_other_required_claims_rejected(
+    keypair: tuple[Any, Any],
+    claim: str,
+) -> None:
+    private, public = keypair
+    token = _sign(private, **{claim: None})
+    assert asyncio.run(_verifier(public).verify_token(token)) is None
+
+
+def test_empty_sub_rejected(keypair: tuple[Any, Any]) -> None:
+    private, public = keypair
+    token = _sign(private, sub="")
+    assert asyncio.run(_verifier(public).verify_token(token)) is None
+
+
+def test_unavailable_jwks_rejected() -> None:
+    verifier = WorkOSTokenVerifier(
+        authkit_domain=ISSUER,
+        resource_url=RESOURCE,
+        jwks_client=_UnavailableJWKS(),
+    )
+    assert asyncio.run(verifier.verify_token("header.payload.signature")) is None
+
+
+def test_missing_scope_becomes_an_empty_scope_list(keypair: tuple[Any, Any]) -> None:
+    private, public = keypair
+    result = asyncio.run(_verifier(public).verify_token(_sign(private, scope=None)))
+    assert result is not None
+    assert result.scopes == []
 
 
 def test_signature_from_unknown_key_rejected(keypair: tuple[Any, Any]) -> None:
