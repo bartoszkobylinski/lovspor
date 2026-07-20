@@ -3797,6 +3797,47 @@ def test_half_configured_hosted_oauth_is_rejected(partial: dict[str, str]) -> No
         HttpConfig(credentials_path=Path("creds.json"), **partial)
 
 
+def _half_pair_by_assignment() -> HttpConfig:
+    config = HttpConfig()
+    config.authkit_domain = _AUTHKIT_DOMAIN  # plain assignment runs no validator
+    return config
+
+
+@pytest.mark.parametrize(
+    "make_bypassed",
+    [
+        pytest.param(
+            lambda: HttpConfig().model_copy(update={"authkit_domain": _AUTHKIT_DOMAIN}),
+            id="model_copy",
+        ),
+        pytest.param(
+            lambda: HttpConfig.model_construct(authkit_domain=_AUTHKIT_DOMAIN),
+            id="model_construct",
+        ),
+        pytest.param(_half_pair_by_assignment, id="assignment"),
+    ],
+)
+def test_half_configured_oauth_is_refused_through_pydantic_escape_hatches(
+    make_bypassed: Callable[[], HttpConfig],
+    tmp_path: Path,
+) -> None:
+    """``model_construct``, ``model_copy(update=...)`` and attribute assignment all
+    skip validators by design, so the constructor guard alone is not the invariant.
+    Re-checking where the mode is decided is what stops a half pair reaching the auth
+    wiring and silently selecting opaque-token mode."""
+    bypassed = make_bypassed()
+    creds = tmp_path / "credentials.json"
+    write_credential_file(creds, [])
+    store = CredentialStore(creds)
+
+    with pytest.raises(ConfigError, match="together"):
+        bypassed.oauth_pair()
+    with pytest.raises(ConfigError, match="together"):
+        mcp_module._auth_kwargs(bypassed, store)
+    with pytest.raises(ConfigError, match="together"):
+        mcp_module._build_verifier(bypassed, store)
+
+
 def test_hosted_oauth_installs_workos_verification_and_turns_discovery_on(
     tmp_path: Path,
 ) -> None:

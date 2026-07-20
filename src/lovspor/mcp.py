@@ -2429,30 +2429,40 @@ class HttpConfig(BaseModel):
 
     @model_validator(mode="after")
     def _reject_half_configured_oauth(self) -> Self:
-        """Refuse one of the OAuth pair without the other.
+        """Refuse one of the OAuth pair without the other, at construction.
 
         Half a config used to boot: the server silently fell back to the legacy
         opaque-token mode with discovery off and WorkOS JWTs never verified, so a
         typo'd deploy unit looks healthy while every self-service connector fails
         to authenticate. An auth boundary must not degrade quietly.
+
+        This catches the mistake early — at CLI parse, before anything binds — but
+        it is not the only guard; see :meth:`oauth_pair`.
         """
-        if bool(self.authkit_domain) != bool(self.public_url):
+        self.oauth_pair()
+        return self
+
+    def oauth_pair(self) -> tuple[str, str] | None:
+        """``(issuer, resource)`` when hosted OAuth is on, ``None`` for opaque mode.
+
+        Raises :class:`ConfigError` on a half-configured pair. Re-checking here
+        rather than trusting the validator is deliberate: pydantic's non-validating
+        escape hatches (``model_construct``, ``model_copy(update=...)``, plain
+        attribute assignment) all skip validators, and any of them could hand a
+        half pair straight to the callers below. Since this is the one place that
+        decides the mode, enforcing here means *no* path can reach ``_auth_kwargs``
+        or ``_build_verifier`` with an auth config that quietly degrades.
+        """
+        issuer, resource = self.authkit_domain, self.public_url
+        if bool(issuer) != bool(resource):
             raise ConfigError(
                 "hosted OAuth needs --authkit-domain and --public-url together "
                 "(LOVSPOR_AUTHKIT_DOMAIN / LOVSPOR_PUBLIC_URL). Pass both to enable "
                 "self-service connectors, or neither for opaque-token mode.",
             )
-        return self
-
-    def oauth_pair(self) -> tuple[str, str] | None:
-        """``(issuer, resource)`` when hosted OAuth is on, else ``None``.
-
-        One place decides the mode, so the auth kwargs and the token verifier can
-        never disagree about which one they are building.
-        """
-        if self.authkit_domain and self.public_url:
-            return self.authkit_domain, self.public_url
-        return None
+        if not issuer or not resource:
+            return None
+        return issuer, resource
 
 
 def _auth_kwargs(bind: HttpConfig, verifier: TokenVerifier | None) -> dict[str, Any]:
