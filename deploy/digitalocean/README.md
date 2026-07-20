@@ -70,7 +70,8 @@ ssh root@<DROPLET_IP> 'bash /root/provision.sh'   # clones the app, uv sync, fet
 # 1. OpenAI key (enables semantic_search; the other 15 tools work without it)
 sudo nano /etc/lovspor/lovspor.env          # set OPENAI_API_KEY=sk-...
 #    The same file carries the OPTIONAL self-service OAuth pair (commented out by
-#    default). Uncomment BOTH or NEITHER — one alone and lovspor-mcp exits on start:
+#    default). Give BOTH a value or NEITHER — one alone and lovspor-mcp exits on
+#    start (present-but-empty counts as unset, i.e. opaque-token mode):
 #      LOVSPOR_AUTHKIT_DOMAIN=https://your-project.authkit.app
 #      LOVSPOR_PUBLIC_URL=https://lovspor.yourdomain.com/mcp   <- must match step 3
 

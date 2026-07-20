@@ -56,7 +56,9 @@ lovspor mcp-http \
 
 `--public-url` is **lovspor's own public `/mcp` URL**, not WorkOS's — it is the RFC 8707 resource identifier the access token is bound to, so a token minted for a different resource cannot open this server. It must match the URL clients actually connect to, including scheme and path.
 
-> ⚠️ **The two are all-or-nothing: setting one without the other refuses to start** (`ConfigError`, before the port is bound). Half a config would otherwise boot straight past the auth boundary — discovery off, WorkOS JWTs never verified — so a typo'd deploy unit would look healthy while every self-service connector failed to log in. A service that won't start is the loud failure; that one is the quiet one.
+> ⚠️ **The two are all-or-nothing: giving one a value without the other refuses to start** (`ConfigError`, before the port is bound). Half a config would otherwise boot straight past the auth boundary — discovery off, WorkOS JWTs never verified — so a typo'd deploy unit would look healthy while every self-service connector failed to log in. A service that won't start is the loud failure; that one is the quiet one.
+>
+> "Set" means *has a non-empty value*. `LOVSPOR_AUTHKIT_DOMAIN=` (present but empty) counts as unset and selects opaque-token mode, matching how the CLI treats an empty env var — so exporting an empty placeholder for one of them is safe, but it also won't warn you that OAuth is off.
 
 Both token types are accepted at once in hosted mode: a bearer with two dots is verified as a WorkOS RS256 JWT (signature against the AuthKit JWKS, issuer, audience, expiry), anything else falls through to the credential store. Issued `lsp_…` tokens keep working unchanged when you turn OAuth on.
 

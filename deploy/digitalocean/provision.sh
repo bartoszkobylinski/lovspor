@@ -136,7 +136,8 @@ if [ ! -f "$ENV_FILE" ]; then
 		'OPENAI_API_KEY=' \
 		'' \
 		'# Optional: self-service OAuth (ChatGPT/Claude.ai connectors) via WorkOS.' \
-		'# Uncomment BOTH or NEITHER — one alone and the server exits on start.' \
+		'# Give BOTH a value or NEITHER — one alone and the server exits on start.' \
+		'# (Present but empty counts as unset, i.e. plain opaque-token mode.)' \
 		'# LOVSPOR_PUBLIC_URL is this host public /mcp URL, not the WorkOS one.' \
 		'#LOVSPOR_AUTHKIT_DOMAIN=https://your-project.authkit.app' \
 		'#LOVSPOR_PUBLIC_URL=https://lovspor.example.com/mcp' >"$ENV_FILE"
