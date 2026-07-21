@@ -9,8 +9,17 @@
 {$LOVSPOR_DOMAIN} {
 	encode zstd gzip
 
-	# MCP app + health probes → the localhost-bound server (TLS stops here).
-	@app path /mcp /mcp/* /healthz /readyz
+	# MCP app + health probes + OAuth discovery → the localhost-bound server
+	# (TLS stops here).
+	#
+	# The .well-known path MUST be proxied rather than left to the landing page.
+	# It is the RFC 9728 protected-resource document that tells an OAuth client
+	# which authorization server to use, and the app serves it only when hosted
+	# OAuth is configured. Omitting it fails in the most confusing way available:
+	# the app answers 200 on localhost while the public URL 404s from file_server,
+	# so every connector reports "cannot authenticate" against a server that looks
+	# perfectly healthy from every other angle.
+	@app path /mcp /mcp/* /healthz /readyz /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
 	handle @app {
 		reverse_proxy 127.0.0.1:8000
 	}
