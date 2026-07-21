@@ -3838,6 +3838,28 @@ def test_half_configured_oauth_is_refused_through_pydantic_escape_hatches(
         mcp_module._build_verifier(bypassed, store)
 
 
+@pytest.mark.parametrize(
+    "wire",
+    [
+        pytest.param(lambda config: mcp_module._auth_kwargs(config, None), id="auth_kwargs"),
+        pytest.param(lambda config: mcp_module._build_verifier(config, None), id="build_verifier"),
+    ],
+)
+def test_half_configured_oauth_is_refused_with_authentication_disabled(
+    wire: Callable[[HttpConfig], object],
+) -> None:
+    """``--insecure-no-auth`` means "no auth at all", not "skip the config checks".
+
+    Both wiring functions return early when there is no verifier, so a half pair
+    that reached them through an escape hatch used to slip past unexamined. The
+    pair is checked before that early return, so a broken config reads the same
+    whether or not authentication happens to be switched on."""
+    bypassed = HttpConfig.model_construct(authkit_domain=_AUTHKIT_DOMAIN)
+
+    with pytest.raises(ConfigError, match="together"):
+        wire(bypassed)
+
+
 def test_hosted_oauth_installs_workos_verification_and_turns_discovery_on(
     tmp_path: Path,
 ) -> None:

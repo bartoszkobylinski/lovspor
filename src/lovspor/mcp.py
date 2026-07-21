@@ -53,7 +53,7 @@ import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Self, TypedDict
+from typing import Any, Self, TypedDict, final
 
 import numpy as np
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -2402,6 +2402,7 @@ def _build_embedder() -> EmbeddingModel | None:
     )
 
 
+@final
 class HttpConfig(BaseModel):
     """Bind address and access control for the Streamable HTTP transport.
 
@@ -2450,8 +2451,15 @@ class HttpConfig(BaseModel):
         escape hatches (``model_construct``, ``model_copy(update=...)``, plain
         attribute assignment) all skip validators, and any of them could hand a
         half pair straight to the callers below. Since this is the one place that
-        decides the mode, enforcing here means *no* path can reach ``_auth_kwargs``
-        or ``_build_verifier`` with an auth config that quietly degrades.
+        decides the mode, enforcing here covers every one of those paths.
+
+        The guard is a normal method, so it is virtual: a subclass overriding it
+        could still return ``None`` for a half pair and select opaque-token mode.
+        That is why the class is ``@final`` — mypy rejects such a subclass, which
+        turns "nothing overrides this" from an assumption into a checked property.
+        It is not a runtime seal, and it is not meant to defend against code that
+        sets out to defeat it; it exists so the invariant cannot be lost by
+        accident when someone later wants a config variant.
         """
         issuer, resource = self.authkit_domain, self.public_url
         if bool(issuer) != bool(resource):
@@ -2482,9 +2490,12 @@ def _auth_kwargs(bind: HttpConfig, verifier: TokenVerifier | None) -> dict[str, 
       just RequireAuth over ``/mcp``. ``resource_server_url=None`` keeps
       ``.well-known`` off; the issuer is inert but must be a valid URL for the SDK.
     """
+    # Before the unauthenticated early return, not after: a half pair is a broken
+    # config whether or not auth is switched on, and it should read the same way
+    # in both cases rather than only being caught when a verifier happens to exist.
+    pair = bind.oauth_pair()
     if verifier is None:
         return {}
-    pair = bind.oauth_pair()
     if pair is not None:
         issuer, resource = pair
         auth = AuthSettings(
@@ -2511,9 +2522,10 @@ def _build_verifier(
     self-service WorkOS users meter against a shared default quota. Otherwise the
     store is both verifier and limits source, or ``None`` when running insecure.
     """
+    # Checked before the insecure early return — see the note in _auth_kwargs.
+    pair = bind.oauth_pair()
     if store is None:
         return None, None
-    pair = bind.oauth_pair()
     if pair is not None:
         issuer, resource = pair
         composite = CompositeVerifier(
