@@ -2450,16 +2450,20 @@ class HttpConfig(BaseModel):
         rather than trusting the validator is deliberate: pydantic's non-validating
         escape hatches (``model_construct``, ``model_copy(update=...)``, plain
         attribute assignment) all skip validators, and any of them could hand a
-        half pair straight to the callers below. Since this is the one place that
-        decides the mode, enforcing here covers every one of those paths.
+        half pair straight to the callers below. This is the one place that decides
+        the mode and both callers consult it before anything else, so:
 
-        The guard is a normal method, so it is virtual: a subclass overriding it
-        could still return ``None`` for a half pair and select opaque-token mode.
-        That is why the class is ``@final`` — mypy rejects such a subclass, which
-        turns "nothing overrides this" from an assumption into a checked property.
-        It is not a runtime seal, and it is not meant to defend against code that
-        sets out to defeat it; it exists so the invariant cannot be lost by
-        accident when someone later wants a config variant.
+            for any ``HttpConfig`` whose ``oauth_pair`` attribute still resolves to
+            ``HttpConfig.oauth_pair``, exactly one non-empty OAuth field raises
+            ``ConfigError`` — including when authentication is disabled.
+
+        That qualifier is load-bearing. The guard is an ordinary method, so it is
+        both virtual (a subclass can override it) and shadowable (``model_copy``
+        will write a callable straight over the attribute). ``@final`` makes the
+        subclass case a mypy error; nothing makes the shadowing case impossible.
+        Neither is reachable from CLI flags or env vars, and both require
+        deliberately replacing the guard — the marker exists so the invariant
+        cannot be lost by accident, not so it cannot be defeated on purpose.
         """
         issuer, resource = self.authkit_domain, self.public_url
         if bool(issuer) != bool(resource):
