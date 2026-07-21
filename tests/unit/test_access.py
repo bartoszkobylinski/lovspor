@@ -596,6 +596,16 @@ def test_limits_reject_non_positive_brakes(field: str, bad: int) -> None:
         Limits(**{field: bad})
 
 
+@pytest.mark.parametrize("field", ["max_in_flight", "rate_per_minute", "rate_burst", "daily_quota"])
+def test_limits_accept_one_as_the_lowest_valid_brake(field: str) -> None:
+    """The floor is exactly 1, not merely "positive". Pinning the accepted side
+    of the boundary matters because the rejecting test above passes just as well
+    against a stricter floor: raising ge=1 to ge=2 would lock out the tightest
+    legitimate credential — the one-call-at-a-time reviewer account — and nothing
+    would have caught it."""
+    assert Limits(**{field: 1}).model_dump()[field] == 1
+
+
 def test_a_store_with_a_zero_rate_fails_closed_instead_of_crashing(tmp_path: Path) -> None:
     """A store carrying rate_per_minute=0 must be refused at load, so the bad
     value never reaches the token bucket where it would raise ZeroDivisionError
