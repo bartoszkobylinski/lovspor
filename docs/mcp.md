@@ -21,9 +21,11 @@ This document covers the full setup: prerequisites, configuration for two common
 
 ## Streamable HTTP transport
 
-`lovspor mcp-http` serves the same sixteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is the foundation of the hosted service (Sprint 12 item 1), **not a finished product**:
+`lovspor mcp-http` serves the same sixteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs (Sprint 12 item 1), in closed beta:
 
-> ⚠️ **Bearer-token auth and per-credential rate limiting + quotas now exist. TLS terminates in a reverse proxy — a deploy recipe now exists (`deploy/digitalocean/`, Caddy with automatic Let's Encrypt) but is not yet deployed, so there is still no live HTTPS endpoint.** A credentialed store gates the tool surface (revocable tokens, per-credential `Limits`), yet the app speaks plaintext HTTP, so a bearer token on an exposed port travels in the clear and can be read and replayed. TLS is terminated upstream by design: the app binds localhost, a proxy terminates TLS in front of it. Until you provision that proxy (see `deploy/digitalocean/README.md`), keep it bound to localhost and do not expose it to the internet.
+> ✅ **Live since 2026-07-18 at `https://lovspor.bartoszkobylinski.com/mcp`.** TLS is terminated by Caddy (automatic Let's Encrypt) on a dedicated DigitalOcean droplet provisioned from `deploy/digitalocean/`. Access is by hand-issued bearer credential (`lovspor tokens issue`), with per-credential quotas and rate limiting enforced. Self-service OAuth landed in the code on 2026-07-21 but **is not enabled on that instance** — it runs in opaque-token mode, so `/.well-known/oauth-protected-resource/mcp` returns 404 there.
+>
+> ⚠️ **The app itself still speaks plaintext HTTP and binds `127.0.0.1` by design** — lovspor never terminates TLS, a proxy in front of it does. If you run `mcp-http` yourself, keep it on localhost behind a TLS-terminating proxy (see `deploy/digitalocean/README.md`): a bearer token on an exposed port travels in the clear and can be read and replayed.
 
 ```bash
 uv run --project /path/to/lovspor lovspor mcp-http --host 127.0.0.1 --port 8000
