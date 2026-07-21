@@ -21,7 +21,24 @@
 	# perfectly healthy from every other angle.
 	@app path /mcp /mcp/* /healthz /readyz /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
 	handle @app {
-		reverse_proxy 127.0.0.1:8000
+		reverse_proxy 127.0.0.1:8000 {
+			# STOPGAP — remove once the app configures TransportSecuritySettings.
+			#
+			# The MCP SDK auto-enables DNS-rebinding protection whenever the server
+			# binds 127.0.0.1, allowing ONLY localhost Host headers
+			# (mcp/server/fastmcp/server.py: allowed_hosts=["127.0.0.1:*", ...]).
+			# A proxied request arrives with the public hostname, which is not on
+			# that list, so every authenticated /mcp call answered 421 Misdirected
+			# Request — for opaque tokens as well as OAuth. Health probes are
+			# custom_route and bypass the check, which is why every probe said the
+			# service was fine while the actual tool surface was unreachable.
+			#
+			# Rewriting Host to the upstream address satisfies the check, but it
+			# satisfies it by making the guard trivially true rather than by
+			# configuring it. The real fix is passing allowed_hosts=[public host]
+			# to FastMCP so the check still rejects unexpected Host headers.
+			header_up Host {upstream_hostport}
+		}
 	}
 
 	# Everything else → the static landing page.
