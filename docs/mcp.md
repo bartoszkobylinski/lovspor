@@ -31,6 +31,37 @@ uv run --project /path/to/lovspor lovspor mcp-http --host 127.0.0.1 --port 8000
 
 Defaults are `--host 127.0.0.1 --port 8000`; `--corpus-path` behaves exactly as it does for `lovspor mcp`. The MCP endpoint is served at `/mcp`.
 
+### Authentication: two modes
+
+lovspor is always an OAuth **resource server** — it verifies tokens, it never issues them. Which kind of token it accepts depends on whether the AuthKit pair is configured:
+
+| | **Opaque tokens** (default) | **Hosted OAuth** (`--authkit-domain` + `--public-url`) |
+|---|---|---|
+| Configure | nothing — this is the default | both flags, or both env vars |
+| Who it serves | developer clients that have a paste-a-token field (Claude Code, Cursor) | chat-app connectors that require OAuth 2.1 and have no such field (ChatGPT, Claude.ai) — **plus** everything the default mode serves |
+| Credential | `lovspor tokens issue --label ...` → an `lsp_…` token | the user logs in through WorkOS; no manual step |
+| Discovery | none — no `.well-known`, no `/authorize`, no `/token` | `GET /.well-known/oauth-protected-resource/mcp` advertises WorkOS as the authorization server (RFC 9728) |
+| Quota bucket | per-credential `Limits` from the store | one shared default bucket for self-service users, keyed `workos:<sub>` |
+
+Enabling hosted OAuth:
+
+```bash
+lovspor mcp-http \
+  --authkit-domain https://your-project.authkit.app \
+  --public-url https://lovspor.example.com/mcp
+# or, equivalently, as env vars (what the systemd unit uses):
+#   LOVSPOR_AUTHKIT_DOMAIN=https://your-project.authkit.app
+#   LOVSPOR_PUBLIC_URL=https://lovspor.example.com/mcp
+```
+
+`--public-url` is **lovspor's own public `/mcp` URL**, not WorkOS's — it is the RFC 8707 resource identifier the access token is bound to, so a token minted for a different resource cannot open this server. It must match the URL clients actually connect to, including scheme and path.
+
+> ⚠️ **The two are all-or-nothing: giving one a value without the other refuses to start** (`ConfigError`, before the port is bound). Half a config would otherwise boot straight past the auth boundary — discovery off, WorkOS JWTs never verified — so a typo'd deploy unit would look healthy while every self-service connector failed to log in. A service that won't start is the loud failure; that one is the quiet one.
+>
+> "Set" means *has a non-empty value*. `LOVSPOR_AUTHKIT_DOMAIN=` (present but empty) counts as unset and selects opaque-token mode, matching how the CLI treats an empty env var — so exporting an empty placeholder for one of them is safe, but it also won't warn you that OAuth is off.
+
+Both token types are accepted at once in hosted mode: a bearer with two dots is verified as a WorkOS RS256 JWT (signature against the AuthKit JWKS, issuer, audience, expiry), anything else falls through to the credential store. Issued `lsp_…` tokens keep working unchanged when you turn OAuth on.
+
 **How it differs from stdio** — both differences exist because an HTTP server shares one process across many clients, while stdio serves exactly one:
 
 - **Tool bodies run on worker threads.** The MCP SDK calls a synchronous tool handler inline on its single event-loop thread, so one slow call (a `search_body` scan, a `semantic_search` embedding round-trip, a `git` subprocess for the time-machine tools) would stall *every* other client. Over HTTP each tool body is offloaded to a thread, so calls make progress concurrently.

@@ -35,9 +35,22 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
+from typing import Protocol
 
-from lovspor.access import CredentialStore, Limits
+from lovspor.access import Limits
 from lovspor.errors import LovsporError
+
+
+class LimitsSource(Protocol):
+    """The quota layer's view of the token store: resolve live limits by id.
+
+    :class:`~lovspor.access.CredentialStore` and the composite WorkOS verifier
+    both satisfy this structurally — the enforcer only needs a caller's limits by
+    identity, not to know which auth path (opaque token vs WorkOS JWT) issued it.
+    """
+
+    def limits_for(self, credential_id: str) -> Limits | None: ...
+
 
 # An in-flight rejection cannot say when a slot frees — that depends on a call
 # still running. One second is a hint, not a promise.
@@ -151,7 +164,7 @@ class QuotaEnforcer:
 
     def __init__(
         self,
-        store: CredentialStore,
+        store: LimitsSource,
         monotonic: Callable[[], float] = time.monotonic,
         utc_now: Callable[[], datetime] = _utc_now,
     ) -> None:

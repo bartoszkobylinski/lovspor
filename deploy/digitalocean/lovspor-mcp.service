@@ -14,6 +14,12 @@ Group=lovspor
 Environment=HOME=/opt/lovspor
 Environment=LOVVERK_CORPUS_PATH=/opt/lovspor/.cache/lovverk
 # Secrets (OPENAI_API_KEY for semantic_search) live here, NOT in the repo.
+# Optional self-service OAuth also comes from here: LOVSPOR_AUTHKIT_DOMAIN and
+# LOVSPOR_PUBLIC_URL. Give BOTH a value or NEITHER — one alone makes the server exit
+# with a ConfigError instead of silently serving without OAuth. (Present-but-empty
+# counts as unset, so `LOVSPOR_PUBLIC_URL=` is opaque mode, not an error.)
+# LOVSPOR_PUBLIC_URL is this droplet's public /mcp URL (must match the Caddy vhost),
+# not the WorkOS one.
 # Read ONLY at start — run `systemctl restart lovspor-mcp` after editing it.
 EnvironmentFile=/etc/lovspor/lovspor.env
 WorkingDirectory=/opt/lovspor/app

@@ -74,6 +74,10 @@ from lovspor.mcp import (
 from lovspor.quota import QuotaEnforcer, QuotaExceededError
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 from lovspor.timetravel import RevisionNotFoundError, RevisionResult
+from lovspor.workos_auth import CompositeVerifier
+
+_AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
+_PUBLIC_URL = "https://lovspor.bartoszkobylinski.com/mcp"
 
 
 def _record(
@@ -3777,6 +3781,109 @@ def test_http_mode_with_credentials_installs_the_store_as_token_verifier(
     assert server.settings.auth.resource_server_url is None
     paths = {route.path for route in server.streamable_http_app().routes}
     assert not any(p.startswith("/.well-known") or p in {"/token", "/authorize"} for p in paths)
+
+
+@pytest.mark.parametrize(
+    "partial",
+    [
+        {"authkit_domain": _AUTHKIT_DOMAIN},
+        {"public_url": _PUBLIC_URL},
+    ],
+)
+def test_half_configured_hosted_oauth_is_rejected(partial: dict[str, str]) -> None:
+    """Half a pair used to boot into the legacy opaque-token mode with discovery
+    off and WorkOS JWTs never verified — a broken auth boundary that looks healthy."""
+    with pytest.raises(ConfigError, match="together"):
+        HttpConfig(credentials_path=Path("creds.json"), **partial)
+
+
+def _half_pair_by_assignment() -> HttpConfig:
+    config = HttpConfig()
+    config.authkit_domain = _AUTHKIT_DOMAIN  # plain assignment runs no validator
+    return config
+
+
+@pytest.mark.parametrize(
+    "make_bypassed",
+    [
+        pytest.param(
+            lambda: HttpConfig().model_copy(update={"authkit_domain": _AUTHKIT_DOMAIN}),
+            id="model_copy",
+        ),
+        pytest.param(
+            lambda: HttpConfig.model_construct(authkit_domain=_AUTHKIT_DOMAIN),
+            id="model_construct",
+        ),
+        pytest.param(_half_pair_by_assignment, id="assignment"),
+    ],
+)
+def test_half_configured_oauth_is_refused_through_pydantic_escape_hatches(
+    make_bypassed: Callable[[], HttpConfig],
+    tmp_path: Path,
+) -> None:
+    """``model_construct``, ``model_copy(update=...)`` and attribute assignment all
+    skip validators by design, so the constructor guard alone is not the invariant.
+    Re-checking where the mode is decided is what stops a half pair reaching the auth
+    wiring and silently selecting opaque-token mode."""
+    bypassed = make_bypassed()
+    creds = tmp_path / "credentials.json"
+    write_credential_file(creds, [])
+    store = CredentialStore(creds)
+
+    with pytest.raises(ConfigError, match="together"):
+        bypassed.oauth_pair()
+    with pytest.raises(ConfigError, match="together"):
+        mcp_module._auth_kwargs(bypassed, store)
+    with pytest.raises(ConfigError, match="together"):
+        mcp_module._build_verifier(bypassed, store)
+
+
+@pytest.mark.parametrize(
+    "wire",
+    [
+        pytest.param(lambda config: mcp_module._auth_kwargs(config, None), id="auth_kwargs"),
+        pytest.param(lambda config: mcp_module._build_verifier(config, None), id="build_verifier"),
+    ],
+)
+def test_half_configured_oauth_is_refused_with_authentication_disabled(
+    wire: Callable[[HttpConfig], object],
+) -> None:
+    """``--insecure-no-auth`` means "no auth at all", not "skip the config checks".
+
+    Both wiring functions return early when there is no verifier, so a half pair
+    that reached them through an escape hatch used to slip past unexamined. The
+    pair is checked before that early return, so a broken config reads the same
+    whether or not authentication happens to be switched on."""
+    bypassed = HttpConfig.model_construct(authkit_domain=_AUTHKIT_DOMAIN)
+
+    with pytest.raises(ConfigError, match="together"):
+        wire(bypassed)
+
+
+def test_hosted_oauth_installs_workos_verification_and_turns_discovery_on(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    write_credential_file(creds, [])
+
+    server = build_server(
+        tmp_path,
+        http=HttpConfig(
+            credentials_path=creds,
+            authkit_domain=_AUTHKIT_DOMAIN,
+            public_url=_PUBLIC_URL,
+        ),
+    )
+
+    assert isinstance(server._token_verifier, CompositeVerifier)
+    assert server.settings.auth is not None
+    # WorkOS is advertised as the authorization server, lovspor as the RFC 8707
+    # resource — that pair is what makes a ChatGPT/Claude connector able to log in.
+    assert str(server.settings.auth.issuer_url).rstrip("/") == _AUTHKIT_DOMAIN
+    assert str(server.settings.auth.resource_server_url).rstrip("/") == _PUBLIC_URL
+    paths = {route.path for route in server.streamable_http_app().routes}
+    assert "/.well-known/oauth-protected-resource/mcp" in paths
 
 
 @pytest.mark.parametrize(

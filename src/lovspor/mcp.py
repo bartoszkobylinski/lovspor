@@ -53,13 +53,14 @@ import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, Self, TypedDict, final
 
 import numpy as np
 from mcp.server.auth.middleware.auth_context import get_access_token
+from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
-from pydantic import AnyHttpUrl, BaseModel
+from pydantic import AnyHttpUrl, BaseModel, model_validator
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -72,7 +73,7 @@ from lovspor.embeddings import (
     read_embeddings,
 )
 from lovspor.errors import ConfigError, LovsporError
-from lovspor.quota import QuotaEnforcer, QuotaExceededError
+from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.timetravel import (
@@ -80,6 +81,11 @@ from lovspor.timetravel import (
     RevisionResult,
     get_law_at_revision,
     resolve_law_at_revision,
+)
+from lovspor.workos_auth import (
+    DEFAULT_WORKOS_LIMITS,
+    CompositeVerifier,
+    WorkOSTokenVerifier,
 )
 
 _STALE_THRESHOLD_DAYS = 7
@@ -2396,6 +2402,7 @@ def _build_embedder() -> EmbeddingModel | None:
     )
 
 
+@final
 class HttpConfig(BaseModel):
     """Bind address and access control for the Streamable HTTP transport.
 
@@ -2412,35 +2419,129 @@ class HttpConfig(BaseModel):
     # whole corpus surface to anyone who can reach the port.
     credentials_path: Path | None = None
     allow_insecure: bool = False
+    # WorkOS AuthKit as the rented OAuth authorization server for self-service
+    # connectors. Both set => hosted-OAuth mode: verify WorkOS-issued JWTs and
+    # advertise WorkOS via RFC 9728 discovery. Neither set => opaque-token,
+    # resource-server-only mode (developer clients paste a token). One without the
+    # other is rejected outright, see the validator below. ``public_url`` is
+    # lovspor's own ``/mcp`` URL — the RFC 8707 resource the token is bound to.
+    authkit_domain: str | None = None
+    public_url: str | None = None
+
+    @model_validator(mode="after")
+    def _reject_half_configured_oauth(self) -> Self:
+        """Refuse one of the OAuth pair without the other, at construction.
+
+        Half a config used to boot: the server silently fell back to the legacy
+        opaque-token mode with discovery off and WorkOS JWTs never verified, so a
+        typo'd deploy unit looks healthy while every self-service connector fails
+        to authenticate. An auth boundary must not degrade quietly.
+
+        This catches the mistake early — at CLI parse, before anything binds — but
+        it is not the only guard; see :meth:`oauth_pair`.
+        """
+        self.oauth_pair()
+        return self
+
+    def oauth_pair(self) -> tuple[str, str] | None:
+        """``(issuer, resource)`` when hosted OAuth is on, ``None`` for opaque mode.
+
+        Raises :class:`ConfigError` on a half-configured pair. Re-checking here
+        rather than trusting the validator is deliberate: pydantic's non-validating
+        escape hatches (``model_construct``, ``model_copy(update=...)``, plain
+        attribute assignment) all skip validators, and any of them could hand a
+        half pair straight to the callers below. This is the one place that decides
+        the mode and both callers consult it before anything else, so:
+
+            for any ``HttpConfig`` whose ``oauth_pair`` attribute still resolves to
+            ``HttpConfig.oauth_pair``, exactly one non-empty OAuth field raises
+            ``ConfigError`` — including when authentication is disabled.
+
+        That qualifier is load-bearing. The guard is an ordinary method, so it is
+        both virtual (a subclass can override it) and shadowable (``model_copy``
+        will write a callable straight over the attribute). ``@final`` makes the
+        subclass case a mypy error; nothing makes the shadowing case impossible.
+        Neither is reachable from CLI flags or env vars, and both require
+        deliberately replacing the guard — the marker exists so the invariant
+        cannot be lost by accident, not so it cannot be defeated on purpose.
+        """
+        issuer, resource = self.authkit_domain, self.public_url
+        if bool(issuer) != bool(resource):
+            raise ConfigError(
+                "hosted OAuth needs --authkit-domain and --public-url together "
+                "(LOVSPOR_AUTHKIT_DOMAIN / LOVSPOR_PUBLIC_URL). Pass both to enable "
+                "self-service connectors, or neither for opaque-token mode.",
+            )
+        if not issuer or not resource:
+            return None
+        return issuer, resource
 
 
-def _auth_kwargs(bind: HttpConfig, store: CredentialStore | None) -> dict[str, Any]:
+def _auth_kwargs(bind: HttpConfig, verifier: TokenVerifier | None) -> dict[str, Any]:
     """FastMCP auth kwargs for a bind config, or empty when unauthenticated.
 
-    A bare ``token_verifier`` is a resource-server-only configuration: the SDK
-    mounts no authorization server, no ``/token``, no ``/authorize`` and no
-    discovery routes, and only wraps ``/mcp`` in its RequireAuth middleware. It
-    then owns bearer parsing, expiry, scopes and the spec-compliant 401/403.
-
     ``auth`` and ``token_verifier`` must be passed together or not at all — the
-    SDK raises on either alone.
+    SDK raises on either alone. Two shapes:
+
+    * **Hosted OAuth** (``authkit_domain`` + ``public_url`` set): advertise WorkOS
+      as the authorization server (``issuer_url``) and lovspor's ``/mcp`` URL as
+      the RFC 9728 resource (``resource_server_url``). That turns the
+      ``.well-known/oauth-protected-resource`` discovery route ON, so ChatGPT and
+      Claude find WorkOS and run the OAuth flow; ``verifier`` validates the
+      WorkOS-issued JWTs they then present.
+    * **Opaque token, RS-only** (neither set): a bare ``token_verifier`` — no
+      authorization server, no ``/token`` / ``/authorize`` / discovery routes,
+      just RequireAuth over ``/mcp``. ``resource_server_url=None`` keeps
+      ``.well-known`` off; the issuer is inert but must be a valid URL for the SDK.
     """
-    if store is None:
+    # Before the unauthenticated early return, not after: a half pair is a broken
+    # config whether or not auth is switched on, and it should read the same way
+    # in both cases rather than only being caught when a verifier happens to exist.
+    pair = bind.oauth_pair()
+    if verifier is None:
         return {}
-    return {
-        "token_verifier": store,
-        "auth": AuthSettings(
-            # Inert here: issuer_url is only ever advertised by the
-            # protected-resource discovery route, which resource_server_url=None
-            # suppresses. It still has to be a well-formed URL — the SDK
-            # validates it — hence the bind address rather than a placeholder.
+    if pair is not None:
+        issuer, resource = pair
+        auth = AuthSettings(
+            issuer_url=AnyHttpUrl(issuer),
+            resource_server_url=AnyHttpUrl(resource),
+            required_scopes=None,
+        )
+    else:
+        auth = AuthSettings(
             issuer_url=AnyHttpUrl(f"http://{bind.host}:{bind.port}/"),
-            # Required-but-nullable: the `| None` reads optional but the field
-            # is mandatory to PASS. None is what keeps /.well-known off.
             resource_server_url=None,
             required_scopes=None,
-        ),
-    }
+        )
+    return {"token_verifier": verifier, "auth": auth}
+
+
+def _build_verifier(
+    bind: HttpConfig, store: CredentialStore | None
+) -> tuple[TokenVerifier | None, LimitsSource | None]:
+    """Return ``(token_verifier, limits_source)`` for a bind config.
+
+    Hosted-OAuth mode wraps the credential store in a :class:`CompositeVerifier`
+    so WorkOS JWT connectors and opaque developer tokens both authenticate, and
+    self-service WorkOS users meter against a shared default quota. Otherwise the
+    store is both verifier and limits source, or ``None`` when running insecure.
+    """
+    # Checked before the insecure early return — see the note in _auth_kwargs.
+    pair = bind.oauth_pair()
+    if store is None:
+        return None, None
+    if pair is not None:
+        issuer, resource = pair
+        composite = CompositeVerifier(
+            credentials=store,
+            workos=WorkOSTokenVerifier(
+                authkit_domain=issuer,
+                resource_url=resource,
+            ),
+            workos_default_limits=DEFAULT_WORKOS_LIMITS,
+        )
+        return composite, composite
+    return store, store
 
 
 def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
@@ -2512,10 +2613,11 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         reader.warm()
     bind = http or HttpConfig()
     store = CredentialStore(bind.credentials_path) if bind.credentials_path else None
-    mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind, store))
+    verifier, metering = _build_verifier(bind, store)
+    mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind, verifier))
     # No store means --allow-insecure: no credential to meter, so no brakes.
     # serve_http already refuses that combination unless it was asked for.
-    enforcer = QuotaEnforcer(store) if store is not None else None
+    enforcer = QuotaEnforcer(metering) if metering is not None else None
 
     def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a tool, offloading its blocking body to a worker thread
