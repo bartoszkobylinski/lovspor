@@ -1571,24 +1571,36 @@ def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
             "occurrence": 1,
             "heading": "§ 1-1. Virkeområde",
             "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+            "kind": "section",
         },
         {
             "section_id": "1-2",
             "occurrence": 1,
             "heading": "§ 1-2. Hvem som pålegger skatt",
             "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+            "kind": "section",
+        },
+        {
+            # A non-§ heading is addressable content, not just a boundary.
+            "section_id": "#subsection-grouping-without-section",
+            "occurrence": 1,
+            "heading": "Subsection grouping without section",
+            "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+            "kind": "block",
         },
         {
             "section_id": "5-12",
             "occurrence": 1,
             "heading": "§ 5-12. Boligsparing for ungdom",
             "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+            "kind": "section",
         },
         {
             "section_id": "5-13",
             "occurrence": 1,
             "heading": "§ 5-13. Annet",
             "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+            "kind": "section",
         },
     ]
 
@@ -2277,7 +2289,9 @@ def test_get_section_raises_with_available_list_when_section_missing(
         CorpusReader(tmp_path).get_section("skatteloven", "5-99")
     msg = str(exc_info.value)
     assert msg == (
-        "section '5-99' not found in 'skatteloven'; available: § 1-1, § 1-2, § 5-12, § 5-13"
+        "section '5-99' not found in 'skatteloven'; "
+        "available: § 1-1, § 1-2, § 5-12, § 5-13; "
+        "1 non-§ content block(s) — call list_sections to see them"
     )
 
 

@@ -27,8 +27,10 @@ optional-title regex pattern used elsewhere in the codebase).
 
 from dataclasses import dataclass
 
-from lovspor.headings import ANY_HEADING, canonical_section_id
+from lovspor.headings import ANY_HEADING, block_id, canonical_section_id
 from lovspor.headings import SECTION_HEADING as _SECTION_HEADING
+
+_CHAPTER_PREFIX = "## "
 
 
 @dataclass(frozen=True)
@@ -49,10 +51,15 @@ def iter_sections(body: str) -> list[EmbeddingSection]:
       ``text`` because it carries meaning. The section pattern is tested
       before the chapter/subsection prefixes, so a flat act's ``## §``
       opens a section rather than being read as a chapter boundary.
-    - ``### `` (anything else) closes the current section without
-      opening a new one.
+    - ``### `` (anything else) closes the current section and opens a
+      content BLOCK keyed by the heading's slug — see
+      ``lovspor.headings.block_id``. Roughly 40% of corpus text sits
+      under such headings (takst tables, vedlegg, the ECHR articles
+      inside menneskerettsloven) and used to be discarded here, leaving
+      it with no vector and so unreachable by ``semantic_search``.
     - ``## `` (a chapter heading, i.e. an ``##`` line without ``§``)
-      closes the current section.
+      closes the current section without opening a block, so a chapter
+      does not compete with the sections nested inside it.
     - End-of-input closes the current section.
     """
     sections: list[EmbeddingSection] = []
@@ -74,10 +81,22 @@ def iter_sections(body: str) -> list[EmbeddingSection]:
             current_id = canonical_section_id(match.group(1))
             current_lines = [line]
             continue
-        if ANY_HEADING.match(line):
+        heading = ANY_HEADING.match(line)
+        if heading:
+            # A non-``§`` heading opens a content block instead of discarding
+            # what follows it — see lovspor.headings.block_id. Chapter headings
+            # (H2) still only close, so ``## Kapittel 4`` does not become a
+            # vector competing with the sections inside it.
             _flush()
-            current_id = None
-            current_lines = []
+            current_id = (
+                None
+                if line.startswith(_CHAPTER_PREFIX)
+                else block_id(
+                    line[heading.end() :].strip(),
+                )
+                or None
+            )
+            current_lines = [line] if current_id is not None else []
             continue
         if current_id is not None:
             current_lines.append(line)

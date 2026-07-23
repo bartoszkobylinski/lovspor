@@ -98,6 +98,44 @@ def raw_section_id(heading_line: str) -> str | None:
     return match.group(1) if match else None
 
 
+BLOCK_ID_PREFIX = "#"
+"""Marks an id that names a non-``§`` content block rather than a section.
+
+A ``§`` id always starts with a digit, so the prefix cannot collide with
+one. It also makes the distinction visible in every payload the server
+returns: a caller that sees ``#takster-fra-1-juli-2026`` knows not to
+cite it as a paragraph of law."""
+
+_NON_SLUG_CHAR = re.compile(r"[^a-z0-9æøåäöü]+")
+_MAX_BLOCK_ID_CHARS = 60
+
+
+def block_id(heading_text: str) -> str:
+    """Derive a stable, addressable id for a non-``§`` heading.
+
+    Whole swathes of the corpus live under headings that carry no ``§``
+    at all: the takst tables of takstforskriften sit under ``### Takster
+    fra 1. juli 2026``, and the European Convention on Human Rights is
+    rendered into menneskerettsloven as ``### Art 1. Obligation to
+    respect human rights``. Roughly 40% of corpus text sits outside any
+    ``§``, and none of it could be addressed or embedded, because the
+    parsers treated such a heading purely as a boundary and dropped the
+    lines that followed.
+
+    Returns an empty string for a heading with no slug-able characters,
+    which the callers treat as a plain boundary — the old behaviour.
+    """
+    slug = _NON_SLUG_CHAR.sub("-", heading_text.lower()).strip("-")
+    if not slug:
+        return ""
+    return BLOCK_ID_PREFIX + slug[:_MAX_BLOCK_ID_CHARS].rstrip("-")
+
+
+def is_block_id(section_id: str) -> bool:
+    """True when ``section_id`` names a content block, not a ``§`` section."""
+    return section_id.startswith(BLOCK_ID_PREFIX)
+
+
 def canonical_section_id(section_id: str) -> str:
     """Fold a section id to the form used as a lookup key.
 

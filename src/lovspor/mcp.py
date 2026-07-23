@@ -73,7 +73,14 @@ from lovspor.embeddings import (
     read_embeddings,
 )
 from lovspor.errors import ConfigError, LovsporError
-from lovspor.headings import ANY_HEADING, SECTION_HEADING, canonical_section_id
+from lovspor.headings import (
+    ANY_HEADING,
+    BLOCK_ID_PREFIX,
+    SECTION_HEADING,
+    block_id,
+    canonical_section_id,
+    is_block_id,
+)
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
@@ -502,10 +509,9 @@ class CorpusReader:
         by_id = _sections_by_id(_parse_sections(body))
         matches = by_id.get(section_id)
         if not matches:
-            available = ", ".join(f"§ {sid}" for sid in sorted(by_id, key=_natural_section_key))
             raise CorpusNotFoundError(
                 f"section {section_id!r} not found in {slug!r}; "
-                f"available: {available or '(no sections in this act)'}",
+                f"available: {_available_ids_message(by_id)}",
             )
         section = _select_occurrence(slug, section_id, matches, occurrence)
         # The act's own section-id set is a free by-product of the
@@ -567,6 +573,10 @@ class CorpusReader:
                 "occurrence": section["occurrence"],
                 "heading": section["heading"],
                 "parent_chapter": section["parent_chapter"],
+                # "block" entries are addressable content that is not a § of
+                # the act (a takst table, a vedlegg, a convention article).
+                # Flagged so a caller never cites one as a paragraph of law.
+                "kind": "block" if is_block_id(section["section_id"]) else "section",
             }
             for section in sections
         ]
@@ -1263,7 +1273,14 @@ class CorpusReader:
             "score": hit.score,
             "title": record.title if record is not None else None,
             "dataset": subdir,
-            "citation_hint": f"§ {hit.section_id} {hit.slug}",
+            # A block is not a §; emitting "§ #takster-fra-1-juli-2026" as a
+            # paste-ready citation would manufacture a paragraph of law that
+            # does not exist.
+            "citation_hint": (
+                f"{hit.slug} > {hit.section_id.removeprefix(BLOCK_ID_PREFIX)}"
+                if is_block_id(hit.section_id)
+                else f"§ {hit.section_id} {hit.slug}"
+            ),
             "heading": section["heading"] if section is not None else None,
             "snippet": _lead_snippet(section["body"]) if section is not None else None,
             "last_changed": record.last_changed if record is not None else None,
@@ -1891,15 +1908,50 @@ def _parse_sections(body: str) -> list[ParsedSection]:
             current_data = None
             current_chapter = chapter.group(1)
             continue
-        if ANY_HEADING.match(line):
+        block = ANY_HEADING.match(line)
+        if block:
+            # An H3-H6 heading without a ``§`` opens a content BLOCK rather than
+            # merely closing the previous section. Treating it as a pure
+            # boundary is what made ~40% of corpus text unaddressable: the
+            # takst tables, the ECHR articles inside menneskerettsloven, every
+            # vedlegg. The lines belong to something; this names it.
             _close()
-            current_id = None
-            current_data = None
+            block_heading = line[block.end() :].strip()
+            current_id = block_id(block_heading) or None
+            current_data = (
+                None
+                if current_id is None
+                else {
+                    "heading": block_heading,
+                    "parent_chapter": current_chapter,
+                    "body_lines": [],
+                }
+            )
             continue
         if current_data is not None:
             current_data["body_lines"].append(line)
     _close()
     return sections
+
+
+def _available_ids_message(by_id: dict[str, list[ParsedSection]]) -> str:
+    """Render the recovery list for a failed section lookup.
+
+    Enumerates ``§`` ids, and only counts content blocks. An act like
+    takstforskriften has a handful of ``§`` and dozens of blocks, so
+    listing both inline would bury the thing the caller asked for. The
+    count still has to be there: this message is what an AI reads as the
+    act's inventory, and silently omitting a whole category of
+    addressable content is how it concludes something is not in the
+    corpus when it is.
+    """
+    sections = sorted((sid for sid in by_id if not is_block_id(sid)), key=_natural_section_key)
+    blocks = sum(1 for sid in by_id if is_block_id(sid))
+    listed = ", ".join(f"§ {sid}" for sid in sections)
+    if blocks:
+        suffix = f"{blocks} non-§ content block(s) — call list_sections to see them"
+        return f"{listed}; {suffix}" if listed else suffix
+    return listed or "(no sections in this act)"
 
 
 def _sections_by_id(sections: list[ParsedSection]) -> dict[str, list[ParsedSection]]:

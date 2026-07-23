@@ -58,7 +58,11 @@ def test_iter_sections_extracts_section_heading_and_body() -> None:
     ]
 
 
-def test_iter_sections_closes_current_section_on_non_section_heading() -> None:
+def test_iter_sections_opens_a_block_on_a_non_section_heading() -> None:
+    """A non-§ heading names addressable content; it is not just a boundary.
+    Discarding what followed it left ~40% of corpus text with no vector at
+    all — the takst tables, every vedlegg, the ECHR articles rendered into
+    menneskerettsloven."""
     body = "\n".join(
         [
             "### § 1. Første",
@@ -78,6 +82,10 @@ def test_iter_sections_closes_current_section_on_non_section_heading() -> None:
         EmbeddingSection(
             section_id="1",
             text="### § 1. Første\nTekst som skal beholdes.",
+        ),
+        EmbeddingSection(
+            section_id="#merknad",
+            text="### Merknad\nTekst som ikke hører til noen paragraf.",
         ),
         EmbeddingSection(section_id="2", text="### § 2. Andre\nNy paragraf."),
     ]
@@ -134,11 +142,12 @@ def test_iter_sections_h2_chapter_still_closes_section() -> None:
     assert iter_sections(body) == [EmbeddingSection(section_id="1", text="## § 1. A\nTekst.")]
 
 
-def test_iter_sections_h3_non_section_heading_closes_without_opening() -> None:
+def test_iter_sections_h3_non_section_heading_opens_a_block() -> None:
     body = "### § 1. A\nTekst.\n### Merknad\nIgnorert.\n### § 2. B\nMer."
 
     assert iter_sections(body) == [
         EmbeddingSection(section_id="1", text="### § 1. A\nTekst."),
+        EmbeddingSection(section_id="#merknad", text="### Merknad\nIgnorert."),
         EmbeddingSection(section_id="2", text="### § 2. B\nMer."),
     ]
 
@@ -195,7 +204,9 @@ def test_embedding_and_mcp_splitters_agree_on_section_heading_matrix(line: str) 
     mcp_sections = parse_mcp_sections(f"{line}\n\nBody.\n")
 
     if embedding_match is None:
-        assert mcp_sections == []
+        # Both parsers must agree on what is NOT a § — a non-§ heading becomes
+        # a content block in both, or neither.
+        assert all(s["section_id"].startswith("#") for s in mcp_sections)
     else:
         assert {s["section_id"] for s in mcp_sections} == {embedding_match.group(1)}
 
@@ -220,7 +231,13 @@ def test_iter_sections_continues_after_non_section_heading() -> None:
         ],
     )
 
-    assert [section.section_id for section in iter_sections(body)] == ["1", "2", "3"]
+    assert [section.section_id for section in iter_sections(body)] == [
+        "1",
+        "#merknad",
+        "2",
+        "#annet",
+        "3",
+    ]
 
 
 def test_embedding_section_is_immutable() -> None:
