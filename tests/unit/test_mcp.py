@@ -511,6 +511,21 @@ def test_get_law_unknown_slug_without_near_miss_omits_suggestions(tmp_path: Path
     assert "search_laws" in message
 
 
+def test_citation_suggestion_hint_pins_its_exact_wording(tmp_path: Path) -> None:
+    # The near-miss hint is the AI's one-step recovery from a colloquial slug;
+    # its wording is a contract, not decoration. Substring tests let the phrase
+    # around "did you mean" mutate freely (5 survivors) — pin it whole.
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven-sktl", title="Skatteloven")})
+    reader = CorpusReader(tmp_path)
+
+    assert reader._citation_suggestion_hint("skatteloven") == (
+        "; did you mean skatteloven-sktl? Use search_laws for canonical slugs"
+    )
+    # No near miss -> empty string, so token-less citations keep their pinned
+    # exact-reason error intact.
+    assert reader._citation_suggestion_hint("zzz-qqq-vvv") == ""
+
+
 def test_validate_citation_unmatched_slug_suggests_canonical_form(tmp_path: Path) -> None:
     _seed_corpus(
         tmp_path,
@@ -1643,9 +1658,15 @@ def test_semantic_search_no_embedding_files_uses_bootstrap_message(
         reader.semantic_search("query")
 
     message = str(exc_info.value)
-    assert "no embeddings found in corpus" in message
-    assert "populate per-document .bin files" in message
-    assert "older model" not in message
+    # Pin the operator remediation whole: a substring check passes against a
+    # message mutated around the fragment it searches for (mutants 399-401,
+    # 442-444). This is the instruction that gets embeddings turned on.
+    assert message == (
+        "no embeddings found in corpus; run 'lovspor sync' with OPENAI_API_KEY "
+        "set to populate per-document .bin files, then 'git pull' in the "
+        "corpus to refresh."
+    )
+    assert "older model" not in message  # the stale-bin branch must not fire
     assert reader._stale_bin_count == 0
 
 
@@ -5910,11 +5931,27 @@ def test_no_strong_match_notice_states_what_the_corpus_does_not_cover() -> None:
     """An empty result invites "there is no such rule". The corpus cannot
     support that claim: the fees a GP is paid for a sykmelding are set by
     L-takster in a NAV rundskriv under folketrygdloven § 21-4 — binding, in
-    force, and in no dataset this server ingests."""
-    notice = _no_strong_match_notice(0.25, 0.11)
+    force, and in no dataset this server ingests.
 
-    assert "rundskriv" in notice
-    assert "an empty result is not evidence that no such rule exists" in notice
+    Pinned whole, not by substring: the wording is a safety instruction, and a
+    substring check stays green against a message mutated around the fragment
+    (mutants 7 in this function). The scope-note tail is asserted here via the
+    constant and pinned to a literal in
+    ``test_corpus_scope_note_is_pinned_verbatim``.
+    """
+    assert _no_strong_match_notice(0.25, 0.11) == (
+        "no sections scored >= 0.25 for this query (best candidate scored 0.11). "
+        "The corpus has no strong match — do NOT cite a law from memory. "
+        "Tell the user no strong match was found, or retry with different "
+        "wording, use search_body for exact keywords, or lower min_score. " + CORPUS_SCOPE_NOTE
+    )
+    # The best-is-None branch has its own phrasing that must stay pinned too.
+    assert _no_strong_match_notice(0.30, None) == (
+        "no sections scored >= 0.30 for this query (no candidates were scored). "
+        "The corpus has no strong match — do NOT cite a law from memory. "
+        "Tell the user no strong match was found, or retry with different "
+        "wording, use search_body for exact keywords, or lower min_score. " + CORPUS_SCOPE_NOTE
+    )
 
 
 def test_corpus_status_reports_scope_alongside_freshness(tmp_path: Path) -> None:
@@ -5926,6 +5963,20 @@ def test_corpus_status_reports_scope_alongside_freshness(tmp_path: Path) -> None
 
     assert status["scope"] == CORPUS_SCOPE_NOTE
     assert status["notice"] != status["scope"]
+
+
+def test_corpus_scope_note_is_pinned_verbatim() -> None:
+    # The scope note is the anti-hallucination disclaimer on every empty
+    # result. Asserting a runtime value == CORPUS_SCOPE_NOTE cannot catch a
+    # mutation of the constant (both sides move together, so mutants 14-18
+    # survive); pin it against an independent literal.
+    assert CORPUS_SCOPE_NOTE == (
+        "Corpus scope: acts (lover) and central regulations (forskrifter) from "
+        "Lovdata's public data. It does NOT contain agency circulars "
+        "(NAV/Helsedirektoratet rundskriv), Trygderetten or court decisions, "
+        "forarbeider, or municipal regulations. A rule can be binding and absent "
+        "here — an empty result is not evidence that no such rule exists."
+    )
 
 
 def test_prose_heading_becomes_a_block_not_a_fabricated_section() -> None:
