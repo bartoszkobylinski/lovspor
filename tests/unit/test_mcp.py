@@ -46,6 +46,7 @@ from lovspor.mcp import (
     _MCP_EMBED_MAX_RETRIES,
     _MCP_EMBED_TIMEOUT_SECONDS,
     _SECTION_HEADING,
+    _TABLE_ROW_SNIPPET_CHARS,
     CorpusAmbiguousSectionError,
     CorpusNotFoundError,
     CorpusReader,
@@ -5699,3 +5700,35 @@ def test_get_section_marks_a_reference_unverifiable_on_an_unparsable_heading(
     section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
 
     assert section["cross_references"][0]["valid"] is None
+
+
+def test_snippet_returns_the_whole_row_when_the_match_is_inside_a_table() -> None:
+    """The takstforskriften failure: `jobbmestring` matched the description
+    column of the 2j row and the 50-char window stopped 550 characters before
+    the fee. A hit that carries none of the payload reads as coverage and
+    prompts no follow-up call."""
+    body = (
+        "# Forskrift\n\n"
+        "| 2j | Helserelatert samtale om arbeid og jobbmestring for pasient "
+        "som ikke blir sykmeldt. Ugyldig takstkombinasjon, 1, 2ak, 2ck, 2e | 50,- | 50,- |\n"
+    )
+    snippet = _snippet(body, body.index("jobbmestring"), len("jobbmestring"))
+
+    assert snippet.startswith("| 2j |")
+    assert "50,-" in snippet
+
+
+def test_snippet_keeps_the_windowed_form_outside_tables() -> None:
+    body = "x" * 200 + "NEEDLE" + "y" * 200
+    snippet = _snippet(body, 200, len("NEEDLE"))
+
+    assert snippet.startswith("...")
+    assert snippet.endswith("...")
+    assert len(snippet) < 120
+
+
+def test_snippet_caps_a_pathologically_long_table_row() -> None:
+    body = "| kode | " + "z" * 5000 + " NEEDLE |\n"
+    snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
+
+    assert len(snippet) == _TABLE_ROW_SNIPPET_CHARS

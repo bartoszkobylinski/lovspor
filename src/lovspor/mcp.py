@@ -138,6 +138,15 @@ returned snippet. 50 chars on each side + match length ~= 100-130 chars
 total, which fits a single AI message line and gives enough context
 to judge relevance without overwhelming the response."""
 
+_TABLE_ROW_SNIPPET_CHARS = 1200
+"""Cap on a whole-table-row snippet.
+
+Generous, because the value a caller is after usually sits in the last
+column and truncating before it recreates the exact failure this
+branch exists to fix. Bounded all the same: the corpus contains rows
+of several thousand characters (takst rows listing every valid
+combination code), and a handful of those would swamp a result set."""
+
 _SEMANTIC_MIN_SCORE_DEFAULT = 0.25
 """Default similarity floor for ``semantic_search``.
 
@@ -2139,6 +2148,15 @@ def _no_strong_match_notice(min_score: float, best: float | None) -> str:
     )
 
 
+def _table_row_bounds(body: str, match_idx: int) -> tuple[int, int] | None:
+    """Bounds of the Markdown table row containing ``match_idx``, if any."""
+    start = body.rfind("\n", 0, match_idx) + 1
+    if not body.startswith("|", start):
+        return None
+    end = body.find("\n", match_idx)
+    return start, len(body) if end < 0 else end
+
+
 def _snippet(body: str, match_idx: int, match_len: int) -> str:
     """Extract a ``~100`` char window around ``match_idx`` in ``body``.
 
@@ -2146,7 +2164,21 @@ def _snippet(body: str, match_idx: int, match_len: int) -> str:
     the snippet renders as a single readable line in the AI's response.
     Adds leading ``...`` if not at the start, trailing ``...`` if not
     at the end, so the AI can see the snippet is a fragment.
+
+    A match inside a Markdown table row returns the WHOLE row instead.
+    In a table the queried term is in one column and the answer is in
+    another — searching takstforskriften for ``jobbmestring`` matched
+    the description column of the ``2j`` row and cut off 550 characters
+    before the fee. The hit was real, the snippet carried none of the
+    payload, and a hit that looks like coverage while withholding the
+    answer is worse than a miss: nothing prompts a follow-up call.
+    Table rows are the one place in the corpus where a fixed character
+    window is systematically the wrong unit.
     """
+    row = _table_row_bounds(body, match_idx)
+    if row is not None:
+        start, end = row
+        return " ".join(body[start:end].split())[:_TABLE_ROW_SNIPPET_CHARS]
     start = max(0, match_idx - _SNIPPET_CONTEXT_CHARS)
     end = min(len(body), match_idx + match_len + _SNIPPET_CONTEXT_CHARS)
     snippet = " ".join(body[start:end].split())
