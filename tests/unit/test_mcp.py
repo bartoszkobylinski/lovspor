@@ -842,6 +842,35 @@ def test_search_laws_substring_matches_slug(tmp_path: Path) -> None:
     assert [r["slug"] for r in rows] == ["skatteloven"]
 
 
+def test_search_laws_row_pins_the_full_response_contract(tmp_path: Path) -> None:
+    # The tool row is _record_summary output; pin the whole dict at the tool
+    # boundary so a renamed field is a hard failure, not a survivor. Every
+    # value is deterministic (no snippet), so this is a clean exact-dict.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(
+                slug="skatteloven",
+                title="Skatteloven",
+                last_changed="2026-04-27",
+                total_changes=3,
+            ),
+        },
+        write_files=False,
+    )
+    rows = CorpusReader(tmp_path).search_laws("skatte")
+    assert rows == [
+        {
+            "slug": "skatteloven",
+            "doc_id": "nl-1",
+            "title": "Skatteloven",
+            "dataset": "lover",
+            "last_changed": "2026-04-27",
+            "total_changes": 3,
+        },
+    ]
+
+
 def test_search_laws_substring_matches_title(tmp_path: Path) -> None:
     _seed_corpus(
         tmp_path,
@@ -937,6 +966,29 @@ def test_search_body_finds_substring_in_body_text(tmp_path: Path) -> None:
     assert rows[0]["slug"] == "skatteloven"
     assert rows[0]["match_count"] == 1
     assert "boligkjøp" in rows[0]["snippet"].lower()
+
+
+def test_search_body_row_pins_the_full_response_contract(tmp_path: Path) -> None:
+    # The row key set is an API contract every MCP consumer depends on:
+    # renaming a field breaks them all while the field-level tests above stay
+    # green (the mutants that rename doc_id / title / dataset survived exactly
+    # because no test asserted the whole row). Pin it as an exact dict.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "§ 1. Skattefradrag for boligkjøp."},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+    assert rows == [
+        {
+            "slug": "skatteloven",
+            "doc_id": "nl-1",
+            "title": "Skatteloven",
+            "dataset": "lover",
+            "match_count": 1,
+            "snippet": "§ 1. Skattefradrag for boligkjøp.",
+        },
+    ]
 
 
 def test_search_body_returns_match_count_for_repeated_substring(tmp_path: Path) -> None:
