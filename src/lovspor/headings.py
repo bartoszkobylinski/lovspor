@@ -93,14 +93,17 @@ pattern silently dropped 2 347 headings across 301 documents —
 arbeidsmiljøloven's whole kapittel 2 A (varsling) and folketrygdloven
 § 8-7 a (sykefraværsoppfølging) among them.
 
-The title group is OPTIONAL because Lovdata's source XML sometimes
-ships a ``legalArticleValue`` with no accompanying ``title`` field,
-and the separating dot is optional and independent of it: chaptered
-titleless sections render bare (``### § 5``), flat titleless ones carry
-a dangling dot (``## § 14.``), and byggeforskrift-for-longyearbyen
-separates id from title with nothing but a space (``### § 2 Plan og
-bygningslovens anvendelse``). The ``\\.?(?:\\s+(.+?))?`` shape matches
-all of them, plus ``§ 13. (Opphevet)``."""
+The title is OPTIONAL because Lovdata's source XML sometimes ships a
+``legalArticleValue`` with no accompanying ``title`` field: chaptered
+titleless sections render bare (``### § 5``) and flat titleless ones
+carry a dangling dot (``## § 14.``).
+
+When a title is present it arrives through one of the two branches of
+:data:`_TITLE` — after a dot, where anything may follow (``§ 13.
+(Opphevet)``), or after a bare space, where it must begin with a
+capital (``### § 2 Plan og bygningslovens anvendelse``). See that
+constant for why the dotless branch is the constrained one; without the
+constraint it manufactured sections out of prose."""
 
 ANY_HEADING = re.compile(r"^#{2,6} ")
 """Any H2-H6 heading line. A heading that is not a ``§`` section closes
