@@ -47,6 +47,7 @@ from lovspor.mcp import (
     _MCP_EMBED_MAX_RETRIES,
     _MCP_EMBED_TIMEOUT_SECONDS,
     _SECTION_HEADING,
+    _SNIPPET_CONTEXT_CHARS,
     _TABLE_ROW_SNIPPET_CHARS,
     CORPUS_SCOPE_NOTE,
     CorpusAmbiguousSectionError,
@@ -5681,7 +5682,14 @@ def test_cross_reference_is_unverifiable_when_the_target_index_is_incomplete() -
     )
 
     assert refs[0]["valid"] is None
-    assert "absence here is not evidence of absence" in refs[0]["reason"]
+    # Asserted whole, not by substring. A loose `in` check let mutants 1005/1007
+    # survive: wrapping the message in marker text leaves the searched fragment
+    # intact, so the assertion passed against a corrupted reason.
+    assert refs[0]["reason"] == (
+        "§ 8-9 is not in the parsed section index of 'folketrygdloven', "
+        "and that index is incomplete — the act contains at least one heading "
+        "this parser cannot read, so absence here is not evidence of absence"
+    )
 
 
 def test_cross_reference_is_invalid_when_the_target_index_is_complete() -> None:
@@ -5882,3 +5890,91 @@ def test_grounded_hit_on_an_act_that_left_the_manifest_degrades_to_bare_fields(
     assert hit["occurrence"] is None
     assert hit["ambiguous_section"] is False
     assert hit["last_changed"] is None
+
+
+def test_snippet_returns_the_row_when_a_table_starts_the_document() -> None:
+    """Mutation survivor 947: the row-start scan bounded rfind at index 0. Move
+    that bound and a table opening the body is no longer recognised as a row —
+    the caller silently gets a truncated window instead."""
+    row = "| 2j | " + "x" * 300 + " NEEDLE | 50,- |"
+    body = "\n" + row + "\n"
+
+    snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
+
+    # The row must come back whole. A window would stop ~50 chars either side and
+    # lose the fee — the exact failure the table branch exists to prevent.
+    assert snippet == row
+    assert not snippet.startswith("...")
+
+
+def test_snippet_omits_the_ellipsis_when_the_window_covers_the_whole_body() -> None:
+    """Mutants 961, 970, 972, 975, 976: the `...` markers tell the caller the
+    snippet is a fragment. Nothing pinned the case where it is not one, so the
+    boundary conditions and both else-branches were free to change."""
+    body = "kort tekst NEEDLE her"
+
+    snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
+
+    assert snippet == "kort tekst NEEDLE her"
+    assert not snippet.startswith("...")
+    assert not snippet.endswith("...")
+
+
+def test_snippet_marks_a_fragment_that_starts_one_character_in() -> None:
+    """Mutant 971: `start > 0` and `start > 1` differ only at start == 1."""
+    body = "a" + "b" * _SNIPPET_CONTEXT_CHARS + "NEEDLE" + "c" * 200
+
+    snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
+
+    assert snippet.startswith("...")
+
+
+def test_snippet_collapses_whitespace_with_single_spaces() -> None:
+    """Mutant 967: the join separator was unpinned because the existing window
+    test had no whitespace in it to join."""
+    body = "x" * 200 + "  to   ord NEEDLE fire\nord  " + "y" * 200
+
+    snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
+
+    assert "  " not in snippet.strip(".")
+    assert "to ord NEEDLE fire ord" in snippet
+
+
+def test_grounded_hit_leaves_dataset_blank_when_the_manifest_key_is_unknown(
+    tmp_path: Path,
+) -> None:
+    """Mutants 457/458: the fallback for a manifest record carrying a
+    source_dataset this build does not know — a corpus written by a newer engine.
+    The hit must still ground, with the dataset field empty rather than guessed."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="rar-lov", title="Rar lov", source_dataset="fremtidig-datasett")},
+        body_for={"rar-lov": "### § 1-1. Tittel\n\nTekst.\n"},
+    )
+    reader = CorpusReader(tmp_path)
+
+    hit = reader._grounded_hit(SearchHit(slug="rar-lov", section_id="1-1", score=0.8), {})
+
+    assert hit["dataset"] == ""
+    assert hit["title"] == "Rar lov"
+    assert hit["heading"] == "§ 1-1. Tittel"
+
+
+def test_list_sections_seeds_the_cross_reference_cache_under_the_act_slug(
+    tmp_path: Path,
+) -> None:
+    """Mutants 142/143: list_sections documents the section-id set as "seeded
+    into the cross-reference cache as a free by-product", but nothing checked
+    the key it lands under. Seeded under the wrong key the cache silently never
+    hits — same answers, every act re-parsed, and no test would notice."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": _SAMPLE_BODY_WITH_SECTIONS},
+    )
+    reader = CorpusReader(tmp_path)
+
+    reader.list_sections("skatteloven")
+
+    assert set(reader._section_ids_cache) == {"skatteloven"}
+    assert "1-1" in reader._section_ids_cache["skatteloven"]
