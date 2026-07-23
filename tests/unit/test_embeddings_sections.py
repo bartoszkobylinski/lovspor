@@ -8,6 +8,8 @@ from lovspor.embeddings.sections import (
     iter_sections,
     strip_frontmatter,
 )
+from lovspor.headings import SECTION_HEADING
+from lovspor.mcp import _SECTION_HEADING as MCP_SECTION_HEADING
 from lovspor.mcp import _parse_sections as parse_mcp_sections
 
 
@@ -165,6 +167,15 @@ def test_embedding_section_heading_regex_matches_real_heading_shapes(
 
 def test_embedding_section_heading_regex_does_not_match_chapter_heading() -> None:
     assert _SECTION_HEADING.match("## Kapittel 1.") is None
+
+
+def test_embedding_and_mcp_share_one_heading_grammar_object() -> None:
+    """The two parsers must not merely agree today — they must be incapable of
+    disagreeing. A shape either parser fails to recognize is unreachable by
+    every tool in the server, because the structured accessors and the
+    embedding index are the only two retrieval paths and both start here."""
+    assert _SECTION_HEADING is SECTION_HEADING
+    assert MCP_SECTION_HEADING is SECTION_HEADING
 
 
 @pytest.mark.parametrize(

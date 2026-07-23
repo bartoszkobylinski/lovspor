@@ -3,9 +3,10 @@
 Used at sync time to decide what units to embed. Each ``EmbeddingSection``
 gets one vector. The section parser in ``lovspor.mcp`` (``_parse_sections``)
 serves a different need (it tracks ``parent_chapter`` for the
-``get_section`` tool), so this module keeps a thin separate
-implementation rather than coupling the sync path to the MCP module. Both
-must recognize the same heading shapes or they drift.
+``get_section`` tool), so this module keeps a thin separate walk of the
+body — but the heading grammar itself comes from ``lovspor.headings``,
+shared with the MCP parser. Two copies of that pattern cannot drift
+apart if there is only one.
 
 Chaptered acts render sections at H3 (``### § 5-12.``); flat acts with no
 chapter level render them at H2 (``## § 1.``). Both are matched — an
@@ -24,10 +25,10 @@ and of acts whose ``### §`` headings have no title (matches the
 optional-title regex pattern used elsewhere in the codebase).
 """
 
-import re
 from dataclasses import dataclass
 
-_SECTION_HEADING = re.compile(r"^#{2,3} § ([\d-]+[a-z]?)(?:\.(?:\s+(.+?))?)?\s*$")
+from lovspor.headings import SECTION_HEADING as _SECTION_HEADING
+
 _SUBSECTION_PREFIX = "### "
 _CHAPTER_PREFIX = "## "
 
