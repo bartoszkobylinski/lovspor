@@ -39,6 +39,7 @@ from lovspor.access import (
     write_credential_file,
 )
 from lovspor.embeddings import write_embeddings
+from lovspor.embeddings.search import SearchHit
 from lovspor.errors import ConfigError
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
@@ -5824,3 +5825,60 @@ def test_snippet_treats_a_pipe_line_inside_a_fence_as_a_table_row() -> None:
     snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
 
     assert snippet == "| not really a table NEEDLE |"
+
+
+def test_semantic_search_hit_on_a_block_is_not_offered_as_a_paragraph_citation(
+    tmp_path: Path,
+) -> None:
+    """Mutation survivor 480: nothing pinned the citation_hint for a content
+    block, which is the one field standing between a caller and citing a takst
+    table as a paragraph of law. `§ #takster-fra-1-juli-2026 <slug>` would be a
+    paste-ready citation to a § that does not exist."""
+    body = "## Kapittel II. Takster\n\n### Takster fra 1. juli 2026\n\n| 2j | Samtale | 50 |\n"
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="takstforskriften", title="Takstforskriften")},
+        body_for={"takstforskriften": body},
+    )
+    _write_embedding_file(
+        tmp_path,
+        "lover",
+        "takstforskriften",
+        [("#takster-fra-1-juli-2026", [10, 0, 0])],
+    )
+
+    out = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0])).semantic_search("takst")
+
+    hit = out["results"][0]
+    assert hit["citation_hint"] == "takstforskriften > takster-fra-1-juli-2026"
+    assert "§" not in hit["citation_hint"]
+    assert hit["heading"] == "Takster fra 1. juli 2026"
+
+
+def test_grounded_hit_on_an_act_that_left_the_manifest_degrades_to_bare_fields(
+    tmp_path: Path,
+) -> None:
+    """Mutation survivors 449-454: the fallbacks in _grounded_hit for a hit whose
+    slug no longer resolves — a stale embedding index pointing at an act that has
+    since been repealed and dropped from the manifest.
+
+    Driven directly rather than through semantic_search, because the index only
+    loads .bin files for slugs the manifest still lists: the mismatch is a race
+    between an index load and a corpus refresh, not a state semantic_search can
+    be walked into. The fallbacks exist for that race, and until now nothing
+    pinned what they fall back TO."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="levende-lov", title="Levende lov")})
+    reader = CorpusReader(tmp_path)
+
+    hit = reader._grounded_hit(SearchHit(slug="opphevet-lov", section_id="1-1", score=0.9), {})
+
+    assert hit["slug"] == "opphevet-lov"
+    assert hit["score"] == 0.9
+    assert hit["citation_hint"] == "§ 1-1 opphevet-lov"
+    assert hit["dataset"] == ""
+    assert hit["title"] is None
+    assert hit["heading"] is None
+    assert hit["snippet"] is None
+    assert hit["occurrence"] is None
+    assert hit["ambiguous_section"] is False
+    assert hit["last_changed"] is None
