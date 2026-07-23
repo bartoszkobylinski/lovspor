@@ -73,7 +73,7 @@ from lovspor.embeddings import (
     read_embeddings,
 )
 from lovspor.errors import ConfigError, LovsporError
-from lovspor.headings import SECTION_HEADING
+from lovspor.headings import ANY_HEADING, SECTION_HEADING, canonical_section_id
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
@@ -131,12 +131,6 @@ _CHAPTER_HEADING = re.compile(r"^## (.+?)\s*$")
 """Matches a chapter heading (``## Kapittel N. Title``). Captured for
 the ``parent_chapter`` field returned by ``get_section`` so the AI has
 context for where in the act the section lives."""
-
-_SUBSECTION_HEADING_PREFIX = "### "
-"""Any ``### `` heading that does NOT match _SECTION_HEADING (e.g. a
-plain subsection grouping like ``### Hvem som har skatteplikt``) acts
-as a boundary that closes the current section without starting a new
-one — same boundary semantics as the next ``### §`` or ``## ``."""
 
 _SNIPPET_CONTEXT_CHARS = 50
 """Characters of context on each side of a body-search match in the
@@ -1817,12 +1811,16 @@ def _parse_sections(body: str) -> list[ParsedSection]:
         section = _SECTION_HEADING.match(line)
         if section:
             _close()
-            current_id = section.group(1)
+            written_id = section.group(1)
+            # Key by the canonical id so every spelling of one section resolves
+            # to one entry, but build the display heading from the id AS WRITTEN
+            # — `§ 8-7 a` must not be quoted back to the caller as `§ 8-7a`.
+            current_id = canonical_section_id(written_id)
             section_title = section.group(2)
             heading = (
-                f"§ {current_id}. {section_title}"
+                f"§ {written_id}. {section_title}"
                 if section_title is not None
-                else f"§ {current_id}"
+                else f"§ {written_id}"
             )
             current_data = {
                 "heading": heading,
@@ -1837,7 +1835,7 @@ def _parse_sections(body: str) -> list[ParsedSection]:
             current_data = None
             current_chapter = chapter.group(1)
             continue
-        if line.startswith(_SUBSECTION_HEADING_PREFIX):
+        if ANY_HEADING.match(line):
             _close()
             current_id = None
             current_data = None
@@ -2271,13 +2269,13 @@ def _normalize_section_id(section_id: str) -> str:
 
     ``"§ 5-12"``, ``"§5-12"``, ``"5-12."`` and surrounding whitespace
     all mean ``"5-12"`` — rejecting them costs an error round trip for
-    no information gain. Anything beyond these (chapter words,
-    ``ledd`` qualifiers) is left untouched and fails the section
-    lookup with the available-ids recovery message.
+    no information gain. Spacing and case inside the id are folded too
+    (``"§ 8-7 a"`` and ``"8-7a"`` name one section), which is what makes
+    a caller's citation match the corpus's own link targets. Anything
+    beyond a section id (chapter words, ``ledd`` qualifiers) is left
+    untouched and fails the lookup with the available-ids message.
     """
-    normalized = section_id.strip()
-    normalized = normalized.removeprefix("§").lstrip()
-    return normalized.rstrip(".").strip()
+    return canonical_section_id(section_id)
 
 
 _QUOTE_FOLD_TABLE = str.maketrans(

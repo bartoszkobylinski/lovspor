@@ -27,10 +27,8 @@ optional-title regex pattern used elsewhere in the codebase).
 
 from dataclasses import dataclass
 
+from lovspor.headings import ANY_HEADING, canonical_section_id
 from lovspor.headings import SECTION_HEADING as _SECTION_HEADING
-
-_SUBSECTION_PREFIX = "### "
-_CHAPTER_PREFIX = "## "
 
 
 @dataclass(frozen=True)
@@ -70,10 +68,13 @@ def iter_sections(body: str) -> list[EmbeddingSection]:
         match = _SECTION_HEADING.match(line)
         if match:
             _flush()
-            current_id = match.group(1)
+            # Canonical, so an embedding row keys by the same id get_section
+            # resolves — a hit that cannot be looked up is a hit that cannot
+            # be grounded in real corpus text.
+            current_id = canonical_section_id(match.group(1))
             current_lines = [line]
             continue
-        if line.startswith(_SUBSECTION_PREFIX) or line.startswith(_CHAPTER_PREFIX):
+        if ANY_HEADING.match(line):
             _flush()
             current_id = None
             current_lines = []
