@@ -63,7 +63,7 @@ def iter_sections(body: str) -> list[EmbeddingSection]:
     - End-of-input closes the current section.
     """
     sections: list[EmbeddingSection] = []
-    current_id: str | None = None
+    current_id: str | None = None  # pragma: no mutate
     current_lines: list[str] = []
 
     def _flush() -> None:

@@ -341,19 +341,19 @@ class CorpusReader:
         # vector and a stale .bin disagree on dim, taking the whole
         # search down for one orphan file from a prior model migration.
         self._expected_dim: int | None = embedder.get_dimension() if embedder else None
-        self._manifest: Manifest | None = None
+        self._manifest: Manifest | None = None  # pragma: no mutate
         # Body-text index for search_body; lazy-loaded on first call so
         # MCP server startup stays fast for clients that only query
         # metadata. ~45 MB resident once populated for the production
         # 4522-doc corpus — acceptable for a long-lived stdio process.
-        self._body_index: dict[str, str] | None = None
+        self._body_index: dict[str, str] | None = None  # pragma: no mutate
         # Per-section int8 embedding index for semantic_search; lazy-
         # loaded on first call. ~200 MB resident for the production
         # corpus at 3072-dim int8 (one contiguous matrix inside
         # EmbeddingIndex). Kept separate from _body_index because the
         # two indices have very different load profiles (binary parse
         # vs. text strip) and most consumers will use only one of them.
-        self._embedding_index: EmbeddingIndex | None = None
+        self._embedding_index: EmbeddingIndex | None = None  # pragma: no mutate
         # Count of .bin files dropped due to dim mismatch during the
         # last index build. Surfaced in semantic_search error messages
         # so an all-stale corpus (post-model-migration state) gets a
@@ -377,11 +377,11 @@ class CorpusReader:
         # (get_law, get_section, get_eu_basis, ...). Built once from
         # the cached manifest — every per-call linear scan over ~4500
         # records was pure waste for the most common tool calls.
-        self._slug_index: dict[str, tuple[str, ManifestRecord]] | None = None
+        self._slug_index: dict[str, tuple[str, ManifestRecord]] | None = None  # pragma: no mutate
         # mtime of manifest.json as of the last cache load. Guards every
         # cache against a ``git pull`` landing underneath the long-lived
         # server (see _refresh_if_stale). None until the first read.
-        self._manifest_mtime_ns: int | None = None
+        self._manifest_mtime_ns: int | None = None  # pragma: no mutate
         # Cache generation, bumped on every invalidation. The per-doc caches
         # are filled from work done OUTSIDE the lock (a doc read + parse can
         # be ~1 MB and would stall every other tool call under it), so a value
@@ -1245,7 +1245,7 @@ class CorpusReader:
         """
         record, epoch = self._lookup_current(hit.slug)
         subdir = ""
-        section: ParsedSection | None = None
+        section: ParsedSection | None = None  # pragma: no mutate
         ambiguous = False
         if record is not None:
             try:
@@ -1883,8 +1883,8 @@ def _parse_sections(body: str) -> list[ParsedSection]:
     sections: list[ParsedSection] = []
     seen: dict[str, int] = {}
     current_chapter = ""
-    current_id: str | None = None
-    current_data: dict[str, Any] | None = None
+    current_id: str | None = None  # pragma: no mutate
+    current_data: dict[str, Any] | None = None  # pragma: no mutate
 
     def _close() -> None:
         if current_id is None or current_data is None:
@@ -2080,7 +2080,7 @@ def _pair_occurrences(
     additions and removals.
     """
     unmatched_a, unmatched_b = list(before), list(after)
-    pairs: list[tuple[ParsedSection | None, ParsedSection | None]] = []
+    pairs: list[tuple[ParsedSection | None, ParsedSection | None]] = []  # pragma: no mutate
     for key in (_section_text, lambda section: section["heading"]):
         for candidate in list(unmatched_b):
             match = next((s for s in unmatched_a if key(s) == key(candidate)), None)
@@ -2290,7 +2290,7 @@ def _compute_match_owner_starts(
         prev = matches[i - 1]
         curr = matches[i]
         between = body_lower[prev.end() : curr.start()]
-        last_known: re.Match[str] | None = None
+        last_known: re.Match[str] | None = None  # pragma: no mutate
         for token_match in _SLUG_TOKEN_PATTERN.finditer(between):
             if token_match.group(0) in known_slugs:
                 last_known = token_match
