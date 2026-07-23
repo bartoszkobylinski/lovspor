@@ -80,6 +80,7 @@ from lovspor.headings import (
     block_id,
     canonical_section_id,
     is_block_id,
+    parse_section_heading,
 )
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
@@ -1903,15 +1904,14 @@ def _parse_sections(body: str) -> list[ParsedSection]:
         # Section check MUST precede the chapter check: a flat act's ``## § 1.``
         # heading also matches _CHAPTER_HEADING (any ``## ...``), so testing the
         # section pattern first is what stops it being misread as a chapter.
-        section = _SECTION_HEADING.match(line)
+        section = parse_section_heading(line)
         if section:
             _close()
-            written_id = section.group(1)
+            written_id, section_title = section
             # Key by the canonical id so every spelling of one section resolves
             # to one entry, but build the display heading from the id AS WRITTEN
             # — `§ 8-7 a` must not be quoted back to the caller as `§ 8-7a`.
             current_id = canonical_section_id(written_id)
-            section_title = section.group(2)
             heading = (
                 f"§ {written_id}. {section_title}"
                 if section_title is not None

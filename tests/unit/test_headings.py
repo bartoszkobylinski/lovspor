@@ -10,9 +10,12 @@ can return.
 import pytest
 
 from lovspor.headings import (
+    _MAX_BLOCK_ID_CHARS,
     SECTION_HEADING,
     SECTION_ID,
+    block_id,
     canonical_section_id,
+    parse_section_heading,
     raw_section_id,
 )
 
@@ -69,11 +72,7 @@ def test_section_heading_matches_real_corpus_shapes(
     section_id: str,
     title: str | None,
 ) -> None:
-    match = SECTION_HEADING.match(line)
-
-    assert match is not None
-    assert match.group(1) == section_id
-    assert match.group(2) == title
+    assert parse_section_heading(line) == (section_id, title)
 
 
 @pytest.mark.parametrize(
@@ -119,6 +118,9 @@ def test_raw_section_id_returns_none_for_non_section() -> None:
         ("2a-1", "2a-1"),
         ("2A-1", "2a-1"),
         ("§ 2 A-1", "2a-1"),
+        # a trailing letter is part of the id, not punctuation to strip
+        ("5-12X", "5-12x"),
+        ("20-7CA", "20-7ca"),
     ],
 )
 def test_canonical_section_id_folds_every_spelling_to_one_key(
@@ -150,3 +152,87 @@ def test_section_id_fullmatch_rejects_legal_prose(prose: str) -> None:
 @pytest.mark.parametrize("real_id", ["5", "5-12", "8-7 a", "2 A-1", "35 a", "10-4-1"])
 def test_section_id_fullmatch_accepts_real_ids(real_id: str) -> None:
     assert SECTION_ID.fullmatch(real_id) is not None
+
+
+@pytest.mark.parametrize(
+    "prose_heading",
+    [
+        "### § 5 og andre bestemmelser",
+        "### § 12 i skatteloven",
+        "### § 5 og § 7 oppheves",
+        "### § 3 jf. tidligere bestemmelser",
+    ],
+)
+def test_section_heading_does_not_manufacture_a_section_from_prose(prose_heading: str) -> None:
+    """Codex review of PR #144. Admitting a title after a bare space — needed for
+    the seven real headings like `### § 2 Plan og bygningslovens anvendelse` —
+    also matched running prose: `### § 5 og andre bestemmelser` parsed as a real
+    § 5 titled "og andre bestemmelser", and `### § 12 i skatteloven` as a § "12 i"
+    that exists in no act.
+
+    A fabricated section is strictly worse than a missed one. It hides the content
+    block that heading actually names, and it makes a citation to a paragraph
+    nobody wrote validate as real."""
+    assert parse_section_heading(prose_heading) is None
+    assert SECTION_HEADING.match(prose_heading) is None
+
+
+def test_a_dotless_title_must_be_capitalised_but_a_dotted_one_need_not_be() -> None:
+    """The discriminator, stated once. Every one of the seven corpus headings that
+    needs the dotless form is capitalised, because Norwegian legal titles are;
+    a continuation word in a reference is not. After a dot, the dot is itself the
+    evidence and anything may follow."""
+    assert parse_section_heading("### § 5 Formål") == ("5", "Formål")
+    assert parse_section_heading("### § 5 formål") is None
+    assert parse_section_heading("### § 5. formål") == ("5", "formål")
+
+
+@pytest.mark.parametrize(
+    ("heading_text", "expected"),
+    [
+        ("Takster fra 1. juli 2026", "#takster-fra-1-juli-2026"),
+        ("a" * _MAX_BLOCK_ID_CHARS, "#" + "a" * _MAX_BLOCK_ID_CHARS),
+        # the 61st character is dropped, the 60th is not
+        ("a" * _MAX_BLOCK_ID_CHARS + "b", "#" + "a" * _MAX_BLOCK_ID_CHARS),
+        ("a" * (_MAX_BLOCK_ID_CHARS - 1) + "b", "#" + "a" * (_MAX_BLOCK_ID_CHARS - 1) + "b"),
+        # truncation landing on a separator must not leave a trailing hyphen
+        ("a" * (_MAX_BLOCK_ID_CHARS - 1) + " bcd", "#" + "a" * (_MAX_BLOCK_ID_CHARS - 1)),
+    ],
+)
+def test_block_id_truncates_without_leaving_a_dangling_separator(
+    heading_text: str,
+    expected: str,
+) -> None:
+    assert block_id(heading_text) == expected
+
+
+@pytest.mark.parametrize("unsluggable", ["", "   ", "///", "— —", "###"])
+def test_block_id_is_empty_when_the_heading_has_nothing_to_slug(unsluggable: str) -> None:
+    """Callers read the empty string as "no block": the heading stays a plain
+    boundary, which is the pre-block behaviour."""
+    assert block_id(unsluggable) == ""
+
+
+@pytest.mark.parametrize(
+    ("candidate", "matches"),
+    [
+        ("5-12X", True),
+        ("20-7ca", True),
+        ("8.1.2", True),
+        ("5-12-", False),
+        ("-5", False),
+        ("5..1", False),
+        ("x-1", False),
+    ],
+)
+def test_section_id_fullmatch_boundaries(candidate: str, matches: bool) -> None:
+    assert (SECTION_ID.fullmatch(candidate) is not None) is matches
+
+
+def test_block_id_cap_is_sixty_characters() -> None:
+    """Pinned as a literal, not via the constant. Every other test here refers
+    to _MAX_BLOCK_ID_CHARS symbolically, so re-pointing the constant moves the
+    assertion with it and the boundary goes unguarded — mutmut mutant 3844
+    (60 -> 61) survived the symbolic tests for exactly that reason."""
+    assert _MAX_BLOCK_ID_CHARS == 60
+    assert len(block_id("a" * 200)) == 61  # "#" + 60

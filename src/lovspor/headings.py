@@ -55,9 +55,27 @@ anchors the whole line — so the ambiguity never arises. A future
 unanchored use (scanning body prose for references) would need a
 different, stricter pattern."""
 
-SECTION_HEADING = re.compile(
-    rf"^#{{2,6}} § ({SECTION_ID.pattern})\.?(?:\s+(.+?))?\s*$",
-)
+_TITLE = r"(?:\.(?:\s+(.+?))?|\s+([A-ZÆØÅÄÖÜ].+?))?"
+"""The title, reachable two ways, and the asymmetry between them is the point.
+
+After a dot, anything goes — the dot is itself the evidence that what
+follows is a title (``§ 13. (Opphevet)``).
+
+Without a dot, the title must start with a capital. Seven headings in
+the corpus need the dotless form (``### § 2 Plan og bygningslovens
+anvendelse``, ``## § 21.1 Straff``) and every one of them is
+capitalised, because Norwegian legal titles are. Allowing a lowercase
+word there instead manufactures sections out of ordinary prose:
+``### § 5 og andre bestemmelser`` parsed as a real § 5 titled "og andre
+bestemmelser", and ``### § 12 i skatteloven`` as a § "12 i" that exists
+in no act. A fabricated section is worse than a missed one — it hides
+the real content block, and it validates citations to a paragraph that
+was never written.
+
+A future Lovdata shape that breaks the capitalisation assumption is not
+silent: corpus_audit reports it as an unparsed heading."""
+
+SECTION_HEADING = re.compile(rf"^#{{2,6}} § ({SECTION_ID.pattern}){_TITLE}\s*$")
 """Matches a section heading produced by the lovspor renderer, capturing
 the raw section id and the optional title.
 
@@ -92,10 +110,24 @@ the section being accumulated, so prose under a ``### Merknad`` or
 _INTERNAL_WHITESPACE = re.compile(r"\s+")
 
 
+def parse_section_heading(heading_line: str) -> tuple[str, str | None] | None:
+    """Split a section heading into ``(id as written, title or None)``.
+
+    The title arrives in one of two capture groups depending on whether a
+    dot separated it — see :data:`_TITLE`. Callers should use this rather
+    than reading groups off the match, so the two-branch shape stays an
+    implementation detail of this module.
+    """
+    match = SECTION_HEADING.match(heading_line)
+    if match is None:
+        return None
+    return match.group(1), match.group(2) or match.group(3)
+
+
 def raw_section_id(heading_line: str) -> str | None:
     """Return the section id exactly as written, or ``None`` if not a section."""
-    match = SECTION_HEADING.match(heading_line)
-    return match.group(1) if match else None
+    parsed = parse_section_heading(heading_line)
+    return parsed[0] if parsed else None
 
 
 BLOCK_ID_PREFIX = "#"
@@ -124,6 +156,12 @@ def block_id(heading_text: str) -> str:
 
     Returns an empty string for a heading with no slug-able characters,
     which the callers treat as a plain boundary — the old behaviour.
+
+    Note for mutation runs: the two ``strip("-")`` calls below yield
+    equivalent mutants under mutmut's character-set mutation. The input
+    has already been lowercased and filtered to ``[a-z0-9æøåäöü-]``, so
+    the extra uppercase characters mutmut adds to the strip set cannot
+    occur and no input distinguishes the programs. Not a coverage gap.
     """
     slug = _NON_SLUG_CHAR.sub("-", heading_text.lower()).strip("-")
     if not slug:

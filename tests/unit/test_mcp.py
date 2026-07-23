@@ -5770,3 +5770,57 @@ def test_corpus_status_reports_scope_alongside_freshness(tmp_path: Path) -> None
 
     assert status["scope"] == CORPUS_SCOPE_NOTE
     assert status["notice"] != status["scope"]
+
+
+def test_prose_heading_becomes_a_block_not_a_fabricated_section() -> None:
+    """Codex review of PR #144. The false positive had two victims: it invented a
+    § 5 that no act contains, and it swallowed the content block that heading
+    actually names. Both halves are asserted here."""
+    body = "### § 5 og andre bestemmelser\n\nInnhold under overskriften.\n"
+
+    sections = _parse_sections(body)
+
+    assert [s["section_id"] for s in sections] == ["#5-og-andre-bestemmelser"]
+    assert sections[0]["heading"] == "§ 5 og andre bestemmelser"
+    assert "Innhold under overskriften." in sections[0]["body"]
+
+
+def test_prose_heading_does_not_validate_a_citation_to_a_nonexistent_section(
+    tmp_path: Path,
+) -> None:
+    """The consequence that matters: before the fix, the fabricated § 5 made a
+    reference to a paragraph nobody wrote come back `valid: True`.
+
+    It now comes back `None`, not `False`, and that is the two guards composing
+    correctly rather than a weaker result. `### § 5 og andre bestemmelser` still
+    LOOKS like a section heading to the completeness check, so this act's index
+    is flagged incomplete and the validator refuses to assert absence either
+    way. Declining to answer is the honest verdict when a §-shaped line in the
+    act cannot be read; only the false claim was ever the bug."""
+    body = (
+        "## Kapittel 1.\n\n### § 1-1. Ekte\n\nSe § 5 for mer.\n\n"
+        "### § 5 og andre bestemmelser\n\nTekst.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="egen-lov", title="Egen lov")},
+        body_for={"egen-lov": body},
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+
+    assert section["cross_references"][0]["target_section_id"] == "5"
+    assert section["cross_references"][0]["valid"] is None
+
+
+def test_snippet_treats_a_pipe_line_inside_a_fence_as_a_table_row() -> None:
+    """Codex flagged this edge case. Pinned rather than handled, with the reason:
+    the corpus contains zero fenced code blocks and the renderer emits none — a
+    line starting with `|` is a table row by construction. Returning the whole
+    line would be a reasonable snippet either way; this test exists so the
+    assumption fails loudly if the renderer ever learns to emit fences."""
+    body = "```\n| not really a table NEEDLE |\n```\n"
+
+    snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
+
+    assert snippet == "| not really a table NEEDLE |"
