@@ -52,6 +52,7 @@ from lovspor.mcp import (
     HttpConfig,
     OpenAIEmbedder,
     ParsedSection,
+    SectionIndex,
     _add_health_routes,
     _bounded_limit,
     _build_embedder,
@@ -5647,3 +5648,54 @@ def test_quota_wrapper_preserves_the_tool_argument_schema(tmp_path: Path) -> Non
             metered._tool_manager.get_tool(name).parameters
             == plain._tool_manager.get_tool(name).parameters
         )
+
+
+def test_cross_reference_is_unverifiable_when_the_target_index_is_incomplete() -> None:
+    """`valid: false` from a lossy index is the worst output this server can
+    produce. Missing data is visible to whoever reads it; a wrong denial reads
+    as verified and gets acted on. 1 585 same-act references were reported
+    invalid that way, against sections present in the file being read."""
+    refs = _extract_cross_references(
+        "Se § 8-9.",
+        "folketrygdloven",
+        {"folketrygdloven"},
+        lambda _slug: SectionIndex(ids={"8-7"}, complete=False),
+    )
+
+    assert refs[0]["valid"] is None
+    assert "absence here is not evidence of absence" in refs[0]["reason"]
+
+
+def test_cross_reference_is_invalid_when_the_target_index_is_complete() -> None:
+    """The degradation is narrow on purpose: a complete index still yields a
+    firm `false`, or the field would stop carrying information."""
+    refs = _extract_cross_references(
+        "Se § 9-99.",
+        "folketrygdloven",
+        {"folketrygdloven"},
+        lambda _slug: SectionIndex(ids={"8-7"}, complete=True),
+    )
+
+    assert refs[0]["valid"] is False
+    assert refs[0]["reason"] == "§ 9-99 not found in 'folketrygdloven'"
+
+
+def test_get_section_marks_a_reference_unverifiable_on_an_unparsable_heading(
+    tmp_path: Path,
+) -> None:
+    body = (
+        "## Kapittel 1.\n\n"
+        "### § 1-1. Main\n\n"
+        "Se § 1-2 for definisjonen.\n\n"
+        "### § x-1. Uleselig overskrift\n\n"
+        "Target body.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="egen-lov", title="Egen lov")},
+        body_for={"egen-lov": body},
+    )
+
+    section = CorpusReader(tmp_path).get_section("egen-lov", "1-1")
+
+    assert section["cross_references"][0]["valid"] is None

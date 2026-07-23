@@ -53,7 +53,7 @@ import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Self, TypedDict, final
+from typing import Any, NamedTuple, Self, TypedDict, final
 
 import numpy as np
 from mcp.server.auth.middleware.auth_context import get_access_token
@@ -236,6 +236,26 @@ class CorpusAmbiguousSectionError(LovsporError):
     be handed ``Endringer i andre lover`` and quote it as the answer. So the
     caller is told what the options are and must pick one via ``occurrence``.
     """
+
+
+_LOOKS_LIKE_SECTION_HEADING = re.compile(r"^#{2,6} § ")
+"""Looser than :data:`_SECTION_HEADING`, and deliberately so.
+
+A line that looks like a section heading but does not parse means this
+act's section index is incomplete. That fact has to reach the cross-
+reference validator, because "not in the index" and "not in the act"
+are only the same statement when the index is known to be whole."""
+
+
+class SectionIndex(NamedTuple):
+    """An act's section ids, carried together with whether they are all of them.
+
+    Bundled rather than passed as two arguments so a caller cannot take
+    the ids and quietly drop the caveat that comes with them.
+    """
+
+    ids: set[str]
+    complete: bool
 
 
 class ParsedSection(TypedDict):
@@ -491,7 +511,7 @@ class CorpusReader:
                 section["body"],
                 record.slug or "",
                 set(self._load_slug_index()),
-                self._section_ids_for,
+                self._section_index_for,
             )
         return {
             "slug": record.slug,
@@ -1411,6 +1431,33 @@ class CorpusReader:
             if epoch == self._epoch:
                 self._section_ids_cache.setdefault(slug, ids)
 
+    def _section_index_for(self, slug: str) -> SectionIndex:
+        """Section-id set for one act, plus whether that set is complete.
+
+        Completeness is not a detail the caller can shrug off. The whole
+        point of ``valid`` on a cross-reference is to tell an AI whether a
+        citation is real, and a "not found" derived from an index that is
+        known to be missing entries is not evidence of absence — it is the
+        guard against hallucination emitting one.
+        """
+        return SectionIndex(
+            ids=self._section_ids_for(slug),
+            complete=self._section_index_is_complete(slug),
+        )
+
+    def _section_index_is_complete(self, slug: str) -> bool:
+        """True when every §-shaped heading in ``slug`` actually parsed.
+
+        Cheap because the body is already cached by ``_section_ids_for``;
+        this is a second pass over lines that are in memory.
+        """
+        record, epoch = self._lookup_current(slug)
+        body = self._body_for_record(record, epoch) if record is not None else ""
+        return not any(
+            _LOOKS_LIKE_SECTION_HEADING.match(line) and not _SECTION_HEADING.match(line)
+            for line in body.split("\n")
+        )
+
     def _section_ids_for(self, slug: str) -> set[str]:
         """Section-id set for one act, parsed lazily and cached.
 
@@ -2147,11 +2194,44 @@ def _compute_match_owner_starts(
     return owners
 
 
+def _verdict(
+    section_id: str,
+    target_slug: str,
+    index: SectionIndex,
+    *,
+    known: bool,
+) -> tuple[bool | None, str | None]:
+    """Decide whether a reference is valid, invalid, or unverifiable.
+
+    ``None`` is not a third flavour of failure — it is the honest answer
+    when the evidence cannot support either verdict. A cross-reference is
+    reported invalid only when the target act's section index is known to
+    be complete; if the act contains a heading the grammar could not
+    parse, the id may well be in the act and simply absent from the index,
+    and saying ``false`` would be asserting something unproven.
+
+    That distinction is the whole value of the field. Missing data is
+    visible to whoever reads the result; a wrong ``valid: false`` reads as
+    a verified denial and is acted on as one.
+    """
+    if not known:
+        return False, f"slug {target_slug!r} unknown"
+    if section_id in index.ids:
+        return True, None
+    if not index.complete:
+        return None, (
+            f"§ {section_id} is not in the parsed section index of {target_slug!r}, "
+            "and that index is incomplete — the act contains at least one heading "
+            "this parser cannot read, so absence here is not evidence of absence"
+        )
+    return False, f"§ {section_id} not found in {target_slug!r}"
+
+
 def _extract_cross_references(
     body: str,
     current_slug: str,
     known_slugs: set[str],
-    sections_for: Callable[[str], set[str]],
+    section_index: Callable[[str], SectionIndex],
 ) -> list[dict[str, Any]]:
     """Extract validated cross-references from a section body.
 
@@ -2163,9 +2243,9 @@ def _extract_cross_references(
     section set).
 
     ``known_slugs`` is the full set of current manifest slugs (cheap
-    — no body parsing). ``sections_for`` resolves one slug to its
+    — no body parsing). ``section_index`` resolves one slug to its
     section-id set lazily, so only acts actually referenced get
-    parsed.
+    parsed, and carries whether that set is complete.
 
     Output is deduplicated by ``(target_slug, target_section_id)``
     so a section that mentions ``§ 5-12`` three times produces one
@@ -2174,9 +2254,10 @@ def _extract_cross_references(
     Output entries: ``text`` (verbatim ``§ N-M`` substring as it
     appears in the body), ``target_slug`` (resolved act, defaults
     to ``current_slug`` when no other slug appears in the window),
-    ``target_section_id`` (the parsed id), ``valid`` (bool —
-    target section exists in target slug's section set), ``reason``
-    (null when valid; otherwise human-readable).
+    ``target_section_id`` (the parsed id), ``valid`` (``True`` the
+    target section exists, ``False`` it provably does not, ``None``
+    the target act's index is incomplete so neither can be shown),
+    ``reason`` (null when valid; otherwise human-readable).
 
     Limitations (deliberate MVP scope, deferred to a possible
     follow-up):
@@ -2217,15 +2298,9 @@ def _extract_cross_references(
             current_slug,
             known_slugs,
         )
-        target_sections = sections_for(target_slug) if target_slug in known_slugs else set()
-        valid = section_id in target_sections
-        reason: str | None = None
-        if not valid:
-            reason = (
-                f"§ {section_id} not found in {target_slug!r}"
-                if target_slug in known_slugs
-                else f"slug {target_slug!r} unknown"
-            )
+        known = target_slug in known_slugs
+        index = section_index(target_slug) if known else SectionIndex(ids=set(), complete=True)
+        valid, reason = _verdict(section_id, target_slug, index, known=known)
         key = (target_slug, section_id)
         if key not in seen:
             seen[key] = {
@@ -2667,10 +2742,18 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         substring as it appears in the body), ``target_slug``
         (defaults to the current act when no other slug appears in
         the surrounding ~80 chars), ``target_section_id``, ``valid``
-        (true only when the target section exists), and ``reason``
-        (null when valid; otherwise a short explanation). Use this
-        list to decide whether a referenced section is safe to
-        quote without a follow-up ``validate_citation`` call.
+        and ``reason`` (null when valid; otherwise a short
+        explanation). Use this list to decide whether a referenced
+        section is safe to quote without a follow-up
+        ``validate_citation`` call.
+
+        ``valid`` is three-valued, and the third value matters:
+        ``true`` the target section exists, ``false`` it provably does
+        not, ``null`` the target act contains a heading this parser
+        cannot read, so its section index is incomplete and neither
+        verdict is supported. Treat ``null`` as "check it yourself"
+        (``list_sections`` on the target act), never as ``false`` —
+        the reference is more likely real than not.
 
         ``occurrence``: leave this unset. Section ids are almost always
         unique within an act, and the call resolves without it. A handful
