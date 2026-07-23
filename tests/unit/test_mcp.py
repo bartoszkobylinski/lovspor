@@ -985,6 +985,72 @@ def test_search_body_no_matches_returns_empty(tmp_path: Path) -> None:
     assert CorpusReader(tmp_path).search_body("boligkjøp") == []
 
 
+# ---------- tombstone exclusion across the index-building loops ----------
+#
+# A removed act keeps its slug and its file — it is a tombstone, not a deletion —
+# so `status != "current"` is the only thing standing between repealed law and a
+# live-looking answer. Returning superseded law is the worst failure this product
+# can produce, worse than returning nothing. Four loops carry the identical guard
+# (search_body, _find_current_by_slug's slug index, the body index, the embedding
+# index); each mutation-tested guard is exercised here through the surface that
+# consumes it, with the tombstone ordered first so a guard that stops the scan
+# instead of skipping the record also drops the live match that follows.
+
+
+def test_get_law_never_returns_a_removed_but_slugged_record(tmp_path: Path) -> None:
+    # The point-lookup path is the sharpest: a broken filter here does not merely
+    # list the tombstone, it returns the repealed act's full text. The file is on
+    # disk (write_files defaults True), so nothing downstream masks the leak — the
+    # status filter is the whole defense. The existing tombstone test uses
+    # write_files=False, which hides this: the leak then fails at the file read.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone", status="removed"),
+            "nl-2": _record(slug="alive", title="Alive"),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+    with pytest.raises(CorpusNotFoundError, match="no current law"):
+        reader.get_law("gone")
+    # The live record after the tombstone must still resolve — a guard that breaks
+    # the loop instead of skipping the tombstone would swallow it.
+    assert reader.get_law("alive")
+
+
+def test_body_index_excludes_a_removed_but_slugged_record(tmp_path: Path) -> None:
+    # The body index feeds point-lookup grounding, so a tombstone leaking into it
+    # would surface repealed text as the evidence behind a citation. Asserted
+    # against the index directly because search_body's own status filter would
+    # otherwise mask a leak here (it drops the tombstone before the body lookup).
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone", status="removed"),
+            "nl-2": _record(slug="alive", title="Alive"),
+        },
+        body_for={"gone": "opphevet", "alive": "gjeldende"},
+    )
+    index = CorpusReader(tmp_path)._load_body_index()
+    assert "gone" not in index
+    assert "alive" in index
+
+
+def test_search_body_does_not_surface_a_removed_but_slugged_record(tmp_path: Path) -> None:
+    # End-to-end guard on the property itself: repealed law never appears in a
+    # body search, whichever internal filter enforces it.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone", status="removed"),
+            "nl-2": _record(slug="alive", title="Alive"),
+        },
+        body_for={"gone": "opphevet paragraf", "alive": "opphevet paragraf"},
+    )
+    rows = CorpusReader(tmp_path).search_body("opphevet")
+    assert [row["slug"] for row in rows] == ["alive"]
+
+
 def test_search_body_filters_by_dataset(tmp_path: Path) -> None:
     _seed_corpus(
         tmp_path,
@@ -1219,6 +1285,35 @@ def test_semantic_search_returns_grounded_hits_with_metadata(tmp_path: Path) -> 
     # The 0.0-score hit falls below the default min_score and is
     # filtered out — similarity that low is noise, not a candidate.
     assert [row["slug"] for row in rows] == ["husleieloven"]
+
+
+def test_semantic_search_excludes_a_removed_but_slugged_record(tmp_path: Path) -> None:
+    # semantic_search builds its candidate list straight from the on-disk
+    # embedding files, so the status filter is the only guard between a removed
+    # act's embeddings and a live-looking, high-scoring hit. Both records embed
+    # along the query direction, so both would score 1.0 if the tombstone leaked;
+    # correct behavior returns only the current act. The tombstone is ordered
+    # first so a guard that stops the scan also drops the live record behind it.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone", status="removed"),
+            "nl-2": _record(slug="husleieloven", title="Husleieloven"),
+        },
+        body_for={
+            "gone": "### § 1-1. Opphevet\n\nDenne loven er opphevet.\n",
+            "husleieloven": "### § 2-10. Vedlikehold\n\nUtleieren plikter.\n",
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "gone", [("1-1", [10, 0, 0])])
+    _write_embedding_file(tmp_path, "lover", "husleieloven", [("2-10", [10, 0, 0])])
+
+    out = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("noe", min_score=0.0)
+
+    assert [row["slug"] for row in out["results"]] == ["husleieloven"]
 
 
 def test_semantic_search_min_score_zero_returns_all_hits(tmp_path: Path) -> None:
