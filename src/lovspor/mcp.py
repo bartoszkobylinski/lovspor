@@ -145,6 +145,23 @@ returned snippet. 50 chars on each side + match length ~= 100-130 chars
 total, which fits a single AI message line and gives enough context
 to judge relevance without overwhelming the response."""
 
+CORPUS_SCOPE_NOTE = (
+    "Corpus scope: acts (lover) and central regulations (forskrifter) from "
+    "Lovdata's public data. It does NOT contain agency circulars "
+    "(NAV/Helsedirektoratet rundskriv), Trygderetten or court decisions, "
+    "forarbeider, or municipal regulations. A rule can be binding and absent "
+    "here — an empty result is not evidence that no such rule exists."
+)
+"""Scope disclaimer attached to empty results.
+
+An AI that searches a legal corpus, finds nothing, and reports "there is
+no such rule" has made a claim the corpus cannot support. The gap is
+routine rather than exotic: the fees a Norwegian GP is paid for issuing
+a sykmelding are set by L-takster in a NAV rundskriv whose hjemmel is
+folketrygdloven § 21-4 — binding, in force, and outside every dataset
+this server ingests. Saying so costs a sentence; the alternative is a
+confident denial."""
+
 _TABLE_ROW_SNIPPET_CHARS = 1200
 """Cap on a whole-table-row snippet.
 
@@ -1659,6 +1676,11 @@ class CorpusReader:
             "head_commit_subject": git_info["subject"],
             "refresh_command": refresh_command,
             "notice": notice,
+            # Freshness and coverage are different questions, and a caller that
+            # confirms the first often assumes the second. "Current" says the
+            # corpus matches Lovdata today; it says nothing about the rules
+            # Lovdata's public datasets never carried.
+            "scope": CORPUS_SCOPE_NOTE,
         }
 
     def _git_head_info(self) -> dict[str, str | None]:
@@ -2196,7 +2218,8 @@ def _no_strong_match_notice(min_score: float, best: float | None) -> str:
         f"no sections scored >= {min_score:.2f} for this query ({best_part}). "
         f"The corpus has no strong match — do NOT cite a law from memory. "
         f"Tell the user no strong match was found, or retry with different "
-        f"wording, use search_body for exact keywords, or lower min_score."
+        f"wording, use search_body for exact keywords, or lower min_score. "
+        f"{CORPUS_SCOPE_NOTE}"
     )
 
 
@@ -3026,12 +3049,22 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
 
         Substring match, case-insensitive. Returns slug, doc_id,
         title, dataset, ``match_count`` (occurrences across the body),
-        and a ``snippet`` (~100 char context window around the FIRST
-        match). Sorted by match_count descending, then by slug.
+        and a ``snippet``: a ~100 char context window around the FIRST
+        match, or — when the match lands inside a Markdown table — the
+        whole row, because in a table the term you searched for and the
+        value you want sit in different columns. Sorted by match_count
+        descending, then by slug.
 
         ``dataset`` (optional): ``lover`` or ``forskrifter`` (or the
         full Lovdata key) to restrict the scan.
         ``limit``: max results (default 20). Must be non-negative.
+
+        An empty result does not mean the rule does not exist. This
+        corpus is acts and central regulations only — not agency
+        circulars (NAV/Helsedirektoratet rundskriv), court or
+        Trygderetten practice, forarbeider, or municipal regulations.
+        Say what was searched rather than concluding the rule is not
+        there; call ``corpus_status`` for the full scope statement.
 
         Performance note: the body index is loaded lazily on the first
         call (~3-5 s for the production 4522-doc corpus, ~45 MB

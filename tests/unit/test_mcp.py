@@ -47,6 +47,7 @@ from lovspor.mcp import (
     _MCP_EMBED_TIMEOUT_SECONDS,
     _SECTION_HEADING,
     _TABLE_ROW_SNIPPET_CHARS,
+    CORPUS_SCOPE_NOTE,
     CorpusAmbiguousSectionError,
     CorpusNotFoundError,
     CorpusReader,
@@ -60,6 +61,7 @@ from lovspor.mcp import (
     _compute_match_owner_starts,
     _diff_section_maps,
     _extract_cross_references,
+    _no_strong_match_notice,
     _normalize_for_quote_match,
     _offload_to_thread,
     _parse_sections,
@@ -5746,3 +5748,25 @@ def test_snippet_caps_a_pathologically_long_table_row() -> None:
     snippet = _snippet(body, body.index("NEEDLE"), len("NEEDLE"))
 
     assert len(snippet) == _TABLE_ROW_SNIPPET_CHARS
+
+
+def test_no_strong_match_notice_states_what_the_corpus_does_not_cover() -> None:
+    """An empty result invites "there is no such rule". The corpus cannot
+    support that claim: the fees a GP is paid for a sykmelding are set by
+    L-takster in a NAV rundskriv under folketrygdloven § 21-4 — binding, in
+    force, and in no dataset this server ingests."""
+    notice = _no_strong_match_notice(0.25, 0.11)
+
+    assert "rundskriv" in notice
+    assert "an empty result is not evidence that no such rule exists" in notice
+
+
+def test_corpus_status_reports_scope_alongside_freshness(tmp_path: Path) -> None:
+    """Freshness and coverage are different questions, and confirming the first
+    reads as confirming the second."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    status = CorpusReader(tmp_path).corpus_status()
+
+    assert status["scope"] == CORPUS_SCOPE_NOTE
+    assert status["notice"] != status["scope"]
