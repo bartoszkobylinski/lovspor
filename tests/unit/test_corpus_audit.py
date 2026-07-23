@@ -331,3 +331,39 @@ def test_a_finding_with_no_owning_record_carries_no_doc_id(tmp_path: Path) -> No
     )
     [f] = [x for x in tombstoned.findings if x.kind == "tombstoned_but_present"]
     assert f.doc_id == "nl2"
+
+
+def test_flags_a_section_heading_the_grammar_cannot_parse(tmp_path: Path) -> None:
+    """The round trip nobody checked: the renderer writes § headings, two
+    parsers read them back, and a shape neither recognizes disappears with no
+    warning. 2 347 headings were unreachable that way — arbeidsmiljøloven's
+    whole kapittel 2 A among them — and the only symptom was an
+    available-sections list that omitted them while reading as authoritative."""
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "skatteloven.md").write_text(
+        "# Skatteloven\n### § 5-12. Kjent form\n### § ø-1. Ukjent form\n",
+        encoding="utf-8",
+    )
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert _kinds(report.findings) == [("unparsed_section_heading", "lover/skatteloven.md")]
+    assert report.findings[0].detail == "line 3: ### § ø-1. Ukjent form"
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "### § 8-7 a. Oppfølging mv. i regi av Arbeids- og velferdsetaten",
+        "### § 2 A-1. Rett til å varsle om kritikkverdige forhold i virksomheten",
+        "### § 17aa. Forbud mot å tilby lagringskapasitet",
+        "## § 8.1",
+        "### § 2 Plan og bygningslovens anvendelse",
+        "###### § 10-4-1. Beløpsgrense for betaling",
+    ],
+)
+def test_real_corpus_heading_shapes_produce_no_finding(tmp_path: Path, heading: str) -> None:
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "skatteloven.md").write_text(f"# Lov\n{heading}\n", encoding="utf-8")
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert report.findings == ()

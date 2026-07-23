@@ -13,15 +13,25 @@ day one.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from lovspor.headings import SECTION_HEADING
 from lovspor.storage.manifest import Manifest, ManifestRecord
 from lovspor.sync.document_io import dataset_dir
 
 _EMBEDDINGS_SUBDIR = "embeddings"
 _DATASET_SUBDIRS = ("lover", "forskrifter")
+
+_LOOKS_LIKE_SECTION_HEADING = re.compile(r"^#{2,6} § ")
+"""Deliberately looser than :data:`lovspor.headings.SECTION_HEADING`.
+
+The audit compares the two: a line any reader would call a section
+heading, that the real grammar cannot parse, is the finding. Keeping
+this pattern independent is the point — deriving it from the grammar
+under test would make the check vacuous."""
 
 # `history/<slug>.{json,md}` is deliberately NOT audited for orphans, and this is
 # not an oversight. A correct removal deletes the act's Markdown and its embedding
@@ -191,6 +201,39 @@ def _orphan_findings(
     return orphan_docs + orphan_bins
 
 
+def _unparsed_heading_findings(corpus_root: Path) -> list[AuditFinding]:
+    """Flag heading lines the section grammar cannot read.
+
+    The renderer writes section headings and two parsers read them back —
+    ``lovspor.mcp`` for get_section/list_sections and
+    ``lovspor.embeddings.sections`` for the vector index. Nothing compared
+    the two halves of that round trip, so a heading shape the grammar did
+    not know simply vanished: no warning, no partial result, and an
+    available-sections error message that omitted it while reading as
+    authoritative. 2 347 headings were unreachable that way, including
+    arbeidsmiljøloven's entire kapittel 2 A.
+
+    A future Lovdata sync can introduce a new shape the same way. This is
+    the check that turns that into a visible finding on the next audit
+    rather than a silent hole discovered by a user who asked for a section
+    that was there all along.
+    """
+    findings: list[AuditFinding] = []
+    for subdir in _DATASET_SUBDIRS:
+        for path in sorted((corpus_root / subdir).glob("*.md")):
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if not _LOOKS_LIKE_SECTION_HEADING.match(line) or SECTION_HEADING.match(line):
+                    continue
+                findings.append(
+                    AuditFinding(
+                        kind="unparsed_section_heading",
+                        path=_relative(corpus_root, path),
+                        detail=f"line {number}: {line.strip()[:120]}",
+                    ),
+                )
+    return findings
+
+
 def audit_corpus(
     corpus_root: Path,
     manifest: Manifest,
@@ -206,6 +249,7 @@ def audit_corpus(
     on_disk = _markdown_on_disk(corpus_root)
     findings = _document_findings(manifest, on_disk, renderer_version)
     findings += _orphan_findings(corpus_root, manifest, on_disk)
+    findings += _unparsed_heading_findings(corpus_root)
     findings.sort(key=lambda f: (f.kind, f.path))
     return AuditReport(
         corpus_root=str(corpus_root),
