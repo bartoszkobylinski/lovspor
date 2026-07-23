@@ -1,4 +1,5 @@
 import subprocess
+from collections import Counter
 from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 from pathlib import Path
@@ -8,6 +9,8 @@ import pytest
 from pydantic import ValidationError
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings.model import split_to_token_chunks
+from lovspor.embeddings.sections import iter_sections
 from lovspor.embeddings.store import write_embeddings
 from lovspor.errors import ConfigError, CorpusStateError, MassRemovalError
 from lovspor.history import HistoryRecord
@@ -21,12 +24,13 @@ from lovspor.sync.orchestrator import (
     _commit_with_history,
     _DocAction,
     _embedding_is_stale,
-    _embedding_section_count,
     _ensure_corpus_git_repo,
+    _expected_section_id_counts,
     _find_undersized_embeddings,
     _guard_mass_removal,
     _index_tarball,
     _load_or_empty_manifest,
+    _stored_section_id_counts,
     _UpstreamDoc,
     _with_slug,
     _write_one,
@@ -2058,15 +2062,51 @@ def test_find_undersized_embeddings_flags_only_under_embedded_current_docs(
     assert _find_undersized_embeddings(tmp_path, prior) == {"flat"}
 
 
-def test_embedding_section_count_treats_missing_or_corrupt_sidecars_as_zero(
+def test_expected_section_id_counts_counts_one_entry_per_chunk() -> None:
+    short = "## § 1. A\n\nx\n\n## § 2.\n\ny\n"
+    assert _expected_section_id_counts(short) == Counter({"1": 1, "2": 1})
+    long_body = f"## § 1.\n\n{'ord ' * 10000}\n"
+    chunks = split_to_token_chunks(iter_sections(long_body)[0].text)
+    assert len(chunks) > 1
+    assert _expected_section_id_counts(long_body) == Counter({"1": len(chunks)})
+
+
+def test_stored_section_id_counts_treats_missing_or_corrupt_sidecars_as_empty(
     tmp_path: Path,
 ) -> None:
     missing = tmp_path / "missing.bin"
     corrupt = tmp_path / "corrupt.bin"
     corrupt.write_bytes(b"not an embedding file")
 
-    assert _embedding_section_count(missing) == 0
-    assert _embedding_section_count(corrupt) == 0
+    assert _stored_section_id_counts(missing) == Counter()
+    assert _stored_section_id_counts(corrupt) == Counter()
+
+
+def test_stored_section_id_counts_counts_repeated_ids(tmp_path: Path) -> None:
+    # A split section stores several vectors under one id; the multiset must
+    # keep the multiplicity so it can be compared against what the parser expects.
+    _write_bin(tmp_path, "dup", ["1", "1", "2"])
+    dup = orchestrator_module._embeddings_path(tmp_path, "gjeldende-lover", "dup")
+
+    assert _stored_section_id_counts(dup) == Counter({"1": 2, "2": 1})
+
+
+def test_find_undersized_embeddings_ignores_chunk_split_sections(tmp_path: Path) -> None:
+    # A single section longer than the model's input window embeds as several
+    # vectors under one id, so vectors outnumber sections. The old count
+    # comparison flagged that fully-embedded doc for re-embed on every run;
+    # the multiset comparison must leave it alone.
+    body = f"## § 1.\n\n{'ord ' * 10000}\n"
+    _write_md(tmp_path, "long", body)
+    chunks = split_to_token_chunks(iter_sections(body)[0].text)
+    assert len(chunks) > 1  # the fixture must actually exercise the split
+    _write_bin(tmp_path, "long", ["1"] * len(chunks))
+    prior = Manifest(
+        generated_at=datetime(2026, 7, 7, tzinfo=UTC),
+        documents={"long": _embedded_record("long")},
+    )
+
+    assert _find_undersized_embeddings(tmp_path, prior) == set()
 
 
 def test_find_undersized_embeddings_skips_legacy_missing_and_flags_corrupt(
