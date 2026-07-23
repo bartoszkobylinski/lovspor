@@ -24,7 +24,7 @@ uv run lovspor mcp-http        # serve the same tools over MCP Streamable HTTP (
 
 A one-time repair for a corpus whose embeddings were written before a section-parser fix. Flat (chapterless) acts render their sections at H2 (`## § N.`); acts synced before that shape was recognized produced **zero** embedding vectors and are invisible to `semantic_search`, yet carry `embedding_hash == xml_hash` — so the normal Sprint 9 staleness check never re-embeds them.
 
-`repair-embeddings` compares each current doc's stored vector count against the sections the current parser finds, clears `embedding_hash` on any mismatch, and commits the manifest. It does **not** call the OpenAI API itself:
+`repair-embeddings` checks, per section id, whether the stored `.bin` holds a vector for every section the current parser finds; it clears `embedding_hash` on any doc missing one and commits the manifest. A section long enough to be split into several chunks stores more vectors than sections and is **not** flagged — the comparison is per-id, not a raw count, so a fully-embedded doc is left alone. It does **not** call the OpenAI API itself:
 
 ```bash
 uv run lovspor repair-embeddings          # flags docs, commits the manifest (no API cost)

@@ -1595,28 +1595,47 @@ def _run_sprint9_embeddings_migration(
     return new_manifest
 
 
-def _embedding_section_count(embed_path: Path) -> int:
-    """Number of vectors stored in a ``.bin`` (0 if absent or unreadable).
+def _expected_section_id_counts(body: str) -> Counter[str]:
+    """Section-id multiset the embedder writes for ``body`` — one entry per
+    chunk, matching ``_write_embeddings_for_doc`` exactly.
 
-    A corrupt sidecar counts as 0 so the caller rebuilds it rather than
-    trusting a file the reader rejects.
+    A section longer than the model's input window is embedded as several
+    vectors under one id, and an act may legitimately repeat an id. So a plain
+    section count cannot tell an over-chunked doc (more vectors than sections)
+    from one genuinely missing a section; a per-id count can.
+    """
+    counts: Counter[str] = Counter()
+    for section in iter_sections(body):
+        for _chunk in split_to_token_chunks(section.text):
+            counts[section.section_id] += 1
+    return counts
+
+
+def _stored_section_id_counts(embed_path: Path) -> Counter[str]:
+    """Section-id multiset stored in a ``.bin`` (empty if absent or corrupt).
+
+    A sidecar the reader rejects counts as empty so the caller rebuilds it
+    rather than trusting a file it cannot parse.
     """
     if not embed_path.exists():
-        return 0
+        return Counter()
     try:
-        return len(read_embeddings(embed_path).sections)
+        stored = read_embeddings(embed_path).sections
     except ValueError:
-        return 0
+        return Counter()
+    return Counter(section_id for section_id, _vector in stored)
 
 
 def _find_undersized_embeddings(repo: Path, prior: Manifest) -> set[str]:
-    """``doc_id``s of current docs whose stored vector count differs from the
-    section count the current parser finds.
+    """``doc_id``s of current docs missing a vector for some section the
+    current parser finds.
 
-    This is the staleness signal that ``embedding_hash`` cannot give: a flat
-    ``## §`` act embedded before the parser fix has ``embedding_hash ==
-    xml_hash`` and a present-but-empty ``.bin``, so ``_embedding_is_stale``
-    reports it fresh. Comparing section counts catches exactly those.
+    The staleness signal ``embedding_hash`` cannot give: a flat ``## §`` act
+    embedded before the parser fix has ``embedding_hash == xml_hash`` and a
+    present-but-empty ``.bin``, so ``_embedding_is_stale`` reports it fresh.
+    Comparing the per-section-id vector multiset catches exactly those, while
+    a section legitimately split into several chunks (more vectors than
+    sections) is left alone — a plain count comparison flagged it forever.
     """
     undersized: set[str] = set()
     for doc_id, record in prior.documents.items():
@@ -1627,7 +1646,7 @@ def _find_undersized_embeddings(repo: Path, prior: Manifest) -> set[str]:
             continue
         body = strip_frontmatter(markdown_path.read_text(encoding="utf-8"))
         embed_path = _embeddings_path(repo, record.source_dataset, record.slug)
-        if len(iter_sections(body)) != _embedding_section_count(embed_path):
+        if _expected_section_id_counts(body) - _stored_section_id_counts(embed_path):
             undersized.add(doc_id)
     return undersized
 
