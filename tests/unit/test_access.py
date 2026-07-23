@@ -95,6 +95,41 @@ def test_issued_credential_expiry_is_in_the_future() -> None:
     assert credential.expires_at <= after + timedelta(days=30)
 
 
+def test_issue_credential_numbers_from_beta_001_into_an_empty_store() -> None:
+    # The allocator starts at 1 so the first credential is beta-001. Starting at 2
+    # would silently skip an id — harmless in isolation, but every helper and
+    # fixture hardcodes "beta-001", so a store issued by the real function would no
+    # longer line up with the quota counters keyed by that id.
+    credential, _token = issue_credential([], "first tester", expires_in_days=30)
+
+    assert credential.credential_id == "beta-001"
+
+
+def test_issued_credential_is_not_revoked() -> None:
+    # `revoked` defaults to False: a freshly issued credential must authenticate.
+    # A default of True would mint credentials that are dead on arrival — every
+    # issue immediately rejected by verify_token, with nothing in the issue path
+    # setting the flag back.
+    credential, _token = issue_credential([], "beta tester", expires_in_days=30)
+
+    assert credential.revoked is False
+
+
+def test_issue_credential_skips_taken_ids_and_returns_the_next() -> None:
+    # Issuing into a store that already holds beta-001 must land on beta-002. This
+    # is the only test that runs the allocator's collision loop — the empty-store
+    # case never enters it. A loop that scanned for the id it is *not* sitting on
+    # would return beta-001 again, minting a duplicate credential_id and colliding
+    # the two store indexes (by hash, by id) the design depends on. The taken
+    # credential is built directly rather than issued, so this asserts the
+    # collision cleanly instead of relying on the mutant's runaway loop timing out.
+    taken = _credential(generate_token(), credential_id="beta-001")
+
+    credential, _token = issue_credential([taken], "second", expires_in_days=30)
+
+    assert credential.credential_id == "beta-002"
+
+
 def test_hash_token_is_stable_and_hides_the_token() -> None:
     token = generate_token()
 
