@@ -2918,7 +2918,13 @@ def test_verify_quote_rejects_text_from_different_section(tmp_path: Path) -> Non
     )
 
     assert result["verified"] is False
-    assert "quote not found" in result["reason"]
+    assert result["reason"] == (
+        "quote not found in § 1-1 of 'skatteloven' after case, "
+        "whitespace and typographic-punctuation normalization. The quote "
+        "may be from a different section, paraphrased rather than "
+        "verbatim, or hallucinated. "
+        "Call get_section('skatteloven', '1-1') to read the actual text."
+    )
 
 
 def test_verify_quote_empty_quote_returns_false(tmp_path: Path) -> None:
