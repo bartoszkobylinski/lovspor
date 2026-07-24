@@ -1301,8 +1301,16 @@ def test_search_body_ignores_frontmatter_and_title_heading(tmp_path: Path) -> No
 def test_semantic_search_requires_embedder(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
 
-    with pytest.raises(CorpusNotFoundError, match="OPENAI_API_KEY"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         CorpusReader(tmp_path).semantic_search("bolig")
+
+    # Pin the availability message whole — a substring match let mutations to any
+    # fragment survive (Theme 1: this operator guidance wording is load-bearing).
+    assert str(excinfo.value) == (
+        "semantic_search is unavailable: OPENAI_API_KEY was not set "
+        "at MCP server startup. Set the environment variable and "
+        "restart the server."
+    )
 
 
 def test_semantic_search_returns_grounded_hits_with_metadata(tmp_path: Path) -> None:
@@ -1528,7 +1536,11 @@ def test_semantic_search_does_not_call_embedder_when_dataset_filter_has_no_hits(
     )
 
     assert out["results"] == []
-    assert "forskrifter" in (out["notice"] or "")
+    # Pin the no-embeddings notice whole, not by the dataset substring (Theme 1).
+    assert out["notice"] == (
+        "no embedded sections available in dataset 'forskrifter'; "
+        "embeddings may not be backfilled for it yet."
+    )
     assert embedder.queries == []
 
 
@@ -2955,7 +2967,14 @@ def test_verify_quote_not_found_row_pins_the_full_response_contract(tmp_path: Pa
     assert result["verified"] is False
     assert result["slug"] == "skatteloven"
     assert result["section_id"] == "1-1"
-    assert "quote not found" in result["reason"]
+    # Pin the anti-hallucination reason whole, not by substring (Theme 1).
+    assert result["reason"] == (
+        "quote not found in § 1-1 of 'skatteloven' after case, "
+        "whitespace and typographic-punctuation normalization. The quote "
+        "may be from a different section, paraphrased rather than "
+        "verbatim, or hallucinated. "
+        "Call get_section('skatteloven', '1-1') to read the actual text."
+    )
 
 
 # ---------- time-machine tools ----------
