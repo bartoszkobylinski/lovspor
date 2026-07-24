@@ -245,8 +245,12 @@ def test_corpus_reader_constructor_and_safe_join_errors_are_specific(tmp_path: P
         {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
     )
     reader = CorpusReader(tmp_path)
-    with pytest.raises(CorpusNotFoundError, match="escapes corpus root"):
+    with pytest.raises(CorpusNotFoundError) as escape_info:
         reader._safe_join("..", "outside.md")
+    # Whole string, not a substring: the path-escape refusal is a security
+    # message and both its wording and the '/' that rebuilds the offending
+    # path are load-bearing.
+    assert str(escape_info.value) == "path '../outside.md' escapes corpus root"
 
 
 def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
@@ -3505,9 +3509,14 @@ def test_corpus_status_flags_pre_sprint_4_manifest_as_schema_stale(
     status = CorpusReader(tmp_path).corpus_status()
     assert status["schema_compatible"] is False
     assert status["is_stale"] is True
-    assert "pre-Sprint-4" in status["notice"]
-    assert "1 of 1" in status["notice"]
-    assert "git -C" in status["notice"]
+    # Pinned whole: this notice is the only signal that every MCP tool is
+    # silently returning empty, so its remediation wording is load-bearing.
+    assert status["notice"] == (
+        "Corpus manifest is on the pre-Sprint-4 schema "
+        "(1 of 1 current documents have no slug field). MCP search/get tools "
+        "cannot operate on this schema. "
+        f"Run: {status['refresh_command']} to refresh."
+    )
 
 
 def test_corpus_status_reports_schema_compatible_for_modern_manifest(
@@ -3619,8 +3628,12 @@ def test_corpus_status_clamps_negative_age_for_future_dated_manifest(
     status = CorpusReader(tmp_path).corpus_status()
     assert status["manifest_age_days"] == 0
     assert status["is_stale"] is False
-    assert "future" in status["notice"]
-    assert "clock-skew" in status["notice"]
+    # Pinned whole: "Treating as fresh" is the part that stops the AI reading a
+    # future-dated manifest as a tooling bug — it must survive verbatim.
+    assert status["notice"] == (
+        f"Corpus manifest is dated in the future ({status['manifest_generated_at']}); "
+        "likely a clock-skew issue on your machine. Treating as fresh."
+    )
 
 
 def test_corpus_status_excludes_tombstones_from_total(tmp_path: Path) -> None:
@@ -4254,8 +4267,11 @@ def test_get_eu_basis_unknown_slug_raises(tmp_path: Path) -> None:
         tmp_path,
         {"nl-1": _record(slug="known", title="Known", eu_basis=[])},
     )
-    with pytest.raises(CorpusNotFoundError, match="no current law with slug 'ghost'"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         CorpusReader(tmp_path).get_eu_basis("ghost")
+    assert str(excinfo.value) == (
+        "no current law with slug 'ghost'; use search_laws or list_recent_changes to discover slugs"
+    )
 
 
 def test_get_eu_basis_pre_sprint8_record_raises_corpus_stale(tmp_path: Path) -> None:
@@ -4266,8 +4282,14 @@ def test_get_eu_basis_pre_sprint8_record_raises_corpus_stale(tmp_path: Path) -> 
         tmp_path,
         {"nl-1": _record(slug="legacy", title="Legacy", eu_basis=None)},
     )
-    with pytest.raises(CorpusNotFoundError, match="corpus predates Sprint 8 PR-D"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         CorpusReader(tmp_path).get_eu_basis("legacy")
+    # Pinned whole: this is a "do not treat empty as absence" remediation,
+    # the same class of message as the other anti-hallucination notices.
+    assert str(excinfo.value) == (
+        "eu_basis is unknown for 'legacy'; corpus predates Sprint 8 PR-D. "
+        "Run 'git pull' in the corpus to refresh."
+    )
 
 
 def test_get_eu_basis_skips_tombstone(tmp_path: Path) -> None:
@@ -5314,11 +5336,45 @@ def test_get_section_refuses_to_guess_on_an_ambiguous_id(tmp_path: Path) -> None
     reader = CorpusReader(tmp_path)
     with pytest.raises(CorpusAmbiguousSectionError) as excinfo:
         reader.get_section("betalingssystemloven", "6-2")
-    message = str(excinfo.value)
-    assert "6-2" in message
-    assert "Forskrifter" in message
-    assert "Endringer i andre lover" in message
-    assert "occurrence" in message
+    # Pinned whole: this message is the recovery path — it must name BOTH
+    # occurrences with their chapter, or the AI cannot re-ask correctly and is
+    # left to guess which § 6-2 it was shown.
+    assert str(excinfo.value) == (
+        "section '6-2' is ambiguous in 'betalingssystemloven': 2 sections "
+        "share that id — "
+        "occurrence=1: § 6-2. Forskrifter [Kapittel 6. Øvrige bestemmelser]; "
+        "occurrence=2: § 6-2. Endringer i andre lover [Kapittel 6. Øvrige bestemmelser]. "
+        "Re-call with occurrence=N to choose one."
+    )
+
+
+def test_ambiguity_message_omits_the_chapter_when_the_sections_have_none(
+    tmp_path: Path,
+) -> None:
+    """Duplicate ids in an act with no chapter headings: each candidate is
+    listed bare, with no empty ``[]`` bracket. The chapter suffix is the only
+    part of the recovery message that is conditional, and nothing exercised its
+    absent-chapter branch — so a mutation there could not be caught."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="chapterless", title="Chapterless")},
+        body_for={
+            "chapterless": (
+                "### § 6-2. Forskrifter\n\nKongen kan gi forskrifter.\n\n"
+                "### § 6-2. Endringer i andre lover\n\nFra den tid loven trer i kraft.\n"
+            ),
+        },
+    )
+
+    with pytest.raises(CorpusAmbiguousSectionError) as excinfo:
+        CorpusReader(tmp_path).get_section("chapterless", "6-2")
+
+    assert str(excinfo.value) == (
+        "section '6-2' is ambiguous in 'chapterless': 2 sections share that id — "
+        "occurrence=1: § 6-2. Forskrifter; "
+        "occurrence=2: § 6-2. Endringer i andre lover. "
+        "Re-call with occurrence=N to choose one."
+    )
 
 
 def test_get_section_returns_the_requested_occurrence(tmp_path: Path) -> None:
@@ -5344,8 +5400,12 @@ def test_get_section_rejects_an_out_of_range_occurrence(tmp_path: Path) -> None:
         body_for={"betalingssystemloven": _DUPLICATE_ID_BODY},
     )
     reader = CorpusReader(tmp_path)
-    with pytest.raises(CorpusNotFoundError, match="occurrence"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         reader.get_section("betalingssystemloven", "6-2", occurrence=3)
+    # The valid range is the whole point of the message — pin it.
+    assert str(excinfo.value) == (
+        "occurrence 3 of section '6-2' not found in 'betalingssystemloven'; it has 2 (valid: 1-2)"
+    )
 
 
 def test_get_section_unique_id_is_unaffected_by_the_occurrence_machinery(
