@@ -2937,6 +2937,27 @@ def test_verify_quote_unknown_section_returns_false_with_reason(tmp_path: Path) 
     assert "section '9-9' not found" in result["reason"]
 
 
+def test_verify_quote_not_found_row_pins_the_full_response_contract(tmp_path: Path) -> None:
+    # The "quote not found after normalization" return is verify_quote's core
+    # anti-hallucination path, and its key set is an API contract: renaming
+    # "slug" or "section_id" here breaks every consumer while the logic tests
+    # (verified / reason) stay green — those key-rename mutants survived exactly
+    # because no test asserted the whole row. Pin the exact key set.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "## Kapittel 1.\n\n### § 1-1. Virkeområde\n\nRiktig tekst.\n"},
+    )
+
+    result = CorpusReader(tmp_path).verify_quote("skatteloven", "1-1", "Hallusinert sitat.")
+
+    assert set(result) == {"verified", "slug", "section_id", "reason"}
+    assert result["verified"] is False
+    assert result["slug"] == "skatteloven"
+    assert result["section_id"] == "1-1"
+    assert "quote not found" in result["reason"]
+
+
 # ---------- time-machine tools ----------
 
 
@@ -3389,6 +3410,30 @@ def test_corpus_status_handles_non_git_corpus_gracefully(tmp_path: Path) -> None
     # Other fields still populated.
     assert status["total_current_documents"] == 1
     assert status["refresh_command"]
+
+
+def test_corpus_status_row_pins_the_full_response_contract(tmp_path: Path) -> None:
+    # Every field corpus_status returns is an API contract for AI consumers, but
+    # the field-level tests only read a subset — so renaming an unread key (e.g.
+    # manifest_generated_at) survived every test. Pin the exact key set; git
+    # fields are present-and-None on a non-git corpus, which is all we need here.
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+
+    status = CorpusReader(tmp_path).corpus_status()
+
+    assert set(status) == {
+        "manifest_generated_at",
+        "manifest_age_days",
+        "is_stale",
+        "schema_compatible",
+        "total_current_documents",
+        "head_commit",
+        "head_commit_date",
+        "head_commit_subject",
+        "refresh_command",
+        "notice",
+        "scope",
+    }
 
 
 def test_corpus_status_refresh_command_quotes_path_with_spaces(tmp_path: Path) -> None:
@@ -5329,6 +5374,38 @@ def test_diff_section_maps_diffs_each_occurrence_of_a_duplicate_id() -> None:
     assert entry["occurrence"] == 1
     assert entry["heading"] == "§ 6-2. Forskrifter"
     assert "+Ny forskriftshjemmel." in entry["unified_diff"]
+
+
+def test_diff_section_maps_reports_occurrence_of_the_changed_second_duplicate() -> None:
+    """A change to the SECOND § 6-2 must report occurrence=2, not a constant 1.
+    Pins the ``source is not None`` guard on the occurrence field: collapsing it
+    makes every entry claim occurrence 1, silently mislabelling which duplicate
+    of a repeated section-id was rewritten. Also pins the entry's key set."""
+    before = [
+        ParsedSection(
+            section_id="6-2",
+            occurrence=1,
+            heading="§ 6-2. Forskrifter",
+            parent_chapter="Kapittel 6.",
+            body="Uendret.",
+        ),
+        ParsedSection(
+            section_id="6-2",
+            occurrence=2,
+            heading="§ 6-2. Endringer i andre lover",
+            parent_chapter="Kapittel 6.",
+            body="Gammel tekst.",
+        ),
+    ]
+    after = [before[0], {**before[1], "body": "Ny tekst."}]
+
+    result = _diff_section_maps(before, after)  # type: ignore[arg-type]
+
+    assert set(result) == {"summary", "sections"}
+    [entry] = result["sections"]
+    assert entry["change_type"] == "changed"
+    assert entry["occurrence"] == 2
+    assert set(entry) == {"section_id", "occurrence", "heading", "change_type", "unified_diff"}
 
 
 def test_diff_section_maps_does_not_misclassify_the_survivor_when_a_duplicate_id_disappears() -> (
