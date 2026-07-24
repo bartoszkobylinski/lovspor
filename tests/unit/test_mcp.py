@@ -5401,6 +5401,7 @@ def test_diff_section_maps_reports_occurrence_of_the_changed_second_duplicate() 
 
     result = _diff_section_maps(before, after)  # type: ignore[arg-type]
 
+    assert set(result) == {"summary", "sections"}
     [entry] = result["sections"]
     assert entry["change_type"] == "changed"
     assert entry["occurrence"] == 2
