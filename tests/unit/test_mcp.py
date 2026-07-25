@@ -1639,7 +1639,91 @@ def test_semantic_search_skips_corrupt_embedding_files(
     ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["good"]
-    assert "skipping corrupt bad.bin" in capsys.readouterr().err
+    # This warning is the only trace that a document was dropped from the index.
+    # Pin the part mcp.py owns exactly — the trailing text is read_embeddings'
+    # exception, and asserting it here would couple this test to that module's
+    # wording for no gain.
+    err = capsys.readouterr().err
+    assert err.startswith("semantic_search: skipping corrupt bad.bin: ")
+    assert err.endswith("\n")
+    assert str(bad_path) in err
+
+
+def test_semantic_search_flushes_the_corrupt_file_warning(tmp_path: Path) -> None:
+    """Same reasoning as the _build_embedder warning: print(..., flush=True)
+    calls the stream's own flush(), so a flush=False regression is observable
+    without a subprocess."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="bad", title="Bad")})
+    bad_path = tmp_path / "lover" / "embeddings" / "bad.bin"
+    bad_path.parent.mkdir(parents=True, exist_ok=True)
+    bad_path.write_bytes(b"not an embedding file")
+    stderr = _FlushSpy()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(mcp_module.sys, "stderr", stderr)
+        CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))._load_embedding_index()
+
+    assert stderr.flush_calls == 1
+
+
+def test_semantic_search_flushes_the_dimension_mismatch_warning(tmp_path: Path) -> None:
+    """The second warning in the same loop, for the same reason."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="legacy", title="Legacy")})
+    _write_embedding_file(tmp_path, "lover", "legacy", [("1", [1, 2])])
+    stderr = _FlushSpy()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(mcp_module.sys, "stderr", stderr)
+        CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))._load_embedding_index()
+
+    assert stderr.flush_calls == 1
+
+
+def test_embedding_index_skips_one_unresolvable_record_and_keeps_the_rest(
+    tmp_path: Path,
+) -> None:
+    """A record whose source_dataset is unknown must be SKIPPED, not abort the
+    whole index build. `continue` -> `break` there would silently drop every
+    later document — the opposite of the documented "one bad file cannot block
+    semantic_search across the rest of the corpus"."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="unresolvable", title="U", source_dataset="totally-unknown"),
+            "nl-2": _record(slug="good", title="Good"),
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "good", [("1", [10, 0, 0])])
+
+    rows = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("query")["results"]
+
+    assert [r["slug"] for r in rows] == ["good"]
+
+
+def test_embedding_index_skips_one_escaping_record_and_keeps_the_rest(
+    tmp_path: Path,
+) -> None:
+    """Same invariant for a slug whose .bin path escapes the corpus root. The
+    slug needs enough '..' segments to leave the root — '../escape' resolves
+    back inside it and never reaches this branch."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="../../../escape", title="E"),
+            "nl-2": _record(slug="good", title="Good"),
+        },
+    )
+    _write_embedding_file(tmp_path, "lover", "good", [("1", [10, 0, 0])])
+
+    rows = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("query")["results"]
+
+    assert [r["slug"] for r in rows] == ["good"]
 
 
 def test_semantic_search_skips_embedding_files_with_wrong_dimension(
