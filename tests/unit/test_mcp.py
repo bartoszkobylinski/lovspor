@@ -554,8 +554,13 @@ def test_get_law_skips_tombstoned_records(tmp_path: Path) -> None:
         {"nl-1": _record(slug="gone", title="Gone", status="removed")},
         write_files=False,
     )
-    with pytest.raises(CorpusNotFoundError, match="no current law"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         CorpusReader(tmp_path).get_law("gone")
+    # Whole string: the recovery routes are the point of this error, and with no
+    # near-miss slug the "did you mean" hint must be absent entirely.
+    assert str(excinfo.value) == (
+        "no current law with slug 'gone'; use search_laws or list_recent_changes to discover slugs"
+    )
 
 
 def test_get_law_raises_when_manifest_references_missing_file(tmp_path: Path) -> None:
@@ -637,8 +642,35 @@ def test_get_law_history_raises_when_history_file_missing(tmp_path: Path) -> Non
 
 def test_get_law_history_raises_for_unknown_slug(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
-    with pytest.raises(CorpusNotFoundError, match="no current law"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         CorpusReader(tmp_path).get_law_history("missing")
+    assert str(excinfo.value) == (
+        "no current law with slug 'missing'; "
+        "use search_laws or list_recent_changes to discover slugs"
+    )
+
+
+def test_unknown_slug_error_offers_near_miss_suggestions(tmp_path: Path) -> None:
+    """The 'did you mean' hint is the affordance that lets an AI recover from a
+    kortform in one step instead of citing from memory. Nothing pinned its
+    wording or the ', ' that separates multiple candidates, so both could be
+    mutated while the suite stayed green."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven", title="Skatteloven"),
+            "nl-2": _record(slug="skatteloven-2", title="Skatteloven 2"),
+        },
+    )
+
+    with pytest.raises(CorpusNotFoundError) as excinfo:
+        CorpusReader(tmp_path).get_law("skatteloven-3")
+
+    assert str(excinfo.value) == (
+        "no current law with slug 'skatteloven-3'; "
+        "did you mean skatteloven-2, skatteloven? "
+        "use search_laws or list_recent_changes to discover slugs"
+    )
 
 
 # ---------- list_recent_changes ----------
@@ -3469,6 +3501,27 @@ def test_corpus_status_row_pins_the_full_response_contract(tmp_path: Path) -> No
         "notice",
         "scope",
     }
+
+
+def test_corpus_status_normalises_a_naive_manifest_timestamp_to_utc(
+    tmp_path: Path,
+) -> None:
+    """A manifest written by an older engine can carry a tz-naive generated_at.
+    It is normalised to UTC before the age arithmetic — without that, subtracting
+    it from an aware now() raises TypeError and corpus_status dies on a corpus
+    that is merely old. No test used a naive timestamp, so the normalisation was
+    unguarded."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        # tz-naive on purpose — that is the condition under test
+        generated_at=datetime(2026, 7, 1, 12, 0, 0),
+    )
+
+    status = CorpusReader(tmp_path).corpus_status()
+
+    assert status["manifest_generated_at"] == "2026-07-01T12:00:00+00:00"
+    assert status["manifest_age_days"] >= 0
 
 
 def test_corpus_status_refresh_command_quotes_path_with_spaces(tmp_path: Path) -> None:
