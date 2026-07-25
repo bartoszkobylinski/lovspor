@@ -2562,7 +2562,11 @@ def _build_embedder() -> EmbeddingModel | None:
             "but the other fourteen tools work normally. Set OPENAI_API_KEY "
             "and restart to enable semantic search.",
             file=sys.stderr,
-            flush=True,
+            # Not strictly equivalent — flush affects when the warning reaches a
+            # block-buffered stderr — but observing that needs a subprocess that
+            # dies mid-write. Deliberately not chased; the message itself is
+            # pinned whole by the tests.
+            flush=True,  # pragma: no mutate
         )
         return None
     return OpenAIEmbedder(
@@ -3333,7 +3337,10 @@ def serve_http(corpus_path: Path, http: HttpConfig) -> None:
             "access: SERVING WITHOUT AUTHENTICATION (--insecure-no-auth). Every "
             "tool is open to anyone who can reach this port. Development only.",
             file=sys.stderr,
-            flush=True,
+            # Same call as in _build_embedder: flush only affects delivery
+            # timing on a block-buffered stderr, which no proportionate test
+            # can observe. The banner text is pinned whole by the tests.
+            flush=True,  # pragma: no mutate
         )
     server = build_server(corpus_path, http=http)
     _add_health_routes(server, corpus_path)
