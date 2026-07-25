@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
@@ -84,6 +85,18 @@ from lovspor.workos_auth import CompositeVerifier
 
 _AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
 _PUBLIC_URL = "https://lovspor.bartoszkobylinski.com/mcp"
+
+
+class _FlushSpy(StringIO):
+    """In-memory stderr that records the observable ``print(..., flush=True)`` call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flush_calls = 0
+
+    def flush(self) -> None:
+        self.flush_calls += 1
+        super().flush()
 
 
 def _record(
@@ -279,6 +292,24 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     monkeypatch.setenv("OPENAI_APIKEY", "sk-compact")
     assert _build_embedder().__class__ is FakeOpenAIEmbedder
     assert created == ["sk-compact"]
+
+
+def test_build_embedder_flushes_the_missing_key_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The warning must reach a block-buffered stderr immediately.
+
+    This needs no subprocess: ``print(..., flush=True)`` calls the stream's
+    observable ``flush`` method. A ``flush=False`` mutant must fail here.
+    """
+    stderr = _FlushSpy()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_APIKEY", raising=False)
+    monkeypatch.setattr(mcp_module.sys, "stderr", stderr)
+
+    assert _build_embedder() is None
+
+    assert stderr.flush_calls == 1
 
 
 def test_build_embedder_uses_tight_interactive_timeout_budget(
@@ -554,8 +585,13 @@ def test_get_law_skips_tombstoned_records(tmp_path: Path) -> None:
         {"nl-1": _record(slug="gone", title="Gone", status="removed")},
         write_files=False,
     )
-    with pytest.raises(CorpusNotFoundError, match="no current law"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         CorpusReader(tmp_path).get_law("gone")
+    # Whole string: the recovery routes are the point of this error, and with no
+    # near-miss slug the "did you mean" hint must be absent entirely.
+    assert str(excinfo.value) == (
+        "no current law with slug 'gone'; use search_laws or list_recent_changes to discover slugs"
+    )
 
 
 def test_get_law_raises_when_manifest_references_missing_file(tmp_path: Path) -> None:
@@ -637,8 +673,35 @@ def test_get_law_history_raises_when_history_file_missing(tmp_path: Path) -> Non
 
 def test_get_law_history_raises_for_unknown_slug(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
-    with pytest.raises(CorpusNotFoundError, match="no current law"):
+    with pytest.raises(CorpusNotFoundError) as excinfo:
         CorpusReader(tmp_path).get_law_history("missing")
+    assert str(excinfo.value) == (
+        "no current law with slug 'missing'; "
+        "use search_laws or list_recent_changes to discover slugs"
+    )
+
+
+def test_unknown_slug_error_offers_near_miss_suggestions(tmp_path: Path) -> None:
+    """The 'did you mean' hint is the affordance that lets an AI recover from a
+    kortform in one step instead of citing from memory. Nothing pinned its
+    wording or the ', ' that separates multiple candidates, so both could be
+    mutated while the suite stayed green."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven", title="Skatteloven"),
+            "nl-2": _record(slug="skatteloven-2", title="Skatteloven 2"),
+        },
+    )
+
+    with pytest.raises(CorpusNotFoundError) as excinfo:
+        CorpusReader(tmp_path).get_law("skatteloven-3")
+
+    assert str(excinfo.value) == (
+        "no current law with slug 'skatteloven-3'; "
+        "did you mean skatteloven-2, skatteloven? "
+        "use search_laws or list_recent_changes to discover slugs"
+    )
 
 
 # ---------- list_recent_changes ----------
@@ -3471,6 +3534,27 @@ def test_corpus_status_row_pins_the_full_response_contract(tmp_path: Path) -> No
     }
 
 
+def test_corpus_status_normalises_a_naive_manifest_timestamp_to_utc(
+    tmp_path: Path,
+) -> None:
+    """A manifest written by an older engine can carry a tz-naive generated_at.
+    It is normalised to UTC before the age arithmetic — without that, subtracting
+    it from an aware now() raises TypeError and corpus_status dies on a corpus
+    that is merely old. No test used a naive timestamp, so the normalisation was
+    unguarded."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        # tz-naive on purpose — that is the condition under test
+        generated_at=datetime(2026, 7, 1, 12, 0, 0),
+    )
+
+    status = CorpusReader(tmp_path).corpus_status()
+
+    assert status["manifest_generated_at"] == "2026-07-01T12:00:00+00:00"
+    assert status["manifest_age_days"] >= 0
+
+
 def test_corpus_status_refresh_command_quotes_path_with_spaces(tmp_path: Path) -> None:
     """Codex PR-A regression. A corpus path containing spaces would
     otherwise produce 'git -C /tmp/lovverk test pull', which git parses
@@ -4024,9 +4108,10 @@ def test_serve_http_refuses_to_start_without_authentication(tmp_path: Path) -> N
 def test_serve_http_allows_no_auth_only_when_explicitly_asked_and_says_so(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    stderr = _FlushSpy()
     monkeypatch.setattr(mcp_module, "load_env", lambda: None)
+    monkeypatch.setattr(mcp_module.sys, "stderr", stderr)
 
     class _FakeServer:
         def run(self, transport: str) -> None:
@@ -4039,10 +4124,11 @@ def test_serve_http_allows_no_auth_only_when_explicitly_asked_and_says_so(
 
     # Whole string: this banner is the only thing standing between an
     # unauthenticated port and an operator who thinks it is protected.
-    assert capsys.readouterr().err == (
+    assert stderr.getvalue() == (
         "access: SERVING WITHOUT AUTHENTICATION (--insecure-no-auth). Every "
         "tool is open to anyone who can reach this port. Development only.\n"
     )
+    assert stderr.flush_calls == 1
 
 
 def test_http_mode_without_credentials_registers_no_auth(tmp_path: Path) -> None:
