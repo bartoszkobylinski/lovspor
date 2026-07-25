@@ -1679,6 +1679,34 @@ def test_semantic_search_flushes_the_dimension_mismatch_warning(tmp_path: Path) 
     assert stderr.flush_calls == 1
 
 
+def test_embedding_index_skips_a_document_without_embeddings_and_keeps_the_rest(
+    tmp_path: Path,
+) -> None:
+    """A document with no .bin must be skipped, not end the index build.
+
+    This is the highest-traffic version of that invariant: a missing embedding
+    file is the NORMAL state of a partially backfilled corpus, so `continue` ->
+    `break` here would let the first un-embedded document silently truncate the
+    index for every document after it.
+    """
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="not-yet-embedded", title="Not yet"),
+            "nl-2": _record(slug="good", title="Good"),
+        },
+    )
+    # Only the second document gets an embedding file.
+    _write_embedding_file(tmp_path, "lover", "good", [("1", [10, 0, 0])])
+
+    rows = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("query")["results"]
+
+    assert [r["slug"] for r in rows] == ["good"]
+
+
 def test_embedding_index_skips_one_unresolvable_record_and_keeps_the_rest(
     tmp_path: Path,
 ) -> None:
