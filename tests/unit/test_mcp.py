@@ -268,7 +268,13 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     monkeypatch.setattr("lovspor.mcp.OpenAIEmbedder", FakeOpenAIEmbedder)
 
     assert _build_embedder() is None
-    assert "semantic_search will be disabled" in capsys.readouterr().err
+    # Whole string: this is the operator's only signal that one of the fifteen
+    # tools is silently unavailable, and the remediation is the point of it.
+    assert capsys.readouterr().err == (
+        "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
+        "but the other fourteen tools work normally. Set OPENAI_API_KEY "
+        "and restart to enable semantic search.\n"
+    )
 
     monkeypatch.setenv("OPENAI_APIKEY", "sk-compact")
     assert _build_embedder().__class__ is FakeOpenAIEmbedder
@@ -4004,8 +4010,15 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
 def test_serve_http_refuses_to_start_without_authentication(tmp_path: Path) -> None:
     """An unauthenticated server hands the whole tool surface to anyone who can
     reach the port. That must not be one forgotten flag away."""
-    with pytest.raises(ConfigError, match="refusing to serve HTTP without authentication"):
+    with pytest.raises(ConfigError) as excinfo:
         mcp_module.serve_http(tmp_path, HttpConfig())
+    # Whole string: the refusal names both recovery routes, and an operator who
+    # loses either one is pushed toward the insecure flag by omission.
+    assert str(excinfo.value) == (
+        "refusing to serve HTTP without authentication. Issue a credential "
+        "with `lovspor tokens issue --label ...`, or pass --insecure-no-auth "
+        "for a local development run."
+    )
 
 
 def test_serve_http_allows_no_auth_only_when_explicitly_asked_and_says_so(
@@ -4024,7 +4037,12 @@ def test_serve_http_allows_no_auth_only_when_explicitly_asked_and_says_so(
 
     mcp_module.serve_http(tmp_path, HttpConfig(allow_insecure=True))
 
-    assert "SERVING WITHOUT AUTHENTICATION" in capsys.readouterr().err
+    # Whole string: this banner is the only thing standing between an
+    # unauthenticated port and an operator who thinks it is protected.
+    assert capsys.readouterr().err == (
+        "access: SERVING WITHOUT AUTHENTICATION (--insecure-no-auth). Every "
+        "tool is open to anyone who can reach this port. Development only.\n"
+    )
 
 
 def test_http_mode_without_credentials_registers_no_auth(tmp_path: Path) -> None:
@@ -4064,8 +4082,15 @@ def test_http_mode_with_credentials_installs_the_store_as_token_verifier(
 def test_half_configured_hosted_oauth_is_rejected(partial: dict[str, str]) -> None:
     """Half a pair used to boot into the legacy opaque-token mode with discovery
     off and WorkOS JWTs never verified — a broken auth boundary that looks healthy."""
-    with pytest.raises(ConfigError, match="together"):
+    with pytest.raises(ConfigError) as excinfo:
         HttpConfig(credentials_path=Path("creds.json"), **partial)
+    # Whole string: "Pass both ... or neither" is the part that stops an
+    # operator half-fixing this into the broken-but-healthy-looking mode.
+    assert str(excinfo.value) == (
+        "hosted OAuth needs --authkit-domain and --public-url together "
+        "(LOVSPOR_AUTHKIT_DOMAIN / LOVSPOR_PUBLIC_URL). Pass both to enable "
+        "self-service connectors, or neither for opaque-token mode."
+    )
 
 
 def _half_pair_by_assignment() -> HttpConfig:
