@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
@@ -84,6 +85,18 @@ from lovspor.workos_auth import CompositeVerifier
 
 _AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
 _PUBLIC_URL = "https://lovspor.bartoszkobylinski.com/mcp"
+
+
+class _FlushSpy(StringIO):
+    """In-memory stderr that records the observable ``print(..., flush=True)`` call."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flush_calls = 0
+
+    def flush(self) -> None:
+        self.flush_calls += 1
+        super().flush()
 
 
 def _record(
@@ -279,6 +292,24 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     monkeypatch.setenv("OPENAI_APIKEY", "sk-compact")
     assert _build_embedder().__class__ is FakeOpenAIEmbedder
     assert created == ["sk-compact"]
+
+
+def test_build_embedder_flushes_the_missing_key_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The warning must reach a block-buffered stderr immediately.
+
+    This needs no subprocess: ``print(..., flush=True)`` calls the stream's
+    observable ``flush`` method. A ``flush=False`` mutant must fail here.
+    """
+    stderr = _FlushSpy()
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_APIKEY", raising=False)
+    monkeypatch.setattr(mcp_module.sys, "stderr", stderr)
+
+    assert _build_embedder() is None
+
+    assert stderr.flush_calls == 1
 
 
 def test_build_embedder_uses_tight_interactive_timeout_budget(
@@ -4077,9 +4108,10 @@ def test_serve_http_refuses_to_start_without_authentication(tmp_path: Path) -> N
 def test_serve_http_allows_no_auth_only_when_explicitly_asked_and_says_so(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    stderr = _FlushSpy()
     monkeypatch.setattr(mcp_module, "load_env", lambda: None)
+    monkeypatch.setattr(mcp_module.sys, "stderr", stderr)
 
     class _FakeServer:
         def run(self, transport: str) -> None:
@@ -4092,10 +4124,11 @@ def test_serve_http_allows_no_auth_only_when_explicitly_asked_and_says_so(
 
     # Whole string: this banner is the only thing standing between an
     # unauthenticated port and an operator who thinks it is protected.
-    assert capsys.readouterr().err == (
+    assert stderr.getvalue() == (
         "access: SERVING WITHOUT AUTHENTICATION (--insecure-no-auth). Every "
         "tool is open to anyone who can reach this port. Development only.\n"
     )
+    assert stderr.flush_calls == 1
 
 
 def test_http_mode_without_credentials_registers_no_auth(tmp_path: Path) -> None:
