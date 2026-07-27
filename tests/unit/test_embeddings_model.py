@@ -623,3 +623,114 @@ def test_split_to_token_chunks_boundary_backs_up_to_character_edge() -> None:
         # A single character wider than max_tokens is the only allowed
         # overflow; none of these characters is, so the cap holds.
         assert len(encoding.encode(chunk)) <= 20
+
+
+def _tokens_in(request_content: bytes) -> int:
+    encoding = model_module._encoding_for(DEFAULT_MODEL_NAME)
+    return sum(len(encoding.encode(text)) for text in json.loads(request_content)["input"])
+
+
+def test_a_request_stays_under_the_endpoints_total_token_budget() -> None:
+    """The 2026-07-27 sync failure. The endpoint caps the tokens SUMMED over
+    a request's inputs, separately from the per-input limit, and answers 400
+    when the sum is exceeded. Batching by item count could not honour that:
+    kosmetikkforskriften renders to 206 chunks, and the first 128 of them
+    carried 583,824 tokens.
+    """
+    chunk = "ord " * 2000  # ~2,000 tokens each; 128 of them blow the budget
+    count = 200
+    model = OpenAIEmbedder(api_key="sk-test", dim=3)
+
+    batches = list(model._batches([chunk] * count))
+
+    assert sum(len(batch) for batch in batches) == count
+    for batch in batches:
+        assert len(batch) <= model_module._DEFAULT_BATCH_SIZE
+        tokens = sum(len(model._encoding.encode(text)) for text in batch)
+        assert tokens <= model_module._MAX_REQUEST_TOKENS
+
+
+def test_the_token_budget_never_starves_a_batch_of_its_only_input() -> None:
+    """A single input can never exceed the budget — it is truncated to
+    _MAX_INPUT_TOKENS first — but the guard must not spin on one anyway."""
+    model = OpenAIEmbedder(api_key="sk-test", dim=3)
+    huge = "ord " * 3000
+
+    batches = list(model._batches([huge, huge, huge]))
+
+    assert [len(batch) for batch in batches] == [3]
+
+
+def test_batching_still_splits_on_item_count_when_the_budget_is_ample(
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(
+        method="POST",
+        url=OPENAI_EMBEDDINGS_URL,
+        json=_embedding_response([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+    )
+    httpx_mock.add_response(
+        method="POST",
+        url=OPENAI_EMBEDDINGS_URL,
+        json=_embedding_response([[1.0, 0.0, 0.0]]),
+    )
+    model = OpenAIEmbedder(api_key="sk-test", dim=3, batch_size=2)
+
+    model.encode(["a", "b", "c"])
+
+    first, second = httpx_mock.get_requests()
+    assert json.loads(first.content)["input"] == ["a", "b"]
+    assert json.loads(second.content)["input"] == ["c"]
+    assert _tokens_in(first.content) < model_module._MAX_REQUEST_TOKENS
+
+
+def test_a_non_retriable_error_carries_the_apis_own_explanation(
+    httpx_mock: HTTPXMock,
+) -> None:
+    """raise_for_status reports the status line only, so the sync failure
+    surfaced as a bare 400 and the cause had to be reconstructed from the
+    corpus. The body names the limit in one sentence."""
+    httpx_mock.add_response(
+        method="POST",
+        url=OPENAI_EMBEDDINGS_URL,
+        status_code=400,
+        json={"error": {"message": "Requested 583824 tokens, max 300000 tokens per request"}},
+    )
+    model = OpenAIEmbedder(api_key="sk-test", dim=3)
+
+    with pytest.raises(httpx.HTTPStatusError, match="max 300000 tokens per request"):
+        model.encode(["text"])
+
+
+def test_an_exhausted_retry_also_carries_the_apis_explanation(
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(model_module, "_sleep", lambda _seconds: None)
+    for _ in range(3):
+        httpx_mock.add_response(
+            method="POST",
+            url=OPENAI_EMBEDDINGS_URL,
+            status_code=503,
+            json={"error": {"message": "upstream capacity"}},
+        )
+    model = OpenAIEmbedder(api_key="sk-test", dim=3, max_retries=3)
+
+    with pytest.raises(httpx.HTTPStatusError, match="upstream capacity"):
+        model.encode(["text"])
+
+
+def test_an_empty_error_body_leaves_the_original_error_untouched(
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(
+        method="POST",
+        url=OPENAI_EMBEDDINGS_URL,
+        status_code=400,
+        content=b"",
+    )
+    model = OpenAIEmbedder(api_key="sk-test", dim=3)
+
+    with pytest.raises(httpx.HTTPStatusError, match="400 Bad Request") as caught:
+        model.encode(["text"])
+    assert "API said" not in str(caught.value)

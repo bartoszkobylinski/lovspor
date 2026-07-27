@@ -27,6 +27,7 @@ core dep for the Lovdata client). The ``openai`` package pulls in
 its own dependency cluster we don't otherwise use.
 """
 
+from collections.abc import Iterator
 from functools import lru_cache
 from typing import Any, Protocol, runtime_checkable
 
@@ -57,6 +58,34 @@ _DEFAULT_BATCH_SIZE = 128
 output. The benchmark proved 256 was too aggressive for 3-large
 on slow OpenAI nodes (60 s timeouts). 128 trades batch count for
 per-request reliability."""
+
+_RETRIABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+_API_MESSAGE_SAMPLE = 500
+"""How much of an error response body to carry into the exception.
+
+``raise_for_status`` reports the status line and nothing else, so the
+2026-07-27 sync failure surfaced as a bare "400 Bad Request" and the
+cause had to be reconstructed from the corpus. The body says which limit
+was hit, in one sentence. Truncated because an API can answer with an
+HTML page, and no secret travels in a response body — the key is only
+ever sent in a request header."""
+
+_MAX_REQUEST_TOKENS = 250_000
+"""Token budget for ONE request, summed across its inputs.
+
+The endpoint rejects a request whose inputs total more than 300,000
+tokens with a 400 — separately from, and regardless of, the 8,191
+per-input limit. Batching by item count alone cannot honour that:
+128 inputs of 8,000 tokens is 1,024,000, and two of the corpus's
+annexes (kosmetikkforskriften, tilsetningsstofforskriften) really do
+reach 206 and 141 chunks, so the first request carried 583,824
+tokens and the whole sync died on it (2026-07-27).
+
+The 50,000-token margin under the documented cap absorbs the known
+disagreement between client-side tiktoken counts and the server's
+own accounting; the price of being wrong is a hard failure mid-sync,
+so the margin is deliberately generous."""
 
 _DEFAULT_TIMEOUT_SECONDS = 180.0
 _DEFAULT_MAX_RETRIES = 3
@@ -191,8 +220,7 @@ class OpenAIEmbedder:
         truncated = [self._truncate_to_tokens(t) for t in texts]
         out: list[list[float]] = []
         with httpx.Client(timeout=self._timeout_seconds) as client:
-            for i in range(0, len(truncated), self._batch_size):
-                batch = truncated[i : i + self._batch_size]
+            for batch in self._batches(truncated):
                 out.extend(self._encode_batch(client, batch))
         arr = np.asarray(out, dtype=np.float32)
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
@@ -201,6 +229,28 @@ class OpenAIEmbedder:
 
     def get_dimension(self) -> int:
         return self._dim
+
+    def _batches(self, texts: list[str]) -> Iterator[list[str]]:
+        """Split ``texts`` into requests bounded by BOTH limits.
+
+        Item count alone is not enough: the endpoint also caps the tokens
+        summed over a request's inputs, and rejects the excess with a 400
+        that no retry can fix. Each input is already truncated to
+        ``_MAX_INPUT_TOKENS``, which is far below the budget, so a single
+        input is never unsendable and the loop always makes progress.
+        """
+        batch: list[str] = []
+        tokens = 0
+        for text in texts:
+            cost = len(self._encoding.encode(text))
+            over_budget = batch and tokens + cost > _MAX_REQUEST_TOKENS
+            if len(batch) == self._batch_size or over_budget:
+                yield batch
+                batch, tokens = [], 0
+            batch.append(text)
+            tokens += cost
+        if batch:
+            yield batch
 
     def _truncate_to_tokens(self, text: str) -> str:
         """Encode, truncate to ``_MAX_INPUT_TOKENS``, decode back.
@@ -258,19 +308,20 @@ class OpenAIEmbedder:
             except httpx.HTTPStatusError as exc:
                 # Rate limits + server errors are retriable; 4xx other
                 # than 429 are not (likely a config or contract bug
-                # the operator should see immediately).
-                if exc.response.status_code in (429, 500, 502, 503, 504):
-                    if attempt == self._max_retries:
-                        raise
-                    wait = 2**attempt
-                    _log_retry(
-                        f"status {exc.response.status_code} "
-                        f"(attempt {attempt}/{self._max_retries}); backoff {wait}s",
-                        exc,
-                    )
-                    _sleep(wait)
-                    continue
-                raise
+                # the operator should see immediately) and are re-raised
+                # carrying the API's own explanation.
+                if exc.response.status_code not in _RETRIABLE_STATUS:
+                    raise _with_api_message(exc) from exc
+                if attempt == self._max_retries:
+                    raise _with_api_message(exc) from exc
+                wait = 2**attempt
+                _log_retry(
+                    f"status {exc.response.status_code} "
+                    f"(attempt {attempt}/{self._max_retries}); backoff {wait}s",
+                    exc,
+                )
+                _sleep(wait)
+                continue
             else:
                 return self._extract_aligned_embeddings(resp.json(), len(batch))
         # Unreachable: every loop iteration either returns, raises,
@@ -309,6 +360,29 @@ class OpenAIEmbedder:
             raise RuntimeError(f"OpenAI did not return embeddings for indices {missing}")
         # mypy can't infer 'no None' from the runtime check above; cast.
         return [v for v in result if v is not None]
+
+
+def _with_api_message(exc: httpx.HTTPStatusError) -> httpx.HTTPStatusError:
+    """Return the same error with the API's explanation appended.
+
+    ``raise_for_status`` builds its message from the status line alone, so
+    an operator reading the traceback learns that the call failed and
+    nothing about why. The body carries the reason — which limit, which
+    field — and without it a failure costs a corpus-wide investigation to
+    reconstruct.
+    """
+    try:
+        body = exc.response.text
+    except (UnicodeDecodeError, httpx.ResponseNotRead):
+        return exc
+    if not body.strip():
+        return exc
+    detail = body.strip()[:_API_MESSAGE_SAMPLE]
+    return httpx.HTTPStatusError(
+        f"{exc}\nAPI said: {detail}",
+        request=exc.request,
+        response=exc.response,
+    )
 
 
 def _log_retry(message: str, exc: Exception) -> None:
