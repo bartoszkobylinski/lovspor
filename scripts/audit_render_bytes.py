@@ -134,6 +134,67 @@ NOT_IN_FORCE_CLASSES = frozenset(
     {"futuretitle", "futureLegalArticle", "futureLegalArticleHeader"},
 )
 
+# Which XML elements put a word boundary between two text nodes. Block-level by
+# HTML semantics: crossing one starts a new line of prose, so the words on
+# either side are separate words. Everything else (<sub>, <sup>, <a>, <i>,
+# <span>, a footnote reference) is inline markup INSIDE a word: "CO<sub>2</sub>"
+# is one word, "km<sup>2</sup>" is one word, and a footnote marker sits flush
+# against the word it annotates.
+#
+# Duplicated from HTML rather than imported from the renderer, for the same
+# reason as NOT_IN_FORCE_CLASSES: the audit must be able to disagree with the
+# renderer. Importing markdown_renderer._BLOCK_TAGS would make every renderer
+# flattening bug invisible here by construction.
+BLOCK_TAGS = frozenset(
+    {
+        "address",
+        "article",
+        "aside",
+        "blockquote",
+        "br",
+        "caption",
+        "dd",
+        "div",
+        "dl",
+        "dt",
+        "fieldset",
+        "figcaption",
+        "figure",
+        "footer",
+        "form",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "header",
+        "hr",
+        "li",
+        "main",
+        "nav",
+        "ol",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "tbody",
+        "td",
+        "tfoot",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    },
+)
+# Inline tags that are word boundaries all the same, because Markdown has no
+# way to emit them without a delimiter: emphasis becomes *…*, a link [ …](…).
+# "E<i>ff</i>EXT" can only come out as "E*ff*EXT", which reads as three tokens
+# whatever the renderer does, so counting the source as one would report a
+# fabrication that no rendering could avoid. <sub>, <sup> and <span> carry no
+# such delimiter and stay glue.
+MARKED_INLINE_TAGS = frozenset({"a", "em", "i", "strong"})
+
 DATASETS = ("gjeldende-lover", "gjeldende-sentrale-forskrifter")
 ARCHIVE_NAME = "{dataset}.tar.bz2"
 
@@ -147,8 +208,11 @@ CHAR_NGRAM = 12
 MD_ESCAPE_ANY_RE = re.compile(r"\\([\\`*#>|\-+.)])")
 # [text](destination) -> the destination is an XML attribute, not text.
 MD_LINK_DEST_RE = re.compile(r"\]\([^)\s]*\)")
-# Synthesized list markers at line start (unescaped forms only).
-MD_LIST_MARKER_RE = re.compile(r"^([ \t]*)(?:\d{1,9}[.)]|[-+])[ \t]+", re.MULTILINE)
+# Synthesized list markers at line start (unescaped forms only). Repeated,
+# because a nested list whose first item shares the outer item's line opens
+# with two of them ("9. 1. Landbruksdepartementet..."); stripping only the
+# first leaves a bare "1" that reads as a word the renderer invented.
+MD_LIST_MARKER_RE = re.compile(r"^([ \t]*)(?:(?:\d{1,9}[.)]|[-+])[ \t]+)+", re.MULTILINE)
 # Synthesized ATX heading / blockquote marks at line start.
 MD_BLOCK_MARK_RE = re.compile(r"^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?)", re.MULTILINE)
 FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n", re.DOTALL)
@@ -201,7 +265,46 @@ def _body_root(xml_bytes: bytes) -> etree._Element:
 
 
 def _all_text(elem: etree._Element) -> str:
-    return " ".join(t for t in elem.itertext() if t)
+    """Subtree text with a space only where the markup means a word boundary.
+
+    ``" ".join(itertext())`` puts one at every seam, which splits every word
+    that inline markup runs through — ``CO<sub>2</sub>`` became "co" + "2",
+    ``km<sup>2</sup>`` "km" + "2". The renderer joins them, correctly, and the
+    joined form then counted as a word the renderer had invented: 13,499 of the
+    13,501 fabricated words this tool reported on 2026-07-27 were this artefact,
+    not a defect.
+
+    A seam is a boundary when a block element is opened or closed between the
+    two text nodes — including one that carries no text of its own, such as the
+    ``<br/>`` between two lines of a table cell, which is why the crossed
+    elements are accumulated during the walk rather than derived from the two
+    text nodes' ancestries.
+    """
+    parts: list[str] = []
+    crossed: list[str] = []
+
+    def walk(node: etree._Element) -> None:
+        nonlocal crossed
+        crossed.append(node.tag)
+        if node.text:
+            _append(parts, crossed, node.text)
+            crossed = []
+        for child in node:
+            walk(child)
+            crossed.append(child.tag)
+            if child.tail:
+                _append(parts, crossed, child.tail)
+                crossed = []
+
+    walk(elem)
+    return "".join(parts)
+
+
+def _append(parts: list[str], crossed: list[str], text: str) -> None:
+    separates = BLOCK_TAGS | MARKED_INLINE_TAGS
+    if parts and any(tag in separates for tag in crossed):
+        parts.append(" ")
+    parts.append(text)
 
 
 def _words(text: str) -> Counter[str]:
@@ -273,7 +376,9 @@ def _md_body(md_text: str) -> str:
         ``"{index}. "`` / ``"- "``, numbering the XML never spelled out.
         Body text that genuinely starts that way is backslash-escaped by
         ``_escape_line_leading``, so matching the *unescaped* form only
-        removes synthesized markers.
+        removes synthesized markers — and matching a *run* of them is safe
+        for the same reason, which is what a nested list sharing its parent's
+        line ("9. 1. ") needs.
       * ATX heading marks and blockquote marks, for the same reason.
 
     Escapes are undone last, so an escaped ``1\\.`` is not mistaken for a

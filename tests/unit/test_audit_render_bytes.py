@@ -173,6 +173,53 @@ def test_md_body_strips_the_frontmatter_before_measuring() -> None:
     assert "Enhver kan yte bistand" in body
 
 
+def test_inline_markup_inside_a_word_does_not_split_it() -> None:
+    # "CO<sub>2</sub>" is one word. Splitting it made the renderer's correct
+    # "CO2" look like a fabricated token — 13,499 of the 13,501 reported on
+    # 2026-07-27 were this, and they hid the 140 that were real.
+    root = etree.fromstring(
+        '<main><article class="legalP">avgift per km<sup>2</sup> for CO<sub>2</sub>'
+        '<sup class="footnotereference">1</sup>.</article></main>',
+    )
+
+    text = audit._all_text(root)
+
+    assert "km2" in text
+    assert "co2" in text.lower()
+    assert "km 2" not in text
+
+
+def test_a_block_boundary_still_separates_two_words() -> None:
+    root = etree.fromstring(
+        '<main><article class="legalP">gjelder, eller</article>'
+        '<article class="legalP">dersom eieren</article></main>',
+    )
+
+    text = audit._all_text(root)
+
+    assert "eller dersom" in text
+    assert "ellerdersom" not in text
+
+
+def test_a_void_block_element_separates_the_text_around_it() -> None:
+    # <br/> carries no text, so a model built from the two text nodes'
+    # ancestries cannot see it and would glue the cell's two lines together.
+    root = etree.fromstring(
+        "<main><table><tbody><tr><td>Akademia Rolnicza<br/>2. Uniwersytet</td>"
+        "</tr></tbody></table></main>",
+    )
+
+    assert "Rolnicza 2. Uniwersytet" in audit._all_text(root)
+
+
+def test_md_body_strips_a_nested_list_marker_sharing_its_parents_line() -> None:
+    # A nested list whose first item shares the outer marker's line renders as
+    # "9. 1. Landbruksdepartementet". One marker stripped leaves a stray "1".
+    body = audit._md_body("9. 1. Landbruksdepartementet endres\n")
+
+    assert body.startswith("Landbruksdepartementet")
+
+
 def test_md_body_unescapes_without_mistaking_escaped_text_for_a_list_marker() -> None:
     # The renderer escapes body text that genuinely begins "1." so Markdown
     # does not read it as a list. Undoing escapes before marker-stripping
