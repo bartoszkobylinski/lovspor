@@ -368,6 +368,30 @@ def _render_change_note(elem: etree._Element) -> str:
 
 
 def _render_legal_article_header(elem: etree._Element) -> str:
+    """Render a ``legalArticleHeader`` as "### {value}. {title}".
+
+    Built from the two spans alone. Anything else the header carries is NOT
+    emitted — in this corpus that is always a footnote-reference marker, 424 of
+    them in 83 documents. A DOCUMENTED, DELIBERATE DROP, not an oversight:
+
+    * 206 of those markers sit on the § number rather than after the title
+      (``<span>§ 5</span>.<sup>1</sup> <span>(skade som ikkje…)</span>``), so
+      emitting them verbatim yields "### § 5.1 (skade som ikkje…)" and
+      "### § 46.1" — a form that reads as a citation of subsection 5.1. The
+      corpus is consumed by ``validate_citation`` and ``verify_quote``; a
+      heading that impersonates a different provision is worse than a missing
+      marker.
+    * Nothing legal is lost with it. The footnote's own text still renders,
+      carrying its own label, in the ``<footer class="footnotes">`` block of
+      the same §. What the marker adds is the pointer, and the association
+      survives positionally.
+
+    ``scripts/audit_render_bytes.py`` subtracts exactly this in its *adjusted*
+    XML variant, the way it already subtracts the not-in-force elision, and
+    keeps it visible in *raw*. That subtraction is only honest while this
+    docstring is true: if the drop ever widens beyond these markers, say so
+    here, or the audit will quietly absorb the difference.
+    """
     value_span = elem.find(".//span[@class='legalArticleValue']")
     title_span = elem.find(".//span[@class='legalArticleTitle']")
     value = _span_text(value_span)
