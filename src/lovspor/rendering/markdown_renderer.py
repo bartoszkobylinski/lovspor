@@ -58,7 +58,7 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
-RENDERER_VERSION = 3
+RENDERER_VERSION = 4
 """Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
 
 Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
@@ -311,11 +311,18 @@ def _render_article(
     elem: etree._Element,
     classes: list[str],
 ) -> str:
-    if elem.find("table") is not None:
-        return _render_mixed_article(elem)
     if _CHANGE_NOTE_CLASS in classes:
-        text = _escape_block_leading(_inline(elem))
-        return f"> {text}\n\n" if text else ""
+        return _render_change_note(elem)
+    # ANY block child, not just a <table>: a paragraph-class article holding a
+    # nested <ol>/<ul>/<p>/<article> used to fall through to _inline below,
+    # which concatenates descendant text with no separator and fuses the last
+    # word before the block into the block's first word
+    # ("Grunndata:" + "navn" -> "Grunndata:navn"). Nothing was lost, but the
+    # fused words stopped being findable, which breaks search, quotation and
+    # the embeddings computed from this output. 74,622 such words stood in
+    # 2,690 of 5,916 documents (analysis/llm-infra/10-byte-audit-results.md).
+    if any(_is_block_element(child) for child in elem):
+        return _render_mixed_article(elem)
     if any(c in _PARAGRAPH_CLASSES for c in classes):
         text = _escape_block_leading(_inline(elem))
         return f"{text}\n\n" if text else ""
@@ -325,6 +332,30 @@ def _render_article(
     # and block children as blocks, rather than dropping the text via the
     # child-only walk.
     return _render_mixed_article(elem)
+
+
+def _render_change_note(elem: etree._Element) -> str:
+    """Render a ``changesToParent`` note as a blockquote.
+
+    Almost every change note is one inline run ("Endret ved lov 9 des 2011
+    nr. 52"). One in the corpus is not: ``skatteloven`` quotes the whole text
+    of a repealed § back under "Paragrafen lød før oppheving:" as a nested
+    ``<ol>``. Routing that one to the plain block path would fix its fusion but
+    strip the marking that says the quoted provision is no longer in force —
+    trading a boundary defect for a worse one. So the blockquote is applied to
+    the structured render instead, which keeps both.
+
+    Checked corpus-wide before this ordering was chosen: 42,299 change notes
+    exist, exactly 1 carries a block child, and none carries a table.
+    """
+    if not any(_is_block_element(child) for child in elem):
+        text = _escape_block_leading(_inline(elem))
+        return f"> {text}\n\n" if text else ""
+    body = _render_mixed_article(elem).rstrip("\n")
+    if not body:
+        return ""
+    quoted = "\n".join(f"> {line}" if line else ">" for line in body.split("\n"))
+    return f"{quoted}\n\n"
 
 
 def _render_legal_article_header(elem: etree._Element) -> str:
@@ -352,7 +383,11 @@ def _is_block_element(elem: etree._Element) -> bool:
     return elem.tag in _BLOCK_TAGS or (elem.tag == "div" and elem.get("role") == _HEADING_ROLE)
 
 
-def _render_mixed_article(elem: etree._Element) -> str:
+def _render_mixed_article(
+    elem: etree._Element,
+    *,
+    skip_tags: frozenset[str] = frozenset(),
+) -> str:
     """Render an ``<article>`` as a run of inline paragraphs and block children.
 
     The general renderer for every article that is not a plain paragraph or a
@@ -363,11 +398,18 @@ def _render_mixed_article(elem: etree._Element) -> str:
     a bare ``<p>``) go through ``_render_element`` so a header stays a ``###``
     heading and a table a GFM block; genuinely-inline children (spans, links,
     ``<br/>``) accumulate into the paragraphs between them, so no text is lost.
+
+    ``skip_tags`` names children the caller renders itself; their tails are
+    still consumed as the parent's inline text. ``_list_item_lines`` uses it
+    for nested ``<ul>``/``<ol>``, which need the list walk's own indentation
+    rather than a block rendered in place.
     """
     blocks: list[str] = []
     inline: list[str] = [_escape_inline_text(elem.text or "")]
     for child in elem:
-        if _is_block_element(child):
+        if child.tag in skip_tags:
+            inline.append(_escape_inline_text(child.tail or ""))
+        elif _is_block_element(child):
             blocks.append(_flush_inline(inline))
             blocks.append(_render_element(child))
             inline = [_escape_inline_text(child.tail or "")]
@@ -501,7 +543,7 @@ def _render_list_lines(
     indent = "  " * depth
     for index, li in enumerate(items, start=1):
         prefix = f"{index}. " if ordered else "- "
-        lines.append(f"{indent}{prefix}{_escape_block_leading(_inline_of_li(li))}")
+        lines.extend(_list_item_lines(li, prefix=prefix, indent=indent))
         for child in li:
             if child.tag in _LIST_TAGS:
                 lines.extend(
@@ -514,21 +556,25 @@ def _render_list_lines(
     return lines
 
 
-def _inline_of_li(li: etree._Element) -> str:
-    """Inline text of a <li> excluding any nested <ul>/<ol> children.
+def _list_item_lines(li: etree._Element, *, prefix: str, indent: str) -> list[str]:
+    """One ``<li>`` as Markdown lines: the marker first, content column after.
 
-    Nested lists are rendered separately by _render_list_lines with
-    their own indentation; their tails (text after the closing tag) are
-    preserved as inline content of the parent li.
+    A block child other than a nested list — in this corpus always an
+    ``<article>``, 184,344 of them across 3,478 documents — used to go through
+    the item's inline accumulator, which fused the item's own text into the
+    block's first word and flattened any table the block contained. Rendering
+    it as a block and re-indenting to the item's content column keeps the
+    boundaries and keeps the item a single list item.
     """
-    parts = [_escape_inline_text(li.text or "")]
-    for child in li:
-        if child.tag in _LIST_TAGS:
-            parts.append(_escape_inline_text(child.tail or ""))
-            continue
-        parts.append(_inline_for_child(child))
-        parts.append(_escape_inline_text(child.tail or ""))
-    return "".join(parts).strip()
+    body = _render_mixed_article(li, skip_tags=_LIST_TAGS).rstrip("\n")
+    if not body:
+        return [f"{indent}{prefix.rstrip()}"]
+    first, *rest = body.split("\n")
+    pad = " " * len(prefix)
+    return [
+        f"{indent}{prefix}{first}",
+        *(f"{indent}{pad}{line}" if line else "" for line in rest),
+    ]
 
 
 def _inline(elem: etree._Element) -> str:
