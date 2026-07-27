@@ -95,10 +95,19 @@ _DEFAULT_HEADING_LEVEL = 6
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 # Tags _render_element renders as blocks. _render_mixed_article uses these (via
 # _is_block_element) to keep block children — a heading, a nested list, a table,
-# a bare <p> — out of the inline paragraph accumulator. A <div role="heading">
-# is block too, but conditional on its role, so _is_block_element adds it rather
-# than listing "div" here (a plain wrapper <div> must stay walk-children).
+# a bare <p> — out of the inline paragraph accumulator.
 _BLOCK_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6", "article", "p", "ol", "ul", "table"})
+# Block-level wrappers Lovdata puts around runs of block content: <footer
+# class="footnotes"> closing a legalArticle, <div class="indent"/"box"> around a
+# quoted convention, <figure>/<figcaption>, <blockquote>, and the odd <li> left
+# outside a list. They are block by HTML semantics, so they must not reach
+# _inline — it concatenates the whole subtree with no separator, fusing every
+# article, row and list item inside into one paragraph. They may also carry text
+# of their own beside block children, which is why they render through
+# _render_mixed_article rather than the child-only walk.
+_WRAPPER_TAGS = frozenset(
+    {"div", "footer", "figure", "figcaption", "blockquote", "li", "dl", "dt", "dd"},
+)
 
 _INLINE_ESCAPE = str.maketrans(
     {
@@ -226,7 +235,7 @@ def _render_element(elem: etree._Element) -> str:
         return _render_table(elem)
     if tag == "div" and elem.get("role") == _HEADING_ROLE:
         return _render_heading_div(elem)
-    return _render_children(elem)
+    return _render_mixed_article(elem) if tag in _WRAPPER_TAGS else _render_children(elem)
 
 
 def _render_heading(elem: etree._Element, tag: str, classes: list[str]) -> str:
@@ -374,13 +383,11 @@ def _is_block_element(elem: etree._Element) -> bool:
     """Whether ``_render_element`` renders ``elem`` as a block, not inline.
 
     ``_render_mixed_article`` uses this to keep block children out of the
-    inline accumulator. A ``<div role="heading">`` is block but conditional on
-    its role, so it is checked here rather than living in ``_BLOCK_TAGS`` (which
-    would also capture a plain wrapper ``<div>``). Mirrors the ``_render_element``
-    dispatch so a block nested inside a mixed article renders the same as one at
-    top level, instead of being flattened through the inline path.
+    inline accumulator. Mirrors the ``_render_element`` dispatch so a block
+    nested inside a mixed article renders the same as one at top level, instead
+    of being flattened through the inline path.
     """
-    return elem.tag in _BLOCK_TAGS or (elem.tag == "div" and elem.get("role") == _HEADING_ROLE)
+    return elem.tag in _BLOCK_TAGS or elem.tag in _WRAPPER_TAGS
 
 
 def _render_mixed_article(

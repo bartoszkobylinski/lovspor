@@ -87,6 +87,23 @@ _SURFACE = (
     '<article class="legalP">Innledende avsnitt.'
     "<table><tbody><tr><td>E 432</td><td>Polysorbat 20</td></tr></tbody></table>"
     "</article></li></ol>"
+    # Block-level wrappers, the third and last flattening class: a footnotes
+    # footer (2,063 sites in 772 documents), a quoted convention inside
+    # <div class="indent">, a stray <li> the list walk never reaches, and a
+    # figure caption. Each collapsed through _inline until renderer 4.
+    '<article class="legalArticle"><article class="legalP">Brodtekst.</article>'
+    '<footer class="footnotes">'
+    '<article class="footnote"><span class="footnoteLabel">1</span>For dieselmotorer.</article>'
+    '<article class="footnote"><span class="footnoteLabel">2</span>Unntak.</article>'
+    "</footer></article>"
+    '<article class="legalArticle"><div class="indent">'
+    '<article class="defaultP"><strong>Art 4bis.</strong>'
+    '<ol class="defaultList" type="a">'
+    '<li><article class="legalP">art og gyldighetstid</article></li>'
+    '<li><article class="legalP">navn og forretningssted</article></li></ol>'
+    "</article></div></article>"
+    '<article class="change">Endringer:<li>forste punkt</li><li>andre punkt</li></article>'
+    '<article class="legalP">Rundt 9<figure><figcaption>Figur 3</figcaption></figure></article>'
     '<div aria-level="7" role="heading">Avsnitt 1<br/>Driftsansvarlige</div>'
     '<p class="leddfortsettelse">►<strong>M7</strong> Endret ved forordning.◄</p>'
     '<article class="futureLegalArticle">Ikke i kraft ennå.</article>'
@@ -99,7 +116,7 @@ _SURFACE = (
 ).encode()
 
 _PINNED_DOCUMENT = (4, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
-_PINNED_SURFACE = (4, "4cc5c3f36506f70183d5a903681c9162f1437a98f353d47e61cfbb9b698a04c3")
+_PINNED_SURFACE = (4, "ebe0073a04702f9aa842b1deabf0ccaceed32a03df38a22d1994c56de3c00245")
 
 
 def _digest(text: str) -> str:
@@ -147,3 +164,10 @@ def test_surface_actually_exercises_the_table_paths() -> None:
     assert "E 432Polysorbat" not in md
     assert "1. Polysorbater:" in md
     assert "\n   | E 432 | Polysorbat 20 |" in md
+    # Block-level wrappers: each keeps its children apart instead of collapsing
+    # the whole subtree into the surrounding paragraph.
+    assert "dieselmotorer.2" not in md  # <footer class="footnotes">
+    assert "gyldighetstidnavn" not in md  # <div class="indent">
+    assert "1. art og gyldighetstid" in md  # ...and the list inside it survives
+    assert "punktandre" not in md  # stray <li>
+    assert "9Figur" not in md  # <figcaption>

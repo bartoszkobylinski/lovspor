@@ -226,11 +226,106 @@ def test_render_inline_only_paragraph_classes_are_unchanged() -> None:
     assert md == "Se [loven](lov/1999-03-26-14) her.\n"
 
 
-def test_only_a_heading_role_div_counts_as_a_block_child() -> None:
+def test_render_footnotes_footer_keeps_the_notes_apart() -> None:
+    # The corpus's most common wrapper: <footer class="footnotes"> closing a
+    # legalArticle, 2,063 of them in 772 documents. As an inline child the whole
+    # footer collapsed into the article's last paragraph, fusing each note into
+    # the next ("For dieselmotorer.2 Unntak:").
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalArticle">'
+            b'<article class="legalP">Brodtekst.</article>'
+            b'<footer class="footnotes">'
+            b'<article class="footnote"><span class="footnoteLabel">1</span>'
+            b"For dieselmotorer.</article>"
+            b'<article class="footnote"><span class="footnoteLabel">2</span>'
+            b"Unntak: kjoretoy.</article>"
+            b"</footer></article>",
+        ),
+    )
+    assert md == "Brodtekst.\n\n1For dieselmotorer.\n\n2Unntak: kjoretoy.\n"
+    assert "dieselmotorer.2" not in md
+
+
+def test_render_wrapper_div_keeps_the_quoted_convention_structured() -> None:
+    # <div class="indent"> around a quoted convention text: 144 sites in ~50
+    # documents. Flattened, an entire annex — headings, articles, list items —
+    # came out as one paragraph ("...gjelder, ellerdersom eieren...").
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalArticle">'
+            b'<article class="legalP">Folgende tekst legges til:</article>'
+            b'<div class="indent">'
+            b'<article class="defaultP"><strong>Art 4bis.</strong>'
+            b'<ol class="defaultList" type="a">'
+            b'<li><article class="legalP">forsikringens art og gyldighetstid</article></li>'
+            b'<li><article class="legalP">navn og hovedforretningssted</article></li>'
+            b"</ol></article></div></article>",
+        ),
+    )
+    assert md == (
+        "Folgende tekst legges til:\n\n**Art 4bis.**\n\n"
+        "1. forsikringens art og gyldighetstid\n"
+        "2. navn og hovedforretningssted\n"
+    )
+    assert "gyldighetstidnavn" not in md
+
+
+def test_render_stray_list_item_outside_a_list_stays_a_block() -> None:
+    # 171 sites in 27 documents: an <li> parented straight by an article,
+    # with no <ol>/<ul> between. It is not reached by the list walk, so it used
+    # to flatten into the article's inline run.
+    md = render_markdown(
+        _wrap(
+            b'<article class="change">Endringer:'
+            b"<li>forste punkt</li><li>andre punkt</li></article>",
+        ),
+    )
+    assert md == "Endringer:\n\nforste punkt\n\nandre punkt\n"
+    assert "punktandre" not in md
+
+
+def test_render_figure_caption_is_not_fused_into_the_running_text() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Rundt 9'
+            b"<figure><figcaption>Figur 3: Stalror</figcaption></figure></article>",
+        ),
+    )
+    assert md == "Rundt 9\n\nFigur 3: Stalror\n"
+    assert "9Figur" not in md
+
+
+def test_render_blockquote_wrapper_keeps_its_articles_apart() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalArticle"><blockquote>'
+            b'<article class="legalP">Forste avsnitt.</article>'
+            b'<article class="legalP">Andre avsnitt.</article>'
+            b"</blockquote></article>",
+        ),
+    )
+    assert md == "Forste avsnitt.\n\nAndre avsnitt.\n"
+    assert "avsnitt.Andre" not in md
+
+
+def test_render_wrapper_carrying_its_own_text_keeps_that_text() -> None:
+    # Wrappers route through _render_mixed_article, not the child-only walk, so
+    # text sitting directly in the wrapper survives instead of tripping
+    # _assert_no_dropped_text.
+    md = render_markdown(
+        _wrap(b'<div class="box">Innledning<article class="legalP">Avsnitt.</article>slutt</div>'),
+    )
+    assert md == "Innledning\n\nAvsnitt.\n\nslutt\n"
+
+
+def test_a_div_is_a_block_child_whatever_its_role() -> None:
     # _is_block_element decides which children leave the inline accumulator, so
-    # since renderer 4 it governs both _render_article and _list_item_lines.
-    # Widening it to any <div> would send plain wrapper divs — which carry text
-    # directly — into the child-only walk, where _assert_no_dropped_text fails.
+    # since renderer 4 it governs both _render_article and _list_item_lines. A
+    # role="heading" div becomes an ATX heading; a plain wrapper div is still a
+    # block, and carries its text directly, so it renders through
+    # _render_mixed_article rather than the child-only walk (which would trip
+    # _assert_no_dropped_text on that text).
     heading = render_markdown(
         _wrap(
             b'<article class="legalP">Foer'
@@ -242,7 +337,7 @@ def test_only_a_heading_role_div_counts_as_a_block_child() -> None:
     plain = render_markdown(
         _wrap(b'<article class="legalP">Foer<div>inni</div>etter</article>'),
     )
-    assert plain == "Foerinnietter\n"
+    assert plain == "Foer\n\ninni\n\netter\n"
 
 
 def test_render_empty_list_item_emits_a_bare_marker() -> None:
