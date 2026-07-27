@@ -251,6 +251,93 @@ def test_elision_drops_a_future_subtree_but_keeps_the_text_after_it() -> None:
     assert "gjeldende tekst" in text
 
 
+def test_elision_reattaches_the_tail_where_it_stood_not_at_the_front() -> None:
+    # elem.getprevious() answers None once the element is detached, so taking it
+    # after the removal sent every tail to parent.text — in front of the
+    # siblings that preceded it. The XML side then carried the document's own
+    # words out of order, which the char n-gram metric reads as loss.
+    root = etree.fromstring(
+        '<main><p>Aaa <i>kursiv</i> <span class="futuretitle">BORTE</span> Bbb</p></main>',
+    )
+
+    audit._elide_not_in_force(root)
+
+    assert audit._all_text(root).split() == ["Aaa", "kursiv", "Bbb"]
+
+
+def _header(inner: str, tag: str = "h3") -> etree._Element:
+    return etree.fromstring(f'<main><{tag} class="legalArticleHeader">{inner}</{tag}></main>')
+
+
+def test_a_heading_footnote_marker_is_elided_as_a_documented_drop() -> None:
+    # _render_legal_article_header renders the two spans and nothing else.
+    # Counting the marker as loss would hold the metric permanently above zero
+    # for a drop the renderer documents and defends.
+    root = _header(
+        '<span class="legalArticleValue">§ 5</span>.'
+        '<sup class="footnotereference">1</sup> '
+        '<span class="legalArticleTitle">(skade som ikkje kan krevjast)</span>',
+    )
+
+    audit._elide_dropped_heading_marks(root)
+    text = audit._all_text(root)
+
+    assert "§ 5" in text
+    assert "(skade som ikkje kan krevjast)" in text
+    # "§ 5.1" is what emitting it verbatim would produce, and reads as a
+    # citation of subsection 5.1 — the reason for the drop in the first place.
+    assert "5.1" not in text
+
+
+def test_eliding_the_marker_leaves_the_rest_of_the_heading_intact() -> None:
+    root = _header(
+        '<span class="legalArticleValue">§ 1</span>. '
+        '<span class="legalArticleTitle">Lovens <i>område</i>.</span>'
+        '<sup class="footnotereference">1</sup>',
+    )
+
+    audit._elide_dropped_heading_marks(root)
+
+    assert "Lovens" in audit._all_text(root)
+    assert "område" in audit._all_text(root)
+
+
+def test_a_heading_without_a_value_span_keeps_everything() -> None:
+    # The renderer falls back to the full inline walk there, so nothing is
+    # dropped and the audit must not pretend otherwise.
+    root = _header('Fritekst<sup class="footnotereference">1</sup>')
+
+    audit._elide_dropped_heading_marks(root)
+
+    assert "1" in audit._all_text(root)
+
+
+def test_an_h2_heading_keeps_its_marker() -> None:
+    # _render_heading walks h1/h2 inline and emits every marker; eliding here
+    # would hide a real loss instead of a documented one.
+    root = _header(
+        '<span class="legalArticleValue">§ 7</span>. '
+        '<span class="legalArticleTitle">Tittel</span>'
+        '<sup class="footnotereference">1</sup>',
+        tag="h2",
+    )
+
+    audit._elide_dropped_heading_marks(root)
+
+    assert audit._all_text(root).endswith("1")
+
+
+def test_a_wrapper_holding_a_rendered_span_is_not_elided() -> None:
+    root = _header(
+        '<span class="futuretitle"><span class="legalArticleValue">§ 3</span></span>'
+        '<span class="legalArticleTitle">Tittel</span>',
+    )
+
+    audit._elide_dropped_heading_marks(root)
+
+    assert "§ 3" in audit._all_text(root)
+
+
 def test_body_root_refuses_a_document_without_a_main_element() -> None:
     with pytest.raises(ParseError, match="no <main>"):
         audit._body_root(b"<document><header>metadata only</header></document>")

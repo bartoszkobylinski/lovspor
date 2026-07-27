@@ -60,12 +60,20 @@ Check B — CONTENT COVERAGE (the load-bearing check)
 
     Two variants of the XML side are reported:
       raw       — every text node in <main>.
-      adjusted  — with not-in-force subtrees (``futuretitle``,
-                  ``futureLegalArticle``, ``futureLegalArticleHeader``)
-                  elided first, because the renderer drops those by
-                  documented design (markdown_renderer.py:77-83).
+      adjusted  — with the renderer's two DOCUMENTED drops elided first:
+                  not-in-force subtrees (``futuretitle``,
+                  ``futureLegalArticle``, ``futureLegalArticleHeader``), and
+                  the footnote marker a ``legalArticleHeader`` carries but
+                  does not render. Each is defended in a renderer docstring;
+                  the audit subtracts what the renderer declares, never what
+                  it merely happens to do.
     Flagging uses ``adjusted``; ``raw`` is reported so the size of the
     intentional drop stays visible.
+
+    Word boundaries come from the markup, not from every element seam: inline
+    markup runs through words (``CO<sub>2</sub>`` is one word), so joining
+    ``itertext()`` with a space would report the renderer's correct output as
+    invented text. See :func:`_all_text`.
 
     Structural counters, also renderer-independent: count of "§" in the
     XML body text vs in the Markdown, and count of XML ``<tr>`` elements
@@ -133,6 +141,15 @@ from lovspor.sync.document_io import doc_type_for_dataset, render_full_document
 NOT_IN_FORCE_CLASSES = frozenset(
     {"futuretitle", "futureLegalArticle", "futureLegalArticleHeader"},
 )
+
+# The other documented renderer drop: a legalArticleHeader renders from these
+# two spans only. Duplicated, not imported, for the reason above.
+LEGAL_ARTICLE_HEADER_CLASS = "legalArticleHeader"
+LEGAL_ARTICLE_VALUE_CLASS = "legalArticleValue"
+LEGAL_ARTICLE_TITLE_CLASS = "legalArticleTitle"
+# h1/h2 keep everything (_render_heading walks them inline); only h3-h6 reach
+# _render_legal_article_header.
+SUB_HEADING_TAGS = frozenset({"h3", "h4", "h5", "h6"})
 
 # Which XML elements put a word boundary between two text nodes. Block-level by
 # HTML semantics: crossing one starts a new line of prose, so the words on
@@ -230,22 +247,70 @@ def _classes(elem: etree._Element) -> list[str]:
     return (elem.get("class") or "").split()
 
 
+def _remove_keeping_tail(elem: etree._Element) -> None:
+    """Drop ``elem`` and its subtree, but keep its tail.
+
+    The tail is the parent's text that follows the element, not part of what
+    is being elided; dropping it with the subtree would understate the XML
+    side and hide real loss.
+    """
+    parent = elem.getparent()
+    if parent is None:
+        return
+    tail = elem.tail
+    prev = elem.getprevious()
+    parent.remove(elem)
+    if tail and tail.strip():
+        if prev is not None:
+            prev.tail = (prev.tail or "") + tail
+        else:
+            parent.text = (parent.text or "") + tail
+
+
 def _elide_not_in_force(root: etree._Element) -> None:
     """Drop not-in-force subtrees in place (documented renderer behaviour)."""
     for elem in list(root.iter()):
-        parent = elem.getparent()
-        if parent is None:
+        if elem.getparent() is not None and any(c in NOT_IN_FORCE_CLASSES for c in _classes(elem)):
+            _remove_keeping_tail(elem)
+
+
+def _elide_dropped_heading_marks(root: etree._Element) -> None:
+    """Drop what a ``legalArticleHeader`` renders without (documented drop).
+
+    ``_render_legal_article_header`` builds "### {value}. {title}" from the two
+    spans alone and emits nothing else the header carries — in this corpus
+    always a footnote-reference marker, 424 of them in 83 documents. Its
+    docstring states why: 206 of the markers sit on the § number, so emitting
+    them gives "### § 5.1", which reads as a citation of subsection 5.1, and
+    the footnote's own text renders in the § anyway.
+
+    Elided here for the same reason ``NOT_IN_FORCE_CLASSES`` is: a documented,
+    intentional drop counted as loss would keep the metric permanently short of
+    zero and train the reader to ignore it. It stays visible in the *raw*
+    variant, which elides nothing.
+
+    Only h3-h6: ``_render_heading`` sends h1/h2 through the full inline walk,
+    which keeps every marker, so eliding there would hide a real loss.
+    """
+    for header in root.iter():
+        if header.tag not in SUB_HEADING_TAGS or LEGAL_ARTICLE_HEADER_CLASS not in _classes(header):
             continue
-        if any(c in NOT_IN_FORCE_CLASSES for c in _classes(elem)):
-            # Keep the tail: it is sibling text, not part of the subtree.
-            tail = elem.tail
-            parent.remove(elem)
-            if tail and tail.strip():
-                prev = elem.getprevious()
-                if prev is not None:
-                    prev.tail = (prev.tail or "") + tail
-                else:
-                    parent.text = (parent.text or "") + tail
+        value = header.find(f".//span[@class='{LEGAL_ARTICLE_VALUE_CLASS}']")
+        if value is None:
+            continue  # no value span: the renderer falls back to _inline, keeping everything
+        title = header.find(f".//span[@class='{LEGAL_ARTICLE_TITLE_CLASS}']")
+        spans = [span for span in (value, title) if span is not None]
+        for child in list(header):
+            # Only text is dropped. A childless <br/> between the two spans
+            # carries none, and removing it would delete a word boundary the
+            # renderer replaces with its synthesized ". " — turning
+            # "Artikkel 34 Overgangsbestemmelser" into one token.
+            if not "".join(child.itertext()).strip():
+                continue
+            # A child that CONTAINS a rendered span is a wrapper, not a drop.
+            if any(any(node is span for node in child.iter()) for span in spans):
+                continue
+            _remove_keeping_tail(child)
 
 
 def _body_root(xml_bytes: bytes) -> etree._Element:
@@ -498,6 +563,7 @@ def audit_one(  # noqa: PLR0912, PLR0915
         xml_text_raw = _all_text(main_raw)
         main_adj = _body_root(xml_bytes)
         _elide_not_in_force(main_adj)
+        _elide_dropped_heading_marks(main_adj)
         xml_text_adj = _all_text(main_adj)
         xml_tr = len(main_adj.findall(".//tr"))
     except (ParseError, etree.XMLSyntaxError) as exc:
@@ -636,6 +702,7 @@ def self_test(
 
     main_adj = _body_root(xml)
     _elide_not_in_force(main_adj)
+    _elide_dropped_heading_marks(main_adj)
     xml_stream = _alnum_stream(_all_text(main_adj))
     body = _md_body(md)
 
