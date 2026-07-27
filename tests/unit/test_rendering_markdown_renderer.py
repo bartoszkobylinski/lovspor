@@ -226,6 +226,39 @@ def test_render_inline_only_paragraph_classes_are_unchanged() -> None:
     assert md == "Se [loven](lov/1999-03-26-14) her.\n"
 
 
+def test_only_a_heading_role_div_counts_as_a_block_child() -> None:
+    # _is_block_element decides which children leave the inline accumulator, so
+    # since renderer 4 it governs both _render_article and _list_item_lines.
+    # Widening it to any <div> would send plain wrapper divs — which carry text
+    # directly — into the child-only walk, where _assert_no_dropped_text fails.
+    heading = render_markdown(
+        _wrap(
+            b'<article class="legalP">Foer'
+            b'<div role="heading" aria-level="4">Tittel</div></article>',
+        ),
+    )
+    assert heading == "Foer\n\n#### Tittel\n"
+
+    plain = render_markdown(
+        _wrap(b'<article class="legalP">Foer<div>inni</div>etter</article>'),
+    )
+    assert plain == "Foerinnietter\n"
+
+
+def test_render_empty_list_item_emits_a_bare_marker() -> None:
+    md = render_markdown(_wrap(b"<ul><li></li><li>x</li></ul>"))
+    # The marker is emitted without its trailing space: a line of "- " alone
+    # is trailing whitespace that the corpus would carry forever.
+    assert md == "-\n- x\n"
+
+
+def test_render_change_note_whose_only_block_renders_empty_produces_nothing() -> None:
+    # An empty <ol> renders to "", so the note has no content to quote. It must
+    # emit nothing rather than a stray blockquote marker.
+    md = render_markdown(_wrap(b'<article class="changesToParent"><ol></ol></article>'))
+    assert md == "\n"
+
+
 def test_render_change_note_with_a_block_child_stays_a_blockquote() -> None:
     # skatteloven nl-19990326-014 is the corpus's only change note carrying a
     # block child, and what it carries is the full text of a repealed § quoted
