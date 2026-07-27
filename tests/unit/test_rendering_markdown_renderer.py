@@ -226,6 +226,24 @@ def test_render_inline_only_paragraph_classes_are_unchanged() -> None:
     assert md == "Se [loven](lov/1999-03-26-14) her.\n"
 
 
+@pytest.mark.parametrize(
+    ("tag", "marker"),
+    [("h1", "#"), ("h2", "##")],
+)
+def test_a_top_level_heading_inside_an_article_stays_a_heading(tag: str, marker: str) -> None:
+    # h1/h2 are in _BLOCK_TAGS, so they leave the inline accumulator like any
+    # other block child. Nothing exercised them nested until a mutation run
+    # removed each from the set and no test noticed: the article would render
+    # "Foer# Tittel" on one line, fusing the text into the heading mark.
+    md = render_markdown(
+        _wrap(
+            f'<article class="legalP">Foer<{tag}>Tittel</{tag}>etter</article>'.encode(),
+        ),
+    )
+
+    assert md == f"Foer\n\n{marker} Tittel\n\netter\n"
+
+
 def test_render_footnotes_footer_keeps_the_notes_apart() -> None:
     # The corpus's most common wrapper: <footer class="footnotes"> closing a
     # legalArticle, 2,063 of them in 772 documents. As an inline child the whole

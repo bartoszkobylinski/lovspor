@@ -97,14 +97,22 @@ _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 # _is_block_element) to keep block children — a heading, a nested list, a table,
 # a bare <p> — out of the inline paragraph accumulator.
 _BLOCK_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6", "article", "p", "ol", "ul", "table"})
-# Block-level wrappers Lovdata puts around runs of block content: <footer
-# class="footnotes"> closing a legalArticle, <div class="indent"/"box"> around a
-# quoted convention, <figure>/<figcaption>, <blockquote>, and the odd <li> left
-# outside a list. They are block by HTML semantics, so they must not reach
-# _inline — it concatenates the whole subtree with no separator, fusing every
-# article, row and list item inside into one paragraph. They may also carry text
-# of their own beside block children, which is why they render through
-# _render_mixed_article rather than the child-only walk.
+# Block-level wrappers Lovdata puts around runs of block content. They are block
+# by HTML semantics, so they must not reach _inline — it concatenates the whole
+# subtree with no separator, fusing every article, row and list item inside into
+# one paragraph. They may also carry text of their own beside block children,
+# which is why they render through _render_mixed_article rather than the
+# child-only walk.
+#
+# Counted in <main> across the 2026-07-22 corpus (5,917 documents):
+#   li 184,344 in 3,478 docs | footer 3,873 in 1,094 | div 3,526 in 139
+#   blockquote 28 in 18      | figure/figcaption 11 in 6
+#   dl/dt/dd   0 in 0
+# The definition list tags are kept although unobserved, and that is a choice,
+# not an oversight: an unhandled wrapper is not a loud failure. As a child of an
+# article it goes to _inline and flattens SILENTLY, which is the whole defect
+# this constant exists to prevent, and Lovdata has added element types before.
+# Anything added here on that reasoning belongs in this list with a 0.
 _WRAPPER_TAGS = frozenset(
     {"div", "footer", "figure", "figcaption", "blockquote", "li", "dl", "dt", "dd"},
 )
