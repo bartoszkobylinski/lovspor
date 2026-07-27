@@ -257,12 +257,20 @@ def _repair_step() -> dict[str, Any]:
 def test_the_repair_step_is_opt_in_and_never_fires_on_the_schedule() -> None:
     """Without the condition, every nightly run would re-flag and re-embed.
 
-    `inputs` is empty for a scheduled event, so the expression is falsy there
-    by construction — but only while the condition exists at all.
+    Pinned as the WHOLE expression rather than as a substring. The ``inputs``
+    context is empty on a scheduled event and a missing property reads as the
+    empty string, so a bare dereference is falsy there — but a condition that
+    merely mentions the input need not be: ``inputs.repair_embeddings !=
+    'false'`` contains the same text and fires on every schedule, because
+    '' != 'false'. A substring check calls that safe.
     """
-    condition = str(_repair_step()["if"])
+    condition = str(_repair_step()["if"]).strip()
 
-    assert "inputs.repair_embeddings" in condition
+    assert condition == "inputs.repair_embeddings", (
+        "the condition must be a bare dereference; anything compound has to be "
+        "re-checked against an EMPTY inputs context, which is what a scheduled "
+        f"run supplies (got: {condition!r})"
+    )
 
 
 def test_the_repair_input_defaults_to_off() -> None:
