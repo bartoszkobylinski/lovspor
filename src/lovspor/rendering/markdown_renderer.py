@@ -58,7 +58,7 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
-RENDERER_VERSION = 3
+RENDERER_VERSION = 4
 """Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
 
 Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
@@ -95,10 +95,27 @@ _DEFAULT_HEADING_LEVEL = 6
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 # Tags _render_element renders as blocks. _render_mixed_article uses these (via
 # _is_block_element) to keep block children — a heading, a nested list, a table,
-# a bare <p> — out of the inline paragraph accumulator. A <div role="heading">
-# is block too, but conditional on its role, so _is_block_element adds it rather
-# than listing "div" here (a plain wrapper <div> must stay walk-children).
+# a bare <p> — out of the inline paragraph accumulator.
 _BLOCK_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6", "article", "p", "ol", "ul", "table"})
+# Block-level wrappers Lovdata puts around runs of block content. They are block
+# by HTML semantics, so they must not reach _inline — it concatenates the whole
+# subtree with no separator, fusing every article, row and list item inside into
+# one paragraph. They may also carry text of their own beside block children,
+# which is why they render through _render_mixed_article rather than the
+# child-only walk.
+#
+# Counted in <main> across the 2026-07-22 corpus (5,917 documents):
+#   li 184,344 in 3,478 docs | footer 3,873 in 1,094 | div 3,526 in 139
+#   blockquote 28 in 18      | figure/figcaption 11 in 6
+#   dl/dt/dd   0 in 0
+# The definition list tags are kept although unobserved, and that is a choice,
+# not an oversight: an unhandled wrapper is not a loud failure. As a child of an
+# article it goes to _inline and flattens SILENTLY, which is the whole defect
+# this constant exists to prevent, and Lovdata has added element types before.
+# Anything added here on that reasoning belongs in this list with a 0.
+_WRAPPER_TAGS = frozenset(
+    {"div", "footer", "figure", "figcaption", "blockquote", "li", "dl", "dt", "dd"},
+)
 
 _INLINE_ESCAPE = str.maketrans(
     {
@@ -226,7 +243,7 @@ def _render_element(elem: etree._Element) -> str:
         return _render_table(elem)
     if tag == "div" and elem.get("role") == _HEADING_ROLE:
         return _render_heading_div(elem)
-    return _render_children(elem)
+    return _render_mixed_article(elem) if tag in _WRAPPER_TAGS else _render_children(elem)
 
 
 def _render_heading(elem: etree._Element, tag: str, classes: list[str]) -> str:
@@ -311,11 +328,18 @@ def _render_article(
     elem: etree._Element,
     classes: list[str],
 ) -> str:
-    if elem.find("table") is not None:
-        return _render_mixed_article(elem)
     if _CHANGE_NOTE_CLASS in classes:
-        text = _escape_block_leading(_inline(elem))
-        return f"> {text}\n\n" if text else ""
+        return _render_change_note(elem)
+    # ANY block child, not just a <table>: a paragraph-class article holding a
+    # nested <ol>/<ul>/<p>/<article> used to fall through to _inline below,
+    # which concatenates descendant text with no separator and fuses the last
+    # word before the block into the block's first word
+    # ("Grunndata:" + "navn" -> "Grunndata:navn"). Nothing was lost, but the
+    # fused words stopped being findable, which breaks search, quotation and
+    # the embeddings computed from this output. 74,622 such words stood in
+    # 2,690 of 5,916 documents (analysis/llm-infra/10-byte-audit-results.md).
+    if any(_is_block_element(child) for child in elem):
+        return _render_mixed_article(elem)
     if any(c in _PARAGRAPH_CLASSES for c in classes):
         text = _escape_block_leading(_inline(elem))
         return f"{text}\n\n" if text else ""
@@ -327,7 +351,55 @@ def _render_article(
     return _render_mixed_article(elem)
 
 
+def _render_change_note(elem: etree._Element) -> str:
+    """Render a ``changesToParent`` note as a blockquote.
+
+    Almost every change note is one inline run ("Endret ved lov 9 des 2011
+    nr. 52"). One in the corpus is not: ``skatteloven`` quotes the whole text
+    of a repealed § back under "Paragrafen lød før oppheving:" as a nested
+    ``<ol>``. Routing that one to the plain block path would fix its fusion but
+    strip the marking that says the quoted provision is no longer in force —
+    trading a boundary defect for a worse one. So the blockquote is applied to
+    the structured render instead, which keeps both.
+
+    Checked corpus-wide before this ordering was chosen: 42,299 change notes
+    exist, exactly 1 carries a block child, and none carries a table.
+    """
+    if not any(_is_block_element(child) for child in elem):
+        text = _escape_block_leading(_inline(elem))
+        return f"> {text}\n\n" if text else ""
+    body = _render_mixed_article(elem).rstrip("\n")
+    if not body:
+        return ""
+    quoted = "\n".join(f"> {line}" if line else ">" for line in body.split("\n"))
+    return f"{quoted}\n\n"
+
+
 def _render_legal_article_header(elem: etree._Element) -> str:
+    """Render a ``legalArticleHeader`` as "### {value}. {title}".
+
+    Built from the two spans alone. Anything else the header carries is NOT
+    emitted — in this corpus that is always a footnote-reference marker, 424 of
+    them in 83 documents. A DOCUMENTED, DELIBERATE DROP, not an oversight:
+
+    * 206 of those markers sit on the § number rather than after the title
+      (``<span>§ 5</span>.<sup>1</sup> <span>(skade som ikkje…)</span>``), so
+      emitting them verbatim yields "### § 5.1 (skade som ikkje…)" and
+      "### § 46.1" — a form that reads as a citation of subsection 5.1. The
+      corpus is consumed by ``validate_citation`` and ``verify_quote``; a
+      heading that impersonates a different provision is worse than a missing
+      marker.
+    * Nothing legal is lost with it. The footnote's own text still renders,
+      carrying its own label, in the ``<footer class="footnotes">`` block of
+      the same §. What the marker adds is the pointer, and the association
+      survives positionally.
+
+    ``scripts/audit_render_bytes.py`` subtracts exactly this in its *adjusted*
+    XML variant, the way it already subtracts the not-in-force elision, and
+    keeps it visible in *raw*. That subtraction is only honest while this
+    docstring is true: if the drop ever widens beyond these markers, say so
+    here, or the audit will quietly absorb the difference.
+    """
     value_span = elem.find(".//span[@class='legalArticleValue']")
     title_span = elem.find(".//span[@class='legalArticleTitle']")
     value = _span_text(value_span)
@@ -343,16 +415,18 @@ def _is_block_element(elem: etree._Element) -> bool:
     """Whether ``_render_element`` renders ``elem`` as a block, not inline.
 
     ``_render_mixed_article`` uses this to keep block children out of the
-    inline accumulator. A ``<div role="heading">`` is block but conditional on
-    its role, so it is checked here rather than living in ``_BLOCK_TAGS`` (which
-    would also capture a plain wrapper ``<div>``). Mirrors the ``_render_element``
-    dispatch so a block nested inside a mixed article renders the same as one at
-    top level, instead of being flattened through the inline path.
+    inline accumulator. Mirrors the ``_render_element`` dispatch so a block
+    nested inside a mixed article renders the same as one at top level, instead
+    of being flattened through the inline path.
     """
-    return elem.tag in _BLOCK_TAGS or (elem.tag == "div" and elem.get("role") == _HEADING_ROLE)
+    return elem.tag in _BLOCK_TAGS or elem.tag in _WRAPPER_TAGS
 
 
-def _render_mixed_article(elem: etree._Element) -> str:
+def _render_mixed_article(
+    elem: etree._Element,
+    *,
+    skip_tags: frozenset[str] = frozenset(),
+) -> str:
     """Render an ``<article>`` as a run of inline paragraphs and block children.
 
     The general renderer for every article that is not a plain paragraph or a
@@ -363,11 +437,18 @@ def _render_mixed_article(elem: etree._Element) -> str:
     a bare ``<p>``) go through ``_render_element`` so a header stays a ``###``
     heading and a table a GFM block; genuinely-inline children (spans, links,
     ``<br/>``) accumulate into the paragraphs between them, so no text is lost.
+
+    ``skip_tags`` names children the caller renders itself; their tails are
+    still consumed as the parent's inline text. ``_list_item_lines`` uses it
+    for nested ``<ul>``/``<ol>``, which need the list walk's own indentation
+    rather than a block rendered in place.
     """
     blocks: list[str] = []
     inline: list[str] = [_escape_inline_text(elem.text or "")]
     for child in elem:
-        if _is_block_element(child):
+        if child.tag in skip_tags:
+            inline.append(_escape_inline_text(child.tail or ""))
+        elif _is_block_element(child):
             blocks.append(_flush_inline(inline))
             blocks.append(_render_element(child))
             inline = [_escape_inline_text(child.tail or "")]
@@ -501,7 +582,7 @@ def _render_list_lines(
     indent = "  " * depth
     for index, li in enumerate(items, start=1):
         prefix = f"{index}. " if ordered else "- "
-        lines.append(f"{indent}{prefix}{_escape_block_leading(_inline_of_li(li))}")
+        lines.extend(_list_item_lines(li, prefix=prefix, indent=indent))
         for child in li:
             if child.tag in _LIST_TAGS:
                 lines.extend(
@@ -514,21 +595,25 @@ def _render_list_lines(
     return lines
 
 
-def _inline_of_li(li: etree._Element) -> str:
-    """Inline text of a <li> excluding any nested <ul>/<ol> children.
+def _list_item_lines(li: etree._Element, *, prefix: str, indent: str) -> list[str]:
+    """One ``<li>`` as Markdown lines: the marker first, content column after.
 
-    Nested lists are rendered separately by _render_list_lines with
-    their own indentation; their tails (text after the closing tag) are
-    preserved as inline content of the parent li.
+    A block child other than a nested list — in this corpus always an
+    ``<article>``, 184,344 of them across 3,478 documents — used to go through
+    the item's inline accumulator, which fused the item's own text into the
+    block's first word and flattened any table the block contained. Rendering
+    it as a block and re-indenting to the item's content column keeps the
+    boundaries and keeps the item a single list item.
     """
-    parts = [_escape_inline_text(li.text or "")]
-    for child in li:
-        if child.tag in _LIST_TAGS:
-            parts.append(_escape_inline_text(child.tail or ""))
-            continue
-        parts.append(_inline_for_child(child))
-        parts.append(_escape_inline_text(child.tail or ""))
-    return "".join(parts).strip()
+    body = _render_mixed_article(li, skip_tags=_LIST_TAGS).rstrip("\n")
+    if not body:
+        return [f"{indent}{prefix.rstrip()}"]
+    first, *rest = body.split("\n")
+    pad = " " * len(prefix)
+    return [
+        f"{indent}{prefix}{first}",
+        *(f"{indent}{pad}{line}" if line else "" for line in rest),
+    ]
 
 
 def _inline(elem: etree._Element) -> str:

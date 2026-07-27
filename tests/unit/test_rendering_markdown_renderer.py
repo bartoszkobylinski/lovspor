@@ -141,6 +141,255 @@ def test_render_changes_to_parent_produces_blockquote() -> None:
     assert md == "> Endret ved lov 2020-05-01.\n"
 
 
+# --------------------------------------------------------------------------
+# Fused block boundaries.
+#
+# A paragraph-class article carrying a block child was flattened by _inline,
+# which concatenates descendant text with NO separator: the last word before
+# the block ran into the block's first word and produced a word that exists
+# in neither. Corpus-wide this fabricated 74,622 words across 2,690 of 5,916
+# documents (analysis/llm-infra/10-byte-audit-results.md). No text was lost —
+# the damage is that "navn" stops being a findable word, so the passage
+# becomes unsearchable and unquotable.
+#
+# The shapes below are the real ones: 222,751 such articles live in 3,514
+# documents, their block children being nested <article> (191,599), <ol>
+# (31,044), <ul> (5,904) and <p> (1,801).
+# --------------------------------------------------------------------------
+
+
+def test_render_legal_p_with_nested_list_keeps_the_list_a_list() -> None:
+    # kredittopplysningsforskriften § 2: the enumeration of personal-data
+    # categories a credit agency may register, rendered as one run-on string.
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Grunndata:'
+            b'<ol class="defaultList"><li>navn</li><li>adresse</li></ol>'
+            b"</article>",
+        ),
+    )
+    assert md == "Grunndata:\n\n1. navn\n2. adresse\n"
+
+
+def test_render_legal_p_with_nested_list_fabricates_no_word() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Grunndata:'
+            b'<ol class="defaultList"><li>navn</li></ol>'
+            b"</article>",
+        ),
+    )
+    # The defect signature: text before the block fused to the block's first
+    # word. "navn" must survive as a word in its own right.
+    assert "Grunndata:navn" not in md
+
+
+def test_render_numbered_legal_p_with_nested_articles_keeps_them_apart() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="numberedLegalP">(1) Innledning'
+            b'<article class="legalP">Andre ledd.</article>'
+            b"</article>",
+        ),
+    )
+    assert md == "(1) Innledning\n\nAndre ledd.\n"
+    assert "InnledningAndre" not in md
+
+
+def test_render_list_article_with_nested_paragraph_block_keeps_the_break() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="listArticle">a) Innledning<p>Etterfolgende avsnitt.</p></article>',
+        ),
+    )
+    assert md == "a) Innledning\n\nEtterfolgende avsnitt.\n"
+
+
+def test_render_legal_p_keeps_text_that_follows_the_block_child() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">For:<ul><li>ett</li></ul>etterpa</article>',
+        ),
+    )
+    # The tail after a block child is sibling text, not part of the block.
+    assert md == "For:\n\n- ett\n\netterpa\n"
+
+
+def test_render_inline_only_paragraph_classes_are_unchanged() -> None:
+    # The block-child route must not capture the ordinary case: an article
+    # whose children are all inline still renders as one paragraph.
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Se <a href="lov/1999-03-26-14">loven</a> her.</article>',
+        ),
+    )
+    assert md == "Se [loven](lov/1999-03-26-14) her.\n"
+
+
+@pytest.mark.parametrize(
+    ("tag", "marker"),
+    [("h1", "#"), ("h2", "##")],
+)
+def test_a_top_level_heading_inside_an_article_stays_a_heading(tag: str, marker: str) -> None:
+    # h1/h2 are in _BLOCK_TAGS, so they leave the inline accumulator like any
+    # other block child. Nothing exercised them nested until a mutation run
+    # removed each from the set and no test noticed: the article would render
+    # "Foer# Tittel" on one line, fusing the text into the heading mark.
+    md = render_markdown(
+        _wrap(
+            f'<article class="legalP">Foer<{tag}>Tittel</{tag}>etter</article>'.encode(),
+        ),
+    )
+
+    assert md == f"Foer\n\n{marker} Tittel\n\netter\n"
+
+
+def test_render_footnotes_footer_keeps_the_notes_apart() -> None:
+    # The corpus's most common wrapper: <footer class="footnotes"> closing a
+    # legalArticle, 2,063 of them in 772 documents. As an inline child the whole
+    # footer collapsed into the article's last paragraph, fusing each note into
+    # the next ("For dieselmotorer.2 Unntak:").
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalArticle">'
+            b'<article class="legalP">Brodtekst.</article>'
+            b'<footer class="footnotes">'
+            b'<article class="footnote"><span class="footnoteLabel">1</span>'
+            b"For dieselmotorer.</article>"
+            b'<article class="footnote"><span class="footnoteLabel">2</span>'
+            b"Unntak: kjoretoy.</article>"
+            b"</footer></article>",
+        ),
+    )
+    assert md == "Brodtekst.\n\n1For dieselmotorer.\n\n2Unntak: kjoretoy.\n"
+    assert "dieselmotorer.2" not in md
+
+
+def test_render_wrapper_div_keeps_the_quoted_convention_structured() -> None:
+    # <div class="indent"> around a quoted convention text: 144 sites in ~50
+    # documents. Flattened, an entire annex — headings, articles, list items —
+    # came out as one paragraph ("...gjelder, ellerdersom eieren...").
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalArticle">'
+            b'<article class="legalP">Folgende tekst legges til:</article>'
+            b'<div class="indent">'
+            b'<article class="defaultP"><strong>Art 4bis.</strong>'
+            b'<ol class="defaultList" type="a">'
+            b'<li><article class="legalP">forsikringens art og gyldighetstid</article></li>'
+            b'<li><article class="legalP">navn og hovedforretningssted</article></li>'
+            b"</ol></article></div></article>",
+        ),
+    )
+    assert md == (
+        "Folgende tekst legges til:\n\n**Art 4bis.**\n\n"
+        "1. forsikringens art og gyldighetstid\n"
+        "2. navn og hovedforretningssted\n"
+    )
+    assert "gyldighetstidnavn" not in md
+
+
+def test_render_stray_list_item_outside_a_list_stays_a_block() -> None:
+    # 171 sites in 27 documents: an <li> parented straight by an article,
+    # with no <ol>/<ul> between. It is not reached by the list walk, so it used
+    # to flatten into the article's inline run.
+    md = render_markdown(
+        _wrap(
+            b'<article class="change">Endringer:'
+            b"<li>forste punkt</li><li>andre punkt</li></article>",
+        ),
+    )
+    assert md == "Endringer:\n\nforste punkt\n\nandre punkt\n"
+    assert "punktandre" not in md
+
+
+def test_render_figure_caption_is_not_fused_into_the_running_text() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Rundt 9'
+            b"<figure><figcaption>Figur 3: Stalror</figcaption></figure></article>",
+        ),
+    )
+    assert md == "Rundt 9\n\nFigur 3: Stalror\n"
+    assert "9Figur" not in md
+
+
+def test_render_blockquote_wrapper_keeps_its_articles_apart() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalArticle"><blockquote>'
+            b'<article class="legalP">Forste avsnitt.</article>'
+            b'<article class="legalP">Andre avsnitt.</article>'
+            b"</blockquote></article>",
+        ),
+    )
+    assert md == "Forste avsnitt.\n\nAndre avsnitt.\n"
+    assert "avsnitt.Andre" not in md
+
+
+def test_render_wrapper_carrying_its_own_text_keeps_that_text() -> None:
+    # Wrappers route through _render_mixed_article, not the child-only walk, so
+    # text sitting directly in the wrapper survives instead of tripping
+    # _assert_no_dropped_text.
+    md = render_markdown(
+        _wrap(b'<div class="box">Innledning<article class="legalP">Avsnitt.</article>slutt</div>'),
+    )
+    assert md == "Innledning\n\nAvsnitt.\n\nslutt\n"
+
+
+def test_a_div_is_a_block_child_whatever_its_role() -> None:
+    # _is_block_element decides which children leave the inline accumulator, so
+    # since renderer 4 it governs both _render_article and _list_item_lines. A
+    # role="heading" div becomes an ATX heading; a plain wrapper div is still a
+    # block, and carries its text directly, so it renders through
+    # _render_mixed_article rather than the child-only walk (which would trip
+    # _assert_no_dropped_text on that text).
+    heading = render_markdown(
+        _wrap(
+            b'<article class="legalP">Foer'
+            b'<div role="heading" aria-level="4">Tittel</div></article>',
+        ),
+    )
+    assert heading == "Foer\n\n#### Tittel\n"
+
+    plain = render_markdown(
+        _wrap(b'<article class="legalP">Foer<div>inni</div>etter</article>'),
+    )
+    assert plain == "Foer\n\ninni\n\netter\n"
+
+
+def test_render_empty_list_item_emits_a_bare_marker() -> None:
+    md = render_markdown(_wrap(b"<ul><li></li><li>x</li></ul>"))
+    # The marker is emitted without its trailing space: a line of "- " alone
+    # is trailing whitespace that the corpus would carry forever.
+    assert md == "-\n- x\n"
+
+
+def test_render_change_note_whose_only_block_renders_empty_produces_nothing() -> None:
+    # An empty <ol> renders to "", so the note has no content to quote. It must
+    # emit nothing rather than a stray blockquote marker.
+    md = render_markdown(_wrap(b'<article class="changesToParent"><ol></ol></article>'))
+    assert md == "\n"
+
+
+def test_render_change_note_with_a_block_child_stays_a_blockquote() -> None:
+    # skatteloven nl-19990326-014 is the corpus's only change note carrying a
+    # block child, and what it carries is the full text of a repealed § quoted
+    # back under "Paragrafen lod for oppheving:". It must keep BOTH its
+    # change-note marking and the structure of the quoted provision.
+    md = render_markdown(
+        _wrap(
+            b'<article class="changesToParent">Opphevet. Paragrafen lod for oppheving:'
+            b'<ol class="defaultList"><li>forste ledd</li><li>andre ledd</li></ol>'
+            b"</article>",
+        ),
+    )
+    assert md == (
+        "> Opphevet. Paragrafen lod for oppheving:\n>\n> 1. forste ledd\n> 2. andre ledd\n"
+    )
+    assert "opphevingforste" not in md
+
+
 def test_render_empty_changes_to_parent_and_paragraph_produce_no_output() -> None:
     md = render_markdown(
         _wrap(
@@ -148,6 +397,73 @@ def test_render_empty_changes_to_parent_and_paragraph_produce_no_output() -> Non
         ),
     )
     assert md == "\n"
+
+
+# --------------------------------------------------------------------------
+# The same fusion one level down: a <li> whose content is an <article>.
+#
+# _inline_of_li excluded nested <ul>/<ol> from the inline run but nothing else,
+# so an <article> inside a list item — 184,344 items across 3,478 documents,
+# the whole residue left after the article-level fix — was flattened, taking
+# any table inside it along.
+# --------------------------------------------------------------------------
+
+
+def test_render_list_item_wrapping_an_article_keeps_the_text_separate() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<ol class="defaultList"><li data-name="(1)" value="1">'
+            b'<article class="listArticle"><article class="legalP">Skattyter som '
+            b"har hatt kostnader.</article></article></li></ol>",
+        ),
+    )
+    assert md == "1. Skattyter som har hatt kostnader.\n"
+
+
+def test_render_list_item_with_leading_text_and_an_article_does_not_fuse() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<ol><li>Innledning:<article class="legalP">Andre avsnitt.</article></li></ol>',
+        ),
+    )
+    # Continuation blocks sit at the item's content column, so the item still
+    # parses as one list item rather than ending the list.
+    assert md == "1. Innledning:\n\n   Andre avsnitt.\n"
+    assert "Innledning:Andre" not in md
+
+
+def test_render_bullet_item_indents_continuation_to_its_own_marker_width() -> None:
+    md = render_markdown(
+        _wrap(b'<ul><li>Forste<article class="legalP">Andre.</article></li></ul>'),
+    )
+    assert md == "- Forste\n\n  Andre.\n"
+
+
+def test_render_list_item_wrapping_a_table_keeps_the_cells_apart() -> None:
+    # sf-20110606-0668 (food additives): an E-number table inside a list item.
+    # It fused into "E 432Polyoksyetylensorbitanmonolaurat".
+    md = render_markdown(
+        _wrap(
+            b"<ol><li>Polysorbater:"
+            b'<article class="legalP"><table><tbody>'
+            b"<tr><td>E 432</td><td>Polyoksyetylensorbitanmonolaurat</td></tr>"
+            b"</tbody></table></article></li></ol>",
+        ),
+    )
+    assert "E 432Polyoksyetylensorbitanmonolaurat" not in md
+    assert "| E 432 | Polyoksyetylensorbitanmonolaurat |" in md
+
+
+def test_render_list_item_with_only_inline_content_is_unchanged() -> None:
+    md = render_markdown(_wrap(b"<ol><li>bare tekst</li></ol>"))
+    assert md == "1. bare tekst\n"
+
+
+def test_render_nested_sublists_still_indent_under_their_parent_item() -> None:
+    md = render_markdown(
+        _wrap(b"<ul><li>ytre<ul><li>indre</li></ul></li></ul>"),
+    )
+    assert md == "- ytre\n  - indre\n"
 
 
 def test_render_ol_produces_numbered_markdown_list() -> None:
@@ -280,7 +596,11 @@ def test_render_escapes_second_line_token_inside_blockquote_after_br() -> None:
 
 def test_render_escapes_leading_token_on_second_line_in_list_item() -> None:
     md = render_markdown(_wrap(b"<ul><li>item<br/>- sub</li></ul>"))
-    assert md == "- item\n\\- sub\n"
+    # Two guards now, not one: the '- ' is still escaped so it cannot reparse
+    # as a bullet, and since renderer 4 the continuation also sits at the
+    # item's content column instead of column 0, so it belongs to the item
+    # outright rather than by lazy continuation.
+    assert md == "- item\n  \\- sub\n"
 
 
 def test_render_encodes_parens_and_spaces_in_href() -> None:

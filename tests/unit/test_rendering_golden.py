@@ -65,17 +65,58 @@ _SURFACE = (
     '<article class="legalP">Langsgående oppmerking.'
     "<table><tbody><tr><td>1000</td><td>1000 Kjørefeltlinje</td></tr></tbody></table>"
     "</article>"
+    # A paragraph-class article holding a NON-table block child. The three
+    # shapes below are the corpus's most common article structure by a wide
+    # margin (222,751 articles in 3,514 documents) and were flattened into a
+    # single run-on line until renderer 4. A table under the same wrapper is
+    # pinned above but never protected them: the pre-4 code branched on
+    # <table> specifically, so the guard covered the one shape that was
+    # already correct.
+    '<article class="legalP">Grunndata:'
+    '<ol class="defaultList"><li>navn</li><li>adresse</li></ol></article>'
+    '<article class="numberedLegalP">(1) Innledning'
+    '<article class="legalP">Andre ledd.</article></article>'
+    '<article class="listArticle">a) Innledning<p>Etterfølgende avsnitt.</p></article>'
     "<ol><li>Første</li><li>Andre</li></ol>"
     "<ul><li>Kule</li></ul>"
+    # A list item wrapping an <article> — 184,344 items in 3,478 documents,
+    # the corpus's second most common structure and the whole residue left
+    # after the article-level fix. A table inside such an item (the food-
+    # additive E-number catalogues) was flattened along with it.
+    '<ol class="defaultList"><li data-name="(1)" value="1">Polysorbater:'
+    '<article class="legalP">Innledende avsnitt.'
+    "<table><tbody><tr><td>E 432</td><td>Polysorbat 20</td></tr></tbody></table>"
+    "</article></li></ol>"
+    # Block-level wrappers, the third and last flattening class: a footnotes
+    # footer (2,063 sites in 772 documents), a quoted convention inside
+    # <div class="indent">, a stray <li> the list walk never reaches, and a
+    # figure caption. Each collapsed through _inline until renderer 4.
+    '<article class="legalArticle"><article class="legalP">Brodtekst.</article>'
+    '<footer class="footnotes">'
+    '<article class="footnote"><span class="footnoteLabel">1</span>For dieselmotorer.</article>'
+    '<article class="footnote"><span class="footnoteLabel">2</span>Unntak.</article>'
+    "</footer></article>"
+    '<article class="legalArticle"><div class="indent">'
+    '<article class="defaultP"><strong>Art 4bis.</strong>'
+    '<ol class="defaultList" type="a">'
+    '<li><article class="legalP">art og gyldighetstid</article></li>'
+    '<li><article class="legalP">navn og forretningssted</article></li></ol>'
+    "</article></div></article>"
+    '<article class="change">Endringer:<li>forste punkt</li><li>andre punkt</li></article>'
+    '<article class="legalP">Rundt 9<figure><figcaption>Figur 3</figcaption></figure></article>'
     '<div aria-level="7" role="heading">Avsnitt 1<br/>Driftsansvarlige</div>'
     '<p class="leddfortsettelse">►<strong>M7</strong> Endret ved forordning.◄</p>'
     '<article class="futureLegalArticle">Ikke i kraft ennå.</article>'
     '<article class="changesToParent">Endret ved lov 1 jan 2026.</article>'
+    # skatteloven's shape: a change note quoting a repealed § back as a list.
+    # It must keep the blockquote AND the list — see _render_change_note.
+    '<article class="changesToParent">Opphevet. Paragrafen lød før oppheving:'
+    '<ol class="defaultList"><li>første ledd</li></ol></article>'
     "</section></main></body></html>"
 ).encode()
 
-_PINNED_DOCUMENT = (3, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
-_PINNED_SURFACE = (3, "80bcb4a7665952633dcfac6e5f9abe4667bf66dc67dbeca77af7b40b4565a04e")
+_PINNED_DOCUMENT = (4, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
+_PINNED_SURFACE = (4, "ebe0073a04702f9aa842b1deabf0ccaceed32a03df38a22d1994c56de3c00245")
 
 
 def _digest(text: str) -> str:
@@ -109,3 +150,24 @@ def test_surface_actually_exercises_the_table_paths() -> None:
     assert "###### Vedlegg 1" in md  # heading div nested inside a mixed <article> (PR #126 fix)
     assert "►**M7** Endret ved forordning.◄" in md  # bare <p> with EU markers verbatim
     assert "Ikke i kraft" not in md  # not-in-force elision still applied
+    # Non-table block children under a paragraph-class article: the shape the
+    # table-only branch left fused until renderer 4. Asserted as the ABSENCE of
+    # the fusion, because that is what the corpus audit measures.
+    assert "Grunndata:navn" not in md
+    assert "InnledningAndre" not in md
+    assert "Innledningtterfølgende" not in md
+    assert "> 1. første ledd" in md  # change note keeps blockquote AND structure
+    assert "oppheving:første" not in md
+    # Block content inside a list item: not fused, and indented to the item's
+    # content column so the item does not end at the block.
+    assert "Polysorbater:Innledende" not in md
+    assert "E 432Polysorbat" not in md
+    assert "1. Polysorbater:" in md
+    assert "\n   | E 432 | Polysorbat 20 |" in md
+    # Block-level wrappers: each keeps its children apart instead of collapsing
+    # the whole subtree into the surrounding paragraph.
+    assert "dieselmotorer.2" not in md  # <footer class="footnotes">
+    assert "gyldighetstidnavn" not in md  # <div class="indent">
+    assert "1. art og gyldighetstid" in md  # ...and the list inside it survives
+    assert "punktandre" not in md  # stray <li>
+    assert "9Figur" not in md  # <figcaption>
