@@ -734,3 +734,70 @@ def test_an_empty_error_body_leaves_the_original_error_untouched(
     with pytest.raises(httpx.HTTPStatusError, match="400 Bad Request") as caught:
         model.encode(["text"])
     assert "API said" not in str(caught.value)
+
+
+def test_the_budget_splits_exactly_at_the_boundary_not_one_input_early(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An input whose cost lands the request EXACTLY on the budget still
+    belongs in it: the cap is a maximum, not a threshold to stay under. With
+    a real 250,000-token budget the boundary is unreachable from a test, so
+    the budget is shrunk to make the off-by-one observable.
+    """
+    monkeypatch.setattr(model_module, "_MAX_REQUEST_TOKENS", 10)
+    model = OpenAIEmbedder(api_key="sk-test", dim=3)
+    encoding = model_module._encoding_for(DEFAULT_MODEL_NAME)
+    text = "ord ord ord ord ord"
+    assert len(encoding.encode(text)) == 5, "fixture must cost exactly half the budget"
+
+    batches = list(model._batches([text] * 4))
+
+    # 5+5 fills the budget exactly, so two inputs per request, twice over.
+    assert [len(batch) for batch in batches] == [2, 2]
+
+
+def test_the_token_accumulator_resets_to_zero_between_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Carrying anything over from the flushed request shrinks every later
+    one — invisible until a document needs three requests or more."""
+    monkeypatch.setattr(model_module, "_MAX_REQUEST_TOKENS", 10)
+    model = OpenAIEmbedder(api_key="sk-test", dim=3)
+
+    batches = list(model._batches(["ord ord ord ord ord"] * 6))
+
+    assert [len(batch) for batch in batches] == [2, 2, 2]
+
+
+def test_the_budget_keeps_a_margin_under_the_endpoints_documented_cap() -> None:
+    """The endpoint rejects a request above 300,000 tokens. Client-side
+    tiktoken and the server's accounting are known to disagree, and the cost
+    of being wrong is a failed sync mid-run, so the gap is deliberate and
+    pinned: shrinking it silently is what this test exists to catch."""
+    documented_cap = 300_000
+
+    assert documented_cap > model_module._MAX_REQUEST_TOKENS
+    assert documented_cap - model_module._MAX_REQUEST_TOKENS == 50_000
+
+
+def test_a_long_error_body_is_sampled_not_carried_whole(
+    httpx_mock: HTTPXMock,
+) -> None:
+    """An API may answer with an HTML page. The reason belongs in the
+    traceback; the page does not."""
+    filler = "x" * 5000
+    httpx_mock.add_response(
+        method="POST",
+        url=OPENAI_EMBEDDINGS_URL,
+        status_code=400,
+        content=f"limit exceeded {filler}".encode(),
+    )
+    model = OpenAIEmbedder(api_key="sk-test", dim=3)
+
+    with pytest.raises(httpx.HTTPStatusError) as caught:
+        model.encode(["text"])
+
+    message = str(caught.value)
+    assert "limit exceeded" in message
+    assert filler not in message
+    assert message.count("x") <= model_module._API_MESSAGE_SAMPLE
