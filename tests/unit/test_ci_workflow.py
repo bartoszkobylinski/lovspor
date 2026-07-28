@@ -254,22 +254,42 @@ def _repair_step() -> dict[str, Any]:
     return next(s for s in _sync_steps() if "repair-embeddings" in str(s.get("run", "")))
 
 
+def _unwrapped_condition() -> str:
+    """The repair step's ``if:`` with GitHub's optional ``${{ }}`` removed.
+
+    ``if:`` evaluates its value as an expression with or without the braces, so
+    ``inputs.repair_embeddings`` and ``${{ inputs.repair_embeddings }}`` are the
+    same condition. Normalizing here keeps the assertion about what the
+    expression MEANS instead of how it is spelled.
+    """
+    condition = str(_repair_step()["if"]).strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    return condition
+
+
 def test_the_repair_step_is_opt_in_and_never_fires_on_the_schedule() -> None:
     """Without the condition, every nightly run would re-flag and re-embed.
 
-    Pinned as the WHOLE expression rather than as a substring. The ``inputs``
-    context is empty on a scheduled event and a missing property reads as the
-    empty string, so a bare dereference is falsy there — but a condition that
-    merely mentions the input need not be: ``inputs.repair_embeddings !=
-    'false'`` contains the same text and fires on every schedule, because
-    '' != 'false'. A substring check calls that safe.
+    Pinned as the whole expression rather than as a substring, because the
+    ``inputs`` context is EMPTY on a scheduled event: a missing property reads
+    as the empty string, so a bare dereference is falsy there, while a
+    condition that merely mentions the input need not be.
+    ``inputs.repair_embeddings != 'false'`` contains the same text and fires on
+    every schedule, because '' != 'false'. A substring check calls that safe.
+
+    Both spellings of the bare dereference are accepted — see
+    ``_unwrapped_condition``. Being stricter than GitHub is its own defect: a
+    test that rejects a correct workflow sends the next maintainer to "fix" a
+    file that was never broken.
     """
-    condition = str(_repair_step()["if"]).strip()
+    condition = _unwrapped_condition()
 
     assert condition == "inputs.repair_embeddings", (
-        "the condition must be a bare dereference; anything compound has to be "
-        "re-checked against an EMPTY inputs context, which is what a scheduled "
-        f"run supplies (got: {condition!r})"
+        "the condition must dereference the input and nothing more (with or "
+        "without ${{ }}); anything compound has to be re-checked against an "
+        f"EMPTY inputs context, which is what a scheduled run supplies "
+        f"(got: {condition!r})"
     )
 
 
