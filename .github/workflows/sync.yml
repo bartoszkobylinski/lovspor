@@ -8,6 +8,14 @@ on:
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
+    inputs:
+      repair_embeddings:
+        description: >-
+          Re-embed documents whose sidecar under-counts their sections.
+          Opt-in, never on the schedule: it rewrites the manifest and spends
+          OpenAI budget on documents the change detector considers current.
+        type: boolean
+        default: false
 
 # Engine repo only needs read access to itself; corpus push uses the deploy
 # key configured in repo secrets (LOVVERK_DEPLOY_KEY). issues:write lets the
@@ -132,6 +140,23 @@ jobs:
           git config user.name "lovspor-sync[bot]"
           git config user.email "lovspor-sync@noreply.github.com"
           git config commit.gpgsign false
+
+      # Clears embedding_hash on documents whose sidecar holds fewer vectors
+      # than the current chunker would write, so the sync below rebuilds them.
+      # The staleness signal alone cannot see these: the hash matches, the file
+      # is present, and only a per-section-id count reveals the shortfall. It
+      # arises when the embedding pipeline changes rather than the law — after
+      # split_to_token_chunks landed, 791 documents held pre-chunking vectors,
+      # and only those whose Markdown also changed were ever rebuilt.
+      #
+      # Opt-in and never scheduled, for two reasons: it rewrites the manifest
+      # for documents the change detector calls current, and the re-embed it
+      # triggers spends real budget. Deliberately WITHOUT the OpenAI key — this
+      # step only reads Markdown and writes the manifest; the sync below is
+      # what talks to OpenAI.
+      - name: Flag under-embedded documents for re-embed
+        if: inputs.repair_embeddings
+        run: uv run --no-dev lovspor repair-embeddings
 
       - name: Run lovspor sync
         id: sync

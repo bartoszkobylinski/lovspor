@@ -240,3 +240,94 @@ def test_freshness_check_warns_and_continues_when_the_endpoint_is_unreachable(
     assert "::warning::" in result.stdout
     assert "::error::" not in result.stdout
     assert result.returncode == 0
+
+
+# ------------------------------------------------------------------ repair step
+#
+# `repair-embeddings` rewrites the corpus manifest and makes the sync spend
+# OpenAI budget on documents the change detector considers current. That is
+# correct on demand and wrong on a timer, so the guard rails are pinned here
+# alongside the other properties of the job that holds the secrets.
+
+
+def _repair_step() -> dict[str, Any]:
+    return next(s for s in _sync_steps() if "repair-embeddings" in str(s.get("run", "")))
+
+
+def _unwrapped_condition() -> str:
+    """The repair step's ``if:`` with GitHub's optional ``${{ }}`` removed.
+
+    ``if:`` evaluates its value as an expression with or without the braces, so
+    ``inputs.repair_embeddings`` and ``${{ inputs.repair_embeddings }}`` are the
+    same condition. Normalizing here keeps the assertion about what the
+    expression MEANS instead of how it is spelled.
+
+    Deliberately stops there. Other spellings are equally valid and equally
+    safe — ``${{ (inputs.repair_embeddings) }}``,
+    ``inputs['repair_embeddings']`` — and recognizing them all ends in an
+    expression evaluator living inside a test. The line is drawn at the two
+    forms anyone actually writes; widening this function is the right response
+    to a workflow that fails the assertion while being safe, and is preferable
+    to relaxing the assertion itself.
+    """
+    condition = str(_repair_step()["if"]).strip()
+    if condition.startswith("${{") and condition.endswith("}}"):
+        condition = condition[3:-2].strip()
+    return condition
+
+
+def test_the_repair_step_is_opt_in_and_never_fires_on_the_schedule() -> None:
+    """Without the condition, every nightly run would re-flag and re-embed.
+
+    Pinned as the whole expression rather than as a substring, because the
+    ``inputs`` context is EMPTY on a scheduled event: a missing property reads
+    as the empty string, so a bare dereference is falsy there, while a
+    condition that merely mentions the input need not be.
+    ``inputs.repair_embeddings != 'false'`` contains the same text and fires on
+    every schedule, because '' != 'false'. A substring check calls that safe.
+
+    Both spellings of the bare dereference are accepted — see
+    ``_unwrapped_condition``. Being stricter than GitHub is its own defect: a
+    test that rejects a correct workflow sends the next maintainer to "fix" a
+    file that was never broken.
+    """
+    condition = _unwrapped_condition()
+
+    assert condition == "inputs.repair_embeddings", (
+        "the condition must dereference the input and nothing more (with or "
+        "without ${{ }}); anything compound has to be re-checked against an "
+        "EMPTY inputs context, which is what a scheduled run supplies. If your "
+        "condition IS a plain dereference in a spelling _unwrapped_condition "
+        f"does not know, widen that helper rather than this assertion "
+        f"(got: {condition!r})"
+    )
+
+
+def test_the_repair_input_defaults_to_off() -> None:
+    """A manual re-run after a transient upstream failure — the documented
+    reason `workflow_dispatch` exists here — must not silently re-embed."""
+    workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    # PyYAML resolves the bare `on:` key to the boolean True.
+    triggers = workflow.get("on", workflow.get(True))
+    repair = triggers["workflow_dispatch"]["inputs"]["repair_embeddings"]
+
+    assert repair["default"] is False
+    assert repair["type"] == "boolean"
+
+
+def test_the_repair_step_is_not_handed_the_openai_key() -> None:
+    """It reads Markdown and writes the manifest; it never calls OpenAI. The
+    re-embed happens in the sync step, which already holds the key."""
+    assert "OPENAI_API_KEY" not in str(_repair_step().get("env", {}))
+
+
+def test_the_repair_step_runs_before_the_sync_that_rebuilds_the_vectors() -> None:
+    """Flagging after the sync would defer every rebuild to the next run."""
+    names = [str(s.get("name", "")) for s in _sync_steps()]
+    runs = [str(s.get("run", "")) for s in _sync_steps()]
+    repair_at = next(i for i, r in enumerate(runs) if "repair-embeddings" in r)
+    sync_at = next(i for i, n in enumerate(names) if n == "Run lovspor sync")
+    author_at = next(i for i, n in enumerate(names) if n.startswith("Configure git author"))
+
+    # The repair commits to the corpus clone, so the author must be set first.
+    assert author_at < repair_at < sync_at, names
