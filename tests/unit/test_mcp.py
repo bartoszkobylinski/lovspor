@@ -44,6 +44,7 @@ from lovspor.embeddings.search import SearchHit
 from lovspor.errors import ConfigError
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
+    _MAX_MARKER_TOLERANT_QUERY,
     _MAX_RESULT_LIMIT,
     _MCP_EMBED_MAX_RETRIES,
     _MCP_EMBED_TIMEOUT_SECONDS,
@@ -1129,6 +1130,104 @@ def test_search_body_no_matches_returns_empty(tmp_path: Path) -> None:
         body_for={"x": "irrelevant content"},
     )
     assert CorpusReader(tmp_path).search_body("boligkjøp") == []
+
+
+# ---------- search_body across a footnote marker ----------
+#
+# The renderer writes a footnote marker flush against the word it annotates,
+# mid-sentence. Nobody searching for the sentence types it, so the plain
+# substring scan silently loses the phrase — the same defect class that made
+# verify_quote reject honest quotes. Measured on the renderer-5 body index
+# (5,913 documents): 11,839 markers in 1,081 of them; the character after a
+# marker is whitespace 10,131 times, "," 728, "." 511. Exactly one marker in
+# the corpus splits a word (a table cell, "HORRAT[^\*]R"), so the
+# phrase-crossing-a-word-boundary case below is the one that matters.
+
+
+def test_search_body_finds_a_phrase_a_footnote_marker_interrupts(tmp_path: Path) -> None:
+    # Verbatim from adopsjonsloven § 52 in the live corpus.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="adopsjonsloven", title="Adopsjonsloven")},
+        body_for={"adopsjonsloven": "Loven gjelder fra det tidspunktet[^1] Kongen bestemmer."},
+    )
+    rows = CorpusReader(tmp_path).search_body("tidspunktet Kongen bestemmer")
+    assert len(rows) == 1
+    assert rows[0]["match_count"] == 1
+    # The snippet window spans the whole match, marker included, so the AI can
+    # see why the text it gets back is not byte-identical to what it searched.
+    assert "tidspunktet[^1] Kongen bestemmer" in rows[0]["snippet"]
+
+
+def test_search_body_finds_a_phrase_a_marker_interrupts_before_punctuation(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "Departementet kan gi forskrift[^2], og fastsette gebyr."},
+    )
+    rows = CorpusReader(tmp_path).search_body("gi forskrift, og fastsette")
+    assert len(rows) == 1
+    assert rows[0]["match_count"] == 1
+
+
+def test_search_body_counts_marker_broken_and_plain_matches_together(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "Kongen bestemmer. Kongen[^1] bestemmer. Kongen bestemmer."},
+    )
+    rows = CorpusReader(tmp_path).search_body("kongen bestemmer")
+    assert rows[0]["match_count"] == 3
+
+
+def test_search_body_marker_tolerance_does_not_invent_a_match(tmp_path: Path) -> None:
+    # Tolerating a marker must not degrade into tolerating any bracketed run:
+    # a link label or a bracketed aside between two words is real text, and
+    # skipping it would report a phrase the statute never contains.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "alfa[^1] beta [se § 4] gamma [^a-very-long-marker-name] delta"},
+    )
+    reader = CorpusReader(tmp_path)
+    assert reader.search_body("alfa gamma") == []
+    assert reader.search_body("beta gamma") == []
+    assert reader.search_body("gamma delta") == []
+
+
+def test_search_body_drops_marker_tolerance_past_the_query_cap(tmp_path: Path) -> None:
+    # The tolerant pattern is ~25 bytes of regex per query character, so an
+    # uncapped query is a caller-controlled compile cost on a public server.
+    # Past the cap the scan degrades to exactly the pre-existing literal match:
+    # the marker-interrupted phrase is missed, the literal one still found.
+    filler = "x" * _MAX_MARKER_TOLERANT_QUERY
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": f"{filler} alfa[^1] beta and {filler} alfa beta"},
+    )
+    reader = CorpusReader(tmp_path)
+    over_cap = f"{filler} alfa beta"
+    assert len(over_cap) > _MAX_MARKER_TOLERANT_QUERY
+    assert reader.search_body(over_cap)[0]["match_count"] == 1
+    assert reader.search_body("alfa beta")[0]["match_count"] == 2
+
+
+def test_search_body_marker_body_keeps_the_plain_substring_result(tmp_path: Path) -> None:
+    # A body that carries a marker elsewhere must still report an ordinary,
+    # uninterrupted hit with the same count and the same snippet window.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "boligkjøp er regulert her.[^1] Senere: boligkjøp igjen."},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+    assert rows[0]["match_count"] == 2
+    assert rows[0]["snippet"].startswith("boligkjøp er regulert")
 
 
 # ---------- tombstone exclusion across the index-building loops ----------

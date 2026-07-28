@@ -978,19 +978,27 @@ class CorpusReader:
         ``snippet`` (~100 char window around the FIRST match). Sorted
         by match_count descending, then by slug for stable ordering.
 
+        A rendered footnote marker (``[^1]``) may interrupt the match
+        anywhere — see ``_marker_tolerant_query``. Without that the
+        scan silently loses every phrase the renderer annotated.
+
         ``limit`` caps the result count, must be non-negative, and is
         clamped to ``_MAX_RESULT_LIMIT``. ``dataset`` accepts
         ``lover`` / ``forskrifter`` (or the full Lovdata key).
 
-        The body index is loaded lazily on the first call (~45 MB
-        resident for the production 4522-doc corpus, ~3-5 s cold
-        load) so server startup stays fast for clients that only
-        query metadata.
+        The body index is loaded lazily on the first call so server
+        startup stays fast for clients that only query metadata. It is
+        not small: on the renderer-5 corpus (5,913 docs, 113.5 M chars)
+        it is ~210 MB of strings, ~270 MB peak RSS, ~1 s to load off a
+        warm page cache.
         """
         limit = _bounded_limit(limit)
         if not query.strip():
             return []
         needle = query.lower()
+        tolerant = (
+            _marker_tolerant_query(needle) if len(needle) <= _MAX_MARKER_TOLERANT_QUERY else None
+        )
         dataset_key = _resolve_dataset(dataset) if dataset is not None else None
         index = self._load_body_index()
         slug_index = self._load_slug_index()
@@ -1009,11 +1017,10 @@ class CorpusReader:
             body = index.get(record.slug)
             if body is None:
                 continue
-            haystack = body.lower()
-            count = haystack.count(needle)
-            if count == 0:
+            summary = _body_match_summary(body, needle, tolerant)
+            if summary is None:
                 continue
-            first_match = haystack.find(needle)
+            count, snippet = summary
             results.append(
                 {
                     "slug": record.slug,
@@ -1021,7 +1028,7 @@ class CorpusReader:
                     "title": record.title,
                     "dataset": _subdir_for_dataset(record.source_dataset),
                     "match_count": count,
-                    "snippet": _snippet(body, first_match, len(query)),
+                    "snippet": snippet,
                 },
             )
         results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
@@ -2262,6 +2269,38 @@ def _snippet(body: str, match_idx: int, match_len: int) -> str:
     return f"{prefix}{snippet}{suffix}"
 
 
+def _body_match_summary(
+    body: str,
+    needle: str,
+    tolerant: re.Pattern[str] | None,
+) -> tuple[int, str] | None:
+    """Occurrences of ``needle`` in ``body`` plus a snippet of the first.
+
+    ``None`` when the body does not contain the query at all.
+
+    Bodies carrying no footnote marker keep the plain substring scan:
+    on those the tolerant pattern finds the very same spans — every
+    optional group fails — at a fraction of the speed, and 81.7% of the
+    body index (4,832 of 5,913 documents) carries no marker. The
+    snippet window is measured from the matched span, not from
+    ``len(needle)``, so a match the marker lengthened is not cut short.
+
+    ``tolerant`` is ``None`` for a query too long to be worth compiling
+    a pattern for (``_MAX_MARKER_TOLERANT_QUERY``).
+    """
+    haystack = body.lower()
+    if tolerant is None or _FOOTNOTE_MARKER_OPENER not in haystack:
+        count = haystack.count(needle)
+        if count == 0:
+            return None
+        return count, _snippet(body, haystack.find(needle), len(needle))
+    spans = [match.span() for match in tolerant.finditer(haystack)]
+    if not spans:
+        return None
+    start, end = spans[0]
+    return len(spans), _snippet(body, start, end - start)
+
+
 def _compute_match_owner_starts(
     body_lower: str,
     matches: list[re.Match[str]],
@@ -2496,6 +2535,41 @@ Dropped rather than folded to a space: the marker interrupts the sentence
 without being a word boundary of it, so removing it rejoins the text exactly as
 the statute reads. Bounded and whitespace-free so the pattern cannot swallow a
 span of real legal text between two unrelated brackets."""
+
+_FOOTNOTE_MARKER_OPENER = "[^"
+"""Cheap precondition for the marker-tolerant scan: no ``[^`` in a body means
+no marker can be interrupting a phrase in it."""
+
+_OPTIONAL_FOOTNOTE_REFERENCE = f"(?:{_FOOTNOTE_REFERENCE_RE.pattern})?"
+
+_MAX_MARKER_TOLERANT_QUERY = 2000
+"""Above this many characters a query is matched literally, as before.
+
+The tolerant pattern costs ~25 bytes of regex per query character, so an
+uncapped query hands a caller of this public server a linear multiplier on
+compile time: 20,000 characters turn a 0.55 s call into 1.55 s, and the
+growth does not stop there. 2,000 characters is an order of magnitude past
+any phrase someone searches for and still compiles in ~35 ms."""
+
+
+def _marker_tolerant_query(needle: str) -> re.Pattern[str]:
+    """Compile ``needle`` so a footnote marker may interrupt it anywhere.
+
+    ``search_body`` is the same defect class as ``verify_quote`` was:
+    the renderer writes the marker flush against the word it annotates
+    (``tidspunktet[^1] Kongen``), nobody searching for that sentence
+    types it, and a plain substring scan then loses the phrase without
+    saying so. Measured on the renderer-5 body index (5,913 documents):
+    11,839 markers in 1,081 of them, and the character after a marker
+    is whitespace 10,131 times, ``,`` 728, ``.`` 511.
+
+    The optional marker group goes between every pair of adjacent
+    characters, not only at word boundaries. Exactly one marker in the
+    corpus splits a word (``HORRAT[^\\*]R``, a table cell), and a rule
+    covering the other 11,838 but not that one would be arbitrary
+    rather than narrow.
+    """
+    return re.compile(_OPTIONAL_FOOTNOTE_REFERENCE.join(map(re.escape, needle)))
 
 
 def _normalize_for_quote_match(text: str) -> str:
@@ -3072,6 +3146,13 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         value you want sit in different columns. Sorted by match_count
         descending, then by slug.
 
+        A footnote marker in the rendered text (``[^1]``) does not break
+        the match: the corpus reads ``tidspunktet[^1] Kongen bestemmer``
+        and searching for that phrase without the marker still finds it.
+        The snippet is returned as the corpus stores it, marker included.
+        Above 2,000 characters the query is matched literally instead,
+        so a marker inside a pasted-paragraph query does break it.
+
         ``dataset`` (optional): ``lover`` or ``forskrifter`` (or the
         full Lovdata key) to restrict the scan.
         ``limit``: max results (default 20). Must be non-negative.
@@ -3084,9 +3165,11 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         there; call ``corpus_status`` for the full scope statement.
 
         Performance note: the body index is loaded lazily on the first
-        call (~3-5 s for the production 4522-doc corpus, ~45 MB
-        resident); subsequent calls are O(N) substring scans (~100-
-        200 ms typical).
+        call and stays resident. Measured on the renderer-5 corpus
+        (5,913 docs, 113.5 M chars): ~270 MB peak RSS, ~1 s cold load,
+        and every call after that is a full scan of that text —
+        ~0.4 s, or ~0.5-0.6 s once the marker-tolerant pass runs over
+        the 18.3% of documents that carry a footnote marker.
         """
         return reader.search_body(query, dataset=dataset, limit=limit)
 
