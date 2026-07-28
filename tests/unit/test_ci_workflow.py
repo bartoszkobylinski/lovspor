@@ -261,6 +261,14 @@ def _unwrapped_condition() -> str:
     ``inputs.repair_embeddings`` and ``${{ inputs.repair_embeddings }}`` are the
     same condition. Normalizing here keeps the assertion about what the
     expression MEANS instead of how it is spelled.
+
+    Deliberately stops there. Other spellings are equally valid and equally
+    safe — ``${{ (inputs.repair_embeddings) }}``,
+    ``inputs['repair_embeddings']`` — and recognizing them all ends in an
+    expression evaluator living inside a test. The line is drawn at the two
+    forms anyone actually writes; widening this function is the right response
+    to a workflow that fails the assertion while being safe, and is preferable
+    to relaxing the assertion itself.
     """
     condition = str(_repair_step()["if"]).strip()
     if condition.startswith("${{") and condition.endswith("}}"):
@@ -288,7 +296,9 @@ def test_the_repair_step_is_opt_in_and_never_fires_on_the_schedule() -> None:
     assert condition == "inputs.repair_embeddings", (
         "the condition must dereference the input and nothing more (with or "
         "without ${{ }}); anything compound has to be re-checked against an "
-        f"EMPTY inputs context, which is what a scheduled run supplies "
+        "EMPTY inputs context, which is what a scheduled run supplies. If your "
+        "condition IS a plain dereference in a spelling _unwrapped_condition "
+        f"does not know, widen that helper rather than this assertion "
         f"(got: {condition!r})"
     )
 
