@@ -211,6 +211,9 @@ BLOCK_TAGS = frozenset(
 # fabrication that no rendering could avoid. <sub>, <sup> and <span> carry no
 # such delimiter and stay glue.
 MARKED_INLINE_TAGS = frozenset({"a", "em", "i", "strong"})
+# <sup class="footnotereference"> joined them at renderer 5, which emits "[^1]"
+# instead of a bare "1". Class-scoped: a plain <sup> is still glue.
+FOOTNOTE_REFERENCE_CLASS = "footnotereference"
 
 DATASETS = ("gjeldende-lover", "gjeldende-sentrale-forskrifter")
 ARCHIVE_NAME = "{dataset}.tar.bz2"
@@ -346,17 +349,17 @@ def _all_text(elem: etree._Element) -> str:
     text nodes' ancestries.
     """
     parts: list[str] = []
-    crossed: list[str] = []
+    crossed: list[etree._Element] = []
 
     def walk(node: etree._Element) -> None:
         nonlocal crossed
-        crossed.append(node.tag)
+        crossed.append(node)
         if node.text:
             _append(parts, crossed, node.text)
             crossed = []
         for child in node:
             walk(child)
-            crossed.append(child.tag)
+            crossed.append(child)
             if child.tail:
                 _append(parts, crossed, child.tail)
                 crossed = []
@@ -365,9 +368,19 @@ def _all_text(elem: etree._Element) -> str:
     return "".join(parts)
 
 
-def _append(parts: list[str], crossed: list[str], text: str) -> None:
-    separates = BLOCK_TAGS | MARKED_INLINE_TAGS
-    if parts and any(tag in separates for tag in crossed):
+def _separates_words(elem: etree._Element) -> bool:
+    """Whether crossing ``elem`` puts a word boundary between two text nodes."""
+    if elem.tag in BLOCK_TAGS or elem.tag in MARKED_INLINE_TAGS:
+        return True
+    # A footnote reference renders as "[^1]" since renderer 5, so the marker no
+    # longer runs into the word it annotates and the two are separate tokens on
+    # the Markdown side. A plain <sup> — "km<sup>2</sup>" — carries no delimiter
+    # and stays glue, which is why this is decided per class, not per tag.
+    return elem.tag == "sup" and FOOTNOTE_REFERENCE_CLASS in _classes(elem)
+
+
+def _append(parts: list[str], crossed: list[etree._Element], text: str) -> None:
+    if parts and any(_separates_words(elem) for elem in crossed):
         parts.append(" ")
     parts.append(text)
 

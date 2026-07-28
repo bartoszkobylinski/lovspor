@@ -2481,6 +2481,22 @@ rewrite between the corpus and what the AI pastes back; an honest
 quote must not fail verification over typography. ``§`` and digits
 are deliberately NOT in this table."""
 
+_FOOTNOTE_REFERENCE_RE = re.compile(r"\[\^[^\]\s]{1,16}\]")
+"""A rendered footnote marker (``[^1]``), dropped before quote matching.
+
+The marker is the renderer's own annotation, not words of the statute: it sits
+mid-sentence, flush against the word it annotates, and no one quoting the law
+reproduces it. Leaving it in makes an honest quote fail — the state this guard
+must never reach, because a guard that rejects real text teaches the AI to stop
+calling it. Verified on the live corpus before renderer 5: the faithful quote of
+``§ 8`` in ``lov-om-omordning-af-det-civile-embedsverk`` came back
+``verified: false`` while only the marker-carrying variant passed.
+
+Dropped rather than folded to a space: the marker interrupts the sentence
+without being a word boundary of it, so removing it rejoins the text exactly as
+the statute reads. Bounded and whitespace-free so the pattern cannot swallow a
+span of real legal text between two unrelated brackets."""
+
 
 def _normalize_for_quote_match(text: str) -> str:
     """Normalize text for ``verify_quote`` substring matching.
@@ -2505,6 +2521,7 @@ def _normalize_for_quote_match(text: str) -> str:
     not the same as ``$``, ``§ 5-12`` is not the same as ``§ 512``).
     """
     folded = unicodedata.normalize("NFKC", text).translate(_QUOTE_FOLD_TABLE)
+    folded = _FOOTNOTE_REFERENCE_RE.sub("", folded)
     return " ".join(folded.lower().split())
 
 

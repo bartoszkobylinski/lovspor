@@ -6561,3 +6561,96 @@ def test_list_sections_seeds_the_cross_reference_cache_under_the_act_slug(
 
     assert set(reader._section_ids_cache) == {"skatteloven"}
     assert "1-1" in reader._section_ids_cache["skatteloven"]
+
+
+def test_verify_quote_accepts_a_quote_the_footnote_marker_interrupts(
+    tmp_path: Path,
+) -> None:
+    """The failure this guard must never have: rejecting real statutory text.
+
+    Renderer 5 emits a footnote marker as "[^1]" so it stops fusing into the
+    word it annotates. That fixes the word but plants the marker mid-sentence,
+    and nobody quoting the law reproduces it. Measured on the live corpus
+    before this change, with the marker still fused: verify_quote answered
+    `verified: false` for the faithful quote of § 8 of the 1894 Embedsværk act
+    and `true` only for "Amtskasserere1 og Politimestre" — telling the AI that
+    the statute's own words were a hallucination and that the mangled form was
+    the real one.
+    """
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="embedsverk", title="Embedsværk")},
+        body_for={
+            "embedsverk": (
+                "## Kapittel 1.\n\n### § 8. Oppebørsel\n\n"
+                "Amtskasserere[^1] og Politimestre samt Amtskassereres Betjente.\n"
+            ),
+        },
+    )
+
+    result = CorpusReader(tmp_path).verify_quote(
+        "embedsverk",
+        "8",
+        "Amtskasserere og Politimestre samt Amtskassereres Betjente.",
+    )
+
+    assert result["verified"] is True
+    assert result["reason"] is None
+
+
+def test_verify_quote_still_accepts_a_quote_that_carries_the_marker(
+    tmp_path: Path,
+) -> None:
+    """An AI that copied the rendered text verbatim, marker and all, is not
+    hallucinating either."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="embedsverk", title="Embedsværk")},
+        body_for={
+            "embedsverk": (
+                "## Kapittel 1.\n\n### § 8. Oppebørsel\n\nAmtskasserere[^1] og Politimestre.\n"
+            ),
+        },
+    )
+
+    result = CorpusReader(tmp_path).verify_quote(
+        "embedsverk",
+        "8",
+        "Amtskasserere[^1] og Politimestre.",
+    )
+
+    assert result["verified"] is True
+
+
+def test_verify_quote_still_rejects_invented_text_around_a_marker(
+    tmp_path: Path,
+) -> None:
+    """Dropping the marker must not widen what counts as verified."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="embedsverk", title="Embedsværk")},
+        body_for={
+            "embedsverk": (
+                "## Kapittel 1.\n\n### § 8. Oppebørsel\n\nAmtskasserere[^1] og Politimestre.\n"
+            ),
+        },
+    )
+    reader = CorpusReader(tmp_path)
+
+    assert (
+        reader.verify_quote("embedsverk", "8", "Sorenskrivere og Politimestre.")["verified"]
+        is False
+    )
+    assert reader.verify_quote("embedsverk", "8", "Amtskasserere og Lensmenn.")["verified"] is False
+
+
+def test_normalize_for_quote_match_does_not_eat_real_bracketed_text() -> None:
+    """The pattern is bounded and whitespace-free so it cannot swallow a span
+    of statute between two unrelated brackets — the corpus renders elided text
+    as "[...]" and repealed wording in square brackets."""
+    assert (
+        _normalize_for_quote_match("[under samme Straf] skal det") == "[under samme straf] skal det"
+    )
+    assert _normalize_for_quote_match("tekst [...] mer") == "tekst [...] mer"
+    # A marker-shaped run of text that is genuinely long is left alone.
+    assert _normalize_for_quote_match("[^" + "x" * 40 + "]") == "[^" + "x" * 40 + "]"
