@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from lovspor.errors import ParseError, RenderError
+from lovspor.headings import parse_section_heading
 from lovspor.rendering.markdown_renderer import render_markdown
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -1237,3 +1238,228 @@ def test_render_bare_p_inside_mixed_article_renders_as_block() -> None:
         ),
     )
     assert md == "Plain lead paragraph.\n\n|  |\n| --- |\n| x |\n"
+
+
+def test_a_footnote_marker_does_not_fuse_into_the_word_it_annotates() -> None:
+    # The marker sits flush against its word, so rendering its bare text made
+    # "Amtskasserere" into "Amtskasserere1" — 7,940 markers in 664 documents.
+    # Measured consequence on the live corpus before renderer 5: verify_quote
+    # rejected the faithful quote of § 8 of the 1894 Embedsværk act and
+    # accepted only the variant carrying the digit.
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Amtskasserere'
+            b'<sup class="footnotereference" data-footnotereferencevalue="1">1</sup>'
+            b" og Politimestre.</article>",
+        ),
+    )
+
+    assert md == "Amtskasserere[^1] og Politimestre.\n"
+    assert "Amtskasserere1" not in md
+
+
+def test_a_plain_sup_still_runs_into_its_word() -> None:
+    # The mirror image, and the reason the footnote case is decided by class
+    # rather than by tag: "km2" is ONE word, and delimiting it would be the
+    # same defect pointing the other way.
+    md = render_markdown(
+        _wrap(b'<article class="legalP">avgift per km<sup>2</sup> for CO<sub>2</sub>.</article>'),
+    )
+
+    assert md == "avgift per km2 for CO2.\n"
+
+
+def test_a_footnote_marker_keeps_its_label_verbatim() -> None:
+    # Labels are not always digits, and are not always one character.
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">tekst'
+            b'<sup class="footnotereference">12</sup> mer'
+            b'<sup class="footnotereference">a</sup></article>',
+        ),
+    )
+
+    assert md == "tekst[^12] mer[^a]\n"
+
+
+def test_a_footnote_marker_inside_a_heading_is_delimited_too() -> None:
+    # h1/h2 go through the full inline walk rather than
+    # _render_legal_article_header, so their markers reach the corpus — 33 of
+    # them — and fused there exactly as body text did.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">Amtskasserere'
+            b'<sup class="footnotereference">1</sup></h2>',
+        ),
+    )
+
+    assert md == "## Amtskasserere[^1]\n"
+
+
+def test_paragraph_class_articles_render_as_plain_paragraphs() -> None:
+    # Renderer 5 dropped the branch that special-cased these classes: with no
+    # block child among them, _render_mixed_article IS the inline paragraph
+    # render. Removing it changed 0 of 5,917 rendered documents, and this pins
+    # that the ordinary shape still comes out as one paragraph.
+    for cls in (b"legalP", b"numberedLegalP", b"listArticle"):
+        md = render_markdown(
+            _wrap(
+                b'<article class="'
+                + cls
+                + b'">Se <a href="lov/1999-03-26-14">loven</a> her.</article>'
+            ),
+        )
+
+        assert md == "Se [loven](lov/1999-03-26-14) her.\n", cls
+
+
+def test_a_footnote_marker_inside_a_heading_title_span_is_delimited() -> None:
+    # trygdeavtalelova § 19 carries its marker INSIDE the title span, where
+    # _span_text reads the subtree directly. Left raw it fused there while the
+    # same marker in body text rendered as "[^1]" — one source, two renderings,
+    # in a single document.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 19</span>. '
+            b'<span class="legalArticleTitle">samh\xc3\xb8ve med trygdeavtalelova'
+            b'<sup class="footnotereference">1</sup></span></h3>',
+        ),
+    )
+
+    assert md == "### § 19. samhøve med trygdeavtalelova[^1]\n"
+    assert "trygdeavtalelova1" not in md
+
+
+def test_a_heading_span_does_not_gain_emphasis_markup() -> None:
+    # _span_text delimits the footnote marker and nothing else. Routing it
+    # through _inline would also emphasise, and a value span of "§ 1-<em>1</em>"
+    # would render "### § 1-*1*", which parse_section_heading cannot read —
+    # trading a fused word for a § no one can address.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 1-<em>1</em></span>. '
+            b'<span class="legalArticleTitle">Scope and <em>reach</em></span></h3>',
+        ),
+    )
+
+    assert md == "### § 1-1. Scope and reach\n"
+
+
+def test_a_heading_carrying_a_marker_still_parses_as_a_section() -> None:
+    # The delimiter lands in the title, so the section id in front of it must
+    # still be readable — otherwise the § becomes unaddressable by every MCP
+    # tool that keys on it.
+    parsed = parse_section_heading("### § 19. samhøve med trygdeavtalelova[^1]")
+
+    assert parsed == ("19", "samhøve med trygdeavtalelova[^1]")
+
+
+def test_a_plain_sup_in_a_heading_span_is_not_treated_as_a_footnote() -> None:
+    # _span_text decides by CLASS, not by tag. Flipping its "and" to "or" makes
+    # every <sup> a marker, so "km2" in a § title would render "km[^2]" — this
+    # fix pointing the other way. Body text pins the same invariant; a heading
+    # span reaches it by a different path and needs its own.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 5</span>. '
+            b'<span class="legalArticleTitle">Avgift per km<sup>2</sup></span></h3>',
+        ),
+    )
+
+    assert md == "### § 5. Avgift per km2\n"
+
+
+def test_a_heading_span_that_opens_with_a_child_keeps_the_child_text() -> None:
+    # _span_text seeds its parts with span.text, which is None when the span
+    # opens with an element. Nothing pinned that the rest still arrives.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 6</span>. '
+            b'<span class="legalArticleTitle"><em>Kursiv</em> start</span></h3>',
+        ),
+    )
+
+    assert md == "### § 6. Kursiv start\n"
+
+
+def test_a_footnote_marker_label_split_across_nodes_stays_one_label() -> None:
+    # The label is joined from the marker's whole subtree. Joining on anything
+    # but "" would splice text into the middle of a label.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 7</span>. '
+            b'<span class="legalArticleTitle">Tittel'
+            b'<sup class="footnotereference">1<em>2</em></sup></span></h3>',
+        ),
+    )
+
+    assert md == "### § 7. Tittel[^12]\n"
+
+
+def test_a_heading_span_child_without_text_contributes_nothing() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 8</span>. '
+            b'<span class="legalArticleTitle">Foer<em></em>etter</span></h3>',
+        ),
+    )
+
+    assert md == "### § 8. Foeretter\n"
+
+
+@pytest.mark.parametrize("tag", ["h3", "h4", "h5", "h6"])
+def test_every_heading_level_is_a_block_child_of_a_mixed_article(tag: str) -> None:
+    # h1/h2 were pinned after a mutation run removed them from _BLOCK_TAGS; the
+    # same mutants for h4-h6 survived because nothing nested those either. A
+    # heading that falls out of the set fuses into the surrounding paragraph.
+    md = render_markdown(
+        _wrap(f'<article class="legalP">Foer<{tag}>Tittel</{tag}>etter</article>'.encode()),
+    )
+
+    assert md == "Foer\n\n### Tittel\n\netter\n"
+
+
+@pytest.mark.parametrize(
+    "tag", ["div", "footer", "figure", "figcaption", "blockquote", "li", "dl", "dt", "dd"]
+)
+def test_every_wrapper_tag_keeps_block_content_apart(tag: str) -> None:
+    # One tag silently dropping out of _WRAPPER_TAGS is the flattening defect
+    # this set exists to prevent, and it fails quietly: the wrapper's subtree
+    # collapses into one paragraph. dl/dt/dd have 0 occurrences in <main> today
+    # and are kept against future Lovdata markup — that choice is only honest
+    # while something proves they work.
+    md = render_markdown(
+        _wrap(
+            f'<article class="legalArticle"><{tag}>'
+            f'<article class="legalP">Forste.</article>'
+            f'<article class="legalP">Andre.</article>'
+            f"</{tag}></article>".encode(),
+        ),
+    )
+
+    assert md == "Forste.\n\nAndre.\n", tag
+    assert "Forste.Andre" not in md
+
+
+def test_eliding_a_future_subtree_keeps_its_tail_in_document_order() -> None:
+    # _remove_preserving_tail reads getprevious() BEFORE remove(), because a
+    # detached element has no previous sibling. Taking it after sends every
+    # tail to parent.text — ahead of the siblings that preceded it — and the
+    # law reads out of order. Exactly the bug found in the audit script's copy
+    # of this logic on 2026-07-27; the renderer's copy is correct and now
+    # pinned.
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Aaa <em>kursiv</em>'
+            b'<span class="futuretitle">BORTE</span> Bbb</article>',
+        ),
+    )
+
+    assert md == "Aaa *kursiv* Bbb\n"
+    assert md.index("kursiv") < md.index("Bbb")

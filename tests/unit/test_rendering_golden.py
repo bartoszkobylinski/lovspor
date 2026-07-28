@@ -104,6 +104,13 @@ _SURFACE = (
     "</article></div></article>"
     '<article class="change">Endringer:<li>forste punkt</li><li>andre punkt</li></article>'
     '<article class="legalP">Rundt 9<figure><figcaption>Figur 3</figcaption></figure></article>'
+    # A footnote marker flush against the word it annotates — 7,940 of them in
+    # 664 documents — beside a plain <sup> that must stay glued. Renderer 5
+    # delimits the first as "[^1]" and leaves the second alone, and only a
+    # fixture carrying both can tell those apart.
+    '<article class="legalP">Amtskasserere'
+    '<sup class="footnotereference" data-footnotereferencevalue="1">1</sup>'
+    " og Politimestre. Avgift per km<sup>2</sup>.</article>"
     '<div aria-level="7" role="heading">Avsnitt 1<br/>Driftsansvarlige</div>'
     '<p class="leddfortsettelse">►<strong>M7</strong> Endret ved forordning.◄</p>'
     '<article class="futureLegalArticle">Ikke i kraft ennå.</article>'
@@ -115,8 +122,12 @@ _SURFACE = (
     "</section></main></body></html>"
 ).encode()
 
-_PINNED_DOCUMENT = (4, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
-_PINNED_SURFACE = (4, "ebe0073a04702f9aa842b1deabf0ccaceed32a03df38a22d1994c56de3c00245")
+# The document digest is UNCHANGED from renderer 4: the 1741 Vimpel law carries
+# no footnote reference, and dropping the dead paragraph-class branch moved no
+# bytes. Only the stamp advanced — which is the guard doing its job, since a
+# version bump must be a deliberate act even when this fixture cannot see it.
+_PINNED_DOCUMENT = (5, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
+_PINNED_SURFACE = (5, "e083807deeca664db7e5ca8a04445f7d2792622c4ed894706dfa2722a3dbcfd8")
 
 
 def _digest(text: str) -> str:
@@ -171,3 +182,9 @@ def test_surface_actually_exercises_the_table_paths() -> None:
     assert "1. art og gyldighetstid" in md  # ...and the list inside it survives
     assert "punktandre" not in md  # stray <li>
     assert "9Figur" not in md  # <figcaption>
+    # A footnote marker is delimited so the word stays the word; a plain <sup>
+    # is not, because "km2" is one word and splitting it would be the defect in
+    # reverse.
+    assert "Amtskasserere[^1] og Politimestre" in md
+    assert "Amtskasserere1" not in md
+    assert "km2" in md

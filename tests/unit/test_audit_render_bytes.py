@@ -413,3 +413,21 @@ def test_archive_dir_follows_the_sync_cache_layout(monkeypatch: pytest.MonkeyPat
 
     # Mirrors sync.orchestrator: settings.data_dir / "cache" / "archives".
     assert audit._env_archive_dir() == Path("/var/lovspor/cache/archives")
+
+
+def test_a_footnote_reference_is_a_word_boundary_but_a_plain_sup_is_not() -> None:
+    # Renderer 5 emits "[^1]" for a footnote marker, so the marker and the word
+    # it annotates are separate tokens on the Markdown side and the XML side
+    # must agree. A plain <sup> carries no delimiter — "km2" is one word — so
+    # the distinction is by class, not by tag.
+    root = etree.fromstring(
+        '<main><article class="legalP">Amtskasserere'
+        '<sup class="footnotereference">1</sup> og Politimestre. '
+        "Avgift per km<sup>2</sup>.</article></main>",
+    )
+
+    text = audit._all_text(root)
+
+    assert "Amtskasserere 1" in text
+    assert "Amtskasserere1" not in text
+    assert "km2" in text

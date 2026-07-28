@@ -58,7 +58,7 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
-RENDERER_VERSION = 4
+RENDERER_VERSION = 5
 """Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
 
 Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
@@ -85,9 +85,7 @@ _NOT_IN_FORCE_CLASSES = frozenset(
 _INLINE_STRONG = {"strong"}
 _INLINE_EMPHASIS = {"i", "em"}
 _LEGAL_ARTICLE_HEADER_CLASS = "legalArticleHeader"
-_PARAGRAPH_CLASSES = frozenset(
-    {"legalP", "numberedLegalP", "listArticle"},
-)
+_FOOTNOTE_REFERENCE_CLASS = "footnotereference"
 _CHANGE_NOTE_CLASS = "changesToParent"
 _HEADING_ROLE = "heading"
 _MAX_HEADING_LEVEL = 6
@@ -340,14 +338,12 @@ def _render_article(
     # 2,690 of 5,916 documents (analysis/llm-infra/10-byte-audit-results.md).
     if any(_is_block_element(child) for child in elem):
         return _render_mixed_article(elem)
-    if any(c in _PARAGRAPH_CLASSES for c in classes):
-        text = _escape_block_leading(_inline(elem))
-        return f"{text}\n\n" if text else ""
-    # Any other article (footnote, defaultP, centeredP, the legalArticle
-    # container) may carry inline text next to element children — a footnote's
-    # "Jf. <a/>" reference is the common case. Render inline runs as paragraphs
-    # and block children as blocks, rather than dropping the text via the
-    # child-only walk.
+    # Everything else — a paragraph-class article whose children are all inline,
+    # a footnote, defaultP, centeredP, the legalArticle container — goes the same
+    # way. _render_mixed_article with no block child among them IS the inline
+    # paragraph render, so the paragraph classes needed no branch of their own:
+    # removing the one they had changed 0 of 5,917 rendered documents (SHA-256
+    # per document, re-verified against this renderer, not an earlier one).
     return _render_mixed_article(elem)
 
 
@@ -546,13 +542,42 @@ def _table_separator(width: int) -> str:
 
 
 def _span_text(span: etree._Element | None) -> str:
+    """Text of a heading's value/title span, with footnote markers delimited.
+
+    A title span can carry a marker — ``§ 19. (… samhøve med
+    trygdeavtalelova<sup>1</sup>)`` — and reading the subtree as raw text fused
+    it into the preceding word while the same marker in body text came out as
+    ``[^1]``: one source, two renderings, inside a single document.
+
+    Deliberately NOT ``_inline``: that also applies emphasis, and a value span
+    of ``§ 1-<em>1</em>`` would render ``### § 1-*1*``, which
+    ``headings.parse_section_heading`` cannot read — trading a fused word for
+    an unaddressable §. Only the footnote marker needs a delimiter here.
+
+    Stops before the span's own tail, which is what the caller needs;
+    ``tostring(method="text")`` would swallow it.
+    """
     if span is None:
         return ""
-    # itertext() yields text in the span's subtree but NOT the span's own tail,
-    # which is what we want. tostring(method="text") incorrectly includes the tail.
-    # lxml-stubs types itertext() as Iterator[str | bytes] but it only yields str
-    # for text parsed from an XML document.
-    return _escape_inline_text("".join(span.itertext()).strip())  # type: ignore[arg-type]
+    return _escape_inline_text(_span_inner(span).strip())
+
+
+def _span_inner(elem: etree._Element) -> str:
+    """Text of ``elem``'s subtree, with footnote markers delimited.
+
+    Recurses over DIRECT children rather than walking ``iter()``: a marker is
+    emitted from its whole subtree at once, so descending into it again would
+    emit its descendants twice (``<sup>1<em>2</em></sup>`` came out as
+    ``[^12]2``).
+    """
+    parts: list[str] = [elem.text or ""]
+    for child in elem:
+        if child.tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (child.get("class") or "").split():
+            parts.append(f"[^{''.join(child.itertext()).strip()}]")  # type: ignore[arg-type]
+        else:
+            parts.append(_span_inner(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
 
 
 _LIST_TAGS = frozenset({"ul", "ol"})
@@ -634,7 +659,38 @@ def _inline_for_child(child: etree._Element) -> str:
         return _render_anchor(child)
     if tag == "br":
         return "\n"
+    if tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (child.get("class") or "").split():
+        return _render_footnote_reference(child)
     return _inline(child)
+
+
+def _render_footnote_reference(elem: etree._Element) -> str:
+    """Render a footnote marker as ``[^n]`` rather than as a bare number.
+
+    The marker sits flush against the word it annotates, so rendering its text
+    alone fused the two: ``Amtskasserere<sup>1</sup>`` became
+    ``Amtskasserere1``. Nothing is lost, but the word stops being the word —
+    7,940 markers across 664 documents produced a token no reader will ever
+    type. Measured consequence, on the live corpus before this change:
+    ``verify_quote`` REJECTED the faithful quote of ``§ 8`` in
+    ``lov-om-omordning-af-det-civile-embedsverk`` and accepted only the variant
+    carrying the digit — an anti-hallucination guard calling real statutory
+    text a hallucination.
+
+    ``[^n]`` is GFM's own footnote-reference syntax, and the delimiter is the
+    point: ``\\w+`` tokenization now yields ``amtskasserere`` and ``1``
+    separately, so BM25 and the embeddings index the real word, while the
+    pointer to the note survives.
+
+    The reference is deliberately left orphaned — the corpus emits no matching
+    ``[^n]: …`` definition. Real GFM footnotes need a document-unique label, and
+    these are not: labels repeat inside a single document in 383 of the 1,092
+    documents carrying references (8,402 repeated occurrences; ``sf-20221027-1901``
+    has 732 references drawn from 12 distinct labels). Pairing them would mean
+    inventing identifiers the source does not provide. GFM renders an unmatched
+    reference literally, which states the pointer without inventing a target.
+    """
+    return f"[^{_inline(elem)}]"
 
 
 def _render_anchor(elem: etree._Element) -> str:
