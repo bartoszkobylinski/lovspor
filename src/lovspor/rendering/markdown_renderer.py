@@ -559,16 +559,25 @@ def _span_text(span: etree._Element | None) -> str:
     """
     if span is None:
         return ""
-    parts: list[str] = [span.text or ""]
-    for child in span.iter():
-        if child is span:
-            continue
+    return _escape_inline_text(_span_inner(span).strip())
+
+
+def _span_inner(elem: etree._Element) -> str:
+    """Text of ``elem``'s subtree, with footnote markers delimited.
+
+    Recurses over DIRECT children rather than walking ``iter()``: a marker is
+    emitted from its whole subtree at once, so descending into it again would
+    emit its descendants twice (``<sup>1<em>2</em></sup>`` came out as
+    ``[^12]2``).
+    """
+    parts: list[str] = [elem.text or ""]
+    for child in elem:
         if child.tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (child.get("class") or "").split():
             parts.append(f"[^{''.join(child.itertext()).strip()}]")  # type: ignore[arg-type]
         else:
-            parts.append(child.text or "")
+            parts.append(_span_inner(child))
         parts.append(child.tail or "")
-    return _escape_inline_text("".join(parts).strip())
+    return "".join(parts)
 
 
 _LIST_TAGS = frozenset({"ul", "ol"})

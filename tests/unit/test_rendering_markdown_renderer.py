@@ -1354,3 +1354,112 @@ def test_a_heading_carrying_a_marker_still_parses_as_a_section() -> None:
     parsed = parse_section_heading("### § 19. samhøve med trygdeavtalelova[^1]")
 
     assert parsed == ("19", "samhøve med trygdeavtalelova[^1]")
+
+
+def test_a_plain_sup_in_a_heading_span_is_not_treated_as_a_footnote() -> None:
+    # _span_text decides by CLASS, not by tag. Flipping its "and" to "or" makes
+    # every <sup> a marker, so "km2" in a § title would render "km[^2]" — this
+    # fix pointing the other way. Body text pins the same invariant; a heading
+    # span reaches it by a different path and needs its own.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 5</span>. '
+            b'<span class="legalArticleTitle">Avgift per km<sup>2</sup></span></h3>',
+        ),
+    )
+
+    assert md == "### § 5. Avgift per km2\n"
+
+
+def test_a_heading_span_that_opens_with_a_child_keeps_the_child_text() -> None:
+    # _span_text seeds its parts with span.text, which is None when the span
+    # opens with an element. Nothing pinned that the rest still arrives.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 6</span>. '
+            b'<span class="legalArticleTitle"><em>Kursiv</em> start</span></h3>',
+        ),
+    )
+
+    assert md == "### § 6. Kursiv start\n"
+
+
+def test_a_footnote_marker_label_split_across_nodes_stays_one_label() -> None:
+    # The label is joined from the marker's whole subtree. Joining on anything
+    # but "" would splice text into the middle of a label.
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 7</span>. '
+            b'<span class="legalArticleTitle">Tittel'
+            b'<sup class="footnotereference">1<em>2</em></sup></span></h3>',
+        ),
+    )
+
+    assert md == "### § 7. Tittel[^12]\n"
+
+
+def test_a_heading_span_child_without_text_contributes_nothing() -> None:
+    md = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 8</span>. '
+            b'<span class="legalArticleTitle">Foer<em></em>etter</span></h3>',
+        ),
+    )
+
+    assert md == "### § 8. Foeretter\n"
+
+
+@pytest.mark.parametrize("tag", ["h3", "h4", "h5", "h6"])
+def test_every_heading_level_is_a_block_child_of_a_mixed_article(tag: str) -> None:
+    # h1/h2 were pinned after a mutation run removed them from _BLOCK_TAGS; the
+    # same mutants for h4-h6 survived because nothing nested those either. A
+    # heading that falls out of the set fuses into the surrounding paragraph.
+    md = render_markdown(
+        _wrap(f'<article class="legalP">Foer<{tag}>Tittel</{tag}>etter</article>'.encode()),
+    )
+
+    assert md == "Foer\n\n### Tittel\n\netter\n"
+
+
+@pytest.mark.parametrize(
+    "tag", ["div", "footer", "figure", "figcaption", "blockquote", "li", "dl", "dt", "dd"]
+)
+def test_every_wrapper_tag_keeps_block_content_apart(tag: str) -> None:
+    # One tag silently dropping out of _WRAPPER_TAGS is the flattening defect
+    # this set exists to prevent, and it fails quietly: the wrapper's subtree
+    # collapses into one paragraph. dl/dt/dd have 0 occurrences in <main> today
+    # and are kept against future Lovdata markup — that choice is only honest
+    # while something proves they work.
+    md = render_markdown(
+        _wrap(
+            f'<article class="legalArticle"><{tag}>'
+            f'<article class="legalP">Forste.</article>'
+            f'<article class="legalP">Andre.</article>'
+            f"</{tag}></article>".encode(),
+        ),
+    )
+
+    assert md == "Forste.\n\nAndre.\n", tag
+    assert "Forste.Andre" not in md
+
+
+def test_eliding_a_future_subtree_keeps_its_tail_in_document_order() -> None:
+    # _remove_preserving_tail reads getprevious() BEFORE remove(), because a
+    # detached element has no previous sibling. Taking it after sends every
+    # tail to parent.text — ahead of the siblings that preceded it — and the
+    # law reads out of order. Exactly the bug found in the audit script's copy
+    # of this logic on 2026-07-27; the renderer's copy is correct and now
+    # pinned.
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP">Aaa <em>kursiv</em>'
+            b'<span class="futuretitle">BORTE</span> Bbb</article>',
+        ),
+    )
+
+    assert md == "Aaa *kursiv* Bbb\n"
+    assert md.index("kursiv") < md.index("Bbb")
