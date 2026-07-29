@@ -40,7 +40,7 @@
 | `get_law_history` | structured change events |
 | `list_recent_changes` | sorted by `last_changed` |
 | `search_laws` | slug + title metadata search |
-| `search_body` | full-text body search, lazy 45 MB index |
+| `search_body` | full-text body search, lazy ~270 MB index |
 | `semantic_search` | top-K cosine over per-section embeddings (Sprint 9) |
 | `validate_citation` | structured validation guard for citations |
 | `verify_quote` | verbatim-quote anti-hallucination check (Sprint 9) |
@@ -131,7 +131,7 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 
 ### Search quality
 - **Substring matching only** in `search_body`. A search for `"kryptovaluta"` misses `"virtuell valuta"` — both terms appear in Norwegian tax guidance for the same concept. No tokenization, no Norwegian morphology (Norwegian inflects heavily — `skatteyteren` / `skatteytere` / `skatteyterne` is one term), no BM25 ranking. (Sprint 9 added `semantic_search` for cross-vocabulary matching, which addresses this from a different angle but does not replace BM25 / morphology for keyword queries.)
-- **45 MB body index in RAM** is acceptable for ~5,900 docs but would scale to ~500 MB once local regulations are added. No SQLite FTS5 fallback.
+- **~270 MB body index in RAM** for ~5,900 docs — measured 2026-07-29 (113.5 M characters, ~210 MB of strings, ~270 MB peak RSS while loading). This line claimed 45 MB until then. That figure was never a measurement: it is the arithmetic in `decisions.md` (§ *In-memory body index*, 2026-04-28) — `4500 docs × ~10 KB each` — which counts raw text bytes and ignores the overhead of the Python string objects the index actually holds. The corpus has since grown to 5,913 documents. The old projection of "~500 MB once local regulations are added" was scaled off that base and needs redoing before it is used for capacity planning. No SQLite FTS5 fallback.
 - **No reranker on `semantic_search` results.** Top-K is raw cosine similarity; a domain-tuned reranker (cross-encoder) could filter "close-but-wrong" matches further. Deferred until eval shows a need.
 - **No fuzzy slug match.** Callers must hit the canonical slug exactly.
 
