@@ -244,6 +244,33 @@ def test_strip_frontmatter_h1_and_snippet_boundaries_are_stable() -> None:
     assert snippet == "..." + ("a" * 50) + "TARGET" + ("b" * 50) + "..."
 
 
+def test_strip_frontmatter_and_h1_cut_boundaries_leak_nothing() -> None:
+    """Every offset in the cut is one character away from leaking metadata
+    into the body, which is exactly the body-only contract violation Codex
+    caught on the original search_body PR. The shapes below are the ones the
+    happy-path document above cannot distinguish."""
+    # Closing delimiter on the line right after the opening one (frontmatter
+    # with no fields): the search for it starts inside the block, so starting
+    # one character later would leave both delimiters in the body.
+    assert _strip_frontmatter_and_h1("---\n\n---\nKroppstekst.") == "Kroppstekst."
+
+    # H1 with no blank line after it: the cut lands on the newline that ends
+    # the title, not on the first character of the body.
+    assert (
+        _strip_frontmatter_and_h1("---\ntitle: T\n---\n# Lov om test\nFørste linje.")
+        == "Første linje."
+    )
+
+    # Newlines are the only thing stripped — a body opening on any other
+    # character keeps it, on both the frontmatter and the H1 path.
+    assert _strip_frontmatter_and_h1("---\ntitle: T\n---\n\nX-stråling omfattes.") == (
+        "X-stråling omfattes."
+    )
+    assert _strip_frontmatter_and_h1("---\ntitle: T\n---\n\n# Lov\n\nX-stråling omfattes.") == (
+        "X-stråling omfattes."
+    )
+
+
 def test_corpus_reader_constructor_and_safe_join_errors_are_specific(tmp_path: Path) -> None:
     missing = tmp_path / "missing"
     with pytest.raises(CorpusNotFoundError) as exc_info:
@@ -1056,6 +1083,20 @@ def test_search_body_finds_substring_in_body_text(tmp_path: Path) -> None:
     assert rows[0]["slug"] == "skatteloven"
     assert rows[0]["match_count"] == 1
     assert "boligkjøp" in rows[0]["snippet"].lower()
+
+
+def test_search_body_matches_neither_frontmatter_nor_the_h1_title(tmp_path: Path) -> None:
+    """The body-only contract at API level: the title lives in the frontmatter
+    and in the H1, and search_body must see neither, while the body line that
+    directly follows the H1 stays whole down to its first character."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="Tittelmarkør")},
+        body_for={"x": "# Tittelmarkør\nParagraftekst om boligkjøp."},
+    )
+    reader = CorpusReader(tmp_path)
+    assert reader.search_body("Tittelmarkør") == []
+    assert [row["slug"] for row in reader.search_body("Paragraftekst")] == ["x"]
 
 
 def test_search_body_row_pins_the_full_response_contract(tmp_path: Path) -> None:
