@@ -1184,6 +1184,24 @@ def test_search_body_counts_marker_broken_and_plain_matches_together(
     assert rows[0]["match_count"] == 3
 
 
+def test_search_body_finds_a_word_a_footnote_marker_splits(tmp_path: Path) -> None:
+    # The corpus has one marker splitting a word rather than a phrase boundary
+    # (a table cell, "HORRAT[^\*]R"). If the optional group were limited to
+    # word boundaries this exact case — the branch justification in the source
+    # comment — would still be missed.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "Tabelltekst HORRAT[^*]R slutt."},
+    )
+
+    rows = CorpusReader(tmp_path).search_body("HORRATR")
+
+    assert len(rows) == 1
+    assert rows[0]["match_count"] == 1
+    assert "HORRAT[^*]R" in rows[0]["snippet"]
+
+
 def test_search_body_marker_tolerance_does_not_invent_a_match(tmp_path: Path) -> None:
     # Tolerating a marker must not degrade into tolerating any bracketed run:
     # a link label or a bracketed aside between two words is real text, and

@@ -2275,6 +2275,12 @@ def _original_offsets(body: str) -> list[int]:
     ``str.lower`` is not length-preserving: ``"\\u0130".lower()`` is two
     characters, so a single Turkish dotted capital I earlier in a document
     shifts every later match one position right in the lowercased copy.
+
+    U+0130 is the ONLY code point that does this — brute-forced over all
+    1,114,112 of them on CPython 3.12: one expands, none collapse. So this
+    translation covers the whole class rather than the one character it was
+    found with, and a future Unicode revision is the only thing that could
+    widen it.
     Slicing the original at that shifted offset cuts the snippet window in
     the wrong place — silently, since the match itself is still found and
     ``match_count`` stays right.
