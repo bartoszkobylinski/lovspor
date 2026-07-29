@@ -44,6 +44,7 @@ from lovspor.embeddings.search import SearchHit
 from lovspor.errors import ConfigError
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
+    _MAX_MARKER_TOLERANT_QUERY,
     _MAX_RESULT_LIMIT,
     _MCP_EMBED_MAX_RETRIES,
     _MCP_EMBED_TIMEOUT_SECONDS,
@@ -1132,6 +1133,234 @@ def test_search_body_no_matches_returns_empty(tmp_path: Path) -> None:
     assert CorpusReader(tmp_path).search_body("boligkjøp") == []
 
 
+# ---------- search_body across a footnote marker ----------
+#
+# The renderer writes a footnote marker flush against the word it annotates,
+# mid-sentence. Nobody searching for the sentence types it, so the plain
+# substring scan silently loses the phrase — the same defect class that made
+# verify_quote reject honest quotes. Measured on the renderer-5 body index
+# (5,913 documents): 11,839 markers in 1,081 of them; the character after a
+# marker is whitespace 10,131 times, "," 728, "." 511. Exactly one marker in
+# the corpus splits a word (a table cell, "HORRAT[^\*]R"), so the
+# phrase-crossing-a-word-boundary case below is the one that matters.
+
+
+def test_search_body_finds_a_phrase_a_footnote_marker_interrupts(tmp_path: Path) -> None:
+    # Verbatim from adopsjonsloven § 52 in the live corpus.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="adopsjonsloven", title="Adopsjonsloven")},
+        body_for={"adopsjonsloven": "Loven gjelder fra det tidspunktet[^1] Kongen bestemmer."},
+    )
+    rows = CorpusReader(tmp_path).search_body("tidspunktet Kongen bestemmer")
+    assert len(rows) == 1
+    assert rows[0]["match_count"] == 1
+    # The snippet window spans the whole match, marker included, so the AI can
+    # see why the text it gets back is not byte-identical to what it searched.
+    assert "tidspunktet[^1] Kongen bestemmer" in rows[0]["snippet"]
+
+
+def test_search_body_finds_a_phrase_a_marker_interrupts_before_punctuation(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "Departementet kan gi forskrift[^2], og fastsette gebyr."},
+    )
+    rows = CorpusReader(tmp_path).search_body("gi forskrift, og fastsette")
+    assert len(rows) == 1
+    assert rows[0]["match_count"] == 1
+
+
+def test_search_body_counts_marker_broken_and_plain_matches_together(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "Kongen bestemmer. Kongen[^1] bestemmer. Kongen bestemmer."},
+    )
+    rows = CorpusReader(tmp_path).search_body("kongen bestemmer")
+    assert rows[0]["match_count"] == 3
+
+
+def test_search_body_finds_a_word_a_footnote_marker_splits(tmp_path: Path) -> None:
+    # The corpus has one marker splitting a word rather than a phrase boundary
+    # (a table cell, "HORRAT[^\*]R"). If the optional group were limited to
+    # word boundaries this exact case — the branch justification in the source
+    # comment — would still be missed.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "Tabelltekst HORRAT[^*]R slutt."},
+    )
+
+    rows = CorpusReader(tmp_path).search_body("HORRATR")
+
+    assert len(rows) == 1
+    assert rows[0]["match_count"] == 1
+    assert "HORRAT[^*]R" in rows[0]["snippet"]
+
+
+def test_search_body_marker_tolerance_does_not_invent_a_match(tmp_path: Path) -> None:
+    # Tolerating a marker must not degrade into tolerating any bracketed run:
+    # a link label or a bracketed aside between two words is real text, and
+    # skipping it would report a phrase the statute never contains.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "alfa[^1] beta [se § 4] gamma [^a-very-long-marker-name] delta"},
+    )
+    reader = CorpusReader(tmp_path)
+    assert reader.search_body("alfa gamma") == []
+    assert reader.search_body("beta gamma") == []
+    assert reader.search_body("gamma delta") == []
+
+
+def test_search_body_drops_marker_tolerance_past_the_query_cap(tmp_path: Path) -> None:
+    # The tolerant pattern is ~25 bytes of regex per query character, so an
+    # uncapped query is a caller-controlled compile cost on a public server.
+    # Past the cap the scan degrades to exactly the pre-existing literal match:
+    # the marker-interrupted phrase is missed, the literal one still found.
+    filler = "x" * _MAX_MARKER_TOLERANT_QUERY
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": f"{filler} alfa[^1] beta and {filler} alfa beta"},
+    )
+    reader = CorpusReader(tmp_path)
+    over_cap = f"{filler} alfa beta"
+    assert len(over_cap) > _MAX_MARKER_TOLERANT_QUERY
+    assert reader.search_body(over_cap)[0]["match_count"] == 1
+    assert reader.search_body("alfa beta")[0]["match_count"] == 2
+
+
+# The cap is a boundary, and the test above only stands well clear of it on one
+# side. Both edges below, because `<=` vs `<` and 2000 vs 2001 are exactly the
+# two ways this silently stops tolerating a marker — or starts tolerating one
+# past the limit that exists to bound compile cost.
+
+_CAP_TAIL = " alfa beta"
+_CAP_HEAD = "a" * (_MAX_MARKER_TOLERANT_QUERY - len(_CAP_TAIL))
+
+
+def test_search_body_tolerates_a_marker_for_a_query_exactly_at_the_cap(
+    tmp_path: Path,
+) -> None:
+    query = f"{_CAP_HEAD}{_CAP_TAIL}"
+    assert len(query) == _MAX_MARKER_TOLERANT_QUERY
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": f"{_CAP_HEAD} alfa[^1] beta"},
+    )
+
+    assert CorpusReader(tmp_path).search_body(query)[0]["match_count"] == 1
+
+
+def test_search_body_drops_marker_tolerance_one_character_past_the_cap(
+    tmp_path: Path,
+) -> None:
+    query = f"{_CAP_HEAD}x{_CAP_TAIL}"
+    assert len(query) == _MAX_MARKER_TOLERANT_QUERY + 1
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": f"{_CAP_HEAD}x alfa[^1] beta"},
+    )
+
+    assert CorpusReader(tmp_path).search_body(query) == []
+
+
+def test_marker_tolerant_query_cap_is_the_number_the_tool_promises(tmp_path: Path) -> None:
+    """The two boundary tests above build their queries FROM the constant, so
+    they move with it and can never notice it moving — which is exactly how a
+    mutant that shifts the cap survived them. The value is a promise made to
+    callers in the tool description, so pin the literal and the sentence
+    together: they change as a pair or not at all.
+    """
+    assert _MAX_MARKER_TOLERANT_QUERY == 2000
+
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    description = build_server(tmp_path)._tool_manager._tools["search_body"].description
+
+    assert "Above 2,000 characters the query is matched literally" in description
+
+
+def test_search_body_snippet_window_extends_past_the_end_of_the_match(
+    tmp_path: Path,
+) -> None:
+    """The window runs _SNIPPET_CONTEXT_CHARS either side of the whole match,
+    so its far edge is measured from where the match ENDS. Asserted as an exact
+    string: a window that stopped short would still contain the query, which is
+    all the looser assertions elsewhere in this file check.
+    """
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "b" * 60 + "boligkjøp" + "e" * 60},
+    )
+    snippet = CorpusReader(tmp_path).search_body("boligkjøp")[0]["snippet"]
+
+    assert snippet == (
+        "..." + "b" * _SNIPPET_CONTEXT_CHARS + "boligkjøp" + "e" * _SNIPPET_CONTEXT_CHARS + "..."
+    )
+
+
+def test_search_body_snippet_survives_a_length_changing_lowercase(tmp_path: Path) -> None:
+    """``str.lower`` is not length-preserving — ``"\\u0130".lower()`` is two
+    characters. Matching runs in the lowercased copy while the snippet is cut
+    from the original, so one such character earlier in an act shifts every
+    later window one position right. It fails silently: the match is still
+    found and match_count stays correct, only the context is wrong.
+
+    Pinned against a control body that lowercases at a stable length: the two
+    snippets must be identical, because the text around the match is.
+    """
+    tail = "a" * 60 + " boligkjøp zzzzz"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="shifting", title="Shifting"),
+            "nl-2": _record(slug="stable", title="Stable"),
+        },
+        body_for={"shifting": "İ" + tail, "stable": tail},
+    )
+    rows = {row["slug"]: row for row in CorpusReader(tmp_path).search_body("boligkjøp")}
+
+    assert rows["shifting"]["snippet"] == rows["stable"]["snippet"]
+    assert rows["shifting"]["snippet"].endswith(" boligkjøp zzzzz")
+
+
+def test_search_body_marker_snippet_survives_a_length_changing_lowercase(
+    tmp_path: Path,
+) -> None:
+    """Same translation on the marker-tolerant path, which reads its offsets
+    out of a regex match rather than str.find."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="shifting", title="Shifting")},
+        body_for={"shifting": "İ" + "a" * 60 + " bolig[^1]kjøp zzzzz"},
+    )
+    snippet = CorpusReader(tmp_path).search_body("boligkjøp")[0]["snippet"]
+
+    assert snippet.endswith(" bolig[^1]kjøp zzzzz")
+
+
+def test_search_body_marker_body_keeps_the_plain_substring_result(tmp_path: Path) -> None:
+    # A body that carries a marker elsewhere must still report an ordinary,
+    # uninterrupted hit with the same count and the same snippet window.
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "boligkjøp er regulert her.[^1] Senere: boligkjøp igjen."},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+    assert rows[0]["match_count"] == 2
+    assert rows[0]["snippet"].startswith("boligkjøp er regulert")
+
+
 # ---------- tombstone exclusion across the index-building loops ----------
 #
 # A removed act keeps its slug and its file — it is a tombstone, not a deletion —
@@ -1181,6 +1410,132 @@ def test_body_index_excludes_a_removed_but_slugged_record(tmp_path: Path) -> Non
     index = CorpusReader(tmp_path)._load_body_index()
     assert "gone" not in index
     assert "alive" in index
+
+
+# ---------- neither loop may truncate the corpus on a skip ----------
+#
+# The same defect class #155/#156 closed in _load_embedding_index, one index
+# over. Every `continue` below is one keystroke from `break`, and a `break`
+# drops every LATER document out of search_body while the suite stays green —
+# on a partially rendered corpus that is most of it. A mutation run over
+# mcp.py on 2026-07-28 found five of these unasserted: three skip branches in
+# _load_body_index and two in search_body. Each test pairs the record that
+# must be skipped with a later one that must still come through.
+#
+# Two mutants on these lines are equivalent and are not chased:
+#   search_body's `record.status != "current" or record.slug is None` mutated
+#   to `and` — every case it stops leaking is stopped again downstream by
+#   _load_body_index's own copy of the filter, so nothing observable changes.
+#   The guard is redundant, not unasserted.
+#   The sort tiebreak `hit["slug"] or ""` mutated to `or "XXXX"` — the loop
+#   has already skipped every record whose slug is None, so the fallback is
+#   unreachable. The `and ""` form of the same mutation is NOT equivalent and
+#   is killed below.
+
+
+def test_body_index_skips_a_duplicate_slug_and_keeps_later_documents(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="First"),
+            "nl-2": _record(slug="dupe", title="Second"),
+            "nl-3": _record(slug="later", title="Later"),
+        },
+        body_for={"dupe": "første", "later": "senere"},
+    )
+    assert set(CorpusReader(tmp_path)._load_body_index()) == {"dupe", "later"}
+
+
+def test_body_index_skips_a_missing_file_and_keeps_later_documents(tmp_path: Path) -> None:
+    # A manifest record whose Markdown file is absent is the normal state of a
+    # partially synced corpus, not an error.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone"),
+            "nl-2": _record(slug="later", title="Later"),
+        },
+        body_for={"gone": "borte", "later": "senere"},
+    )
+    (tmp_path / "lover" / "gone.md").unlink()
+
+    assert set(CorpusReader(tmp_path)._load_body_index()) == {"later"}
+
+
+def test_body_index_skips_an_escaping_path_and_keeps_later_documents(tmp_path: Path) -> None:
+    # The slug needs enough '..' segments to actually leave the root — the same
+    # trap the embedding-index test documents. Files are written by hand here so
+    # seeding the escaping record cannot write outside tmp_path.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="../../../escape", title="E"),
+            "nl-2": _record(slug="later", title="Later"),
+        },
+        write_files=False,
+    )
+    (tmp_path / "lover").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "lover" / "later.md").write_text(
+        "---\nid: x\ntitle: Later\n---\n\nsenere\n",
+        encoding="utf-8",
+    )
+
+    assert set(CorpusReader(tmp_path)._load_body_index()) == {"later"}
+
+
+def test_search_body_skips_a_non_owning_duplicate_and_keeps_later_documents(
+    tmp_path: Path,
+) -> None:
+    # Only the slug-index owner reports a hit for a duplicated slug; the second
+    # claimant is skipped. The document after it still has to be searched.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="First"),
+            "nl-2": _record(slug="dupe", title="Second"),
+            "nl-3": _record(slug="later", title="Later"),
+        },
+        body_for={"dupe": "boligkjøp her", "later": "boligkjøp der"},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+
+    assert sorted(row["slug"] for row in rows) == ["dupe", "later"]
+
+
+def test_search_body_skips_a_record_without_a_body_and_keeps_later_documents(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone"),
+            "nl-2": _record(slug="later", title="Later"),
+        },
+        body_for={"gone": "boligkjøp borte", "later": "boligkjøp senere"},
+    )
+    (tmp_path / "lover" / "gone.md").unlink()
+
+    assert [row["slug"] for row in CorpusReader(tmp_path).search_body("boligkjøp")] == [
+        "later",
+    ]
+
+
+def test_search_body_breaks_a_match_count_tie_on_slug(tmp_path: Path) -> None:
+    # "Sorted by match_count descending, then by slug" is the documented
+    # ordering contract. Manifest order here is the reverse of slug order, so a
+    # tiebreak that collapses to a constant leaves the rows as the manifest had
+    # them and the contract silently stops holding.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="zeta", title="Zeta"),
+            "nl-2": _record(slug="alfa", title="Alfa"),
+        },
+        body_for={"zeta": "boligkjøp", "alfa": "boligkjøp"},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+
+    assert [row["slug"] for row in rows] == ["alfa", "zeta"]
 
 
 def test_search_body_does_not_surface_a_removed_but_slugged_record(tmp_path: Path) -> None:
