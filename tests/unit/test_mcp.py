@@ -1217,6 +1217,78 @@ def test_search_body_drops_marker_tolerance_past_the_query_cap(tmp_path: Path) -
     assert reader.search_body("alfa beta")[0]["match_count"] == 2
 
 
+# The cap is a boundary, and the test above only stands well clear of it on one
+# side. Both edges below, because `<=` vs `<` and 2000 vs 2001 are exactly the
+# two ways this silently stops tolerating a marker — or starts tolerating one
+# past the limit that exists to bound compile cost.
+
+_CAP_TAIL = " alfa beta"
+_CAP_HEAD = "a" * (_MAX_MARKER_TOLERANT_QUERY - len(_CAP_TAIL))
+
+
+def test_search_body_tolerates_a_marker_for_a_query_exactly_at_the_cap(
+    tmp_path: Path,
+) -> None:
+    query = f"{_CAP_HEAD}{_CAP_TAIL}"
+    assert len(query) == _MAX_MARKER_TOLERANT_QUERY
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": f"{_CAP_HEAD} alfa[^1] beta"},
+    )
+
+    assert CorpusReader(tmp_path).search_body(query)[0]["match_count"] == 1
+
+
+def test_search_body_drops_marker_tolerance_one_character_past_the_cap(
+    tmp_path: Path,
+) -> None:
+    query = f"{_CAP_HEAD}x{_CAP_TAIL}"
+    assert len(query) == _MAX_MARKER_TOLERANT_QUERY + 1
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": f"{_CAP_HEAD}x alfa[^1] beta"},
+    )
+
+    assert CorpusReader(tmp_path).search_body(query) == []
+
+
+def test_marker_tolerant_query_cap_is_the_number_the_tool_promises(tmp_path: Path) -> None:
+    """The two boundary tests above build their queries FROM the constant, so
+    they move with it and can never notice it moving — which is exactly how a
+    mutant that shifts the cap survived them. The value is a promise made to
+    callers in the tool description, so pin the literal and the sentence
+    together: they change as a pair or not at all.
+    """
+    assert _MAX_MARKER_TOLERANT_QUERY == 2000
+
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    description = build_server(tmp_path)._tool_manager._tools["search_body"].description
+
+    assert "Above 2,000 characters the query is matched literally" in description
+
+
+def test_search_body_snippet_window_extends_past_the_end_of_the_match(
+    tmp_path: Path,
+) -> None:
+    """The window runs _SNIPPET_CONTEXT_CHARS either side of the whole match,
+    so its far edge is measured from where the match ENDS. Asserted as an exact
+    string: a window that stopped short would still contain the query, which is
+    all the looser assertions elsewhere in this file check.
+    """
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="x", title="X")},
+        body_for={"x": "b" * 60 + "boligkjøp" + "e" * 60},
+    )
+    snippet = CorpusReader(tmp_path).search_body("boligkjøp")[0]["snippet"]
+
+    assert snippet == (
+        "..." + "b" * _SNIPPET_CONTEXT_CHARS + "boligkjøp" + "e" * _SNIPPET_CONTEXT_CHARS + "..."
+    )
+
+
 def test_search_body_snippet_survives_a_length_changing_lowercase(tmp_path: Path) -> None:
     """``str.lower`` is not length-preserving — ``"\\u0130".lower()`` is two
     characters. Matching runs in the lowercased copy while the snippet is cut
