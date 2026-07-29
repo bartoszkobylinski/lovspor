@@ -67,7 +67,7 @@ Both token types are accepted at once in hosted mode: a bearer with two dots is 
 **How it differs from stdio** — both differences exist because an HTTP server shares one process across many clients, while stdio serves exactly one:
 
 - **Tool bodies run on worker threads.** The MCP SDK calls a synchronous tool handler inline on its single event-loop thread, so one slow call (a `search_body` scan, a `semantic_search` embedding round-trip, a `git` subprocess for the time-machine tools) would stall *every* other client. Over HTTP each tool body is offloaded to a thread, so calls make progress concurrently.
-- **Indices are warmed at startup.** The corpus indices (~45 MB body index, ~200 MB embeddings when an OpenAI key is configured) are built before the server accepts traffic, so no request pays a multi-second cold build while holding the reader's cache lock. The cost is a slower start and a higher memory floor. stdio deliberately stays lazy: a client that only queries metadata should never pay for an index it may not touch.
+- **Indices are warmed at startup.** The corpus indices (~270 MB body index measured 2026-07-29 on 5,913 docs, ~200 MB embeddings when an OpenAI key is configured) are built before the server accepts traffic, so no request pays a multi-second cold build while holding the reader's cache lock. The cost is a slower start and a higher memory floor. stdio deliberately stays lazy: a client that only queries metadata should never pay for an index it may not touch.
 
 Two probes are exposed for operators, both unauthenticated and deliberately cheap (readiness stats `manifest.json` rather than parsing it or shelling out to git, so a probe loop cannot stall the server):
 
@@ -419,7 +419,9 @@ Search the **full Markdown body** of every current law for a substring (case-ins
 
 Sorted by `match_count` descending, then by `slug` for stable ordering. The snippet is a ~100-char window around the **first** match (whitespace collapsed, leading/trailing `...` if not at the document boundaries).
 
-**Performance:** the body index is loaded lazily on the first call (~3-5 s for the production ~5,900-doc corpus, ~45 MB resident); subsequent calls are O(N) substring scans (~100-200 ms typical). Server startup stays fast for clients that only query metadata.
+**Footnote markers do not break the match.** The corpus reads `fra det tidspunktet[^1] Kongen bestemmer`; searching for that phrase without the marker still finds it. The snippet comes back as the corpus stores it, marker included. Above 2,000 characters the query is matched literally instead, so a marker inside a pasted-paragraph query does break it — that cap bounds the regex compile cost a caller can drive.
+
+**Performance:** the body index is loaded lazily on the first call and stays resident. Measured 2026-07-29 on the renderer-5 corpus (5,913 docs, 113,457,896 characters): **~270 MB peak RSS** — four runs across two machines landed at 247, 271, 278 and 280 MB, so size a droplet from the top of that range, not the bottom. The body strings alone are ~209 MB (`sum(getsizeof)`) plus ~0.8 MB of dict and keys; the rest is the transient load-time peak, which is the part that actually decides whether a small droplet survives the warm-up. Cold load 1.3–1.9 s off a warm page cache. Every call after that is a full scan of that text — ~0.4 s, or ~0.5–0.6 s once the marker-tolerant pass runs over the 18.3% of documents that carry a footnote marker. Server startup stays fast for clients that only query metadata.
 
 ### `semantic_search(query, dataset?, limit?, min_score?)`
 
