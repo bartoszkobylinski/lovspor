@@ -1281,6 +1281,132 @@ def test_body_index_excludes_a_removed_but_slugged_record(tmp_path: Path) -> Non
     assert "alive" in index
 
 
+# ---------- neither loop may truncate the corpus on a skip ----------
+#
+# The same defect class #155/#156 closed in _load_embedding_index, one index
+# over. Every `continue` below is one keystroke from `break`, and a `break`
+# drops every LATER document out of search_body while the suite stays green —
+# on a partially rendered corpus that is most of it. A mutation run over
+# mcp.py on 2026-07-28 found five of these unasserted: three skip branches in
+# _load_body_index and two in search_body. Each test pairs the record that
+# must be skipped with a later one that must still come through.
+#
+# Two mutants on these lines are equivalent and are not chased:
+#   search_body's `record.status != "current" or record.slug is None` mutated
+#   to `and` — every case it stops leaking is stopped again downstream by
+#   _load_body_index's own copy of the filter, so nothing observable changes.
+#   The guard is redundant, not unasserted.
+#   The sort tiebreak `hit["slug"] or ""` mutated to `or "XXXX"` — the loop
+#   has already skipped every record whose slug is None, so the fallback is
+#   unreachable. The `and ""` form of the same mutation is NOT equivalent and
+#   is killed below.
+
+
+def test_body_index_skips_a_duplicate_slug_and_keeps_later_documents(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="First"),
+            "nl-2": _record(slug="dupe", title="Second"),
+            "nl-3": _record(slug="later", title="Later"),
+        },
+        body_for={"dupe": "første", "later": "senere"},
+    )
+    assert set(CorpusReader(tmp_path)._load_body_index()) == {"dupe", "later"}
+
+
+def test_body_index_skips_a_missing_file_and_keeps_later_documents(tmp_path: Path) -> None:
+    # A manifest record whose Markdown file is absent is the normal state of a
+    # partially synced corpus, not an error.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone"),
+            "nl-2": _record(slug="later", title="Later"),
+        },
+        body_for={"gone": "borte", "later": "senere"},
+    )
+    (tmp_path / "lover" / "gone.md").unlink()
+
+    assert set(CorpusReader(tmp_path)._load_body_index()) == {"later"}
+
+
+def test_body_index_skips_an_escaping_path_and_keeps_later_documents(tmp_path: Path) -> None:
+    # The slug needs enough '..' segments to actually leave the root — the same
+    # trap the embedding-index test documents. Files are written by hand here so
+    # seeding the escaping record cannot write outside tmp_path.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="../../../escape", title="E"),
+            "nl-2": _record(slug="later", title="Later"),
+        },
+        write_files=False,
+    )
+    (tmp_path / "lover").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "lover" / "later.md").write_text(
+        "---\nid: x\ntitle: Later\n---\n\nsenere\n",
+        encoding="utf-8",
+    )
+
+    assert set(CorpusReader(tmp_path)._load_body_index()) == {"later"}
+
+
+def test_search_body_skips_a_non_owning_duplicate_and_keeps_later_documents(
+    tmp_path: Path,
+) -> None:
+    # Only the slug-index owner reports a hit for a duplicated slug; the second
+    # claimant is skipped. The document after it still has to be searched.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="First"),
+            "nl-2": _record(slug="dupe", title="Second"),
+            "nl-3": _record(slug="later", title="Later"),
+        },
+        body_for={"dupe": "boligkjøp her", "later": "boligkjøp der"},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+
+    assert sorted(row["slug"] for row in rows) == ["dupe", "later"]
+
+
+def test_search_body_skips_a_record_without_a_body_and_keeps_later_documents(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="gone", title="Gone"),
+            "nl-2": _record(slug="later", title="Later"),
+        },
+        body_for={"gone": "boligkjøp borte", "later": "boligkjøp senere"},
+    )
+    (tmp_path / "lover" / "gone.md").unlink()
+
+    assert [row["slug"] for row in CorpusReader(tmp_path).search_body("boligkjøp")] == [
+        "later",
+    ]
+
+
+def test_search_body_breaks_a_match_count_tie_on_slug(tmp_path: Path) -> None:
+    # "Sorted by match_count descending, then by slug" is the documented
+    # ordering contract. Manifest order here is the reverse of slug order, so a
+    # tiebreak that collapses to a constant leaves the rows as the manifest had
+    # them and the contract silently stops holding.
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="zeta", title="Zeta"),
+            "nl-2": _record(slug="alfa", title="Alfa"),
+        },
+        body_for={"zeta": "boligkjøp", "alfa": "boligkjøp"},
+    )
+    rows = CorpusReader(tmp_path).search_body("boligkjøp")
+
+    assert [row["slug"] for row in rows] == ["alfa", "zeta"]
+
+
 def test_search_body_does_not_surface_a_removed_but_slugged_record(tmp_path: Path) -> None:
     # End-to-end guard on the property itself: repealed law never appears in a
     # body search, whichever internal filter enforces it.
