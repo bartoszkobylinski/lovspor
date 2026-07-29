@@ -1463,3 +1463,138 @@ def test_eliding_a_future_subtree_keeps_its_tail_in_document_order() -> None:
 
     assert md == "Aaa *kursiv* Bbb\n"
     assert md.index("kursiv") < md.index("Bbb")
+
+
+# ---------------------------------------------------------------------------
+# Mutation-debt paydown, 2026-07-28. A fresh mutmut 2.x run over this module
+# (375 mutants, narrow renderer runner) left 20 survivors, every one of them
+# re-checked against the FULL unit suite so none is a narrow-runner artifact.
+# The fifteen tests below kill fifteen of them, verified one mutant at a time.
+# Each pins behaviour that matters on its own — the mutant is why the gap was
+# visible, not the thing under test.
+#
+# The remaining five are equivalent mutants: they cannot be killed because they
+# do not change what the code computes. Recorded here rather than chased, and
+# deliberately NOT pragma'd — mutmut's pragma is line-granular and these lines
+# carry killed mutants too, so silencing them would silence real signal.
+#
+#   _is_not_in_force:207, _render_element:233, _span_inner:575,
+#   _inline_for_child:662 — `(elem.get("class") or "").split()` mutated to
+#   `or "XXXX"`. The empty default splits to []; the placeholder splits to
+#   ["XXXX"]. Both are only ever membership-tested against known class names
+#   and no real class is "XXXX", so every downstream answer is identical.
+#
+#   _expand_row:525 — `[""] * (width - len(cells))` mutated to `width +
+#   len(cells)`. The next line is `return cells[:width]`, which truncates the
+#   over-padding away; a short row still arrives at exactly `width` cells.
+# ---------------------------------------------------------------------------
+
+
+def test_render_escapes_inline_backtick_and_backslash() -> None:
+    """The inline escape table has three entries and only the asterisk was
+    pinned. An unescaped backtick opens a code span that swallows law text
+    until the next one; an unescaped backslash eats the character after it.
+    """
+    md = render_markdown(_wrap(b'<article class="legalP">bruk `kode` og C:\\sti</article>'))
+    assert md == "bruk \\`kode\\` og C:\\\\sti\n"
+
+
+def test_render_escapes_leading_table_pipe_and_plus_bullet() -> None:
+    """``|`` starts a GFM table row and ``+ `` is a bullet exactly like
+    ``- ``. Both live in the same two character sets as the ``#``/``>``/``-``
+    cases pinned above, and neither end of either set was covered."""
+    assert (
+        render_markdown(_wrap(b'<article class="legalP">| ikke tabell</article>'))
+        == "\\| ikke tabell\n"
+    )
+    assert (
+        render_markdown(_wrap(b'<article class="legalP">+ ikke punkt</article>'))
+        == "\\+ ikke punkt\n"
+    )
+
+
+def test_render_escapes_a_line_that_is_only_a_bullet_character() -> None:
+    """A line consisting of nothing but ``-`` is still a bullet to Markdown.
+    That is the ``len(line) == 1`` half of the guard: the other half needs a
+    following space, which a one-character line cannot have."""
+    md = render_markdown(_wrap(b'<article class="legalP">Tekst<br/>-</article>'))
+    assert md == "Tekst\n\\-\n"
+
+
+def test_render_leaves_an_ordinary_leading_letter_verbatim() -> None:
+    """The escape sets are exact, not approximate. Widening either one would
+    backslash ordinary legal text — a paragraph opening with a letter must
+    come through untouched."""
+    md = render_markdown(_wrap(b'<article class="legalP">X gjelder ikke</article>'))
+    assert md == "X gjelder ikke\n"
+
+
+def test_eliding_a_first_child_future_subtree_rescues_its_tail_to_the_parent() -> None:
+    """The tail of an elided element goes to its previous sibling — unless it
+    has none, and then it must land on the parent's own text. That branch is
+    the one the corpus reaches whenever a not-in-force block OPENS a
+    paragraph, and the law that follows it would otherwise be dropped."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="legalP"><span class="futuretitle">Kapittel 6A</span>'
+            b" gjelder ikke</article>",
+        ),
+    )
+    assert md == "gjelder ikke\n"
+    assert "Kapittel 6A" not in md
+
+
+def test_render_heading_div_without_text_emits_no_heading() -> None:
+    """An empty heading div must produce no ATX marker at all. A bare ``#``
+    line would read as an untitled section of the act."""
+    assert render_markdown(_wrap(b'<div role="heading" aria-level="7"></div>')) == "\n"
+
+
+def test_render_heading_div_floors_aria_level_at_one() -> None:
+    """The clamp has two ends and only the upper one was pinned. aria-level 1
+    is a top-level heading and must stay one ``#``; 0 and negatives clamp up
+    to the same place rather than falling through to the default depth."""
+    assert (
+        render_markdown(_wrap(b'<div role="heading" aria-level="1">Tittel</div>')) == "# Tittel\n"
+    )
+    assert (
+        render_markdown(_wrap(b'<div role="heading" aria-level="0">Tittel</div>')) == "# Tittel\n"
+    )
+
+
+def test_dropped_text_error_pins_its_whole_message_and_sample_length() -> None:
+    """This message is all an operator gets when the corpus freezes on an
+    element the renderer does not understand: it must name the offending
+    text, cut to _DROPPED_TEXT_SAMPLE characters so a whole section cannot
+    flood the log, the tag it sat in, and what went wrong."""
+    with pytest.raises(RenderError) as excinfo:
+        render_markdown(
+            _wrap(
+                b'<section class="section"><span class="mysteryClass">'
+                + b"A" * 80
+                + b"</span></section>",
+            ),
+        )
+    assert str(excinfo.value) == (
+        f"renderer would drop block-level text ({'A' * 60!r}) in <span>; "
+        f"an unhandled text-bearing element reached the child-only walk"
+    )
+
+
+def test_render_change_note_with_a_block_child_keeps_a_trailing_letter() -> None:
+    """The structured change-note path strips trailing NEWLINES off the body.
+    Anything wider would eat the last character of the note, and Norwegian
+    legal text ends on a roman numeral often enough for that to be real."""
+    md = render_markdown(
+        _wrap(
+            b'<article class="changesToParent">'
+            b'<article class="legalP">Endret ved lov X</article></article>',
+        ),
+    )
+    assert md == "> Endret ved lov X\n"
+
+
+def test_render_list_item_keeps_a_trailing_letter() -> None:
+    """Same guard, the list-item copy: the rstrip takes newlines only."""
+    md = render_markdown(_wrap(b"<ul><li>Kapittel X</li></ul>"))
+    assert md == "- Kapittel X\n"

@@ -48,6 +48,7 @@ from lovspor.mcp import (
     _MAX_RESULT_LIMIT,
     _MCP_EMBED_MAX_RETRIES,
     _MCP_EMBED_TIMEOUT_SECONDS,
+    _QUOTE_FOLD_TABLE,
     _SECTION_HEADING,
     _SNIPPET_CONTEXT_CHARS,
     _TABLE_ROW_SNIPPET_CHARS,
@@ -3419,6 +3420,58 @@ def test_verify_quote_folds_typographic_punctuation(
     result = CorpusReader(tmp_path).verify_quote("skatteloven", "1-1", quoted_text)
 
     assert result["verified"] is True
+
+
+# _QUOTE_FOLD_TABLE is the whole reason verify_quote does not reject an honest
+# quote over typography, and a guard that rejects real text teaches the AI to
+# stop calling it. The parametrized test above reaches six of the table's
+# eleven entries; a mutation run over mcp.py on 2026-07-28 found the other five
+# (U+2018, U+201A, U+201B, U+201E, U+2212) entirely unasserted — their mutants
+# survived because no test ever puts those characters through the function.
+# Below: every entry, in both directions, plus a guard that a new entry cannot
+# be added without a test.
+
+_QUOTE_FOLD_CASES = [
+    ("\u2018", "'"),  # left single quotation mark
+    ("\u2019", "'"),  # right single quotation mark / typographic apostrophe
+    ("\u201a", "'"),  # single low-9 quotation mark
+    ("\u201b", "'"),  # single high-reversed-9 quotation mark
+    ("\u201c", '"'),  # left double quotation mark
+    ("\u201d", '"'),  # right double quotation mark
+    ("\u201e", '"'),  # double low-9 quotation mark
+    ("\u2013", "-"),  # en dash
+    ("\u2014", "-"),  # em dash
+    ("\u2212", "-"),  # minus sign
+]
+
+
+@pytest.mark.parametrize(("typographic", "ascii_form"), _QUOTE_FOLD_CASES)
+def test_quote_fold_table_folds_every_entry(typographic: str, ascii_form: str) -> None:
+    """Each entry folds to its ASCII equivalent, and the ASCII form is already
+    at rest. Both halves matter: the corpus and the pasted quote go through the
+    same function, so a fold that moved the ASCII character too would break the
+    match from the other side."""
+    assert _normalize_for_quote_match(f"a{typographic}b") == f"a{ascii_form}b"
+    assert _normalize_for_quote_match(f"a{ascii_form}b") == f"a{ascii_form}b"
+
+
+def test_quote_fold_table_drops_the_soft_hyphen_rather_than_folding_it() -> None:
+    """The soft hyphen is invisible: a client that inserts one mid-word must
+    not turn the word into two. It is the one entry mapped to None, so it is
+    dropped rather than replaced.
+
+    Its ``None -> ""`` mutant is equivalent and stays alive: str.maketrans
+    deletes the character either way, so no test can tell the two apart.
+    """
+    assert _normalize_for_quote_match("eien\u00addomsretten") == "eiendomsretten"
+
+
+def test_quote_fold_table_has_no_untested_entry() -> None:
+    """A character added to the table without a case above would ride into
+    production unasserted — which is exactly how five of these got there."""
+    covered = {ord(typographic) for typographic, _ in _QUOTE_FOLD_CASES} | {0x00AD}
+
+    assert set(_QUOTE_FOLD_TABLE) == covered
 
 
 def test_verify_quote_does_not_fold_section_sign_or_digits(tmp_path: Path) -> None:
@@ -7009,3 +7062,111 @@ def test_normalize_for_quote_match_does_not_eat_real_bracketed_text() -> None:
     assert _normalize_for_quote_match("tekst [...] mer") == "tekst [...] mer"
     # A marker-shaped run of text that is genuinely long is left alone.
     assert _normalize_for_quote_match("[^" + "x" * 40 + "]") == "[^" + "x" * 40 + "]"
+
+
+# ---------- no record-skipping loop may truncate the corpus ----------
+#
+# The defect class #155/#156 closed in _load_embedding_index and #164 closed in
+# _load_body_index and search_body runs through this whole module: every loop
+# that walks the manifest skips records with `continue`, and every one of those
+# is a keystroke from `break`. A `break` drops every LATER document while the
+# suite stays green — on a corpus of ~5,900 acts that is most of the answer.
+#
+# The mutation run over mcp.py on 2026-07-28 (1187 mutants, every survivor
+# re-checked against the full unit suite) left ten such mutants alive. Five are
+# closed on the search_body branch; these are the other five, in the four loops
+# nothing had pinned. Each test puts the record that must be skipped BEFORE the
+# one that must still be found — the only arrangement a `break` can fail.
+
+
+def test_list_recent_changes_skips_a_tombstone_and_keeps_later_records(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(
+                slug="gone",
+                title="Gone",
+                status="removed",
+                last_changed="2026-04-27",
+            ),
+            "nl-2": _record(slug="alive", title="Alive", last_changed="2026-04-26"),
+        },
+    )
+    rows = CorpusReader(tmp_path).list_recent_changes()
+
+    assert [row["slug"] for row in rows] == ["alive"]
+
+
+def test_search_laws_skips_a_tombstone_and_keeps_later_records(tmp_path: Path) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="skatteloven-gammel", title="Skatteloven", status="removed"),
+            "nl-2": _record(slug="skatteloven-sktl", title="Skatteloven"),
+        },
+    )
+    rows = CorpusReader(tmp_path).search_laws("skatteloven")
+
+    assert [row["slug"] for row in rows] == ["skatteloven-sktl"]
+
+
+def test_search_eu_implementations_skips_a_tombstone_and_keeps_later_records(
+    tmp_path: Path,
+) -> None:
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(
+                slug="opphevet",
+                title="Opphevet",
+                status="removed",
+                eu_basis=["32016R0679"],
+            ),
+            "nl-2": _record(
+                slug="personopplysningsloven",
+                title="Personopplysningsloven",
+                eu_basis=["32016R0679"],
+            ),
+        },
+    )
+    rows = CorpusReader(tmp_path).search_eu_implementations("32016R0679")
+
+    assert [row["slug"] for row in rows] == ["personopplysningsloven"]
+
+
+def test_search_eu_implementations_skips_an_unbackfilled_record_and_keeps_later_ones(
+    tmp_path: Path,
+) -> None:
+    """``eu_basis is None`` marks a record the Sprint 8 backfill has not
+    reached. That is the ordinary state of a stale corpus, not an error, and it
+    must not end the walk — the acts after it still implement the directive."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="ikke-backfilt", title="Ikke backfilt", eu_basis=None),
+            "nl-2": _record(
+                slug="personopplysningsloven",
+                title="Personopplysningsloven",
+                eu_basis=["32016R0679"],
+            ),
+        },
+    )
+    rows = CorpusReader(tmp_path).search_eu_implementations("32016R0679")
+
+    assert [row["slug"] for row in rows] == ["personopplysningsloven"]
+
+
+def test_citation_suggestion_hint_skips_a_short_token_and_keeps_looking(
+    tmp_path: Path,
+) -> None:
+    """Tokens under _MIN_SUGGESTION_TOKEN_CHARS are filler ('jf', 'i') and are
+    skipped so they never query. A citation opens with that filler far more
+    often than not, so ending the walk there would silence the suggestion for
+    the act name that follows it."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven-sktl", title="Skatteloven")},
+    )
+    hint = CorpusReader(tmp_path)._citation_suggestion_hint("jf skatteloven")
+
+    assert hint == "; did you mean skatteloven-sktl? Use search_laws for canonical slugs"
