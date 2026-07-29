@@ -1217,6 +1217,46 @@ def test_search_body_drops_marker_tolerance_past_the_query_cap(tmp_path: Path) -
     assert reader.search_body("alfa beta")[0]["match_count"] == 2
 
 
+def test_search_body_snippet_survives_a_length_changing_lowercase(tmp_path: Path) -> None:
+    """``str.lower`` is not length-preserving — ``"\\u0130".lower()`` is two
+    characters. Matching runs in the lowercased copy while the snippet is cut
+    from the original, so one such character earlier in an act shifts every
+    later window one position right. It fails silently: the match is still
+    found and match_count stays correct, only the context is wrong.
+
+    Pinned against a control body that lowercases at a stable length: the two
+    snippets must be identical, because the text around the match is.
+    """
+    tail = "a" * 60 + " boligkjøp zzzzz"
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="shifting", title="Shifting"),
+            "nl-2": _record(slug="stable", title="Stable"),
+        },
+        body_for={"shifting": "İ" + tail, "stable": tail},
+    )
+    rows = {row["slug"]: row for row in CorpusReader(tmp_path).search_body("boligkjøp")}
+
+    assert rows["shifting"]["snippet"] == rows["stable"]["snippet"]
+    assert rows["shifting"]["snippet"].endswith(" boligkjøp zzzzz")
+
+
+def test_search_body_marker_snippet_survives_a_length_changing_lowercase(
+    tmp_path: Path,
+) -> None:
+    """Same translation on the marker-tolerant path, which reads its offsets
+    out of a regex match rather than str.find."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="shifting", title="Shifting")},
+        body_for={"shifting": "İ" + "a" * 60 + " bolig[^1]kjøp zzzzz"},
+    )
+    snippet = CorpusReader(tmp_path).search_body("boligkjøp")[0]["snippet"]
+
+    assert snippet.endswith(" bolig[^1]kjøp zzzzz")
+
+
 def test_search_body_marker_body_keeps_the_plain_substring_result(tmp_path: Path) -> None:
     # A body that carries a marker elsewhere must still report an ordinary,
     # uninterrupted hit with the same count and the same snippet window.

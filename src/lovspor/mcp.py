@@ -2269,6 +2269,30 @@ def _snippet(body: str, match_idx: int, match_len: int) -> str:
     return f"{prefix}{snippet}{suffix}"
 
 
+def _original_offsets(body: str) -> list[int]:
+    """Map every offset in ``body.lower()`` back to its offset in ``body``.
+
+    ``str.lower`` is not length-preserving: ``"\\u0130".lower()`` is two
+    characters, so a single Turkish dotted capital I earlier in a document
+    shifts every later match one position right in the lowercased copy.
+    Slicing the original at that shifted offset cuts the snippet window in
+    the wrong place — silently, since the match itself is still found and
+    ``match_count`` stays right.
+
+    Not hypothetical. One document in the renderer-5 corpus does this:
+    ``sanksjonsforskrift-ukraina-territoriell-integritet-mv`` carries 27 of
+    them in the Turkish addresses of sanctioned entities, so every hit past
+    the first one had its window shifted by up to 27 characters — in the one
+    act where reading an address correctly matters most.
+
+    Built only when the two lengths actually differ, so the other 5,912
+    documents pay a length comparison and nothing else.
+    """
+    offsets = [index for index, char in enumerate(body) for _ in char.lower()]
+    offsets.append(len(body))
+    return offsets
+
+
 def _body_match_summary(
     body: str,
     needle: str,
@@ -2287,18 +2311,28 @@ def _body_match_summary(
 
     ``tolerant`` is ``None`` for a query too long to be worth compiling
     a pattern for (``_MAX_MARKER_TOLERANT_QUERY``).
+
+    Matching happens in the lowercased copy but the snippet is cut from
+    the original, so the offsets have to be translated back whenever
+    lowercasing changed the length (see ``_original_offsets``).
     """
     haystack = body.lower()
     if tolerant is None or _FOOTNOTE_MARKER_OPENER not in haystack:
         count = haystack.count(needle)
         if count == 0:
             return None
-        return count, _snippet(body, haystack.find(needle), len(needle))
-    spans = [match.span() for match in tolerant.finditer(haystack)]
-    if not spans:
-        return None
-    start, end = spans[0]
-    return len(spans), _snippet(body, start, end - start)
+        first = haystack.find(needle)
+        start, end = first, first + len(needle)
+    else:
+        spans = [match.span() for match in tolerant.finditer(haystack)]
+        if not spans:
+            return None
+        count = len(spans)
+        start, end = spans[0]
+    if len(haystack) != len(body):
+        offsets = _original_offsets(body)
+        start, end = offsets[start], offsets[end]
+    return count, _snippet(body, start, end - start)
 
 
 def _compute_match_owner_starts(
