@@ -1,5 +1,6 @@
 """lovspor command-line interface."""
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
@@ -14,7 +15,7 @@ from lovspor.access import (
     revoke_credential,
     write_credential_file,
 )
-from lovspor.corpus_audit import AuditReport, audit_corpus
+from lovspor.corpus_audit import AuditFinding, AuditReport, audit_corpus
 from lovspor.corpus_fetch import default_corpus_path, fetch_corpus, is_corpus
 from lovspor.errors import ConfigError
 from lovspor.github_output import append_step_summary, set_output
@@ -233,18 +234,33 @@ def repair_embeddings() -> None:
     )
 
 
+class AuditFailOn(StrEnum):
+    """What makes `lovspor audit` exit non-zero."""
+
+    integrity = "integrity"
+    all = "all"
+
+
 def _echo_audit(report: AuditReport) -> None:
-    """Print findings grouped by kind, most-common kind first."""
+    """Print findings grouped by severity, then by kind, most-common kind first."""
     if report.clean:
         typer.echo(f"Corpus is clean — {report.documents_checked} current document(s), no drift.")
         return
-    by_kind: dict[str, list[str]] = {}
-    for finding in report.findings:
-        by_kind.setdefault(finding.kind, []).append(finding.path)
     typer.echo(
         f"Corpus drift: {len(report.findings)} finding(s) "
         f"across {report.documents_checked} current document(s).\n",
     )
+    _echo_findings("INTEGRITY (blocking)", report.integrity_findings)
+    _echo_findings("ADVISORY (registered follow-up work, non-blocking)", report.advisory_findings)
+
+
+def _echo_findings(label: str, findings: tuple[AuditFinding, ...]) -> None:
+    if not findings:
+        return
+    typer.echo(f"{label}:\n")
+    by_kind: dict[str, list[str]] = {}
+    for finding in findings:
+        by_kind.setdefault(finding.kind, []).append(finding.path)
     for kind, paths in sorted(by_kind.items(), key=lambda kv: (-len(kv[1]), kv[0])):
         typer.echo(f"{kind} ({len(paths)}):")
         for path in paths:
@@ -258,6 +274,13 @@ def audit(
         Path | None,
         typer.Option("--corpus-path", help="Corpus to audit (default: the configured lovverk)."),
     ] = None,
+    fail_on: Annotated[
+        AuditFailOn,
+        typer.Option(
+            "--fail-on",
+            help="Exit non-zero on integrity findings only (default), or on all findings.",
+        ),
+    ] = AuditFailOn.integrity,
 ) -> None:
     """Reconcile the corpus on disk against the manifest, and report the drift.
 
@@ -267,19 +290,29 @@ def audit(
     never self-heal — which is how 48 repealed regulations sat in `lovverk` for
     seven weeks. This is the check that catches that class of drift.
 
-    Reports: documents on disk that no record claims (`orphan_document`),
-    tombstoned records whose file was never deleted (`tombstoned_but_present`),
-    current records with no file (`missing_document`), embedding sidecars no
-    record owns (`orphan_embedding`), and documents left behind by a renderer
-    bump (`stale_render`).
+    INTEGRITY findings — the corpus contradicting its own manifest: documents
+    on disk that no record claims (`orphan_document`), tombstoned records whose
+    file was never deleted (`tombstoned_but_present`), current records with no
+    file (`missing_document`), embedding sidecars no current record owns
+    (`orphan_embedding`), documents left behind by a renderer bump
+    (`stale_render`), one markdown path claimed by more than one record or one
+    current record claiming two paths (`duplicate_path_ownership`), and files
+    whose frontmatter id contradicts their owning record (`identity_mismatch`).
 
-    Read-only — it never writes or deletes. Exits non-zero when drift is found,
-    so it can gate CI.
+    ADVISORY findings are registered follow-up work, not corruption — today
+    that is `unparsed_section_heading` (18 pre-existing findings). They are
+    printed and labeled, but do not fail the command by default: a CI gate
+    that is permanently red is one nobody reads. Pass `--fail-on all` to
+    treat them as blocking too.
+
+    Read-only — it never writes or deletes. Exits non-zero on integrity
+    findings (or on any finding with `--fail-on all`), so it can gate CI.
     """
     root = corpus_path or Settings.from_env().lovverk_repo_path
     report = audit_corpus(root, read_manifest(root / "manifest.json"), RENDERER_VERSION)
     _echo_audit(report)
-    if not report.clean:
+    blocking = report.findings if fail_on is AuditFailOn.all else report.integrity_findings
+    if blocking:
         raise typer.Exit(code=1)
 
 

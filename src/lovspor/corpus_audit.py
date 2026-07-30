@@ -14,6 +14,7 @@ day one.
 from __future__ import annotations
 
 import re
+from itertools import islice
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -24,6 +25,43 @@ from lovspor.sync.document_io import dataset_dir
 
 _EMBEDDINGS_SUBDIR = "embeddings"
 _DATASET_SUBDIRS = ("lover", "forskrifter")
+
+ADVISORY_KINDS = frozenset({"unparsed_section_heading"})
+"""Findings that are registered follow-up work, not corpus corruption.
+
+An unparsed heading means a section the grammar cannot reach yet — real,
+worth fixing, and 18 of them predate the CI gate. Exiting non-zero on them
+would keep that gate permanently red, and a gate that is always red is one
+nobody reads: exactly how the 48 orphans of 2026-05/07 stayed invisible.
+Every kind NOT in this set is an INTEGRITY finding — the corpus contradicts
+its own manifest — and blocks by default. Unknown kinds therefore classify
+as integrity: a new check someone forgets to register here fails closed
+instead of passing silently."""
+
+INTEGRITY_KINDS = frozenset(
+    {
+        "duplicate_path_ownership",
+        "identity_mismatch",
+        "missing_document",
+        "orphan_document",
+        "orphan_embedding",
+        "stale_render",
+        "tombstoned_but_present",
+    }
+)
+"""Every kind this module can emit that contradicts the manifest's own claims.
+
+Documentation of the current inventory — classification itself keys on
+:data:`ADVISORY_KINDS` (see there for why unknown kinds fail closed)."""
+
+_FRONTMATTER_ID = re.compile(r'^id: "([^"]*)"$')
+"""The ``id`` field exactly as ``serialize_frontmatter`` emits it: first
+frontmatter field, double-quoted scalar. Anything else is not our id line."""
+
+_FRONTMATTER_SCAN_LINES = 40
+"""How deep into a file the identity check reads. The id is the *first*
+frontmatter field by model declaration order, so this is generous headroom —
+the point is that the audit never streams whole acts to compare one field."""
 
 _LOOKS_LIKE_SECTION_HEADING = re.compile(r"^#{2,6} § ")
 """Deliberately looser than :data:`lovspor.headings.SECTION_HEADING`.
@@ -65,6 +103,19 @@ class AuditReport(BaseModel):
     @property
     def clean(self) -> bool:
         return not self.findings
+
+    @property
+    def integrity_findings(self) -> tuple[AuditFinding, ...]:
+        """Findings that mean the corpus contradicts its own manifest.
+
+        Membership is *exclusion* from :data:`ADVISORY_KINDS`, so a kind
+        nobody classified blocks rather than slips through (see there)."""
+        return tuple(f for f in self.findings if f.kind not in ADVISORY_KINDS)
+
+    @property
+    def advisory_findings(self) -> tuple[AuditFinding, ...]:
+        """Findings that are registered follow-up work, not corruption."""
+        return tuple(f for f in self.findings if f.kind in ADVISORY_KINDS)
 
 
 def _relative(corpus_root: Path, path: Path) -> str:
@@ -119,6 +170,123 @@ def _live_markdown_paths(manifest: Manifest) -> set[str]:
     return {
         record.markdown_path for record in manifest.documents.values() if record.status == "current"
     }
+
+
+def _expected_markdown(corpus_root: Path, record: ManifestRecord) -> str | None:
+    """The path a record's slug renders to, or None when it cannot be derived."""
+    if record.slug is None:
+        return None
+    try:
+        directory = dataset_dir(corpus_root, record.source_dataset)
+    except ValueError:
+        return None
+    return _relative(corpus_root, directory / f"{record.slug}.md")
+
+
+def _duplicate_path_findings(corpus_root: Path, manifest: Manifest) -> list[AuditFinding]:
+    """One path, one owner — violated in either direction.
+
+    The 2026-07-14 omregningsfaktorer case: a replacement act slugified onto a
+    tombstone's ``markdown_path``, leaving two manifest ids pointing at one
+    file. The file itself is fine (it belongs to the live act — deleting it
+    would remove text in force), but the shared pointer fuses two documents'
+    identities in every path-keyed consumer, e.g. ``git log --follow`` history.
+    The fix is always manifest-side, never a file deletion.
+    """
+    return _shared_path_findings(manifest) + _split_ownership_findings(corpus_root, manifest)
+
+
+def _shared_path_findings(manifest: Manifest) -> list[AuditFinding]:
+    """More than one manifest record — any status mix — on one markdown_path."""
+    owners_by_path: dict[str, list[str]] = {}
+    for doc_id, record in manifest.documents.items():
+        owners_by_path.setdefault(record.markdown_path, []).append(doc_id)
+    findings: list[AuditFinding] = []
+    for path, owners in owners_by_path.items():
+        if len(owners) == 1:
+            continue
+        current = [d for d in owners if manifest.documents[d].status == "current"]
+        listed = ", ".join(f"{d} ({manifest.documents[d].status})" for d in sorted(owners))
+        findings.append(
+            AuditFinding(
+                kind="duplicate_path_ownership",
+                path=path,
+                doc_id=current[0] if len(current) == 1 else None,
+                detail=f"{len(owners)} manifest records resolve to this path: {listed}",
+            ),
+        )
+    return findings
+
+
+def _split_ownership_findings(corpus_root: Path, manifest: Manifest) -> list[AuditFinding]:
+    """One current doc id effectively owning two paths.
+
+    A current record whose ``markdown_path`` disagrees with what its own slug
+    renders to claims one file while the next re-render will write another —
+    the mirror image of two ids on one path, from a half-applied rename."""
+    findings: list[AuditFinding] = []
+    for doc_id, record in manifest.documents.items():
+        if record.status != "current":
+            continue
+        expected = _expected_markdown(corpus_root, record)
+        if expected is None or expected == record.markdown_path:
+            continue
+        findings.append(
+            AuditFinding(
+                kind="duplicate_path_ownership",
+                path=record.markdown_path,
+                doc_id=doc_id,
+                detail=(
+                    f"one doc id, two paths: manifest points at {record.markdown_path} "
+                    f"but slug {record.slug!r} renders to {expected}"
+                ),
+            ),
+        )
+    return findings
+
+
+def _frontmatter_id(path: Path) -> str | None:
+    """The document id the file itself declares, or None when it declares none.
+
+    Reads at most :data:`_FRONTMATTER_SCAN_LINES` lines — the id is the first
+    frontmatter field, so a file whose id is not in that window has no id."""
+    with path.open(encoding="utf-8") as handle:
+        for line in islice(handle, _FRONTMATTER_SCAN_LINES):
+            match = _FRONTMATTER_ID.match(line.rstrip("\n"))
+            if match:
+                return match.group(1)
+    return None
+
+
+def _identity_findings(
+    corpus_root: Path,
+    manifest: Manifest,
+    on_disk: set[str],
+) -> list[AuditFinding]:
+    """On-disk frontmatter id versus the manifest id owning that path.
+
+    This is the invariant the 2026-07-14 overwrite would have tripped had the
+    add and the tombstone landed in the other order: a file whose frontmatter
+    says it is one document, owned in the manifest by another. Files that
+    declare no id at all are skipped — absence of evidence is not a mismatch,
+    and inventing one would be a fabricated finding."""
+    findings: list[AuditFinding] = []
+    for doc_id, record in manifest.documents.items():
+        if record.status != "current" or record.markdown_path not in on_disk:
+            continue
+        declared = _frontmatter_id(corpus_root / record.markdown_path)
+        if declared is None or declared == doc_id:
+            continue
+        findings.append(
+            AuditFinding(
+                kind="identity_mismatch",
+                path=record.markdown_path,
+                doc_id=doc_id,
+                detail=f'file frontmatter declares id "{declared}" but the manifest '
+                f"record owning this path is {doc_id}",
+            ),
+        )
+    return findings
 
 
 def _document_findings(
@@ -245,9 +413,14 @@ def audit_corpus(
     dimension (the other checks do not need to know about rendering).
 
     Findings are sorted by (kind, path) so a run is reproducible and diffable.
+    Classification into blocking and non-blocking is the *caller's* concern,
+    via :attr:`AuditReport.integrity_findings` / ``advisory_findings`` — this
+    function reports everything it sees.
     """
     on_disk = _markdown_on_disk(corpus_root)
     findings = _document_findings(manifest, on_disk, renderer_version)
+    findings += _duplicate_path_findings(corpus_root, manifest)
+    findings += _identity_findings(corpus_root, manifest, on_disk)
     findings += _orphan_findings(corpus_root, manifest, on_disk)
     findings += _unparsed_heading_findings(corpus_root)
     findings.sort(key=lambda f: (f.kind, f.path))

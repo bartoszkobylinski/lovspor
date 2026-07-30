@@ -15,7 +15,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lovspor.corpus_audit import AuditFinding, audit_corpus
+from lovspor.corpus_audit import (
+    ADVISORY_KINDS,
+    INTEGRITY_KINDS,
+    AuditFinding,
+    AuditReport,
+    audit_corpus,
+)
 from lovspor.storage.manifest import Manifest, ManifestRecord
 
 
@@ -92,15 +98,21 @@ def test_detects_a_tombstoned_document_whose_file_was_never_deleted(tmp_path: Pa
     ]
 
 
-def test_a_tombstone_superseded_at_the_same_path_is_not_a_finding(tmp_path: Path) -> None:
+def test_a_tombstone_superseded_at_the_same_path_is_duplicate_ownership_not_tombstoned(
+    tmp_path: Path,
+) -> None:
     """Two acts can slugify to one path: when a new regulation replaces an old
     one under the same short title, the old record is tombstoned while the new
     one — a different doc id — renders to the *same* markdown_path.
 
-    The file on disk belongs to the live act. Flagging it is not a cosmetic
-    false positive: the finding reads "its file was never deleted", so acting on
-    it deletes text that is in force. Real case: sf-20090520-0534 (removed) and
+    The file on disk belongs to the live act, so `tombstoned_but_present` must
+    stay suppressed: that finding reads "its file was never deleted", and acting
+    on it deletes text that is in force. But the shared pointer itself is real
+    drift — it fuses two documents' identities in every path-keyed consumer
+    (`git log --follow` history, timetravel), which is exactly how the 2026 act
+    inherited the 2009 act's events. Real case: sf-20090520-0534 (removed) and
     sf-20260710-1545 (current) both own forskrift-om-omregningsfaktorer.md.
+    So it surfaces as `duplicate_path_ownership`, whose fix is manifest-side.
     """
     _seed(tmp_path, "omregningsfaktorer")
     report = audit_corpus(
@@ -111,8 +123,13 @@ def test_a_tombstone_superseded_at_the_same_path_is_not_a_finding(tmp_path: Path
         ),
     )
 
-    assert report.findings == ()
-    assert report.clean is True
+    assert _kinds(report.findings) == [
+        ("duplicate_path_ownership", "lover/omregningsfaktorer.md"),
+    ]
+    [finding] = report.findings
+    assert finding.doc_id == "new"  # the single current owner
+    assert "new (current)" in finding.detail
+    assert "old (removed)" in finding.detail
 
 
 def test_a_missing_live_owner_on_a_tombstoned_shared_path_is_still_missing(tmp_path: Path) -> None:
@@ -120,7 +137,8 @@ def test_a_missing_live_owner_on_a_tombstoned_shared_path_is_still_missing(tmp_p
 
     If a current record and a tombstone collide on one markdown_path but the file
     is absent, the audit must still report the live record as missing — the new
-    tombstone guard must not mask a real drift on the current owner.
+    tombstone guard must not mask a real drift on the current owner. The shared
+    pointer is additionally reported as duplicate ownership.
     """
     report = audit_corpus(
         tmp_path,
@@ -130,7 +148,10 @@ def test_a_missing_live_owner_on_a_tombstoned_shared_path_is_still_missing(tmp_p
         ),
     )
 
-    assert _kinds(report.findings) == [("missing_document", "lover/omregningsfaktorer.md")]
+    assert _kinds(report.findings) == [
+        ("duplicate_path_ownership", "lover/omregningsfaktorer.md"),
+        ("missing_document", "lover/omregningsfaktorer.md"),
+    ]
     assert report.documents_checked == 1
 
 
@@ -367,3 +388,194 @@ def test_real_corpus_heading_shapes_produce_no_finding(tmp_path: Path, heading: 
     report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
 
     assert report.findings == ()
+
+
+# --- duplicate_path_ownership: one path, one owner, in both directions ---
+
+
+def test_two_current_records_on_one_path_are_duplicate_ownership(tmp_path: Path) -> None:
+    """Two *current* records on one path is worse than the tombstone case: both
+    claim to be the file. No single owner exists, so the finding carries no
+    doc_id — attaching either would be a guess about which record is right."""
+    _seed(tmp_path, "skatteloven")
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("skatteloven")),
+    )
+
+    assert _kinds(report.findings) == [
+        ("duplicate_path_ownership", "lover/skatteloven.md"),
+    ]
+    [finding] = report.findings
+    assert finding.doc_id is None
+    assert "2 manifest records resolve to this path" in finding.detail
+
+
+def test_a_current_record_whose_slug_renders_elsewhere_is_duplicate_ownership(
+    tmp_path: Path,
+) -> None:
+    """The mirror image: one doc id, two paths. A current record whose
+    markdown_path disagrees with what its own slug renders to claims one file
+    now and will write another on the next re-render — a half-applied rename."""
+    _seed(tmp_path, "gammelt-navn")
+    drifted = _record("nytt-navn").model_copy(update={"markdown_path": "lover/gammelt-navn.md"})
+    report = audit_corpus(tmp_path, _manifest(nl1=drifted))
+
+    assert _kinds(report.findings) == [
+        ("duplicate_path_ownership", "lover/gammelt-navn.md"),
+    ]
+    [finding] = report.findings
+    assert finding.doc_id == "nl1"
+    assert "slug 'nytt-navn' renders to lover/nytt-navn.md" in finding.detail
+
+
+def test_a_record_without_a_slug_cannot_be_split_ownership(tmp_path: Path) -> None:
+    """Pre-Sprint-4 records carry no slug, so no second path can be derived for
+    them — absence of evidence is not drift."""
+    _seed(tmp_path, "skatteloven")
+    slugless = _record("skatteloven").model_copy(update={"slug": None})
+    report = audit_corpus(tmp_path, _manifest(nl1=slugless))
+
+    assert report.findings == ()
+
+
+def test_a_tombstone_pair_on_one_path_is_still_duplicate_ownership(tmp_path: Path) -> None:
+    """'Any status mix' includes removed+removed: two tombstones fused on one
+    path still poison every path-keyed consumer of the audit trail."""
+    report = audit_corpus(
+        tmp_path,
+        _manifest(
+            old=_record("omregningsfaktorer", status="removed"),
+            older=_record("omregningsfaktorer", status="removed"),
+        ),
+    )
+
+    assert _kinds(report.findings) == [
+        ("duplicate_path_ownership", "lover/omregningsfaktorer.md"),
+    ]
+    assert report.findings[0].doc_id is None  # no current owner to name
+
+
+# --- identity_mismatch: the file's own id versus the manifest's ---
+
+
+def _seed_with_frontmatter(root: Path, slug: str, doc_id: str) -> None:
+    (root / "lover").mkdir(parents=True, exist_ok=True)
+    (root / "lover" / f"{slug}.md").write_text(
+        f'---\nid: "{doc_id}"\ntype: "lov"\n---\n\n# {slug}\n',
+        encoding="utf-8",
+    )
+
+
+def test_detects_a_frontmatter_id_that_contradicts_the_owning_record(tmp_path: Path) -> None:
+    """The invariant the 2026-07-14 omregningsfaktorer overwrite skirted: a file
+    whose frontmatter says it is one document, owned in the manifest by another.
+    Whichever artifact is wrong, they cannot both be right — that is drift."""
+    _seed_with_frontmatter(tmp_path, "skatteloven", doc_id="nl2")
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert _kinds(report.findings) == [("identity_mismatch", "lover/skatteloven.md")]
+    [finding] = report.findings
+    assert finding.doc_id == "nl1"
+    assert 'declares id "nl2"' in finding.detail
+
+
+def test_a_matching_frontmatter_id_is_not_a_finding(tmp_path: Path) -> None:
+    _seed_with_frontmatter(tmp_path, "skatteloven", doc_id="nl1")
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert report.findings == ()
+
+
+def test_a_file_declaring_no_id_is_not_an_identity_finding(tmp_path: Path) -> None:
+    """Absence of evidence is not a mismatch. A file with no frontmatter id
+    cannot be compared, and inventing a verdict for it would be a fabricated
+    finding — this project treats those as worse than a missing one."""
+    _seed(tmp_path, "skatteloven")  # seeds a bare '# skatteloven' body, no frontmatter
+
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert report.findings == ()
+
+
+def test_the_identity_check_only_reads_current_records(tmp_path: Path) -> None:
+    """A tombstoned record's leftover file already surfaces as
+    tombstoned_but_present; second-guessing its identity on top would double-
+    report one drift event under two kinds."""
+    _seed_with_frontmatter(tmp_path, "opphevet-lov", doc_id="noe-helt-annet")
+    _seed_with_frontmatter(tmp_path, "skatteloven", doc_id="nl1")
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("opphevet-lov", status="removed")),
+    )
+
+    assert _kinds(report.findings) == [("tombstoned_but_present", "lover/opphevet-lov.md")]
+
+
+def test_the_identity_scan_stays_within_its_line_budget(tmp_path: Path) -> None:
+    """The check reads the head of each file, never whole acts. An id line
+    buried past the scan window is treated as absent, not streamed for."""
+    (tmp_path / "lover").mkdir(parents=True)
+    filler = "\n".join(f"line {i}" for i in range(60))
+    (tmp_path / "lover" / "skatteloven.md").write_text(
+        f'{filler}\nid: "nl2"\n',
+        encoding="utf-8",
+    )
+
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert report.findings == ()
+
+
+# --- severity: integrity blocks, advisory informs ---
+
+
+def test_findings_split_into_integrity_and_advisory(tmp_path: Path) -> None:
+    """One corpus with both flavors of drift: the orphan is corruption, the
+    unparsed heading is registered follow-up work. The report must keep them
+    apart so a CI gate can block on the first without going permanently red
+    over the second."""
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "skatteloven.md").write_text(
+        "# Skatteloven\n### § ø-1. Ukjent form\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "lover" / "spøkelse.md").write_text("# orphan\n", encoding="utf-8")
+
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
+
+    assert [f.kind for f in report.integrity_findings] == ["orphan_document"]
+    assert [f.kind for f in report.advisory_findings] == ["unparsed_section_heading"]
+    assert report.clean is False
+
+
+def test_an_unregistered_kind_classifies_as_integrity() -> None:
+    """Fail closed: a future check nobody added to ADVISORY_KINDS must block,
+    not slip through as informational."""
+    report = AuditReport(
+        corpus_root="/x",
+        documents_checked=0,
+        findings=(AuditFinding(kind="brand_new_check", path="lover/x.md"),),
+    )
+
+    assert report.integrity_findings == report.findings
+    assert report.advisory_findings == ()
+
+
+def test_the_severity_registers_are_disjoint_and_cover_every_emitted_kind() -> None:
+    """A kind in both sets would make severity ambiguous; a kind in neither is
+    the fail-closed case tested above — but every kind the module actually
+    emits today should be deliberately registered, not incidentally blocking."""
+    emitted = {
+        "duplicate_path_ownership",
+        "identity_mismatch",
+        "missing_document",
+        "orphan_document",
+        "orphan_embedding",
+        "stale_render",
+        "tombstoned_but_present",
+        "unparsed_section_heading",
+    }
+
+    assert not INTEGRITY_KINDS & ADVISORY_KINDS
+    assert emitted == INTEGRITY_KINDS | ADVISORY_KINDS

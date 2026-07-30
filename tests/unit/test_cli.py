@@ -741,10 +741,22 @@ def test_mcp_existing_non_corpus_path_points_to_fetch_corpus(
 # --- audit: reconcile the corpus on disk against the manifest ---
 
 
-def _audit_corpus_fixture(root: Path, *, orphan: bool) -> None:
-    """Minimal corpus: one current act, optionally one orphaned file."""
+def _audit_corpus_fixture(
+    root: Path,
+    *,
+    orphan: bool,
+    unparsed_heading: bool = False,
+) -> None:
+    """Minimal corpus: one current act, optionally drifted.
+
+    ``orphan`` plants an INTEGRITY finding (a file no record claims);
+    ``unparsed_heading`` plants an ADVISORY one (a section heading the
+    grammar cannot read)."""
     (root / "lover").mkdir(parents=True, exist_ok=True)
-    (root / "lover" / "skatteloven.md").write_text("# Skatteloven\n", encoding="utf-8")
+    body = "# Skatteloven\n"
+    if unparsed_heading:
+        body += "### § ø-1. Ukjent form\n"
+    (root / "lover" / "skatteloven.md").write_text(body, encoding="utf-8")
     if orphan:
         (root / "lover" / "opphevet.md").write_text("# Opphevet\n", encoding="utf-8")
     manifest = {
@@ -776,7 +788,7 @@ def test_audit_reports_clean_corpus_and_exits_zero(tmp_path: Path) -> None:
     assert "1 current document" in result.stdout
 
 
-def test_audit_exits_nonzero_on_drift_so_it_can_gate_ci(tmp_path: Path) -> None:
+def test_audit_exits_nonzero_on_integrity_drift_so_it_can_gate_ci(tmp_path: Path) -> None:
     """A file no manifest record claims. Exit 1 is what makes this usable as a
     CI gate rather than a report nobody reads."""
     _audit_corpus_fixture(tmp_path, orphan=True)
@@ -784,8 +796,55 @@ def test_audit_exits_nonzero_on_drift_so_it_can_gate_ci(tmp_path: Path) -> None:
     result = runner.invoke(app, ["audit", "--corpus-path", str(tmp_path)])
 
     assert result.exit_code == 1
+    assert "INTEGRITY (blocking)" in result.stdout
     assert "orphan_document (1)" in result.stdout
     assert "lover/opphevet.md" in result.stdout
+
+
+def test_audit_advisory_only_findings_are_labeled_and_exit_zero(tmp_path: Path) -> None:
+    """18 pre-existing unparsed_section_heading findings are registered
+    follow-up work. If they failed the command, the CI gate would be
+    permanently red — and a gate that is always red is one nobody reads,
+    which is exactly how the 48 orphans stayed invisible. Advisory findings
+    are therefore printed and labeled, but do not fail the default mode."""
+    _audit_corpus_fixture(tmp_path, orphan=False, unparsed_heading=True)
+
+    result = runner.invoke(app, ["audit", "--corpus-path", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "ADVISORY" in result.stdout
+    assert "non-blocking" in result.stdout
+    assert "unparsed_section_heading (1)" in result.stdout
+    assert "INTEGRITY" not in result.stdout  # no integrity section when empty
+
+
+def test_audit_fail_on_all_makes_advisory_findings_block(tmp_path: Path) -> None:
+    """The strict mode: for a corpus that should be advisory-clean too (e.g.
+    after the section-grammar follow-up lands), `--fail-on all` restores the
+    blanket gate."""
+    _audit_corpus_fixture(tmp_path, orphan=False, unparsed_heading=True)
+
+    result = runner.invoke(
+        app,
+        ["audit", "--corpus-path", str(tmp_path), "--fail-on", "all"],
+    )
+
+    assert result.exit_code == 1
+    assert "unparsed_section_heading (1)" in result.stdout
+
+
+def test_audit_fail_on_integrity_is_explicit_default(tmp_path: Path) -> None:
+    """Spelling out the default must behave identically to omitting it."""
+    _audit_corpus_fixture(tmp_path, orphan=True, unparsed_heading=True)
+
+    result = runner.invoke(
+        app,
+        ["audit", "--corpus-path", str(tmp_path), "--fail-on", "integrity"],
+    )
+
+    assert result.exit_code == 1
+    assert "INTEGRITY (blocking)" in result.stdout
+    assert "ADVISORY" in result.stdout
 
 
 def test_audit_never_writes_or_deletes(tmp_path: Path) -> None:
