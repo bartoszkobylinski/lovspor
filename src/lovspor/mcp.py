@@ -1,13 +1,14 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles fifteen read-only tools over a local clone of the lovverk
+Bundles sixteen read-only tools over a local clone of the lovverk
 Markdown corpus (produced by the lovspor sync engine). Each tool
 answers a class of question an AI agent would naturally ask about
 Norwegian law:
 
     get_law(slug)                       -> "Show me Skatteloven"
-    get_law_at(slug, "2018-06-15")      -> "Show me Skatteloven as of 2018-06-15"
-    list_law_versions(slug)             -> "When did Skatteloven change?"
+    get_law_at(slug, "2026-05-01")      -> "Skatteloven as the corpus held it on 2026-05-01"
+    list_law_versions(slug)             -> "When did the corpus record changes to Skatteloven?"
+    diff_law_versions(slug, a, b)       -> "What changed in Skatteloven between two dates?"
     get_section(slug, "5-12")           -> "Show me just § 5-12 of Skatteloven"
     list_sections(slug)                 -> "Which sections does Skatteloven have?"
     get_law_history(slug)               -> "What changed in Skatteloven recently?"
