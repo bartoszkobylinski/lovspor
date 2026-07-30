@@ -104,6 +104,71 @@ def test_render_lower_heading_levels_as_h3_markdown(tag: str) -> None:
     assert md == "### Sub heading\n"
 
 
+def test_render_h4_with_br_splits_the_spill_into_a_following_paragraph() -> None:
+    """A heading cannot span lines. EU-regulation titles carry <br/> inside a
+    real h2-h6 (4,668 headings in 152 documents), and emitting _inline() raw
+    left the continuation glued to the heading line: the heading read as
+    truncated mid-phrase and the rest as an adjacent block. Same rule the
+    <div role="heading"> path already applies."""
+    md = render_markdown(
+        _wrap(
+            b"<h4>R\xc3\x85DSFORORDNING (EF) nr. 765/2006 av<br/>"
+            b"18. mai 2006<br/>om restriktive tiltak</h4>",
+        ),
+    )
+    assert md == (
+        "### RÅDSFORORDNING (EF) nr. 765/2006 av\n\n18\\. mai 2006\nom restriktive tiltak\n"
+    )
+
+
+@pytest.mark.parametrize(("tag", "marker"), [("h1", "#"), ("h2", "##"), ("h5", "###")])
+def test_render_heading_spill_is_escaped_at_every_level(tag: str, marker: str) -> None:
+    """The spill is escaped per line, so a continuation opening with a list,
+    quote, or table token cannot reparse as that block."""
+    md = render_markdown(_wrap(f"<{tag}>Tittel<br/>- ikke en liste</{tag}>".encode()))
+    assert md == f"{marker} Tittel\n\n\\- ikke en liste\n"
+
+
+def test_render_legal_article_header_spill_becomes_a_paragraph() -> None:
+    xml = _wrap(
+        b'<h4 class="legalArticleHeader">'
+        b'<span class="legalArticleValue">\xc2\xa7 2</span>. '
+        b'<span class="legalArticleTitle">Tittel<br/>5. juni 2019</span>'
+        b"</h4>",
+    )
+    assert render_markdown(xml) == "### § 2. Tittel\n\n5\\. juni 2019\n"
+
+
+def test_render_does_not_let_source_text_form_a_markdown_link() -> None:
+    """Chemical nomenclature closes a bracket and opens a paren — the exact
+    shape of an inline link, so a CommonMark reader displays the parenthesised
+    fragment as a link DESTINATION and never shows it. Ten sites across four
+    forskrifter (narkotika, kosmetikk, tilsetningsstoffer, f-ranalyse)."""
+    md = render_markdown(
+        _wrap(
+            b"<p>[1-(5-fluoropentyl)-1H-indol-3-yl](2,2,3,3-tetrametylsyklopropyl)metanon</p>",
+        ),
+    )
+    assert md == ("[1-(5-fluoropentyl)-1H-indol-3-yl]\\(2,2,3,3-tetrametylsyklopropyl)metanon\n")
+
+
+def test_render_does_not_let_a_footnote_marker_open_a_link() -> None:
+    """The other route to the same shape: the renderer's own "[^n]" supplies
+    the closing bracket and the source's next character the paren, so
+    "på 2[^7](2)" made a link whose destination was "2"."""
+    md = render_markdown(
+        _wrap(b'<p>dekningsfaktor p\xc3\xa5 2<sup class="footnotereference">7</sup>(2) som</p>'),
+    )
+    assert md == "dekningsfaktor på 2[^7]\\(2) som\n"
+
+
+def test_render_anchor_link_paren_is_not_escaped() -> None:
+    """The escape must not touch the renderer's OWN links — it fires only on a
+    bracket the renderer did not open as link text."""
+    md = render_markdown(_wrap(b'<p>se <a href="eu/32019r1009">forordningen</a> her</p>'))
+    assert md == "se [forordningen](eu/32019r1009) her\n"
+
+
 def test_render_legal_header_class_on_h4_uses_article_header_renderer() -> None:
     xml = _wrap(
         b'<h4 class="legalArticleHeader">'

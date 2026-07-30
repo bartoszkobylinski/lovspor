@@ -223,9 +223,10 @@ WORD_RE = re.compile(r"\w+", re.UNICODE)
 # incidental collisions between unrelated legal boilerplate are negligible,
 # short enough that a single lost cell boundary perturbs only ~k n-grams.
 CHAR_NGRAM = 12
-# Renderer escapes these in inline text (_INLINE_ESCAPE) and at line starts
-# (_escape_line_leading: # > | - + and the dot/paren of an ordered marker).
-MD_ESCAPE_ANY_RE = re.compile(r"\\([\\`*#>|\-+.)])")
+# Renderer escapes these in inline text (_INLINE_ESCAPE, plus the "(" of a "]("
+# pair since renderer 6) and at line starts (_escape_line_leading: # > | - + and
+# the dot/paren of an ordered marker).
+MD_ESCAPE_ANY_RE = re.compile(r"\\([\\`*#>|\-+.()])")
 # [text](destination) -> the destination is an XML attribute, not text.
 MD_LINK_DEST_RE = re.compile(r"\]\([^)\s]*\)")
 # Synthesized list markers at line start (unescaped forms only). Repeated,
