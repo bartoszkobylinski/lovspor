@@ -30,6 +30,7 @@ from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import EMBEDDING_DIM, read_embeddings, write_embeddings
 from lovspor.errors import ConfigError, RenderError
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
+from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings
 from lovspor.sources.lovdata import DEFAULT_BASE_URL
 from lovspor.storage.manifest import (
@@ -257,6 +258,7 @@ def _current_law_record(
     markdown_path: str | None = None,
     title: str = "Title",
     status: str = "current",
+    renderer_version: int | None = None,
 ) -> ManifestRecord:
     return ManifestRecord(
         doc_type="lov",
@@ -268,6 +270,7 @@ def _current_law_record(
         slug=slug,
         title=title,
         eu_basis=[],
+        renderer_version=renderer_version,
     )
 
 
@@ -295,6 +298,9 @@ def _seed_collision_manifest(
     corpus: Path,
     xml_by_doc_id: dict[str, bytes],
     prior_slugs: dict[str, str],
+    renderer_version: int | None = None,
+    *,
+    fresh_embeddings: bool = False,
 ) -> None:
     (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
     (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
@@ -304,9 +310,10 @@ def _seed_collision_manifest(
         old_path = corpus / "lover" / f"{prior_slug}.md"
         old_path.parent.mkdir(parents=True, exist_ok=True)
         old_path.write_text(f"# Prior {doc_id}\n", encoding="utf-8")
+        xml_hash = hash_normalized_xml(xml_by_doc_id[doc_id])
         records[doc_id] = ManifestRecord(
             doc_type="lov",
-            xml_hash=hash_normalized_xml(xml_by_doc_id[doc_id]),
+            xml_hash=xml_hash,
             markdown_path=f"lover/{prior_slug}.md",
             source_dataset="gjeldende-lover",
             last_seen=datetime(2026, 4, 30, tzinfo=UTC),
@@ -314,6 +321,8 @@ def _seed_collision_manifest(
             slug=prior_slug,
             title=_COLLISION_TITLE,
             eu_basis=[],
+            embedding_hash=xml_hash if fresh_embeddings else None,
+            renderer_version=renderer_version,
         )
 
     write_manifest(
@@ -1370,11 +1379,22 @@ def test_commit_history_followup_commits_exact_document_count_message(
     assert messages == ["sync: update history for 1 documents"]
 
 
-def test_run_sync_changed_slug_delete_skips_path_written_by_new_doc(
+def test_run_sync_changed_slug_new_doc_cannot_take_prior_owners_slug(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Permanent slug ownership (ADR-0003; RCA 2026-07-30 defect 3).
+
+    ``alpha`` stays reserved for ``lov-a`` even in the sync where lov-a
+    is retitled and renames away to ``beta``. The new doc sharing the
+    old kortform gets an identity-suffixed slug instead of moving into
+    the just-vacated slot, so lov-a's old file is genuinely deleted and
+    no path is ever handed from one doc_id to another within a sync.
+    (Before ownership this scenario exercised the written_paths
+    skip-if-reused delete gate; that gate remains covered by the
+    monkeypatched action-level tests, which bypass slug resolution.)
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1436,27 +1456,30 @@ def test_run_sync_changed_slug_delete_skips_path_written_by_new_doc(
 
     run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
-    assert ("write", "alpha.md") in calls
+    assert ("write", "alpha-lov-new.md") in calls
     assert ("write", "beta.md") in calls
-    assert ("delete", "alpha.md") not in calls
-    assert "New doc body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    assert ("write", "alpha.md") not in calls
+    assert ("delete", "alpha.md") in calls
+    assert not (corpus / "lover" / "alpha.md").exists()
+    assert "New doc body." in (corpus / "lover" / "alpha-lov-new.md").read_text(encoding="utf-8")
     assert "Changed A body." in (corpus / "lover" / "beta.md").read_text(encoding="utf-8")
 
 
-def test_run_sync_removed_delete_is_gated_by_written_paths(
+def test_run_sync_removed_doc_slug_is_not_reused_by_new_doc(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Production crash 2026-05-05 reproducer + regression guard.
+    """Permanent slug ownership (ADR-0003; RCA 2026-07-30 defect 3).
 
-    A doc is removed while another action writes a new doc to the
-    SAME path (collision-resolution slug shuffle). Earlier behaviour
-    deleted the path unconditionally and then the per-doc commit
-    crashed with ``pathspec did not match any files``. The fix
-    consults ``written_paths`` in the removed loop: when the slot
-    is already taken by another action, the tombstone is purely a
-    manifest update, no FS delete and no path in action.paths.
+    Successor scenario to the production crash 2026-05-05 reproducer:
+    a doc is removed while a new doc with the same kortform arrives in
+    the same sync. Ownership now deflects the newcomer to an
+    identity-suffixed slug, so the removed doc's path is never written
+    by another action and its file is genuinely deleted. The
+    written_paths skip-if-reused gate in the removed loop stays as
+    defense-in-depth and keeps its coverage in the monkeypatched
+    action-level tests, which bypass slug resolution.
     """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
@@ -1512,17 +1535,30 @@ def test_run_sync_removed_delete_is_gated_by_written_paths(
 
     run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
-    # Only the new doc's write happens. The removed loop sees alpha.md
-    # in written_paths and skips the delete to preserve the new content.
-    assert calls == [("write", "alpha.md")]
-    assert (corpus / "lover" / "alpha.md").exists()
-    assert "Replacement doc body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    # The new doc lands on its identity-suffixed slug; the removed doc's
+    # path is untouched by writes, so its delete actually fires.
+    assert calls == [("write", "alpha-lov-new.md"), ("delete", "alpha.md")]
+    assert not (corpus / "lover" / "alpha.md").exists()
+    assert "Replacement doc body." in (
+        (corpus / "lover" / "alpha-lov-new.md").read_text(encoding="utf-8")
+    )
 
 
-def test_run_sync_add_remove_path_collision_commits_manifest_without_remove_path(
+def test_run_sync_add_remove_same_slug_disambiguates_and_commits_remove_path(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
 ) -> None:
+    """Permanent slug ownership (ADR-0003; RCA 2026-07-30 defect 3).
+
+    The ``ce3df5a13`` shape compressed into one sync: the old act leaves
+    upstream while its same-kortform replacement arrives. The removed
+    doc keeps ``alpha`` forever; the replacement gets the identity-
+    suffixed slug, so the removal produces a real ``remove(...)`` commit
+    (the healthy sibling shape) and the two ids never share a path.
+    Identity assertions per the RCA test plan: the new doc's history
+    belongs to its own doc_id only and ``total_changes`` counts only its
+    own corpus events.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1558,20 +1594,127 @@ def test_run_sync_add_remove_path_collision_commits_manifest_without_remove_path
 
     assert report.new_count == 1
     assert report.removed_count == 1
-    assert "Replacement body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    assert not (corpus / "lover" / "alpha.md").exists()
+    assert "Replacement body." in (
+        (corpus / "lover" / "alpha-lov-added.md").read_text(encoding="utf-8")
+    )
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["documents"]["lov-added"]["status"] == "current"
+    assert manifest["documents"]["lov-added"]["markdown_path"] == "lover/alpha-lov-added.md"
     assert manifest["documents"]["lov-removed"]["status"] == "removed"
+    assert manifest["documents"]["lov-removed"]["markdown_path"] == "lover/alpha.md"
+    # Identity invariant: no two manifest records share a markdown_path.
+    paths = [record["markdown_path"] for record in manifest["documents"].values()]
+    assert len(paths) == len(set(paths))
+    # Identity assertions (RCA test plan): the new doc's history carries
+    # its own doc_id, contains no event from the removed act's life, and
+    # total_changes counts only the new doc's single corpus event.
+    history = json.loads(
+        (corpus / "lover" / "history" / "alpha-lov-added.json").read_text(encoding="utf-8"),
+    )
+    assert history["doc_id"] == "lov-added"
+    assert [event["type"] for event in history["events"]] == ["added"]
+    assert all(event.get("from_path") != "lover/alpha.md" for event in history["events"])
+    assert manifest["documents"]["lov-added"]["total_changes"] == 1
     subjects = _git_log_subjects(corpus)
-    assert "add(lov): alpha" in subjects
-    assert "remove(lov): alpha" not in subjects
+    assert "add(lov): alpha-lov-added" in subjects
+    assert "remove(lov): alpha" in subjects
     assert "sync: update manifest, index, and history" in subjects
 
 
-def test_run_sync_rename_remove_path_collision_preserves_renamed_doc(
+def test_run_sync_new_doc_colliding_with_tombstoned_slug_gets_identity_suffix(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
 ) -> None:
+    """Mirror of the RCA ``ce3df5a13`` scenario (2026-07-30, defect 3).
+
+    The prior manifest holds a REMOVED record — the repealed 2009 act —
+    whose stale file is still on disk (the defect-1 shape). A later sync
+    brings the replacement act with the identical kortform. A tombstone
+    never releases its slug, so the new doc must get the deterministic
+    ref-year suffix and the tombstone's file must not be overwritten.
+    """
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    (corpus / "lover" / "history").mkdir(parents=True, exist_ok=True)
+    (corpus / "forskrifter" / "history").mkdir(parents=True, exist_ok=True)
+
+    title = "Forskrift om omregningsfaktorer"
+    slug = "forskrift-om-omregningsfaktorer"
+    old_xml = _law_with_section(title, "2009 body.")
+    new_xml = _law_with_section(title, "2026 body.")
+    stale_path = corpus / "forskrifter" / f"{slug}.md"
+    _write_markdown_with_section(stale_path, title, "2009 body.")
+    stale_bytes = stale_path.read_bytes()
+    write_manifest(
+        Manifest(
+            generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+            documents={
+                "sf-20090520-0534": ManifestRecord(
+                    doc_type="forskrift",
+                    xml_hash=hash_normalized_xml(old_xml),
+                    markdown_path=f"forskrifter/{slug}.md",
+                    source_dataset="gjeldende-sentrale-forskrifter",
+                    last_seen=datetime(2026, 4, 29, tzinfo=UTC),
+                    status="removed",
+                    slug=slug,
+                    title=title,
+                    eu_basis=[],
+                ),
+            },
+        ),
+        corpus / "manifest.json",
+    )
+    subprocess.run(["git", "add", "."], cwd=corpus, check=True)
+    subprocess.run(["git", "commit", "-m", "seed tombstoned 2009 act"], cwd=corpus, check=True)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [])
+    _build_tarball(forskrifter_tar, [("sf/sf-20260710-1545.xml", new_xml)])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    report = run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert report.new_count == 1
+    assert report.removed_count == 0
+    # The tombstone's stale file is byte-identical — NOT overwritten.
+    assert stale_path.read_bytes() == stale_bytes
+    new_path = corpus / "forskrifter" / f"{slug}-2026.md"
+    assert "2026 body." in new_path.read_text(encoding="utf-8")
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    added = manifest["documents"]["sf-20260710-1545"]
+    tombstone = manifest["documents"]["sf-20090520-0534"]
+    assert added["status"] == "current"
+    assert added["slug"] == f"{slug}-2026"
+    assert added["markdown_path"] == f"forskrifter/{slug}-2026.md"
+    assert added["total_changes"] == 1
+    assert tombstone["status"] == "removed"
+    assert tombstone["markdown_path"] == f"forskrifter/{slug}.md"
+    paths = [record["markdown_path"] for record in manifest["documents"].values()]
+    assert len(paths) == len(set(paths))
+    history = json.loads(
+        (corpus / "forskrifter" / "history" / f"{slug}-2026.json").read_text(encoding="utf-8"),
+    )
+    assert history["doc_id"] == "sf-20260710-1545"
+    assert [event["type"] for event in history["events"]] == ["added"]
+    subjects = _git_log_subjects(corpus)
+    assert f"add(forskrift): {slug}-2026" in subjects
+    assert f"remove(forskrift): {slug}" not in subjects
+
+
+def test_run_sync_rename_candidate_keeps_own_slug_when_removed_doc_owns_it(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+) -> None:
+    """Permanent slug ownership (ADR-0003; RCA 2026-07-30 defect 3).
+
+    ``alpha`` belongs to the doc being removed this sync, forever. The
+    surviving doc whose kortform now prefers ``alpha`` stays on its own
+    ``alpha-2`` slug instead of renaming into the tombstone's slot, so
+    the removal deletes its file for real (no manifest-only tombstone).
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1590,11 +1733,13 @@ def test_run_sync_rename_remove_path_collision_preserves_renamed_doc(
                     xml=removed_xml,
                     slug="alpha",
                     title="Alpha",
+                    renderer_version=RENDERER_VERSION,
                 ),
                 "lov-renamed": _current_law_record(
                     xml=renamed_xml,
                     slug="alpha-2",
                     title="Alpha",
+                    renderer_version=RENDERER_VERSION,
                 ),
             },
         ),
@@ -1613,18 +1758,30 @@ def test_run_sync_rename_remove_path_collision_preserves_renamed_doc(
 
     assert report.removed_count == 1
     assert report.unchanged_count == 1
-    assert "Renamed B body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
-    assert not (corpus / "lover" / "alpha-2.md").exists()
+    # No rename: the survivor keeps alpha-2, the tombstone's file is gone.
+    assert not (corpus / "lover" / "alpha.md").exists()
+    assert "Renamed B body." in (corpus / "lover" / "alpha-2.md").read_text(encoding="utf-8")
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["documents"]["lov-renamed"]["markdown_path"] == "lover/alpha.md"
+    assert manifest["documents"]["lov-renamed"]["markdown_path"] == "lover/alpha-2.md"
     assert manifest["documents"]["lov-removed"]["status"] == "removed"
+    assert manifest["documents"]["lov-removed"]["markdown_path"] == "lover/alpha.md"
+    subjects = _git_log_subjects(corpus)
+    assert "remove(lov): alpha" in subjects
+    assert "rename(lov):" not in subjects
 
 
-def test_run_sync_removed_path_collision_preserves_new_embedding_sidecar(
+def test_run_sync_removed_doc_sidecar_deleted_and_new_doc_embeds_own_slug(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Permanent slug ownership (ADR-0003; RCA 2026-07-30 defects 2+3).
+
+    The removed doc's ``.md`` AND ``.bin`` are deleted with it (the
+    healthy sibling shape), while the same-kortform replacement embeds
+    under its own identity-suffixed slug — no sidecar is ever handed
+    from one doc_id to another.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1666,12 +1823,19 @@ def test_run_sync_removed_path_collision_preserves_new_embedding_sidecar(
         ),
     )
 
-    sidecar = _embedding_path(corpus, "alpha")
-    markdown = (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
+    # The removed doc's markdown and sidecar are both gone; the new doc
+    # lives entirely under its own identity-suffixed slug.
+    assert not (corpus / "lover" / "alpha.md").exists()
+    assert not _embedding_path(corpus, "alpha").exists()
+    sidecar = _embedding_path(corpus, "alpha-lov-added")
+    markdown = (corpus / "lover" / "alpha-lov-added.md").read_text(encoding="utf-8")
     assert sidecar.exists()
     _assert_embedding_matches_markdown(sidecar, markdown)
-    add_commit = _git_show_name_status(corpus, "HEAD~1")
-    assert "lover/embeddings/alpha.bin" in add_commit
+    add_commit = _git_show_name_status(corpus, "HEAD~2")
+    assert "lover/embeddings/alpha-lov-added.bin" in add_commit
+    remove_commit = _git_show_name_status(corpus, "HEAD~1")
+    assert "lover/alpha.md" in remove_commit
+    assert "lover/embeddings/alpha.bin" in remove_commit
 
 
 def test_run_sync_removed_slugless_doc_builds_remove_action_without_sidecars(
@@ -1731,11 +1895,20 @@ def test_run_sync_removed_slugless_doc_builds_remove_action_without_sidecars(
     assert not legacy_path.exists()
 
 
-def test_run_sync_writes_all_rename_targets_before_deleting_old_paths(
+def test_run_sync_rename_cascade_collapses_to_single_unowned_slot_move(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Permanent slug ownership (ADR-0003) collapses suffix cascades.
+
+    Three same-kortform docs sit at ``-2``/``-3``/``-4``. The bare slug
+    is unowned, so only the smallest doc_id moves into it; the others
+    keep their own permanently-owned suffixes instead of shuffling down
+    (write still precedes the delete). Multi-way cascades over other
+    docs' prior slugs can no longer arise — the phased write/delete
+    machinery stays covered by the monkeypatched action-level tests.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1750,7 +1923,7 @@ def test_run_sync_writes_all_rename_targets_before_deleting_old_paths(
         "lov-b": f"{_COLLISION_SLUG}-3",
         "lov-c": f"{_COLLISION_SLUG}-4",
     }
-    _seed_collision_manifest(corpus, xml_by_doc_id, prior_slugs)
+    _seed_collision_manifest(corpus, xml_by_doc_id, prior_slugs, RENDERER_VERSION)
 
     lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
     forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
@@ -1779,16 +1952,26 @@ def test_run_sync_writes_all_rename_targets_before_deleting_old_paths(
 
     assert calls == [
         ("write", f"{_COLLISION_SLUG}.md"),
-        ("write", f"{_COLLISION_SLUG}-2.md"),
-        ("write", f"{_COLLISION_SLUG}-3.md"),
-        ("delete", f"{_COLLISION_SLUG}-4.md"),
+        ("delete", f"{_COLLISION_SLUG}-2.md"),
     ]
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["documents"]["lov-a"]["markdown_path"] == f"lover/{_COLLISION_SLUG}.md"
+    assert manifest["documents"]["lov-b"]["markdown_path"] == f"lover/{_COLLISION_SLUG}-3.md"
+    assert manifest["documents"]["lov-c"]["markdown_path"] == f"lover/{_COLLISION_SLUG}-4.md"
 
 
-def test_run_sync_handles_two_way_collision_suffix_swap_with_bulk_commit(
+def test_run_sync_two_way_suffix_swap_is_blocked_by_permanent_ownership(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
 ) -> None:
+    """Permanent slug ownership (ADR-0003; RCA 2026-07-30 defect 3).
+
+    ``lov-b`` owns the bare slug and ``lov-a`` owns ``-2``, forever.
+    The pre-ownership suffix "normalization" swap (smallest doc_id
+    steals the bare slug) must no longer happen: neither doc may take a
+    slug the prior manifest reserves for the other, so the sync is a
+    true no-op — no renames, no commit, no file churn.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1804,6 +1987,7 @@ def test_run_sync_handles_two_way_collision_suffix_swap_with_bulk_commit(
             "lov-a": f"{_COLLISION_SLUG}-2",
             "lov-b": _COLLISION_SLUG,
         },
+        RENDERER_VERSION,
     )
     commits_before = _git_commit_count(corpus)
 
@@ -1831,23 +2015,31 @@ def test_run_sync_handles_two_way_collision_suffix_swap_with_bulk_commit(
 
     base_path = corpus / "lover" / f"{_COLLISION_SLUG}.md"
     suffixed_path = corpus / "lover" / f"{_COLLISION_SLUG}-2.md"
-    assert "Current A body." in base_path.read_text(encoding="utf-8")
-    assert "Current B body." in suffixed_path.read_text(encoding="utf-8")
+    assert "# Prior lov-b" in base_path.read_text(encoding="utf-8")
+    assert "# Prior lov-a" in suffixed_path.read_text(encoding="utf-8")
 
     manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["documents"]["lov-a"]["markdown_path"] == (f"lover/{_COLLISION_SLUG}.md")
-    assert manifest["documents"]["lov-b"]["markdown_path"] == (f"lover/{_COLLISION_SLUG}-2.md")
-    assert _git_commit_count(corpus) == commits_before + 2
+    assert manifest["documents"]["lov-a"]["markdown_path"] == (f"lover/{_COLLISION_SLUG}-2.md")
+    assert manifest["documents"]["lov-b"]["markdown_path"] == (f"lover/{_COLLISION_SLUG}.md")
+    assert _git_commit_count(corpus) == commits_before
     log = _git_log_subjects(corpus)
-    assert "sync: 0 new, 0 changed, 2 renamed, 0 removed" in log
-    assert "sync: update history for 2 documents" in log
-    assert f"rename(lov): {_COLLISION_SLUG}" not in log
+    assert "renamed" not in log
+    assert "rename(lov):" not in log
 
 
-def test_run_sync_handles_changed_slug_overlapping_rename_old_path(
+def test_run_sync_changed_doc_blocked_from_siblings_owned_slug_keeps_its_own(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
 ) -> None:
+    """Permanent slug ownership (ADR-0003; RCA 2026-07-30 defect 3).
+
+    ``lov-a`` is retitled to prefer ``beta`` — but the prior manifest
+    reserves ``beta`` for ``lov-b`` (even though lov-b renames away to
+    ``gamma`` this very sync). lov-a therefore keeps its own ``alpha``
+    and updates in place; the vacated ``beta`` is only released once a
+    later manifest no longer records lov-b there. Before ownership this
+    was the changed-slug/rename old-path overlap scenario.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -1882,14 +2074,17 @@ def test_run_sync_handles_changed_slug_overlapping_rename_old_path(
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
 
-    assert "New A body." in (corpus / "lover" / "beta.md").read_text(encoding="utf-8")
+    assert "New A body." in (corpus / "lover" / "alpha.md").read_text(encoding="utf-8")
     assert "Stable B body." in (corpus / "lover" / "gamma.md").read_text(encoding="utf-8")
-    assert _git_commit_count(corpus) == commits_before + 2
+    assert not (corpus / "lover" / "beta.md").exists()
+    manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["documents"]["lov-a"]["markdown_path"] == "lover/alpha.md"
+    assert manifest["documents"]["lov-b"]["markdown_path"] == "lover/gamma.md"
+    assert _git_commit_count(corpus) == commits_before + 3
     log = _git_log_subjects(corpus)
-    assert "sync: 0 new, 1 changed, 1 renamed, 0 removed" in log
-    assert "sync: update history for 2 documents" in log
-    assert "update(lov): beta" not in log
-    assert "rename(lov): gamma" not in log
+    assert "update(lov): alpha" in log
+    assert "rename(lov): gamma" in log
+    assert "sync: update manifest, index, and history" in log
 
 
 def test_run_sync_without_openai_key_skips_embedding_sidecars(
@@ -2268,11 +2463,18 @@ def test_run_sync_removed_document_without_sidecar_does_not_stage_absent_embeddi
     assert "lover/embeddings/skattie.bin" not in remove_commit
 
 
-def test_run_sync_changed_slug_delete_preserves_sidecar_written_by_new_doc(
+def test_run_sync_changed_slug_new_doc_embeds_under_disambiguated_slug(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Sidecar arm of permanent slug ownership (ADR-0003).
+
+    lov-a renames alpha->beta while a new doc arrives preferring
+    ``alpha``: the newcomer embeds under its identity-suffixed slug, so
+    lov-a's old ``alpha`` sidecar is deleted with its markdown instead
+    of being preserved for a new owner.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -2336,12 +2538,15 @@ def test_run_sync_changed_slug_delete_preserves_sidecar_written_by_new_doc(
     )
 
     alpha_sidecar = _embedding_path(corpus, "alpha")
+    new_doc_sidecar = _embedding_path(corpus, "alpha-lov-new")
     beta_sidecar = _embedding_path(corpus, "beta")
-    assert alpha_sidecar.exists()
+    assert not alpha_sidecar.exists()
+    assert not (corpus / "lover" / "alpha.md").exists()
+    assert new_doc_sidecar.exists()
     assert beta_sidecar.exists()
     _assert_embedding_matches_markdown(
-        alpha_sidecar,
-        (corpus / "lover" / "alpha.md").read_text(encoding="utf-8"),
+        new_doc_sidecar,
+        (corpus / "lover" / "alpha-lov-new.md").read_text(encoding="utf-8"),
     )
     _assert_embedding_matches_markdown(
         beta_sidecar,
@@ -2350,16 +2555,25 @@ def test_run_sync_changed_slug_delete_preserves_sidecar_written_by_new_doc(
 
     add_action = next(action for action in captured_actions if action.action == "add")
     update_action = next(action for action in captured_actions if action.action == "update")
-    assert alpha_sidecar in add_action.sidecar_paths
-    assert alpha_sidecar not in update_action.sidecar_paths
+    assert new_doc_sidecar in add_action.sidecar_paths
+    assert alpha_sidecar not in add_action.sidecar_paths
+    # lov-a's update stages the old alpha sidecar as a deletion plus the
+    # new beta sidecar — nothing is left behind for another doc_id.
+    assert alpha_sidecar in update_action.sidecar_paths
     assert beta_sidecar in update_action.sidecar_paths
 
 
-def test_run_sync_two_way_collision_suffix_swap_preserves_embedding_sidecars(
+def test_run_sync_two_way_suffix_swap_noop_leaves_embedding_sidecars_alone(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Sidecar arm of the ownership-blocked swap (ADR-0003).
+
+    Permanent ownership makes the two-way suffix swap a true no-op, so
+    both embedding sidecars must stay byte-identical — no re-embed, no
+    staged action, no commit.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -2384,11 +2598,18 @@ def test_run_sync_two_way_collision_suffix_swap_preserves_embedding_sidecars(
             "lov-a": f"{_COLLISION_SLUG}-2",
             "lov-b": _COLLISION_SLUG,
         },
+        RENDERER_VERSION,
+        fresh_embeddings=True,
     )
     _write_seed_embedding(_embedding_path(corpus, f"{_COLLISION_SLUG}-2"), marker=21)
     _write_seed_embedding(_embedding_path(corpus, _COLLISION_SLUG), marker=22)
     subprocess.run(["git", "add", "."], cwd=corpus, check=True)
     subprocess.run(["git", "commit", "-m", "seed collision sidecars"], cwd=corpus, check=True)
+    base_sidecar = _embedding_path(corpus, _COLLISION_SLUG)
+    suffixed_sidecar = _embedding_path(corpus, f"{_COLLISION_SLUG}-2")
+    seed_base_bytes = base_sidecar.read_bytes()
+    seed_suffixed_bytes = suffixed_sidecar.read_bytes()
+    commits_before = _git_commit_count(corpus)
 
     lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
     forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
@@ -2407,34 +2628,27 @@ def test_run_sync_two_way_collision_suffix_swap_preserves_embedding_sidecars(
         ),
     )
 
+    assert report.new_count == 0
+    assert report.changed_count == 0
+    assert report.removed_count == 0
     assert report.unchanged_count == 2
-    base_sidecar = _embedding_path(corpus, _COLLISION_SLUG)
-    suffixed_sidecar = _embedding_path(corpus, f"{_COLLISION_SLUG}-2")
-    assert base_sidecar.exists()
-    assert suffixed_sidecar.exists()
-    _assert_embedding_matches_markdown(
-        base_sidecar,
-        (corpus / "lover" / f"{_COLLISION_SLUG}.md").read_text(encoding="utf-8"),
-    )
-    _assert_embedding_matches_markdown(
-        suffixed_sidecar,
-        (corpus / "lover" / f"{_COLLISION_SLUG}-2.md").read_text(encoding="utf-8"),
-    )
-
-    staged_sidecars = [
-        path
-        for action in captured_actions
-        for path in action.sidecar_paths
-        if path.suffix == ".bin"
-    ]
-    assert sorted(staged_sidecars) == sorted({base_sidecar, suffixed_sidecar})
+    assert base_sidecar.read_bytes() == seed_base_bytes
+    assert suffixed_sidecar.read_bytes() == seed_suffixed_bytes
+    assert captured_actions == []
+    assert _git_commit_count(corpus) == commits_before
 
 
-def test_run_sync_three_way_collision_cycle_preserves_embedding_sidecars(
+def test_run_sync_three_way_collision_cycle_blocked_by_permanent_ownership(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Permanent slug ownership (ADR-0003) makes the 3-way cycle a no-op.
+
+    Every doc's preferred bare slug is owned by a sibling, so all three
+    keep their own permanently-owned slugs: no renames, no re-embeds,
+    no commit, sidecars byte-identical.
+    """
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -2461,14 +2675,19 @@ def test_run_sync_three_way_collision_cycle_preserves_embedding_sidecars(
             "lov-b": f"{_COLLISION_SLUG}-3",
             "lov-c": _COLLISION_SLUG,
         },
+        RENDERER_VERSION,
+        fresh_embeddings=True,
     )
+    seed_bytes: dict[Path, bytes] = {}
     for marker, slug in enumerate(
         [_COLLISION_SLUG, f"{_COLLISION_SLUG}-2", f"{_COLLISION_SLUG}-3"],
         start=31,
     ):
         _write_seed_embedding(_embedding_path(corpus, slug), marker=marker)
+        seed_bytes[_embedding_path(corpus, slug)] = _embedding_path(corpus, slug).read_bytes()
     subprocess.run(["git", "add", "."], cwd=corpus, check=True)
     subprocess.run(["git", "commit", "-m", "seed three-way sidecars"], cwd=corpus, check=True)
+    commits_before = _git_commit_count(corpus)
 
     lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
     forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
@@ -2487,28 +2706,14 @@ def test_run_sync_three_way_collision_cycle_preserves_embedding_sidecars(
         ),
     )
 
+    assert report.new_count == 0
+    assert report.changed_count == 0
+    assert report.removed_count == 0
     assert report.unchanged_count == 3
-    expected_sidecars = {
-        _embedding_path(corpus, _COLLISION_SLUG),
-        _embedding_path(corpus, f"{_COLLISION_SLUG}-2"),
-        _embedding_path(corpus, f"{_COLLISION_SLUG}-3"),
-    }
-    assert all(path.exists() for path in expected_sidecars)
-    for sidecar in expected_sidecars:
-        markdown = sidecar.with_suffix(".md")
-        markdown = markdown.parent.parent / markdown.name
-        _assert_embedding_matches_markdown(
-            sidecar,
-            markdown.read_text(encoding="utf-8"),
-        )
-
-    staged_sidecars = [
-        path
-        for action in captured_actions
-        for path in action.sidecar_paths
-        if path.suffix == ".bin"
-    ]
-    assert sorted(staged_sidecars) == sorted(expected_sidecars)
+    for sidecar, expected in seed_bytes.items():
+        assert sidecar.read_bytes() == expected
+    assert captured_actions == []
+    assert _git_commit_count(corpus) == commits_before
 
 
 def test_run_sync_writes_index_files_for_both_datasets(

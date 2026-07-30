@@ -45,7 +45,7 @@ from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
@@ -220,7 +220,7 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
 
     cache_dir = settings.data_dir / "cache" / "archives"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    upstream, drift_fields = _collect_upstream(settings, cache_dir)
+    upstream, drift_fields = _collect_upstream(settings, cache_dir, prior)
     upstream, placeholder_ids = _withhold_content_placeholders(upstream)
 
     # Sprint 8 PR-D eu_basis backfill: triggers once when the prior
@@ -666,6 +666,7 @@ def _load_or_empty_manifest(path: Path) -> Manifest:
 def _collect_upstream(
     settings: Settings,
     cache_dir: Path,
+    prior: Manifest | None = None,
 ) -> tuple[dict[str, _UpstreamDoc], tuple[str, ...]]:
     """Download both tarballs and return (doc_id -> _UpstreamDoc, schema drift).
 
@@ -679,6 +680,13 @@ def _collect_upstream(
     on the filesystem. Resolving globally would force unnecessary
     ``-2`` suffixes and cause avoidable rename history when, for example,
     a law and a regulation share a kortform.
+
+    ``prior`` supplies permanent slug ownership (ADR-0003): every slug in
+    the prior manifest — current AND removed records — stays reserved for
+    its original doc_id, so a replacement act sharing a repealed act's
+    kortform gets an identity-suffixed slug instead of overwriting the
+    tombstone's file and fusing two documents' histories (root-cause
+    analysis 2026-07-30, defect 3). ``None`` means no prior corpus.
     """
     client = LovdataClient(
         timeout_seconds=settings.http_timeout_seconds,
@@ -695,13 +703,36 @@ def _collect_upstream(
             tar_path = client.download(archive, cache_dir).path
             by_dataset[dataset] = _index_tarball(tar_path, dataset)
 
+    owners_by_dataset = _prior_slug_ownership(prior)
     upstream: dict[str, _UpstreamDoc] = {}
-    for docs in by_dataset.values():
+    for dataset, docs in by_dataset.items():
         base_slugs = {doc.doc_id: doc.slug for doc in docs}
-        final_slugs = resolve_collisions(base_slugs)
+        final_slugs = resolve_collisions(base_slugs, owners_by_dataset.get(dataset, {}))
         for doc in docs:
             upstream[doc.doc_id] = _with_slug(doc, final_slugs[doc.doc_id])
     return upstream, drift
+
+
+def _prior_slug_ownership(prior: Manifest | None) -> dict[str, dict[str, str]]:
+    """Per-dataset slug ownership over the ENTIRE prior manifest.
+
+    Returns ``dataset -> slug -> owning doc_id`` including ``removed``
+    records: a tombstone never releases its slug (ADR-0003 permanent
+    identity). Iteration is over sorted doc_ids with ``setdefault``, so
+    on a manifest that is already conflicted (two ids on one slug) the
+    smallest doc_id — the earliest act, ids embed the upstream ref date —
+    wins ownership, matching ``evaluate_slug_ownership``. Records from
+    pre-Sprint-4 manifests without a ``slug`` field fall back to the
+    ``markdown_path`` stem.
+    """
+    if prior is None:
+        return {}
+    owners: dict[str, dict[str, str]] = {}
+    for doc_id in sorted(prior.documents):
+        record = prior.documents[doc_id]
+        slug = record.slug or PurePosixPath(record.markdown_path).stem
+        owners.setdefault(record.source_dataset, {}).setdefault(slug, doc_id)
+    return owners
 
 
 def _with_slug(doc: _UpstreamDoc, slug: str) -> _UpstreamDoc:
