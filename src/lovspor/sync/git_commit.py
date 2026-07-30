@@ -36,11 +36,15 @@ def _run(args: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         # always built from list literals or sanitized inputs (never shell
         # strings), and PATH-based resolution is the standard expectation
         # for invoking system git.
+        # encoding pinned to UTF-8: corpus paths are UTF-8 on disk
+        # (Norwegian slugs carry æ/ø/å), and locale-dependent decoding
+        # would corrupt them on runners with a non-UTF-8 locale.
         return subprocess.run(  # noqa: S603
             ["git", *args],  # noqa: S607
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         )
     except subprocess.CalledProcessError as exc:
@@ -107,11 +111,22 @@ def _drop_orphan_paths(repo_abs: Path, rel_paths: list[str]) -> list[str]:
     Plain ``ls-files`` (no ``--error-unmatch``) is used so unknown
     paths produce empty output rather than a non-zero exit, letting
     the orphan filter do its job in the success path.
+
+    ``-z`` (NUL-delimited output) is mandatory, not cosmetic: without
+    it ``git ls-files`` C-quotes non-ASCII paths whenever
+    ``core.quotePath`` is on (the default), so a tracked
+    ``forskrifter/endr-i-økodesignforskriften.md`` came back as
+    ``"forskrifter/endr-i-\\303\\270kodesignforskriften.md"`` and never
+    matched the raw UTF-8 string — the deletion was misclassified as an
+    orphan and silently dropped (corpus defect of 2026-07-24: manifest
+    tombstone with the ``.md``/``.bin`` never deleted; see
+    docs/evidence/corpus-integrity-root-cause-2026-07-30.md §2.2).
+    With ``-z`` git emits paths verbatim regardless of configuration.
     """
     if not rel_paths:
         return rel_paths
-    result = _run(["ls-files", "--", *rel_paths], cwd=repo_abs)
-    tracked = set(result.stdout.splitlines())
+    result = _run(["ls-files", "-z", "--", *rel_paths], cwd=repo_abs)
+    tracked = {p for p in result.stdout.split("\0") if p}
     kept: list[str] = []
     for p in rel_paths:
         if p in tracked or (repo_abs / p).exists():

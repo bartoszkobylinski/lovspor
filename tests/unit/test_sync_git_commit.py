@@ -38,6 +38,23 @@ def _status(repo: Path) -> str:
     return result.stdout
 
 
+def _status_entries(repo: Path) -> list[str]:
+    """``git status --porcelain -z`` entries — NUL-delimited so
+    assertions see exact filesystem paths. The plain ``_status`` helper
+    C-quotes non-ASCII paths because the ``repo`` fixture deliberately
+    leaves ``core.quotePath`` at its default (on), matching production
+    CI (sync.yml configures only identity and gpgsign)."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain", "-z"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+    return [entry for entry in result.stdout.split("\0") if entry]
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """Initialize a fresh git repo with a test user identity."""
@@ -133,6 +150,59 @@ def test_add_stages_deletion_for_dash_prefixed_tracked_path(repo: Path) -> None:
     add(repo, ["-tracked.txt"])
 
     assert _status(repo) == "D  -tracked.txt\n"
+
+
+def test_add_stages_deletion_for_tracked_missing_nonascii_path(repo: Path) -> None:
+    """Mirror of test_add_stages_deletion_for_tracked_missing_path with a
+    Norwegian slug. Corpus defect 2026-07-24 (endr-i-økodesignforskriften
+    tombstoned in the manifest, file never deleted): with core.quotePath
+    at its default, ``git ls-files`` without ``-z`` C-quoted the path as
+    ``"endr-i-\\303\\270kodesignforskriften.md"``, so the raw UTF-8
+    string missed the tracked set; the file was already unlinked, so
+    ``.exists()`` was False too — the deletion was dropped as an orphan
+    and the ``remove(...)`` commit silently skipped. See
+    docs/evidence/corpus-integrity-root-cause-2026-07-30.md §2.2."""
+    tracked = repo / "endr-i-økodesignforskriften.md"
+    tracked.write_text("tracked", encoding="utf-8")
+    add(repo, ["endr-i-økodesignforskriften.md"])
+    commit(repo, "seed nonascii file")
+    tracked.unlink()
+
+    add(repo, ["endr-i-økodesignforskriften.md"])
+
+    assert _status_entries(repo) == ["D  endr-i-økodesignforskriften.md"]
+
+
+def test_add_stages_mixed_ascii_and_nonascii_deletions_in_one_call(repo: Path) -> None:
+    """One git_add call carrying ASCII and non-ASCII deletions (the
+    per-doc remove commit stages md + embedding sidecar together) must
+    stage all of them — pre-fix only the ASCII path survived the orphan
+    filter."""
+    rel_paths = [
+        "forskrifter/blåbærsyltetøy.md",
+        "forskrifter/embeddings/blåbærsyltetøy.bin",
+        "forskrifter/ascii-doc.md",
+    ]
+    for rel in rel_paths:
+        target = repo / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("body\n", encoding="utf-8")
+    add(repo, rel_paths)
+    commit(repo, "seed documents")
+    for rel in rel_paths:
+        (repo / rel).unlink()
+
+    add(repo, rel_paths)
+
+    assert sorted(_status_entries(repo)) == sorted(f"D  {rel}" for rel in rel_paths)
+
+
+def test_add_drops_untracked_nonascii_orphan_path(repo: Path) -> None:
+    """A genuinely orphaned non-ASCII path (never tracked, not on disk)
+    still gets the orphan treatment under NUL-delimited ls-files."""
+    add(repo, ["blåbærsyltetøy.md"])
+
+    assert not has_staged_changes(repo)
 
 
 def test_add_drops_absolute_orphan_path_inside_repo(repo: Path) -> None:
