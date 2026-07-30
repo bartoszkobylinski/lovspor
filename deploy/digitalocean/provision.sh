@@ -122,9 +122,11 @@ fi
 log "Installing dependencies (uv sync)"
 sudo -u "$APP_USER" sh -c "cd '$APP_DIR' && '$UV' sync --frozen --no-dev"
 
-# --- 9. Corpus (public repo, no auth; ~1.3 GB, first run is slow) ---
-log "Fetching lovverk corpus"
-sudo -u "$APP_USER" sh -c "cd '$APP_DIR' && LOVVERK_CORPUS_PATH='$CORPUS_DIR' '$APP_DIR/.venv/bin/lovspor' fetch-corpus"
+# --- 9. Corpus (public repo, no auth; ~2.2 GB with full history, first run is slow) ---
+# --full-history: temporal tools (get_law_at/diff_law_versions) walk git log;
+# a shallow clone would limit them to post-provisioning dates (ADR-0003).
+log "Fetching lovverk corpus (full history)"
+sudo -u "$APP_USER" sh -c "cd '$APP_DIR' && LOVVERK_CORPUS_PATH='$CORPUS_DIR' '$APP_DIR/.venv/bin/lovspor' fetch-corpus --full-history"
 
 # --- 10. Secrets env file (placeholder; NEVER commit real keys) ---
 mkdir -p /etc/lovspor
