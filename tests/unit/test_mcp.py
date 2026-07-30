@@ -82,7 +82,7 @@ from lovspor.mcp import (
 )
 from lovspor.quota import QuotaEnforcer, QuotaExceededError
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
-from lovspor.timetravel import RevisionNotFoundError, RevisionResult
+from lovspor.timetravel import RevisionNotFoundError, RevisionResult, ShallowHistoryError
 from lovspor.workos_auth import CompositeVerifier
 
 _AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
@@ -3748,6 +3748,95 @@ def test_get_law_at_translates_missing_revision_to_corpus_not_found(
         ),
     ):
         CorpusReader(tmp_path).get_law_at("skatteloven", "2020-01-01")
+
+
+# --- shallow corpus checkouts (ADR-0003: clone boundary is not corpus history) ---
+
+
+def _git_corpus(repo: Path, message: str, when: str) -> None:
+    env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+
+
+def _shallow_corpus_clone(tmp_path: Path) -> tuple[Path, Path]:
+    """Real two-commit corpus origin plus a --depth 1 clone of it.
+
+    The origin's first commit (2026-01-01) predates the clone boundary
+    (2026-06-01): dates in between exist in corpus history but are invisible
+    to the shallow clone — the exact hosted-deployment defect ADR-0003 names.
+    """
+    origin = tmp_path / "origin"
+    _seed_corpus(origin, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    for args in (
+        ["init", "-b", "main"],
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "Test"],
+        ["config", "commit.gpgsign", "false"],
+    ):
+        subprocess.run(["git", *args], cwd=origin, check=True, capture_output=True)
+    _git_corpus(origin, "add(lov): skatteloven", "2026-01-01T12:00:00+00:00")
+    (origin / "lover" / "skatteloven.md").write_text("versjon 2\n", encoding="utf-8")
+    _git_corpus(origin, "update(lov): skatteloven", "2026-06-01T12:00:00+00:00")
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "--depth", "1", f"file://{origin}", str(clone)],
+        check=True,
+        capture_output=True,
+    )
+    return origin, clone
+
+
+def test_get_law_at_on_shallow_clone_raises_incomplete_history_not_absence(
+    tmp_path: Path,
+) -> None:
+    """A date inside corpus history but before the shallow boundary must NOT
+    produce the "did not exist in the corpus" claim — that statement would be
+    false. It surfaces as ShallowHistoryError, untranslated."""
+    _origin, clone = _shallow_corpus_clone(tmp_path)
+
+    with pytest.raises(ShallowHistoryError) as excinfo:
+        CorpusReader(clone).get_law_at("skatteloven", "2026-03-01")
+
+    message = str(excinfo.value)
+    assert "did not exist" not in message
+    assert "in this shallow checkout" in message
+    assert "locally available history for this path begins 2026-06-01" in message
+
+
+def test_get_law_at_on_full_clone_still_reports_pre_corpus_absence(
+    tmp_path: Path,
+) -> None:
+    """The distinction: on a FULL repository, a date before the document
+    entered the corpus keeps the genuine CorpusNotFoundError."""
+    origin, _clone = _shallow_corpus_clone(tmp_path)
+
+    with pytest.raises(
+        CorpusNotFoundError,
+        match=(
+            r"^law 'skatteloven' did not exist in the corpus on 2025-12-01; "
+            r"call get_law_history\('skatteloven'\) to see when it first appeared$"
+        ),
+    ):
+        CorpusReader(origin).get_law_at("skatteloven", "2025-12-01")
+
+
+def test_diff_law_versions_on_shallow_clone_raises_incomplete_history(
+    tmp_path: Path,
+) -> None:
+    """diff_law_versions resolves both sides through the same follow-log; a
+    pre-boundary side on a shallow clone raises ShallowHistoryError instead
+    of being converted to a nonexistence claim."""
+    _origin, clone = _shallow_corpus_clone(tmp_path)
+
+    with pytest.raises(ShallowHistoryError):
+        CorpusReader(clone).diff_law_versions("skatteloven", "2026-03-01", "2026-07-01")
 
 
 def test_list_law_versions_filters_content_events_and_sorts_oldest_first(

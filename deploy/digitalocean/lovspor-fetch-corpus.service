@@ -11,7 +11,10 @@ Group=lovspor
 Environment=HOME=/opt/lovspor
 Environment=LOVVERK_CORPUS_PATH=/opt/lovspor/.cache/lovverk
 WorkingDirectory=/opt/lovspor/app
-ExecStart=/opt/lovspor/app/.venv/bin/lovspor fetch-corpus
+# --full-history: the hosted MCP exposes the time-machine tools, which walk
+# git log; a shallow checkout would silently limit them to post-clone dates
+# and make get_law_at misreport pre-clone corpus states (ADR-0003).
+ExecStart=/opt/lovspor/app/.venv/bin/lovspor fetch-corpus --full-history
 # oneshot disables the start timeout by default; bound it so a stalled git fetch
 # cannot wedge the unit and block every subsequent timer run.
 TimeoutStartSec=600

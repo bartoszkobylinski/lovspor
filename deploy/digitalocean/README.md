@@ -128,6 +128,12 @@ sudo journalctl -u lovspor-mcp -n 40 --no-pager
 05:30 UTC and the running server picks up changes on the next query (no restart).
 Force one now: `sudo systemctl start lovspor-fetch-corpus`.
 
+**Full git history is required** on this box: the hosted MCP exposes the
+time-machine tools, so the fetch units run `fetch-corpus --full-history`
+(~2.2 GB total). A shallow checkout would limit `get_law_at` /
+`diff_law_versions` to post-provisioning dates (ADR-0003). Deepen a legacy
+shallow checkout with: `sudo -u lovspor git -C /opt/lovspor/.cache/lovverk fetch --unshallow`.
+
 **Logs / health:**
 
 ```bash

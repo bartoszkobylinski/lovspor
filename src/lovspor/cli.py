@@ -293,6 +293,18 @@ def fetch_corpus_command(
             envvar="LOVVERK_CORPUS_PATH",
         ),
     ] = None,
+    full_history: Annotated[
+        bool,
+        typer.Option(
+            "--full-history",
+            help=(
+                "Clone the complete git history (deepens an existing shallow "
+                "clone in place). Required for full time-machine reach; the "
+                "default shallow clone limits get_law_at/diff_law_versions "
+                "to dates after the clone was made."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Clone or update the local lovverk corpus that ``lovspor mcp`` reads.
 
@@ -300,8 +312,10 @@ def fetch_corpus_command(
     cache); later runs fast-forward it. With no ``--dest`` and no
     ``LOVVERK_CORPUS_PATH``, ``lovspor mcp`` then finds it automatically — so
     the whole consumer flow is ``lovspor fetch-corpus`` then ``lovspor mcp``.
+    Pass ``--full-history`` when the deployment exposes the time-machine
+    tools; a shallow clone serves them only back to its own creation date.
     """
-    result = fetch_corpus(dest or default_corpus_path())
+    result = fetch_corpus(dest or default_corpus_path(), full_history=full_history)
     typer.echo(f"Corpus {result.action} at {result.path}.")
 
 

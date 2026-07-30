@@ -153,6 +153,33 @@ rm ~/.ssh/lovverk_deploy_key ~/.ssh/lovverk_deploy_key.pub
 
 The keys live in GitHub now; you don't need them locally unless you want to debug SSH config off-line.
 
+## Temporal tools require full corpus git history
+
+The git-log-based time-machine tools (`get_law_at`, `diff_law_versions`) can
+only reach as far back as the local checkout's git history. `lovspor
+fetch-corpus` clones **shallow by default** (`--depth 1`, small download); on
+such a clone the tools serve only dates after the clone was made, and a date
+beyond the boundary raises a dedicated incomplete-history error
+(`ShallowHistoryError`) — never a claim that the law was absent from the
+corpus (ADR-0003).
+
+**Operational requirement: any deployment exposing the temporal tools must
+use complete git history.**
+
+- New checkouts: `lovspor fetch-corpus --full-history` (the hosted deployment
+  units pass this flag).
+- Existing shallow checkouts, deepened in place (additive, no history
+  rewrite):
+
+```bash
+git -C <corpus-path> fetch --unshallow
+```
+
+Shallow clones remain supported only where the reduced temporal reach is
+explicitly acceptable (e.g. local current-law lookup, keyword search, CI
+smoke tests). `list_law_versions` and `get_law_history` read committed
+`history/<slug>.json` files and are unaffected by clone depth.
+
 ## Idempotency
 
 `lovspor sync` is idempotent: running twice on the same upstream state produces **zero file changes and zero git commits**. The orchestrator early-returns before manifest write/commit when the change detector reports no `new` / `changed` / `removed` documents. The integration test `test_run_sync_is_idempotent_on_unchanged_state` enforces this by asserting commit-count parity.
