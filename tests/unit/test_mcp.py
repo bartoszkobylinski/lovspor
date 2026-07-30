@@ -4057,6 +4057,44 @@ def test_corpus_status_includes_git_head_info_when_corpus_is_a_git_repo(
     assert len(status["head_commit_date"]) == 10  # YYYY-MM-DD
 
 
+def test_corpus_status_git_fields_are_none_when_the_head_subject_is_empty(
+    tmp_path: Path,
+) -> None:
+    """`git log --format=%H%n%aI%n%s` collapses to two lines when the HEAD
+    commit has an empty message, so the short-output guard is reachable with
+    real git — not just when git is missing. corpus_status is the only place
+    an AI asks 'is my corpus current?', so a half-filled answer there is a
+    staleness signal that lies. All three fields drop to None together."""
+    repo = tmp_path / "lovverk"
+    _git_init_corpus(repo)
+    _seed_corpus(repo, {"nl-1": _record(slug="x", title="X")})
+    _git("add", "manifest.json", cwd=repo)
+    _git("commit", "--allow-empty-message", "-m", "", cwd=repo)
+
+    status = CorpusReader(repo).corpus_status()
+    assert status["head_commit"] is None
+    assert status["head_commit_date"] is None
+    assert status["head_commit_subject"] is None
+    # The rest of the answer still stands — the guard degrades, never raises.
+    assert status["total_current_documents"] == 1
+    assert status["refresh_command"]
+
+
+def test_corpus_status_head_subject_keeps_its_last_character(tmp_path: Path) -> None:
+    """The trailing-newline trim on git's stdout must strip newlines and
+    nothing else. A subject whose final character would be eaten by a wider
+    strip set is the only shape that shows the difference — hence the
+    deliberately awkward 'NOX' ending."""
+    repo = tmp_path / "lovverk"
+    _git_init_corpus(repo)
+    _seed_corpus(repo, {"nl-1": _record(slug="x", title="X")})
+    _git("add", "manifest.json", cwd=repo)
+    _git("commit", "-m", "sync(forskrift): oppdater forskrift om NOX", cwd=repo)
+
+    status = CorpusReader(repo).corpus_status()
+    assert status["head_commit_subject"] == "sync(forskrift): oppdater forskrift om NOX"
+
+
 def test_corpus_status_handles_non_git_corpus_gracefully(tmp_path: Path) -> None:
     """Documented contract: a corpus directory that is NOT a git repo
     still returns a well-shaped status — git fields are None rather
@@ -4738,6 +4776,18 @@ def test_half_configured_hosted_oauth_is_rejected(partial: dict[str, str]) -> No
         "(LOVSPOR_AUTHKIT_DOMAIN / LOVSPOR_PUBLIC_URL). Pass both to enable "
         "self-service connectors, or neither for opaque-token mode."
     )
+
+
+def test_http_config_binds_localhost_by_default() -> None:
+    """The bind address is a deployment invariant, not a tuning knob: the
+    droplet runs `lovspor mcp-http` behind Caddy, which terminates TLS and
+    proxies to 127.0.0.1:8000, and the systemd unit relies on the process
+    never reaching a public interface on its own. A default that drifted to
+    0.0.0.0 would expose the whole corpus surface, bypassing the proxy, with
+    nothing in the suite objecting."""
+    config = HttpConfig()
+    assert config.host == "127.0.0.1"
+    assert config.port == 8000
 
 
 def _half_pair_by_assignment() -> HttpConfig:

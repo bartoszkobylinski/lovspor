@@ -218,6 +218,36 @@ def test_mcp_http_defaults_to_the_credential_store_not_to_open_access(
     assert http.credentials_path == tmp_path / "cfg" / "lovspor" / "credentials.json"
 
 
+def test_mcp_http_binds_localhost_when_no_host_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The --host/--port defaults are what the systemd unit relies on: the
+    droplet runs `lovspor mcp-http` behind Caddy on 127.0.0.1:8000. Every
+    other CLI test passes --host explicitly, so a default that drifted to a
+    public interface would reach production unopposed."""
+    monkeypatch.delenv("LOVVERK_CORPUS_PATH", raising=False)
+    monkeypatch.delenv("LOVSPOR_CREDENTIALS", raising=False)
+    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
+    creds = tmp_path / "creds.json"
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "lovspor.cli._mcp_serve_http",
+        lambda path, http: captured.update(path=path, http=http),
+    )
+
+    result = runner.invoke(
+        app,
+        ["mcp-http", "--corpus-path", str(tmp_path), "--credentials", str(creds)],
+    )
+
+    assert result.exit_code == 0, result.output
+    http = captured["http"]
+    assert isinstance(http, HttpConfig)
+    assert http.host == "127.0.0.1"
+    assert http.port == 8000
+
+
 def test_mcp_http_insecure_flag_clears_the_credential_store(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
