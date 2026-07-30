@@ -4392,6 +4392,42 @@ def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
     )
 
 
+_ADR_0002_CONTRACT_SENTENCES = (
+    "the result represents the version available in the Lovspor corpus "
+    "at the end of the specified UTC date.",
+    "It does not establish which legal provisions were legally in force on that date.",
+    "Corpus history starts when Lovspor first recorded the document; "
+    "earlier states are not retrievable.",
+    "The ``date_in_force`` frontmatter field is descriptive metadata and "
+    "is not used to reconstruct validity history.",
+)
+
+
+def test_time_machine_tool_descriptions_pin_adr_0002_contract(tmp_path: Path) -> None:
+    """ADR-0002: the user-facing descriptions of ``get_law_at`` and
+    ``diff_law_versions`` must carry the full temporal contract, and
+    ``list_law_versions`` must state that its dates are corpus-recording
+    dates. Sentences are pinned whole (project rule for safety-critical
+    wording: a fragment check would pass against a description corrupted
+    around the fragment it searched for). Whitespace is normalized because
+    docstring line wrapping is not part of the contract."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    server = build_server(tmp_path)
+    tools = server._tool_manager._tools
+
+    for name in ("get_law_at", "diff_law_versions"):
+        description = " ".join((tools[name].description or "").split())
+        for sentence in _ADR_0002_CONTRACT_SENTENCES:
+            assert " ".join(sentence.split()) in description, (name, sentence)
+
+    versions = " ".join((tools["list_law_versions"].description or "").split())
+    assert (
+        "listed dates are the UTC dates on which the Lovspor corpus "
+        "recorded a content change — not entry-into-force dates." in versions
+    )
+    assert "They do not establish when a provision became legally applicable" in versions
+
+
 def test_build_server_raises_eagerly_on_bad_corpus(tmp_path: Path) -> None:
     """Misconfigured corpus path fails at server startup, not first call."""
     with pytest.raises(CorpusNotFoundError):
@@ -5506,6 +5542,38 @@ def test_diff_law_versions_same_content_yields_empty_diff_but_reports_commits(
     }
     assert result["resolved_commit_a"] == "sha-x"
     assert result["resolved_commit_b"] == "sha-y"
+
+
+def test_diff_law_versions_carries_adr_0002_temporal_markers(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The response restates the ADR-0002 contract machine-readably: both
+    sides are corpus states at end-of-day UTC and the tool never determines
+    legal validity. Values pinned exactly — a renamed key or a silently
+    flipped value must show up as a red test, and ``is False`` guards
+    against a falsy-but-wrong substitute (0, None, "")."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    md = _law_md([("1", "Formål", "Loven gjelder skatt.")])
+
+    def fake_resolve(
+        _repo_path: Path,
+        _current_path: str,
+        target_date: date,
+    ) -> RevisionResult:
+        return _rev(md, "sha-x" if target_date == date(2020, 1, 1) else "sha-y")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fake_resolve)
+
+    result = CorpusReader(tmp_path).diff_law_versions(
+        "skatteloven",
+        "2020-01-01",
+        "2024-01-01",
+    )
+
+    assert result["temporal_basis"] == "corpus_history"
+    assert result["cutoff_timezone"] == "UTC"
+    assert result["legal_validity_determined"] is False
 
 
 def test_diff_law_versions_ignores_frontmatter_metadata_churn(
