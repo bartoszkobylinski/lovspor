@@ -15,9 +15,11 @@ from lovspor.history import (
     HistoryRecord,
     _classify_bulk_sync,
     _classify_commit,
+    _frontmatter_id_at,
     _parse_events,
     _parse_line_stats,
     _parse_rename_paths,
+    _scan_frontmatter_id,
     extract_history,
     render_history_markdown,
     write_history,
@@ -208,6 +210,40 @@ def test_parse_rename_paths_empty_input() -> None:
 def test_parse_rename_paths_brace_form_with_suffix() -> None:
     lines = ["0\t0\tlover/{old => new}/file.md"]
     assert _parse_rename_paths(lines) == ("lover/old/file.md", "lover/new/file.md")
+
+
+# ---------- _scan_frontmatter_id ----------
+
+
+def test_scan_frontmatter_id_quoted_form() -> None:
+    """The renderer emits ``id: "sf-…"`` (double-quoted) as the first field."""
+    text = '---\nid: "sf-20260710-1545"\nslug: "x"\n---\n\nbody\n'
+    assert _scan_frontmatter_id(text) == "sf-20260710-1545"
+
+
+def test_scan_frontmatter_id_unquoted_form() -> None:
+    text = "---\nid: nl-19990326-014\n---\nbody\n"
+    assert _scan_frontmatter_id(text) == "nl-19990326-014"
+
+
+def test_scan_frontmatter_id_no_frontmatter_returns_none() -> None:
+    assert _scan_frontmatter_id("body without frontmatter\n") is None
+
+
+def test_scan_frontmatter_id_empty_text_returns_none() -> None:
+    assert _scan_frontmatter_id("") is None
+
+
+def test_scan_frontmatter_id_missing_id_field_returns_none() -> None:
+    text = '---\ntype: "history"\nslug: "x"\n---\nbody\n'
+    assert _scan_frontmatter_id(text) is None
+
+
+def test_scan_frontmatter_id_ignores_id_line_in_body() -> None:
+    """Only the frontmatter block is scanned; an ``id:`` line after the
+    closing delimiter must never match."""
+    text = '---\ntype: "history"\n---\nid: "sneaky-body-id"\n'
+    assert _scan_frontmatter_id(text) is None
 
 
 # ---------- _classify_commit ----------
@@ -1057,3 +1093,246 @@ def test_extract_history_records_raw_non_ascii_rename_paths(tmp_path: Path) -> N
     assert record.events[0].type == "renamed"
     assert record.events[0].from_path == "lover/opplæringslova.md"
     assert record.events[0].to_path == "lover/opplæringslova-ny.md"
+
+
+# ---------- extract_history identity boundary ----------
+
+
+def _head_sha7(repo: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()[:7]
+
+
+def _frontmatter_doc(doc_id: str, body: str) -> str:
+    """Minimal doc text in the renderer's frontmatter shape: quoted ``id``
+    first, then the body."""
+    return f'---\nid: "{doc_id}"\ntype: "forskrift"\n---\n\n{body}\n'
+
+
+def _commit_doc(repo: Path, rel_path: str, text: str, subject: str) -> str:
+    """Write ``rel_path``, commit with ``subject``, return the short sha."""
+    (repo / rel_path).write_text(text, encoding="utf-8")
+    _git("add", rel_path, cwd=repo)
+    _git("commit", "-m", subject, cwd=repo)
+    return _head_sha7(repo)
+
+
+def test_extract_history_stops_at_doc_identity_boundary(tmp_path: Path) -> None:
+    """RCA defect 3 (``forskrift-om-omregningsfaktorer``): a replacement act
+    overwrote a repealed act's file in place (the ``ce3df5a13`` shape — M,
+    not A), and ``git log --follow`` fused both identities into one history.
+    The walk must stop at the first revision whose frontmatter id differs
+    from the record's doc_id: the new act keeps ONLY its own events."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "forskrifter").mkdir()
+    path = "forskrifter/forskrift-om-omregningsfaktorer.md"
+
+    # Old act (sf-20090520-0534): born on the path, then updated.
+    old_add = _commit_doc(
+        repo,
+        path,
+        _frontmatter_doc("sf-20090520-0534", "old body v1"),
+        "add(forskrift): forskrift-om-omregningsfaktorer",
+    )
+    old_update = _commit_doc(
+        repo,
+        path,
+        _frontmatter_doc("sf-20090520-0534", "old body v2"),
+        "update(forskrift): forskrift-om-omregningsfaktorer",
+    )
+
+    # Replacement act (sf-20260710-1545) overwrites the SAME path in place,
+    # then receives its own update.
+    new_add = _commit_doc(
+        repo,
+        path,
+        _frontmatter_doc("sf-20260710-1545", "new body v1"),
+        "add(forskrift): forskrift-om-omregningsfaktorer",
+    )
+    new_update = _commit_doc(
+        repo,
+        path,
+        _frontmatter_doc("sf-20260710-1545", "new body v2"),
+        "update(forskrift): forskrift-om-omregningsfaktorer",
+    )
+
+    record = extract_history(
+        repo_path=repo,
+        current_path=path,
+        doc_id="sf-20260710-1545",
+        slug="forskrift-om-omregningsfaktorer",
+    )
+
+    # Newest first: only the new act's own events; count feeds total_changes.
+    assert [e.commit for e in record.events] == [new_update, new_add]
+    assert [e.type for e in record.events] == ["updated", "added"]
+    assert len(record.events) == 2
+    # The old identity's events are never attributed to the new act.
+    assert {old_add, old_update}.isdisjoint({e.commit for e in record.events})
+    assert all(e.from_path is None and e.to_path is None for e in record.events)
+
+
+def test_extract_history_follows_rename_of_same_identity(tmp_path: Path) -> None:
+    """A rename of the SAME doc id remains part of the lineage — the
+    identity boundary only cuts revisions whose frontmatter id differs."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "forskrifter").mkdir()
+    add_sha = _commit_doc(
+        repo,
+        "forskrifter/sf-20090520-0534.md",
+        _frontmatter_doc("sf-20090520-0534", "body"),
+        "sync: 1 new, 0 changed, 0 removed",
+    )
+
+    _git(
+        "mv",
+        "forskrifter/sf-20090520-0534.md",
+        "forskrifter/forskrift-om-omregningsfaktorer.md",
+        cwd=repo,
+    )
+    _git("commit", "-m", "migration: rename 1 documents to slug-based filenames", cwd=repo)
+    rename_sha = _head_sha7(repo)
+
+    record = extract_history(
+        repo_path=repo,
+        current_path="forskrifter/forskrift-om-omregningsfaktorer.md",
+        doc_id="sf-20090520-0534",
+        slug="forskrift-om-omregningsfaktorer",
+    )
+
+    assert [e.commit for e in record.events] == [rename_sha, add_sha]
+    assert record.events[0].type == "renamed"
+    assert record.events[0].from_path == "forskrifter/sf-20090520-0534.md"
+    assert record.events[0].to_path == "forskrifter/forskrift-om-omregningsfaktorer.md"
+    assert record.events[1].type == "added"
+
+
+def test_extract_history_boundary_detected_across_rename(tmp_path: Path) -> None:
+    """Path tracking through renames: the identity check must read the blob
+    at the path the file had AT each revision, so a foreign identity that
+    lived at the pre-rename path is still detected and cut."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "forskrifter").mkdir()
+    old_path = "forskrifter/sf-19990101-0001.md"
+
+    foreign_add = _commit_doc(
+        repo,
+        old_path,
+        _frontmatter_doc("sf-19990101-0001", "foreign body"),
+        "add(forskrift): sf-19990101-0001",
+    )
+    takeover = _commit_doc(
+        repo,
+        old_path,
+        _frontmatter_doc("sf-20260101-0002", "our body v1"),
+        "add(forskrift): sf-19990101-0001",
+    )
+    _git("mv", old_path, "forskrifter/vår-forskrift.md", cwd=repo)
+    _git("commit", "-m", "rename(forskrift): vår-forskrift", cwd=repo)
+    rename_sha = _head_sha7(repo)
+    update_sha = _commit_doc(
+        repo,
+        "forskrifter/vår-forskrift.md",
+        _frontmatter_doc("sf-20260101-0002", "our body v2"),
+        "update(forskrift): vår-forskrift",
+    )
+
+    record = extract_history(
+        repo_path=repo,
+        current_path="forskrifter/vår-forskrift.md",
+        doc_id="sf-20260101-0002",
+        slug="vår-forskrift",
+    )
+
+    assert [e.commit for e in record.events] == [update_sha, rename_sha, takeover]
+    assert [e.type for e in record.events] == ["updated", "renamed", "added"]
+    assert foreign_add not in {e.commit for e in record.events}
+
+
+def test_extract_history_treats_idless_history_as_same_identity(tmp_path: Path) -> None:
+    """Pre-frontmatter-era revisions (no parseable ``id``) extend the current
+    identity when no foreign id was ever seen on the path above them."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "lover").mkdir()
+    idless_add = _commit_doc(
+        repo,
+        "lover/skatteloven.md",
+        "pre-frontmatter body\n",
+        "add(lov): skatteloven",
+    )
+    update_sha = _commit_doc(
+        repo,
+        "lover/skatteloven.md",
+        _frontmatter_doc("nl-19990326-014", "body v2"),
+        "update(lov): skatteloven",
+    )
+
+    record = extract_history(
+        repo_path=repo,
+        current_path="lover/skatteloven.md",
+        doc_id="nl-19990326-014",
+        slug="skatteloven",
+    )
+
+    assert [e.commit for e in record.events] == [update_sha, idless_add]
+    assert [e.type for e in record.events] == ["updated", "added"]
+
+
+def test_extract_history_idless_revision_below_boundary_is_excluded(tmp_path: Path) -> None:
+    """An id-less revision is same-identity only while the lineage from HEAD
+    is unbroken: once a foreign id appears, the id-less revisions below it
+    are cut along with the boundary revision itself."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "lover").mkdir()
+    idless_add = _commit_doc(
+        repo,
+        "lover/x.md",
+        "pre-frontmatter body of some other doc\n",
+        "add(lov): x",
+    )
+    foreign_update = _commit_doc(
+        repo,
+        "lover/x.md",
+        _frontmatter_doc("nl-19000101-001", "foreign body"),
+        "update(lov): x",
+    )
+    ours_add = _commit_doc(
+        repo,
+        "lover/x.md",
+        _frontmatter_doc("nl-20260101-002", "our body"),
+        "add(lov): x",
+    )
+
+    record = extract_history(
+        repo_path=repo,
+        current_path="lover/x.md",
+        doc_id="nl-20260101-002",
+        slug="x",
+    )
+
+    assert [e.commit for e in record.events] == [ours_add]
+    assert {idless_add, foreign_update}.isdisjoint({e.commit for e in record.events})
+
+
+def test_frontmatter_id_at_missing_blob_returns_none(tmp_path: Path) -> None:
+    """A revision where the path has no blob (never existed, or deleted in
+    that commit) yields ``None`` — treated as same-identity by the walk."""
+    repo = tmp_path / "lovverk"
+    _setup_repo(repo)
+    (repo / "lover").mkdir()
+    _commit_doc(repo, "lover/real.md", "body\n", "add(lov): real")
+    sha = _head_sha7(repo)
+
+    assert _frontmatter_id_at(repo, sha, "lover/absent.md") is None
+    assert _frontmatter_id_at(repo, sha, "lover/real.md") is None  # no frontmatter id

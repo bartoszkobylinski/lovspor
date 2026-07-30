@@ -7,6 +7,12 @@ truth is JSON (`history/<slug>.json`); a human-readable Markdown view
 and AI consumers can query JSON directly while researchers browse the
 rendered MD on GitHub.
 
+A path is not an identity: when upstream replaces a repealed act with a
+new act that derives the same slug (and therefore reuses the same file
+path), the git lineage of the path spans two different documents. The
+walk stops at that identity boundary so one document's events are never
+attributed to another — see ``extract_history``.
+
 Event types correspond to the orchestrator's per-document commit policy
 (see decisions.md §12a):
 
@@ -61,6 +67,9 @@ _VERB_TO_TYPE: dict[str, EventType] = {
     "remove": "removed",
 }
 
+_FRONTMATTER_DELIMITER = "---"
+_FRONTMATTER_ID_LINE = re.compile(r'^id:\s*"?(?P<id>[^"\n]+?)"?\s*$')
+_MAX_FRONTMATTER_LINES = 100  # id is the first frontmatter field; bound the scan
 _MIN_COMMIT_BLOCK_LINES = 3  # sha + iso date + subject (numstat optional)
 _MIN_NUMSTAT_PARTS = 2  # added + removed columns; path may be absent
 _NUMSTAT_PATH_INDEX = 2  # third tab-separated column is the path
@@ -132,9 +141,28 @@ def extract_history(
     root (e.g. ``"lover/skatteloven.md"``). ``--follow`` traces back
     through renames so the returned list spans the full lifetime of the
     underlying document.
+
+    ``--follow`` knows paths, not document identities: when a path was
+    reused by a different document (a replacement act overwriting a
+    tombstoned doc's file in place — the ``forskrift-om-omregningsfaktorer``
+    defect), the raw walk crosses into the previous document's commits.
+    The walk therefore inspects the frontmatter ``id`` of the blob at
+    every candidate revision and stops at the first revision whose id
+    differs from ``doc_id`` — that revision and everything older belong
+    to the other identity and are excluded. Renames of the SAME id are
+    still followed.
+
+    Revisions with no parseable frontmatter ``id`` (pre-frontmatter-era
+    files, or a blob absent at that revision) are treated as
+    same-identity. The rule is safe because such revisions are only
+    reachable while the lineage from HEAD is unbroken: the walk has
+    already stopped if any newer revision on the path carried a foreign
+    id, so a foreign identity excludes every id-less revision below the
+    boundary along with the boundary revision itself.
     """
     raw = _run_git_log(repo_path, current_path)
-    return HistoryRecord(slug=slug, doc_id=doc_id, events=_parse_events(raw))
+    events = _events_within_identity(repo_path, current_path, doc_id, raw)
+    return HistoryRecord(slug=slug, doc_id=doc_id, events=events)
 
 
 class _HistoryFrontMatter(BaseModel):
@@ -214,15 +242,93 @@ def _run_git_log(repo_path: Path, file_path: str) -> str:
     return result.stdout
 
 
-def _parse_events(raw: str) -> list[HistoryEvent]:
-    """Parse the raw git log output (newest commit first) into events."""
+def _events_within_identity(
+    repo_path: Path,
+    current_path: str,
+    doc_id: str,
+    raw: str,
+) -> list[HistoryEvent]:
+    """Build events from raw git log, stopping at the identity boundary.
+
+    Walks the parsed commits newest-first while tracking the path the
+    file had at each revision (numstat rename rows move the tracked path
+    back to ``from_path`` for older commits). At every revision the
+    blob's frontmatter ``id`` is compared against ``doc_id``; the first
+    mismatch ends the lineage — see ``extract_history`` for the rule on
+    revisions without a parseable id.
+    """
     events: list[HistoryEvent] = []
+    path = current_path
+    for sha, iso_date, subject, stat_lines in _parse_blocks(raw):
+        blob_id = _frontmatter_id_at(repo_path, sha, path)
+        if blob_id is not None and blob_id != doc_id:
+            break
+        event = _classify_commit(sha, iso_date, subject, stat_lines)
+        if event is not None:
+            events.append(event)
+        from_path, to_path = _parse_rename_paths(stat_lines)
+        if from_path and to_path:
+            path = from_path
+    return events
+
+
+def _frontmatter_id_at(repo_path: Path, sha: str, file_path: str) -> str | None:
+    """Frontmatter ``id`` of ``file_path``'s blob at revision ``sha``.
+
+    ``None`` when the blob does not exist at that revision (e.g. the
+    commit deleted the file) or carries no parseable frontmatter ``id``
+    (pre-frontmatter-era files). Callers treat ``None`` as same-identity.
+    """
+    result = subprocess.run(  # noqa: S603
+        ["git", "show", f"{sha}:{file_path}"],  # noqa: S607
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return _scan_frontmatter_id(result.stdout)
+
+
+def _scan_frontmatter_id(text: str) -> str | None:
+    """Cheap scan for the frontmatter ``id`` field — no full YAML parse.
+
+    Only the top-of-file frontmatter block is scanned (bounded to
+    ``_MAX_FRONTMATTER_LINES``), so an ``id:`` line in the document body
+    can never match. Handles both the quoted form the renderer emits
+    (``id: "sf-…"``) and a bare unquoted value.
+    """
+    lines = text.split("\n", _MAX_FRONTMATTER_LINES)
+    if not lines or lines[0].strip() != _FRONTMATTER_DELIMITER:
+        return None
+    for line in lines[1:]:
+        if line.strip() == _FRONTMATTER_DELIMITER:
+            return None
+        match = _FRONTMATTER_ID_LINE.match(line)
+        if match:
+            return match.group("id")
+    return None
+
+
+def _parse_blocks(raw: str) -> list[tuple[str, str, str, list[str]]]:
+    """Split raw git-log output (newest commit first) into per-commit
+    ``(sha, iso_date, subject, stat_lines)`` tuples, dropping malformed
+    blocks."""
+    blocks: list[tuple[str, str, str, list[str]]] = []
     for block in raw.split("__COMMIT__\n")[1:]:
         lines = block.strip("\n").split("\n")
         if len(lines) < _MIN_COMMIT_BLOCK_LINES:
             continue
-        sha, iso_date, subject = lines[0], lines[1], lines[2]
         stat_lines = [line for line in lines[3:] if line]
+        blocks.append((lines[0], lines[1], lines[2], stat_lines))
+    return blocks
+
+
+def _parse_events(raw: str) -> list[HistoryEvent]:
+    """Parse the raw git log output (newest commit first) into events."""
+    events: list[HistoryEvent] = []
+    for sha, iso_date, subject, stat_lines in _parse_blocks(raw):
         event = _classify_commit(sha, iso_date, subject, stat_lines)
         if event is not None:
             events.append(event)
