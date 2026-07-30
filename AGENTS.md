@@ -59,6 +59,19 @@ If a feature requires an optional extra, ensure mypy strict still passes without
 - Do not modify dependencies. Adding an optional extra requires a matching `[[tool.mypy.overrides]]` block; verify `uv sync --frozen` followed by `uv run mypy src/` is green before flagging the PR ready.
 - Do not commit. Open a PR with your additions instead.
 
+## Repository Context Isolation
+
+Agents MUST base conclusions only on evidence available in the current
+repository, explicitly referenced companion repositories and the current task.
+
+Agents MUST NOT introduce concepts, requirements, terminology or findings
+remembered from unrelated projects, previous sessions or external codebases.
+
+Every reported finding MUST cite evidence from the current project.
+
+If a claim cannot be grounded in the inspected repositories, label it as
+unsupported and exclude it from the final conclusion.
+
 ## Report format
 
 For each PR review, return:
