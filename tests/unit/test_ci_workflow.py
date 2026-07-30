@@ -331,3 +331,55 @@ def test_the_repair_step_runs_before_the_sync_that_rebuilds_the_vectors() -> Non
 
     # The repair commits to the corpus clone, so the author must be set first.
     assert author_at < repair_at < sync_at, names
+
+
+# ------------------------------------------------------------------ corpus audit gate
+#
+# The audit is the only check comparing the manifest against disk — every
+# sync-time mechanism compares upstream against the manifest, so drift like a
+# tombstoned-but-present file (2026-07-24) is invisible to the sync itself. The
+# audit existed eleven days before that damage and caught nothing, because no
+# workflow ran it. These tests pin the wiring: the gate must exist, must sit
+# between building the corpus and pushing it, and must be able to fail the job.
+
+
+def _audit_gate_step() -> dict[str, Any]:
+    return next(s for s in _sync_steps() if "lovspor audit" in str(s.get("run", "")))
+
+
+def test_the_corpus_audit_gate_exists_and_audits_the_corpus_clone() -> None:
+    """No gate step, no gate: `lovspor audit` was manual-CLI-only when the
+    2026-07-24 sync left a tombstoned-but-present file, and nothing ran it."""
+    run = str(_audit_gate_step()["run"])
+
+    assert "--corpus-path" in run
+    assert "$LOVVERK_PATH" in run
+
+
+def test_the_audit_gate_runs_after_the_corpus_is_built_and_before_the_push() -> None:
+    """Order is the invariant. Before the sync it audits yesterday's corpus;
+    after the push it is a report on corruption already published."""
+    names = [str(s.get("name", "")) for s in _sync_steps()]
+    runs = [str(s.get("run", "")) for s in _sync_steps()]
+    audit_at = next(i for i, r in enumerate(runs) if "lovspor audit" in r)
+    sync_at = next(i for i, n in enumerate(names) if n == "Run lovspor sync")
+    push_at = next(i for i, n in enumerate(names) if n.startswith("Push corpus"))
+
+    assert sync_at < audit_at < push_at, names
+
+
+def test_the_audit_gate_fails_on_integrity_findings_only() -> None:
+    """The 18 pre-existing unparsed_section_heading findings are registered
+    follow-up work; `--fail-on all` would turn the gate permanently red, and a
+    gate that is always red is one nobody reads. Integrity-only is the default,
+    so the step may either omit the flag or spell the default out — anything
+    else is a different gate."""
+    run = str(_audit_gate_step()["run"])
+
+    assert "--fail-on" not in run or "--fail-on integrity" in run, run
+
+
+def test_the_audit_gate_is_allowed_to_fail_the_job() -> None:
+    """`continue-on-error` here would demote the gate to a report nobody reads
+    — the exact failure mode the gate exists to end."""
+    assert not _audit_gate_step().get("continue-on-error", False)

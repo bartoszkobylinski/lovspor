@@ -172,6 +172,19 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: uv run --no-dev lovspor sync
 
+      # The audit is the only check that compares the manifest against disk;
+      # every sync-time mechanism compares upstream against the manifest, so
+      # drift like a tombstoned-but-present file (2026-07-24) or the 48
+      # orphans of 2026-05/07 is invisible to the sync itself and can never
+      # self-heal. It runs AFTER the sync has built the corpus and BEFORE the
+      # push, so a run that corrupts the corpus fails loudly here instead of
+      # publishing the corruption. Default mode fails on INTEGRITY findings
+      # only: the 18 pre-existing unparsed_section_heading findings are
+      # registered follow-up work, and a gate that is permanently red is one
+      # nobody reads. No continue-on-error — failing the job is the point.
+      - name: Audit corpus integrity before push
+        run: uv run --no-dev lovspor audit --corpus-path "$LOVVERK_PATH"
+
       - name: Push corpus changes if any
         working-directory: ${{ env.LOVVERK_PATH }}
         run: |
