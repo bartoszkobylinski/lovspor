@@ -1,13 +1,14 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles fifteen read-only tools over a local clone of the lovverk
+Bundles sixteen read-only tools over a local clone of the lovverk
 Markdown corpus (produced by the lovspor sync engine). Each tool
 answers a class of question an AI agent would naturally ask about
 Norwegian law:
 
     get_law(slug)                       -> "Show me Skatteloven"
-    get_law_at(slug, "2018-06-15")      -> "Show me Skatteloven as of 2018-06-15"
-    list_law_versions(slug)             -> "When did Skatteloven change?"
+    get_law_at(slug, "2026-05-01")      -> "Skatteloven as the corpus held it on 2026-05-01"
+    list_law_versions(slug)             -> "When did the corpus record changes to Skatteloven?"
+    diff_law_versions(slug, a, b)       -> "What changed in Skatteloven between two dates?"
     get_section(slug, "5-12")           -> "Show me just § 5-12 of Skatteloven"
     list_sections(slug)                 -> "Which sections does Skatteloven have?"
     get_law_history(slug)               -> "What changed in Skatteloven recently?"
@@ -715,7 +716,13 @@ class CorpusReader:
         return loaded
 
     def get_law_at(self, slug: str, target_date: str) -> str:
-        """Return the rendered Markdown of ``slug`` as it stood on ``target_date``.
+        """Return the rendered Markdown of ``slug`` as the corpus held it
+        at the end of ``target_date`` (UTC).
+
+        Temporal contract (ADR-0002): this is corpus history, not
+        legal-validity history — the result does not establish which
+        provisions were legally in force on that date, and the history
+        reaches back only to when Lovspor first recorded the document.
 
         ``target_date`` is an ISO ``YYYY-MM-DD`` string; end-of-day
         UTC semantics ("close of business on that day"). Future dates
@@ -809,6 +816,10 @@ class CorpusReader:
         removed ``§`` section carries a stdlib unified diff of its heading and
         body. Sections identical on both dates are omitted.
 
+        The response carries ADR-0002 temporal markers (``temporal_basis``,
+        ``cutoff_timezone``, ``legal_validity_determined``) stating that both
+        sides are corpus states, not legally-in-force reconstructions.
+
         Raises ``CorpusNotFoundError`` for an unknown slug or a date before the
         law first appeared; ``ValueError`` for a non-ISO or future date.
         """
@@ -827,6 +838,13 @@ class CorpusReader:
             "date_b": parsed_b.isoformat(),
             "resolved_commit_a": rev_a.sha,
             "resolved_commit_b": rev_b.sha,
+            # ADR-0002 temporal markers: both sides are corpus states at
+            # end-of-day UTC, not reconstructions of legally-in-force text.
+            # Additive keys — existing consumers pin individual keys, never
+            # the full key set, so this does not break the response schema.
+            "temporal_basis": "corpus_history",
+            "cutoff_timezone": "UTC",
+            "legal_validity_determined": False,
             "summary": diff["summary"],
             "sections": diff["sections"],
         }
@@ -851,7 +869,9 @@ class CorpusReader:
         a different ``get_law_at`` result. Pure renames (filename
         slug change with identical XML) are skipped: they don't
         change the content so they don't add a "version" from the
-        time-machine consumer's point of view.
+        time-machine consumer's point of view. Dates are the UTC dates
+        on which the corpus recorded the change, not entry-into-force
+        dates (ADR-0002).
 
         When two or more content changes land on the same UTC date,
         only the latest is listed. ``get_law_at`` resolves a date with
@@ -3045,16 +3065,22 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
 
     @_tool()
     def get_law_at(slug: str, target_date: str) -> str:
-        """Return a law's full Markdown as it stood on a given calendar date.
+        """Return a law's full Markdown as the corpus recorded it on a date.
 
         Time-machine companion to ``get_law``: where ``get_law(slug)``
         always returns the current version, ``get_law_at(slug, date)``
-        returns the version that was current at end-of-day UTC on
-        ``date``. Use it when the user asks *"what did Skatteloven
-        say in 2018?"*, or when an answer needs to anchor to the
-        version of an act in force at a specific historical moment
-        (case decided 2019-03-12 -> what was the relevant § as of
-        2019-03-12).
+        returns the version the corpus held at end-of-day UTC on
+        ``date``. Use it to anchor an answer to a specific past corpus
+        state — e.g. what this corpus served for an act on 2026-05-01,
+        or what a consumer saw before a recent update.
+
+        Temporal contract (ADR-0002): the result represents the version
+        available in the Lovspor corpus at the end of the specified UTC
+        date. It does not establish which legal provisions were legally
+        in force on that date. Corpus history starts when Lovspor first
+        recorded the document; earlier states are not retrievable. The
+        ``date_in_force`` frontmatter field is descriptive metadata and
+        is not used to reconstruct validity history.
 
         ``slug``: the act's current slug (same as for ``get_law``).
         Even if the kortform was different in the past, you pass
@@ -3095,6 +3121,12 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         ``type`` (``added`` | ``updated``), and ``lines_added`` /
         ``lines_removed`` (may be null for legacy bulk-mode commits).
 
+        Temporal contract (ADR-0002): listed dates are the UTC dates on
+        which the Lovspor corpus recorded a content change — not
+        entry-into-force dates. They do not establish when a provision
+        became legally applicable, and the list reaches back only to
+        when Lovspor first recorded the document.
+
         Raises if the slug is unknown or if the corpus pre-dates the
         Sprint 5 history layer (no ``history/<slug>.json``).
         """
@@ -3115,9 +3147,22 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         ``date_a`` / ``date_b``: ISO ``YYYY-MM-DD``. ``date_a`` is the "before"
         side; a later ``date_a`` gives a reverse diff. Future dates are refused.
 
+        Temporal contract (ADR-0002): the result represents the version
+        available in the Lovspor corpus at the end of the specified UTC
+        date. It does not establish which legal provisions were legally
+        in force on that date. Corpus history starts when Lovspor first
+        recorded the document; earlier states are not retrievable. The
+        ``date_in_force`` frontmatter field is descriptive metadata and
+        is not used to reconstruct validity history.
+
         Returns ``{slug, date_a, date_b, resolved_commit_a, resolved_commit_b,
-        summary, sections}``. ``resolved_commit_a/b`` are the commits the dates
+        temporal_basis, cutoff_timezone, legal_validity_determined, summary,
+        sections}``. ``resolved_commit_a/b`` are the commits the dates
         actually mapped to (a date rarely equals the day the law changed).
+        The three temporal markers are machine-readable restatements of the
+        contract above: ``temporal_basis`` is always ``"corpus_history"``,
+        ``cutoff_timezone`` is always ``"UTC"``, and
+        ``legal_validity_determined`` is always ``false``.
         ``summary`` counts ``sections_added`` / ``sections_removed`` /
         ``sections_changed``. ``sections`` lists each affected ``§`` with its
         ``section_id``, ``heading``, ``change_type``, and a unified diff of its
