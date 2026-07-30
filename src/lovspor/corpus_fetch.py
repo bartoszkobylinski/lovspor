@@ -118,17 +118,37 @@ def _is_corpus_clone(path: Path, repo_url: str) -> bool:
     return origin is not None and _same_repo(origin, repo_url)
 
 
-def fetch_corpus(dest: Path, *, repo_url: str = LOVVERK_REPO_URL) -> FetchResult:
+def _is_shallow(dest: Path) -> bool:
+    """True when the clone's git history is shallow."""
+    return _git_capture(["rev-parse", "--is-shallow-repository"], dest) == "true"
+
+
+def fetch_corpus(
+    dest: Path,
+    *,
+    repo_url: str = LOVVERK_REPO_URL,
+    full_history: bool = False,
+) -> FetchResult:
     """Clone the lovverk corpus to ``dest``, or fast-forward it if already there.
 
     Refuses to touch a path that exists but is not a lovverk clone (a file, or
     a non-empty directory), so a stray ``--dest`` can never clobber unrelated
-    files. A shallow clone keeps the download small; ``pull --ff-only`` keeps
-    updates honest (never a surprise merge). The result reports ``cloned``,
-    ``updated`` (a pull moved HEAD), or ``unchanged`` (already current).
+    files. ``pull --ff-only`` keeps updates honest (never a surprise merge).
+    The result reports ``cloned``, ``updated`` (a pull moved HEAD), or
+    ``unchanged`` (already current).
+
+    By default the clone is shallow (``--depth 1``) to keep the download
+    small — sufficient for current-law tools, but the git-log-based
+    time-machine tools (``get_law_at``, ``diff_law_versions``) then reach
+    only as far back as the clone. ``full_history=True`` clones the complete
+    history, and on an existing shallow clone deepens it in place with
+    ``fetch --unshallow`` — additive, never rewriting history (ADR-0003:
+    deployments exposing temporal tools require complete history).
     """
     dest = dest.expanduser()
     if _is_corpus_clone(dest, repo_url):
+        if full_history and _is_shallow(dest):
+            _git(["fetch", "--unshallow"], cwd=dest)
         before = _git_capture(["rev-parse", "HEAD"], dest)
         _git(["pull", "--ff-only"], cwd=dest)
         after = _git_capture(["rev-parse", "HEAD"], dest)
@@ -139,5 +159,8 @@ def fetch_corpus(dest: Path, *, repo_url: str = LOVVERK_REPO_URL) -> FetchResult
             f"{dest} exists and is not a lovverk clone; refusing to overwrite it.",
         )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _git(["clone", "--depth", "1", repo_url, str(dest)], cwd=dest.parent)
+    clone_args = ["clone", repo_url, str(dest)]
+    if not full_history:
+        clone_args[1:1] = ["--depth", "1"]
+    _git(clone_args, cwd=dest.parent)
     return FetchResult(path=dest.resolve(), action="cloned")

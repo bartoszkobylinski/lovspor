@@ -193,3 +193,96 @@ def test_fetch_result_is_frozen() -> None:
     result = FetchResult(path=Path("corpus"), action="cloned")
     with pytest.raises(ValidationError):
         result.path = Path("other")
+
+
+# --- full_history (ADR-0003: temporal tools need complete git history) ---
+
+
+def _second_commit(origin: Path) -> None:
+    (origin / "lover").mkdir(exist_ok=True)
+    (origin / "lover" / "x.md").write_text("v2\n", encoding="utf-8")
+    _git(["add", "-A"], cwd=origin)
+    _git(["commit", "-m", "update(lov): x"], cwd=origin)
+
+
+def _is_shallow_clone(path: Path) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() == "true"
+
+
+def _commit_count(path: Path) -> int:
+    result = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return len(result.stdout.splitlines())
+
+
+def test_fetch_corpus_full_history_clones_complete_history(tmp_path: Path) -> None:
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    _second_commit(origin)
+    dest = tmp_path / "clone"
+
+    result = fetch_corpus(dest, repo_url=_url(origin), full_history=True)
+
+    assert result.action == "cloned"
+    assert _is_shallow_clone(dest) is False
+    assert _commit_count(dest) == 2
+
+
+def test_fetch_corpus_default_clone_stays_shallow(tmp_path: Path) -> None:
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    _second_commit(origin)
+    dest = tmp_path / "clone"
+
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    assert _is_shallow_clone(dest) is True
+    assert _commit_count(dest) == 1
+
+
+def test_fetch_corpus_full_history_deepens_existing_shallow_clone(
+    tmp_path: Path,
+) -> None:
+    """The hosted-deployment upgrade path: an existing --depth 1 checkout is
+    deepened in place (fetch --unshallow, additive — no history rewrite),
+    after which the whole history is locally available."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    _second_commit(origin)
+    dest = tmp_path / "clone"
+    fetch_corpus(dest, repo_url=_url(origin))
+    assert _is_shallow_clone(dest) is True
+
+    result = fetch_corpus(dest, repo_url=_url(origin), full_history=True)
+
+    assert result.action == "unchanged"  # HEAD did not move; history deepened
+    assert _is_shallow_clone(dest) is False
+    assert _commit_count(dest) == 2
+
+
+def test_fetch_corpus_full_history_on_already_full_clone_is_plain_update(
+    tmp_path: Path,
+) -> None:
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    dest = tmp_path / "clone"
+    fetch_corpus(dest, repo_url=_url(origin), full_history=True)
+    _second_commit(origin)
+
+    result = fetch_corpus(dest, repo_url=_url(origin), full_history=True)
+
+    assert result.action == "updated"
+    assert _is_shallow_clone(dest) is False
+    assert _commit_count(dest) == 2

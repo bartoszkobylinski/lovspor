@@ -11,6 +11,7 @@ import pytest
 from lovspor.timetravel import (
     RevisionNotFoundError,
     RevisionResult,
+    ShallowHistoryError,
     _find_revision,
     _iter_follow_log,
     _read_blob,
@@ -59,6 +60,10 @@ def test_find_revision_raises_when_no_entry_is_on_or_before_cutoff(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    # tmp_path is not a git repo, so the out-of-range branch's shallow probe
+    # is stubbed to the full-clone answer; real-shallow behavior is covered
+    # by the actual-repository tests below.
+    monkeypatch.setattr("lovspor.timetravel._is_shallow_repository", lambda _repo: False)
     monkeypatch.setattr(
         "lovspor.timetravel._iter_follow_log",
         lambda *_args: [
@@ -296,3 +301,72 @@ def test_get_law_at_revision_delegates_to_resolver(tmp_path: Path) -> None:
         get_law_at_revision(repo, rel, date(2026, 2, 1))
         == resolve_law_at_revision(repo, rel, date(2026, 2, 1)).content
     )
+
+
+# --- shallow checkouts (ADR-0003: clone boundary is not corpus history) ---
+
+
+def _shallow_clone(origin: Path, dest: Path) -> None:
+    # file:// so `git clone --depth 1` is honoured without the local-clone
+    # optimization that would silently share the full object store.
+    subprocess.run(
+        ["git", "clone", "--depth", "1", f"file://{origin}", str(dest)],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _two_version_origin(tmp_path: Path) -> Path:
+    repo = tmp_path / "origin"
+    _init_repo(repo)
+    (repo / "lover").mkdir()
+    doc = repo / "lover" / "x.md"
+    doc.write_text("versjon 1\n", encoding="utf-8")
+    _commit_all(repo, "add(lov): x", "2026-01-01T12:00:00+00:00")
+    doc.write_text("versjon 2\n", encoding="utf-8")
+    _commit_all(repo, "update(lov): x", "2026-06-01T12:00:00+00:00")
+    return repo
+
+
+def test_shallow_clone_raises_shallow_history_error_before_boundary(
+    tmp_path: Path,
+) -> None:
+    """A date the corpus DID cover but the shallow clone cannot see must
+    raise ShallowHistoryError — never RevisionNotFoundError, whose message
+    callers translate into "did not exist in the corpus". The message is
+    pinned whole: it names the local boundary and the recovery commands."""
+    origin = _two_version_origin(tmp_path)
+    clone = tmp_path / "clone"
+    _shallow_clone(origin, clone)
+
+    with pytest.raises(ShallowHistoryError) as excinfo:
+        resolve_law_at_revision(clone, "lover/x.md", date(2026, 3, 1))
+
+    assert str(excinfo.value) == (
+        "no commit on or before 2026-03-01 touches 'lover/x.md' in this "
+        "shallow checkout; locally available history for this path begins "
+        "2026-06-01. The corpus may contain earlier revisions that this "
+        "clone cannot see — deepen it with 'git fetch --unshallow' or "
+        "re-fetch with 'lovspor fetch-corpus --full-history'."
+    )
+
+
+def test_shallow_clone_serves_dates_within_local_history(tmp_path: Path) -> None:
+    origin = _two_version_origin(tmp_path)
+    clone = tmp_path / "clone"
+    _shallow_clone(origin, clone)
+
+    assert get_law_at_revision(clone, "lover/x.md", date(2026, 7, 1)) == "versjon 2\n"
+
+
+def test_full_clone_still_reports_genuinely_missing_history(tmp_path: Path) -> None:
+    """The distinction test: on a FULL repository a pre-existence date keeps
+    raising RevisionNotFoundError with the unqualified message — no shallow
+    wording, because here "not found" is a true corpus-history fact."""
+    origin = _two_version_origin(tmp_path)
+
+    with pytest.raises(
+        RevisionNotFoundError,
+        match=r"^no commit on or before 2025-12-01 touches 'lover/x\.md'$",
+    ):
+        resolve_law_at_revision(origin, "lover/x.md", date(2025, 12, 1))

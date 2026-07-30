@@ -620,11 +620,34 @@ def test_fetch_corpus_reports_action_and_path(
 ) -> None:
     target = tmp_path / "lovverk"
     canned = FetchResult(path=target, action="cloned")
-    monkeypatch.setattr("lovspor.cli.fetch_corpus", lambda _dest: canned)
+    monkeypatch.setattr("lovspor.cli.fetch_corpus", lambda _dest, **_kwargs: canned)
     result = runner.invoke(app, ["fetch-corpus", "--dest", str(target)])
     assert result.exit_code == 0, result.output
     assert "cloned" in result.stdout
     assert str(target) in result.stdout
+
+
+def test_fetch_corpus_passes_full_history_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """--full-history reaches fetch_corpus as full_history=True; the default
+    invocation stays shallow (full_history=False) — ADR-0003 keeps shallow
+    clones supported where limited temporal reach is acceptable."""
+    target = tmp_path / "lovverk"
+    seen: list[bool] = []
+
+    def fake_fetch(_dest: Path, *, full_history: bool = False) -> FetchResult:
+        seen.append(full_history)
+        return FetchResult(path=target, action="cloned")
+
+    monkeypatch.setattr("lovspor.cli.fetch_corpus", fake_fetch)
+
+    assert runner.invoke(app, ["fetch-corpus", "--dest", str(target)]).exit_code == 0
+    assert (
+        runner.invoke(app, ["fetch-corpus", "--dest", str(target), "--full-history"]).exit_code == 0
+    )
+    assert seen == [False, True]
 
 
 def test_mcp_falls_back_to_default_corpus_path_when_unset(

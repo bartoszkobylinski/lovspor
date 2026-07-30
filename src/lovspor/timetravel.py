@@ -50,6 +50,17 @@ class RevisionNotFoundError(LovsporError):
     """No commit on or before the target date touches the requested path."""
 
 
+class ShallowHistoryError(LovsporError):
+    """The target date precedes this shallow checkout's locally available history.
+
+    Deliberately distinct from :class:`RevisionNotFoundError`: a shallow clone
+    cannot distinguish "the document entered the corpus later" from "this
+    clone's history starts later", so callers must not translate this into a
+    claim that the document did not exist in the corpus (ADR-0003 named
+    defect: the clone boundary must never be conflated with corpus history).
+    """
+
+
 @dataclass(frozen=True)
 class _RevisionEntry:
     sha: str
@@ -121,12 +132,59 @@ def _find_revision(
     the first entry within the cutoff. Newest-first iteration order
     matches git's default log order; the first hit IS the answer.
     """
-    for entry in _iter_follow_log(repo_path, current_path):
+    entries = _iter_follow_log(repo_path, current_path)
+    for entry in entries:
         if entry.commit_date <= cutoff:
             return entry
-    raise RevisionNotFoundError(
-        f"no commit on or before {cutoff.date().isoformat()} touches {current_path!r}",
+    raise _out_of_range_error(repo_path, current_path, cutoff, entries)
+
+
+def _out_of_range_error(
+    repo_path: Path,
+    current_path: str,
+    cutoff: datetime,
+    entries: list[_RevisionEntry],
+) -> LovsporError:
+    """Classify an out-of-range date: genuinely pre-history vs shallow-truncated.
+
+    On a shallow clone the oldest visible follow-log entry is the clone
+    boundary, not the document's first corpus appearance — returning "not
+    found" there would assert a corpus-history fact this checkout cannot
+    know. The shallow check runs only on this failure path, so successful
+    lookups pay nothing for it.
+    """
+    prefix = f"no commit on or before {cutoff.date().isoformat()} touches {current_path!r}"
+    if _is_shallow_repository(repo_path):
+        earliest = entries[-1].commit_date.date().isoformat() if entries else None
+        reach = (
+            f"locally available history for this path begins {earliest}"
+            if earliest is not None
+            else "no locally available history reaches this path"
+        )
+        return ShallowHistoryError(
+            f"{prefix} in this shallow checkout; {reach}. The corpus may "
+            f"contain earlier revisions that this clone cannot see — deepen "
+            f"it with 'git fetch --unshallow' or re-fetch with "
+            f"'lovspor fetch-corpus --full-history'.",
+        )
+    return RevisionNotFoundError(prefix)
+
+
+def _is_shallow_repository(repo_path: Path) -> bool:
+    """True when the checkout's git history is shallow (grafted boundary).
+
+    Asks git itself (``rev-parse --is-shallow-repository``) rather than
+    probing ``.git/shallow`` so worktrees and future git layouts keep
+    working.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],  # noqa: S607
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        check=True,
     )
+    return result.stdout.strip() == "true"
 
 
 def _iter_follow_log(repo_path: Path, current_path: str) -> list[_RevisionEntry]:

@@ -730,7 +730,9 @@ class CorpusReader:
         always a typo, and silently aliasing it to HEAD would mask the
         mistake. Past dates that predate the act's first appearance
         in the corpus raise with a hint pointing to ``get_law_history``
-        so the AI can recover.
+        so the AI can recover. A shallow checkout whose history does
+        not reach the date raises ``ShallowHistoryError`` untranslated
+        — never the "did not exist in the corpus" claim (ADR-0003).
 
         Walks ``git log --follow`` on the manifest's current
         ``markdown_path`` to find the latest commit ≤ end-of-day on
@@ -3101,7 +3103,11 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         Raises if the slug is unknown or if the act first appeared in
         the corpus *after* ``target_date`` — the error message points
         to ``get_law_history`` so the AI can find the earliest
-        available date.
+        available date. On a shallow local checkout whose git history
+        does not reach ``target_date``, it raises a distinct
+        incomplete-history error instead: the corpus may contain the
+        revision even though this clone cannot see it, so the tool
+        never claims the law did not exist (ADR-0003).
         """
         return reader.get_law_at(slug, target_date)
 
@@ -3171,7 +3177,9 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
 
         Raises if the slug is unknown or if either date predates the act's
         first appearance in the corpus (the message points to
-        ``get_law_history``).
+        ``get_law_history``). On a shallow local checkout, a date beyond the
+        clone's history raises a distinct incomplete-history error rather
+        than a claim that the law did not exist (ADR-0003).
         """
         return reader.diff_law_versions(slug, date_a, date_b)
 
