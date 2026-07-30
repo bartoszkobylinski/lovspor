@@ -119,15 +119,29 @@ _SURFACE = (
     # It must keep the blockquote AND the list — see _render_change_note.
     '<article class="changesToParent">Opphevet. Paragrafen lød før oppheving:'
     '<ol class="defaultList"><li>første ledd</li></ol></article>'
+    # Renderer 6, both halves. A <br/> inside a REAL heading (2,565 of them in
+    # 152 documents) whose continuation opens with an ordered marker, and the
+    # two routes by which source text formed an inline link: "](" written by
+    # chemical nomenclature, and a footnote marker followed by a parenthesis.
+    # Without these the version-6 digest pins bytes that never exercise the fix.
+    "<h4>RÅDSFORORDNING (EF) nr. 765/2006 av<br/>18. mai 2006</h4>"
+    '<article class="legalP">'
+    "[1-(5-fluoropentyl)-1H-indol-3-yl](2,2,3,3-tetrametylsyklopropyl)metanon"
+    "</article>"
+    '<article class="legalP">dekningsfaktor på 2'
+    '<sup class="footnotereference" data-footnotereferencevalue="7">7</sup>(2) som</article>'
     "</section></main></body></html>"
 ).encode()
 
-# The document digest is UNCHANGED from renderer 4: the 1741 Vimpel law carries
-# no footnote reference, and dropping the dead paragraph-class branch moved no
-# bytes. Only the stamp advanced — which is the guard doing its job, since a
-# version bump must be a deliberate act even when this fixture cannot see it.
-_PINNED_DOCUMENT = (5, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
-_PINNED_SURFACE = (5, "e083807deeca664db7e5ca8a04445f7d2792622c4ed894706dfa2722a3dbcfd8")
+# The document digest is UNCHANGED from renderer 4 and again at 6: the 1741
+# Vimpel law carries no footnote reference, no <br/> in a heading and no "](" in
+# its text, so neither the renderer-5 nor the renderer-6 fix moves a byte of it.
+# Only the stamp advances — which is the guard doing its job, since a version
+# bump must be a deliberate act even when this fixture cannot see it. The SURFACE
+# digest does change at 6, because the surface was extended to exercise both
+# halves of that fix; a pin over bytes the fix never touches protects nothing.
+_PINNED_DOCUMENT = (6, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
+_PINNED_SURFACE = (6, "46d17a5a2b1979ac24a4cde466a66bbb070270d7caf5ec834092141a0383eae3")
 
 
 def _digest(text: str) -> str:

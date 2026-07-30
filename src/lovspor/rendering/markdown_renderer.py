@@ -58,7 +58,7 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
-RENDERER_VERSION = 5
+RENDERER_VERSION = 6
 """Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
 
 Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
@@ -123,19 +123,29 @@ _INLINE_ESCAPE = str.maketrans(
     },
 )
 _ORDERED_LIST_MARKER = re.compile(r"^(\d{1,9})([.)])(?=\s|$)")
+# The "(" that turns a preceding "]" into an inline link destination.
+_LINK_DEST_OPEN = re.compile(r"(?<=\])\(")
 
 
 def _escape_inline_text(text: str) -> str:
     """Escape inline Markdown specials in a raw text run so law text cannot
-    turn into emphasis, a code span, or a stray escape.
+    turn into emphasis, a code span, a link, or a stray escape.
 
     Deliberately conservative: only backslash, backtick, and asterisk are
-    escaped. Brackets, underscores, and angle brackets are left verbatim —
-    a lone bracket is literal in CommonMark, ``_`` inside a word is not
-    emphasis, and escaping them would pepper legal citations and
-    identifiers with backslashes for no real ambiguity.
+    escaped, plus the ``(`` of a ``](`` sequence. Brackets, underscores, and
+    angle brackets are left verbatim — a lone bracket is literal in CommonMark,
+    ``_`` inside a word is not emphasis, and escaping them would pepper legal
+    citations and identifiers with backslashes for no real ambiguity.
+
+    ``](`` is the exception, because a lone bracket being literal does not make
+    the *pair* literal: it closes a link text and opens a destination. Chemical
+    nomenclature writes exactly that shape —
+    ``[1-(5-fluoropentyl)-1H-indol-3-yl](2,2,3,3-tetrametylsyklopropyl)metanon``
+    — and a CommonMark reader then renders the parenthesised fragment as a URL
+    it never displays, so the legal text becomes invisible and unquotable. Only
+    the paren is escaped; the brackets stay readable in the raw file.
     """
-    return text.translate(_INLINE_ESCAPE)
+    return _LINK_DEST_OPEN.sub(r"\\\g<0>", text.translate(_INLINE_ESCAPE))
 
 
 def _escape_block_leading(text: str) -> str:
@@ -247,8 +257,29 @@ def _render_element(elem: etree._Element) -> str:
 def _render_heading(elem: etree._Element, tag: str, classes: list[str]) -> str:
     if tag in {"h1", "h2"}:
         marker = "#" if tag == "h1" else "##"
-        return f"{marker} {_inline(elem)}\n\n"
+        return _atx_heading(marker, _inline(elem))
     return _render_sub_heading(elem, classes)
+
+
+def _atx_heading(marker: str, text: str) -> str:
+    """Emit ``text`` as an ATX heading, spilling anything past the first line
+    into a following paragraph.
+
+    A ``<br/>`` inside a heading is common in EU-regulation titles (2,565
+    headings across 152 documents), and an ATX heading cannot span lines: the
+    continuation is a separate block whatever the renderer intends. Emitting
+    ``_inline()`` raw therefore left the heading reading as truncated
+    mid-phrase, with its rest glued underneath and unescaped — two of them
+    opened with "18. " / "5. " and reparsed as an ordered list. Making the
+    split explicit is the same rule ``_render_heading_div`` already applies to
+    ARIA heading blocks, applied to real ``h1``-``h6`` as well.
+    """
+    head, _, spill = text.partition("\n")
+    heading = f"{marker} {head}\n\n" if head else ""
+    spill = spill.strip()
+    if not spill:
+        return heading
+    return heading + f"{_escape_block_leading(spill)}\n\n"
 
 
 def _render_heading_div(elem: etree._Element) -> str:
@@ -264,13 +295,7 @@ def _render_heading_div(elem: etree._Element) -> str:
     cannot span lines, so the first line is the heading and the rest follows
     as a paragraph.
     """
-    level = _aria_heading_level(elem)
-    head, _, subtitle = _inline(elem).partition("\n")
-    heading = f"{'#' * level} {head}\n\n" if head else ""
-    subtitle = subtitle.strip()
-    if not subtitle:
-        return heading
-    return heading + f"{_escape_block_leading(subtitle)}\n\n"
+    return _atx_heading("#" * _aria_heading_level(elem), _inline(elem))
 
 
 def _aria_heading_level(elem: etree._Element) -> int:
@@ -290,7 +315,7 @@ def _render_sub_heading(
 ) -> str:
     if _LEGAL_ARTICLE_HEADER_CLASS in classes:
         return _render_legal_article_header(elem)
-    return f"### {_inline(elem)}\n\n"
+    return _atx_heading("###", _inline(elem))
 
 
 def _render_children(elem: etree._Element) -> str:
@@ -401,10 +426,10 @@ def _render_legal_article_header(elem: etree._Element) -> str:
     value = _span_text(value_span)
     title = _span_text(title_span)
     if value and title:
-        return f"### {value}. {title}\n\n"
+        return _atx_heading("###", f"{value}. {title}")
     if value:
-        return f"### {value}\n\n"
-    return f"### {_inline(elem)}\n\n"
+        return _atx_heading("###", value)
+    return _atx_heading("###", _inline(elem))
 
 
 def _is_block_element(elem: etree._Element) -> bool:
@@ -443,14 +468,14 @@ def _render_mixed_article(
     inline: list[str] = [_escape_inline_text(elem.text or "")]
     for child in elem:
         if child.tag in skip_tags:
-            inline.append(_escape_inline_text(child.tail or ""))
+            _append_inline(inline, _escape_inline_text(child.tail or ""))
         elif _is_block_element(child):
             blocks.append(_flush_inline(inline))
             blocks.append(_render_element(child))
             inline = [_escape_inline_text(child.tail or "")]
         else:
-            inline.append(_inline_for_child(child))
-            inline.append(_escape_inline_text(child.tail or ""))
+            _append_inline(inline, _inline_for_child(child))
+            _append_inline(inline, _escape_inline_text(child.tail or ""))
     blocks.append(_flush_inline(inline))
     return "".join(block for block in blocks if block)
 
@@ -569,10 +594,19 @@ def _span_inner(elem: etree._Element) -> str:
     emitted from its whole subtree at once, so descending into it again would
     emit its descendants twice (``<sup>1<em>2</em></sup>`` came out as
     ``[^12]2``).
+
+    A ``<br/>`` becomes a newline, which ``_atx_heading`` then spills into a
+    following paragraph. No heading span in the current corpus carries one (0 of
+    5,914 documents), so this changes no output today — but reading the subtree
+    as raw text would fuse the two lines into one word, the exact defect
+    ``_render_mixed_article`` exists to prevent, and Lovdata has added markup
+    shapes before.
     """
     parts: list[str] = [elem.text or ""]
     for child in elem:
-        if child.tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (child.get("class") or "").split():
+        if child.tag == "br":
+            parts.append("\n")
+        elif child.tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (child.get("class") or "").split():
             parts.append(f"[^{''.join(child.itertext()).strip()}]")  # type: ignore[arg-type]
         else:
             parts.append(_span_inner(child))
@@ -644,9 +678,29 @@ def _list_item_lines(li: etree._Element, *, prefix: str, indent: str) -> list[st
 def _inline(elem: etree._Element) -> str:
     parts = [_escape_inline_text(elem.text or "")]
     for child in elem:
-        parts.append(_inline_for_child(child))
-        parts.append(_escape_inline_text(child.tail or ""))
+        _append_inline(parts, _inline_for_child(child))
+        _append_inline(parts, _escape_inline_text(child.tail or ""))
     return "".join(parts).strip()
+
+
+def _append_inline(parts: list[str], chunk: str) -> None:
+    """Append ``chunk``, escaping a leading ``(`` that a preceding ``]`` would
+    turn into a link destination.
+
+    ``_escape_inline_text`` cannot see this case: the bracket and the paren come
+    from different nodes. It happens when the renderer's own footnote marker
+    supplies the bracket and the source's next text node the paren —
+    ``på 2<sup class="footnotereference">7</sup>(2)`` rendered as ``2[^7](2)``,
+    a link whose destination was "2". A ``]`` this renderer opened as real link
+    text always arrives inside one chunk, so its ``(`` is never reached here.
+    """
+    if chunk.startswith("(") and _last_char(parts) == "]":
+        chunk = "\\" + chunk
+    parts.append(chunk)
+
+
+def _last_char(parts: list[str]) -> str:
+    return next((part[-1] for part in reversed(parts) if part), "")
 
 
 def _inline_for_child(child: etree._Element) -> str:
