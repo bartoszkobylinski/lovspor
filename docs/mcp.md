@@ -14,7 +14,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio by default (`lovspor mcp`) — each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note. A Streamable HTTP transport (`lovspor mcp-http`) also exists for the forthcoming hosted service; it is **not** production-ready — see [§ Streamable HTTP transport](#streamable-http-transport).
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user re-runs `lovspor fetch-corpus` (which fast-forwards the cache) to pick up updates.
-- **Tools:** sixteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the sixteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history.
+- **Tools:** sixteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the sixteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history. They answer corpus history — what the corpus contained at the end of a UTC date — never which provisions were legally in force on that date (ADR-0002; see the temporal contract under `get_law_at`).
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
@@ -279,7 +279,9 @@ Return the per-act change history as structured JSON. Each event has `date`, `co
 
 ### `get_law_at(slug, target_date)`
 
-Time-machine companion to `get_law`: returns the full Markdown of a law as it stood on a given calendar date. Use it when the user asks *"what did Skatteloven say in 2018?"*, or when an answer needs to anchor to the version of an act in force at a specific historical moment (case decided 2019-03-12 → relevant § as it stood on 2019-03-12).
+Time-machine companion to `get_law`: returns the full Markdown of a law as the corpus recorded it at the end of a given UTC calendar date. Use it to anchor an answer to a specific past corpus state — e.g. *"what did this corpus serve for Skatteloven on 2026-05-01?"*, or reproducing what a consumer saw before a recent update.
+
+**Temporal contract (ADR-0002):** the result represents the version available in the Lovspor corpus at the end of the specified UTC date. It does not establish which legal provisions were legally in force on that date. Corpus history starts when Lovspor first recorded the document; earlier states are not retrievable (asking for a date before an act entered the corpus is an error, not an approximation). The `date_in_force` frontmatter field is descriptive metadata and is not used to reconstruct validity history.
 
 - **`slug`** — the act's *current* slug. Even if the kortform was different in the past, you pass today's slug — the corpus's git history is rename-aware and traces predecessors automatically (Sprint-4 slug migration, any subsequent Lovdata kortform change).
 - **`target_date`** — ISO date `YYYY-MM-DD`. End-of-day UTC semantics: `"2026-04-15"` returns the version current at 23:59:59 UTC on April 15. Future dates are refused with a `ValueError` because they are almost always typos; use `get_law(slug)` for the current version.
@@ -309,6 +311,8 @@ Companion to `get_law_at`: lists the dates on which the act had distinct content
 
 Returns oldest-first so the AI can reason about the timeline naturally (initial appearance → updates → today). Each entry has `date` (ISO `YYYY-MM-DD` — feed straight into `get_law_at`), `commit` (short SHA), `type` (`added` | `updated`), and `lines_added` / `lines_removed` (may be `null` for legacy bulk-mode commits).
 
+Listed dates are the UTC dates on which the Lovspor corpus recorded a content change — not entry-into-force dates. They do not establish when a provision became legally applicable (ADR-0002).
+
 **Sample call:** `list_law_versions("skatteloven-sktl")`
 
 **Sample output:**
@@ -333,6 +337,8 @@ What changed in an act between two dates, section by section. Builds on `get_law
 
 The comparison runs on rendered Markdown with the YAML frontmatter stripped, so metadata-only churn (`retrieved_at`, `xml_hash`) never surfaces as a change. Each added / removed / changed `§` section carries a stdlib unified diff of its heading and body; sections identical on both dates are omitted. `resolved_commit_a` / `resolved_commit_b` report which commits the two dates actually mapped to — a date rarely coincides with the day the law changed.
 
+The temporal contract of `get_law_at` (ADR-0002) applies to both sides: each resolves to the version available in the Lovspor corpus at the end of the given UTC date, and the diff shows how the corpus record changed — not when the law became legally applicable. The response restates this machine-readably: `temporal_basis` is always `"corpus_history"`, `cutoff_timezone` is always `"UTC"`, and `legal_validity_determined` is always `false`.
+
 **Sample call:** `diff_law_versions("skatteloven-sktl", "2020-01-01", "2024-01-01")`
 
 **Sample output:**
@@ -344,6 +350,9 @@ The comparison runs on rendered Markdown with the YAML frontmatter stripped, so 
   "date_b": "2024-01-01",
   "resolved_commit_a": "57c3052e1b…",
   "resolved_commit_b": "9a1f3c8d04…",
+  "temporal_basis": "corpus_history",
+  "cutoff_timezone": "UTC",
+  "legal_validity_determined": false,
   "summary": { "sections_added": 1, "sections_removed": 0, "sections_changed": 1 },
   "sections": [
     {
@@ -721,7 +730,7 @@ A typical AI-assistant interaction with this server follows the same pattern:
 3. **`semantic_search("question phrased naturally")`** — when the user's wording differs from the law's vocabulary (e.g. *"renter rights"* vs *manglende vedlikehold*), substring search misses but cosine-similarity over per-section embeddings finds the right section. Always follow up with `get_section` before quoting — score is similarity, not relevance proof.
 4. **`get_law(slug)`** — pull the full text of the chosen candidate.
 5. **`get_section(slug, "N-M")`** — when the user wants ONE paragraph, not the whole act. Surgical, cheaper on context window. Returns the section body plus `cross_references` (every internal `§` ref already validated) so the AI sees broken refs inline.
-6. **`get_law_history(slug)`** — if the assistant needs to reason about *when* the law changed (e.g., "was § 5-12 in force in 2018?"), it pulls the history and inspects events.
+6. **`get_law_history(slug)`** — if the assistant needs to reason about *when the corpus recorded changes* to the law (e.g., "when did the corpus's text of § 5-12 last change?"), it pulls the history and inspects events. History events are corpus-recording dates, not entry-into-force dates (ADR-0002).
 7. **`list_recent_changes(...)`** — for "what's new in the corpus" queries that don't start from a specific law.
 8. **`validate_citation(citation)`** — pre-quote guard. Before quoting a citation in a final answer ("per § 5-12 of Skatteloven..."), call this to confirm both the act and the section actually exist in the corpus. Returns a `valid` bool plus a human-readable `reason` field the AI can quote.
 9. **`verify_quote(slug, section_id, quote)`** — anti-hallucination final check. After writing a verbatim quote attributed to a section, call this to confirm the quote actually appears in that section. Catches the most common citation hallucination (AI quotes words that are not in the cited section).
@@ -729,7 +738,7 @@ A typical AI-assistant interaction with this server follows the same pattern:
 11. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
 12. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The sixteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) extend the same surface to historical research: the AI can answer "what did Skatteloven say in 2018?" — or "what changed between 2018 and 2024?" via `diff_law_versions` — by walking the corpus's git history without any extra plumbing.
+The sixteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) extend the same surface to corpus-history research: the AI can answer "what did this corpus hold for Skatteloven on 2026-05-01?" — or "how did the corpus record of Skatteloven change since then?" via `diff_law_versions` — by walking the corpus's git history without any extra plumbing. Per ADR-0002, these answers describe corpus states at UTC dates, never which provisions were legally in force.
 
 ---
 
@@ -754,7 +763,7 @@ The engine is private and its earlier PyPI releases (`0.2.0`–`0.3.0`) were wit
 
 ## Limitations
 
-- **Current laws only, with git-history point-in-time.** The corpus mirrors `gjeldende-lover` and `gjeldende-sentrale-forskrifter` — laws and central regulations as currently in force (no repealed acts). The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) reconstruct an act's text as of a past date, but only back to the **earliest corpus revision** — a law's text as of 2018-06-01 predates lovspor's tracking window and is not retrievable.
+- **Current laws only, with git-history point-in-time.** The corpus mirrors `gjeldende-lover` and `gjeldende-sentrale-forskrifter` — laws and central regulations as currently in force (no repealed acts). The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) reconstruct an act's text as of a past date, but only back to the **earliest corpus revision** — a law's text as of 2018-06-01 predates lovspor's tracking window and is not retrievable. Results are corpus states, not legal-applicability determinations, and the `date_in_force` frontmatter field is descriptive metadata only — it is not used to reconstruct validity history (ADR-0002).
 - **No local or municipal regulations.** Only `sentrale forskrifter` are tracked.
 - **`search_laws` matches metadata only.** A law mentioning "klima" in its body but not its title or slug will not be found via `search_laws("klima")` — use `search_body` for that. (The two tools are complementary; `search_laws` is fast, `search_body` is thorough.)
 - **No Stortinget enrichment.** Parliamentary metadata (saker, voteringer, publikasjoner) is not surfaced. See [`docs/decisions.md` §3](decisions.md) for the rationale.
