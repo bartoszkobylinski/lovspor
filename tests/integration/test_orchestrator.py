@@ -3191,6 +3191,65 @@ def test_run_sync_removes_disappearing_document(
     assert not (corpus / "lover" / "to-be-removed.md").exists()
 
 
+def test_run_sync_removes_disappearing_nonascii_document_and_sidecar(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RCA 2026-07-24 regression, end to end.
+
+    The helper-level git test proves ``git add`` now stages tracked
+    missing UTF-8 paths under the default ``core.quotePath``. This test
+    pins the full sync shape that failed in production: a disappearing
+    Norwegian slug with an embeddings sidecar produces a real
+    ``remove(...)`` commit deleting BOTH paths, not a manifest-only
+    tombstone.
+    """
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+
+    title = "Endr i økodesignforskriften"
+    slug = "endr-i-økodesignforskriften"
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-gone.xml", _law_with_section(title, "Body of the disappearing act."))],
+    )
+    _build_tarball(forskrifter_tar, [])
+
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        openai_api_key="sk-test",
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)
+    assert (corpus / "lover" / f"{slug}.md").exists()
+    assert _embedding_path(corpus, slug).exists()
+
+    _build_tarball(lover_tar, [])  # upstream dropped the doc
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    report = run_sync(settings)
+
+    assert report.removed_count == 1
+    assert not (corpus / "lover" / f"{slug}.md").exists()
+    assert not _embedding_path(corpus, slug).exists()
+    assert f"remove(lov): {slug}" in _git_log_subjects(corpus)
+    remove_commit = subprocess.run(
+        ["git", "-c", "core.quotePath=off", "show", "--name-status", "--format=", "HEAD~1"],
+        cwd=corpus,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout
+    assert f"lover/{slug}.md" in remove_commit
+    assert f"lover/embeddings/{slug}.bin" in remove_commit
+
+
 def test_run_sync_raises_config_error_when_corpus_not_a_git_repo(
     tmp_path: Path,
 ) -> None:
