@@ -202,3 +202,26 @@ All corrections land as **new commits on top of `e3660c4e2`**; none require touc
 ## 8. Read-only attestation
 
 During this analysis: **no file was modified, no artifact deleted, no manifest membership changed, and no git history rewritten** in `lovverk`, `lovspor`, or `lovspor-notebook`. All repository access was via read-only commands (`git show`, `git log`, `git diff`, `git diff-tree`, `git ls-files`, `git ls-tree`, file reads, and a read-only Python scan of `manifest.json`). `lovverk` remains at HEAD `e3660c4e2`. The only file created is this report, as explicitly authorized. All proposed corrections in §6 are **PROPOSED, NOT executed**.
+
+---
+
+## 9. Repair completed — dated cross-reference (2026-07-31)
+
+The corrections proposed in §6 were implemented and verified in
+production on 2026-07-31:
+
+* Engine fixes merged to `lovspor` main at `473f0c0` (branch
+  `fix/corpus-integrity-rca-corrections`, 8 commits, Codex-reviewed,
+  1,714 tests green).
+* Corpus repair commits (forward-only, on top of `e3660c4e2`):
+  `b40b1d8f6` `remove(forskrift): endr-i-økodesignforskriften` and
+  `25bb3add5` `rename(forskrift): forskrift-om-omregningsfaktorer-2026`;
+  pushed fast-forward `e3660c4e2..25bb3add5` — no history rewritten
+  (`git merge-base --is-ancestor` confirmed).
+* Post-repair `lovspor audit`: all integrity categories zero
+  (`tombstoned_but_present` 0, `orphan_embedding` 0,
+  `duplicate_path_ownership` 0, `identity_mismatch` 0); 18 advisory
+  `unparsed_section_heading` findings remain as registered follow-up.
+* Production sync run `30608029865` (2026-07-31): `0 new, 0 changed,
+  0 removed, 5914 unchanged` — verified no-op; the new
+  corpus-integrity CI gate ran before push and passed.
