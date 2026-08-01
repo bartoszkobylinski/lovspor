@@ -41,10 +41,12 @@ Commit strategy (decisions.md §12a + §12d):
 """
 
 import logging
+import re
 from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import islice
 from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
@@ -356,7 +358,7 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
     rerender_noop_ids: list[str] = []
     for doc_id in changes.changed:
         prior_record = prior.documents[doc_id]
-        upstream_doc = _rerender_upstream(upstream[doc_id], prior_record)
+        upstream_doc = _rerender_upstream(settings, upstream[doc_id], prior_record)
         if _rerender_is_noop(settings, upstream_doc, now, prior_record):
             # Re-render that reproduces the file byte-for-byte: keep the prior
             # record so last_seen and embedding_hash are not disturbed. But
@@ -365,12 +367,18 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
             # (a renderer bump that did not touch THIS file). Only when it
             # differs, so force_rerender of an already-current doc adds no
             # manifest churn.
+            updates: dict[str, object] = {}
             if prior_record.renderer_version != RENDERER_VERSION:
-                new_records[doc_id] = prior_record.model_copy(
-                    update={"renderer_version": RENDERER_VERSION},
-                )
-            else:
-                new_records[doc_id] = prior_record
+                updates["renderer_version"] = RENDERER_VERSION
+            # Reconcile a historically drifted last_seen to the file's own
+            # observation timestamp (the byte-identical render proves the seed
+            # equals the file value). Manifest-only: no file is rewritten.
+            preserved = upstream_doc.retrieved_at
+            if preserved is not None and prior_record.last_seen != preserved:
+                updates["last_seen"] = preserved
+            new_records[doc_id] = (
+                prior_record.model_copy(update=updates) if updates else prior_record
+            )
             rerender_noop_ids.append(doc_id)
             continue
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
@@ -394,7 +402,10 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
     # the renamed writes.
     for doc_id in renamed:
         prior_record = prior.documents[doc_id]
-        upstream_doc = _with_retrieved_at(upstream[doc_id], prior_record.last_seen)
+        upstream_doc = _with_retrieved_at(
+            upstream[doc_id],
+            _preserved_observation(settings, prior_record),
+        )
         old_path = settings.lovverk_repo_path / prior_record.markdown_path
         written = _try_write_one(settings, upstream_doc, now, embedder)
         if written is None:
@@ -772,20 +783,66 @@ def _frontmatter_context(upstream: _UpstreamDoc, now: datetime) -> FrontmatterCo
     )
 
 
-def _rerender_upstream(doc: _UpstreamDoc, prior: ManifestRecord) -> _UpstreamDoc:
-    """Preserve ``retrieved_at`` when the upstream XML has not changed.
+_FRONTMATTER_RETRIEVED_AT = re.compile(r'^retrieved_at: "([^"]+)"$')
+"""``retrieved_at`` exactly as ``serialize_frontmatter`` emits it."""
 
-    Frontmatter ``retrieved_at`` and manifest ``last_seen`` are stamped from the
-    same ``now`` inside ``_write_one``, so reusing the prior ``last_seen``
-    reproduces the timestamp already on disk. Without this a forced re-render
-    restamps every file and the whole corpus churns instead of only the
-    documents the renderer fix actually affects.
+_FRONTMATTER_SCAN_LINES = 40
+"""How deep into a Published Rendering the observation-recovery scan reads."""
+
+
+def _published_retrieved_at(settings: Settings, prior: ManifestRecord) -> datetime | None:
+    """The source-observation timestamp the Published Rendering itself carries.
+
+    For a renderer-only re-render this file value is the authoritative
+    preserved timestamp. It is deliberately NOT read from the manifest:
+    ``last_seen`` was historically re-stamped to ``now`` by every seeded
+    re-render while the file kept the seed, so the two drifted apart on
+    thousands of records (the v6/v7 ``retrieved_at``-only churn — see
+    docs/evidence/retrieved-at-provenance-2026-08-02.md). The file is the
+    side that never lied about when the content version was observed.
+    """
+    path = settings.lovverk_repo_path / prior.markdown_path
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in islice(handle, _FRONTMATTER_SCAN_LINES):
+                match = _FRONTMATTER_RETRIEVED_AT.match(line.rstrip("\n"))
+                if match:
+                    return datetime.fromisoformat(match.group(1))
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _preserved_observation(settings: Settings, prior: ManifestRecord) -> datetime:
+    """Source-observation timestamp to carry through a renderer-only write.
+
+    Prefers the Published Rendering's own ``retrieved_at`` (see
+    :func:`_published_retrieved_at`); falls back to the manifest ``last_seen``
+    only when the file value is unrecoverable (missing file, pre-frontmatter
+    artifact) — a drifted ``last_seen`` is still a better anchor than ``now``.
+    """
+    return _published_retrieved_at(settings, prior) or prior.last_seen
+
+
+def _rerender_upstream(
+    settings: Settings,
+    doc: _UpstreamDoc,
+    prior: ManifestRecord,
+) -> _UpstreamDoc:
+    """Preserve the source-observation timestamp when the XML has not changed.
+
+    A renderer-only re-render is an artifact-generation event, not a new
+    upstream-content observation, so ``retrieved_at`` must not move. The seed
+    is the Published Rendering's own frontmatter value; ``_write_one`` then
+    stamps ``last_seen`` from the same carried value, keeping the invariant
+    ``retrieved_at == last_seen`` on both sides (XML unchanged) instead of
+    re-manufacturing drift on every migration.
 
     A genuinely changed doc (different hash) keeps ``now``, unchanged behaviour.
     """
     if doc.xml_hash != prior.xml_hash:
         return doc
-    return _with_retrieved_at(doc, prior.last_seen)
+    return _with_retrieved_at(doc, _preserved_observation(settings, prior))
 
 
 def _rerender_is_noop(
@@ -897,7 +954,14 @@ def _write_one(
         xml_hash=upstream.xml_hash,
         markdown_path=str(path.relative_to(settings.lovverk_repo_path)),
         source_dataset=upstream.source_dataset,
-        last_seen=now,
+        # The record's last_seen and the file's frontmatter retrieved_at are
+        # the SAME source-observation timestamp, so they must come from the
+        # same value: the carried observation for a renderer-only re-render
+        # (upstream.retrieved_at, seeded by _rerender_upstream), or this
+        # sync's `now` for a genuinely new/changed content version. Stamping
+        # `now` unconditionally here is what used to split the two fields and
+        # made every migration churn the fleet.
+        last_seen=upstream.retrieved_at or now,
         status="current",
         slug=upstream.slug,
         title=upstream.title,
@@ -1515,7 +1579,7 @@ def _run_sprint8_eu_basis_migration(
         # OpenAI key is configured.
         new_record, paths_written = _write_one(
             settings,
-            _with_retrieved_at(upstream_doc, record.last_seen),
+            _with_retrieved_at(upstream_doc, _preserved_observation(settings, record)),
             now,
         )
         new_records[doc_id] = new_record
