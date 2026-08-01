@@ -140,8 +140,8 @@ _SURFACE = (
 # bump must be a deliberate act even when this fixture cannot see it. The SURFACE
 # digest does change at 6, because the surface was extended to exercise both
 # halves of that fix; a pin over bytes the fix never touches protects nothing.
-_PINNED_DOCUMENT = (6, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
-_PINNED_SURFACE = (6, "46d17a5a2b1979ac24a4cde466a66bbb070270d7caf5ec834092141a0383eae3")
+_PINNED_DOCUMENT = (7, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
+_PINNED_SURFACE = (7, "46d17a5a2b1979ac24a4cde466a66bbb070270d7caf5ec834092141a0383eae3")
 
 
 def _digest(text: str) -> str:
