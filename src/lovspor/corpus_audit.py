@@ -20,13 +20,14 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lovspor.headings import SECTION_HEADING
+from lovspor.rendering.document import LANGUAGE_TAG
 from lovspor.storage.manifest import Manifest, ManifestRecord
 from lovspor.sync.document_io import dataset_dir
 
 _EMBEDDINGS_SUBDIR = "embeddings"
 _DATASET_SUBDIRS = ("lover", "forskrifter")
 
-ADVISORY_KINDS = frozenset({"unparsed_section_heading"})
+ADVISORY_KINDS = frozenset({"unparsed_section_heading", "malformed_language"})
 """Findings that are registered follow-up work, not corpus corruption.
 
 An unparsed heading means a section the grammar cannot reach yet — real,
@@ -245,6 +246,59 @@ def _split_ownership_findings(corpus_root: Path, manifest: Manifest) -> list[Aud
     return findings
 
 
+_FRONTMATTER_LANGUAGE = re.compile(r'^language: "(.*)"$')
+"""The ``language`` field exactly as ``serialize_frontmatter`` emits it."""
+
+_LANGUAGE_DETAIL_MAX = 60
+"""Cap on how much of a malformed value the finding detail reproduces."""
+
+
+def _frontmatter_language(path: Path) -> str | None:
+    """The language value the file itself declares, or None when absent."""
+    with path.open(encoding="utf-8") as handle:
+        for line in islice(handle, _FRONTMATTER_SCAN_LINES):
+            match = _FRONTMATTER_LANGUAGE.match(line.rstrip("\n"))
+            if match:
+                return match.group(1)
+    return None
+
+
+def _language_findings(
+    corpus_root: Path,
+    manifest: Manifest,
+    on_disk: set[str],
+) -> list[AuditFinding]:
+    """Current documents whose frontmatter ``language`` is not a valid tag.
+
+    Advisory, deliberately narrow: ``language`` has constrained semantics (a
+    BCP-47-shaped tag or empty), so markup or free text in it is always
+    upstream corruption leaking through — the ``bredbåndsutbyggingsloven``
+    defect shape. This is not generic frontmatter validation; fields with
+    open semantics are out of scope. Empty is valid: the attribute may be
+    legitimately absent upstream."""
+    findings: list[AuditFinding] = []
+    for doc_id, record in manifest.documents.items():
+        if record.status != "current" or record.markdown_path not in on_disk:
+            continue
+        declared = _frontmatter_language(corpus_root / record.markdown_path)
+        if declared is None or declared == "" or LANGUAGE_TAG.match(declared):
+            continue
+        shown = (
+            declared
+            if len(declared) <= _LANGUAGE_DETAIL_MAX
+            else declared[: _LANGUAGE_DETAIL_MAX - 3] + "..."
+        )
+        findings.append(
+            AuditFinding(
+                kind="malformed_language",
+                path=record.markdown_path,
+                doc_id=doc_id,
+                detail=f"frontmatter language is not a valid language tag: {shown!r}",
+            ),
+        )
+    return findings
+
+
 def _frontmatter_id(path: Path) -> str | None:
     """The document id the file itself declares, or None when it declares none.
 
@@ -421,6 +475,7 @@ def audit_corpus(
     findings = _document_findings(manifest, on_disk, renderer_version)
     findings += _duplicate_path_findings(corpus_root, manifest)
     findings += _identity_findings(corpus_root, manifest, on_disk)
+    findings += _language_findings(corpus_root, manifest, on_disk)
     findings += _orphan_findings(corpus_root, manifest, on_disk)
     findings += _unparsed_heading_findings(corpus_root)
     findings.sort(key=lambda f: (f.kind, f.path))

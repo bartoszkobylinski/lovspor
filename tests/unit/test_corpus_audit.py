@@ -569,6 +569,7 @@ def test_the_severity_registers_are_disjoint_and_cover_every_emitted_kind() -> N
     emitted = {
         "duplicate_path_ownership",
         "identity_mismatch",
+        "malformed_language",
         "missing_document",
         "orphan_document",
         "orphan_embedding",
@@ -579,3 +580,53 @@ def test_the_severity_registers_are_disjoint_and_cover_every_emitted_kind() -> N
 
     assert not INTEGRITY_KINDS & ADVISORY_KINDS
     assert emitted == INTEGRITY_KINDS | ADVISORY_KINDS
+
+
+# --- malformed_language: advisory guard for constrained-semantics frontmatter ---
+
+
+def _seed_with_language(root: Path, slug: str, language_line: str | None) -> None:
+    (root / "lover").mkdir(parents=True, exist_ok=True)
+    lines = ["---", f'id: "{slug}"']
+    if language_line is not None:
+        lines.append(language_line)
+    lines += ["---", "", f"# {slug}", ""]
+    (root / "lover" / f"{slug}.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def test_malformed_language_is_flagged_as_advisory(tmp_path: Path) -> None:
+    _seed_with_language(
+        tmp_path,
+        "broken",
+        'language: "nb<br/>nr. 5czn (direktiv <a href="',
+    )
+    report = audit_corpus(tmp_path, _manifest(broken=_record("broken")))
+    kinds = [f.kind for f in report.findings]
+    assert kinds == ["malformed_language"]
+    assert report.integrity_findings == ()
+    finding = report.advisory_findings[0]
+    assert finding.path == "lover/broken.md"
+    assert "nb<br/>" in finding.detail
+
+
+def test_valid_and_empty_language_produce_no_finding(tmp_path: Path) -> None:
+    _seed_with_language(tmp_path, "valid", 'language: "nb"')
+    _seed_with_language(tmp_path, "blank", 'language: ""')
+    _seed_with_language(tmp_path, "absent", None)
+    report = audit_corpus(
+        tmp_path,
+        _manifest(
+            valid=_record("valid"),
+            blank=_record("blank"),
+            absent=_record("absent"),
+        ),
+    )
+    assert [f.kind for f in report.findings] == []
+
+
+def test_malformed_language_detail_truncates_long_values(tmp_path: Path) -> None:
+    _seed_with_language(tmp_path, "long", f'language: "{"x" * 200}<{"y" * 40}"')
+    report = audit_corpus(tmp_path, _manifest(long=_record("long")))
+    (finding,) = report.findings
+    assert finding.kind == "malformed_language"
+    assert len(finding.detail) < 140
