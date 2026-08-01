@@ -18,6 +18,7 @@ from lovspor.rendering.document import (
     LegalDocumentFrontMatter,
     build_frontmatter,
     extract_xml_metadata,
+    normalize_language,
 )
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -371,3 +372,62 @@ def test_legal_document_frontmatter_default_eu_basis_is_empty_list() -> None:
     </dl></header><main><h1>T</h1></main></body></html>"""
     fm = build_frontmatter(xml, _default_context())
     assert fm.eu_basis == []
+
+
+# --- language normalization (the bredbåndsutbyggingsloven upstream corruption) ---
+
+_LOVDATA_CORRUPT_LANG = "nb<br/>nr. 5czn (direktiv <a href="
+
+
+@pytest.mark.parametrize("tag", ["nb", "nn", "no", "se", "nb-NO", "sma", "und-Latn-150"])
+def test_normalize_language_passes_valid_tags_unchanged(tag: str) -> None:
+    assert normalize_language(tag) == tag
+
+
+@pytest.mark.parametrize("absent", [None, ""])
+def test_normalize_language_keeps_missing_and_blank_empty(absent: str | None) -> None:
+    assert normalize_language(absent) == ""
+
+
+def test_normalize_language_recovers_leading_tag_before_markup_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one sanctioned recovery: a complete valid tag immediately followed
+    by markup — the exact Lovdata shape on lov/2020-05-07-40."""
+    with caplog.at_level("WARNING"):
+        assert normalize_language(_LOVDATA_CORRUPT_LANG) == "nb"
+    assert "malformed upstream lang attribute" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "garbage",
+    [
+        '<a href="x">nb</a>',
+        "norsk bokmål",
+        "nb nn",
+        "NB",
+        "n",
+        "nb-",
+        "12<br/>",
+    ],
+)
+def test_normalize_language_drops_unrecoverable_garbage(
+    garbage: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        assert normalize_language(garbage) == ""
+    assert "malformed upstream lang attribute" in caplog.text
+
+
+def test_build_frontmatter_never_lets_markup_reach_language() -> None:
+    """Full-pipeline guard: the escaped corrupt attribute from upstream yields
+    the recovered tag, and no markup character survives into the model."""
+    xml = (
+        b'<!DOCTYPE html><html lang="nb&lt;br/&gt;nr. 5czn (direktiv &lt;a href="><body>'
+        b'<header><dl><dt class="title">T</dt><dd class="title">T</dd></dl></header>'
+        b"<main><h1>T</h1></main></body></html>"
+    )
+    fm = build_frontmatter(xml, _default_context())
+    assert fm.language == "nb"
+    assert not any(ch in fm.language for ch in '<>"')

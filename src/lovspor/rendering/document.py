@@ -11,6 +11,7 @@ extracted from the XML with provenance fields supplied by the caller
 know its own file name, content hash, retrieval time, or source dataset.
 """
 
+import logging
 import re
 from datetime import datetime
 from io import BytesIO
@@ -22,7 +23,48 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.errors import ParseError
 from lovspor.parsing.xml_normalizer import safe_parser
 
+logger = logging.getLogger(__name__)
+
 _DATE_ONLY = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+LANGUAGE_TAG = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?$")
+"""BCP-47-shaped tag: ``language[-Script][-REGION]``. Shared with the corpus
+audit's ``malformed_language`` check so both sides accept the same shape."""
+
+_LANGUAGE_THEN_MARKUP = re.compile(
+    r"^([a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?)<",
+)
+
+
+def normalize_language(raw: str | None) -> str:
+    """Validate the upstream ``lang`` attribute for the ``language`` field.
+
+    Lovdata has served at least one document whose root ``lang`` attribute
+    carries escaped footnote markup (``nb<br/>nr. 5czn (direktiv <a href=`` on
+    ``lov/2020-05-07-40``, unchanged upstream since first ingestion — see
+    docs/evidence/corpus-integrity-root-cause defect 3 follow-up RCA). Markup
+    must never reach the Published Rendering, so anything that is not a
+    BCP-47-shaped tag (``language[-Script][-REGION]``) is rejected here.
+
+    One conservative recovery only: a value that BEGINS with a complete valid
+    tag immediately followed by ``<`` (markup) unambiguously identifies the
+    intended tag, so that tag is kept. Anything else malformed becomes ``""``.
+    Both cases log a warning; missing or blank stays ``""`` silently.
+    """
+    if raw is None or raw == "":
+        return ""
+    if LANGUAGE_TAG.match(raw):
+        return raw
+    recovered = _LANGUAGE_THEN_MARKUP.match(raw)
+    if recovered:
+        logger.warning(
+            "malformed upstream lang attribute %r: recovered leading tag %r",
+            raw,
+            recovered.group(1),
+        )
+        return recovered.group(1)
+    logger.warning("malformed upstream lang attribute %r: dropped, no unambiguous tag", raw)
+    return ""
 
 
 class LegalDocumentFrontMatter(BaseModel):
@@ -116,7 +158,7 @@ def extract_xml_metadata(xml_bytes: bytes) -> dict[str, Any]:
         "title": title,
         "short_title": _find_dd(dl, "titleShort"),
         "ref_id": _find_dd(dl, "refid"),
-        "language": root.get("lang") or "",
+        "language": normalize_language(root.get("lang")),
         "ministry": _find_dd_list(dl, "ministry"),
         "date_in_force": _parse_date(_find_dd(dl, "dateInForce")),
         "last_change_in_force": _parse_date(
