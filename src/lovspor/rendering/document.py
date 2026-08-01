@@ -51,7 +51,7 @@ def normalize_language(raw: str | None) -> str:
     intended tag, so that tag is kept. Anything else malformed becomes ``""``.
     Both cases log a warning; missing or blank stays ``""`` silently.
     """
-    if raw is None or raw == "":
+    if raw is None or raw.strip() == "":
         return ""
     if LANGUAGE_TAG.match(raw):
         return raw

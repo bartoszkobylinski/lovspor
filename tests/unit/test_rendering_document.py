@@ -384,9 +384,16 @@ def test_normalize_language_passes_valid_tags_unchanged(tag: str) -> None:
     assert normalize_language(tag) == tag
 
 
-@pytest.mark.parametrize("absent", [None, ""])
-def test_normalize_language_keeps_missing_and_blank_empty(absent: str | None) -> None:
-    assert normalize_language(absent) == ""
+@pytest.mark.parametrize("absent", [None, "", " ", "   ", "\t", " \n "])
+def test_normalize_language_keeps_missing_and_blank_empty(
+    absent: str | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Blank includes whitespace-only: absent-shaped upstream metadata is not
+    malformed, so it must stay silent — no warning, no recovery attempt."""
+    with caplog.at_level("WARNING"):
+        assert normalize_language(absent) == ""
+    assert caplog.text == ""
 
 
 def test_normalize_language_recovers_leading_tag_before_markup_only(
