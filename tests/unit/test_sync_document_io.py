@@ -17,13 +17,13 @@ from lovspor.sync.document_io import (
     write_document,
 )
 
-_TINY_FIXTURE = (Path(__file__).parent.parent / "fixtures" / "lov-17410217-000.xml").read_bytes()
+_TINY_FIXTURE = (Path(__file__).parent.parent / "fixtures" / "synthetic-flat-law.xml").read_bytes()
 
 
 def _context(**overrides: object) -> FrontmatterContext:
     base = {
-        "doc_id": "lov-17410217-000",
-        "slug": "forbud-paa-vimpel-foering",
+        "doc_id": "lov-17990401-000",
+        "slug": "forbud-mot-drage-flyging",
         "doc_type": "lov",
         "xml_hash": "a" * 64,
         "source_dataset": "gjeldende-lover",
@@ -86,8 +86,8 @@ def test_document_path_for_unknown_dataset_raises(tmp_path: Path) -> None:
 def test_render_full_document_contains_frontmatter_and_body() -> None:
     out = render_full_document(_TINY_FIXTURE, _context())
     assert out.startswith("---\n")
-    assert 'title: "Forbud paa Vimpel-Føring"' in out
-    assert "# Forbud paa Vimpel-Føring" in out
+    assert 'title: "Forbud mot Drage-Flyging"' in out
+    assert "# Forbud mot Drage-Flyging" in out
 
 
 def test_render_full_document_is_deterministic() -> None:

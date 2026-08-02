@@ -8,14 +8,14 @@ missing chars, `analysis/corpus-render-drift-audit.md`).
 
 Two digests, because the risk has two halves:
 
-``_PINNED_DOCUMENT`` pins ``render_full_document`` over the committed Vimpel
-fixture — frontmatter *and* body, since a frontmatter-only rewrite is also
-drift (the Sprint 8 eu_basis backfill was exactly that).
+``_PINNED_DOCUMENT`` pins ``render_full_document`` over the committed
+synthetic flat-law fixture — frontmatter *and* body, since a frontmatter-only
+rewrite is also drift (the Sprint 8 eu_basis backfill was exactly that).
 
 ``_PINNED_SURFACE`` pins ``render_markdown`` over a synthetic document that
 exercises the block-dispatch surface the fixture does not reach: tables under
 BOTH article wrappers, lists, inline marks, change notes, and not-in-force
-elision. The 1741 Vimpel law is two paragraphs of prose — a table-rendering
+elision. The flat-law fixture is one paragraph of prose — a table-rendering
 change would sail straight past a fixture-only guard, and a table-rendering
 bug is what froze the sign catalogues of `skiltforskriften` in the first place.
 
@@ -23,7 +23,11 @@ When this fails after a deliberate rendering change:
 1. bump ``RENDERER_VERSION`` (+1) in ``rendering/markdown_renderer.py``,
 2. re-pin the digest(s) from the assertion message.
 Never re-pin a digest without bumping the version — that re-freezes the corpus
-on the old output.
+on the old output. The one exception is a deliberate replacement of the
+FIXTURE itself (the digest pins the fixture+renderer pair, so a new fixture
+means a new digest even though no rendered corpus byte moves): re-pin without
+a bump and say so in the commit, as done for the 2026-08-02 swap of the raw
+Lovdata Vimpel fixture for the synthetic one.
 """
 
 import hashlib
@@ -34,11 +38,11 @@ from lovspor.rendering.document import FrontmatterContext
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION, render_markdown
 from lovspor.sync.document_io import render_full_document
 
-_FIXTURE = Path(__file__).parent.parent / "fixtures" / "lov-17410217-000.xml"
+_FIXTURE = Path(__file__).parent.parent / "fixtures" / "synthetic-flat-law.xml"
 
 _CONTEXT = FrontmatterContext(
-    doc_id="lov-17410217-000",
-    slug="lov-17410217-000",
+    doc_id="lov-17990401-000",
+    slug="lov-17990401-000",
     doc_type="lov",
     xml_hash="0" * 64,
     source_dataset="gjeldende-lover",
@@ -133,14 +137,15 @@ _SURFACE = (
     "</section></main></body></html>"
 ).encode()
 
-# The document digest is UNCHANGED from renderer 4 and again at 6: the 1741
-# Vimpel law carries no footnote reference, no <br/> in a heading and no "](" in
-# its text, so neither the renderer-5 nor the renderer-6 fix moves a byte of it.
-# Only the stamp advances — which is the guard doing its job, since a version
-# bump must be a deliberate act even when this fixture cannot see it. The SURFACE
-# digest does change at 6, because the surface was extended to exercise both
-# halves of that fix; a pin over bytes the fix never touches protects nothing.
-_PINNED_DOCUMENT = (8, "24a23f2cdf1b55196731bfac763af20eee963dc2945170753a4ac8c5946f6be7")
+# History: through renderer 8 the document digest was pinned over the raw
+# Lovdata Vimpel fixture (unchanged from renderer 4 through 8 — that fixture
+# carried no footnote reference, no <br/> in a heading and no "](" in its
+# text, so only the stamp advanced). On 2026-08-02 the fixture was replaced
+# by the synthetic flat law (raw-source non-retention posture), so the
+# document digest was re-pinned WITHOUT a version bump: the renderer did not
+# change, the pinned input did. The SURFACE digest is fixture-independent and
+# did not move.
+_PINNED_DOCUMENT = (8, "af62ee23ce1653b9669e09f4c5ad421809d9289a34e087770fd6d676204aea5d")
 _PINNED_SURFACE = (8, "46d17a5a2b1979ac24a4cde466a66bbb070270d7caf5ec834092141a0383eae3")
 
 
