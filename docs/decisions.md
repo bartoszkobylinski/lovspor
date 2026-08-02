@@ -540,7 +540,7 @@ A refresh landing between those two lines yields a pre-refresh record stamped wi
 
 **`HttpConfig` selects hosted mode.** Passing it to `build_server` implies offload + warm and carries the bind address (FastMCP configures its transport-security allowlist from the constructor host, so it cannot be set after the fact). Bundling them also keeps `build_server` within the four-parameter limit (§ code rules).
 
-**Security posture — improving, not complete.** Bearer-token authentication (revocable per-credential tokens), per-credential rate limiting, and quotas are enforced. **TLS is deployed** (`deploy/digitalocean/` — Caddy terminates TLS upstream, automatic Let's Encrypt), live since 2026-07-18, so an HTTPS endpoint now exists. **Self-service OAuth shipped 2026-07-21** (WorkOS AuthKit as the authorization server, lovspor as resource server) but is **not enabled on the hosted instance**, which stays in opaque-token mode; **usage metering remains absent**. Because the app transport is plaintext HTTP, a bearer token on an exposed port is cleartext on the wire and replayable — so `mcp-http` binds `127.0.0.1` by default and must stay behind a TLS-terminating reverse proxy (Sprint 12 item 3). `/healthz` and `/readyz` are unauthenticated by design (FastMCP `custom_route` bypasses auth) and deliberately cheap — readiness stats `manifest.json` rather than parsing it or shelling out to git, so a probe loop cannot stall the loop. Richer freshness stays behind `corpus_status`.
+**Security posture — improving, not complete.** Bearer-token authentication (revocable per-credential tokens), per-credential rate limiting, and quotas are enforced. **TLS is deployed** (`deploy/digitalocean/` — Caddy terminates TLS upstream, automatic Let's Encrypt), live since 2026-07-18, so an HTTPS endpoint now exists. **Self-service OAuth shipped 2026-07-21** (WorkOS AuthKit as the authorization server, lovspor as resource server) but is **not enabled on the hosted instance**, which stays in opaque-token mode; **usage metering remains absent**. *(Update 2026-08-02, verified against production: the AuthKit pair IS configured on the hosted instance — `/.well-known/oauth-protected-resource/mcp` serves RFC 9728 discovery and both credential modes (opaque tokens + WorkOS OAuth) are active; the opaque-token-only statement is superseded. Anonymous requests still return 401; metering still absent. See `docs/mcp.md` §Streamable HTTP transport.)* Because the app transport is plaintext HTTP, a bearer token on an exposed port is cleartext on the wire and replayable — so `mcp-http` binds `127.0.0.1` by default and must stay behind a TLS-terminating reverse proxy (Sprint 12 item 3). `/healthz` and `/readyz` are unauthenticated by design (FastMCP `custom_route` bypasses auth) and deliberately cheap — readiness stats `manifest.json` rather than parsing it or shelling out to git, so a probe loop cannot stall the loop. Richer freshness stays behind `corpus_status`.
 
 **Hosted deploy shape (decided 2026-07-18).** The first hosted target is a **$12 DigitalOcean droplet** (2 GB / 1 vCPU), sized from measurement: the warmed reader is **~672 MB steady / ~1.24 GB peak** on the real corpus (85,426 sections × 3072-dim int8), so 1 GB OOMs on the startup warm while 2 GB fits with headroom — the unit caps `MemoryHigh=1400M` / `MemoryMax=1700M`. **TLS terminates in Caddy** (automatic Let's Encrypt) in front of the localhost-bound app, chosen over nginx+certbot because auto-HTTPS on a clean public box is one file and zero cron; the recipe documents the nginx variant for parity with the existing izabela213 stack. The app checkout is private, so provisioning uses a **read-only deploy key** and pins GitHub's published host key (never `ssh-keyscan`), mirroring the sync job's posture. **Not chosen:** AWS (Lightsail ties on price but adds no benefit at this scale; EC2 costs more and adds ops surface) and the shared izabela213 box (4 GB, zero swap, recurring OOM — the wrong home for a product endpoint). Full recipe + runbook in `deploy/digitalocean/`.
 
@@ -656,6 +656,19 @@ Resolved during Sprint 3:
 - ~~Duplicate commit `2def5a6`~~ — squashed away by PR #5 merge.
 - ~~Deploy key not configured~~ — operator runbook in `docs/operations.md` §Deploy key setup; user confirmed the key is in place 2026-04-26.
 - ~~`sync.yml` not added~~ — added in PR #16.
+
+## 15. Open infrastructure — supersedes the commercial pivot (decided 2026-07-30)
+
+Project-owner decision, reversing the closed-product direction of 2026-07-14 (per this file's convention: the pivot entries in §12 Sprint 12, §14 and `roadmap.md` stay as history; this entry supersedes their strategy content).
+
+The accepted direction is **open infrastructure**:
+
+- `lovspor` — engine **public under MIT**; independently runnable end to end (sync, render, MCP) without any hosted service.
+- `lovverk` — corpus **public** under its existing NLOD 2.0 + CC0 boundary (unchanged).
+- The hosted MCP endpoint is an **optional operated access layer**. Its authentication, quotas and rate limits are operational controls on one deployment, not a business boundary around the engine.
+- Optional paid operational services (managed hosting, support, integration) are permitted, but they must not make the open core artificially incomplete or impractical.
+
+Current state vs direction (2026-08-02): GitHub visibility of `lovspor` is still **PRIVATE** — a temporary implementation-state mismatch while publication-readiness work completes, tracked in `docs/publication-plan.md`. The withdrawn PyPI releases (`0.2.0`–`0.3.0`) have not returned; whether PyPI publishing resumes is an open decision (`docs/releasing.md`).
 
 ---
 

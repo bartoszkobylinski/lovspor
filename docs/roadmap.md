@@ -2,7 +2,9 @@
 
 > **Strategic options under evaluation.** This document is not a commitment. It is a structured menu of directions to argue against during sprint planning, written 2026-04-29 immediately after Sprint 8 closeout (PR #35 merged). It complements [`decisions.md`](decisions.md), which logs decisions actually made.
 
-> **Commercial priority changed 2026-07-14.** The option catalogue below is preserved, but its previous priority ordering is superseded by the Hosted Lovspor MCP pivot. Sprint 12 now focuses on turning the existing local read-only MCP into a paid remote service. Structural depth, domain expansion, and local distribution remain candidate follow-ups rather than the immediate plan.
+> **Direction superseded 2026-07-30 (open infrastructure).** The 2026-07-14 commercial-pivot note below, and every "paid remote service as the primary product" statement in this file, are **historical record**. The accepted current direction (logged in [`decisions.md`](decisions.md) §1) is open infrastructure: engine public under MIT, [`lovverk`](https://github.com/bartoszkobylinski/lovverk) public under its NLOD 2.0 / CC0 boundary, the core independently runnable. The hosted MCP endpoint is an optional operated access layer; optional paid hosting/support/integration may exist but must not restrict the open core. Engine publication is in progress (`docs/publication-plan.md`). The catalogue and shipped-work notes below are preserved unchanged as history.
+
+> **Commercial priority changed 2026-07-14** *(historical — superseded above)*. The option catalogue below is preserved, but its previous priority ordering is superseded by the Hosted Lovspor MCP pivot. Sprint 12 now focuses on turning the existing local read-only MCP into a paid remote service. Structural depth, domain expansion, and local distribution remain candidate follow-ups rather than the immediate plan.
 
 ---
 
@@ -53,7 +55,9 @@ Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). Th
 
 ---
 
-## Commercial pivot — Hosted Lovspor MCP (decided 2026-07-14)
+## Commercial pivot — Hosted Lovspor MCP (decided 2026-07-14; superseded 2026-07-30)
+
+> **Historical record.** This section describes the July 2026 closed-product direction, which was superseded by the open-infrastructure decision (see the note at the top and `decisions.md` §1). The shipped technical work below stands; the business framing does not.
 
 The primary product is now a **paid remote MCP service for grounded conversations about Norwegian law**, not a locally distributed Python package. A user connects Lovspor to an MCP-capable AI client and can ask about current provisions, available historical revisions, exact changes, EU/EEA relationships, and citations without installing the engine or cloning the corpus.
 
@@ -62,16 +66,16 @@ The product promise is deliberately narrower than "no hallucinations": Lovspor s
 ### Product boundary
 
 - `lovverk` remains public under NLOD 2.0 as the auditable corpus and provenance layer.
-- The engine and hosted service remain private while the commercial direction is evaluated.
+- The engine and hosted service remain private while the commercial direction is evaluated. *(Superseded 2026-07-30: the engine is intended public under MIT; the repository stays private only until publication-readiness work completes.)*
 - The previously published MIT releases `0.2.0`–`0.3.0` were removed from PyPI on 2026-07-14. Copies already obtained remain governed by their original licence; future hosted-service code is not distributed through PyPI.
 - Local stdio remains useful for development, tests, and operations, but is no longer the primary consumer distribution model.
 - Monitoring and alerts remain possible follow-up products. They do not replace the core MCP experience.
 
-### Sprint 12 — Hosted MCP foundation (active priority)
+### Sprint 12 — Hosted MCP foundation (active priority at the time; technical items remain valid under the open model)
 
 1. **Remote transport — SHIPPED (transport only).** `lovspor mcp-http` exposes the existing read-only tool surface over the MCP Streamable HTTP transport; stdio remains the development path. Tool bodies are offloaded to worker threads (the SDK calls sync handlers inline on its event loop, so one slow call would otherwise stall every client) and the corpus indices are warmed at startup (a cold build holds the reader's cache lock for seconds). `/healthz` and `/readyz` probes included. **Bearer auth and per-credential quotas enforced (item 3); the TLS/deploy recipe (`deploy/digitalocean/`, Caddy) was deployed 2026-07-18** — the service is live at `https://lovspor.bartoszkobylinski.com/mcp`. The app still binds localhost; TLS terminates in Caddy in front of it.
 2. **Hosted corpus runtime.** Run against an automatically refreshed `lovverk` clone, with health/readiness checks and an operator-visible freshness signal.
-3. **Access control — SHIPPED; deployed 2026-07-18.** Revocable beta credentials, per-credential quotas, rate limiting, and in-memory usage counters are enforced against manually issued tokens, behind Caddy-terminated TLS on a dedicated droplet. Self-service OAuth (WorkOS AuthKit) **shipped and enabled in production 2026-07-21**, verified end to end: WorkOS issues audience-bound RS256 JWTs, lovspor verifies them, and both Claude Code and the Claude Desktop connector complete the flow and call tools successfully. Remaining before a broad launch: **gating signup** — registration is currently open, so anyone reaching the URL can self-register and receive the default quota, with no payment or approval step — plus usage metering and item 9.
+3. **Access control — SHIPPED; deployed 2026-07-18.** Revocable beta credentials, per-credential quotas, rate limiting, and in-memory usage counters are enforced against manually issued tokens, behind Caddy-terminated TLS on a dedicated droplet. Self-service OAuth (WorkOS AuthKit) **shipped and enabled in production 2026-07-21**, verified end to end: WorkOS issues audience-bound RS256 JWTs, lovspor verifies them, and both Claude Code and the Claude Desktop connector complete the flow and call tools successfully. Remaining before a broad launch: **signup gating** — at the 2026-07-21 go-live verification, AuthKit registration accepted new sign-ups (self-register → default quota, no payment or approval step); whether it accepts them at any given time is an operator-side WorkOS tenant setting, and deliberate gating remains unimplemented — plus usage metering and item 9.
 4. **Grounded research workflow.** Evaluate a high-level `research_law` tool that returns an evidence bundle: matched sections, exact quotes, corpus revision, validation results, and source links. Preserve the 16 lower-level tools for composability.
 5. **Trust layer.** Promote per-section Lovdata deep links (F1) and extend evals to measure tool selection, citation validity, quote fidelity, temporal-boundary handling, and unsupported-claim behaviour.
 6. **Client adoption.** Publish connection instructions and tested examples for supported AI clients, plus a short comparison showing an ungrounded answer versus a Lovspor-grounded answer.
@@ -146,7 +150,7 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **PyPI local distribution — WITHDRAWN 2026-07-14.** Versions `0.2.0`–`0.3.0` shipped, then were removed when the engine moved to a private hosted-service strategy. The `lovspor` project name remains reserved by its sole owner with no downloadable releases.
 - **No Docker image.** Retained as a future private-deployment or enterprise option, not a current adoption priority.
 - **No public docs site** (mkdocs).
-- **Hosted MCP endpoint — LIVE since 2026-07-18**, at `https://lovspor.bartoszkobylinski.com/mcp`, on a dedicated DigitalOcean droplet with Caddy-terminated TLS (`deploy/digitalocean/`). It runs the Streamable HTTP transport (thread-offloaded tool bodies, startup index warming, health/readiness probes) and enforces bearer-token auth with per-credential quotas + rate limiting. Access is **closed beta by hand-issued credential** — there is no self-service signup yet, so stdio plus `lovspor fetch-corpus` remains the path for anyone without a token.
+- **Hosted MCP endpoint — LIVE since 2026-07-18**, at `https://lovspor.bartoszkobylinski.com/mcp`, on a dedicated DigitalOcean droplet with Caddy-terminated TLS (`deploy/digitalocean/`). It runs the Streamable HTTP transport (thread-offloaded tool bodies, startup index warming, health/readiness probes) and requires authentication on every request, with per-credential quotas + rate limiting. Access is operator-provisioned — opaque bearer tokens (`lovspor tokens issue`) or WorkOS AuthKit OAuth (both active in production, verified 2026-08-02) — and stdio plus `lovspor fetch-corpus` remains the complete path for anyone without a credential.
 
 ---
 
@@ -311,7 +315,7 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 - Cloud-hosted server with auto-refreshing `lovverk`.
 - Users configure a URL and authenticate instead of installing the engine or cloning the corpus.
 - Commercial requirements: HTTPS MCP transport, credentials/OAuth, quotas, rate limits, usage metering, privacy controls, deployment, monitoring, and eventually billing.
-- **Progress:** live since 2026-07-18 at `https://lovspor.bartoszkobylinski.com/mcp` — Streamable HTTP transport (`lovspor mcp-http`) with bearer-token auth, per-credential quotas and rate limiting, behind Caddy-terminated TLS (`deploy/digitalocean/`). Self-service OAuth shipped **and was enabled there** 2026-07-21, verified end to end from both Claude Code and the Claude Desktop connector. Usage metering, monitoring, and billing remain outstanding — as does gating signup, which is currently open to anyone who reaches the URL.
+- **Progress:** live since 2026-07-18 at `https://lovspor.bartoszkobylinski.com/mcp` — Streamable HTTP transport (`lovspor mcp-http`) with bearer-token auth, per-credential quotas and rate limiting, behind Caddy-terminated TLS (`deploy/digitalocean/`). Self-service OAuth shipped **and was enabled there** 2026-07-21, verified end to end from both Claude Code and the Claude Desktop connector. Usage metering, monitoring, and billing remain outstanding — as does deliberate signup gating (registration state is an operator-side WorkOS tenant setting; it accepted sign-ups at the 2026-07-21 verification).
 - **Effort:** high (auth, hosting, SLA).
 - **Risk:** the project becomes a SaaS, which is a different problem domain. This risk is now accepted deliberately and managed through a bounded beta before billing work.
 
@@ -347,9 +351,9 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ## Recommendation
 
-> **Status change 2026-07-14:** Hosted MCP (E3) supersedes the ordering below as the active commercial priority. The earlier recommendations are retained as the option backlog and should be reconsidered after the hosted beta identifies concrete retrieval, coverage, or adoption gaps.
+> **Status change 2026-07-14** *(historical — the commercial framing was superseded 2026-07-30 by the open-infrastructure direction; see the note at the top)*: Hosted MCP (E3) supersedes the ordering below as the active commercial priority. The earlier recommendations are retained as the option backlog and should be reconsidered after the hosted beta identifies concrete retrieval, coverage, or adoption gaps. Current priorities are set by `docs/publication-plan.md`, not by this section.
 
-### Active commercial priority
+### Active commercial priority (historical — superseded 2026-07-30)
 
 1. **Hosted Lovspor MCP foundation** (E3 / Sprint 12): remote transport, hosted corpus runtime, access control, quotas, privacy, and operational hardening.
 2. **Grounded research workflow:** evaluate a high-level evidence-bundle tool while preserving the existing 16 composable tools.
@@ -397,4 +401,4 @@ Until (c), the following remain out of scope as a matter of Norwegian law, not p
 
 ---
 
-*Last reviewed: 2026-07-16 (Sprint 12 item 1 — Streamable HTTP transport shipped; the rest of E3 remains outstanding). Written 2026-07-14 for the commercial pivot to Hosted Lovspor MCP; PyPI withdrawal; E3 promoted to active Sprint 12 without removing the prior option catalogue. The post-Sprint-11 engine/corpus inventory and the 2026-05-18 source-legality structure remain in force. Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
+*Last reviewed: 2026-08-02 — the 2026-07-14 commercial framing marked historical after the 2026-07-30 open-infrastructure supersession (`decisions.md` §1); hosted-endpoint auth facts aligned with production. Previous review 2026-07-16 (Sprint 12 item 1 — Streamable HTTP transport shipped). Written 2026-07-14 for the commercial pivot to Hosted Lovspor MCP; PyPI withdrawal; E3 promoted to active Sprint 12 without removing the prior option catalogue. The post-Sprint-11 engine/corpus inventory and the 2026-05-18 source-legality structure remain in force. Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
