@@ -54,7 +54,7 @@ matter emitted on a rendered law/forskrift. Fields, in emission order:
 | `source_provider` | `str` | `"Lovdata"` |
 | `source_dataset` | `str` | e.g. `gjeldende-lover` |
 | `source_license` | `str` | `"NLOD 2.0"` |
-| `retrieved_at` | `datetime` | |
+| `retrieved_at` | `datetime` | source-observation time — see below |
 | `status` | `str` | `"current"` |
 | `eu_basis` | `list[str]` | CELEX ids (uppercased); `[]` when none |
 
@@ -76,7 +76,7 @@ defaults) — the XML cannot supply provenance, so the caller provides it.
 | `xml_hash` | `str` | required |
 | `markdown_path` | `str` | required (repo-relative) |
 | `source_dataset` | `str` | required |
-| `last_seen` | `datetime` | required |
+| `last_seen` | `datetime` | required — same source-observation semantics as `retrieved_at` |
 | `status` | `Literal["current","removed"]` | required |
 | `slug` | `str \| None` | `None` |
 | `title` | `str \| None` | `None` |
@@ -207,6 +207,19 @@ list → `key: []`; non-empty list → a `  - ` block sequence; `None` → `null
   `source_license: "NLOD 2.0"`. No timestamp (byte-identical regeneration).
 - **History** (`<dataset>/history/<slug>.md`) — `_HistoryFrontMatter`:
   `type: "history"`, `slug`, `source_provider`, `source_license`. No timestamp.
+
+### `retrieved_at` / `last_seen` semantics
+
+Both fields carry the **same source-observation timestamp**: the UTC time the
+sync first retrieved/observed the document's *current upstream content
+version*. While the normalized XML is unchanged, both values stay stable —
+`retrieved_at == last_seen` is the invariant. A renderer-only re-render is an
+artifact-generation event, not a new upstream-content observation, so it
+preserves the timestamp on both sides (seed source: the Published Rendering's
+own frontmatter, `sync/orchestrator.py::_preserved_observation`). Neither
+field is an artifact-render timestamp; the v1 model deliberately has no such
+field. A true XML-content change advances both fields to the observing sync's
+time.
 
 ## Identifiers
 

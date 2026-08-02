@@ -587,7 +587,11 @@ def test_write_one_can_preserve_prior_retrieved_at(
 
     record, _paths = _write_one(settings, upstream, now)
 
-    assert record.last_seen == now
+    # The carried observation lands on BOTH sides: frontmatter retrieved_at
+    # and manifest last_seen are the same source-observation timestamp. The
+    # old contract (last_seen=now while the file kept the seed) is what
+    # manufactured the v6/v7 migration drift.
+    assert record.last_seen == prior_retrieved_at
     assert rendered_contexts[0].retrieved_at == prior_retrieved_at
 
 

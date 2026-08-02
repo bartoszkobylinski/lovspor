@@ -4737,3 +4737,208 @@ def test_renderer_bump_with_identical_output_restamps_without_a_rerender_commit(
     assert third.unchanged_count == 1
     assert third.rerendered_count == 0
     assert _git_commit_count(corpus) == commits_before
+
+
+# --- retrieved_at / last_seen provenance invariant (the v6/v7 churn RCA) ---
+
+_T0 = datetime(2026, 8, 1, 4, 0, tzinfo=UTC)
+_T1 = datetime(2026, 8, 2, 4, 0, tzinfo=UTC)
+_T2_DRIFT = datetime(2026, 8, 3, 4, 0, tzinfo=UTC)
+_T3 = datetime(2026, 8, 4, 4, 0, tzinfo=UTC)
+
+
+def _freeze_now(monkeypatch: pytest.MonkeyPatch, moment: datetime) -> None:
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return moment
+
+    monkeypatch.setattr(orchestrator_module, "datetime", _Frozen)
+
+
+def _provenance_corpus(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Settings, Path]:
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-17410217-000.xml", _minimal_law_html("17410217-000", "Vimpel"))],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    _freeze_now(monkeypatch, _T0)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+    return Settings(data_dir=data_dir, lovverk_repo_path=corpus), corpus
+
+
+def _file_retrieved_at_line(corpus: Path) -> str:
+    md = (corpus / "lover" / "vimpel.md").read_text(encoding="utf-8")
+    return next(line for line in md.splitlines() if line.startswith("retrieved_at:"))
+
+
+def test_unchanged_sync_preserves_both_observation_timestamps(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, corpus = _provenance_corpus(tmp_path, httpx_mock, monkeypatch)
+    line_before = _file_retrieved_at_line(corpus)
+    bytes_before = (corpus / "lover" / "vimpel.md").read_bytes()
+
+    _freeze_now(monkeypatch, _T1)
+    _register_lovdata_mocks(
+        httpx_mock,
+        tmp_path / "tarballs" / "lover.tar.bz2",
+        tmp_path / "tarballs" / "forskrifter.tar.bz2",
+    )
+    report = run_sync(settings)
+
+    assert report.changed_count == 0
+    assert (corpus / "lover" / "vimpel.md").read_bytes() == bytes_before
+    assert _file_retrieved_at_line(corpus) == line_before
+    record = read_manifest(corpus / "manifest.json").documents["lov-17410217-000"]
+    assert record.last_seen == _T0
+
+
+def test_content_update_advances_both_observation_timestamps(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, corpus = _provenance_corpus(tmp_path, httpx_mock, monkeypatch)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-17410217-000.xml", _minimal_law_html("17410217-000", "Vimpel endret"))],
+    )
+    _freeze_now(monkeypatch, _T1)
+    _register_lovdata_mocks(
+        httpx_mock,
+        lover_tar,
+        tmp_path / "tarballs" / "forskrifter.tar.bz2",
+    )
+    report = run_sync(settings)
+
+    assert report.changed_count == 1
+    md_path = corpus / "lover" / "vimpel-endret.md"
+    assert f'retrieved_at: "{_T1.isoformat()}"' in md_path.read_text(encoding="utf-8")
+    record = read_manifest(corpus / "manifest.json").documents["lov-17410217-000"]
+    assert record.last_seen == _T1
+
+
+def test_renderer_only_migration_preserves_observation_on_both_sides(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The migration rewrites the file for the renderer fix ONLY: retrieved_at
+    stays at the source-observation time in the file AND the manifest — no
+    timestamp-only churn, no re-manufactured drift."""
+    settings, corpus = _provenance_corpus(tmp_path, httpx_mock, monkeypatch)
+    line_before = _file_retrieved_at_line(corpus)
+
+    real_render = orchestrator_module.render_full_document
+    monkeypatch.setattr(
+        orchestrator_module,
+        "render_full_document",
+        lambda xml, ctx: real_render(xml, ctx) + "\nRenderer fix output.\n",
+    )
+    monkeypatch.setattr(orchestrator_module, "RENDERER_VERSION", RENDERER_VERSION + 1)
+    _freeze_now(monkeypatch, _T1)
+    _register_lovdata_mocks(
+        httpx_mock,
+        tmp_path / "tarballs" / "lover.tar.bz2",
+        tmp_path / "tarballs" / "forskrifter.tar.bz2",
+    )
+    report = run_sync(settings)
+
+    assert report.rerendered_count == 1
+    md = (corpus / "lover" / "vimpel.md").read_text(encoding="utf-8")
+    assert "Renderer fix output." in md
+    assert _file_retrieved_at_line(corpus) == line_before
+    record = read_manifest(corpus / "manifest.json").documents["lov-17410217-000"]
+    assert record.last_seen == _T0
+    assert record.renderer_version == RENDERER_VERSION + 1
+
+
+def test_drifted_last_seen_recovers_from_published_rendering(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """File says T0, a historically drifted manifest says T2: the file is the
+    authoritative recovery value. The byte-identical re-render is skipped and
+    the manifest reconciles to T0 — T2 is never trusted as a seed."""
+    settings, corpus = _provenance_corpus(tmp_path, httpx_mock, monkeypatch)
+    bytes_before = (corpus / "lover" / "vimpel.md").read_bytes()
+
+    manifest_path = corpus / "manifest.json"
+    drifted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    drifted["documents"]["lov-17410217-000"]["last_seen"] = _T2_DRIFT.isoformat()
+    manifest_path.write_text(json.dumps(drifted), encoding="utf-8")
+    subprocess.run(["git", "add", "manifest.json"], cwd=corpus, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "test: simulate historical last_seen drift"],
+        cwd=corpus,
+        check=True,
+    )
+
+    monkeypatch.setattr(orchestrator_module, "RENDERER_VERSION", RENDERER_VERSION + 1)
+    _freeze_now(monkeypatch, _T3)
+    _register_lovdata_mocks(
+        httpx_mock,
+        tmp_path / "tarballs" / "lover.tar.bz2",
+        tmp_path / "tarballs" / "forskrifter.tar.bz2",
+    )
+    report = run_sync(settings)
+
+    assert report.changed_count == 0
+    assert (corpus / "lover" / "vimpel.md").read_bytes() == bytes_before
+    record = read_manifest(manifest_path).documents["lov-17410217-000"]
+    assert record.last_seen == _T0
+    assert record.renderer_version == RENDERER_VERSION + 1
+
+
+def test_repeated_renderer_migrations_reach_a_fixpoint(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings, corpus = _provenance_corpus(tmp_path, httpx_mock, monkeypatch)
+
+    real_render = orchestrator_module.render_full_document
+    monkeypatch.setattr(
+        orchestrator_module,
+        "render_full_document",
+        lambda xml, ctx: real_render(xml, ctx) + "\nRenderer fix output.\n",
+    )
+    monkeypatch.setattr(orchestrator_module, "RENDERER_VERSION", RENDERER_VERSION + 1)
+    _freeze_now(monkeypatch, _T1)
+    _register_lovdata_mocks(
+        httpx_mock,
+        tmp_path / "tarballs" / "lover.tar.bz2",
+        tmp_path / "tarballs" / "forskrifter.tar.bz2",
+    )
+    run_sync(settings)
+    bytes_after_first = (corpus / "lover" / "vimpel.md").read_bytes()
+    manifest_after_first = (corpus / "manifest.json").read_bytes()
+
+    _freeze_now(monkeypatch, _T3)
+    _register_lovdata_mocks(
+        httpx_mock,
+        tmp_path / "tarballs" / "lover.tar.bz2",
+        tmp_path / "tarballs" / "forskrifter.tar.bz2",
+    )
+    report = run_sync(settings)
+
+    assert report.changed_count == 0
+    assert report.rerendered_count == 0
+    assert (corpus / "lover" / "vimpel.md").read_bytes() == bytes_after_first
+    assert (corpus / "manifest.json").read_bytes() == manifest_after_first
