@@ -177,9 +177,13 @@ a renderer-only change does not.
 **A decision, not a task. Costs an afternoon.**
 
 The distribution note of 2026-07-14 made the engine private for a commercial
-pivot. The decision of 2026-07-22 (`analysis/llm-infra/06-decision-free.md`)
-reversed the commercial part — but *free* and *open source* are not the same
-thing, and the README still states the engine is private.
+pivot. The decision of 2026-07-22 (`analysis/llm-infra/06-decision-free.md` —
+private working notes, not in this repo) reversed the commercial part — but
+*free* and *open source* are not the same thing. *(Update 2026-08-02: the
+README, `docs/mcp.md`, `docs/roadmap.md` and `docs/decisions.md` §15 now
+carry the open-infrastructure framing; the stale "engine is private" claims
+are gone. The repository itself is still PRIVATE pending the rest of this
+phase.)*
 
 Everything after this phase is invisible while the engine stays closed.
 
@@ -389,4 +393,13 @@ rather than followed.
   unbounded third-party spend. Existing quotas are a runaway-loop brake, not a
   budget control. Needs a hard cap, or degradation to `search_body` when
   exhausted, before Phase 1.
+  *(Classification 2026-08-02: making the source repository public adds no
+  spend surface by itself — the hosted endpoint requires a credential on every
+  request and self-hosters bring their own OpenAI key. The exposure scales
+  with the hosted credential population: bounded while tokens are
+  operator-issued, unbounded only if AuthKit self-registration is left open.
+  So the cap/degradation is recommended operational hardening for the hosted
+  service — it gates expanding hosted access, not repo visibility. Whether
+  the original "before Phase 1" binding stands or is waived is an owner
+  decision.)*
 - NLLP 2027 and NoDaLiDa 2027 dates — not announced at time of writing.

@@ -1,6 +1,6 @@
 # Releasing `lovspor` to PyPI
 
-> **Suspended 2026-07-14 — PyPI publishing withdrawn.** With the commercial pivot to a hosted MCP service, the engine went private and releases `0.2.0`–`0.3.0` were removed from PyPI. This runbook is retained as historical record and for a possible future private index; do **not** publish new public PyPI releases under the current strategy. See [`roadmap.md`](roadmap.md).
+> **Suspended 2026-07-14 — PyPI publishing withdrawn.** With the commercial pivot to a hosted MCP service, the engine went private and releases `0.2.0`–`0.3.0` were removed from PyPI. *(Update 2026-08-02: the commercial strategy behind that suspension was superseded on 2026-07-30 by the open-infrastructure decision — see [`decisions.md`](decisions.md) §15. Whether and when PyPI publishing resumes is an open project-owner decision; until it is made, do not publish new PyPI releases. Note the project page currently returns 404, so the Trusted Publishing registration likely needs to be redone as a pending publisher before any re-release.)* This runbook is retained as the working procedure for that decision. See [`roadmap.md`](roadmap.md).
 
 `lovspor` publishes to [PyPI](https://pypi.org/project/lovspor/) via **Trusted
 Publishing** (OpenID Connect). GitHub Actions mints a short-lived OIDC token that

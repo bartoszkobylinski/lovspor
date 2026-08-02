@@ -2,7 +2,7 @@
 
 `lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets sixteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
-> **Distribution changed 2026-07-14 (commercial pivot).** The engine is now private and the PyPI releases (`0.2.0`–`0.3.0`) were withdrawn. A hosted Lovspor MCP endpoint (Sprint 12) will be the supported consumer path; until it ships, run the server locally from a checkout of this repo via `uv run --project /path/to/lovspor lovspor …`. Read that form wherever the commands below say `uvx lovspor …`. See [`roadmap.md`](roadmap.md).
+> **Distribution (updated 2026-08-02).** The engine is MIT-licensed open infrastructure; the repository is temporarily private while publication-readiness work completes (see [`decisions.md`](decisions.md) §1). The PyPI releases (`0.2.0`–`0.3.0`) were withdrawn in July 2026 and have not returned, so run the server locally from a checkout via `uv run --project /path/to/lovspor lovspor …` — read that form wherever the commands below say `uvx lovspor …`. Local stdio is a first-class, fully supported path. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
 
 Sprint 9 added a four-layer grounding-and-verification path for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
@@ -12,7 +12,7 @@ This document covers the full setup: prerequisites, configuration for two common
 
 ## At a glance
 
-- **Transport:** stdio by default (`lovspor mcp`) — each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note. A Streamable HTTP transport (`lovspor mcp-http`) also exists for the forthcoming hosted service; it is **not** production-ready — see [§ Streamable HTTP transport](#streamable-http-transport).
+- **Transport:** stdio by default (`lovspor mcp`) — each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note. A Streamable HTTP transport (`lovspor mcp-http`) serves the hosted instance, live since 2026-07-18 — see [§ Streamable HTTP transport](#streamable-http-transport).
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user re-runs `lovspor fetch-corpus` (which fast-forwards the cache) to pick up updates.
 - **Tools:** sixteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the sixteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history. They answer corpus history — what the corpus contained at the end of a UTC date — never which provisions were legally in force on that date (ADR-0002; see the temporal contract under `get_law_at`).
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
@@ -21,9 +21,9 @@ This document covers the full setup: prerequisites, configuration for two common
 
 ## Streamable HTTP transport
 
-`lovspor mcp-http` serves the same sixteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs (Sprint 12 item 1), in closed beta:
+`lovspor mcp-http` serves the same sixteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs:
 
-> ✅ **Live since 2026-07-18 at `https://lovspor.bartoszkobylinski.com/mcp`.** TLS is terminated by Caddy (automatic Let's Encrypt) on a dedicated DigitalOcean droplet provisioned from `deploy/digitalocean/`. Access is by hand-issued bearer credential (`lovspor tokens issue`), with per-credential quotas and rate limiting enforced. Self-service OAuth landed in the code on 2026-07-21 but **is not enabled on that instance** — it runs in opaque-token mode, so `/.well-known/oauth-protected-resource/mcp` returns 404 there.
+> ✅ **Live since 2026-07-18 at `https://lovspor.bartoszkobylinski.com/mcp`.** TLS is terminated by Caddy (automatic Let's Encrypt) on a dedicated DigitalOcean droplet provisioned from `deploy/digitalocean/`. **Every request requires authentication** — anonymous and invalid-token calls return 401. Both credential modes are active there (verified against production 2026-08-02): operator-issued opaque bearer tokens (`lovspor tokens issue`), and WorkOS AuthKit OAuth — the AuthKit pair is configured, so `/.well-known/oauth-protected-resource/mcp` serves RFC 9728 discovery. Access provisioning is operator-managed; whether AuthKit accepts new self-service sign-ups at any given time is an operator-side WorkOS setting, not a commitment of these docs. Per-credential quotas and rate limiting are enforced in both modes.
 >
 > ⚠️ **The app itself still speaks plaintext HTTP and binds `127.0.0.1` by design** — lovspor never terminates TLS, a proxy in front of it does. If you run `mcp-http` yourself, keep it on localhost behind a TLS-terminating proxy (see `deploy/digitalocean/README.md`): a bearer token on an exposed port travels in the clear and can be read and replayed.
 
@@ -101,9 +101,9 @@ Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_
    git clone https://github.com/bartoszkobylinski/lovverk.git ~/lovverk
    ```
 
-2. **`uv` installed locally + a checkout of this repo** — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server from your checkout via `uv run --project /path/to/lovspor lovspor`. The engine is private and no longer on PyPI, so there is no on-demand `uvx` install.
+2. **`uv` installed locally + a checkout of this repo** — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server from your checkout via `uv run --project /path/to/lovspor lovspor`. The engine is not currently on PyPI, so there is no on-demand `uvx` install.
 
-   The former PyPI / `pip install lovspor` path was retired with the 2026-07-14 pivot — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
+   The former PyPI / `pip install lovspor` path was retired in July 2026 (historical) — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
 
 3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fifteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
@@ -744,7 +744,7 @@ The sixteen tools compose: an assistant can stitch together a research workflow 
 
 ## Running from a local checkout
 
-The engine is private and its earlier PyPI releases (`0.2.0`–`0.3.0`) were withdrawn on 2026-07-14 (see the distribution note at the top). Until the hosted Lovspor MCP endpoint ships (Sprint 12), the server runs from a clone of this repo. Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache:
+The earlier PyPI releases (`0.2.0`–`0.3.0`) were withdrawn on 2026-07-14 and have not returned (see the distribution note at the top), so the server runs from a clone of this repo. This is a first-class supported path — the hosted endpoint (live since 2026-07-18) is an optional alternative, not a replacement. Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache:
 
 ```jsonc
 {
