@@ -4,7 +4,7 @@ Single source of truth for why this project looks the way it does. Every non-obv
 
 Update this file whenever a new decision lands.
 
-Last updated: 2026-07-12
+Last updated: 2026-08-02
 
 ---
 
@@ -15,6 +15,21 @@ Last updated: 2026-07-12
 - Both public on GitHub under `bartoszkobylinski/`.
 
 Two repos because two audiences: engine repo is for contributors and portfolio, corpus repo is for consumers (AI/RAG, researchers) who want clean data without code noise.
+
+> **Current state (2026-08-02).** "Both public" is the original, undated
+> founding statement and no longer describes reality: the July 2026
+> commercial pivot took `lovspor` private (see the Sprint 12 note and the
+> `uvx` supersession in §Operational gotchas), and visibility was measured
+> asymmetric on 2026-07-30 — `lovspor` **PRIVATE**, `lovverk` **PUBLIC**
+> (ADR-0004 evidence, fact 10). The closed commercial-product direction was
+> itself **superseded on 2026-07-30** by the accepted ADR-0004 ruling: the
+> project is **open infrastructure** — engine public under MIT, corpus
+> public under the existing NLOD 2.0 + CC0 boundary, the core independently
+> runnable; a hosted endpoint may use auth/quotas, and optional paid
+> hosting/support/integration may exist without crippling the open version.
+> Re-publishing the engine is tracked in `docs/publication-plan.md`; until
+> that lands, the two-audience rationale above holds but the "both public"
+> claim is direction, not state.
 
 ## 2. Purpose
 
@@ -493,6 +508,13 @@ A four-part code review (pipeline, rendering, ops, embeddings/MCP) was run over 
 
 First item of the [commercial pivot](roadmap.md): expose the existing sixteen read-only tools over the MCP Streamable HTTP transport. No tool logic changed. stdio stays the development path.
 
+> **Direction superseded 2026-07-30 (ADR-0004).** The commercial pivot this
+> sprint opened — a closed, paid Legal-AI product on a private engine — was
+> rejected by the accepted ADR-0004 open-infrastructure ruling. The work
+> itself stands unchanged: the HTTP transport now serves the hosted MCP
+> endpoint under the open model, where auth/quotas are operational
+> controls, not a business boundary. Historical record below is intact.
+
 **The SDK dispatch finding that shaped everything.** mcp 1.27.0 calls a **synchronous** tool handler *inline on its single event-loop thread* (`func_metadata.call_fn_with_arg_validation` → `fn(**args)`; the only `anyio.to_thread` in the fastmcp package is in the resource path, never tools). The lowlevel server does start each request as its own task, but a blocking sync body never yields, so concurrent tool calls **serialize**. Consequences, both counter-intuitive:
 - On stdio this is harmless and the reader needed no locking, which is why `CorpusReader` was correct as written despite documenting itself as single-session.
 - On HTTP it means one slow call (cold `search_body`, a `semantic_search` embedding round-trip, a `git` subprocess) stalls *every* client. Verified before writing any lock — a lock alone would have guarded a race that could not yet occur.
@@ -603,7 +625,7 @@ Open items (current):
 - **Sprint 5 partial-failure recovery** — `_needs_sprint5_history_migration` only checks for the presence of `<dataset>/history/`, not that every current doc has a populated history file. A migration that crashes mid-bulk-write would not auto-retry on the next sync. Acceptable for a one-time event; recovery is manual rerun or a strengthened detector. See §12d.
 - **Sprint-5 mixed-bulk-commit ambiguity** — `_classify_bulk_sync` cannot distinguish a deleted file from an in-place shrunken update inside the same bulk commit using `--numstat` alone. Deletes mixed with updates are classified as updates. Bounded to legacy bulk-mode commits (post-Sprint-4 default is per-doc, never goes through this branch). Full fix needs `--name-status` parsing; deferred unless real lovverk history shows the misclassification mattering.
 - **Orchestrator branch coverage at 97%** — Sprint 5 PR-B added several new branches (commit-mode dispatch, history follow-up, Sprint 5 migration trigger) without proportional integration coverage. Codex flagged but did not classify as a bug.
-- **Stale `uvx` cache after lovspor pushes (operational gotcha)** — **Superseded 2026-07-14:** the commercial pivot withdrew the PyPI releases and took the engine private, so the *prefer `uvx lovspor` / `pip install lovspor`* advice no longer holds — there is no PyPI package to prefer. The current path is a local checkout run via `uv run --project /path/to/lovspor lovspor …` (see [`roadmap.md`](roadmap.md)), so the git-source cache gotcha is again the relevant failure mode. *Original note (historical): Largely obsolete since the 0.2.0 PyPI release: prefer `uvx lovspor` / `pip install lovspor`, which are versioned and immutable. The gotcha below applies only to legacy `--from git+...` installs.* Adopters who configured the MCP server via `uvx --from "git+https://github.com/.../lovspor.git" lovspor mcp ...` may continue to see an older lovspor build after the upstream main moves, because `uvx`'s git-source cache does not refresh aggressively. Diagnosis: call `corpus_status()` and check whether the `schema_compatible` field is present. If absent → cached pre-PR-#29 build is in play. Fix: `uvx --refresh --from "git+..." ...` once (or `uv cache clean lovspor`) and restart the MCP client. Worth a one-line note in `docs/mcp.md` Troubleshooting if a real adopter reports it.
+- **Stale `uvx` cache after lovspor pushes (operational gotcha)** — **Superseded 2026-07-14:** the commercial pivot withdrew the PyPI releases and took the engine private, so the *prefer `uvx lovspor` / `pip install lovspor`* advice no longer holds — there is no PyPI package to prefer. The current path is a local checkout run via `uv run --project /path/to/lovspor lovspor …` (see [`roadmap.md`](roadmap.md)), so the git-source cache gotcha is again the relevant failure mode. *(Direction note 2026-08-02: the private-engine state this supersession describes is itself historical in direction — ADR-0004's accepted open-infrastructure ruling re-opens the engine; the local-checkout advice stays current until that publication lands, see `docs/publication-plan.md`.)* *Original note (historical): Largely obsolete since the 0.2.0 PyPI release: prefer `uvx lovspor` / `pip install lovspor`, which are versioned and immutable. The gotcha below applies only to legacy `--from git+...` installs.* Adopters who configured the MCP server via `uvx --from "git+https://github.com/.../lovspor.git" lovspor mcp ...` may continue to see an older lovspor build after the upstream main moves, because `uvx`'s git-source cache does not refresh aggressively. Diagnosis: call `corpus_status()` and check whether the `schema_compatible` field is present. If absent → cached pre-PR-#29 build is in play. Fix: `uvx --refresh --from "git+..." ...` once (or `uv cache clean lovspor`) and restart the MCP client. Worth a one-line note in `docs/mcp.md` Troubleshooting if a real adopter reports it.
 - **PR-merge follow-up branch detection** — discovered during PR #29: when a PR has Codex-reviewed follow-up commits after the initial "No findings", a squash-merge of the PR deletes the source branch on origin; any subsequent push to the same branch name silently creates a new orphan branch and re-triggers Codex without ever connecting back to a PR. We almost shipped Sprint 7 with the schema-detection invisible because of this. Mitigation: after a squash-merge, **always** verify a follow-up branch's existence via `git ls-remote origin <branch>` before assuming a re-Codex-pass means the work is on main. Worth automating into the PR-merge skill flow.
 - **Change-detection is blind to inter-element whitespace the renderer treats as significant** — `hash_normalized_xml` parses with `remove_blank_text=True`, so an upstream change that alters ONLY whitespace-only nodes between elements (`<strong>a</strong><em>b</em>` → `<strong>a</strong> <em>b</em>`) yields the same hash and triggers no re-render. The renderer parses with `remove_blank_text=False` (PR #79) and DOES treat that inline space as significant, so the rendered corpus can drift from upstream for such a change. **Deliberately not fixed** (decided 2026-07-05): making the hash whitespace-sensitive flips it on every block-level indentation reflow Lovdata emits (`<root><a>` vs `<root>\n  <a>`), forcing a corpus-wide re-render — a direct violation of the conservative-churn posture (§4). A precise fix would have to replicate the renderer's inline-vs-block whitespace model inside the hash path (fragile, could still churn). The gap is bounded and rare — real legal amendments change text or structure, never inline spacing alone — and it heals forward on the doc's next content change. Verified empirically: strip=True collapses both the inline-space diff and the indentation reflow; strip=False separates them but re-hashes on indentation. Revisit only if a real upstream diff shows a whitespace-only rendering change being dropped.
 
