@@ -78,6 +78,7 @@ from lovspor.headings import (
     ANY_HEADING,
     BLOCK_ID_PREFIX,
     SECTION_HEADING,
+    SECTION_ID,
     block_id,
     canonical_section_id,
     is_block_id,
@@ -109,14 +110,41 @@ docs/mcp.md if changed."""
 
 _GIT_HEAD_FIELDS = 3  # sha + ISO date + subject from the --format string
 
-_CITATION_SECTION_ID = re.compile(r"§\s*([\d-]+[a-z]?)")
-"""Permissive matcher for the ``§ N-M`` part of a citation string.
+_CITATION_SECTION_ID = re.compile(rf"§\s*({SECTION_ID.pattern})")
+"""Matcher for the ``§ <id>`` part of a citation string, built on the SAME
+grammar the heading parsers use (:data:`lovspor.headings.SECTION_ID`).
 
 Allows whitespace between ``§`` and the id; matches anywhere in the
 input. Citations occur in many forms in real AI prompts —
 ``§ 5-12 skatteloven``, ``skatteloven § 5-12``, ``§ 5-12 i skatteloven``,
 ``§5-12``, etc. — so the parser doesn't pin a fixed order; it extracts
-each component independently from wherever it appears."""
+each component independently from wherever it appears.
+
+The previous private pattern (``[\\d-]+[a-z]?``) was NARROWER than the
+section grammar, and the gap was not a miss but a mis-hit: ``§ 9 a``
+truncated to ``9`` and ``§ 17aa`` to ``17a``, so the validator could
+confirm a DIFFERENT section than the one cited — an anti-hallucination
+guard hallucinating. Sharing the grammar removes the divergence; what
+the heading parsers can address, the citation parser can extract.
+
+The shared grammar is anchored-use-only because of its spaced-letter
+suffix (``§ 8-7 a``): unanchored, ``§ 12 i skatteloven`` reads as id
+``12 i``. Here that ambiguity is resolved against the cited act itself
+— see ``_resolve_cited_section`` — instead of by truncating the
+pattern, because the corpus really does contain both readings
+(15 sections carry a genuine `` i`` suffix)."""
+
+_CITATION_PROSE_TAIL = re.compile(r"\s+i$")
+"""The one spaced-letter tail that is also a Norwegian preposition.
+
+``§ 12 i skatteloven`` means "§ 12 OF the tax act" — but ``§ 33 i``
+is also a real section id shape (15 in the corpus). The tail is
+therefore dropped only AFTER the full id failed to resolve in the
+cited act (``_resolve_cited_section``); every other letter tail
+(``§ 9 a``) fails closed rather than validating the shorter
+neighbour. ``i`` is the only single-letter Norwegian word that
+plausibly follows a section number in a citation, so the special
+case stays exactly this narrow."""
 
 _SLUG_CHARACTER = re.compile(r"[a-z0-9æøåäöü-]")
 """Single character that could be part of a lovspor-rendered slug.
@@ -623,7 +651,25 @@ class CorpusReader:
         known. ``§``-only citations are ambiguous (many acts have
         ``§ 5-12``) — flagged invalid with a reason. Unparseable
         citations likewise return invalid + reason.
+
+        The section id is read at its LONGEST and resolved against the
+        cited act (``_resolve_cited_section``): an id the act does not
+        contain fails closed instead of being truncated to a shorter
+        neighbour that happens to exist. ``§§`` range citations are
+        refused outright — the grammar does not model ranges, and
+        validating one endpoint of a range as if it were the citation
+        would confirm something the caller never cited.
         """
+        if "§§" in citation:
+            return {
+                "valid": False,
+                "slug": None,
+                "section_id": None,
+                "heading": None,
+                "reason": (
+                    "range citations (§§) are not supported; cite a single § section instead"
+                ),
+            }
         section_match = _CITATION_SECTION_ID.search(citation)
         section_id = section_match.group(1) if section_match else None
 
@@ -682,23 +728,65 @@ class CorpusReader:
         # Both slug and section_id present — delegate to get_section
         # for the section-existence check. Reuses its body-index cache
         # and natural-order error message.
-        try:
-            section = self.get_section(matched_slug, section_id)
-        except CorpusNotFoundError as exc:
+        resolved_id, section, reason = self._resolve_cited_section(matched_slug, section_id)
+        if section is None:
             return {
                 "valid": False,
                 "slug": matched_slug,
-                "section_id": section_id,
+                "section_id": resolved_id,
                 "heading": None,
-                "reason": str(exc),
+                "reason": reason,
             }
         return {
             "valid": True,
             "slug": matched_slug,
-            "section_id": section_id,
+            "section_id": resolved_id,
             "heading": section["heading"],
             "reason": None,
         }
+
+    def _resolve_cited_section(
+        self,
+        slug: str,
+        section_id: str,
+    ) -> tuple[str, dict[str, Any] | None, str | None]:
+        """Resolve a citation-extracted id against the cited act itself.
+
+        The extracted candidate is the LONGEST read of the citation
+        (``§ 12 i skatteloven`` extracts ``12 i``), because the corpus
+        contains genuine `` i``-suffixed sections and truncating up front
+        would validate a different section than the one cited. Order:
+
+        1. The full candidate resolves — done. ``§ 33 i`` finds § 33 i.
+        2. It does not, and its tail is the preposition ``i`` — retry
+           without the tail: ``§ 12 i skatteloven`` falls back to § 12.
+        3. Any other unresolved candidate fails closed with get_section's
+           available-sections message. ``§ 9 a`` in an act with only a
+           § 9 is NOT reduced to § 9 — citing a section that does not
+           exist must say so, never confirm a shorter neighbour.
+
+        A duplicate id (``CorpusAmbiguousSectionError`` — the act really
+        has several sections sharing it) is invalid-with-reason, not an
+        exception: ``validate_citation`` promises a result dict, and the
+        citation names a real id without singling out one section, the
+        same failure class as a ``§``-only citation. No tail strip on
+        that path — the id exists; re-reading it would change what the
+        caller cited.
+        """
+        try:
+            return section_id, self.get_section(slug, section_id), None
+        except CorpusAmbiguousSectionError as exc:
+            return section_id, None, str(exc)
+        except CorpusNotFoundError as exc:
+            stripped = _CITATION_PROSE_TAIL.sub("", section_id)
+            if stripped == section_id:
+                return section_id, None, str(exc)
+            try:
+                return stripped, self.get_section(slug, stripped), None
+            except CorpusAmbiguousSectionError as ambiguous:
+                return stripped, None, str(ambiguous)
+            except CorpusNotFoundError:
+                return stripped, None, str(exc)
 
     def get_law_history(self, slug: str) -> dict[str, Any]:
         """Return the parsed ``history/<slug>.json`` for ``slug``."""
