@@ -390,6 +390,64 @@ def test_real_corpus_heading_shapes_produce_no_finding(tmp_path: Path, heading: 
     assert report.findings == ()
 
 
+def test_a_range_heading_is_a_distinct_advisory_finding(tmp_path: Path) -> None:
+    """RCA class C: the single-``§`` prefilter never even looked at ``§§``
+    range headings, so 11 of them across 7 documents were invisible to the
+    audit — not flagged, not counted, absent from every finding total. A
+    blind prefilter is worse than an unparsed heading: the unparsed one is
+    at least a visible line item. The range gets its own kind so the backlog
+    it represents stays separately countable."""
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "fiskerpensjon.md").write_text(
+        "# Forskrift\n## §§ 6-8. Opphevet.\n",
+        encoding="utf-8",
+    )
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("fiskerpensjon")))
+
+    assert _kinds(report.findings) == [
+        ("unsupported_section_range", "lover/fiskerpensjon.md"),
+    ]
+    assert report.findings[0].detail == "line 2: ## §§ 6-8. Opphevet."
+    assert report.integrity_findings == ()
+    assert [f.kind for f in report.advisory_findings] == ["unsupported_section_range"]
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        # every structural form the 2026-08-02 corpus scan found (11 headings,
+        # 7 documents): hyphenated, spaced en-dash, and the word "til"
+        "## §§ 6-8. Opphevet.",
+        "### §§ 5-9. (Opphevet ved forskrift 17 sep 1993 nr. 857.)",
+        "### §§ 17 – 18. (Opphevet)",  # noqa: RUF001 — the corpus really uses EN DASH here
+        "### §§ 14 til 91. (Endrer prosessuelle bestemmelser i eldre lover.)",
+    ],
+)
+def test_every_corpus_range_form_is_flagged(tmp_path: Path, heading: str) -> None:
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "gammel-lov.md").write_text(f"# Lov\n{heading}\n", encoding="utf-8")
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("gammel-lov")))
+
+    assert [f.kind for f in report.findings] == ["unsupported_section_range"]
+
+
+def test_range_and_unparsed_headings_stay_separate_kinds(tmp_path: Path) -> None:
+    """One scan, two kinds. Blending ranges into the unparsed count would
+    misstate both backlogs; the split is what makes each independently
+    actionable."""
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "blandet.md").write_text(
+        "# Lov\n### § ø-1. Ukjent form\n### §§ 7 – 9. (Opphevet)\n",  # noqa: RUF001 — real EN DASH form
+        encoding="utf-8",
+    )
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("blandet")))
+
+    assert sorted(f.kind for f in report.findings) == [
+        "unparsed_section_heading",
+        "unsupported_section_range",
+    ]
+
+
 # --- duplicate_path_ownership: one path, one owner, in both directions ---
 
 
@@ -576,6 +634,7 @@ def test_the_severity_registers_are_disjoint_and_cover_every_emitted_kind() -> N
         "stale_render",
         "tombstoned_but_present",
         "unparsed_section_heading",
+        "unsupported_section_range",
     }
 
     assert not INTEGRITY_KINDS & ADVISORY_KINDS
