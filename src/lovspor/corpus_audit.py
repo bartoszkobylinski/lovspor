@@ -27,17 +27,21 @@ from lovspor.sync.document_io import dataset_dir
 _EMBEDDINGS_SUBDIR = "embeddings"
 _DATASET_SUBDIRS = ("lover", "forskrifter")
 
-ADVISORY_KINDS = frozenset({"unparsed_section_heading", "malformed_language"})
+ADVISORY_KINDS = frozenset(
+    {"unparsed_section_heading", "unsupported_section_range", "malformed_language"},
+)
 """Findings that are registered follow-up work, not corpus corruption.
 
 An unparsed heading means a section the grammar cannot reach yet — real,
 worth fixing, and 18 of them predate the CI gate. Exiting non-zero on them
 would keep that gate permanently red, and a gate that is always red is one
 nobody reads: exactly how the 48 orphans of 2026-05/07 stayed invisible.
-Every kind NOT in this set is an INTEGRITY finding — the corpus contradicts
-its own manifest — and blocks by default. Unknown kinds therefore classify
-as integrity: a new check someone forgets to register here fails closed
-instead of passing silently."""
+``unsupported_section_range`` is the same category: a genuine ``§§ 6-8``
+range heading is valid law the grammar does not model yet, not a corpus
+that contradicts its manifest. Every kind NOT in this set is an INTEGRITY
+finding — the corpus contradicts its own manifest — and blocks by default.
+Unknown kinds therefore classify as integrity: a new check someone forgets
+to register here fails closed instead of passing silently."""
 
 INTEGRITY_KINDS = frozenset(
     {
@@ -64,13 +68,26 @@ _FRONTMATTER_SCAN_LINES = 40
 frontmatter field by model declaration order, so this is generous headroom —
 the point is that the audit never streams whole acts to compare one field."""
 
-_LOOKS_LIKE_SECTION_HEADING = re.compile(r"^#{2,6} § ")
+_LOOKS_LIKE_SECTION_HEADING = re.compile(r"^#{2,6} §{1,2} ")
 """Deliberately looser than :data:`lovspor.headings.SECTION_HEADING`.
 
 The audit compares the two: a line any reader would call a section
 heading, that the real grammar cannot parse, is the finding. Keeping
 this pattern independent is the point — deriving it from the grammar
-under test would make the check vacuous."""
+under test would make the check vacuous.
+
+``§{1,2}``, not ``§``: Lovdata collapses a run of repealed sections
+into one range heading (``## §§ 6-8. Opphevet.``), and the original
+single-``§`` prefilter skipped those lines entirely — RCA class C, an
+audit blind spot rather than a parser gap. A blind prefilter is the
+one failure mode this module cannot afford: a heading it never looks
+at can neither be counted nor registered as follow-up work."""
+
+_RANGE_HEADING = re.compile(r"^#{2,6} §§ ")
+"""A ``§§`` range heading. Real Norwegian legal text, faithfully
+rendered, that the section grammar deliberately does not model yet —
+distinct from :data:`_LOOKS_LIKE_SECTION_HEADING` misses so the two
+kinds of follow-up work stay separately countable."""
 
 # `history/<slug>.{json,md}` is deliberately NOT audited for orphans, and this is
 # not an oversight. A correct removal deletes the act's Markdown and its embedding
@@ -439,6 +456,16 @@ def _unparsed_heading_findings(corpus_root: Path) -> list[AuditFinding]:
     the check that turns that into a visible finding on the next audit
     rather than a silent hole discovered by a user who asked for a section
     that was there all along.
+
+    Two kinds come out of the same scan, and the split is the point:
+
+    * ``unsupported_section_range`` — a ``§§`` range heading
+      (``## §§ 6-8. Opphevet.``): valid Lovdata text the grammar
+      deliberately does not model yet. Counted separately so the range
+      backlog is visible on every audit instead of blended into (or, as
+      before this check, entirely absent from) the unparsed count.
+    * ``unparsed_section_heading`` — a singular ``§`` heading the grammar
+      cannot read: either a real defect or a shape awaiting support.
     """
     findings: list[AuditFinding] = []
     for subdir in _DATASET_SUBDIRS:
@@ -446,9 +473,14 @@ def _unparsed_heading_findings(corpus_root: Path) -> list[AuditFinding]:
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 if not _LOOKS_LIKE_SECTION_HEADING.match(line) or SECTION_HEADING.match(line):
                     continue
+                kind = (
+                    "unsupported_section_range"
+                    if _RANGE_HEADING.match(line)
+                    else "unparsed_section_heading"
+                )
                 findings.append(
                     AuditFinding(
-                        kind="unparsed_section_heading",
+                        kind=kind,
                         path=_relative(corpus_root, path),
                         detail=f"line {number}: {line.strip()[:120]}",
                     ),
