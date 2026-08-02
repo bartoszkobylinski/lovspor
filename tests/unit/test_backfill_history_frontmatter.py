@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 from lovspor.history import (
     HistoryEvent,
     HistoryRecord,
@@ -224,6 +226,78 @@ def _run_main(corpus: Path, *, execute: bool) -> int:
     finally:
         sys.argv = old_argv
     return rc
+
+
+def test_a_leading_delimiter_without_the_contract_aborts(tmp_path: Path) -> None:
+    """Codex (PR #183): a legacy body that happens to open with ``---`` was
+    silently counted as already-current. Current means a CLOSED frontmatter
+    block carrying the history type and the NLOD attribution; anything else
+    that opens with the delimiter is an anomaly, never a skip."""
+    _seed_history(tmp_path, "healthy")
+    weird = tmp_path / "lover" / "history" / "weird.md"
+    weird.write_text("---\n# weird — Change history\n\nlegacy body\n", encoding="utf-8")
+    (tmp_path / "lover" / "history" / "weird.json").write_text(
+        _canonical_json(_record("weird")),
+        encoding="utf-8",
+    )
+    _seed_both_dirs(tmp_path)
+
+    plan = backfill.build_plan(tmp_path)
+    assert any(a.startswith("UNRECOGNIZED_FORMAT") for a in plan.anomalies)
+
+    rc = _run_main(tmp_path, execute=True)
+    assert rc == 1
+    assert not (tmp_path / "lover" / "history" / "healthy.md").read_text().startswith("---")
+
+
+def test_a_closed_block_missing_the_nlod_line_is_not_current(tmp_path: Path) -> None:
+    weird = tmp_path / "lover" / "history"
+    weird.mkdir(parents=True)
+    (weird / "half.md").write_text(
+        '---\ntype: "history"\nslug: "half"\n---\n\n# half — Change history\n',
+        encoding="utf-8",
+    )
+    (weird / "half.json").write_text(_canonical_json(_record("half")), encoding="utf-8")
+    _seed_both_dirs(tmp_path)
+
+    plan = backfill.build_plan(tmp_path)
+
+    assert any(a.startswith("UNRECOGNIZED_FORMAT") for a in plan.anomalies)
+
+
+def test_a_mid_staging_failure_leaves_zero_visible_changes(tmp_path: Path) -> None:
+    """Codex (PR #183): the single write loop migrated earlier files and
+    abandoned later ones when a write raised mid-run. Execution now stages
+    the COMPLETE set first; a staging failure unwinds every staged file and
+    changes nothing visible."""
+    a_path = _seed_history(tmp_path, "a-lov")
+    b_path = _seed_history(tmp_path, "b-lov")
+    _seed_both_dirs(tmp_path)
+    before = {a_path: a_path.read_bytes(), b_path: b_path.read_bytes()}
+
+    real_write = backfill.atomic_write_text
+    calls = {"n": 0}
+
+    def failing_write(path: Path, text: str) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("disk full")
+        real_write(path, text)
+
+    backfill.atomic_write_text = failing_write
+    try:
+        with pytest.raises(OSError, match="disk full"):
+            _run_main(tmp_path, execute=True)
+    finally:
+        backfill.atomic_write_text = real_write
+
+    assert {p: p.read_bytes() for p in before} == before
+    assert list(tmp_path.rglob(f"*{backfill.STAGE_SUFFIX}")) == []
+
+    # a clean re-run completes the migration
+    assert _run_main(tmp_path, execute=True) == 0
+    assert a_path.read_text(encoding="utf-8").startswith("---\n")
+    assert b_path.read_text(encoding="utf-8").startswith("---\n")
 
 
 # ---------- mini corpus + history-extraction invariance ----------

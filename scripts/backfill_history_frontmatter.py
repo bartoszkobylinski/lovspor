@@ -48,6 +48,9 @@ from lovspor.history import HistoryRecord, render_history_markdown  # noqa: E402
 
 DATASET_SUBDIRS = ("lover", "forskrifter")
 FRONTMATTER_OPEN = "---\n"
+FRONTMATTER_CLOSE = "\n---\n"
+STAGE_SUFFIX = ".nlod-stage"
+_CONTRACT_LINES = ('type: "history"', 'source_license: "NLOD 2.0"')
 
 
 @dataclass
@@ -81,7 +84,17 @@ def _preflight_one(plan: Plan, corpus_root: Path, md_path: Path) -> None:
     rel = md_path.relative_to(corpus_root)
     text = md_path.read_text(encoding="utf-8")
     if text.startswith(FRONTMATTER_OPEN):
-        plan.already_current += 1
+        # A leading delimiter alone is NOT the contract: a legacy body that
+        # happens to open with "---" must abort, never be skipped as
+        # already-migrated (Codex, PR #183). Current means the block closes
+        # and carries the history type and the NLOD attribution.
+        if _is_current_contract(text):
+            plan.already_current += 1
+        else:
+            plan.anomalies.append(
+                f"UNRECOGNIZED_FORMAT: {rel}: opens with a frontmatter delimiter "
+                f"but does not satisfy the history frontmatter contract",
+            )
         return
     json_path = md_path.with_suffix(".json")
     if not json_path.exists():
@@ -119,6 +132,17 @@ def _canonical_json(record: HistoryRecord) -> str:
         json.dumps(record.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False)
         + "\n"
     )
+
+
+def _is_current_contract(text: str) -> bool:
+    """Whether ``text`` opens with a CLOSED frontmatter block carrying the
+    history type and the NLOD attribution — the publication contract, not
+    merely a leading delimiter."""
+    close = text.find(FRONTMATTER_CLOSE, len(FRONTMATTER_OPEN))
+    if close == -1:
+        return False
+    block = text[: close + len(FRONTMATTER_CLOSE)]
+    return all(line in block for line in _CONTRACT_LINES)
 
 
 def _body_after_frontmatter(rendered: str) -> str | None:
@@ -169,10 +193,36 @@ def main() -> int:
     if not args.execute:
         print("\nDry run (default): no files written. Re-run with --execute to migrate.")
         return 0
-    for md_path, rendered in plan.writes:
-        atomic_write_text(md_path, rendered)
+    _execute(plan)
     print(f"\nMigrated {len(plan.writes)} files (Markdown only; JSON untouched).")
     return 0
+
+
+def _execute(plan: Plan) -> None:
+    """Write the plan in two passes so a failure cannot strand a partial run.
+
+    Pass 1 stages every rendered file next to its target
+    (``<name>.nlod-stage``); ANY failure removes every staged file and
+    re-raises, leaving zero visible changes (Codex, PR #183: a single write
+    loop migrated earlier files and abandoned later ones on a mid-run
+    ``OSError``). Pass 2 renames the staged files onto their targets
+    (``Path.replace``), each rename atomic. Only a crash inside pass 2 itself can leave a mixed
+    state — staging I/O, the failure mode that actually occurs on a full
+    disk, is out of that window — and a re-run (or ``git checkout``)
+    recovers cleanly.
+    """
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for md_path, rendered in plan.writes:
+            stage = md_path.with_name(md_path.name + STAGE_SUFFIX)
+            atomic_write_text(stage, rendered)
+            staged.append((stage, md_path))
+    except BaseException:
+        for stage, _ in staged:
+            stage.unlink(missing_ok=True)
+        raise
+    for stage, md_path in staged:
+        stage.replace(md_path)
 
 
 if __name__ == "__main__":
