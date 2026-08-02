@@ -39,11 +39,34 @@ Requiring a digit after the dot is what keeps this from colliding with
 the far more common titleless-with-dangling-dot shape ``## § 14.``,
 where the dot belongs to the heading punctuation rather than the id."""
 
-SECTION_ID = re.compile(rf"{_ID_PART}(?:-{_ID_PART})*{_ID_SUBNUMBER}")
-"""A complete section id: one or more :data:`_ID_PART` joined by ``-``.
+_LETTER_LEAD = r"[A-Za-z](?=-[0-9])"
+"""A single-letter FIRST component, and only ever the first.
+
+Lovdata writes one genuine letter-led section id in the corpus:
+``forskrift-om-kulturhistoriske-eiendommer`` numbers its chapters
+``Kapittel 1`` … ``Kapittel X`` and the closing chapter's one section
+``§ x-1`` — a real, citable provision the digit-led grammar could not
+reach (the last ``unparsed_section_heading`` audit finding of RCA
+class B).
+
+Three restrictions keep this from opening the grammar to prose, and
+each is load-bearing:
+
+* exactly ONE letter — ``§ og-1`` and every other word stays rejected,
+  because Norwegian function words are two letters or more;
+* first component only — later dash components stay digit-led
+  (:data:`_ID_PART`), so ``5-a`` does not become an id;
+* the lookahead demands ``-<digit>`` immediately after — a bare ``x``,
+  ``x.``, or ``x-a`` is not an id, so the letter alternative can never
+  match a lone stray character."""
+
+SECTION_ID = re.compile(rf"(?:{_ID_PART}|{_LETTER_LEAD})(?:-{_ID_PART})*{_ID_SUBNUMBER}")
+"""A complete section id: one or more :data:`_ID_PART` joined by ``-``,
+or the single corpus-attested letter-led shape :data:`_LETTER_LEAD`.
 
 Covers every shape the renderer emits — ``1``, ``5-12``, ``5a``,
-``5-10a``, ``8-7 a``, ``35 a``, ``2 A-1``, ``3-4 A``, ``10-4-1``.
+``5-10a``, ``8-7 a``, ``35 a``, ``2 A-1``, ``3-4 A``, ``10-4-1``,
+``x-1``.
 
 **Use anchored only.** Allowing a space before the letter suffix makes
 the pattern ambiguous against running prose: unanchored, ``§ 12 i

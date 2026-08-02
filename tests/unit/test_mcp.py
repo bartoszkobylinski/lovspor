@@ -6000,6 +6000,25 @@ def test_parse_sections_still_handles_chaptered_h3_sections() -> None:
     assert sections[0]["body"] == "Body."
 
 
+def test_parse_sections_letter_led_id_under_a_roman_chapter() -> None:
+    """Real corpus shape (forskrift-om-kulturhistoriske-eiendommer): the act
+    numbers its closing chapter ``Kapittel X`` and its one section ``§ x-1``.
+    The digit-led grammar dropped it — the last class B
+    ``unparsed_section_heading`` audit finding — so the provision was
+    unreachable by ``get_section`` and unlisted by ``list_sections``."""
+    body = (
+        "### § 9-1. Omfang\n\nEldre del.\n\n"
+        "## Kapittel X. Ikraftsetting\n\n"
+        "### § x-1. Ikraftsetting\n\n"
+        "Forskriften trer i kraft straks.\n"
+    )
+    sections = _parse_sections(body)
+    assert [s["section_id"] for s in sections] == ["9-1", "x-1"]
+    assert sections[1]["heading"] == "§ x-1. Ikraftsetting"
+    assert sections[1]["parent_chapter"] == "Kapittel X. Ikraftsetting"
+    assert sections[1]["body"] == "Forskriften trer i kraft straks."
+
+
 def test_parse_sections_mixed_h2_section_and_h2_chapter() -> None:
     """``## §`` is a section; ``## Kapittel`` (no ``§``) is still a chapter."""
     body = "## Kapittel 1.\n\n### § 1-1. A\n\nx\n\n## § 2. B\n\ny\n"
@@ -6918,11 +6937,14 @@ def test_cross_reference_is_invalid_when_the_target_index_is_complete() -> None:
 def test_get_section_marks_a_reference_unverifiable_on_an_unparsable_heading(
     tmp_path: Path,
 ) -> None:
+    # § y-z: looks like a section heading (## § prefix) but the grammar
+    # rejects letter-dash-letter. § x-1 no longer works as the example here —
+    # it parses since the class B repair of 2026-08-02.
     body = (
         "## Kapittel 1.\n\n"
         "### § 1-1. Main\n\n"
         "Se § 1-2 for definisjonen.\n\n"
-        "### § x-1. Uleselig overskrift\n\n"
+        "### § y-z. Uleselig overskrift\n\n"
         "Target body.\n"
     )
     _seed_corpus(

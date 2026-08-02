@@ -65,6 +65,9 @@ from lovspor.headings import (
         ("## § 9 a.1 Utvidet adgang", "9 a.1", "Utvidet adgang"),
         # title separated by a space alone (byggeforskrift-for-longyearbyen)
         ("### § 2 Plan og bygningslovens anvendelse", "2", "Plan og bygningslovens anvendelse"),
+        # letter-led id under a Roman-numbered chapter
+        # (forskrift-om-kulturhistoriske-eiendommer, Kapittel X -> § x-1)
+        ("### § x-1. Ikraftsetting", "x-1", "Ikraftsetting"),
     ],
 )
 def test_section_heading_matches_real_corpus_shapes(
@@ -121,6 +124,10 @@ def test_raw_section_id_returns_none_for_non_section() -> None:
         # a trailing letter is part of the id, not punctuation to strip
         ("5-12X", "5-12x"),
         ("20-7CA", "20-7ca"),
+        # letter-led id: the heading writes lowercase x, the chapter Roman X
+        ("x-1", "x-1"),
+        ("§ X-1", "x-1"),
+        ("X-1", "x-1"),
     ],
 )
 def test_canonical_section_id_folds_every_spelling_to_one_key(
@@ -149,9 +156,42 @@ def test_section_id_fullmatch_rejects_legal_prose(prose: str) -> None:
     assert SECTION_ID.fullmatch(prose) is None
 
 
-@pytest.mark.parametrize("real_id", ["5", "5-12", "8-7 a", "2 A-1", "35 a", "10-4-1"])
+@pytest.mark.parametrize("real_id", ["5", "5-12", "8-7 a", "2 A-1", "35 a", "10-4-1", "x-1"])
 def test_section_id_fullmatch_accepts_real_ids(real_id: str) -> None:
     assert SECTION_ID.fullmatch(real_id) is not None
+
+
+@pytest.mark.parametrize(
+    "not_an_id",
+    [
+        # two letters is a word, not an id — "§ og-1" must stay prose
+        "og-1",
+        # a bare letter, letter-dot, or letter-dash-letter never forms an id:
+        # the letter lead is only legal directly before "-<digit>"
+        "x",
+        "x.",
+        "x-a",
+        "i-",
+    ],
+)
+def test_section_id_letter_lead_stays_narrow(not_an_id: str) -> None:
+    """The single corpus-attested letter-led shape (``x-1``) must not open
+    the grammar to arbitrary alphabetic ids. A fabricated section is worse
+    than a missed one — see :data:`lovspor.headings._TITLE`."""
+    assert SECTION_ID.fullmatch(not_an_id) is None
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "### § og-1. Tittel",
+        "### § x. Tittel",
+        "### § x-a. Tittel",
+        "### § xx-1. Tittel",
+    ],
+)
+def test_section_heading_rejects_prose_like_letter_leads(heading: str) -> None:
+    assert parse_section_heading(heading) is None
 
 
 @pytest.mark.parametrize(
@@ -222,7 +262,8 @@ def test_block_id_is_empty_when_the_heading_has_nothing_to_slug(unsluggable: str
         ("5-12-", False),
         ("-5", False),
         ("5..1", False),
-        ("x-1", False),
+        # class B repair: the letter-led corpus shape is an id since 2026-08-02
+        ("x-1", True),
     ],
 )
 def test_section_id_fullmatch_boundaries(candidate: str, matches: bool) -> None:
