@@ -3303,6 +3303,110 @@ def test_validate_citation_unknown_section_returns_helpful_error(
     assert "§ 5-12" in result["reason"]
 
 
+def _seed_for_id_shapes(tmp_path: Path) -> CorpusReader:
+    """One act carrying every citation-relevant id shape the corpus attests:
+    spaced suffix (§ 9 a — forsikringslovvalgsloven), a genuine `` i`` suffix
+    (§ 14 i — politiloven), multi-letter adjacent suffixes (§ 17a/§ 17aa —
+    sanksjonsforskrift-ukraina), and the letter-led § x-1
+    (forskrift-om-kulturhistoriske-eiendommer, Kapittel X)."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="formlov", title="Formlov")},
+        body_for={
+            "formlov": (
+                "## Kapittel 1.\n\n"
+                "### § 9. Grunnregel\nA.\n"
+                "### § 9 a. Utvidelse\nB.\n"
+                "### § 12. Saksbehandling\nC.\n"
+                "### § 14 i. Forskriftshjemmel\nD.\n"
+                "### § 17a. Første\nE.\n"
+                "### § 17aa. Andre\nF.\n\n"
+                "## Kapittel X. Ikraftsetting\n\n"
+                "### § x-1. Ikraftsetting\nG.\n"
+            ),
+        },
+    )
+    return CorpusReader(tmp_path)
+
+
+def test_validate_citation_letter_led_id_is_preserved(tmp_path: Path) -> None:
+    """The old private pattern ([\\d-]+[a-z]?) could not read § x-1 at all —
+    production returned valid:true with section_id null for the whole
+    citation, silently dropping the section claim."""
+    result = _seed_for_id_shapes(tmp_path).validate_citation("§ x-1 formlov")
+    assert result["valid"] is True
+    assert result["section_id"] == "x-1"
+    assert result["heading"] == "§ x-1. Ikraftsetting"
+
+
+def test_validate_citation_spaced_suffix_is_not_truncated(tmp_path: Path) -> None:
+    """§ 9 a used to extract as '9' and validate § 9 — the validator
+    confirming a DIFFERENT section than the one cited."""
+    result = _seed_for_id_shapes(tmp_path).validate_citation("§ 9 a formlov")
+    assert result["valid"] is True
+    assert result["section_id"] == "9 a"
+    assert result["heading"] == "§ 9 a. Utvidelse"
+
+
+def test_validate_citation_adjacent_suffix_folds_to_the_same_section(tmp_path: Path) -> None:
+    result = _seed_for_id_shapes(tmp_path).validate_citation("§ 9a formlov")
+    assert result["valid"] is True
+    assert result["heading"] == "§ 9 a. Utvidelse"
+
+
+def test_validate_citation_multi_letter_suffix_is_not_truncated(tmp_path: Path) -> None:
+    """§ 17aa used to extract as '17a' — with both sections real
+    (sanksjonsforskrift-ukraina has exactly this neighbourhood), the old
+    pattern validated the wrong one."""
+    result = _seed_for_id_shapes(tmp_path).validate_citation("§ 17aa formlov")
+    assert result["valid"] is True
+    assert result["heading"] == "§ 17aa. Andre"
+
+
+def test_validate_citation_preposition_i_still_reads_as_filler(tmp_path: Path) -> None:
+    """§ 12 i formlov — the act has no § 12 i, so the longest read fails and
+    the `` i`` tail is re-read as the preposition. Existing behaviour
+    preserved."""
+    result = _seed_for_id_shapes(tmp_path).validate_citation("§ 12 i formlov")
+    assert result["valid"] is True
+    assert result["section_id"] == "12"
+    assert result["heading"] == "§ 12. Saksbehandling"
+
+
+def test_validate_citation_genuine_i_suffix_wins_over_the_preposition(tmp_path: Path) -> None:
+    """politiloven really has § 14 i. When the longest read exists in the
+    cited act it wins — the citation is ambiguous to a human reader too, and
+    the returned heading makes the chosen reading visible."""
+    result = _seed_for_id_shapes(tmp_path).validate_citation("§ 14 i formlov")
+    assert result["valid"] is True
+    assert result["section_id"] == "14 i"
+    assert result["heading"] == "§ 14 i. Forskriftshjemmel"
+
+
+def test_validate_citation_missing_spaced_suffix_fails_closed(tmp_path: Path) -> None:
+    """§ 9 a cited against an act that only has § 9: never confirm the
+    shorter neighbour. Invalid, with the available-sections message."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="smallov", title="Smallov")},
+        body_for={"smallov": "## Kapittel 1.\n\n### § 9. Eneste\nA.\n"},
+    )
+    result = CorpusReader(tmp_path).validate_citation("§ 9 a smallov")
+    assert result["valid"] is False
+    assert result["section_id"] == "9 a"
+    assert result["heading"] is None
+    assert "§ 9" in result["reason"]
+
+
+def test_validate_citation_refuses_range_citations(tmp_path: Path) -> None:
+    """§§ 6-8 is a range; validating '6-8' as chapter-6-section-8 would
+    confirm something the caller never cited."""
+    result = _seed_for_id_shapes(tmp_path).validate_citation("§§ 6-8 formlov")
+    assert result["valid"] is False
+    assert result["section_id"] is None
+    assert "range" in result["reason"]
+
+
 def test_validate_citation_picks_longest_slug_match(tmp_path: Path) -> None:
     """If multiple manifest slugs appear as substrings of the
     citation, pick the LONGEST one (most specific)."""
