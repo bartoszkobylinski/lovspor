@@ -1,9 +1,9 @@
 """Tests for lovspor.rendering.markdown_renderer.
 
-The tiny fixture lov-17410217-000.xml is the real Lovdata file for the
-Vimpel law from 1741 (NLOD 2.0, attributed in the other rendering-test
-module docstring). Most tests here use inline synthetic HTML to isolate
-rendering rules for individual element types.
+The tiny fixture synthetic-flat-law.xml is an invented flat-law document
+(no Lovdata content — see the comment inside the fixture). Most tests
+here use inline synthetic HTML to isolate rendering rules for individual
+element types.
 """
 
 from pathlib import Path
@@ -21,22 +21,19 @@ def _wrap(main_body: bytes) -> bytes:
     return b'<!DOCTYPE html><html lang="nb"><body><main>' + main_body + b"</main></body></html>"
 
 
-def test_render_markdown_on_tiny_vimpel_fixture() -> None:
-    xml = (_FIXTURES / "lov-17410217-000.xml").read_bytes()
+def test_render_markdown_on_tiny_flat_law_fixture() -> None:
+    xml = (_FIXTURES / "synthetic-flat-law.xml").read_bytes()
     md = render_markdown(xml)
     dash = "\N{EN DASH}"
     assert md == (
-        "# Forbud paa Vimpel-Føring\n\n"
-        "Ingen Skipper, som fører noget i Kongens Riger og Lande hjemmehørende Skib, "
-        "enten det maatte føre Canoner eller ikke, ei heller nogen Kjøbmand eller "
-        "Rheder deri, maa understaa sig enten i Søen, paa nogen indenlandsk Rhed eller "
-        "Havn, eller og paa fremmede Kyster og Havne at føre nogen Vimpel eller Kgl. "
-        "Flag og Gjøs med Split i, det være sig i hvad Slags Leilighed det være maatte, "
-        f"{dash} {dash} {dash}; [under samme Straf] skal det være forbudt alle Skippere "
-        "og Rhedere af noget i Kongens Riger og Lande hjemmehørende Skib dertil at lade "
-        "gjøre eller derved at føre nogen Vimpel eller Kgl. Flag og Gjøs, og om de dermed "
-        "betræffes, skal de uden Forskaansel ansees, ligesom de dem virkelig havde "
-        f"misbrugt. {dash} {dash} {dash}\n"
+        "# Forbud mot Drage-Flyging\n\n"
+        "Ingen Person, som flyver nogen Papirdrage over Kongens Torv, enten den "
+        "bærer Halevimpel eller ikke, maa driste sig til at flyve samme Drage nær "
+        "noget Raadhus eller Fyrtaarn, uanset hvilket Veir der maatte raade, "
+        f"{dash} {dash} {dash}; [under lik Bot] skal det være forbudt alle "
+        "Dragemagere at sælge nogen Drage uden Snor, og om nogen dermed antreffes, "
+        "skal han uden Ophold bøde, som om han selv havde fløiet Dragen. "
+        f"{dash} {dash} {dash}\n"
     )
 
 
@@ -1076,7 +1073,7 @@ def test_render_raises_parse_error_when_main_missing() -> None:
 
 
 def test_render_is_deterministic_across_calls() -> None:
-    xml = (_FIXTURES / "lov-17410217-000.xml").read_bytes()
+    xml = (_FIXTURES / "synthetic-flat-law.xml").read_bytes()
     assert render_markdown(xml) == render_markdown(xml)
 
 

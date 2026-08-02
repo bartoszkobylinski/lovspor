@@ -1,9 +1,10 @@
 """Tests for lovspor.rendering.document.
 
-The lov-17410217-000.xml fixture is the real Lovdata-published file for
-Norway's oldest still-in-force law (Forbud paa Vimpel-Føring, 1741).
-Captured from the gjeldende-lover public-data tarball on 2026-04-22,
-NLOD 2.0, attributed to Lovdata.
+The synthetic-flat-law.xml fixture is an invented document that mirrors
+the Lovdata publicData flat-law shape (header key-info dl, flat legalP
+body, no dateInForce, "(struktur)"-suffixed lastupdated, short title
+differing from the title only in case). No Lovdata content — see the
+comment inside the fixture.
 """
 
 from datetime import UTC, datetime
@@ -22,13 +23,13 @@ from lovspor.rendering.document import (
 )
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
-_TINY_XML = (_FIXTURES / "lov-17410217-000.xml").read_bytes()
+_TINY_XML = (_FIXTURES / "synthetic-flat-law.xml").read_bytes()
 
 
 def _default_context(**overrides: object) -> FrontmatterContext:
     base = {
-        "doc_id": "lov-17410217-000",
-        "slug": "forbud-paa-vimpel-foering",
+        "doc_id": "lov-17990401-000",
+        "slug": "forbud-mot-drage-flyging",
         "doc_type": "lov",
         "xml_hash": "a" * 64,
         "source_dataset": "gjeldende-lover",
@@ -91,17 +92,17 @@ def test_legal_document_frontmatter_default_eu_basis_is_empty_list_direct() -> N
 
 def test_build_frontmatter_extracts_title_from_fixture() -> None:
     fm = build_frontmatter(_TINY_XML, _default_context())
-    assert fm.title == "Forbud paa Vimpel-Føring"
+    assert fm.title == "Forbud mot Drage-Flyging"
 
 
 def test_build_frontmatter_extracts_short_title_from_fixture() -> None:
     fm = build_frontmatter(_TINY_XML, _default_context())
-    assert fm.short_title == "Forbud paa Vimpel-føring"
+    assert fm.short_title == "Forbud mot Drage-flyging"
 
 
 def test_build_frontmatter_extracts_ref_id_from_fixture() -> None:
     fm = build_frontmatter(_TINY_XML, _default_context())
-    assert fm.ref_id == "lov/1741-02-17"
+    assert fm.ref_id == "lov/1799-04-01"
 
 
 def test_build_frontmatter_extracts_language_from_html_lang() -> None:
@@ -120,19 +121,20 @@ def test_build_frontmatter_defaults_missing_language_to_empty_string() -> None:
 
 def test_build_frontmatter_extracts_ministry_as_list() -> None:
     fm = build_frontmatter(_TINY_XML, _default_context())
-    assert fm.ministry == ["Utenriksdepartementet"]
+    assert fm.ministry == ["Testdepartementet"]
 
 
 def test_build_frontmatter_handles_missing_date_in_force() -> None:
-    """The 1741 law has no <dd class='dateInForce'>."""
+    """The fixture deliberately has no <dd class='dateInForce'> — the shape
+    of Norway's oldest laws."""
     fm = build_frontmatter(_TINY_XML, _default_context())
     assert fm.date_in_force is None
 
 
 def test_build_frontmatter_extracts_last_updated_date_only() -> None:
-    """The raw field is '2021-06-21 (struktur)'; we keep only the ISO date."""
+    """The raw field is '2020-01-02 (struktur)'; we keep only the ISO date."""
     fm = build_frontmatter(_TINY_XML, _default_context())
-    assert fm.last_updated == "2021-06-21"
+    assert fm.last_updated == "2020-01-02"
 
 
 def test_build_frontmatter_carries_context_fields() -> None:
