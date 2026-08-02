@@ -1348,9 +1348,10 @@ def test_a_footnote_marker_keeps_its_label_verbatim() -> None:
 
 
 def test_a_footnote_marker_inside_a_heading_is_delimited_too() -> None:
-    # h1/h2 go through the full inline walk rather than
-    # _render_legal_article_header, so their markers reach the corpus — 33 of
-    # them — and fused there exactly as body text did.
+    # A legalArticleHeader with no value span falls back to the full inline
+    # walk on every level — h2 included, since renderer 8 routes only the
+    # span-carrying h2 shape through _render_h2_legal_article_header. The
+    # fallback keeps the marker, delimited exactly as body text is.
     md = render_markdown(
         _wrap(
             b'<h2 class="legalArticleHeader">Amtskasserere'
@@ -1359,6 +1360,143 @@ def test_a_footnote_marker_inside_a_heading_is_delimited_too() -> None:
     )
 
     assert md == "## Amtskasserere[^1]\n"
+
+
+def test_h2_legal_article_header_drops_a_sibling_marker_after_the_value() -> None:
+    # eos-kontrolloven § 21: the marker sits between the value span's dot and
+    # the title span. The inline walk rendered "## § 21.[^1] Straff", which
+    # SECTION_HEADING cannot read, so the whole § fell out of every section
+    # index — get_section failed, verify_quote called its real text a
+    # hallucination.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 21</span>.'
+            b'<sup class="footnotereference">1</sup> '
+            b'<span class="legalArticleTitle">Straff</span></h2>',
+        ),
+    )
+
+    assert md == "## § 21. Straff\n"
+
+
+def test_titleless_h2_legal_article_header_keeps_its_dangling_dot() -> None:
+    # instruks-om-delegering-fra-namsretten: all four sections are titleless
+    # h2 headers with a sibling marker, and "## § 1.[^1]" made the instrument
+    # completely invisible — list_sections = [], zero embeddings. The dangling
+    # dot is the established flat-act shape ("## § 14."); only the marker
+    # goes.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 1</span>.'
+            b'<sup class="footnotereference">1</sup></h2>',
+        ),
+    )
+
+    assert md == "## § 1.\n"
+
+
+def test_titleless_h2_and_h3_disagree_about_the_dot_by_design() -> None:
+    # Two real corpus shapes the grammar reads: flat acts write "## § 14." and
+    # chaptered acts render bare ("### § 5"). Folding either into the other
+    # would rewrite titleless headings corpus-wide for zero information.
+    h2 = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 14</span>.</h2>',
+        ),
+    )
+    h3 = render_markdown(
+        _wrap(
+            b'<h3 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 14</span>.</h3>',
+        ),
+    )
+
+    assert h2 == "## § 14.\n"
+    assert h3 == "### § 14\n"
+
+
+def test_h2_legal_article_header_drops_a_marker_inside_the_title_span() -> None:
+    # Wider than the h3-h6 drop, deliberately: h3-h6 keep an in-span marker
+    # delimited as [^n], but on an h2 that delimited marker sits in the very
+    # line parse_section_heading feeds list_sections and citation checks —
+    # "## § 1. Definisjoner[^1]" captured a polluted title in 21 headings
+    # across 3 documents.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 1</span>. '
+            b'<span class="legalArticleTitle">Definisjoner'
+            b'<sup class="footnotereference">1</sup></span></h2>',
+        ),
+    )
+
+    assert md == "## § 1. Definisjoner\n"
+
+
+def test_h2_legal_article_header_drops_a_sibling_marker_after_the_title() -> None:
+    # bokloven § 12: the marker follows the title span.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 12</span>. '
+            b'<span class="legalArticleTitle">Innkj\xc3\xb8psrabatt</span>'
+            b'<sup class="footnotereference">1</sup></h2>',
+        ),
+    )
+
+    assert md == "## § 12. Innkjøpsrabatt\n"
+
+
+def test_h2_legal_article_header_drops_a_marker_inside_the_value_span() -> None:
+    # No corpus instance today, but a marker on the § number is the worst
+    # placement — "## § 5[^1]. Ansvar" impersonates a different provision —
+    # and Lovdata has moved markers between placements before.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 5'
+            b'<sup class="footnotereference">1</sup></span>. '
+            b'<span class="legalArticleTitle">Ansvar</span></h2>',
+        ),
+    )
+
+    assert md == "## § 5. Ansvar\n"
+
+
+def test_h2_legal_article_header_keeps_link_markup_in_the_title() -> None:
+    # Reusing the h3-h6 raw-span-text policy verbatim on h2 would have
+    # stripped link markup from headings in 114 documents (measured on the
+    # 2026-07-28 tarballs). The h2 title renders through _inline, so links
+    # and emphasis survive exactly as the inline walk emitted them.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 6</span>. '
+            b'<span class="legalArticleTitle">Unntak fra '
+            b'<a href="lov/2003-05-23-35/\xc2\xa74">\xc2\xa7\xc2\xa7 4</a>'
+            b" og 5</span></h2>",
+        ),
+    )
+
+    assert md == "## § 6. Unntak fra [§§ 4](lov/2003-05-23-35/§4) og 5\n"
+
+
+def test_a_repaired_h2_heading_parses_as_a_section_with_a_clean_title() -> None:
+    # The point of the whole repair: the rendered line must round-trip through
+    # the section grammar with the title free of marker garbage.
+    md = render_markdown(
+        _wrap(
+            b'<h2 class="legalArticleHeader">'
+            b'<span class="legalArticleValue">\xc2\xa7 21</span>.'
+            b'<sup class="footnotereference">1</sup> '
+            b'<span class="legalArticleTitle">Straff</span></h2>',
+        ),
+    )
+
+    assert parse_section_heading(md.strip()) == ("21", "Straff")
 
 
 def test_paragraph_class_articles_render_as_plain_paragraphs() -> None:

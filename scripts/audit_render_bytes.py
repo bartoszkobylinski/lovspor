@@ -147,9 +147,13 @@ NOT_IN_FORCE_CLASSES = frozenset(
 LEGAL_ARTICLE_HEADER_CLASS = "legalArticleHeader"
 LEGAL_ARTICLE_VALUE_CLASS = "legalArticleValue"
 LEGAL_ARTICLE_TITLE_CLASS = "legalArticleTitle"
-# h1/h2 keep everything (_render_heading walks them inline); only h3-h6 reach
-# _render_legal_article_header.
-SUB_HEADING_TAGS = frozenset({"h3", "h4", "h5", "h6"})
+# h1 keeps everything (_render_heading walks it inline); h2-h6 with the class
+# reach the span-based assembly (_render_legal_article_header for h3-h6,
+# _render_h2_legal_article_header for h2 since renderer 8). The h2 drop is
+# wider: it also omits a marker INSIDE the value/title span, which h3-h6 keep
+# delimited as [^n].
+LEGAL_ARTICLE_HEADER_TAGS = frozenset({"h2", "h3", "h4", "h5", "h6"})
+H2_TAG = "h2"
 
 # Which XML elements put a word boundary between two text nodes. Block-level by
 # HTML semantics: crossing one starts a new line of prose, so the words on
@@ -293,11 +297,18 @@ def _elide_dropped_heading_marks(root: etree._Element) -> None:
     zero and train the reader to ignore it. It stays visible in the *raw*
     variant, which elides nothing.
 
-    Only h3-h6: ``_render_heading`` sends h1/h2 through the full inline walk,
-    which keeps every marker, so eliding there would hide a real loss.
+    h2-h6 with the class; h1 goes through the full inline walk, which keeps
+    every marker, so eliding there would hide a real loss. Since renderer 8
+    the h2 drop is wider than h3-h6's: ``_render_h2_legal_article_header``
+    also omits a footnote marker INSIDE the value/title span, which h3-h6
+    keep delimited as ``[^n]`` — so for h2 the in-span markers are elided
+    here too.
     """
     for header in root.iter():
-        if header.tag not in SUB_HEADING_TAGS or LEGAL_ARTICLE_HEADER_CLASS not in _classes(header):
+        if (
+            header.tag not in LEGAL_ARTICLE_HEADER_TAGS
+            or LEGAL_ARTICLE_HEADER_CLASS not in _classes(header)
+        ):
             continue
         value = header.find(f".//span[@class='{LEGAL_ARTICLE_VALUE_CLASS}']")
         if value is None:
@@ -315,6 +326,11 @@ def _elide_dropped_heading_marks(root: etree._Element) -> None:
             if any(any(node is span for node in child.iter()) for span in spans):
                 continue
             _remove_keeping_tail(child)
+        if header.tag == H2_TAG:
+            for marker in [
+                sup for sup in header.iter("sup") if FOOTNOTE_REFERENCE_CLASS in _classes(sup)
+            ]:
+                _remove_keeping_tail(marker)
 
 
 def _body_root(xml_bytes: bytes) -> etree._Element:
