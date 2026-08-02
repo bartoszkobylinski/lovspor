@@ -3398,6 +3398,29 @@ def test_validate_citation_missing_spaced_suffix_fails_closed(tmp_path: Path) ->
     assert "§ 9" in result["reason"]
 
 
+def test_validate_citation_duplicate_id_is_invalid_not_an_exception(tmp_path: Path) -> None:
+    """Codex (PR #182): an act really can carry two sections with one id
+    (førerkortforskriften's vedlegg both open with § 1). get_section raises
+    CorpusAmbiguousSectionError, but validate_citation promises a result
+    dict — the citation names a real id without singling out one section,
+    the same failure class as a §-only citation."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="dobbeltlov", title="Dobbeltlov")},
+        body_for={
+            "dobbeltlov": (
+                "## Vedlegg 1.\n\n### § 2. Første\nA.\n\n## Vedlegg 2.\n\n### § 2. Andre\nB.\n"
+            ),
+        },
+    )
+    result = CorpusReader(tmp_path).validate_citation("§ 2 dobbeltlov")
+    assert result["valid"] is False
+    assert result["section_id"] == "2"
+    assert result["heading"] is None
+    assert "ambiguous" in result["reason"]
+    assert "occurrence" in result["reason"]
+
+
 def test_validate_citation_refuses_range_citations(tmp_path: Path) -> None:
     """§§ 6-8 is a range; validating '6-8' as chapter-6-section-8 would
     confirm something the caller never cited."""

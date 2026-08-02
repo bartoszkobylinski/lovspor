@@ -764,15 +764,27 @@ class CorpusReader:
            available-sections message. ``§ 9 a`` in an act with only a
            § 9 is NOT reduced to § 9 — citing a section that does not
            exist must say so, never confirm a shorter neighbour.
+
+        A duplicate id (``CorpusAmbiguousSectionError`` — the act really
+        has several sections sharing it) is invalid-with-reason, not an
+        exception: ``validate_citation`` promises a result dict, and the
+        citation names a real id without singling out one section, the
+        same failure class as a ``§``-only citation. No tail strip on
+        that path — the id exists; re-reading it would change what the
+        caller cited.
         """
         try:
             return section_id, self.get_section(slug, section_id), None
+        except CorpusAmbiguousSectionError as exc:
+            return section_id, None, str(exc)
         except CorpusNotFoundError as exc:
             stripped = _CITATION_PROSE_TAIL.sub("", section_id)
             if stripped == section_id:
                 return section_id, None, str(exc)
             try:
                 return stripped, self.get_section(slug, stripped), None
+            except CorpusAmbiguousSectionError as ambiguous:
+                return stripped, None, str(ambiguous)
             except CorpusNotFoundError:
                 return stripped, None, str(exc)
 
