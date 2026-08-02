@@ -10,6 +10,7 @@ reconnaissance notes). Element-by-element mapping:
 
     <h1>                                    -> # Title
     <section><h2>                           -> ## Heading
+    <h2 class='legalArticleHeader'>         -> ## § N. Title (flat act, no chapter level)
     <h3|h4 class='legalArticleHeader'>      -> ### § N. Title
     <h3..h6> (other)                        -> ### Heading
     <div role='heading' aria-level='N'>     -> ###### ATX heading (level clamped)
@@ -50,6 +51,7 @@ Output contract: body only, no YAML frontmatter, no trailing whitespace
 except a single trailing newline.
 """
 
+import copy
 import re
 from io import BytesIO
 
@@ -58,7 +60,7 @@ from lxml import etree
 from lovspor.errors import ParseError, RenderError
 from lovspor.parsing.xml_normalizer import safe_parser
 
-RENDERER_VERSION = 7
+RENDERER_VERSION = 8
 """Stamp recorded on every rendered document (``ManifestRecord.renderer_version``).
 
 Change detection keys on the *upstream XML* hash, so a renderer fix leaves every
@@ -255,9 +257,12 @@ def _render_element(elem: etree._Element) -> str:
 
 
 def _render_heading(elem: etree._Element, tag: str, classes: list[str]) -> str:
-    if tag in {"h1", "h2"}:
-        marker = "#" if tag == "h1" else "##"
-        return _atx_heading(marker, _inline(elem))
+    if tag == "h1":
+        return _atx_heading("#", _inline(elem))
+    if tag == "h2":
+        if _LEGAL_ARTICLE_HEADER_CLASS in classes:
+            return _render_h2_legal_article_header(elem)
+        return _atx_heading("##", _inline(elem))
     return _render_sub_heading(elem, classes)
 
 
@@ -415,8 +420,9 @@ def _render_legal_article_header(elem: etree._Element) -> str:
       the same §. What the marker adds is the pointer, and the association
       survives positionally.
 
-    ``scripts/audit_render_bytes.py`` subtracts exactly this in its *adjusted*
-    XML variant, the way it already subtracts the not-in-force elision, and
+    ``scripts/audit_render_bytes.py`` subtracts exactly this (and the wider H2
+    drop of :func:`_render_h2_legal_article_header`) in its *adjusted* XML
+    variant, the way it already subtracts the not-in-force elision, and
     keeps it visible in *raw*. That subtraction is only honest while this
     docstring is true: if the drop ever widens beyond these markers, say so
     here, or the audit will quietly absorb the difference.
@@ -430,6 +436,71 @@ def _render_legal_article_header(elem: etree._Element) -> str:
     if value:
         return _atx_heading("###", value)
     return _atx_heading("###", _inline(elem))
+
+
+def _render_h2_legal_article_header(elem: etree._Element) -> str:
+    """Render a flat act's H2 ``legalArticleHeader`` as "## {value}. {title}".
+
+    The H2 shape is the flat-act (chapterless) counterpart of
+    :func:`_render_legal_article_header`, and until renderer 8 it went through
+    the full inline walk instead. That walk emitted the sibling
+    footnote-reference markers the span policy drops, and on an H2 the marker
+    lands INSIDE the section heading line — ``## § 21.[^1] Straff``,
+    ``## § 1.[^1]`` — where ``headings.SECTION_HEADING`` cannot read it. The
+    body under such a heading fell out of every section index: two instruments
+    (``instruks-om-delegering-fra-namsretten``, 4 of 4 sections, and
+    ``forskrift-om-utlegg-ved-lønnstrekk``, 2 of 2) had ``list_sections`` = []
+    and zero embeddings while ``get_law`` showed their full text.
+
+    Differences from the H3-H6 policy, both deliberate:
+
+    * A titleless heading keeps its dangling dot (``## § 8.``) — that is the
+      established flat-act shape in the corpus and the grammar, where the
+      chaptered form renders bare (``### § 5``).
+    * EVERY footnote-reference marker is dropped, including one inside the
+      value or title span (``_without_footnote_markers``), not just the
+      sibling ones — and the title renders through ``_inline``, so link and
+      emphasis markup a flat act carries in its titles survives as it always
+      has. H3-H6 keep their in-span markers delimited as ``[^n]``; on H2 that
+      delimited marker would sit in the line ``parse_section_heading`` feeds
+      ``list_sections`` and citation checks, polluting the captured title
+      (``## § 1. Definisjoner[^1]``). Nothing legal is lost: the footnote's
+      own text still renders in the ``<footer class="footnotes">`` block of
+      the same §.
+
+    A header with no value span falls back to the inline walk unchanged, like
+    the H3-H6 path.
+    """
+    stripped = _without_footnote_markers(elem)
+    value_span = stripped.find(".//span[@class='legalArticleValue']")
+    title_span = stripped.find(".//span[@class='legalArticleTitle']")
+    value = _span_text(value_span)
+    title = _inline(title_span) if title_span is not None else ""
+    if value and title:
+        return _atx_heading("##", f"{value}. {title}")
+    if value:
+        return _atx_heading("##", f"{value}.")
+    return _atx_heading("##", _inline(elem))
+
+
+def _without_footnote_markers(elem: etree._Element) -> etree._Element:
+    """Deep copy of ``elem`` with every footnote-reference marker detached.
+
+    Tails are preserved through :func:`_remove_preserving_tail`, so the
+    punctuation that follows a marker (``§ 21</span>.<sup>1</sup> <span>``)
+    stays exactly where the inline walk would have put it. The copy keeps the
+    render pure: the source tree is walked once per document today, but a
+    renderer that mutates its input is one refactor away from a
+    nondeterminism bug.
+    """
+    clone = copy.deepcopy(elem)
+    for marker in [child for child in clone.iter("sup") if _is_footnote_marker(child)]:
+        _remove_preserving_tail(marker)
+    return clone
+
+
+def _is_footnote_marker(elem: etree._Element) -> bool:
+    return elem.tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (elem.get("class") or "").split()
 
 
 def _is_block_element(elem: etree._Element) -> bool:
@@ -606,7 +677,7 @@ def _span_inner(elem: etree._Element) -> str:
     for child in elem:
         if child.tag == "br":
             parts.append("\n")
-        elif child.tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (child.get("class") or "").split():
+        elif _is_footnote_marker(child):
             parts.append(f"[^{''.join(child.itertext()).strip()}]")  # type: ignore[arg-type]
         else:
             parts.append(_span_inner(child))
@@ -713,7 +784,7 @@ def _inline_for_child(child: etree._Element) -> str:
         return _render_anchor(child)
     if tag == "br":
         return "\n"
-    if tag == "sup" and _FOOTNOTE_REFERENCE_CLASS in (child.get("class") or "").split():
+    if _is_footnote_marker(child):
         return _render_footnote_reference(child)
     return _inline(child)
 

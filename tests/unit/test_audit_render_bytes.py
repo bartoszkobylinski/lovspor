@@ -312,9 +312,9 @@ def test_a_heading_without_a_value_span_keeps_everything() -> None:
     assert "1" in audit._all_text(root)
 
 
-def test_an_h2_heading_keeps_its_marker() -> None:
-    # _render_heading walks h1/h2 inline and emits every marker; eliding here
-    # would hide a real loss instead of a documented one.
+def test_an_h2_marker_is_elided_since_renderer_8() -> None:
+    # _render_h2_legal_article_header assembles the two spans and drops the
+    # sibling marker, the same documented drop as h3-h6.
     root = _header(
         '<span class="legalArticleValue">§ 7</span>. '
         '<span class="legalArticleTitle">Tittel</span>'
@@ -324,7 +324,37 @@ def test_an_h2_heading_keeps_its_marker() -> None:
 
     audit._elide_dropped_heading_marks(root)
 
-    assert audit._all_text(root).endswith("1")
+    assert not audit._all_text(root).endswith("1")
+    assert "Tittel" in audit._all_text(root)
+
+
+def test_an_h2_marker_inside_a_span_is_elided_but_an_h3_one_is_kept() -> None:
+    # The h2 drop is wider than h3-h6's: the renderer omits an in-span marker
+    # on h2, while h3-h6 keep it delimited as [^n] — so its text IS in their
+    # Markdown and eliding it there would misstate what the renderer does.
+    inner = (
+        '<span class="legalArticleValue">§ 1</span>. '
+        '<span class="legalArticleTitle">Definisjoner'
+        '<sup class="footnotereference">1</sup></span>'
+    )
+
+    h2 = _header(inner, tag="h2")
+    audit._elide_dropped_heading_marks(h2)
+    assert "1" not in audit._all_text(h2).replace("§ 1", "")
+
+    h3 = _header(inner, tag="h3")
+    audit._elide_dropped_heading_marks(h3)
+    assert "Definisjoner1" in audit._all_text(h3).replace(" ", "")
+
+
+def test_an_h2_heading_without_a_value_span_keeps_its_marker() -> None:
+    # No value span means the renderer falls back to the full inline walk and
+    # emits the marker, on h2 exactly as on h3-h6.
+    root = _header('Amtskasserere<sup class="footnotereference">1</sup>', tag="h2")
+
+    audit._elide_dropped_heading_marks(root)
+
+    assert "1" in audit._all_text(root)
 
 
 def test_a_wrapper_holding_a_rendered_span_is_not_elided() -> None:
