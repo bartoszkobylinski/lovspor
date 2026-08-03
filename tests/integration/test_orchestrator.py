@@ -184,14 +184,19 @@ def _install_fake_embedder(
     api_keys: list[str] = []
 
     class FakeOpenAIEmbedder:
-        def __init__(self, api_key: str) -> None:
+        def __init__(self, api_key: str, **_kwargs: object) -> None:
             api_keys.append(api_key)
 
         def encode(self, texts: list[str]) -> np.ndarray:
             calls.append(list(texts))
             return _fake_embedding_matrix(texts)
 
-    monkeypatch.setattr(orchestrator_module, "OpenAIEmbedder", FakeOpenAIEmbedder)
+        def get_dimension(self) -> int:
+            return EMBEDDING_DIM
+
+    # Patched where the adapter is defined: the orchestrator asks the shared
+    # factory for an embedder instead of naming a provider itself.
+    monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", FakeOpenAIEmbedder)
     return calls, api_keys
 
 
@@ -821,6 +826,9 @@ def test_write_embeddings_for_doc_empty_sections_writes_header_only_file(
         def encode(self, _texts: list[str]) -> np.ndarray:
             raise AssertionError("empty documents must not call the embedder")
 
+        def get_dimension(self) -> int:
+            return EMBEDDING_DIM
+
     path = orchestrator_module._write_embeddings_for_doc(
         tmp_path,
         "gjeldende-lover",
@@ -857,6 +865,9 @@ def test_write_embeddings_for_doc_chunks_sections_over_token_limit(
         def encode(self, texts: list[str]) -> np.ndarray:
             self.texts = list(texts)
             return _fake_embedding_matrix(texts)
+
+        def get_dimension(self) -> int:
+            return EMBEDDING_DIM
 
     embedder = CountingEmbedder()
     path = orchestrator_module._write_embeddings_for_doc(
@@ -2106,7 +2117,7 @@ def test_run_sync_without_openai_key_skips_embedding_sidecars(
         captured_actions.extend(kwargs["actions"])
         return original_commit(*args, **kwargs)
 
-    monkeypatch.setattr(orchestrator_module, "OpenAIEmbedder", fail_openai_embedder)
+    monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", fail_openai_embedder)
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
 
     lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
