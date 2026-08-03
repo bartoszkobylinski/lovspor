@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Self
 
 from dotenv import find_dotenv, load_dotenv
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from lovspor.embeddings.provider import EmbeddingConfig
 from lovspor.errors import ConfigError
 
 _ENV_LOADED = False
@@ -68,7 +69,49 @@ class Settings(BaseModel):
     ``OPENAI_API_KEY`` env var or accepts ``OPENAI_APIKEY`` as
     fallback (some users have it without underscore from older
     docs).
+
+    Retained because it is the field the installed base configures and every
+    existing caller reads. :attr:`embedding` is the provider-agnostic view of
+    the same thing and is what builds the adapter; the two are kept consistent
+    by :meth:`from_env`.
     """
+    embedding: EmbeddingConfig = EmbeddingConfig()
+    """Which embedding space to use, and how to reach it.
+
+    Defaults reproduce the historical OpenAI configuration exactly, so an
+    install that sets only ``OPENAI_API_KEY`` behaves as it always has.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _mirror_embedding_credential(cls, data: object) -> object:
+        """Keep ``openai_api_key`` and ``embedding.api_key`` in agreement.
+
+        Every existing caller — including deployments and tests that build
+        ``Settings`` directly rather than through :meth:`from_env` — sets
+        ``openai_api_key`` alone. Without this the credential would reach the
+        field but never the factory, and embeddings would silently stop being
+        written: a backwards-compatibility break that presents exactly like
+        "no key configured". Whichever side was populated fills the other; an
+        explicit ``embedding.api_key`` wins.
+
+        Runs *before* validation because the model is frozen, so there is no
+        supported way to reconcile two fields once it is built.
+        """
+        if not isinstance(data, dict):
+            return data
+        key = data.get("openai_api_key")
+        raw_embedding = data.get("embedding")
+        embedding = (
+            raw_embedding
+            if isinstance(raw_embedding, EmbeddingConfig)
+            else EmbeddingConfig.model_validate(raw_embedding or {})
+        )
+        if embedding.api_key and not key:
+            data = {**data, "openai_api_key": embedding.api_key}
+        elif key and not embedding.api_key:
+            embedding = embedding.model_copy(update={"api_key": str(key)})
+        return {**data, "embedding": embedding}
 
     @field_validator("git_commit_mode")
     @classmethod
@@ -108,6 +151,7 @@ class Settings(BaseModel):
             LOVSPOR_HTTP_USER_AGENT       (str)
             LOVSPOR_LOG_LEVEL             (DEBUG | INFO | WARNING | ERROR)
             OPENAI_API_KEY                (str — also reads OPENAI_APIKEY)
+            LOVSPOR_EMBEDDING_*           (see EmbeddingConfig.from_env)
         """
         _ensure_env_loaded()
         data: dict[str, object] = {}
@@ -159,13 +203,22 @@ class Settings(BaseModel):
                     f"LOVSPOR_MAX_REMOVAL_RATIO must be a float, got: {raw_ratio!r}",
                 ) from exc
 
-        # OpenAI key: try the canonical env var first, then the
-        # underscore-less variant some users have. Override always wins.
-        raw_key = overrides.get("openai_api_key")
-        if raw_key is None:
-            raw_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_APIKEY")
-        if raw_key is not None:
-            data["openai_api_key"] = str(raw_key)
+        # Embedding configuration owns the credential lookup (including the
+        # underscore-less OPENAI_APIKEY fallback); openai_api_key mirrors
+        # whatever it resolved so the two can never disagree.
+        embedding = overrides.get("embedding")
+        if embedding is None:
+            raw_key = overrides.get("openai_api_key")
+            embedding = EmbeddingConfig.from_env(
+                **({"api_key": raw_key} if raw_key is not None else {}),
+            )
+        if not isinstance(embedding, EmbeddingConfig):
+            raise ConfigError(
+                f"embedding override must be an EmbeddingConfig, got: {type(embedding).__name__}",
+            )
+        data["embedding"] = embedding
+        if embedding.api_key is not None:
+            data["openai_api_key"] = embedding.api_key
 
         return cls.model_validate(data)
 
