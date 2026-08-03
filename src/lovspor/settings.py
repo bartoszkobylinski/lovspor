@@ -221,7 +221,14 @@ def _resolve_embedding(overrides: dict[str, object]) -> EmbeddingConfig:
     indistinguishable from "no key configured": the sync simply stops writing
     sidecars and says nothing.
     """
-    raw_key = overrides.get("openai_api_key") or credential_from_env()
+    # Explicit None check, not `or`: an empty override means "no credential",
+    # and falling through to the environment there would re-enable embeddings
+    # for a caller who deliberately blanked the key. Same rule the numeric
+    # fields above already follow. Env vars keep empty-means-unset, which is
+    # the historical behaviour and the normal convention for them.
+    raw_key = overrides.get("openai_api_key")
+    if raw_key is None:
+        raw_key = credential_from_env()
     override = overrides.get("embedding")
     if override is None:
         return EmbeddingConfig.from_env(**({"api_key": raw_key} if raw_key is not None else {}))

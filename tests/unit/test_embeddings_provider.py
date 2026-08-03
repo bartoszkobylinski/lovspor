@@ -230,6 +230,55 @@ def test_from_env_explicit_key_override_beats_the_environment(
     assert settings.embedding.api_key == "sk-override"
 
 
+@pytest.mark.parametrize(
+    "blanked",
+    [
+        pytest.param({"openai_api_key": ""}, id="legacy-field"),
+        pytest.param({"embedding": EmbeddingConfig(api_key="")}, id="embedding-config"),
+    ],
+)
+def test_a_blanked_credential_is_not_refilled_from_the_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    blanked: dict[str, object],
+) -> None:
+    """Blanking the key must disable embeddings, not fall back to the ambient one.
+
+    An empty override is a decision — "run without a credential" — and quietly
+    substituting whatever is exported in the environment overrides that
+    decision in the one direction an operator cannot see. The numeric fields
+    in Settings already use an explicit None check for the same reason; the
+    credential is the field where getting it wrong matters most.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+
+    settings = Settings.from_env(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "corpus",
+        **blanked,  # type: ignore[arg-type]
+    )
+
+    assert not settings.openai_api_key
+    assert not settings.embedding.api_key
+    assert create_embedder(settings.embedding) is None
+
+
+def test_a_blanked_credential_is_honoured_on_direct_construction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "corpus",
+        openai_api_key="",
+    )
+
+    assert not settings.embedding.api_key
+    assert create_embedder(settings.embedding) is None
+
+
 def test_from_env_rejects_an_unusable_embedding_override(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="invalid embedding override"):
         Settings.from_env(

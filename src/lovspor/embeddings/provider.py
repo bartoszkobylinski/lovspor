@@ -175,6 +175,14 @@ def _apply(
     overrides: dict[str, object],
     env_var: str,
 ) -> None:
+    """Apply a name-valued override, falling back to the environment.
+
+    Truthiness rather than an explicit None check, deliberately, and unlike
+    the credential: an empty provider, model name or base URL names nothing,
+    so blank reads as "not set" here. Blanking a *credential* is a real
+    instruction — "run without one" — which is why that path checks None (see
+    ``_resolve_embedding`` in settings.py).
+    """
     value = overrides.get(key) or os.environ.get(env_var)
     if value is not None:
         data[key] = value
