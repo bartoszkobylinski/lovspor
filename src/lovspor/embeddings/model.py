@@ -259,11 +259,11 @@ class OpenAIEmbedder:
         # Derived from the same rules the config uses, so an adapter built
         # directly (tests, evals) reports the same space as one built through
         # the factory with equivalent arguments.
-        self._space_id = EmbeddingConfig(
+        self._config = EmbeddingConfig(
             model_name=model_name,
             dimension=dim,
             base_url=base_url,
-        ).space_id
+        )
         self._encoding = _resolve_encoding(model_name)
 
     def encode(self, texts: list[str]) -> np.ndarray:
@@ -284,7 +284,12 @@ class OpenAIEmbedder:
 
     @property
     def space_id(self) -> str:
-        return self._space_id
+        return self._config.space_id
+
+    @property
+    def descriptor(self) -> str:
+        """Canonical descriptor recorded alongside the ESI in the manifest."""
+        return self._config.descriptor
 
     @property
     def model_name(self) -> str:
