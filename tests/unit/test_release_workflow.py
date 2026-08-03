@@ -165,18 +165,26 @@ def test_release_docs_agree_on_version_workflow_environment_and_burned_versions(
 def test_distribution_docs_agree_on_whether_lovspor_is_on_pypi_yet() -> None:
     """No reader may be told both "install from PyPI" and "the project page is absent".
 
-    The contradiction is resolved by state, not by silence: whichever is true —
-    release pending, or released — all three docs must say the same thing. This
-    asserts agreement rather than a fixed answer, so it keeps guarding the docs
-    after the first release flips them (see docs/releasing.md, "Cutting a
-    release" step 5) instead of having to be deleted then.
+    The contradiction is resolved by state, not by silence. Each doc must commit
+    to exactly one of the two release states, and all three must commit to the
+    same one — so this keeps biting after a transition flips them rather than
+    passing vacuously once a marker is deleted.
     """
     pending_marker = "first PyPI release is pending"
-    releasing = _RELEASING_DOC.read_text(encoding="utf-8")
-    pending_per_releasing = pending_marker in releasing
+    released_marker = "Lovspor is distributed on PyPI"
 
-    for label, doc in (("README", _README), ("docs/mcp.md", _MCP_DOC)):
+    states: dict[str, str] = {}
+    for label, doc in (
+        ("README", _README),
+        ("docs/mcp.md", _MCP_DOC),
+        ("docs/releasing.md", _RELEASING_DOC),
+    ):
         text = doc.read_text(encoding="utf-8")
-        assert (pending_marker in text) == pending_per_releasing, (
-            f"{label} and docs/releasing.md disagree about whether lovspor is on PyPI yet"
+        pending = pending_marker in text
+        released = released_marker in text
+        assert pending != released, (
+            f"{label} must state exactly one release state, not both and not neither"
         )
+        states[label] = "pending" if pending else "released"
+
+    assert len(set(states.values())) == 1, f"docs disagree about the release state: {states}"
