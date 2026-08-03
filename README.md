@@ -68,7 +68,7 @@ Maintainer release process: [`docs/releasing.md`](docs/releasing.md).
 
 Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen tools work immediately — no key, and no network access beyond your local corpus clone.
 
-**Optional — enable `semantic_search`.** The one search-by-meaning tool needs an OpenAI API key: it embeds *your query* at call time (the corpus vectors ship pre-computed, so you never re-embed the corpus yourself). Bring your own key via the server's `env`:
+**Optional — enable `semantic_search`.** Lovspor core needs no embedding provider; the one search-by-meaning tool does. It embeds *your query* at call time (the corpus vectors ship pre-computed, so you never re-embed the corpus yourself) using OpenAI, the default and currently only supported embedding adapter — the provider sits behind an abstraction so others can be added, which is not the same as claiming any model works today ([`docs/embeddings.md`](docs/embeddings.md)). Bring your own key via the server's `env`:
 
 ```jsonc
 {

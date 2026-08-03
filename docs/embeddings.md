@@ -154,13 +154,71 @@ result = read_embeddings(path)
 Same input → byte-identical file (deterministic byte order, no
 timestamps, no platform-dependent encoding). Property tested.
 
+## Provider configuration
+
+Lovspor core requires **no embedding provider at all**. Without one the sync
+renders Markdown, history and manifest exactly as usual, simply skipping
+sidecars, and fifteen of the sixteen MCP tools work untouched — only
+`semantic_search` is unavailable. Credentials are always operator-supplied;
+nothing is bundled.
+
+The application asks one factory for an adapter —
+`EmbeddingConfig.from_env() -> create_embedder() -> EmbeddingModel` — and no
+provider name appears in the sync engine or the MCP server. Configuration:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LOVSPOR_EMBEDDING_PROVIDER` | `openai` | Adapter to use. Unknown values are an error, never a silent fallback. |
+| `LOVSPOR_EMBEDDING_MODEL` | `text-embedding-3-large` | Model name sent to the provider. |
+| `LOVSPOR_EMBEDDING_DIMENSION` | `3072` | Vector width requested and stored. |
+| `LOVSPOR_EMBEDDING_BASE_URL` | unset | Endpoint override for an OpenAI-protocol-compatible service. |
+| `LOVSPOR_EMBEDDING_API_KEY` | unset | Provider-neutral credential. |
+| `OPENAI_API_KEY` | unset | Still read, still with the `OPENAI_APIKEY` fallback. |
+
+**Setting none of them reproduces the previous behaviour exactly.** An install
+configured with only `OPENAI_API_KEY` needs no changes.
+
+**`openai` is the only supported provider today.** The abstraction exists so
+another adapter can be added behind `EmbeddingModel`; that is an extension
+point, not a claim that arbitrary models work. See the limits below before
+configuring anything away from the defaults.
+
+## Embedding-space identity — and the limit it imposes
+
+A vector only means something relative to the model that produced it. Two
+unrelated models routinely emit the same number of dimensions while describing
+entirely different spaces, and cosine similarity across them yields scores in
+the normal `[-1, 1]` range that look completely plausible. There is no
+exception, no shape error, no signal of any kind — just confident, meaningless
+ranking. Dimension equality is therefore **not** evidence of compatibility.
+
+Adapters declare a `space_id` (for example
+`openai:text-embedding-3-large:3072`), and `semantic_search` compares that
+identity before any query meets corpus vectors. An OpenAI-protocol-compatible
+endpoint reached via `LOVSPOR_EMBEDDING_BASE_URL` reports as
+`openai-compatible:<host>:<model>:<dim>` — same wire format, unknown model, so
+it is deliberately a different space rather than being labelled as OpenAI.
+
+**The sidecar format records only the dimension — no model, no provider.** So a
+`.bin` file cannot state which space it belongs to, and compatibility with an
+existing corpus is provable for exactly one configuration: the default, which
+is demonstrably the one every published sidecar was written with. Configure any
+other space and `semantic_search` reports itself unavailable, explaining why,
+instead of returning results nobody can trust.
+
+The consequence, stated plainly: **you can configure a different embedding
+model, and the sync will use it, but semantic search against the published
+`lovverk` corpus will refuse to run.** Lifting that needs the sidecar to carry
+its own space identity — a change to published corpus artifacts, and an owner
+decision rather than a runtime one.
+
 ## Migration story
 
-When the embedding model changes (or its native dimension changes —
-`text-embedding-3-small` is 1536, `text-embedding-3-large` is
-3072, etc.), every existing `.bin` becomes stale.
+When the embedding model changes — including a native-dimension change, since
+`text-embedding-3-small` is 1536 and `text-embedding-3-large` is 3072 — every
+existing `.bin` becomes stale.
 
-The MCP server handles this gracefully:
+The MCP server degrades rather than crashing:
 
 1. `_load_embedding_index` checks each `.bin`'s header `dim`
    against the embedder's `get_dimension()`. Mismatched files are
@@ -173,6 +231,11 @@ The MCP server handles this gracefully:
    ("no embeddings — run lovspor sync") fires instead. Different
    states, different remediation.
 
-The next sync overwrites every `.bin` with current-dim content via
-the orchestrator's per-doc `_write_one` flow. No manual migration
-step needed.
+**Re-embedding is not automatic.** Staleness is decided by
+`_embedding_is_stale`, which compares the manifest's `embedding_hash` against
+the document's `xml_hash` — that is, it detects *content* changes. A model
+change alters no document's XML, so the next sync re-embeds only documents that
+happened to change upstream, and a partial re-embed leaves the corpus split
+across two spaces at once. To migrate deliberately: delete the affected
+`<dataset>/embeddings/*.bin`, run `lovspor sync` with a credential set (missing
+files are re-embedded), then `git pull` in the corpus clone.
