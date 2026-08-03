@@ -2,7 +2,7 @@
 
 `lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets sixteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
-> **Distribution (updated 2026-08-02).** The engine is MIT-licensed open infrastructure; the repository is temporarily private while publication-readiness work completes (see [`decisions.md`](decisions.md) §1). The PyPI releases (`0.2.0`–`0.3.0`) were withdrawn in July 2026 and have not returned, so run the server locally from a checkout via `uv run --project /path/to/lovspor lovspor …` — read that form wherever the commands below say `uvx lovspor …`. Local stdio is a first-class, fully supported path. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
+> **Distribution (updated 2026-08-03).** The engine is MIT-licensed open infrastructure, public on GitHub. PyPI publishing resumes with `0.4.0`, but the **first PyPI release is pending** — the `0.2.0`–`0.3.0` releases were withdrawn during a July 2026 pivot, so the project page is currently absent. The commands below use the on-demand `uvx lovspor …` form, which resolves the latest release from PyPI once it exists; until then — and for anyone running unreleased changes — use `uv run --project /path/to/lovspor lovspor …` from a checkout instead, see [§ Running from a local checkout](#running-from-a-local-checkout). Local stdio is a first-class, fully supported path either way. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
 
 Sprint 9 added a four-layer grounding-and-verification path for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
@@ -28,7 +28,7 @@ This document covers the full setup: prerequisites, configuration for two common
 > ⚠️ **The app itself still speaks plaintext HTTP and binds `127.0.0.1` by design** — lovspor never terminates TLS, a proxy in front of it does. If you run `mcp-http` yourself, keep it on localhost behind a TLS-terminating proxy (see `deploy/digitalocean/README.md`): a bearer token on an exposed port travels in the clear and can be read and replayed.
 
 ```bash
-uv run --project /path/to/lovspor lovspor mcp-http --host 127.0.0.1 --port 8000
+uvx lovspor mcp-http --host 127.0.0.1 --port 8000
 ```
 
 Defaults are `--host 127.0.0.1 --port 8000`; `--corpus-path` behaves exactly as it does for `lovspor mcp`. The MCP endpoint is served at `/mcp`.
@@ -85,7 +85,7 @@ Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_
 1. **The `lovverk` corpus.** One command fetches it:
 
    ```bash
-   uv run --project /path/to/lovspor lovspor fetch-corpus
+   uvx lovspor fetch-corpus
    ```
 
    This shallow-clones the corpus into `~/.cache/lovverk` (honouring
@@ -101,9 +101,9 @@ Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_
    git clone https://github.com/bartoszkobylinski/lovverk.git ~/lovverk
    ```
 
-2. **`uv` installed locally + a checkout of this repo** — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server from your checkout via `uv run --project /path/to/lovspor lovspor`. The engine is not currently on PyPI, so there is no on-demand `uvx` install.
+2. **`uv` installed locally** — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server on demand via `uvx lovspor`, which resolves the `lovspor` package from PyPI — no clone needed. (Plain `pip install lovspor` works too; then the command is just `lovspor`.)
 
-   The former PyPI / `pip install lovspor` path was retired in July 2026 (historical) — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
+   Until the pending `0.4.0` release publishes, and for anyone running unreleased changes, use a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
 
 3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fifteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
@@ -117,8 +117,8 @@ Add the following to your Claude Desktop config (path varies by OS — see [Clau
 {
   "mcpServers": {
     "lovverk": {
-      "command": "uv",
-      "args": ["run", "--project", "/path/to/lovspor", "lovspor", "mcp"]
+      "command": "uvx",
+      "args": ["lovspor", "mcp"]
     }
   }
 }
@@ -133,7 +133,7 @@ Try it: ask Claude *"Use the lovverk MCP tools to tell me when Skatteloven was l
 Same config shape, registered via the Claude Code CLI:
 
 ```bash
-claude mcp add lovverk -- uv run --project /path/to/lovspor lovspor mcp
+claude mcp add lovverk -- uvx lovspor mcp
 ```
 
 (Add `--corpus-path <path>` after `mcp` only to override the default cache.) Or edit `~/.claude.json` directly with the JSON above. Then `claude` in a fresh session — `/mcp` lists the registered servers.
@@ -744,7 +744,7 @@ The sixteen tools compose: an assistant can stitch together a research workflow 
 
 ## Running from a local checkout
 
-The earlier PyPI releases (`0.2.0`–`0.3.0`) were withdrawn on 2026-07-14 and have not returned (see the distribution note at the top), so the server runs from a clone of this repo. This is a first-class supported path — the hosted endpoint (live since 2026-07-18) is an optional alternative, not a replacement. Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache:
+The server also runs from a clone of this repo instead of the PyPI release. This is the path to use while the first `0.4.0` release is still pending, and afterwards whenever you want unreleased changes. Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache:
 
 ```jsonc
 {
@@ -807,7 +807,7 @@ Defensive error. Should not happen with a clean `lovverk` clone — the manifest
 
 - Check the client's MCP logs (Claude Desktop: `~/Library/Logs/Claude/mcp*.log` on macOS).
 - Verify `uv` is on your `PATH` — MCP clients often launch in a minimal shell environment without your full `PATH`.
-- Try the command standalone: `uv run --project /path/to/lovspor lovspor mcp` should start and wait for stdio input (append `--corpus-path /path/to/lovverk` if you use a custom clone).
+- Try the command standalone: `uvx lovspor mcp` should start and wait for stdio input (append `--corpus-path /path/to/lovverk` if you use a custom clone).
 
 ---
 

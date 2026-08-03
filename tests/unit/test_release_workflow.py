@@ -1,0 +1,182 @@
+"""Security and packaging invariants of the PyPI release path.
+
+The release workflow is the only path that can publish immutable bytes under
+the `lovspor` name. Its trigger, token scope and artifact hand-off are security
+properties, not style. The surrounding docs and packaging metadata are pinned
+here too, so a regression shows up as a failing test instead of a bad release.
+"""
+
+import os
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+from typing import Any
+
+import yaml  # type: ignore[import-untyped]
+
+_ROOT = Path(__file__).resolve().parents[2]
+_WORKFLOW = _ROOT / ".github" / "workflows" / "release.yml"
+_README = _ROOT / "README.md"
+_MCP_DOC = _ROOT / "docs" / "mcp.md"
+_RELEASING_DOC = _ROOT / "docs" / "releasing.md"
+
+
+def _workflow() -> dict[str, Any]:
+    return yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+
+
+def _workflow_steps(job: str) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = _workflow()["jobs"][job]["steps"]
+    return steps
+
+
+def _pyproject() -> dict[str, Any]:
+    return tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+
+def test_release_workflow_triggers_only_on_published_releases() -> None:
+    workflow = _workflow()
+    triggers = workflow.get("on", workflow.get(True))  # PyYAML resolves bare `on:` to True.
+
+    assert triggers == {"release": {"types": ["published"]}}, triggers
+
+
+def test_only_the_publish_job_gets_oidc_token_minting_power() -> None:
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+
+    assert workflow["permissions"] == {"contents": "read"}
+    assert jobs["pypi-publish"]["permissions"] == {"id-token": "write"}
+    assert "permissions" not in jobs["build"]
+
+
+def test_publish_job_runs_no_repository_code() -> None:
+    """No checkout, no shell, no local Python: only artifact download + upload."""
+    steps = _workflow_steps("pypi-publish")
+
+    assert [step["name"] for step in steps] == [
+        "Download distributions",
+        "Publish to PyPI (trusted publishing)",
+    ]
+    assert all("run" not in step for step in steps), steps
+    assert not any("checkout" in str(step.get("uses", "")) for step in steps), steps
+
+
+def test_build_job_fails_closed_on_tag_version_mismatch_before_publish_steps() -> None:
+    steps = _workflow_steps("build")
+    names = [str(step.get("name", "")) for step in steps]
+    assert_at = names.index("Assert built version matches the release tag")
+    check_at = names.index("Check distribution metadata")
+    upload_at = names.index("Upload distributions")
+
+    assert assert_at < check_at < upload_at, names
+    assert "dist/lovspor-${tag}.tar.gz" in str(steps[assert_at]["run"])
+    assert "exit 1" in str(steps[assert_at]["run"])
+
+
+def test_release_workflow_fails_if_the_expected_dist_artifact_is_missing() -> None:
+    upload = next(
+        step for step in _workflow_steps("build") if step.get("name") == "Upload distributions"
+    )
+
+    assert upload["with"]["name"] == "dist"
+    assert upload["with"]["path"] == "dist/"
+    assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_project_version_and_mcp_cap_are_pinned_for_the_first_re_release() -> None:
+    project = _pyproject()["project"]
+    deps = project["dependencies"]
+    runtime_mcp = [dep for dep in deps if dep.startswith("mcp")]
+
+    assert project["version"] == "0.4.0"
+    assert runtime_mcp == ["mcp>=1.28.1,<2"]
+
+
+def test_lockfile_matches_the_declared_mcp_cap_and_resolves_to_a_1x_release() -> None:
+    lock = (_ROOT / "uv.lock").read_text(encoding="utf-8")
+
+    assert '{ name = "mcp", specifier = ">=1.28.1,<2" }' in lock
+    assert 'name = "mcp"\nversion = "1.28.1"' in lock
+
+
+def test_the_mcp_cap_is_load_bearing_because_the_server_imports_fastmcp() -> None:
+    """If this import goes away, the `<2` ceiling deserves re-review."""
+    mcp_source = (_ROOT / "src" / "lovspor" / "mcp.py").read_text(encoding="utf-8")
+
+    assert "from mcp.server.fastmcp import FastMCP" in mcp_source
+
+
+def test_wheel_ships_only_the_lovspor_package() -> None:
+    wheel = _pyproject()["tool"]["hatch"]["build"]["targets"]["wheel"]
+
+    assert wheel["packages"] == ["src/lovspor"], wheel
+
+
+def test_console_entry_point_targets_the_lovspor_cli() -> None:
+    scripts = _pyproject()["project"]["scripts"]
+
+    assert scripts == {"lovspor": "lovspor.cli:app"}
+
+
+def test_importing_lovspor_and_its_cli_surface_needs_no_openai_key() -> None:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"OPENAI_API_KEY", "OPENAI_APIKEY"}
+        and not key.startswith(("LOVSPOR_", "LOVVERK_"))
+    }
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import lovspor, lovspor.cli, lovspor.mcp; print(lovspor.__version__)",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0.4.0"
+
+
+def test_release_docs_agree_on_version_workflow_environment_and_burned_versions() -> None:
+    texts = {
+        "README": _README.read_text(encoding="utf-8"),
+        "docs/mcp.md": _MCP_DOC.read_text(encoding="utf-8"),
+        "docs/releasing.md": _RELEASING_DOC.read_text(encoding="utf-8"),
+    }
+
+    for label, text in texts.items():
+        assert "0.4.0" in text, label
+
+    assert "release.yml" in texts["docs/releasing.md"]
+    assert "`pypi`" in texts["docs/releasing.md"]
+    for label, text in texts.items():
+        assert "0.2.0" in text, label
+        assert "0.3.0" in text, label
+        assert "burned" in text or "never be reused" in text or "withdrawn" in text, label
+
+
+def test_distribution_docs_agree_on_whether_lovspor_is_on_pypi_yet() -> None:
+    """No reader may be told both "install from PyPI" and "the project page is absent".
+
+    The contradiction is resolved by state, not by silence: whichever is true —
+    release pending, or released — all three docs must say the same thing. This
+    asserts agreement rather than a fixed answer, so it keeps guarding the docs
+    after the first release flips them (see docs/releasing.md, "Cutting a
+    release" step 5) instead of having to be deleted then.
+    """
+    pending_marker = "first PyPI release is pending"
+    releasing = _RELEASING_DOC.read_text(encoding="utf-8")
+    pending_per_releasing = pending_marker in releasing
+
+    for label, doc in (("README", _README), ("docs/mcp.md", _MCP_DOC)):
+        text = doc.read_text(encoding="utf-8")
+        assert (pending_marker in text) == pending_per_releasing, (
+            f"{label} and docs/releasing.md disagree about whether lovspor is on PyPI yet"
+        )

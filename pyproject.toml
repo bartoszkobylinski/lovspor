@@ -1,6 +1,6 @@
 [project]
 name = "lovspor"
-version = "0.3.0"
+version = "0.4.0"
 description = "Norwegian law change tracker — produces the lovverk corpus from Lovdata public data"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -27,7 +27,11 @@ dependencies = [
     # authenticates as the principal that opened it (CVE-2026-52869), so
     # a leaked or guessed Mcp-Session-Id bypasses the bearer auth this
     # server relies on. 1.28.1 additionally covers CVE-2026-59950.
-    "mcp>=1.28.1",
+    # Ceiling: mcp 2.0.0 removed the mcp.server.fastmcp module this server
+    # is built on, so an unbounded spec breaks `import lovspor.mcp` on any
+    # fresh install (caught in the 0.4.0 clean-wheel smoke). Lift only with
+    # a deliberate 2.x migration.
+    "mcp>=1.28.1,<2",
     "numpy>=1.26.0",
     # tiktoken is required by the OpenAI embedder for token-aware
     # truncation under the 8191-token API limit. It's tiny (~3 MB
