@@ -17,11 +17,12 @@ import numpy as np
 import pytest
 
 from lovspor.embeddings import (
-    LEGACY_SPACE_ID,
+    LEGACY_SPACE_DESCRIPTOR,
     SUPPORTED_PROVIDERS,
     EmbeddingConfig,
     OpenAIEmbedder,
     create_embedder,
+    esi_for_descriptor,
     space_id_of,
     write_embeddings,
 )
@@ -30,6 +31,8 @@ from lovspor.errors import ConfigError
 from lovspor.mcp import CorpusNotFoundError, CorpusReader
 from lovspor.settings import Settings
 from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
+
+LEGACY_SPACE_ID = esi_for_descriptor(LEGACY_SPACE_DESCRIPTOR)
 
 _EMBEDDING_ENV_VARS = (
     "OPENAI_API_KEY",
@@ -92,8 +95,8 @@ def test_openai_api_key_alone_reproduces_the_historical_configuration(
     assert config.dimension == 3072
     assert config.base_url is None
     assert config.api_key == "sk-installed-base"
+    assert config.descriptor == LEGACY_SPACE_DESCRIPTOR
     assert config.space_id == LEGACY_SPACE_ID
-    assert config.is_corpus_compatible
 
 
 def test_underscore_less_openai_apikey_is_still_accepted(
@@ -325,7 +328,9 @@ def test_factory_honours_model_and_dimension_overrides() -> None:
 
     assert embedder is not None
     assert embedder.get_dimension() == 1536
-    assert embedder.space_id == "openai:text-embedding-3-small:1536"
+    assert embedder.descriptor == (
+        "provider=openai;model=text-embedding-3-small;dim=1536;endpoint=default"
+    )
 
 
 def test_unknown_provider_fails_loudly_and_never_falls_back() -> None:
@@ -391,8 +396,8 @@ def test_space_id_distinguishes_models_that_share_a_dimension() -> None:
 
     assert a.dimension == b.dimension
     assert a.space_id != b.space_id
-    assert a.is_corpus_compatible
-    assert not b.is_corpus_compatible
+    assert a.space_id == LEGACY_SPACE_ID
+    assert b.space_id != LEGACY_SPACE_ID
 
 
 def test_a_custom_endpoint_is_not_labelled_as_openai() -> None:
@@ -403,8 +408,11 @@ def test_a_custom_endpoint_is_not_labelled_as_openai() -> None:
     """
     config = EmbeddingConfig(base_url="https://embeddings.internal.example/v1/embeddings")
 
-    assert config.space_id.startswith("openai-compatible:embeddings.internal.example:")
-    assert not config.is_corpus_compatible
+    assert config.descriptor == (
+        "provider=openai;model=text-embedding-3-large;dim=3072;"
+        "endpoint=https://embeddings.internal.example/v1/embeddings"
+    )
+    assert config.space_id != LEGACY_SPACE_ID
 
 
 def test_an_adapter_declaring_no_space_is_treated_as_unknown() -> None:
@@ -413,7 +421,7 @@ def test_an_adapter_declaring_no_space_is_treated_as_unknown() -> None:
     assert space_id_of(_FakeEmbedder()) == LEGACY_SPACE_ID
 
 
-def _seed_minimal_corpus(root: Path, *, dim: int) -> None:
+def _seed_minimal_corpus(root: Path, *, dim: int, stamped: bool = True) -> None:
     root.mkdir(parents=True, exist_ok=True)
     record = ManifestRecord(
         doc_id="nl-1",
@@ -428,6 +436,8 @@ def _seed_minimal_corpus(root: Path, *, dim: int) -> None:
         last_changed="2026-04-27",
         last_seen="2026-04-27",
         total_changes=1,
+        embedding_space=LEGACY_SPACE_DESCRIPTOR if stamped else None,
+        embedding_space_id=LEGACY_SPACE_ID if stamped else None,
     )
     write_manifest(
         Manifest(generated_at=datetime.now(UTC), documents={"nl-1": record}),
@@ -460,16 +470,15 @@ def test_semantic_search_refuses_an_embedder_from_a_different_space(tmp_path: Pa
         reader.semantic_search("formal")
 
     message = str(exc_info.value)
-    assert "some-other-model" in message
-    assert LEGACY_SPACE_ID in message
-    assert "cannot be verified" in message
+    assert "record a different one" in message
+    assert "cannot be compared" in message
 
 
 def test_semantic_search_refuses_an_adapter_that_declares_no_space(tmp_path: Path) -> None:
     _seed_minimal_corpus(tmp_path, dim=4)
     reader = CorpusReader(tmp_path, embedder=_LegacyProtocolEmbedder())
 
-    with pytest.raises(CorpusNotFoundError, match="cannot be verified"):
+    with pytest.raises(CorpusNotFoundError, match="cannot be compared"):
         reader.semantic_search("formal")
 
 
@@ -556,15 +565,22 @@ def test_sidecar_bytes_are_unchanged_by_taking_dim_from_the_embedder(
     assert implicit.read_bytes() == explicit.read_bytes()
 
 
-def test_manifest_records_gain_no_embedding_identity_field(tmp_path: Path) -> None:
-    """No persistence change: the sidecar and manifest schemas are untouched.
+def test_identity_lives_in_the_manifest_and_not_in_the_sidecar(tmp_path: Path) -> None:
+    """The Stage 1 boundary: manifest carries identity, the binary does not.
 
-    Recording which space a sidecar belongs to is the fix that would make
-    provider switching genuinely safe, and it is deliberately NOT in this PR —
-    it changes published corpus artifacts and needs an owner decision.
+    ADR-0005 stages this deliberately. Putting the digest in the sidecar means
+    rewriting every published file, so it waits for a coordinated cutover;
+    until then the manifest is the only place identity exists.
     """
     _seed_minimal_corpus(tmp_path, dim=4)
     manifest = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    record = next(iter(manifest["documents"].values()))
 
-    fields = set(next(iter(manifest["documents"].values())))
-    assert not fields & {"embedding_model", "embedding_provider", "embedding_space"}
+    assert record["embedding_space"] == LEGACY_SPACE_DESCRIPTOR
+    assert record["embedding_space_id"] == LEGACY_SPACE_ID
+
+    sidecar = (tmp_path / "lover" / "embeddings" / "testloven.bin").read_bytes()
+    assert sidecar[:4] == b"LSPE"
+    assert sidecar[4] == 1
+    # The spare header byte stays spare: no digest, no Stage 2 smuggled in.
+    assert sidecar[5] == 0

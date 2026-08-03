@@ -1304,8 +1304,11 @@ def test_migration_triggers_and_messages(tmp_path: Path) -> None:
     )
     assert orchestrator_module._needs_sprint9_embeddings_migration(prior, tmp_path) is True
     (tmp_path / "lover" / "embeddings").mkdir()
-    (tmp_path / "lover" / "embeddings" / "current.bin").write_bytes(b"")
-    (tmp_path / "lover" / "embeddings" / "eu.bin").write_bytes(b"")
+    # Real (section-less) sidecars, not empty placeholders: a sidecar that
+    # cannot be parsed is now corrupt and therefore stale, so "the file
+    # exists" is no longer enough to satisfy the check.
+    for name in ("current.bin", "eu.bin"):
+        write_embeddings(tmp_path / "lover" / "embeddings" / name, [], scale=1.0)
     assert orchestrator_module._needs_sprint9_embeddings_migration(prior, tmp_path) is False
 
     actions = [
@@ -2159,22 +2162,8 @@ def test_mark_undersized_embeddings_stale_clears_hash_and_commits(tmp_path: Path
     assert updated.documents["healthy"].embedding_hash == "a" * 64
     flat_embed = orchestrator_module._embeddings_path(repo, "gjeldende-lover", "flat")
     healthy_embed = orchestrator_module._embeddings_path(repo, "gjeldende-lover", "healthy")
-    assert (
-        _embedding_is_stale(
-            updated.documents["flat"].embedding_hash,
-            updated.documents["flat"].xml_hash,
-            flat_embed,
-        )
-        is True
-    )
-    assert (
-        _embedding_is_stale(
-            updated.documents["healthy"].embedding_hash,
-            updated.documents["healthy"].xml_hash,
-            healthy_embed,
-        )
-        is False
-    )
+    assert _embedding_is_stale(updated.documents["flat"], flat_embed) is True
+    assert _embedding_is_stale(updated.documents["healthy"], healthy_embed) is False
     status = subprocess.run(
         ["git", "status", "--short"],
         cwd=repo,
