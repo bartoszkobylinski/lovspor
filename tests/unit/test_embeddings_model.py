@@ -28,6 +28,10 @@ class FakeModel:
     def get_dimension(self) -> int:
         return 2
 
+    @property
+    def space_id(self) -> str:
+        return "fake:test-model:2"
+
 
 class FakeEncoding:
     encode_calls: ClassVar[list[str]] = []

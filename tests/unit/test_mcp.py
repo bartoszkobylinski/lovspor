@@ -39,7 +39,7 @@ from lovspor.access import (
     hash_token,
     write_credential_file,
 )
-from lovspor.embeddings import write_embeddings
+from lovspor.embeddings import LEGACY_SPACE_ID, OpenAIEmbedder, write_embeddings
 from lovspor.embeddings.search import SearchHit
 from lovspor.errors import ConfigError
 from lovspor.mcp import (
@@ -57,7 +57,6 @@ from lovspor.mcp import (
     CorpusNotFoundError,
     CorpusReader,
     HttpConfig,
-    OpenAIEmbedder,
     ParsedSection,
     SectionIndex,
     _add_health_routes,
@@ -181,9 +180,19 @@ def _seed_corpus(
 
 
 class _FakeEmbedder:
-    def __init__(self, vector: list[float]) -> None:
+    """Stands in for the production adapter, so it claims the production space.
+
+    ``space_id`` is not decoration here: CorpusReader refuses to search when
+    the embedder's space is not the one the corpus was built in, and an
+    adapter that declares no space is treated as unknown — which is refused
+    too. A fake that omitted it would exercise the refusal path in every test
+    that means to exercise search.
+    """
+
+    def __init__(self, vector: list[float], space_id: str = LEGACY_SPACE_ID) -> None:
         self.vector = np.asarray(vector, dtype=np.float32)
         self.queries: list[str] = []
+        self._space_id = space_id
 
     def encode(self, texts: list[str]) -> np.ndarray:
         self.queries.extend(texts)
@@ -191,6 +200,10 @@ class _FakeEmbedder:
 
     def get_dimension(self) -> int:
         return int(self.vector.shape[0])
+
+    @property
+    def space_id(self) -> str:
+        return self._space_id
 
 
 def test_mcp_low_level_helpers_have_stable_public_contracts() -> None:
@@ -307,14 +320,17 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_APIKEY", raising=False)
-    monkeypatch.setattr("lovspor.mcp.OpenAIEmbedder", FakeOpenAIEmbedder)
+    monkeypatch.delenv("LOVSPOR_EMBEDDING_API_KEY", raising=False)
+    # Patched where the adapter is defined, not on lovspor.mcp: the MCP module
+    # no longer constructs a provider itself, it asks the factory for one.
+    monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", FakeOpenAIEmbedder)
 
     assert _build_embedder() is None
-    # Whole string: this is the operator's only signal that one of the fifteen
+    # Whole string: this is the operator's only signal that one of the sixteen
     # tools is silently unavailable, and the remediation is the point of it.
     assert capsys.readouterr().err == (
         "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-        "but the other fourteen tools work normally. Set OPENAI_API_KEY "
+        "but the other fifteen tools work normally. Set OPENAI_API_KEY "
         "and restart to enable semantic search.\n"
     )
 
@@ -334,6 +350,7 @@ def test_build_embedder_flushes_the_missing_key_warning(
     stderr = _FlushSpy()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_APIKEY", raising=False)
+    monkeypatch.delenv("LOVSPOR_EMBEDDING_API_KEY", raising=False)
     monkeypatch.setattr(mcp_module.sys, "stderr", stderr)
 
     assert _build_embedder() is None

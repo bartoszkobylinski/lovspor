@@ -35,6 +35,13 @@ from lovspor.embeddings.model import (
     EmbeddingModel,
     OpenAIEmbedder,
 )
+from lovspor.embeddings.provider import (
+    LEGACY_SPACE_ID,
+    SUPPORTED_PROVIDERS,
+    EmbeddingConfig,
+    create_embedder,
+    space_id_of,
+)
 from lovspor.embeddings.quantize import dequantize_int8, quantize_int8
 from lovspor.embeddings.search import EmbeddingIndex, SearchHit
 from lovspor.embeddings.sections import EmbeddingSection, iter_sections
@@ -49,15 +56,20 @@ __all__ = [
     "DEFAULT_DIMENSION",
     "DEFAULT_MODEL_NAME",
     "EMBEDDING_DIM",
+    "LEGACY_SPACE_ID",
+    "SUPPORTED_PROVIDERS",
+    "EmbeddingConfig",
     "EmbeddingFile",
     "EmbeddingIndex",
     "EmbeddingModel",
     "EmbeddingSection",
     "OpenAIEmbedder",
     "SearchHit",
+    "create_embedder",
     "dequantize_int8",
     "iter_sections",
     "quantize_int8",
     "read_embeddings",
+    "space_id_of",
     "write_embeddings",
 ]

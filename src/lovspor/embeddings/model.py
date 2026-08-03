@@ -35,18 +35,31 @@ import httpx
 import numpy as np
 import tiktoken
 
-DEFAULT_MODEL_NAME = "text-embedding-3-large"
-DEFAULT_DIMENSION = 3072
-"""Native dimensionality of text-embedding-3-large.
+from lovspor.embeddings.provider import (
+    DEFAULT_DIMENSION,
+    DEFAULT_MODEL_NAME,
+    EmbeddingConfig,
+)
+from lovspor.embeddings.provider import (
+    OPENAI_ENDPOINT as _ENDPOINT,
+)
 
-The OpenAI API supports dimensionality reduction via the
-``dimensions`` parameter, but this engine uses native dim because
-storage savings (~33% for 1024-dim, ~92% for 256-dim) come at a
-~1-3% Recall@5 cost on benchmarks. The 200 MB int8 footprint at
-3072 dim is acceptable for the lovverk corpus.
-"""
+__all__ = [
+    "DEFAULT_DIMENSION",
+    "DEFAULT_MODEL_NAME",
+    "EmbeddingModel",
+    "OpenAIEmbedder",
+    "split_to_token_chunks",
+]
 
-_ENDPOINT = "https://api.openai.com/v1/embeddings"
+_FALLBACK_ENCODING = "cl100k_base"
+"""Tokenizer for a model name tiktoken has never heard of.
+
+Reachable only once the model name is configurable: ``encoding_for_model``
+raises ``KeyError`` for anything outside its registry, which would turn a
+custom-model config into a crash at construction. The count is then
+approximate, which costs a little truncation accuracy — strictly better than
+refusing to start."""
 _MAX_INPUT_TOKENS = 8000
 """text-embedding-3 hard limit is 8191; leave a 191-token margin
 to absorb tokenizer drift between client-side tiktoken and
@@ -91,11 +104,28 @@ _DEFAULT_TIMEOUT_SECONDS = 180.0
 _DEFAULT_MAX_RETRIES = 3
 
 
+def _resolve_encoding(model_name: str) -> tiktoken.Encoding:
+    """Tokenizer for ``model_name``, falling back for an unknown model.
+
+    ``encoding_for_model`` raises ``KeyError`` outside its registry, which
+    would turn a configured non-OpenAI model name into a crash at
+    construction. Approximate token counts beat refusing to start.
+
+    Uncached on purpose: the per-embedder call happens once, and a cache here
+    would make the resolution unobservable to anything that swaps the
+    tokenizer out from under it.
+    """
+    try:
+        return tiktoken.encoding_for_model(model_name)
+    except KeyError:
+        return tiktoken.get_encoding(_FALLBACK_ENCODING)
+
+
 @lru_cache(maxsize=4)
 def _encoding_for(model_name: str) -> tiktoken.Encoding:
     """Cached tiktoken encoding lookup — ``encoding_for_model`` walks a
     registry on every call, and the chunker calls it per section."""
-    return tiktoken.encoding_for_model(model_name)
+    return _resolve_encoding(model_name)
 
 
 def split_to_token_chunks(
@@ -182,6 +212,18 @@ class EmbeddingModel(Protocol):
     def get_dimension(self) -> int:
         """Output dimensionality (3072 for text-embedding-3-large)."""
 
+    @property
+    def space_id(self) -> str:
+        """Identity of the vector space this adapter produces.
+
+        Dimensionality cannot serve as this identity: two unrelated models
+        routinely agree on it, and comparing their vectors returns confident
+        nonsense rather than an error. Consumers compare this string before
+        letting a query meet corpus vectors. Format is opaque — only equality
+        is meaningful. See ``provider.space_id_of`` for reading it defensively
+        from an adapter that predates this member.
+        """
+
 
 class OpenAIEmbedder:
     """text-embedding-3-large client. Pre-truncates input by tokens.
@@ -200,6 +242,7 @@ class OpenAIEmbedder:
         batch_size: int = _DEFAULT_BATCH_SIZE,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
         max_retries: int = _DEFAULT_MAX_RETRIES,
+        base_url: str | None = None,
     ) -> None:
         if not api_key:
             raise ValueError(
@@ -212,7 +255,16 @@ class OpenAIEmbedder:
         self._batch_size = batch_size
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
-        self._encoding = tiktoken.encoding_for_model(model_name)
+        self._endpoint = base_url or _ENDPOINT
+        # Derived from the same rules the config uses, so an adapter built
+        # directly (tests, evals) reports the same space as one built through
+        # the factory with equivalent arguments.
+        self._space_id = EmbeddingConfig(
+            model_name=model_name,
+            dimension=dim,
+            base_url=base_url,
+        ).space_id
+        self._encoding = _resolve_encoding(model_name)
 
     def encode(self, texts: list[str]) -> np.ndarray:
         if not texts:
@@ -229,6 +281,14 @@ class OpenAIEmbedder:
 
     def get_dimension(self) -> int:
         return self._dim
+
+    @property
+    def space_id(self) -> str:
+        return self._space_id
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
 
     def _batches(self, texts: list[str]) -> Iterator[list[str]]:
         """Split ``texts`` into requests bounded by BOTH limits.
@@ -280,7 +340,7 @@ class OpenAIEmbedder:
         for attempt in range(1, self._max_retries + 1):
             try:
                 resp = client.post(
-                    _ENDPOINT,
+                    self._endpoint,
                     headers={
                         "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",

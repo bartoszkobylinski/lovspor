@@ -44,7 +44,6 @@ import asyncio
 import difflib
 import functools
 import json
-import os
 import re
 import shlex
 import subprocess
@@ -67,11 +66,14 @@ from starlette.responses import JSONResponse, Response
 
 from lovspor.access import CredentialStore
 from lovspor.embeddings import (
+    LEGACY_SPACE_ID,
+    EmbeddingConfig,
     EmbeddingIndex,
     EmbeddingModel,
-    OpenAIEmbedder,
     SearchHit,
+    create_embedder,
     read_embeddings,
+    space_id_of,
 )
 from lovspor.errors import ConfigError, LovsporError
 from lovspor.headings import (
@@ -370,6 +372,13 @@ class CorpusReader:
         # vector and a stale .bin disagree on dim, taking the whole
         # search down for one orphan file from a prior model migration.
         self._expected_dim: int | None = embedder.get_dimension() if embedder else None
+        # Which vector space this embedder speaks. Dimension cannot stand in
+        # for it: two unrelated models agree on 3072 all the time, and cosine
+        # similarity across their spaces returns confident nonsense instead of
+        # an error. Sidecars record no space of their own, so the only space
+        # whose compatibility with a corpus can be asserted is the one those
+        # files were demonstrably written in — see _assert_searchable_space.
+        self._embedder_space_id: str | None = space_id_of(embedder)
         self._manifest: Manifest | None = None  # pragma: no mutate
         # Body-text index for search_body; lazy-loaded on first call so
         # MCP server startup stays fast for clients that only query
@@ -1280,6 +1289,7 @@ class CorpusReader:
                 "at MCP server startup. Set the environment variable and "
                 "restart the server.",
             )
+        self._assert_searchable_space()
         limit = _bounded_limit(limit)
         # Empty results ALWAYS carry a notice (documented contract) —
         # including these caller no-op cases, so the AI never has to
@@ -1316,6 +1326,33 @@ class CorpusReader:
             "results": [self._grounded_hit(hit, sections_memo) for hit in kept],
             "notice": None,
         }
+
+    def _assert_searchable_space(self) -> None:
+        """Refuse to search unless query and corpus vectors share a space.
+
+        The corpus records a dimension per sidecar and no model identity at
+        all, so "are these the same space?" is not answerable from the files.
+        What *is* known is that every published sidecar was written by the
+        default OpenAI configuration, so that one space — and only it — can be
+        asserted compatible. Any other configured space is unprovable, and an
+        unprovable comparison is refused rather than run: the failure mode it
+        replaces is silent, returning ranked, plausible, meaningless results.
+
+        Lifting this restriction needs the sidecar format to carry its own
+        space identity; that is a corpus persistence decision, not a runtime
+        one (see docs/embeddings.md).
+        """
+        if self._embedder_space_id in (None, LEGACY_SPACE_ID):
+            return
+        raise CorpusNotFoundError(
+            f"semantic_search is unavailable: the configured embedding space "
+            f"{self._embedder_space_id!r} is not the space this corpus was built in "
+            f"({LEGACY_SPACE_ID!r}), and embedding sidecars record only their "
+            "dimension, so compatibility cannot be verified. Searching anyway "
+            "would return confident but meaningless results. Unset the "
+            "LOVSPOR_EMBEDDING_* overrides to use the corpus-compatible "
+            "configuration.",
+        )
 
     def _raise_for_empty_embedding_index(self) -> None:
         if self._stale_bin_count > 0:
@@ -2789,28 +2826,44 @@ _MCP_EMBED_MAX_RETRIES = 2
 
 
 def _build_embedder() -> EmbeddingModel | None:
-    """Instantiate the OpenAI embedder if ``OPENAI_API_KEY`` is set,
-    otherwise log a warning and return None. Reads either
-    ``OPENAI_API_KEY`` or the underscore-less ``OPENAI_APIKEY`` to
-    match what ``Settings.from_env`` accepts on the engine side.
+    """Build the configured embedding adapter, or return None if unusable.
 
-    The embedder is built with an interactive timeout/retry budget so a
-    hung OpenAI node cannot freeze the stdio server for minutes."""
-    api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_APIKEY")
-    if not api_key:
+    Configuration comes from :meth:`EmbeddingConfig.from_env`, the same
+    resolution the engine uses — including the credential env-var fallbacks
+    this function used to re-implement provider-side knowledge of.
+
+    Returns None rather than raising in every failure mode, because the server
+    hosts fifteen tools that need no embedding provider at all: a missing
+    credential or a misconfigured provider must cost ``semantic_search`` and
+    nothing else. The reason is printed once at startup and repeated in
+    ``semantic_search``'s own error, so it is not lost in a scrollback.
+
+    The adapter gets an interactive timeout/retry budget so a hung provider
+    node cannot freeze the stdio server for minutes."""
+    try:
+        config = EmbeddingConfig.from_env()
+        embedder = create_embedder(
+            config,
+            timeout_seconds=_MCP_EMBED_TIMEOUT_SECONDS,
+            max_retries=_MCP_EMBED_MAX_RETRIES,
+        )
+    except ConfigError as exc:
         print(
-            "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-            "but the other fourteen tools work normally. Set OPENAI_API_KEY "
-            "and restart to enable semantic search.",
+            f"lovspor mcp: embedding provider not configured: {exc} "
+            "semantic_search will be disabled; the other fifteen tools work normally.",
             file=sys.stderr,
             flush=True,
         )
         return None
-    return OpenAIEmbedder(
-        api_key=api_key,
-        timeout_seconds=_MCP_EMBED_TIMEOUT_SECONDS,
-        max_retries=_MCP_EMBED_MAX_RETRIES,
-    )
+    if embedder is None:
+        print(
+            "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
+            "but the other fifteen tools work normally. Set OPENAI_API_KEY "
+            "and restart to enable semantic search.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return embedder
 
 
 @final

@@ -51,7 +51,8 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.embeddings.model import EmbeddingModel, OpenAIEmbedder, split_to_token_chunks
+from lovspor.embeddings.model import EmbeddingModel, split_to_token_chunks
+from lovspor.embeddings.provider import create_embedder
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import read_embeddings, write_embeddings
@@ -1004,7 +1005,7 @@ def _try_write_one(
 
 
 def _load_embedder(settings: Settings) -> EmbeddingModel | None:
-    """Return an ``OpenAIEmbedder`` when an API key is configured, else ``None``.
+    """Return the configured embedding adapter, or ``None`` when unavailable.
 
     ``None`` means embeddings are skipped for this sync — the engine
     still produces Markdown and runs the rest of the pipeline normally.
@@ -1012,10 +1013,13 @@ def _load_embedder(settings: Settings) -> EmbeddingModel | None:
     ``embedding_hash`` set to ``None`` (added) or left at the old hash
     (changed), so it no longer matches their ``xml_hash``; the next sync
     with a key set re-embeds exactly those via the backfill migration.
+
+    A misconfigured provider is not the same thing as an absent one: the
+    :class:`ConfigError` from :func:`create_embedder` propagates, so a typo in
+    ``LOVSPOR_EMBEDDING_PROVIDER`` fails the run instead of quietly producing a
+    corpus with no embeddings and no explanation.
     """
-    if not settings.openai_api_key:
-        return None
-    return OpenAIEmbedder(api_key=settings.openai_api_key)
+    return create_embedder(settings.embedding)
 
 
 def _embeddings_path(corpus_root: Path, dataset: str, slug: str) -> Path:
@@ -1052,8 +1056,13 @@ def _write_embeddings_for_doc(
     body = strip_frontmatter(rendered_markdown)
     sections = iter_sections(body)
     path = _embeddings_path(corpus_root, dataset, slug)
+    # Take the header's dim from the embedder that produced the vectors rather
+    # than from write_embeddings' module-level default. The default happens to
+    # equal the production model's dimensionality, so this is byte-identical
+    # today; it stops being a coincidence the moment the model is configurable.
+    dim = embedder.get_dimension()
     if not sections:
-        write_embeddings(path, [], scale=1.0)
+        write_embeddings(path, [], scale=1.0, dim=dim)
         return path
     texts: list[str] = []
     section_ids: list[str] = []
@@ -1064,7 +1073,7 @@ def _write_embeddings_for_doc(
     matrix = embedder.encode(texts)
     quantized, scale = quantize_int8(matrix)
     pairs = [(section_ids[i], quantized[i]) for i in range(len(section_ids))]
-    write_embeddings(path, pairs, scale)
+    write_embeddings(path, pairs, scale, dim=dim)
     return path
 
 

@@ -12,8 +12,9 @@ from pathlib import Path
 from typing import Self
 
 from dotenv import find_dotenv, load_dotenv
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
+from lovspor.embeddings.provider import EmbeddingConfig, credential_from_env
 from lovspor.errors import ConfigError
 
 _ENV_LOADED = False
@@ -68,7 +69,49 @@ class Settings(BaseModel):
     ``OPENAI_API_KEY`` env var or accepts ``OPENAI_APIKEY`` as
     fallback (some users have it without underscore from older
     docs).
+
+    Retained because it is the field the installed base configures and every
+    existing caller reads. :attr:`embedding` is the provider-agnostic view of
+    the same thing and is what builds the adapter; the two are kept consistent
+    by :meth:`from_env`.
     """
+    embedding: EmbeddingConfig = EmbeddingConfig()
+    """Which embedding space to use, and how to reach it.
+
+    Defaults reproduce the historical OpenAI configuration exactly, so an
+    install that sets only ``OPENAI_API_KEY`` behaves as it always has.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _mirror_embedding_credential(cls, data: object) -> object:
+        """Keep ``openai_api_key`` and ``embedding.api_key`` in agreement.
+
+        Every existing caller — including deployments and tests that build
+        ``Settings`` directly rather than through :meth:`from_env` — sets
+        ``openai_api_key`` alone. Without this the credential would reach the
+        field but never the factory, and embeddings would silently stop being
+        written: a backwards-compatibility break that presents exactly like
+        "no key configured". Whichever side was populated fills the other; an
+        explicit ``embedding.api_key`` wins.
+
+        Runs *before* validation because the model is frozen, so there is no
+        supported way to reconcile two fields once it is built.
+        """
+        if not isinstance(data, dict):
+            return data
+        key = data.get("openai_api_key")
+        raw_embedding = data.get("embedding")
+        embedding = (
+            raw_embedding
+            if isinstance(raw_embedding, EmbeddingConfig)
+            else EmbeddingConfig.model_validate(raw_embedding or {})
+        )
+        if embedding.api_key and not key:
+            data = {**data, "openai_api_key": embedding.api_key}
+        elif key and not embedding.api_key:
+            embedding = embedding.model_copy(update={"api_key": str(key)})
+        return {**data, "embedding": embedding}
 
     @field_validator("git_commit_mode")
     @classmethod
@@ -108,6 +151,7 @@ class Settings(BaseModel):
             LOVSPOR_HTTP_USER_AGENT       (str)
             LOVSPOR_LOG_LEVEL             (DEBUG | INFO | WARNING | ERROR)
             OPENAI_API_KEY                (str — also reads OPENAI_APIKEY)
+            LOVSPOR_EMBEDDING_*           (see EmbeddingConfig.from_env)
         """
         _ensure_env_loaded()
         data: dict[str, object] = {}
@@ -159,15 +203,48 @@ class Settings(BaseModel):
                     f"LOVSPOR_MAX_REMOVAL_RATIO must be a float, got: {raw_ratio!r}",
                 ) from exc
 
-        # OpenAI key: try the canonical env var first, then the
-        # underscore-less variant some users have. Override always wins.
-        raw_key = overrides.get("openai_api_key")
-        if raw_key is None:
-            raw_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_APIKEY")
-        if raw_key is not None:
-            data["openai_api_key"] = str(raw_key)
+        embedding = _resolve_embedding(overrides)
+        data["embedding"] = embedding
+        if embedding.api_key is not None:
+            data["openai_api_key"] = embedding.api_key
 
         return cls.model_validate(data)
+
+
+def _resolve_embedding(overrides: dict[str, object]) -> EmbeddingConfig:
+    """Embedding config for this Settings, with the credential always applied.
+
+    The credential is resolved once, from one rule, and then applied to
+    whichever config we end up with. Deriving it per branch is how it went
+    missing twice — most recently for a caller overriding the model through
+    ``embedding=``, which inherited no key at all. The symptom is
+    indistinguishable from "no key configured": the sync simply stops writing
+    sidecars and says nothing.
+    """
+    # Explicit None check, not `or`: an empty override means "no credential",
+    # and falling through to the environment there would re-enable embeddings
+    # for a caller who deliberately blanked the key. Same rule the numeric
+    # fields above already follow. Env vars keep empty-means-unset, which is
+    # the historical behaviour and the normal convention for them.
+    raw_key = overrides.get("openai_api_key")
+    if raw_key is None:
+        raw_key = credential_from_env()
+    override = overrides.get("embedding")
+    if override is None:
+        return EmbeddingConfig.from_env(**({"api_key": raw_key} if raw_key is not None else {}))
+    try:
+        embedding = (
+            override
+            if isinstance(override, EmbeddingConfig)
+            else EmbeddingConfig.model_validate(override)
+        )
+    except ValidationError as exc:
+        raise ConfigError(f"invalid embedding override: {exc}") from exc
+    # An explicit config keeps its own credential; it inherits the ambient one
+    # only when it declares none.
+    if embedding.api_key is None and raw_key is not None:
+        return embedding.model_copy(update={"api_key": str(raw_key)})
+    return embedding
 
 
 def _apply_optional(
