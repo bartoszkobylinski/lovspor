@@ -6,11 +6,30 @@ Norwegian law change tracker. Engine that produces the [`lovverk`](https://githu
 
 **Production.** A scheduled GitHub Actions workflow runs daily at 04:00 UTC, pulls the latest tarballs from Lovdata, classifies each document as new / updated / renamed / removed, renders the changes to Markdown, and pushes the diff to `lovverk` as conventional-commit history. The corpus mirrors close to **6 000 acts** (Norwegian *lover* and central *forskrifter*), each with a structured per-act change history under `<dataset>/history/<slug>.json`. The exact live count is always available from the MCP `corpus_status` tool.
 
-> **Distribution (updated 2026-08-02).** Lovspor is open infrastructure for trustworthy access to Norwegian legal sources. The engine is MIT-licensed and independently runnable; [`lovverk`](https://github.com/bartoszkobylinski/lovverk) is the public generated corpus (NLOD 2.0 / CC0 boundary). The engine repository is temporarily private while publication-readiness work completes (tracked in [`docs/publication-plan.md`](docs/publication-plan.md)) — that is an implementation state, not the intended architecture. The PyPI releases (`0.2.0`–`0.3.0`) were withdrawn in July 2026 and have not returned, so the server currently runs from a checkout: read `uv run --project /path/to/lovspor lovspor …` wherever the commands below say `uvx lovspor …`. The hosted MCP endpoint at `https://lovspor.bartoszkobylinski.com/mcp` (live since 2026-07-18) is an **optional operated access layer**: every request requires authentication and per-credential quotas apply; access is operator-provisioned (see [`docs/mcp.md`](docs/mcp.md)). Hosted-service auth and quotas do not change the open nature of the engine. *Historical note: a 2026-07-14 pivot briefly made a closed commercial hosted service the primary direction; that decision was superseded on 2026-07-30 by the open-infrastructure ruling recorded in [`docs/decisions.md`](docs/decisions.md).*
+> **Distribution (updated 2026-08-03).** Lovspor is open infrastructure for trustworthy access to Norwegian legal sources. The engine is MIT-licensed, public on GitHub, and distributed on PyPI as [`lovspor`](https://pypi.org/project/lovspor/) — publishing resumed at `0.4.0` (the `0.2.0`–`0.3.0` releases were withdrawn during a July 2026 pivot and PyPI version numbers can never be reused). [`lovverk`](https://github.com/bartoszkobylinski/lovverk) is the public generated corpus (NLOD 2.0 / CC0 boundary). The hosted MCP endpoint at `https://lovspor.bartoszkobylinski.com/mcp` (live since 2026-07-18) is an **optional operated access layer**: every request requires authentication and per-credential quotas apply; access is operator-provisioned (see [`docs/mcp.md`](docs/mcp.md)). Hosted-service auth and quotas do not change the open nature of the engine. *Historical note: a 2026-07-14 pivot briefly made a closed commercial hosted service the primary direction; that decision was superseded on 2026-07-30 by the open-infrastructure ruling recorded in [`docs/decisions.md`](docs/decisions.md).*
 
 Sprint 9 (MERGED 2026-05-06) added per-section embeddings to the corpus and a four-layer grounding-and-verification path to the MCP surface: `semantic_search` (cosine over embeddings), `verify_quote` (verbatim-citation guard), validated `cross_references` on `get_section`, and `validate_citation` as the off-ramp for ambiguous citations.
 
 See [`docs/decisions.md`](docs/decisions.md) for the full architecture and design rationale.
+
+## Install
+
+From PyPI:
+
+```bash
+pip install lovspor        # or: uv tool install lovspor, or run ad hoc with uvx lovspor
+```
+
+From source (contributors):
+
+```bash
+git clone https://github.com/bartoszkobylinski/lovspor
+cd lovspor
+./scripts/bootstrap.sh     # uv sync + pre-commit hooks
+uv run lovspor --help
+```
+
+Maintainer release process: [`docs/releasing.md`](docs/releasing.md).
 
 ## MCP server
 
@@ -18,12 +37,12 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 
 **Setup — three steps:**
 
-1. **Install [`uv`](https://docs.astral.sh/uv/) and clone this repo.** The engine is not currently on PyPI (releases withdrawn July 2026, not yet resumed), so the server runs from your checkout via `uv run --project /path/to/lovspor lovspor` (see the distribution note above). The commands below use that `--project` form so they work from any directory; drop `--project /path/to/lovspor` if you run them from inside the checkout.
+1. **Install [`uv`](https://docs.astral.sh/uv/).** The server runs straight from PyPI via `uvx lovspor` — no clone needed. (Working from a checkout instead? Replace `uvx lovspor` with `uv run --project /path/to/lovspor lovspor` in the commands below.)
 
 2. **Fetch the corpus.** One command shallow-clones the legal text to the default cache (`~/.cache/lovverk`):
 
    ```bash
-   uv run --project /path/to/lovspor lovspor fetch-corpus
+   uvx lovspor fetch-corpus
    ```
 
    Re-run it any time to update — it reports `cloned`, `updated`, or `unchanged`.
@@ -31,7 +50,7 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 3. **Register the server.** `lovspor mcp` finds that cache automatically. With Claude Code:
 
    ```bash
-   claude mcp add lovverk -- uv run --project /path/to/lovspor lovspor mcp
+   claude mcp add lovverk -- uvx lovspor mcp
    ```
 
    Or add it to your client config directly — Claude Desktop's `claude_desktop_config.json`, or `~/.claude.json` for Claude Code:
@@ -40,8 +59,8 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
    {
      "mcpServers": {
        "lovverk": {
-         "command": "uv",
-         "args": ["run", "--project", "/path/to/lovspor", "lovspor", "mcp"]
+         "command": "uvx",
+         "args": ["lovspor", "mcp"]
        }
      }
    }
@@ -55,8 +74,8 @@ Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen
 {
   "mcpServers": {
     "lovverk": {
-      "command": "uv",
-      "args": ["run", "--project", "/path/to/lovspor", "lovspor", "mcp"],
+      "command": "uvx",
+      "args": ["lovspor", "mcp"],
       "env": { "OPENAI_API_KEY": "sk-...your-own-key..." }
     }
   }
@@ -65,9 +84,9 @@ Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen
 
 It's your key in your own local config file — keep that file private and never commit it. Without a key, `semantic_search` is simply disabled; the other fifteen tools are unaffected.
 
-Keep the corpus fresh by re-running `uv run --project /path/to/lovspor lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
+Keep the corpus fresh by re-running `uvx lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
 
-> **On invocation:** the commands above run the server from a local checkout via `uv run` (the `--project` flag points at wherever you cloned this repo). The former PyPI / `uvx lovspor` and `--from git+…` paths were retired when the July 2026 pivot withdrew the PyPI releases (historical — see the distribution note under [Status](#status)); whether PyPI publishing resumes is an open decision tracked in [`docs/releasing.md`](docs/releasing.md).
+> **On invocation:** `uvx lovspor` resolves the latest release from PyPI — versioned and immutable (`uvx lovspor@0.4.0 …` pins one). To run unreleased changes, use the from-source form `uv run --project /path/to/lovspor lovspor …` against your checkout. Release process: [`docs/releasing.md`](docs/releasing.md).
 
 See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all sixteen tools documented with examples (`get_law`, `get_law_at`, `list_law_versions`, `diff_law_versions`, `get_section`, `list_sections`, `get_law_history`, `list_recent_changes`, `search_laws`, `search_body`, `semantic_search`, `validate_citation`, `verify_quote`, `get_eu_basis`, `search_eu_implementations`, `corpus_status`), troubleshooting, and limitations. The binary embedding format that powers `semantic_search` is documented in [`docs/embeddings.md`](docs/embeddings.md).
 
