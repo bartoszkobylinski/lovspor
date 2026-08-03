@@ -50,6 +50,22 @@ class ManifestRecord(BaseModel):
     sidecar is stale and the embeddings backfill re-embeds the doc.
     Existence-on-disk alone cannot catch a stale-but-present ``.bin``.
 
+    ``embedding_space`` and ``embedding_space_id`` record **which embedding
+    space** the sidecar's vectors belong to (ADR-0005 Stage 1): the canonical
+    descriptor for humans and audit, and its 128-bit digest for comparison.
+    Both ``None`` means **Unknown/legacy** — the sidecar predates this stamp,
+    and its space is *unproven*, not assumed. Nothing may infer the space from
+    a 3072 dimension, from a ``.bin`` existing, from ``embedding_hash``, or
+    from whatever provider happens to be configured now; annotating historical
+    records requires the separate empirically-gated grandfathering migration.
+    Vectors from an unknown space are never compared against a query.
+
+    Being manifest-level, this identity is authoritative only for consumers
+    that reach a sidecar *through* the manifest, and only for an untampered
+    corpus: a substituted same-dimension ``.bin`` at a manifest-referenced path
+    still matches the record. Closing that needs the sidecar to carry its own
+    digest, which is ADR-0005 Stage 2 and has not shipped.
+
     ``renderer_version`` records the ``RENDERER_VERSION`` that produced the
     Markdown. Change detection keys on the *upstream XML* hash, so a renderer
     fix leaves the record ``unchanged`` and never reaches it; sync compares this
@@ -90,6 +106,8 @@ class ManifestRecord(BaseModel):
     last_changed: str | None = None
     eu_basis: list[str] | None = None
     embedding_hash: str | None = None
+    embedding_space: str | None = None
+    embedding_space_id: str | None = None
     renderer_version: int | None = None
     removed_reason: str | None = None
 
