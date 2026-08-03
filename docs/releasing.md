@@ -1,22 +1,18 @@
 # Releasing `lovspor` to PyPI
 
-> **Status (2026-08-03): publishing resumed, first PyPI release is pending.**
+> **Status (2026-08-03): publishing resumed — Lovspor is distributed on PyPI.**
 > PyPI releases were suspended 2026-07-14 during the commercial pivot and the
 > then-published versions were removed; the open-infrastructure decision
-> ([`decisions.md`](decisions.md) §15) supersedes that pivot, and this release
-> process is live again. Nothing is on PyPI until the owner publishes `0.4.0` —
-> `README.md` and [`mcp.md`](mcp.md) carry the same pending caveat, and all
-> three must be updated together once the release lands. Two lasting
-> consequences of the removal:
+> ([`decisions.md`](decisions.md) §15) supersedes that pivot. `0.4.0` published
+> on 2026-08-03 and is live at
+> [pypi.org/project/lovspor](https://pypi.org/project/lovspor/); `README.md` and
+> [`mcp.md`](mcp.md) state the same, and the three must stay in step (an
+> invariant test in `tests/unit/test_release_workflow.py` fails if they drift).
+> One lasting consequence of the removal:
 >
-> 1. **The PyPI project page is absent** — deleting the releases removed the
->    project, and with it the old Trusted Publishing registration. It must be
->    recreated as a **pending publisher** before the first release; see the
->    one-time setup below.
-> 2. **Versions `0.2.0`–`0.3.0` are permanently burned.** PyPI never allows a
->    filename to be reused, even after the project is deleted. The first
->    re-release is therefore `0.4.0`, and no burned version can ever be
->    re-published.
+> **Versions `0.2.0`–`0.3.0` are permanently burned.** PyPI never allows a
+> filename to be reused, even after a project is deleted. The re-release
+> therefore started at `0.4.0`, and no burned version can ever be re-published.
 
 `lovspor` publishes to [PyPI](https://pypi.org/project/lovspor/) via **Trusted
 Publishing** (OpenID Connect). GitHub Actions mints a short-lived OIDC token that
@@ -29,35 +25,29 @@ with `id-token: write`, gated on the `pypi` GitHub environment — uploads them
 with the official [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish)
 action. Ordinary pushes and PRs never trigger it.
 
-## One-time setup (must be redone — the old registration died with the project)
+## One-time setup (done — registered as a pending publisher, live since `0.4.0`)
 
-Trusted Publishing has to be registered on PyPI **before** the project exists —
-this is a "pending publisher". You need a PyPI account; no token, no `twine`.
+Because the project did not exist on PyPI, Trusted Publishing was registered in
+advance as a **pending publisher** (pypi.org → **Account settings** →
+**[Publishing](https://pypi.org/manage/account/publishing/)**). Publishing
+`0.4.0` created the project and converted it into an ordinary trusted publisher.
 
-1. Sign in at [pypi.org](https://pypi.org) → **Account settings** →
-   **[Publishing](https://pypi.org/manage/account/publishing/)**.
-2. Under **"Add a new pending publisher"** (GitHub tab), fill in exactly:
-   - **PyPI Project Name:** `lovspor`
-   - **Owner:** `bartoszkobylinski`
-   - **Repository name:** `lovspor`
-   - **Workflow name:** `release.yml`
-   - **Environment name:** `pypi`
-3. Save.
+The registered identity — change any of these and publishing breaks, so keep the
+workflow, its `environment:` block, and this list in agreement:
 
-Note: a pending publisher only expresses intent — the project name is not
-reserved until the first release actually publishes.
+- **PyPI Project Name:** `lovspor`
+- **Owner:** `bartoszkobylinski`
+- **Repository name:** `lovspor`
+- **Workflow name:** `release.yml`
+- **Environment name:** `pypi`
 
-In the GitHub repo, create the matching **Environment** named `pypi`
-(**Settings → Environments → New environment**):
+The matching GitHub **Environment** `pypi` (**Settings → Environments**) carries:
 
-- Add yourself under **Required reviewers** — this is the manual approval gate
-  between "Release published" and "package goes live". Recommended and assumed
-  by this process, since a PyPI version can never be reused once published.
-- **Deployment branches and tags** → restrict to tags matching `v*` (and/or
-  branch `main`), so no other ref can ever reach the publish job.
-
-The environment name in the workflow (`pypi`) must match both the PyPI
-pending-publisher form and the GitHub environment.
+- the owner under **Required reviewers** — the manual approval gate between
+  "Release published" and "package goes live", which matters because a PyPI
+  version can never be reused once published;
+- **Deployment branches and tags** restricted to tags matching `v*` (and/or
+  branch `main`), so no other ref can reach the publish job.
 
 ## Cutting a release
 
@@ -81,11 +71,11 @@ pending-publisher form and the GitHub environment.
 4. **Verify:** the package appears at
    [pypi.org/project/lovspor](https://pypi.org/project/lovspor/), and a clean
    `uvx lovspor@<version> mcp --help` resolves it from PyPI.
-5. **First release only — drop the pending caveat.** Once `0.4.0` is live,
-   remove the "first PyPI release is pending" wording from this file,
-   `README.md` and [`mcp.md`](mcp.md) in one commit. A test in
-   `tests/unit/test_release_workflow.py` fails if only some of them are
-   updated, so the three cannot drift apart.
+Step 5 of the first release — swapping the "pending" wording in this file,
+`README.md` and [`mcp.md`](mcp.md) for the distributed-on-PyPI wording — was
+carried out on 2026-08-03 and does not recur. The release-state invariant in
+`tests/unit/test_release_workflow.py` still holds the three files to one shared
+answer, so they cannot drift apart on a later transition either.
 
 Publishing never happens merely because `main` changed — it takes an explicit
 GitHub Release by the owner *and* an approval on the `pypi` environment.
