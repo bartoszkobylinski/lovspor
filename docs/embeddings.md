@@ -96,11 +96,18 @@ contiguous section records.
 |     12 |    4 | scale         | float32, dequantization scale          |
 
 `dim` is recorded per-file so old and new files can coexist during
-a model migration. The MCP server's `_load_embedding_index` checks
-each file's `dim` against the embedder's expected dimension and
-silently drops mismatched files (with an operator-visible stderr
-log) so one stale file from an older model cannot crash the search
-across the rest of the corpus.
+a model migration. It is a **shape** check only — it stops a numpy
+alignment crash, and is never evidence that two files share an
+embedding space (see below). The MCP server's
+`_load_embedding_index` drops files whose `dim` disagrees with the
+embedder's, so one file from an older model cannot crash the search
+across the rest of the corpus; the drop is counted and reported in
+`semantic_search`'s `notice`.
+
+The header carries **no embedding-space identity**, and Stage 1 of
+ADR-0005 does not add one: the version stays `1` and the reserved
+byte stays `0`. A `.bin` read on its own therefore cannot tell you
+which model produced it.
 
 ### Section record
 
@@ -154,6 +161,12 @@ result = read_embeddings(path)
 Same input → byte-identical file (deterministic byte order, no
 timestamps, no platform-dependent encoding). Property tested.
 
+This reader works on a detached file and keeps working unchanged.
+What it cannot do is establish which embedding space the vectors
+belong to: that identity lives in the manifest, so a sidecar read
+without its manifest is **Unknown** and must not be compared against
+query vectors.
+
 ## Provider configuration
 
 Lovspor core requires **no embedding provider at all**. Without one the sync
@@ -183,59 +196,89 @@ another adapter can be added behind `EmbeddingModel`; that is an extension
 point, not a claim that arbitrary models work. See the limits below before
 configuring anything away from the defaults.
 
-## Embedding-space identity — and the limit it imposes
+## Embedding-space identity (ADR-0005 Stage 1)
+
+Each embedding sidecar belongs to an **embedding space** — the model that produced
+its vectors. The manifest records that space per document, in two fields:
+
+| Field | Example | Purpose |
+|---|---|---|
+| `embedding_space` | `provider=openai;model=text-embedding-3-large;dim=3072;endpoint=default` | canonical descriptor, for humans and audit |
+| `embedding_space_id` | first 128 bits of its SHA-256, hex | the value compared |
+
+`semantic_search` compares the query embedder's identity against each document's
+recorded identity and uses only documents that match. Three outcomes, and no fourth:
+**same identity** → searchable; **different identity** → excluded; **no recorded
+identity** → excluded. There is no "compatible enough" class, and dimension equality
+is never accepted as evidence — two unrelated models routinely share a dimension.
+
+**Documents written before this stamp existed have no recorded identity.** They are
+*Unknown*, which means unproven rather than wrong, and they are excluded from search
+until a separate migration annotates them. Nothing infers their space from a 3072
+dimension, from a `.bin` existing, or from whatever provider is configured now.
+
+Exclusions are never silent. If some documents are excluded, `semantic_search`
+returns its results with a `notice` naming how many and why; if none qualify, it
+fails with an explanation rather than answering over an empty corpus.
+
+### What Stage 1 does not cover
+
+* **Sidecars are not self-describing.** The identity lives in the manifest, so it is
+  authoritative only for consumers that reach a sidecar *through* the manifest, and
+  only for an untampered corpus. A `.bin` replaced by a same-dimension file from
+  another space still matches the record.
+* **`read_embeddings(path)` on a detached file tells you nothing about its space.**
+  The file parses; its identity is Unknown.
+* **The binary format has not changed.** Sidecars are still `LSPE` version 1 and
+  carry no digest. Putting one there is Stage 2, which requires a reader that
+  accepts both versions, a propagation period, and a single coordinated corpus-wide
+  cutover — a mixed version-1/version-2 corpus is forbidden, because older readers
+  skip an unreadable sidecar silently and would answer over a quietly smaller
+  corpus.
+
+## Model changes
 
 A vector only means something relative to the model that produced it. Two
 unrelated models routinely emit the same number of dimensions while describing
 entirely different spaces, and cosine similarity across them yields scores in
 the normal `[-1, 1]` range that look completely plausible. There is no
 exception, no shape error, no signal of any kind — just confident, meaningless
-ranking. Dimension equality is therefore **not** evidence of compatibility.
+ranking. That is what the identity above exists to prevent.
 
-Adapters declare a `space_id` (for example
-`openai:text-embedding-3-large:3072`), and `semantic_search` compares that
-identity before any query meets corpus vectors. An OpenAI-protocol-compatible
-endpoint reached via `LOVSPOR_EMBEDDING_BASE_URL` reports as
-`openai-compatible:<host>:<model>:<dim>` — same wire format, unknown model, so
-it is deliberately a different space rather than being labelled as OpenAI.
+An endpoint configured through `LOVSPOR_EMBEDDING_BASE_URL` is part of the
+identity in full — scheme, host, port and path. Two models served from one
+gateway on different paths are different spaces, so the path is not discarded.
+Query strings and fragments are rejected rather than stripped.
 
-**The sidecar format records only the dimension — no model, no provider.** So a
-`.bin` file cannot state which space it belongs to, and compatibility with an
-existing corpus is provable for exactly one configuration: the default, which
-is demonstrably the one every published sidecar was written with. Configure any
-other space and `semantic_search` reports itself unavailable, explaining why,
-instead of returning results nobody can trust.
+**Changing the model now selects the affected documents automatically.** A
+document whose recorded identity differs from the configured one is stale, and
+the next sync with a provider configured re-embeds and re-stamps it. Deleting
+sidecars by hand is no longer the mechanism.
 
-The consequence, stated plainly: **you can configure a different embedding
-model, and the sync will use it, but semantic search against the published
-`lovverk` corpus will refuse to run.** Lifting that needs the sidecar to carry
-its own space identity — a change to published corpus artifacts, and an owner
-decision rather than a runtime one.
+The one case that is *not* automatic is the legacy population: documents with
+no recorded identity are left alone rather than re-embedded. Regenerating them
+en masse would spend real money and rewrite every sidecar in the published
+corpus, and it would pre-empt a decision — annotate the existing vectors, or
+regenerate them — that belongs to a separate, evidence-gated migration. Until
+that migration runs, those documents are excluded from semantic search.
 
 ## Migration story
 
-When the embedding model changes — including a native-dimension change, since
-`text-embedding-3-small` is 1536 and `text-embedding-3-large` is 3072 — every
-existing `.bin` becomes stale.
+When the configured embedding model changes, every document whose recorded
+identity no longer matches becomes stale, and the next sync with a provider
+configured re-embeds and re-stamps exactly those documents. **Manual sidecar
+deletion is no longer the migration mechanism** — that instruction, which
+earlier versions of this document gave, is obsolete.
 
-The MCP server degrades rather than crashing:
+Corrupt sidecars are repaired the same way: a `.bin` that no longer parses is
+stale and is regenerated, rather than being skipped at search time forever.
 
-1. `_load_embedding_index` checks each `.bin`'s header `dim`
-   against the embedder's `get_dimension()`. Mismatched files are
-   skipped with a stderr log.
-2. The dropped count is tracked in `CorpusReader._stale_bin_count`.
-3. If the index ends up empty *and* any files were dropped,
-   `semantic_search` raises with a "corpus needs to be re-embedded"
-   message pointing at `lovspor sync`.
-4. If the index ends up empty with no drops, the bootstrap message
-   ("no embeddings — run lovspor sync") fires instead. Different
-   states, different remediation.
+Two cases are still not automatic, both deliberately:
 
-**Re-embedding is not automatic.** Staleness is decided by
-`_embedding_is_stale`, which compares the manifest's `embedding_hash` against
-the document's `xml_hash` — that is, it detects *content* changes. A model
-change alters no document's XML, so the next sync re-embeds only documents that
-happened to change upstream, and a partial re-embed leaves the corpus split
-across two spaces at once. To migrate deliberately: delete the affected
-`<dataset>/embeddings/*.bin`, run `lovspor sync` with a credential set (missing
-files are re-embedded), then `git pull` in the corpus clone.
+* **Documents with no recorded identity** (written before the stamp existed)
+  are left alone. See "Model changes" above — regenerating them en masse is a
+  decision reserved for a separate migration.
+* **A dimension change** additionally makes existing files unreadable to the
+  current index builder, which skips them with a stderr log and counts them;
+  if that leaves the index empty, `semantic_search` fails with a message naming
+  the remedy rather than answering over nothing.
