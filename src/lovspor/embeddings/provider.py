@@ -142,20 +142,31 @@ class EmbeddingConfig(BaseModel):
                     f"LOVSPOR_EMBEDDING_DIMENSION must be an integer, got: {raw_dimension!r}",
                 ) from exc
 
-        # The provider-neutral variable wins when both are set, but plain
-        # OPENAI_API_KEY (with the long-standing underscore-less fallback) keeps
-        # working untouched — that is the whole installed base.
         raw_key = overrides.get("api_key")
         if raw_key is None:
-            raw_key = (
-                os.environ.get("LOVSPOR_EMBEDDING_API_KEY")
-                or os.environ.get("OPENAI_API_KEY")
-                or os.environ.get("OPENAI_APIKEY")
-            )
+            raw_key = credential_from_env()
         if raw_key is not None:
             data["api_key"] = str(raw_key)
 
         return cls.model_validate(data)
+
+
+def credential_from_env() -> str | None:
+    """The embedding credential, resolved from the environment.
+
+    One function because this rule has been duplicated before: four call sites
+    each re-implemented the ``OPENAI_APIKEY`` fallback, and every copy is a
+    place a credential can go missing. Anything that needs a key asks here.
+
+    The provider-neutral variable wins when both are set, but plain
+    ``OPENAI_API_KEY`` — with its long-standing underscore-less fallback —
+    keeps working untouched, because that is the whole installed base.
+    """
+    return (
+        os.environ.get("LOVSPOR_EMBEDDING_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or os.environ.get("OPENAI_APIKEY")
+    )
 
 
 def _apply(

@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Self
 
 from dotenv import find_dotenv, load_dotenv
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
-from lovspor.embeddings.provider import EmbeddingConfig
+from lovspor.embeddings.provider import EmbeddingConfig, credential_from_env
 from lovspor.errors import ConfigError
 
 _ENV_LOADED = False
@@ -203,24 +203,41 @@ class Settings(BaseModel):
                     f"LOVSPOR_MAX_REMOVAL_RATIO must be a float, got: {raw_ratio!r}",
                 ) from exc
 
-        # Embedding configuration owns the credential lookup (including the
-        # underscore-less OPENAI_APIKEY fallback); openai_api_key mirrors
-        # whatever it resolved so the two can never disagree.
-        embedding = overrides.get("embedding")
-        if embedding is None:
-            raw_key = overrides.get("openai_api_key")
-            embedding = EmbeddingConfig.from_env(
-                **({"api_key": raw_key} if raw_key is not None else {}),
-            )
-        if not isinstance(embedding, EmbeddingConfig):
-            raise ConfigError(
-                f"embedding override must be an EmbeddingConfig, got: {type(embedding).__name__}",
-            )
+        embedding = _resolve_embedding(overrides)
         data["embedding"] = embedding
         if embedding.api_key is not None:
             data["openai_api_key"] = embedding.api_key
 
         return cls.model_validate(data)
+
+
+def _resolve_embedding(overrides: dict[str, object]) -> EmbeddingConfig:
+    """Embedding config for this Settings, with the credential always applied.
+
+    The credential is resolved once, from one rule, and then applied to
+    whichever config we end up with. Deriving it per branch is how it went
+    missing twice — most recently for a caller overriding the model through
+    ``embedding=``, which inherited no key at all. The symptom is
+    indistinguishable from "no key configured": the sync simply stops writing
+    sidecars and says nothing.
+    """
+    raw_key = overrides.get("openai_api_key") or credential_from_env()
+    override = overrides.get("embedding")
+    if override is None:
+        return EmbeddingConfig.from_env(**({"api_key": raw_key} if raw_key is not None else {}))
+    try:
+        embedding = (
+            override
+            if isinstance(override, EmbeddingConfig)
+            else EmbeddingConfig.model_validate(override)
+        )
+    except ValidationError as exc:
+        raise ConfigError(f"invalid embedding override: {exc}") from exc
+    # An explicit config keeps its own credential; it inherits the ambient one
+    # only when it declares none.
+    if embedding.api_key is None and raw_key is not None:
+        return embedding.model_copy(update={"api_key": str(raw_key)})
+    return embedding
 
 
 def _apply_optional(

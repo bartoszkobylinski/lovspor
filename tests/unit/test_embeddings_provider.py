@@ -137,6 +137,108 @@ def test_settings_mirrors_an_embedding_credential_back_to_the_legacy_field(
     assert settings.openai_api_key == "sk-new-field"
 
 
+def _settings_paths(tmp_path: Path) -> dict[str, dict[str, object]]:
+    """Every supported way to build Settings, as kwargs."""
+    base: dict[str, object] = {
+        "data_dir": tmp_path / "data",
+        "lovverk_repo_path": tmp_path / "corpus",
+    }
+    return {
+        "bare": base,
+        "embedding-config-override": {
+            **base,
+            "embedding": EmbeddingConfig(model_name="text-embedding-3-small", dimension=1536),
+        },
+        "embedding-dict-override": {
+            **base,
+            "embedding": {"model_name": "text-embedding-3-small", "dimension": 1536},
+        },
+    }
+
+
+@pytest.mark.parametrize("path", ["bare", "embedding-config-override", "embedding-dict-override"])
+def test_from_env_credential_survives_every_construction_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    """The ambient credential must reach the factory however Settings was built.
+
+    This bug class has appeared twice: a key that lands in one field but not
+    the other disables embeddings silently, and the symptom — sync quietly
+    writing no sidecars — is indistinguishable from "no key configured".
+    Enumerating the construction paths is the point; a single-path test is
+    what let the `embedding=` override through the first time.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+
+    settings = Settings.from_env(**_settings_paths(tmp_path)[path])  # type: ignore[arg-type]
+
+    assert settings.openai_api_key == "env-key", path
+    assert settings.embedding.api_key == "env-key", path
+    assert create_embedder(settings.embedding) is not None, path
+
+
+@pytest.mark.parametrize("path", ["bare", "embedding-config-override", "embedding-dict-override"])
+def test_from_env_without_any_credential_stays_unconfigured(
+    tmp_path: Path,
+    path: str,
+) -> None:
+    """The mirror of the above: absent stays absent, on every path."""
+    settings = Settings.from_env(**_settings_paths(tmp_path)[path])  # type: ignore[arg-type]
+
+    assert settings.openai_api_key is None, path
+    assert settings.embedding.api_key is None, path
+    assert create_embedder(settings.embedding) is None, path
+
+
+def test_from_env_embedding_override_keeps_its_own_model_and_credential(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Inheriting the ambient key must not overwrite an explicit one."""
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+
+    settings = Settings.from_env(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "corpus",
+        embedding=EmbeddingConfig(
+            model_name="text-embedding-3-small",
+            dimension=1536,
+            api_key="sk-explicit",
+        ),
+    )
+
+    assert settings.embedding.api_key == "sk-explicit"
+    assert settings.embedding.model_name == "text-embedding-3-small"
+    assert settings.embedding.dimension == 1536
+    assert settings.openai_api_key == "sk-explicit"
+
+
+def test_from_env_explicit_key_override_beats_the_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+
+    settings = Settings.from_env(
+        data_dir=tmp_path / "data",
+        lovverk_repo_path=tmp_path / "corpus",
+        openai_api_key="sk-override",
+    )
+
+    assert settings.embedding.api_key == "sk-override"
+
+
+def test_from_env_rejects_an_unusable_embedding_override(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="invalid embedding override"):
+        Settings.from_env(
+            data_dir=tmp_path / "data",
+            lovverk_repo_path=tmp_path / "corpus",
+            embedding={"dimension": "not-a-number"},
+        )
+
+
 # --- 2. no credential: core intact, semantic capability absent ------------
 
 
