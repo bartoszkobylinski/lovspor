@@ -41,6 +41,7 @@ inputs accept either form and normalize internally.
 """
 
 import asyncio
+import collections
 import difflib
 import functools
 import json
@@ -66,7 +67,6 @@ from starlette.responses import JSONResponse, Response
 
 from lovspor.access import CredentialStore
 from lovspor.embeddings import (
-    LEGACY_SPACE_ID,
     EmbeddingConfig,
     EmbeddingIndex,
     EmbeddingModel,
@@ -375,10 +375,13 @@ class CorpusReader:
         # Which vector space this embedder speaks. Dimension cannot stand in
         # for it: two unrelated models agree on 3072 all the time, and cosine
         # similarity across their spaces returns confident nonsense instead of
-        # an error. Sidecars record no space of their own, so the only space
-        # whose compatibility with a corpus can be asserted is the one those
-        # files were demonstrably written in — see _assert_searchable_space.
+        # an error. Every candidate sidecar's recorded space is compared
+        # against this before its vectors may meet a query, and a record with
+        # no recorded space is Unknown — refused, never assumed compatible.
         self._embedder_space_id: str | None = space_id_of(embedder)
+        # Documents left out of the last index build, by reason. Surfaced in
+        # semantic_search's notice so reduced coverage is never silent.
+        self._excluded_bins: collections.Counter[str] = collections.Counter()
         self._manifest: Manifest | None = None  # pragma: no mutate
         # Body-text index for search_body; lazy-loaded on first call so
         # MCP server startup stays fast for clients that only query
@@ -1289,7 +1292,6 @@ class CorpusReader:
                 "at MCP server startup. Set the environment variable and "
                 "restart the server.",
             )
-        self._assert_searchable_space()
         limit = _bounded_limit(limit)
         # Empty results ALWAYS carry a notice (documented contract) —
         # including these caller no-op cases, so the AI never has to
@@ -1318,43 +1320,38 @@ class CorpusReader:
         query_vector = self._embedder.encode([query])[0]
         hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
         kept = [hit for hit in hits if hit.score >= min_score]
+        coverage = self._coverage_notice()
         if not kept:
             best = max((hit.score for hit in hits), default=None)
-            return {"results": [], "notice": _no_strong_match_notice(min_score, best)}
+            notice = _no_strong_match_notice(min_score, best)
+            return {
+                "results": [],
+                "notice": f"{notice} {coverage}" if coverage else notice,
+            }
         sections_memo: dict[str, dict[str, list[ParsedSection]]] = {}
         return {
             "results": [self._grounded_hit(hit, sections_memo) for hit in kept],
-            "notice": None,
+            # Non-empty results still carry a notice when part of the corpus was
+            # excluded: the answer is trustworthy, its coverage is not complete,
+            # and the caller must be told the difference.
+            "notice": coverage,
         }
 
-    def _assert_searchable_space(self) -> None:
-        """Refuse to search unless query and corpus vectors share a space.
-
-        The corpus records a dimension per sidecar and no model identity at
-        all, so "are these the same space?" is not answerable from the files.
-        What *is* known is that every published sidecar was written by the
-        default OpenAI configuration, so that one space — and only it — can be
-        asserted compatible. Any other configured space is unprovable, and an
-        unprovable comparison is refused rather than run: the failure mode it
-        replaces is silent, returning ranked, plausible, meaningless results.
-
-        Lifting this restriction needs the sidecar format to carry its own
-        space identity; that is a corpus persistence decision, not a runtime
-        one (see docs/embeddings.md).
-        """
-        if self._embedder_space_id in (None, LEGACY_SPACE_ID):
-            return
-        raise CorpusNotFoundError(
-            f"semantic_search is unavailable: the configured embedding space "
-            f"{self._embedder_space_id!r} is not the space this corpus was built in "
-            f"({LEGACY_SPACE_ID!r}), and embedding sidecars record only their "
-            "dimension, so compatibility cannot be verified. Searching anyway "
-            "would return confident but meaningless results. Unset the "
-            "LOVSPOR_EMBEDDING_* overrides to use the corpus-compatible "
-            "configuration.",
-        )
-
     def _raise_for_empty_embedding_index(self) -> None:
+        excluded = getattr(self, "_excluded_bins", None) or {}
+        unknown = excluded.get("unknown_space", 0)
+        mismatched = excluded.get("different_space", 0)
+        if unknown or mismatched:
+            raise CorpusNotFoundError(
+                f"semantic_search is unavailable: no document in this corpus is known to "
+                f"share the configured embedding space. {unknown} document(s) record no "
+                f"embedding space at all and {mismatched} record a different one, and a "
+                "vector from an unknown or different space cannot be compared with a query "
+                "— doing so returns confident but meaningless results. Sidecars written "
+                "before the embedding space was stamped stay unknown until the "
+                "embedding-space migration annotates them; re-running 'lovspor sync' with "
+                "the configured provider re-embeds and stamps them.",
+            )
         if self._stale_bin_count > 0:
             raise CorpusNotFoundError(
                 f"no usable embeddings: all {self._stale_bin_count} .bin file(s) "
@@ -1550,6 +1547,7 @@ class CorpusReader:
                 return self._embedding_index
             entries: list[tuple[str, str, np.ndarray, float]] = []
             stale = 0
+            excluded: collections.Counter[str] = collections.Counter()
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
                     continue
@@ -1563,6 +1561,16 @@ class CorpusReader:
                     continue
                 if not bin_path.exists():
                     continue
+                # Embedding-space identity is checked BEFORE the file is read.
+                # The manifest is the only thing that can answer which space a
+                # sidecar belongs to (ADR-0005 Stage 1); the bytes cannot, and
+                # dimension is a shape check, never evidence of compatibility.
+                if record.embedding_space_id is None:
+                    excluded["unknown_space"] += 1
+                    continue
+                if record.embedding_space_id != self._embedder_space_id:
+                    excluded["different_space"] += 1
+                    continue
                 try:
                     embedding_file = read_embeddings(bin_path)
                 except (ValueError, OSError) as exc:
@@ -1571,6 +1579,7 @@ class CorpusReader:
                         file=sys.stderr,
                         flush=True,
                     )
+                    excluded["corrupt"] += 1
                     continue
                 if self._expected_dim is not None and embedding_file.dim != self._expected_dim:
                     print(
@@ -1581,12 +1590,45 @@ class CorpusReader:
                         flush=True,
                     )
                     stale += 1
+                    excluded["wrong_dimension"] += 1
                     continue
                 for section_id, vector in embedding_file.sections:
                     entries.append((record.slug, section_id, vector, embedding_file.scale))
             self._embedding_index = EmbeddingIndex.from_entries(entries)
             self._stale_bin_count = stale
+            self._excluded_bins = excluded
             return self._embedding_index
+
+    def _coverage_notice(self) -> str | None:
+        """Describe documents left out of the index, or ``None`` if none were.
+
+        Exclusions are reported in-band rather than only to stderr. A search
+        that quietly covers less of the corpus than the caller believes is the
+        failure this whole identity mechanism exists to prevent, and a stderr
+        line inside a stdio subprocess is not a signal any MCP client sees.
+        """
+        excluded = getattr(self, "_excluded_bins", None)
+        if not excluded:
+            return None
+        reasons = {
+            "unknown_space": (
+                "have no recorded embedding space (written before the space was "
+                "stamped; they need the embedding-space migration)"
+            ),
+            "different_space": "were built by a different embedding model",
+            "corrupt": "could not be read",
+            "wrong_dimension": "have a different vector dimension",
+        }
+        parts = [
+            f"{count} document(s) {reasons[reason]}"
+            for reason, count in sorted(excluded.items())
+            if reason in reasons
+        ]
+        return (
+            "coverage is incomplete — these results do not cover the whole corpus: "
+            + "; ".join(parts)
+            + ". Run 'lovspor sync' with an embedding provider configured to rebuild them."
+        )
 
     def _resolve_current(self, slug: str) -> tuple[ManifestRecord, int]:
         """Resolve a slug to a current record, paired with its own generation.
