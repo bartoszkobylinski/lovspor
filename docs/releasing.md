@@ -1,14 +1,18 @@
 # Releasing `lovspor` to PyPI
 
-> **Status (2026-08-03): publishing resumed.** PyPI releases were suspended
-> 2026-07-14 during the commercial pivot and the then-published versions were
-> removed; the open-infrastructure decision ([`decisions.md`](decisions.md) §15)
-> supersedes that pivot, and this release process is live again. Two lasting
+> **Status (2026-08-03): publishing resumed, first PyPI release is pending.**
+> PyPI releases were suspended 2026-07-14 during the commercial pivot and the
+> then-published versions were removed; the open-infrastructure decision
+> ([`decisions.md`](decisions.md) §15) supersedes that pivot, and this release
+> process is live again. Nothing is on PyPI until the owner publishes `0.4.0` —
+> `README.md` and [`mcp.md`](mcp.md) carry the same pending caveat, and all
+> three must be updated together once the release lands. Two lasting
 > consequences of the removal:
 >
-> 1. **The PyPI project `lovspor` no longer exists** (the page 404s), so the
->    Trusted Publishing registration must be redone as a **pending publisher**
->    before the next release — see the one-time setup below.
+> 1. **The PyPI project page is absent** — deleting the releases removed the
+>    project, and with it the old Trusted Publishing registration. It must be
+>    recreated as a **pending publisher** before the first release; see the
+>    one-time setup below.
 > 2. **Versions `0.2.0`–`0.3.0` are permanently burned.** PyPI never allows a
 >    filename to be reused, even after the project is deleted. The first
 >    re-release is therefore `0.4.0`, and no burned version can ever be
@@ -77,6 +81,11 @@ pending-publisher form and the GitHub environment.
 4. **Verify:** the package appears at
    [pypi.org/project/lovspor](https://pypi.org/project/lovspor/), and a clean
    `uvx lovspor@<version> mcp --help` resolves it from PyPI.
+5. **First release only — drop the pending caveat.** Once `0.4.0` is live,
+   remove the "first PyPI release is pending" wording from this file,
+   `README.md` and [`mcp.md`](mcp.md) in one commit. A test in
+   `tests/unit/test_release_workflow.py` fails if only some of them are
+   updated, so the three cannot drift apart.
 
 Publishing never happens merely because `main` changed — it takes an explicit
 GitHub Release by the owner *and* an approval on the `pypi` environment.

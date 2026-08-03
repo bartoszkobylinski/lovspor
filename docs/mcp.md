@@ -2,7 +2,7 @@
 
 `lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets sixteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
-> **Distribution (updated 2026-08-03).** The engine is MIT-licensed open infrastructure, public on GitHub and distributed on PyPI as [`lovspor`](https://pypi.org/project/lovspor/) since `0.4.0` (the `0.2.0`–`0.3.0` releases were withdrawn during a July 2026 pivot). The commands below use the on-demand `uvx lovspor …` form, which resolves the latest release from PyPI; contributors running unreleased changes use `uv run --project /path/to/lovspor lovspor …` from a checkout — see [§ Running from a local checkout](#running-from-a-local-checkout). Local stdio is a first-class, fully supported path. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
+> **Distribution (updated 2026-08-03).** The engine is MIT-licensed open infrastructure, public on GitHub. PyPI publishing resumes with `0.4.0`, but the **first PyPI release is pending** — the `0.2.0`–`0.3.0` releases were withdrawn during a July 2026 pivot, so the project page is currently absent. The commands below use the on-demand `uvx lovspor …` form, which resolves the latest release from PyPI once it exists; until then — and for anyone running unreleased changes — use `uv run --project /path/to/lovspor lovspor …` from a checkout instead, see [§ Running from a local checkout](#running-from-a-local-checkout). Local stdio is a first-class, fully supported path either way. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
 
 Sprint 9 added a four-layer grounding-and-verification path for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
@@ -101,9 +101,9 @@ Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_
    git clone https://github.com/bartoszkobylinski/lovverk.git ~/lovverk
    ```
 
-2. **`uv` installed locally** — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server on demand via `uvx lovspor`, which resolves the [`lovspor` package from PyPI](https://pypi.org/project/lovspor/) — no clone needed. (Plain `pip install lovspor` works too; then the command is just `lovspor`.)
+2. **`uv` installed locally** — see [astral.sh/uv](https://docs.astral.sh/uv/). The MCP client invokes the server on demand via `uvx lovspor`, which resolves the `lovspor` package from PyPI — no clone needed. (Plain `pip install lovspor` works too; then the command is just `lovspor`.)
 
-   Contributors running unreleased changes use a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
+   Until the pending `0.4.0` release publishes, and for anyone running unreleased changes, use a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
 
 3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fifteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
@@ -744,7 +744,7 @@ The sixteen tools compose: an assistant can stitch together a research workflow 
 
 ## Running from a local checkout
 
-For contributors — or anyone who wants to run unreleased changes — the server also runs from a clone of this repo instead of the PyPI release. Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache:
+The server also runs from a clone of this repo instead of the PyPI release. This is the path to use while the first `0.4.0` release is still pending, and afterwards whenever you want unreleased changes. Add `"--corpus-path", "/absolute/path/to/lovverk"` only to override the default `fetch-corpus` cache:
 
 ```jsonc
 {
