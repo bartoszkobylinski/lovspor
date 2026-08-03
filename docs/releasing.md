@@ -71,6 +71,12 @@ The matching GitHub **Environment** `pypi` (**Settings → Environments**) carri
 4. **Verify:** the package appears at
    [pypi.org/project/lovspor](https://pypi.org/project/lovspor/), and a clean
    `uvx lovspor@<version> mcp --help` resolves it from PyPI.
+
+The project page's long description is a **snapshot of `README.md` taken at
+build time** and is immutable for that version, so a README change reaches PyPI
+only with the next upload. Editing docs after a release therefore leaves the
+published page behind until then ([#6](https://github.com/bartoszkobylinski/lovspor/issues/6)).
+
 Step 5 of the first release — swapping the "pending" wording in this file,
 `README.md` and [`mcp.md`](mcp.md) for the distributed-on-PyPI wording — was
 carried out on 2026-08-03 and does not recur. The release-state invariant in
