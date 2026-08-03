@@ -6,7 +6,7 @@ Norwegian law change tracker. Engine that produces the [`lovverk`](https://githu
 
 **Production.** A scheduled GitHub Actions workflow runs daily at 04:00 UTC, pulls the latest tarballs from Lovdata, classifies each document as new / updated / renamed / removed, renders the changes to Markdown, and pushes the diff to `lovverk` as conventional-commit history. The corpus mirrors close to **6 000 acts** (Norwegian *lover* and central *forskrifter*), each with a structured per-act change history under `<dataset>/history/<slug>.json`. The exact live count is always available from the MCP `corpus_status` tool.
 
-> **Distribution (updated 2026-08-03).** Lovspor is open infrastructure for trustworthy access to Norwegian legal sources. The engine is MIT-licensed and public on GitHub. PyPI publishing resumes with `0.4.0`, but the **first PyPI release is pending** — the `0.2.0`–`0.3.0` releases were withdrawn during a July 2026 pivot, so the project page is currently absent and those two version numbers are permanently burned (PyPI never reuses a filename). Until `0.4.0` is published, install from source; see [`docs/releasing.md`](docs/releasing.md). [`lovverk`](https://github.com/bartoszkobylinski/lovverk) is the public generated corpus (NLOD 2.0 / CC0 boundary). The hosted MCP endpoint at `https://lovspor.bartoszkobylinski.com/mcp` (live since 2026-07-18) is an **optional operated access layer**: every request requires authentication and per-credential quotas apply; access is operator-provisioned (see [`docs/mcp.md`](docs/mcp.md)). Hosted-service auth and quotas do not change the open nature of the engine. *Historical note: a 2026-07-14 pivot briefly made a closed commercial hosted service the primary direction; that decision was superseded on 2026-07-30 by the open-infrastructure ruling recorded in [`docs/decisions.md`](docs/decisions.md).*
+> **Distribution (updated 2026-08-03).** Lovspor is open infrastructure for trustworthy access to Norwegian legal sources. The engine is MIT-licensed and public on GitHub, and **Lovspor is distributed on PyPI** as [`lovspor`](https://pypi.org/project/lovspor/) — publishing resumed at `0.4.0`, the earlier `0.2.0`–`0.3.0` releases having been withdrawn during a July 2026 pivot (those two version numbers are permanently burned; PyPI never reuses a filename). Release process: [`docs/releasing.md`](docs/releasing.md). [`lovverk`](https://github.com/bartoszkobylinski/lovverk) is the public generated corpus (NLOD 2.0 / CC0 boundary). The hosted MCP endpoint at `https://lovspor.bartoszkobylinski.com/mcp` (live since 2026-07-18) is an **optional operated access layer**: every request requires authentication and per-credential quotas apply; access is operator-provisioned (see [`docs/mcp.md`](docs/mcp.md)). Hosted-service auth and quotas do not change the open nature of the engine. *Historical note: a 2026-07-14 pivot briefly made a closed commercial hosted service the primary direction; that decision was superseded on 2026-07-30 by the open-infrastructure ruling recorded in [`docs/decisions.md`](docs/decisions.md).*
 
 Sprint 9 (MERGED 2026-05-06) added per-section embeddings to the corpus and a four-layer grounding-and-verification path to the MCP surface: `semantic_search` (cosine over embeddings), `verify_quote` (verbatim-citation guard), validated `cross_references` on `get_section`, and `validate_citation` as the off-ramp for ambiguous citations.
 
@@ -14,7 +14,7 @@ See [`docs/decisions.md`](docs/decisions.md) for the full architecture and desig
 
 ## Install
 
-From PyPI — works once `0.4.0` is published (the **first PyPI release is pending**; until it lands, use the source install below):
+From PyPI:
 
 ```bash
 pip install lovspor        # or: uv tool install lovspor, or run ad hoc with uvx lovspor
@@ -37,7 +37,7 @@ Maintainer release process: [`docs/releasing.md`](docs/releasing.md).
 
 **Setup — three steps:**
 
-1. **Install [`uv`](https://docs.astral.sh/uv/).** The server runs straight from PyPI via `uvx lovspor` — no clone needed. Note the pending first release above: until `0.4.0` is on PyPI, replace `uvx lovspor` with `uv run --project /path/to/lovspor lovspor` against a checkout in every command below (the same substitution contributors use for unreleased changes).
+1. **Install [`uv`](https://docs.astral.sh/uv/).** The server runs straight from PyPI via `uvx lovspor` — no clone needed. (To run unreleased changes instead, replace `uvx lovspor` with `uv run --project /path/to/lovspor lovspor` against a checkout in every command below.)
 
 2. **Fetch the corpus.** One command shallow-clones the legal text to the default cache (`~/.cache/lovverk`):
 
@@ -86,7 +86,7 @@ It's your key in your own local config file — keep that file private and never
 
 Keep the corpus fresh by re-running `uvx lovspor fetch-corpus` (the engine re-syncs daily at 04:00 UTC); the `corpus_status` tool tells the assistant when your clone has drifted.
 
-> **On invocation:** `uvx lovspor` resolves the latest release from PyPI — versioned and immutable (`uvx lovspor@0.4.0 …` pins one). It starts working when `0.4.0` publishes. To run unreleased changes — or anything at all before that release — use the from-source form `uv run --project /path/to/lovspor lovspor …` against your checkout. Release process: [`docs/releasing.md`](docs/releasing.md).
+> **On invocation:** `uvx lovspor` resolves the latest release from PyPI — versioned and immutable (`uvx lovspor@0.4.0 …` pins one). To run unreleased changes, use the from-source form `uv run --project /path/to/lovspor lovspor …` against your checkout. Release process: [`docs/releasing.md`](docs/releasing.md).
 
 See [`docs/mcp.md`](docs/mcp.md) for the full setup guide, all sixteen tools documented with examples (`get_law`, `get_law_at`, `list_law_versions`, `diff_law_versions`, `get_section`, `list_sections`, `get_law_history`, `list_recent_changes`, `search_laws`, `search_body`, `semantic_search`, `validate_citation`, `verify_quote`, `get_eu_basis`, `search_eu_implementations`, `corpus_status`), troubleshooting, and limitations. The binary embedding format that powers `semantic_search` is documented in [`docs/embeddings.md`](docs/embeddings.md).
 
