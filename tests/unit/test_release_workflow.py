@@ -7,12 +7,14 @@ here too, so a regression shows up as a failing test instead of a bad release.
 """
 
 import os
+import re
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml  # type: ignore[import-untyped]
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +22,52 @@ _WORKFLOW = _ROOT / ".github" / "workflows" / "release.yml"
 _README = _ROOT / "README.md"
 _MCP_DOC = _ROOT / "docs" / "mcp.md"
 _RELEASING_DOC = _ROOT / "docs" / "releasing.md"
+
+_PENDING_MARKER = "first PyPI release is pending"
+_RELEASED_MARKER = "Lovspor is distributed on PyPI"
+
+_DISTRIBUTION_DOCS = (
+    ("README", _README),
+    ("docs/mcp.md", _MCP_DOC),
+    ("docs/releasing.md", _RELEASING_DOC),
+)
+
+# Prose that only makes sense before the first release. A doc claiming the
+# released state while still carrying any of it is a half-finished transition:
+# the banner says "on PyPI", the install steps still say "wait". Deliberately a
+# denylist of the framings these docs have actually used — it narrows the gap
+# rather than closing it, so add to it when a new pre-release phrasing appears.
+_PRE_RELEASE_PROSE = (
+    re.compile(r"once\s+`?\d+\.\d+\.\d+`?\s+is\s+published", re.IGNORECASE),
+    re.compile(r"until\s+\S+\s+(?:lands|publishes|is\s+published)", re.IGNORECASE),
+    re.compile(r"release\s+is\s+(?:still\s+)?pending", re.IGNORECASE),
+    re.compile(r"not\s+(?:currently\s+)?on\s+PyPI", re.IGNORECASE),
+    re.compile(r"page\s+is\s+currently\s+absent", re.IGNORECASE),
+    re.compile(r"page\s+404s", re.IGNORECASE),
+)
+
+
+def _release_state(label: str, text: str) -> str:
+    """Classify one doc's PyPI release state, rejecting self-contradiction.
+
+    Marker presence alone is too weak: a doc can carry the released marker in
+    its banner and still tell the reader further down to wait for the release.
+    So a released doc must also be free of pre-release prose.
+    """
+    pending = _PENDING_MARKER in text
+    released = _RELEASED_MARKER in text
+
+    assert pending != released, (
+        f"{label} must state exactly one release state, not both and not neither"
+    )
+
+    if released:
+        stale = [pattern.pattern for pattern in _PRE_RELEASE_PROSE if pattern.search(text)]
+        assert not stale, (
+            f"{label} says lovspor is on PyPI but still carries pre-release prose: {stale}"
+        )
+
+    return "pending" if pending else "released"
 
 
 def _workflow() -> dict[str, Any]:
@@ -170,21 +218,31 @@ def test_distribution_docs_agree_on_whether_lovspor_is_on_pypi_yet() -> None:
     same one — so this keeps biting after a transition flips them rather than
     passing vacuously once a marker is deleted.
     """
-    pending_marker = "first PyPI release is pending"
-    released_marker = "Lovspor is distributed on PyPI"
-
-    states: dict[str, str] = {}
-    for label, doc in (
-        ("README", _README),
-        ("docs/mcp.md", _MCP_DOC),
-        ("docs/releasing.md", _RELEASING_DOC),
-    ):
-        text = doc.read_text(encoding="utf-8")
-        pending = pending_marker in text
-        released = released_marker in text
-        assert pending != released, (
-            f"{label} must state exactly one release state, not both and not neither"
-        )
-        states[label] = "pending" if pending else "released"
+    states = {
+        label: _release_state(label, doc.read_text(encoding="utf-8"))
+        for label, doc in _DISTRIBUTION_DOCS
+    }
 
     assert len(set(states.values())) == 1, f"docs disagree about the release state: {states}"
+
+
+@pytest.mark.parametrize(
+    ("original", "stale"),
+    [
+        ("From PyPI:", "From PyPI — works once `0.4.0` is published:"),
+        ("From PyPI:", "From PyPI (the first release is still pending):"),
+        ("## Install", "## Install\n\nlovspor is not currently on PyPI."),
+    ],
+)
+def test_release_state_invariant_rejects_stale_publish_caveats(original: str, stale: str) -> None:
+    """Guard the guard: marker presence must not be enough to pass as released.
+
+    A half-finished transition leaves the released marker in the banner while
+    prose further down still tells the reader to wait for the release. Feeding
+    that shape through the invariant must raise, not classify it as released.
+    """
+    mutated = _README.read_text(encoding="utf-8").replace(original, stale, 1)
+    assert mutated != _README.read_text(encoding="utf-8"), "mutation did not apply"
+
+    with pytest.raises(AssertionError, match="pre-release prose"):
+        _release_state("README", mutated)
