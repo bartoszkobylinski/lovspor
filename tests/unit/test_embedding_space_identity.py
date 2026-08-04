@@ -479,7 +479,7 @@ def test_a_different_identity_at_the_same_dimension_is_refused(tmp_path: Path) -
     with pytest.raises(CorpusNotFoundError) as exc_info:
         reader.semantic_search("formal")
 
-    assert "record a different one" in str(exc_info.value)
+    assert "record a different space" in str(exc_info.value)
 
 
 def test_an_unknown_legacy_identity_is_refused_not_silently_searched(tmp_path: Path) -> None:
@@ -544,6 +544,94 @@ def test_partial_coverage_is_reported_in_band_rather_than_only_to_stderr(
     assert result["notice"] is not None
     assert "coverage is incomplete" in result["notice"]
     assert "no recorded embedding space" in result["notice"]
+
+
+def test_a_dataset_filter_still_reports_why_documents_were_excluded(
+    tmp_path: Path,
+) -> None:
+    """The early return for a dataset with no indexed rows must not lose the reason.
+
+    Without this the caller is told the dataset "may not be backfilled yet" —
+    a bootstrap story — when the real cause is that its documents were excluded
+    for identity reasons. Wrong cause, wrong remedy, and exactly the silent
+    recall loss this mechanism exists to prevent.
+    """
+    _seed_corpus(tmp_path, dim=4)
+    manifest = read_manifest(tmp_path / "manifest.json")
+    legacy = _record(
+        markdown_path="forskrifter/annen.md",
+        source_dataset="gjeldende-sentrale-forskrifter",
+        doc_type="forskrift",
+        slug="annen",
+        title="Annen forskrift",
+        xml_hash="a" * 64,
+        embedding_space_id=None,
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={**manifest.documents, "nl-2": legacy},
+        ),
+        tmp_path / "manifest.json",
+    )
+    doc = tmp_path / "forskrifter" / "annen.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(
+        "---\nid: nl-2\ntitle: Annen\n---\n\n# Annen\n\n### § 1-1. Formal\n\nTekst.\n",
+        encoding="utf-8",
+    )
+    write_embeddings(
+        tmp_path / "forskrifter" / "embeddings" / "annen.bin",
+        [("1-1", np.ones(4, dtype=np.int8))],
+        0.01,
+        4,
+    )
+
+    result = CorpusReader(tmp_path, embedder=_FakeEmbedder()).semantic_search(
+        "Tekst",
+        dataset="forskrifter",
+    )
+
+    assert result["results"] == []
+    notice = result["notice"]
+    assert notice is not None
+    assert "no recorded embedding space" in notice
+    assert "migration" in notice
+
+
+def test_an_unknown_only_corpus_is_not_promised_an_ordinary_sync_fix(
+    tmp_path: Path,
+) -> None:
+    """The remedy must match what the code actually does.
+
+    Absent identity is deliberately NOT stale, so a keyed sync leaves an
+    unchanged legacy corpus exactly as it was. Telling an operator to re-run
+    sync would send them to an action that cannot repair the state.
+    """
+    _seed_corpus(tmp_path, dim=4, stamped=False)
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder())
+
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        reader.semantic_search("Tekst")
+
+    message = str(exc_info.value)
+    assert "an ordinary sync will NOT change them" in message
+    assert "embedding-space migration" in message
+
+
+def test_a_different_space_corpus_is_pointed_at_sync_which_does_fix_it(
+    tmp_path: Path,
+) -> None:
+    """The mirror case: a mismatched space IS stale, so sync is the right remedy."""
+    _seed_corpus(tmp_path, dim=4, descriptor=_OTHER_DESCRIPTOR)
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder())
+
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        reader.semantic_search("Tekst")
+
+    message = str(exc_info.value)
+    assert "record a different space" in message
+    assert "re-embeds and re-stamps" in message
 
 
 def test_the_other_tools_need_no_identity_at_all(tmp_path: Path) -> None:

@@ -1306,21 +1306,26 @@ class CorpusReader:
             self._raise_for_empty_embedding_index()
 
         allowed_slugs = self._dataset_slugs(dataset)
+        coverage = self._coverage_notice()
         # Skip the (network) query-embedding call entirely when the
         # dataset filter cannot match any indexed row.
         if allowed_slugs is not None and allowed_slugs.isdisjoint(index.unique_slugs):
+            bootstrap = (
+                f"no embedded sections available in dataset {dataset!r}; "
+                f"embeddings may not be backfilled for it yet."
+            )
+            # The exclusion reason has to survive this early return too. Without
+            # it a dataset whose documents were dropped for identity reasons
+            # reports the bootstrap "not backfilled yet" story instead, which
+            # names the wrong cause and the wrong remedy.
             return {
                 "results": [],
-                "notice": (
-                    f"no embedded sections available in dataset {dataset!r}; "
-                    f"embeddings may not be backfilled for it yet."
-                ),
+                "notice": f"{bootstrap} {coverage}" if coverage else bootstrap,
             }
 
         query_vector = self._embedder.encode([query])[0]
         hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
         kept = [hit for hit in hits if hit.score >= min_score]
-        coverage = self._coverage_notice()
         if not kept:
             best = max((hit.score for hit in hits), default=None)
             notice = _no_strong_match_notice(min_score, best)
@@ -1342,15 +1347,29 @@ class CorpusReader:
         unknown = excluded.get("unknown_space", 0)
         mismatched = excluded.get("different_space", 0)
         if unknown or mismatched:
+            # Remedies differ, so they are named separately. A document
+            # recording a *different* space is stale and an ordinary keyed sync
+            # re-embeds it. A document recording *no* space is deliberately not
+            # stale — sync leaves it alone — so telling the operator to re-run
+            # sync would promise a fix that cannot happen.
+            remedies = []
+            if mismatched:
+                remedies.append(
+                    f"{mismatched} record a different space; re-running 'lovspor sync' "
+                    "with the configured provider re-embeds and re-stamps those",
+                )
+            if unknown:
+                remedies.append(
+                    f"{unknown} record no embedding space at all; these were written "
+                    "before the space was stamped and an ordinary sync will NOT change "
+                    "them, because unchanged documents are not re-embedded — they need "
+                    "the embedding-space migration",
+                )
             raise CorpusNotFoundError(
-                f"semantic_search is unavailable: no document in this corpus is known to "
-                f"share the configured embedding space. {unknown} document(s) record no "
-                f"embedding space at all and {mismatched} record a different one, and a "
-                "vector from an unknown or different space cannot be compared with a query "
-                "— doing so returns confident but meaningless results. Sidecars written "
-                "before the embedding space was stamped stay unknown until the "
-                "embedding-space migration annotates them; re-running 'lovspor sync' with "
-                "the configured provider re-embeds and stamps them.",
+                "semantic_search is unavailable: no document in this corpus is known to "
+                "share the configured embedding space, and a vector from an unknown or "
+                "different space cannot be compared with a query — doing so returns "
+                "confident but meaningless results. " + "; ".join(remedies) + ".",
             )
         if self._stale_bin_count > 0:
             raise CorpusNotFoundError(
@@ -1610,14 +1629,24 @@ class CorpusReader:
         excluded = getattr(self, "_excluded_bins", None)
         if not excluded:
             return None
+        # Each reason carries its own remedy. A blanket "run sync" would be
+        # wrong for the unknown-space case, which sync deliberately leaves
+        # alone, and pointing an operator at an action that cannot fix the
+        # state is worse than saying nothing.
         reasons = {
             "unknown_space": (
-                "have no recorded embedding space (written before the space was "
-                "stamped; they need the embedding-space migration)"
+                "have no recorded embedding space — written before the space was "
+                "stamped, and an ordinary sync will not re-embed them; they need "
+                "the embedding-space migration"
             ),
-            "different_space": "were built by a different embedding model",
-            "corrupt": "could not be read",
-            "wrong_dimension": "have a different vector dimension",
+            "different_space": (
+                "were built by a different embedding model — 'lovspor sync' with the "
+                "configured provider re-embeds them"
+            ),
+            "corrupt": "could not be read — 'lovspor sync' regenerates them",
+            "wrong_dimension": (
+                "have a different vector dimension — 'lovspor sync' regenerates them"
+            ),
         }
         parts = [
             f"{count} document(s) {reasons[reason]}"
@@ -1627,7 +1656,7 @@ class CorpusReader:
         return (
             "coverage is incomplete — these results do not cover the whole corpus: "
             + "; ".join(parts)
-            + ". Run 'lovspor sync' with an embedding provider configured to rebuild them."
+            + "."
         )
 
     def _resolve_current(self, slug: str) -> tuple[ManifestRecord, int]:

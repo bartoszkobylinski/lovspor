@@ -470,7 +470,7 @@ def test_semantic_search_refuses_an_embedder_from_a_different_space(tmp_path: Pa
         reader.semantic_search("formal")
 
     message = str(exc_info.value)
-    assert "record a different one" in message
+    assert "record a different space" in message
     assert "cannot be compared" in message
 
 
