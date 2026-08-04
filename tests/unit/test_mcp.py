@@ -3773,6 +3773,155 @@ def test_verify_quote_not_found_row_pins_the_full_response_contract(tmp_path: Pa
     )
 
 
+def _seed_duplicate_id_corpus(tmp_path: Path) -> CorpusReader:
+    """The betalingssystemloven shape: two `§ 6-2` in one act, with
+    occurrence-distinct bodies so cross-occurrence matching is detectable."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="betalingssystemloven", title="Betalingssystemloven")},
+        body_for={"betalingssystemloven": _DUPLICATE_ID_BODY},
+    )
+    return CorpusReader(tmp_path)
+
+
+def test_verify_quote_unique_section_ignores_an_explicit_occurrence_of_one(
+    tmp_path: Path,
+) -> None:
+    """Backward compatibility both ways: a unique id verifies without an
+    occurrence exactly as before (the whole existing verify_quote suite pins
+    that), and occurrence=1 on a unique id is a no-op, not an error — the
+    caller who always forwards an occurrence is not punished for it."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="skatteloven", title="Skatteloven")},
+        body_for={"skatteloven": "## Kapittel 1.\n\n### § 1-1. Virkeområde\n\nRiktig tekst.\n"},
+    )
+    reader = CorpusReader(tmp_path)
+
+    assert reader.verify_quote("skatteloven", "1-1", "Riktig tekst.")["verified"] is True
+    with_occurrence = reader.verify_quote("skatteloven", "1-1", "Riktig tekst.", occurrence=1)
+    assert with_occurrence["verified"] is True
+    assert with_occurrence["reason"] is None
+
+
+def test_verify_quote_duplicate_id_without_occurrence_returns_ambiguity_in_band(
+    tmp_path: Path,
+) -> None:
+    """The final trust guard must not dead-end on exactly the hits
+    semantic_search flags ambiguous_section=true (system audit H2): a
+    duplicate id without an occurrence is an in-band verified=false carrying
+    the same candidate list get_section raises, never an exception and never
+    a guess. Pinned whole: this reason IS the recovery path."""
+    reader = _seed_duplicate_id_corpus(tmp_path)
+
+    result = reader.verify_quote("betalingssystemloven", "6-2", "Kongen kan gi forskrifter")
+
+    assert set(result) == {"verified", "slug", "section_id", "reason"}
+    assert result["verified"] is False
+    assert result["slug"] == "betalingssystemloven"
+    assert result["section_id"] == "6-2"
+    assert result["reason"] == (
+        "section '6-2' is ambiguous in 'betalingssystemloven': 2 sections "
+        "share that id — "
+        "occurrence=1: § 6-2. Forskrifter [Kapittel 6. Øvrige bestemmelser]; "
+        "occurrence=2: § 6-2. Endringer i andre lover [Kapittel 6. Øvrige bestemmelser]. "
+        "Re-call with occurrence=N to choose one."
+    )
+
+
+def test_verify_quote_resolves_each_duplicate_occurrence_explicitly(
+    tmp_path: Path,
+) -> None:
+    reader = _seed_duplicate_id_corpus(tmp_path)
+
+    first = reader.verify_quote(
+        "betalingssystemloven", "6-2", "Kongen kan gi forskrifter", occurrence=1
+    )
+    second = reader.verify_quote(
+        "betalingssystemloven", "6-2", "Fra den tid loven trer i kraft", occurrence=2
+    )
+
+    assert first["verified"] is True
+    assert first["reason"] is None
+    assert second["verified"] is True
+    assert second["reason"] is None
+
+
+def test_verify_quote_never_matches_a_quote_across_occurrences(tmp_path: Path) -> None:
+    """Critical property: with occurrence=1 selected, a quote that lives only
+    in occurrence 2 must NOT verify. Anything else silently converts an
+    ambiguous reference into a hidden cross-occurrence search, and the guard
+    would confirm quotes against text the caller never selected."""
+    reader = _seed_duplicate_id_corpus(tmp_path)
+
+    result = reader.verify_quote(
+        "betalingssystemloven", "6-2", "Fra den tid loven trer i kraft", occurrence=1
+    )
+
+    assert result["verified"] is False
+    assert result["reason"] is not None
+    assert "quote not found in § 6-2" in result["reason"]
+
+
+def test_verify_quote_out_of_range_occurrence_returns_false_with_valid_range(
+    tmp_path: Path,
+) -> None:
+    """Same contract as get_section's occurrence validation, delivered in-band:
+    the reason carries the valid range so the caller can correct the request
+    in one round trip."""
+    reader = _seed_duplicate_id_corpus(tmp_path)
+
+    result = reader.verify_quote(
+        "betalingssystemloven", "6-2", "Kongen kan gi forskrifter", occurrence=99
+    )
+
+    assert result["verified"] is False
+    assert result["reason"] == (
+        "occurrence 99 of section '6-2' not found in 'betalingssystemloven'; it has 2 (valid: 1-2)"
+    )
+
+
+def test_ambiguous_semantic_hit_verifies_deterministically_via_occurrence(
+    tmp_path: Path,
+) -> None:
+    """The end-to-end recovery path the audit found broken: semantic_search
+    legitimately surfaces ambiguous_section=true with occurrence=null (the
+    sidecar keys vectors by bare id, so the store cannot know which § matched
+    — see the withholds-the-heading test). The hit's slug + section_id must
+    now be enough to drive verify_quote to a deterministic verdict: the first
+    call returns the candidate list in-band, and each occurrence-selected
+    retry verifies against exactly one occurrence."""
+    slug = "betalingssystemloven"
+    body = (
+        "## Kapittel 6. Øvrige bestemmelser\n\n"
+        "### § 6-2. Forskrifter\n\nFørste forekomst.\n\n"
+        "### § 6-2. Endringer i andre lover\n\nAndre forekomst.\n"
+    )
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug=slug, title="Betalingssystemloven")},
+        body_for={slug: body},
+    )
+    _write_embedding_file(tmp_path, "lover", slug, [("6-2", [1, 0]), ("6-2", [0, 1])])
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([0.0, 1.0]))
+
+    [hit] = reader.semantic_search("beta", limit=1)["results"]
+    assert hit["ambiguous_section"] is True
+    assert hit["occurrence"] is None
+
+    unresolved = reader.verify_quote(hit["slug"], hit["section_id"], "Andre forekomst")
+    assert unresolved["verified"] is False
+    assert "ambiguous" in unresolved["reason"]
+    assert "occurrence=N" in unresolved["reason"]
+
+    in_second = reader.verify_quote(hit["slug"], hit["section_id"], "Andre forekomst", occurrence=2)
+    not_in_first = reader.verify_quote(
+        hit["slug"], hit["section_id"], "Andre forekomst", occurrence=1
+    )
+    assert in_second["verified"] is True
+    assert not_in_first["verified"] is False
+
+
 # ---------- time-machine tools ----------
 
 
