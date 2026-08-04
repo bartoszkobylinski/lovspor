@@ -1483,6 +1483,7 @@ class CorpusReader:
         slug: str,
         section_id: str,
         quote: str,
+        occurrence: int | None = None,
     ) -> dict[str, Any]:
         """Verify that ``quote`` is verbatim text from ``§ section_id`` of ``slug``.
 
@@ -1494,6 +1495,18 @@ class CorpusReader:
         ``_normalize_for_quote_match``), appears as a substring of
         the section body.
 
+        ``occurrence`` disambiguates the rare act where one id names
+        more than one ``§`` — same one-based semantics as
+        ``get_section``. Leave it unset for the unique case. A
+        duplicate id without an occurrence returns ``verified=false``
+        with the candidate list in ``reason`` — never a guess, never a
+        raise, and never a search across the candidates: a guard that
+        quietly picked one occurrence (or matched the quote against
+        all of them) would convert ambiguity into exactly the
+        hallucination it exists to catch. With an occurrence set, the
+        quote is checked against that occurrence's body ONLY — a quote
+        that lives in the other duplicate returns ``verified=false``.
+
         Catches the most common citation hallucination — the AI quotes
         words that are NOT in the section it cites (often pulled from
         a different section, paraphrased from memory, or invented).
@@ -1501,9 +1514,9 @@ class CorpusReader:
         meaning; for those the AI must fall back to ``get_section``
         and present the original Norwegian text.
 
-        Raises only on explicit programming errors (missing slug, etc.
-        — surfaced via ``get_section``). Empty quote returns
-        verified=False with a clear reason rather than raising.
+        Never raises on citation content: empty quote, unknown slug or
+        section, ambiguous id, and out-of-range occurrence all return
+        verified=False with a recovery-oriented reason.
         """
         section_id = _normalize_section_id(section_id)
         if not quote.strip():
@@ -1514,8 +1527,8 @@ class CorpusReader:
                 "reason": "quote is empty",
             }
         try:
-            section = self.get_section(slug, section_id)
-        except CorpusNotFoundError as exc:
+            section = self.get_section(slug, section_id, occurrence)
+        except (CorpusAmbiguousSectionError, CorpusNotFoundError) as exc:
             return {
                 "verified": False,
                 "slug": slug,
@@ -3610,7 +3623,12 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         return reader.validate_citation(citation)
 
     @_tool()
-    def verify_quote(slug: str, section_id: str, quote: str) -> dict[str, Any]:
+    def verify_quote(
+        slug: str,
+        section_id: str,
+        quote: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
         """Verify a verbatim quote actually appears in a specific section.
 
         Anti-hallucination guard. Before answering with text like
@@ -3634,12 +3652,25 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         for those you must fall back to ``get_section`` and quote
         the original.
 
+        ``occurrence`` (one-based, same convention as ``get_section``)
+        selects between duplicate ``§`` ids — the handful of acts where
+        an appendix restarts numbering or an id genuinely repeats, the
+        same case ``semantic_search`` flags with
+        ``ambiguous_section: true``. A duplicate id WITHOUT an
+        occurrence returns ``verified=false`` with every candidate
+        listed in ``reason`` — re-call with ``occurrence=N``. The check
+        then runs against that occurrence's text only: a quote that
+        lives in the other duplicate returns ``verified=false``, so
+        ambiguity can never silently widen into a search across
+        occurrences.
+
         Empty quote returns ``verified=false`` with a clear reason
-        rather than raising. Unknown slug or section returns
-        ``verified=false`` with the get_section error message in
-        ``reason`` (which already lists available sections).
+        rather than raising. Unknown slug or section, ambiguous id, and
+        out-of-range occurrence likewise return ``verified=false`` with
+        a recovery-oriented ``reason`` (the messages list available
+        sections, candidate occurrences, or the valid occurrence range).
         """
-        return reader.verify_quote(slug, section_id, quote)
+        return reader.verify_quote(slug, section_id, quote, occurrence)
 
     @_tool()
     def get_eu_basis(slug: str) -> dict[str, Any]:

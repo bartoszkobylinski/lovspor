@@ -538,13 +538,16 @@ Verify that a Norwegian-law citation string actually resolves in the corpus. **C
 
 The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. When the citation contains a near-miss token, the `reason` appends an advisory `did you mean skatteloven-sktl?` hint (the same hint appears in `get_law`/`get_section` unknown-slug errors), but validation itself never fuzzy-matches: AI consumers should confirm via `search_laws` and re-validate with the canonical slug.
 
-### `verify_quote(slug, section_id, quote)`
+### `verify_quote(slug, section_id, quote, occurrence=None)`
 
 Anti-hallucination guard for verbatim citations. Before answering with text like *"§ 5-12 of Skatteloven says: 'Skattefradraget gis for...'"* call this with the verbatim quote you intend to attribute to that section. Returns `{verified, slug, section_id, reason}`.
 
 - **`slug`** — the act's slug.
 - **`section_id`** — the bare numeric id (same form as for `get_section`).
 - **`quote`** — the verbatim string to verify against the section body.
+- **`occurrence`** — optional, one-based, same convention as `get_section`. Only needed for the handful of acts where one id names more than one `§` (an appendix restarting its numbering, or a genuine upstream repeat) — the same case `semantic_search` flags with `ambiguous_section: true`. A duplicate id **without** an occurrence returns `verified: false` with every candidate occurrence listed in `reason` — re-call with `occurrence=N`. The quote is then checked against that occurrence's text **only**: a quote that actually lives in the other duplicate returns `verified: false`. This is deliberate — the guard never guesses an occurrence and never searches across the candidates, because either would convert ambiguity back into the hallucination it exists to catch. An out-of-range occurrence returns `verified: false` with the valid range.
+
+**Ambiguity recovery flow:** `semantic_search` hit with `ambiguous_section: true` → `verify_quote(slug, section_id, quote)` → `verified: false` with the candidate list in `reason` → pick the occurrence (or read them via `get_section(slug, section_id, occurrence=N)`) → `verify_quote(slug, section_id, quote, occurrence=N)` → deterministic verdict.
 
 Match is **case-insensitive, whitespace-tolerant, and typography-tolerant**: curly vs straight quotes, en/em dash vs hyphen, and soft hyphens are folded before matching (Norwegian legal text is sentence case but AIs sometimes capitalize for emphasis; chat clients rewrite quotes and dashes in transit — an honest quote must not fail over typography). Beyond that, punctuation and accents are NOT normalized — `§` is not the same as `$`, and `§ 5-12` is not the same as `§ 512`.
 
