@@ -205,6 +205,55 @@ def test_a_missing_sidecar_basis_aborts(tmp_path: Path) -> None:
     point at regeneration instead of annotating on faith."""
     settings, corpus = _seed_corpus(tmp_path)
     (corpus / "lover" / "embeddings" / "y.bin").unlink()
+    _git(corpus, "add", "-A")
+    _git(corpus, "commit", "-m", "drop sidecar")
 
     with pytest.raises(CorpusStateError, match="no embedding sidecar"):
         annotate_embedding_input_identity(settings)
+
+
+def test_a_corrupt_sidecar_basis_aborts(tmp_path: Path) -> None:
+    """An existing-but-unreadable sidecar is no basis either: the current
+    reader rejects it, so there are no vectors for the annotation to certify.
+    Existence-only checking would bless the corrupt file."""
+    settings, corpus = _seed_corpus(tmp_path)
+    manifest_before = (corpus / "manifest.json").read_bytes()
+    sidecar = corpus / "lover" / "embeddings" / "y.bin"
+    sidecar.write_bytes(b"not-an-lspe-file")
+    _git(corpus, "add", ".")
+    _git(corpus, "commit", "-m", "corrupt sidecar")
+
+    with pytest.raises(CorpusStateError, match="unreadable embedding sidecar"):
+        annotate_embedding_input_identity(settings)
+
+    assert (corpus / "manifest.json").read_bytes() == manifest_before
+
+
+def test_a_dirty_worktree_aborts_before_any_work(tmp_path: Path) -> None:
+    """The migration commit sweeps the index, so pre-staged unrelated files
+    would ride along and break the manifest-only invariant — refuse to start
+    on anything but a pristine clone."""
+    settings, corpus = _seed_corpus(tmp_path)
+    manifest_before = (corpus / "manifest.json").read_bytes()
+    (corpus / "UNRELATED.txt").write_text("smuggled\n", encoding="utf-8")
+    _git(corpus, "add", "UNRELATED.txt")
+    count_before = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=corpus,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    with pytest.raises(CorpusStateError, match="worktree is not clean"):
+        annotate_embedding_input_identity(settings)
+
+    assert (corpus / "manifest.json").read_bytes() == manifest_before
+    count_after = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=corpus,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert count_after == count_before

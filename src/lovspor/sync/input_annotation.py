@@ -22,6 +22,7 @@ from subprocess import run
 
 from lovspor import __version__
 from lovspor.embeddings.inputs import build_embedding_inputs, hash_embedding_inputs
+from lovspor.embeddings.store import read_embeddings
 from lovspor.errors import CorpusStateError
 from lovspor.settings import Settings
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest, write_manifest
@@ -72,6 +73,19 @@ def _record_input_hash(repo: Path, record: ManifestRecord) -> str:
             f"annotation aborted: {record.markdown_path} is referenced by the "
             f"manifest but missing on disk",
         )
+    _require_sidecar_basis(repo, record)
+    rendered = markdown_path.read_text(encoding="utf-8")
+    return hash_embedding_inputs(build_embedding_inputs(rendered))
+
+
+def _require_sidecar_basis(repo: Path, record: ManifestRecord) -> None:
+    """The sidecar the annotation certifies must exist AND parse.
+
+    Existence alone would bless a corrupt file: a metadata-only annotation
+    claims the stored vectors match the digested inputs, so an artifact the
+    current reader rejects has no vectors to claim for. Abort and point at
+    regeneration, exactly as for a missing sidecar.
+    """
     dataset_dir = "lover" if record.source_dataset.startswith("gjeldende-lov") else "forskrifter"
     sidecar = repo / dataset_dir / "embeddings" / f"{record.slug}.bin"
     if not sidecar.exists():
@@ -79,8 +93,14 @@ def _record_input_hash(repo: Path, record: ManifestRecord) -> str:
             f"annotation aborted: {record.slug!r} has no embedding sidecar — "
             f"the metadata-only proof does not cover it; regenerate instead",
         )
-    rendered = markdown_path.read_text(encoding="utf-8")
-    return hash_embedding_inputs(build_embedding_inputs(rendered))
+    try:
+        read_embeddings(sidecar)
+    except (ValueError, OSError) as exc:
+        raise CorpusStateError(
+            f"annotation aborted: {record.slug!r} has an unreadable embedding "
+            f"sidecar ({exc}) — the metadata-only proof must not certify an "
+            f"artifact the current reader rejects; regenerate instead",
+        ) from exc
 
 
 def _compute_all(repo: Path, manifest: Manifest) -> dict[str, str]:
@@ -117,15 +137,39 @@ def _verify_basis_unchanged(repo: Path, head_before: str, hashes: dict[str, str]
         )
 
 
+def _require_clean_worktree(repo: Path) -> None:
+    """The migration commit must contain the manifest update and nothing else.
+
+    ``git commit`` sweeps whatever is already staged, so a dirty worktree or
+    index could smuggle unrelated files into the migration commit and break
+    the manifest-only invariant. Fail closed before any work: the tool runs
+    against a pristine clone.
+    """
+    result = run(
+        ["git", "status", "--porcelain"],  # noqa: S607
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if result.stdout.strip():
+        raise CorpusStateError(
+            "annotation aborted: corpus worktree is not clean — the migration "
+            "commit must contain only the manifest update; run against a "
+            "pristine clone",
+        )
+
+
 def annotate_embedding_input_identity(settings: Settings) -> AnnotationReport:
     """Run the ADR-0006 metadata-only migration against the configured corpus.
 
-    Requires no provider credential. Produces one forward-only migration
-    commit (never pushes). Idempotent: a second run annotates nothing and
-    creates no commit.
+    Requires no provider credential and a clean corpus worktree. Produces one
+    forward-only migration commit (never pushes). Idempotent: a second run
+    annotates nothing and creates no commit.
     """
     repo = settings.lovverk_repo_path
     manifest_path = repo / _MANIFEST_FILENAME
+    _require_clean_worktree(repo)
     head_before = _git_head(repo)
     manifest = read_manifest(manifest_path)
     hashes = _compute_all(repo, manifest)
