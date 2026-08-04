@@ -85,16 +85,41 @@ defaults) — the XML cannot supply provenance, so the caller provides it.
 | `eu_basis` | `list[str] \| None` | `None` |
 | `embedding_hash` | `str \| None` | `None` |
 | `renderer_version` | `int \| None` | `None` |
+| `embedding_space` | `str \| None` | `None` |
+| `embedding_space_id` | `str \| None` | `None` |
+| `removed_reason` | `str \| None` | `None` |
 
 The optional fields default to `None` for backward compatibility with older-sprint
 manifests. `embedding_hash` records the `xml_hash` the doc's `.bin` was built from;
 `None` or a mismatch means the embeddings are stale and get rebuilt. `renderer_version`
 records the `RENDERER_VERSION` that produced the Markdown; `None` or a mismatch means the
 renderer has moved on and the doc is re-rendered on the next sync (see
-`docs/operations.md`). A `removed` record is a **tombstone** — `status` is flipped to
-`"removed"`, `xml_hash` / `markdown_path` / `last_seen` / `slug` / `title` are kept, and
-`total_changes` / `last_changed` / `eu_basis` / `embedding_hash` / `renderer_version`
-revert to `None`.
+`docs/operations.md`).
+
+`embedding_space` and `embedding_space_id` record the **Embedding Space Identity** of the
+sidecar the record describes (ADR-0005 Stage 1): the canonical provider/model/dim/endpoint
+descriptor and its 128-bit digest, stamped at generation time by whichever embedder
+actually produced the vectors. The manifest is the **only** authority for this identity —
+the `.bin` format carries none — and `semantic_search` compares `embedding_space_id`
+against the running embedder's identity *before* reading any vector: same → searchable,
+different → excluded, absent → excluded as Unknown. Absence is a defined state, not an
+error: it means no identity was established (keyless write, or an embedder that declared
+none), and crucially **absence alone never makes a record stale** — an identity-less
+record is refused by search but is not silently re-embedded. Both fields apply to
+`current` records only. The full ESI definition, canonical serialization and staleness
+rules live in `docs/embeddings.md` — this table deliberately does not restate them.
+
+`removed_reason` explains a `removed` status: `None` means the document simply left the
+upstream dataset; `"upstream_placeholder"` marks a document Lovdata still lists but serves
+as an error notice rather than legal text, which the corpus withholds rather than
+publishing (see `lovspor.parsing.placeholder`).
+
+A `removed` record is a **tombstone** — `status` is flipped to
+`"removed"`, `xml_hash` / `markdown_path` / `last_seen` / `slug` / `title` are kept,
+`removed_reason` is set as above, and
+`total_changes` / `last_changed` / `eu_basis` / `embedding_hash` / `renderer_version` /
+`embedding_space` / `embedding_space_id` revert to `None` — a tombstone claims no
+embedding identity because it has no current sidecar to describe.
 
 ### History
 

@@ -315,13 +315,22 @@ LEGACY_SPACE_DESCRIPTOR = (
     f"provider={DEFAULT_PROVIDER};model={DEFAULT_MODEL_NAME};"
     f"dim={DEFAULT_DIMENSION};endpoint={_DEFAULT_ENDPOINT_SENTINEL}"
 )
-"""The descriptor the published corpus is *believed* to hold.
+"""The descriptor the pre-Stage-1 corpus was *believed* to hold — historical.
 
 Reconstructed from the code that wrote those sidecars, not read from them —
 the files record no model identity at all. It is **not** a runtime gate and
 must never be used as one: nothing may assume an unannotated corpus is in this
-space. It exists so the separate grandfathering migration has a name for the
-identity it would assert, once the empirical check in ADR-0005 §6 confirms it.
+space.
+
+The grandfathering question this constant existed for is closed: two
+predeclared empirical checks (ADR-0005 §6) could not confirm the historical
+identity, and on 2026-08-04 the corpus was regenerated under the recorded
+identity instead — no migration will ever assert this descriptor. No
+production code path reads it today. It is kept as the named historical
+belief the Stage 1 test suite pins its digest against
+(``tests/unit/test_embedding_space_identity.py``), so the canonical
+serialization can never drift silently out from under the published
+evidence.
 """
 
 

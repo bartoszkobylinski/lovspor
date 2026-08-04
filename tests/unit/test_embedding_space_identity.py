@@ -491,7 +491,7 @@ def test_an_unknown_legacy_identity_is_refused_not_silently_searched(tmp_path: P
 
     message = str(exc_info.value)
     assert "record no embedding space at all" in message
-    assert "migration" in message
+    assert "identity-declaring provider configuration" in message
 
 
 def test_an_adapter_without_an_identity_cannot_search_a_stamped_corpus(tmp_path: Path) -> None:
@@ -596,7 +596,7 @@ def test_a_dataset_filter_still_reports_why_documents_were_excluded(
     notice = result["notice"]
     assert notice is not None
     assert "no recorded embedding space" in notice
-    assert "migration" in notice
+    assert "absent identity alone is never staleness" in notice
 
 
 def test_an_unknown_only_corpus_is_not_promised_an_ordinary_sync_fix(
@@ -615,8 +615,12 @@ def test_an_unknown_only_corpus_is_not_promised_an_ordinary_sync_fix(
         reader.semantic_search("Tekst")
 
     message = str(exc_info.value)
-    assert "an ordinary sync will NOT change them" in message
-    assert "embedding-space migration" in message
+    assert "an ordinary sync will NOT change up-to-date records" in message
+    assert "identity-declaring provider configuration" in message
+    # The dead operator instruction must never return: the evidence-gated
+    # migration it named was closed on 2026-08-04 by regenerating the corpus,
+    # and no engine command by that name ever existed.
+    assert "embedding-space migration" not in message
 
 
 def test_a_different_space_corpus_is_pointed_at_sync_which_does_fix_it(

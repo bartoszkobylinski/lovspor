@@ -1364,10 +1364,13 @@ class CorpusReader:
                 )
             if unknown:
                 remedies.append(
-                    f"{unknown} record no embedding space at all; these were written "
-                    "before the space was stamped and an ordinary sync will NOT change "
-                    "them, because unchanged documents are not re-embedded — they need "
-                    "the embedding-space migration",
+                    f"{unknown} record no embedding space at all — written keyless or "
+                    "by an embedder that declared no identity. A keyed 'lovspor sync' "
+                    "re-embeds and stamps the ones whose content is out of date, but "
+                    "an ordinary sync will NOT change up-to-date records, because "
+                    "absent identity alone is never staleness — those stay excluded "
+                    "until re-embedded under an identity-declaring provider "
+                    "configuration",
                 )
             raise CorpusNotFoundError(
                 "semantic_search is unavailable: no document in this corpus is known to "
@@ -1677,9 +1680,10 @@ class CorpusReader:
             ),
             "unsafe_path": "resolve to a path outside the corpus and were not read",
             "unknown_space": (
-                "have no recorded embedding space — written before the space was "
-                "stamped, and an ordinary sync will not re-embed them; they need "
-                "the embedding-space migration"
+                "have no recorded embedding space — written keyless or by an embedder "
+                "that declared no identity; a keyed 'lovspor sync' stamps the ones "
+                "whose content is stale, and deliberately leaves up-to-date records "
+                "excluded (absent identity alone is never staleness)"
             ),
             "different_space": (
                 "were built by a different embedding model — 'lovspor sync' with the "

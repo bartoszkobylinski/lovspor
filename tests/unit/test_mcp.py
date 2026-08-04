@@ -2065,7 +2065,9 @@ def test_semantic_search_skips_corrupt_embedding_files(
     ).semantic_search("query")["results"]
 
     assert [r["slug"] for r in rows] == ["good"]
-    # This warning is the only trace that a document was dropped from the index.
+    # The stderr warning is one of two traces that a document was dropped —
+    # the other is the excluded['corrupt'] counter surfaced in the coverage
+    # notice. This test pins the warning; the counter has its own coverage.
     # Pin the part mcp.py owns exactly — the trailing text is read_embeddings'
     # exception, and asserting it here would couple this test to that module's
     # wording for no gain.
