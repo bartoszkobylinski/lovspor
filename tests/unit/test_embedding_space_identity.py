@@ -634,6 +634,103 @@ def test_a_different_space_corpus_is_pointed_at_sync_which_does_fix_it(
     assert "re-embeds and re-stamps" in message
 
 
+def test_a_document_with_no_sidecar_is_counted_not_silently_dropped(
+    tmp_path: Path,
+) -> None:
+    """A half-embedded corpus must not answer as though it were complete.
+
+    A missing sidecar leaves a document just as absent from the answer as one
+    excluded for identity, and it used to be skipped without being counted —
+    so results came back with no notice at all. That is silent recall loss in
+    its plainest form, and it is not narrower than the identity case.
+    """
+    _seed_corpus(tmp_path, dim=4)
+    manifest = read_manifest(tmp_path / "manifest.json")
+    no_sidecar = _record(
+        markdown_path="lover/annen.md",
+        slug="annen",
+        title="Annen lov",
+        xml_hash="a" * 64,
+        embedding_space=LEGACY_SPACE_DESCRIPTOR,
+        embedding_space_id=LEGACY_SPACE_ID,
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={**manifest.documents, "nl-2": no_sidecar},
+        ),
+        tmp_path / "manifest.json",
+    )
+    (tmp_path / "lover" / "annen.md").write_text(
+        "---\nid: nl-2\ntitle: Annen\n---\n\n# Annen\n\n### § 1-1. Formal\n\nTekst.\n",
+        encoding="utf-8",
+    )
+
+    result = CorpusReader(tmp_path, embedder=_FakeEmbedder()).semantic_search("Tekst")
+
+    assert [hit["slug"] for hit in result["results"]] == ["testloven"]
+    notice = result["notice"]
+    assert notice is not None
+    assert "no embedding sidecar yet" in notice
+
+
+def test_a_dataset_of_only_unembedded_documents_still_names_the_reason(
+    tmp_path: Path,
+) -> None:
+    """The dataset early-return path, for a dataset whose docs have no sidecar."""
+    _seed_corpus(tmp_path, dim=4)
+    manifest = read_manifest(tmp_path / "manifest.json")
+    legacy = _record(
+        markdown_path="forskrifter/annen.md",
+        source_dataset="gjeldende-sentrale-forskrifter",
+        doc_type="forskrift",
+        slug="annen",
+        title="Annen forskrift",
+        xml_hash="a" * 64,
+        embedding_space_id=None,
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={**manifest.documents, "nl-2": legacy},
+        ),
+        tmp_path / "manifest.json",
+    )
+    doc = tmp_path / "forskrifter" / "annen.md"
+    doc.parent.mkdir(parents=True, exist_ok=True)
+    doc.write_text(
+        "---\nid: nl-2\ntitle: Annen\n---\n\n# Annen\n\n### § 1-1. Formal\n\nTekst.\n",
+        encoding="utf-8",
+    )
+
+    result = CorpusReader(tmp_path, embedder=_FakeEmbedder()).semantic_search(
+        "Tekst",
+        dataset="forskrifter",
+    )
+
+    assert result["results"] == []
+    assert result["notice"] is not None
+    assert "no embedding sidecar yet" in result["notice"]
+
+
+def test_a_refreshed_corpus_does_not_report_the_previous_manifest_exclusions(
+    tmp_path: Path,
+) -> None:
+    """The exclusion counter is cleared with the index it describes."""
+    _seed_corpus(tmp_path, dim=4, stamped=False)
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder())
+    with pytest.raises(CorpusNotFoundError):
+        reader.semantic_search("Tekst")
+
+    # The corpus is repaired underneath the reader, as a git pull would do.
+    _seed_corpus(tmp_path, dim=4, stamped=True)
+
+    result = reader.semantic_search("Tekst")
+
+    assert [hit["slug"] for hit in result["results"]] == ["testloven"]
+    assert result["notice"] is None
+
+
 def test_the_other_tools_need_no_identity_at_all(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, dim=4, stamped=False)
     reader = CorpusReader(tmp_path, embedder=None)

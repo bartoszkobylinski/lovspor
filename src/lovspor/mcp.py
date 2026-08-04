@@ -470,6 +470,10 @@ class CorpusReader:
             self._body_index = None
             self._embedding_index = None
             self._stale_bin_count = 0
+            # Cleared with the index it describes. A counter left over from the
+            # previous manifest would report exclusions for documents the new
+            # corpus may have already fixed.
+            self._excluded_bins = collections.Counter()
             self._doc_bodies = {}
             self._section_ids_cache = {}
 
@@ -1579,6 +1583,12 @@ class CorpusReader:
                 except CorpusNotFoundError:
                     continue
                 if not bin_path.exists():
+                    # Counted, not merely skipped. A document with no sidecar is
+                    # as absent from the answer as one excluded for identity, and
+                    # leaving it uncounted meant a half-embedded corpus returned
+                    # results with no notice at all — silent recall loss in the
+                    # plainest possible form.
+                    excluded["missing"] += 1
                     continue
                 # Embedding-space identity is checked BEFORE the file is read.
                 # The manifest is the only thing that can answer which space a
@@ -1634,6 +1644,10 @@ class CorpusReader:
         # alone, and pointing an operator at an action that cannot fix the
         # state is worse than saying nothing.
         reasons = {
+            "missing": (
+                "have no embedding sidecar yet — 'lovspor sync' with the configured "
+                "provider embeds them"
+            ),
             "unknown_space": (
                 "have no recorded embedding space — written before the space was "
                 "stamped, and an ordinary sync will not re-embed them; they need "
