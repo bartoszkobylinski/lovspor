@@ -419,6 +419,7 @@ def test_read_manifest_drops_unknown_record_fields_on_round_trip(
         "embedding_hash": None,
         "embedding_space": None,
         "embedding_space_id": None,
+        "embedding_input_hash": None,
         "renderer_version": 2,
         "removed_reason": None,
     }
@@ -444,6 +445,7 @@ def test_read_manifest_drops_unknown_record_fields_on_round_trip(
                 "embedding_hash": None,
                 "embedding_space": None,
                 "embedding_space_id": None,
+                "embedding_input_hash": None,
                 "renderer_version": 2,
                 "removed_reason": None,
             },

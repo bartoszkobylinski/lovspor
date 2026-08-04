@@ -25,11 +25,16 @@ from hypothesis import strategies as st
 from pytest_httpx import HTTPXMock
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings.inputs import (
+    EMPTY_INPUT_HASH,
+    build_embedding_inputs,
+    hash_embedding_inputs,
+)
 from lovspor.embeddings.provider import DEFAULT_MODEL_NAME, EmbeddingConfig
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import EMBEDDING_DIM, read_embeddings, write_embeddings
-from lovspor.errors import ConfigError, RenderError
+from lovspor.errors import ConfigError, MassReembedError, RenderError
 from lovspor.parsing.xml_normalizer import hash_normalized_xml
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings
@@ -349,6 +354,17 @@ def _seed_collision_manifest(
             title=_COLLISION_TITLE,
             eu_basis=[],
             embedding_hash=xml_hash if fresh_embeddings else None,
+            # ADR-0006: a keyed sync treats an absent input hash as stale, so a
+            # fixture claiming fresh embeddings must claim a truthful input
+            # identity too — computed from the exact markdown it just wrote,
+            # through the canonical pipeline path.
+            embedding_input_hash=(
+                hash_embedding_inputs(
+                    build_embedding_inputs(old_path.read_text(encoding="utf-8")),
+                )
+                if fresh_embeddings
+                else None
+            ),
             renderer_version=renderer_version,
         )
 
@@ -851,7 +867,7 @@ def test_write_embeddings_for_doc_empty_sections_writes_header_only_file(
         def get_dimension(self) -> int:
             return EMBEDDING_DIM
 
-    path = orchestrator_module._write_embeddings_for_doc(
+    path, _input_hash = orchestrator_module._write_embeddings_for_doc(
         tmp_path,
         "gjeldende-lover",
         "empty",
@@ -892,7 +908,7 @@ def test_write_embeddings_for_doc_chunks_sections_over_token_limit(
             return EMBEDDING_DIM
 
     embedder = CountingEmbedder()
-    path = orchestrator_module._write_embeddings_for_doc(
+    path, _input_hash = orchestrator_module._write_embeddings_for_doc(
         tmp_path,
         "gjeldende-lover",
         "lang-lov",
@@ -2308,7 +2324,19 @@ def test_sprint9_embeddings_migration_skips_non_targets_and_commits_once(
             "lov-present": _current_law_record(
                 xml=base_xml, slug="present", title="Present"
             ).model_copy(
-                update={"embedding_hash": base_hash},
+                update={
+                    "embedding_hash": base_hash,
+                    # ADR-0006: absent input hash is stale on keyed runs, so a
+                    # fixture claiming a current sidecar must claim the
+                    # truthful input identity of the markdown it wrote.
+                    "embedding_input_hash": hash_embedding_inputs(
+                        build_embedding_inputs(
+                            (corpus / "lover" / "present.md").read_text(
+                                encoding="utf-8",
+                            ),
+                        ),
+                    ),
+                },
             ),
             "lov-missing": _current_law_record(xml=base_xml, slug="missing", title="Missing"),
             # needs has embedding_hash=None -> stale -> re-embedded.
@@ -2325,11 +2353,11 @@ def test_sprint9_embeddings_migration_skips_non_targets_and_commits_once(
         slug: str,
         rendered_markdown: str,
         _embedder: object,
-    ) -> Path:
+    ) -> tuple[Path, str]:
         writes.append((slug, rendered_markdown))
         path = _embedding_path(repo, slug)
         _write_seed_embedding(path, marker=9)
-        return path
+        return path, hash_embedding_inputs(build_embedding_inputs(rendered_markdown))
 
     monkeypatch.setattr(
         orchestrator_module,
@@ -2383,7 +2411,19 @@ def test_sprint9_embeddings_migration_noops_when_no_current_doc_needs_sidecar(
             "lov-present": _current_law_record(
                 xml=base_xml, slug="present", title="Present"
             ).model_copy(
-                update={"embedding_hash": base_hash},
+                update={
+                    "embedding_hash": base_hash,
+                    # ADR-0006: absent input hash is stale on keyed runs, so a
+                    # fixture claiming a current sidecar must claim the
+                    # truthful input identity of the markdown it wrote.
+                    "embedding_input_hash": hash_embedding_inputs(
+                        build_embedding_inputs(
+                            (corpus / "lover" / "present.md").read_text(
+                                encoding="utf-8",
+                            ),
+                        ),
+                    ),
+                },
             ),
             "lov-removed": _current_law_record(
                 xml=base_xml,
@@ -5189,3 +5229,289 @@ def test_keyless_sync_preserves_recorded_embedding_space_identity(
     assert alpha_after.embedding_space == descriptor
     assert alpha_after.embedding_space_id == space_id
     assert _embedding_path(corpus, "alpha").read_bytes() == sidecar_bytes_before
+
+
+def _stored_input_hash(corpus: Path, doc_id: str) -> str | None:
+    manifest = read_manifest(corpus / "manifest.json")
+    return manifest.documents[doc_id].embedding_input_hash
+
+
+def _hash_of_markdown(path: Path) -> str:
+    return hash_embedding_inputs(build_embedding_inputs(path.read_text(encoding="utf-8")))
+
+
+def test_keyed_sync_stamps_the_embedding_input_identity(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0006: every keyed write persists the input identity of the exact
+    payload it embedded — add path, update path, and the header-only case
+    (a sectionless document stamps the empty-stream digest, which is a
+    defined identity, not an absent one)."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body.")),
+            ("nl/lov-2.xml", _minimal_law_html("tomrom", "Tomrom")),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        openai_api_key="sk-test",
+    )
+    run_sync(settings)
+
+    manifest = read_manifest(corpus / "manifest.json")
+    by_slug = {r.slug: (doc_id, r) for doc_id, r in manifest.documents.items()}
+    alpha_id, alpha = by_slug["alpha"]
+    _tomrom_id, tomrom = by_slug["tomrom"]
+    assert alpha.embedding_input_hash == _hash_of_markdown(corpus / "lover" / "alpha.md")
+    assert tomrom.embedding_input_hash == EMPTY_INPUT_HASH
+    assert read_embeddings(_embedding_path(corpus, "tomrom")).sections == []
+
+    first_hash = alpha.embedding_input_hash
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_section("Alpha", "Changed alpha body.")),
+            ("nl/lov-2.xml", _minimal_law_html("tomrom", "Tomrom")),
+        ],
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)
+
+    updated = _stored_input_hash(corpus, alpha_id)
+    assert updated == _hash_of_markdown(corpus / "lover" / "alpha.md")
+    assert updated != first_hash
+
+
+def test_backfill_stamps_the_embedding_input_identity(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second, independent write path: a keyless run leaves no identity,
+    the next keyed run's backfill repairs and stamps — small population, so
+    the guard lets it through automatically."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    keyless = read_manifest(corpus / "manifest.json")
+    assert all(r.embedding_input_hash is None for r in keyless.documents.values())
+
+    _install_fake_embedder(monkeypatch)
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(
+        Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test"),
+    )
+
+    assert "migration: backfill embeddings for 1 documents" in _git_log_subjects(corpus)
+    repaired = read_manifest(corpus / "manifest.json")
+    [record] = [r for r in repaired.documents.values() if r.slug == "alpha"]
+    assert record.embedding_input_hash == _hash_of_markdown(corpus / "lover" / "alpha.md")
+
+
+def test_provider_output_has_no_influence_on_the_input_identity(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same document, same transformation, radically different fake vectors:
+    the stamped identity is byte-identical. Provider nondeterminism cannot
+    masquerade as input drift (ADR-0006 requirement 4)."""
+    hashes: list[str | None] = []
+    for offset in (0.0, 0.9):
+        corpus = tmp_path / f"lovverk-{offset}"
+        data_dir = tmp_path / f"data-{offset}"
+        _git_init_corpus(corpus)
+
+        class OffsetEmbedder:
+            def __init__(self, api_key: str, offset: float = offset, **_kwargs: object) -> None:
+                self._offset = offset
+
+            def encode(self, texts: list[str]) -> np.ndarray:
+                matrix = _fake_embedding_matrix(texts)
+                return np.clip(matrix + self._offset, -1.0, 1.0)
+
+            def get_dimension(self) -> int:
+                return EMBEDDING_DIM
+
+        monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", OffsetEmbedder)
+        lover_tar = tmp_path / f"tarballs-{offset}" / "lover.tar.bz2"
+        forskrifter_tar = tmp_path / f"tarballs-{offset}" / "forskrifter.tar.bz2"
+        _build_tarball(
+            lover_tar,
+            [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))],
+        )
+        _build_tarball(forskrifter_tar, [])
+        _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+        run_sync(
+            Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test"),
+        )
+        manifest = read_manifest(corpus / "manifest.json")
+        [record] = list(manifest.documents.values())
+        hashes.append(record.embedding_input_hash)
+
+    assert hashes[0] is not None
+    assert hashes[0] == hashes[1]
+
+
+def test_a_failed_embedding_leaves_no_false_input_stamp(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the provider dies mid-write, the sync fails before the manifest is
+    rewritten — no record may claim an identity for an artifact that was
+    never produced."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    manifest_before = (
+        (corpus / "manifest.json").read_bytes() if (corpus / "manifest.json").exists() else None
+    )
+
+    class ExplodingEmbedder:
+        def __init__(self, api_key: str, **_kwargs: object) -> None:
+            pass
+
+        def encode(self, texts: list[str]) -> np.ndarray:
+            raise RuntimeError("provider unavailable")
+
+        def get_dimension(self) -> int:
+            return EMBEDDING_DIM
+
+    monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", ExplodingEmbedder)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        run_sync(
+            Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test"),
+        )
+
+    if manifest_before is None:
+        assert not (corpus / "manifest.json").exists()
+    else:
+        assert (corpus / "manifest.json").read_bytes() == manifest_before
+
+
+def test_an_unannotated_corpus_trips_the_mass_guard_before_any_provider_call(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The designed fail-closed outcome (ADR-0006 §6 sequencing note): a
+    current keyed engine meeting records without input identity computes the
+    repair scope, trips the guard, and stops with ZERO encode calls and no
+    manifest movement. The explicit override then permits the same run."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    calls, _api_keys = _install_fake_embedder(monkeypatch)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))  # keyless seed
+    assert calls == []
+    manifest_before = (corpus / "manifest.json").read_bytes()
+
+    # Tiny corpus, so the fraction floor would wave it through — trip the
+    # ALWAYS-armed workload dimension instead via the operator-configurable
+    # threshold. Zero encode calls is the property under test.
+    guarded = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        openai_api_key="sk-test",
+        reembed_guard_max_tokens=1,
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    with pytest.raises(MassReembedError) as exc_info:
+        run_sync(guarded)
+    assert calls == []
+    assert (corpus / "manifest.json").read_bytes() == manifest_before
+    assert "token workload" in str(exc_info.value)
+
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(guarded, allow_mass_reembed=True)
+    assert len(calls) > 0
+    [record] = [
+        r for r in read_manifest(corpus / "manifest.json").documents.values() if r.slug == "alpha"
+    ]
+    assert record.embedding_input_hash == _hash_of_markdown(corpus / "lover" / "alpha.md")
+
+
+def test_keyless_sync_preserves_a_recorded_input_identity(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keyless operation must not destroy or fabricate input identity: the
+    stamped value and the sidecar bytes survive verbatim, with a raising
+    constructor proving no embedder is even built."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(
+        Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test"),
+    )
+    stamped = read_manifest(corpus / "manifest.json")
+    [before] = [r for r in stamped.documents.values() if r.slug == "alpha"]
+    assert before.embedding_input_hash is not None
+    sidecar_before = _embedding_path(corpus, "alpha").read_bytes()
+
+    def fail_openai_embedder(**_kwargs: object) -> None:
+        raise AssertionError("a keyless run must not construct an embedder")
+
+    monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", fail_openai_embedder)
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    preserved = read_manifest(corpus / "manifest.json")
+    [after] = [r for r in preserved.documents.values() if r.slug == "alpha"]
+    assert after.embedding_input_hash == before.embedding_input_hash
+    assert _embedding_path(corpus, "alpha").read_bytes() == sidecar_before

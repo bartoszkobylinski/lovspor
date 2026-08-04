@@ -285,12 +285,49 @@ stale and is regenerated, rather than being skipped at search time forever.
 
 Two cases are still not automatic, both deliberately:
 
-* **Documents with no recorded identity** are left alone — absent identity
+* **Documents with no recorded *space* identity** are left alone — absent ESI
   alone is never staleness. See "Model changes" above; for the published
   corpus this population was closed by the 2026-08-04 regeneration, and the
   rule now guards against silent re-embedding of any future identity-less
-  record.
+  record. (Note the deliberate contrast with the *input* identity below,
+  where absence IS stale on keyed runs.)
 * **A dimension change** additionally makes existing files unreadable to the
   current index builder, which skips them with a stderr log and counts them;
   if that leaves the index empty, `semantic_search` fails with a message naming
   the remedy rather than answering over nothing.
+
+## Embedding input identity (ADR-0006)
+
+The space identity above answers *which model* produced the vectors; a second,
+independent axis answers *whether the stored vectors were generated from the
+exact ordered inputs the current pipeline would produce* — section extraction,
+heading grammar, ordering, and token-bounded chunking. Four historical
+incidents (2,336 / 797 / 26 / 1 documents) came from pipeline changes that no
+existing identity could see, and the count-based repair heuristic is blind to
+boundary drift that preserves chunk counts.
+
+Every keyed writer therefore stamps `embedding_input_hash` into the manifest:
+the SHA-256 of the length-prefixed ordered `(section_id, chunk_text)` stream it
+actually embedded (a sectionless document stamps the digest of the empty
+stream). On every keyed sync the engine reconstructs each current document's
+inputs locally — no provider call — and treats an **absent or mismatching**
+value as stale. Absence is stale on purpose, the opposite of the ESI rule: an
+absent input hash is unverifiable, and an old keyed writer strips the field on
+rewrite, so absent-immunity would leave old-transformation vectors searchable
+indefinitely.
+
+What makes absent-is-stale safe is the **mass-re-embed guard**: the complete
+repair population is selected and sized first — document count/fraction AND
+token workload, both computed deterministically — and an unexpectedly large
+scope fails closed *before any provider call*. Ordinary small repairs proceed
+automatically; a corpus-wide selection (an unannotated corpus, a broad
+pipeline drift, mass field-stripping) stops for an explicit
+`lovspor sync --allow-mass-reembed`. The scheduled workflow never passes the
+override. Provider output has no influence on the input hash, so provider
+nondeterminism cannot create churn.
+
+The `repair-embeddings` command remains available as diagnostic/recovery
+tooling during the rollout, superseded as the normal drift detector. The
+one-time metadata migration for the published corpus is
+`lovspor annotate-input-identity` — manifest-only, drift-guarded, idempotent,
+and keyless.

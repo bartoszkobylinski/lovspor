@@ -25,6 +25,7 @@ from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.storage.manifest import read_manifest
+from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
 
 app = typer.Typer(
@@ -174,6 +175,19 @@ def sync(
             "output is written, embedded, and committed."
         ),
     ),
+    allow_mass_reembed: bool = typer.Option(
+        False,
+        "--allow-mass-reembed",
+        help=(
+            "Explicitly authorize an embedding-input repair larger than the "
+            "ADR-0006 mass-re-embed guard allows. Default is fail-closed: a "
+            "keyed sync whose input-identity repair selection exceeds the "
+            "configured document-fraction or token-workload threshold aborts "
+            "BEFORE any provider call. The scheduled workflow never passes "
+            "this flag; it is a deliberate operator action for intended "
+            "large repairs (unannotated corpus, deliberate pipeline change)."
+        ),
+    ),
 ) -> None:
     """Incremental sync against the current Lovdata public-data tarballs.
 
@@ -182,7 +196,11 @@ def sync(
     commits only the changed ones.
     """
     settings = Settings.from_env()
-    report = run_sync(settings, force_rerender=force_rerender)
+    report = run_sync(
+        settings,
+        force_rerender=force_rerender,
+        allow_mass_reembed=allow_mass_reembed,
+    )
     _warn_schema_drift(report.unknown_archive_fields)
     typer.echo(
         f"Sync complete at {settings.lovverk_repo_path}: "
@@ -219,18 +237,46 @@ def _warn_schema_drift(fields: tuple[str, ...]) -> None:
 def repair_embeddings() -> None:
     """Flag documents whose embeddings under-count their current sections.
 
-    One-time repair for a corpus embedded before a section-parser fix — e.g.
-    flat acts whose sections render at H2 (``## § N.``) produced zero vectors
-    and are invisible to ``semantic_search``. Clears each affected record's
-    ``embedding_hash`` and commits the manifest; run ``lovspor sync`` afterwards
-    (with ``OPENAI_API_KEY`` set) to rebuild the vectors via the Sprint 9
-    backfill. A no-op — no commit — when every embedding is already current.
+    Diagnostic/recovery tooling. Since ADR-0006, transformation drift is
+    detected automatically by the ``embedding_input_hash`` staleness
+    condition on every keyed sync — this count heuristic is retained during
+    the rollout as an independent safety net, not as the normal mechanism.
+    It catches under-counted sidecars only (e.g. flat acts whose H2 sections
+    once produced zero vectors); same-count drift is the input hash's job.
+    Clears each affected record's ``embedding_hash`` and commits the
+    manifest; run ``lovspor sync`` afterwards (with ``OPENAI_API_KEY`` set)
+    to rebuild the vectors via the backfill. A no-op — no commit — when
+    every embedding is already current.
     """
     settings = Settings.from_env()
     count = mark_undersized_embeddings_stale(settings)
     typer.echo(
         f"Flagged {count} document(s) for re-embed. "
         "Run `lovspor sync` with OPENAI_API_KEY set to rebuild their vectors.",
+    )
+
+
+@app.command(name="annotate-input-identity")
+def annotate_input_identity() -> None:
+    """Run the ADR-0006 metadata-only embedding-input-identity migration.
+
+    Stamps ``embedding_input_hash`` on every current manifest record by
+    reconstructing each document's embedding inputs through the production
+    pipeline and digesting them. Manifest-only: no Markdown, history,
+    sidecar or ESI field changes, and no provider credential needed. The
+    ADR-0006 drift invariant is enforced — the corpus basis is re-verified
+    immediately before the manifest is written, and any drift aborts with
+    nothing written. Commits locally; publication is a separate,
+    deliberately manual step.
+    """
+    settings = Settings.from_env()
+    report = annotate_embedding_input_identity(settings)
+    typer.echo(
+        f"Annotated {report.annotated} record(s) "
+        f"({report.already_annotated} already current, "
+        f"{report.tombstones_skipped} tombstone(s) untouched, "
+        f"{report.empty_input_documents} sectionless) "
+        f"at corpus {report.corpus_head[:12]} with engine {report.engine_version}.",
     )
 
 

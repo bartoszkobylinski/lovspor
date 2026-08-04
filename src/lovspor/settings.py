@@ -58,6 +58,23 @@ class Settings(BaseModel):
     doc count; see ``_REMOVAL_GUARD_MIN_DOCS``. Raise it for a run with a
     genuine mass removal via ``LOVSPOR_MAX_REMOVAL_RATIO``.
     """
+    reembed_guard_max_fraction: float = 0.02
+    """ADR-0006 mass-re-embed guard, blast-radius dimension: a keyed sync
+    whose input-hash repair selection exceeds this fraction of current
+    documents fails closed before any provider call. 0.02 = ~117 documents on
+    the 5,880-doc corpus — an order of magnitude above every observed normal
+    daily change (0-3 docs) and below every historical broad-drift incident
+    that should have stopped (797, 2,336, corpus-wide). Raise deliberately
+    via ``LOVSPOR_REEMBED_GUARD_MAX_FRACTION`` or the explicit sync override.
+    """
+    reembed_guard_max_tokens: int = 1_000_000
+    """ADR-0006 guard, workload dimension: cap on the selected inputs' total
+    token volume (~$0.13 at current pricing). Independent of the count cap
+    because a handful of very large acts carries real spend — the largest
+    single act measures ~0.3M tokens, so a few of them trip this while
+    staying far under the count threshold. Full corpus is ~37.9M tokens.
+    Override: ``LOVSPOR_REEMBED_GUARD_MAX_TOKENS`` or the sync flag.
+    """
     http_timeout_seconds: float = 120.0
     http_user_agent: str = "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"
     log_level: str = "INFO"
@@ -119,6 +136,24 @@ class Settings(BaseModel):
         if value not in {"per-document", "single"}:
             raise ValueError(
                 f"git_commit_mode must be 'per-document' or 'single', got: {value!r}",
+            )
+        return value
+
+    @field_validator("reembed_guard_max_fraction")
+    @classmethod
+    def _guard_fraction_in_range(cls, value: float) -> float:
+        if not 0 < value <= 1:
+            raise ValueError(
+                f"reembed_guard_max_fraction must be in (0, 1], got: {value!r}",
+            )
+        return value
+
+    @field_validator("reembed_guard_max_tokens")
+    @classmethod
+    def _guard_tokens_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError(
+                f"reembed_guard_max_tokens must be positive, got: {value!r}",
             )
         return value
 
@@ -203,6 +238,8 @@ class Settings(BaseModel):
                     f"LOVSPOR_MAX_REMOVAL_RATIO must be a float, got: {raw_ratio!r}",
                 ) from exc
 
+        _apply_reembed_guard(data, overrides)
+
         embedding = _resolve_embedding(overrides)
         data["embedding"] = embedding
         if embedding.api_key is not None:
@@ -245,6 +282,33 @@ def _resolve_embedding(overrides: dict[str, object]) -> EmbeddingConfig:
     if embedding.api_key is None and raw_key is not None:
         return embedding.model_copy(update={"api_key": str(raw_key)})
     return embedding
+
+
+def _apply_reembed_guard(
+    data: dict[str, object],
+    overrides: dict[str, object],
+) -> None:
+    """Resolve the two ADR-0006 guard thresholds from overrides or env."""
+    raw_fraction = overrides.get("reembed_guard_max_fraction")
+    if raw_fraction is None:
+        raw_fraction = os.environ.get("LOVSPOR_REEMBED_GUARD_MAX_FRACTION")
+    if raw_fraction is not None:
+        try:
+            data["reembed_guard_max_fraction"] = float(str(raw_fraction))
+        except ValueError as exc:
+            raise ConfigError(
+                f"LOVSPOR_REEMBED_GUARD_MAX_FRACTION must be a float, got: {raw_fraction!r}",
+            ) from exc
+    raw_tokens = overrides.get("reembed_guard_max_tokens")
+    if raw_tokens is None:
+        raw_tokens = os.environ.get("LOVSPOR_REEMBED_GUARD_MAX_TOKENS")
+    if raw_tokens is not None:
+        try:
+            data["reembed_guard_max_tokens"] = int(str(raw_tokens))
+        except ValueError as exc:
+            raise ConfigError(
+                f"LOVSPOR_REEMBED_GUARD_MAX_TOKENS must be an int, got: {raw_tokens!r}",
+            ) from exc
 
 
 def _apply_optional(

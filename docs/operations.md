@@ -10,7 +10,9 @@ uv run lovspor info            # project info
 uv run lovspor seed            # initial corpus population (first sync)
 uv run lovspor sync            # incremental update against latest tarballs
 uv run lovspor sync --force-rerender  # re-render every doc, to land a renderer fix (see Maintenance)
-uv run lovspor repair-embeddings  # flag under-embedded docs for re-embed (see Maintenance)
+uv run lovspor repair-embeddings  # diagnostic: flag under-embedded docs (see Maintenance)
+uv run lovspor annotate-input-identity  # one-time ADR-0006 manifest annotation (see Maintenance)
+uv run lovspor sync --allow-mass-reembed  # explicit override for a large intended re-embed (see Maintenance)
 uv run lovspor fetch-corpus    # clone/update the local lovverk corpus that `lovspor mcp` reads
 uv run lovspor mcp             # serve the corpus to AI assistants over MCP (stdio)
 uv run lovspor mcp-http        # serve the same tools over MCP Streamable HTTP (binds localhost — bearer auth + quotas; TLS terminated upstream, see deploy/digitalocean/)
@@ -20,9 +22,30 @@ uv run lovspor mcp-http        # serve the same tools over MCP Streamable HTTP (
 
 `seed` and `sync` are aliases at the engine level — both call the same orchestrator. Use `seed` semantically for the first run on an empty corpus, `sync` for repeated invocations. Settings are read from environment variables (or a `.env` file at the engine repo root). See `.env.example` for the required variables.
 
-### Maintenance: `repair-embeddings`
+### Maintenance: embedding input identity and the mass-re-embed guard (ADR-0006)
 
-A one-time repair for a corpus whose embeddings were written before a section-parser fix. Flat (chapterless) acts render their sections at H2 (`## § N.`); acts synced before that shape was recognized produced **zero** embedding vectors and are invisible to `semantic_search`, yet carry `embedding_hash == xml_hash` — so the normal Sprint 9 staleness check never re-embeds them.
+Every keyed sync reconstructs each current document's embedding inputs locally and
+compares their digest against the record's `embedding_input_hash`; an absent or
+mismatching value selects the document for re-embedding. Before any provider call,
+the complete repair selection is sized on two dimensions — document count/fraction
+(`LOVSPOR_REEMBED_GUARD_MAX_FRACTION`, default 0.02) and input-token workload
+(`LOVSPOR_REEMBED_GUARD_MAX_TOKENS`, default 1,000,000 ≈ $0.13) — and an
+unexpectedly large scope **fails closed** with a message naming the counts and the
+threshold that fired. Ordinary daily repairs pass automatically; a corpus-wide
+selection (unannotated corpus, deliberate pipeline change, mass field-stripping)
+requires the deliberate `lovspor sync --allow-mass-reembed`. The scheduled workflow
+never passes the override, so a tripped guard fails the job before any spend.
+
+`lovspor annotate-input-identity` is the one-time metadata migration for an
+existing fully-embedded corpus: manifest-only, keyless, idempotent, and
+drift-guarded (corpus HEAD re-verified and every digest recomputed immediately
+before the manifest is written; any drift aborts with nothing written).
+
+### Maintenance: `repair-embeddings` (diagnostic/recovery)
+
+Superseded as the normal drift detector by the input-identity condition above —
+retained during the rollout as an independent safety net. Originally a one-time
+repair for a corpus whose embeddings were written before a section-parser fix. Flat (chapterless) acts render their sections at H2 (`## § N.`); acts synced before that shape was recognized produced **zero** embedding vectors and are invisible to `semantic_search`, yet carry `embedding_hash == xml_hash` — so the normal Sprint 9 staleness check never re-embeds them.
 
 `repair-embeddings` checks, per section id, whether the stored `.bin` holds a vector for every section the current parser finds; it clears `embedding_hash` on any doc missing one and commits the manifest. A section long enough to be split into several chunks stores more vectors than sections and is **not** flagged — the comparison is per-id, not a raw count, so a fully-embedded doc is left alone. It does **not** call the OpenAI API itself:
 
