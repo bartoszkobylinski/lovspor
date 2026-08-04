@@ -14,7 +14,7 @@ sections about *manglende vedlikehold*; embeddings can.
 One file per act, not one monolithic blob across the corpus.
 
 - **Git diff per-section.** When a single act changes, only that
-  act's `.bin` is rewritten. A 4500-act monolithic embeddings file
+  act's `.bin` is rewritten. A corpus-wide monolithic embeddings file
   would rewrite end-to-end on any sync, producing 200+ MB git blobs
   per push and burying real legal-text changes under embedding
   churn.
@@ -36,7 +36,7 @@ float32 fidelity, at **1/4 the storage cost**.
 
 text-embedding-3-large outputs 3072-dim float32 = 12 288 bytes per
 section. int8 with per-file scale = 3072 + 4 bytes per section.
-For the production 4500-doc corpus with ~30 sections per doc on
+For the production corpus (5,880 documents as of 2026-08-04) with ~20 sections per doc on
 average, that is ~200 MB of `.bin` files instead of ~1.6 GB of
 float32. Acceptable for git tracking; float32 would not be.
 
@@ -212,10 +212,15 @@ recorded identity and uses only documents that match. Three outcomes, and no fou
 identity** → excluded. There is no "compatible enough" class, and dimension equality
 is never accepted as evidence — two unrelated models routinely share a dimension.
 
-**Documents written before this stamp existed have no recorded identity.** They are
-*Unknown*, which means unproven rather than wrong, and they are excluded from search
-until a separate migration annotates them. Nothing infers their space from a 3072
-dimension, from a `.bin` existing, or from whatever provider is configured now.
+**A document with no recorded identity is *Unknown*** — unproven rather than wrong —
+and is excluded from search. Nothing infers its space from a 3072 dimension, from a
+`.bin` existing, or from whatever provider is configured now. In the published corpus
+this legacy population is closed: two predeclared grandfathering protocols failed to
+establish the historical identity empirically, so on 2026-08-04 every current document
+was regenerated under the recorded identity (migration completed; ADR-0005's fail-closed
+fallback). The Unknown state remains reachable — a keyless sync writes records without
+identity until the next keyed run embeds them, and an embedder that declares no identity
+produces honestly unidentified records — and it is always excluded, never assumed.
 
 Exclusions are never silent. If some documents are excluded, `semantic_search`
 returns its results with a `notice` naming how many and why; if none qualify, it
@@ -255,12 +260,17 @@ document whose recorded identity differs from the configured one is stale, and
 the next sync with a provider configured re-embeds and re-stamps it. Deleting
 sidecars by hand is no longer the mechanism.
 
-The one case that is *not* automatic is the legacy population: documents with
-no recorded identity are left alone rather than re-embedded. Regenerating them
-en masse would spend real money and rewrite every sidecar in the published
-corpus, and it would pre-empt a decision — annotate the existing vectors, or
-regenerate them — that belongs to a separate, evidence-gated migration. Until
-that migration runs, those documents are excluded from semantic search.
+The one case that is *not* automatic is a record with no recorded identity:
+it is left alone rather than re-embedded, because absent identity alone is
+never staleness — silently regenerating would spend real money and settle an
+identity question by accident. For the published corpus that question WAS
+settled, deliberately: the evidence-gated grandfathering attempts could not
+prove the historical identity, and the whole current corpus was regenerated
+under the recorded identity on 2026-08-04. The rule stays in force for any
+future identity-less record (keyless writes, an identity-less adapter): it is
+excluded from semantic search until re-embedded through the normal keyed
+lifecycle — a content change, or regeneration under an identity-declaring
+provider configuration.
 
 ## Migration story
 
@@ -275,9 +285,11 @@ stale and is regenerated, rather than being skipped at search time forever.
 
 Two cases are still not automatic, both deliberately:
 
-* **Documents with no recorded identity** (written before the stamp existed)
-  are left alone. See "Model changes" above — regenerating them en masse is a
-  decision reserved for a separate migration.
+* **Documents with no recorded identity** are left alone — absent identity
+  alone is never staleness. See "Model changes" above; for the published
+  corpus this population was closed by the 2026-08-04 regeneration, and the
+  rule now guards against silent re-embedding of any future identity-less
+  record.
 * **A dimension change** additionally makes existing files unreadable to the
   current index builder, which skips them with a stderr log and counts them;
   if that leaves the index empty, `semantic_search` fails with a message naming

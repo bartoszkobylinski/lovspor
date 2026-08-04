@@ -147,7 +147,7 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
 
 ### Distribution
-- **PyPI local distribution — WITHDRAWN 2026-07-14.** Versions `0.2.0`–`0.3.0` shipped, then were removed when the engine moved to a private hosted-service strategy. The `lovspor` project name remains reserved by its sole owner with no downloadable releases.
+- **PyPI local distribution — WITHDRAWN 2026-07-14, RESUMED 2026-08-03.** Versions `0.2.0`–`0.3.0` shipped, then were removed when the engine moved to a private hosted-service strategy. Distribution resumed with the open-infrastructure publication: `0.4.0` is live on PyPI via Trusted Publishing (`uvx lovspor` / `pip install lovspor` — see `docs/releasing.md`), so this is no longer a gap.
 - **No Docker image.** Retained as a future private-deployment or enterprise option, not a current adoption priority.
 - **No public docs site** (mkdocs).
 - **Hosted MCP endpoint — LIVE since 2026-07-18**, at `https://lovspor.bartoszkobylinski.com/mcp`, on a dedicated DigitalOcean droplet with Caddy-terminated TLS (`deploy/digitalocean/`). It runs the Streamable HTTP transport (thread-offloaded tool bodies, startup index warming, health/readiness probes) and requires authentication on every request, with per-credential quotas + rate limiting. Access is operator-provisioned — opaque bearer tokens (`lovspor tokens issue`) or WorkOS AuthKit OAuth (both active in production, verified 2026-08-02) — and stdio plus `lovspor fetch-corpus` remains the complete path for anyone without a credential.
@@ -301,7 +301,7 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 ### Class E: Distribution
 
 **E1. Local package distribution — SHIPPED, THEN WITHDRAWN; Docker image — deferred**
-- `pip install lovspor` / `uvx lovspor` shipped through `0.3.0`, then the releases were removed from PyPI on 2026-07-14 after the commercial pivot. This remains part of the project's distribution history, not the current consumer path.
+- `pip install lovspor` / `uvx lovspor` shipped through `0.3.0`, then the releases were removed from PyPI on 2026-07-14 after the commercial pivot. Resumed 2026-08-03 with `0.4.0` under the open-infrastructure ruling — versioned PyPI installs are the current consumer path again (`docs/releasing.md`).
 - `docker run lovspor mcp ...` remains an option for private deployments and enterprise customers that require their own infrastructure.
 - **Leverage:** low for the hosted default; potentially high for enterprise deployment.
 - **Effort:** Docker image ~low.
@@ -370,7 +370,7 @@ Top three by **value × novelty** (unchanged by the Sprint 11 hardening wave, wh
 
 Top three by **adoption × reach**:
 
-4. **Docker image** (remaining half of Class E1; local PyPI distribution shipped through 0.3.0 before being withdrawn). A `docker run lovspor mcp` path for private or enterprise deployments.
+4. **Docker image** (remaining half of Class E1; local PyPI distribution shipped through 0.3.0, was withdrawn, and resumed 2026-08-03 with 0.4.0). A `docker run lovspor mcp` path for private or enterprise deployments.
 5. **Public docs site + showcase** (Class E2). Discoverability.
 6. **`lovtidend-avd1`** (Class D-API-3) — the one remaining pure-pipeline `publicData` add (change-announcement overlay). NB (2026-07-18): the previously-listed `historiske-lover` + `gjeldende-lokale-forskrifter` are **not** in the live catalogue — local regs moved to D-DIRECT-6 (municipal sourcing, not pipeline), `historiske-lover` unconfirmed.
 

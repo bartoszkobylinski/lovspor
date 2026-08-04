@@ -183,7 +183,11 @@ private working notes, not in this repo) reversed the commercial part — but
 README, `docs/mcp.md`, `docs/roadmap.md` and `docs/decisions.md` §15 now
 carry the open-infrastructure framing; the stale "engine is private" claims
 are gone. The repository itself is still PRIVATE pending the rest of this
-phase.)*
+phase.)* *(Completed 2026-08-03: this phase executed — the repository is
+PUBLIC (history rewritten into the canonical `bartoszkobylinski/lovspor`,
+old repo archived privately) and `0.4.0` is live on PyPI via Trusted
+Publishing. Everything below in this phase is historical plan, not pending
+work.)*
 
 Everything after this phase is invisible while the engine stays closed.
 

@@ -246,3 +246,46 @@ def test_release_state_invariant_rejects_stale_publish_caveats(original: str, st
 
     with pytest.raises(AssertionError, match="pre-release prose"):
         _release_state("README", mutated)
+
+
+def test_post_stage1_closure_state_holds_on_active_surfaces() -> None:
+    """The Stage 1 migration narrative is closed; active docs must stay closed.
+
+    The 2026-08-04 documentation-state audit found active surfaces still
+    telling the pre-migration story — including two runtime error strings
+    pointing operators at "the embedding-space migration", an operation that
+    was never implemented in the engine and whose question was closed by
+    regenerating the corpus. The release-state pin above did not cover the
+    files that drifted, which is exactly where they drifted.
+
+    Denylist entries are the exact stale framings these surfaces actually
+    used — narrow on purpose, targeting ACTIVE documents only. Historical
+    evidence (docs/evidence/*, the notebook) may and must keep historically
+    correct language; nothing here scans it.
+    """
+    embeddings_doc = (_ROOT / "docs" / "embeddings.md").read_text(encoding="utf-8")
+    mcp_doc = _MCP_DOC.read_text(encoding="utf-8")
+    mcp_source = (_ROOT / "src" / "lovspor" / "mcp.py").read_text(encoding="utf-8")
+    roadmap = (_ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8")
+    publication_plan = (_ROOT / "docs" / "publication-plan.md").read_text(encoding="utf-8")
+
+    # The dead operator instruction must never return to a runtime remedy.
+    assert "embedding-space migration" not in mcp_source
+
+    # embeddings.md is the public current-state ESI document: it must state
+    # the closure and must not present the settled decision as pending.
+    assert "regenerated" in embeddings_doc and "2026-08-04" in embeddings_doc
+    for stale in (
+        "until a separate migration annotates them",
+        "evidence-gated migration",
+        "reserved for a separate migration",
+    ):
+        assert stale not in embeddings_doc, f"reopened migration narrative: {stale!r}"
+        assert stale not in mcp_doc, f"reopened migration narrative in mcp.md: {stale!r}"
+
+    # Distribution reality: resumed on PyPI. The roadmap's gap list is an
+    # active surface; the plan document is historical but must carry its
+    # dated completion marker so its PRIVATE-era prose reads as history.
+    assert "RESUMED 2026-08-03" in roadmap
+    assert "no downloadable releases" not in roadmap
+    assert "(Completed 2026-08-03" in publication_plan
