@@ -52,7 +52,7 @@ from pathlib import Path, PurePosixPath
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.embeddings.model import EmbeddingModel, split_to_token_chunks
-from lovspor.embeddings.provider import create_embedder
+from lovspor.embeddings.provider import UNKNOWN_SPACE_ID, create_embedder, space_id_of
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import read_embeddings, write_embeddings
@@ -254,15 +254,22 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
     # commit BEFORE the regular sync flow runs. Skipped entirely
     # when no OpenAI key is configured.
     sprint9_embedder = _load_embedder(settings)
+    # The target space is the identity the configured adapter would produce.
+    # Passing it makes an embedding-space change select exactly the affected
+    # documents for backfill, so switching model no longer needs an operator
+    # to delete sidecars by hand.
+    sprint9_target = space_id_of(sprint9_embedder) if sprint9_embedder is not None else None
     if sprint9_embedder is not None and _needs_sprint9_embeddings_migration(
         prior,
         settings.lovverk_repo_path,
+        sprint9_target,
     ):
         prior = _run_sprint9_embeddings_migration(
             settings,
             prior,
             sprint9_embedder,
             datetime.now(UTC),
+            sprint9_target,
         )
 
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
@@ -940,6 +947,8 @@ def _write_one(
     write_document(path, rendered)
 
     written_paths: list[Path] = [path]
+    descriptor: str | None = None
+    space_id: str | None = None
     if embedder is not None:
         embed_path = _write_embeddings_for_doc(
             settings.lovverk_repo_path,
@@ -949,6 +958,7 @@ def _write_one(
             embedder,
         )
         written_paths.append(embed_path)
+        descriptor, space_id = _embedder_identity(embedder)
 
     record = ManifestRecord(
         doc_type=doc_type,
@@ -971,6 +981,13 @@ def _write_one(
         # it was built from. No embedder (keyless sync) -> None -> the doc
         # reads stale until the next keyed sync re-embeds it.
         embedding_hash=upstream.xml_hash if embedder is not None else None,
+        # ...and which embedding space those vectors belong to. Both fields
+        # describe the sidecar that was just written, so a keyless run leaves
+        # them None alongside embedding_hash: there is no sidecar to describe,
+        # and inventing an identity for one is exactly the fabrication the
+        # identity exists to prevent.
+        embedding_space=descriptor,
+        embedding_space_id=space_id,
         # Stamp the renderer that produced this Markdown, so a later renderer
         # bump makes the doc detectably stale even though its XML is unchanged.
         renderer_version=RENDERER_VERSION,
@@ -1020,6 +1037,22 @@ def _load_embedder(settings: Settings) -> EmbeddingModel | None:
     corpus with no embeddings and no explanation.
     """
     return create_embedder(settings.embedding)
+
+
+def _embedder_identity(embedder: EmbeddingModel) -> tuple[str | None, str | None]:
+    """Descriptor and ESI of the adapter that just produced vectors.
+
+    An adapter that declares neither yields ``(None, None)`` — Unknown/legacy,
+    exactly as for a sidecar written before the stamp existed. A third-party
+    adapter implementing only the older two-method protocol therefore produces
+    honestly unidentified records rather than being credited with an identity
+    it never claimed.
+    """
+    descriptor = getattr(embedder, "descriptor", None)
+    space_id = space_id_of(embedder)
+    if not isinstance(descriptor, str) or not descriptor or space_id == UNKNOWN_SPACE_ID:
+        return None, None
+    return descriptor, space_id
 
 
 def _embeddings_path(corpus_root: Path, dataset: str, slug: str) -> Path:
@@ -1606,22 +1639,75 @@ def _run_sprint8_eu_basis_migration(
     return new_manifest
 
 
-def _embedding_is_stale(embedding_hash: str | None, xml_hash: str, embed_path: Path) -> bool:
-    """True if an embedding sidecar is missing or built from stale content.
+def _embedding_is_stale(
+    record: ManifestRecord,
+    embed_path: Path,
+    target_space_id: str | None = None,
+) -> bool:
+    """True if a doc's embedding sidecar needs regenerating.
 
-    Stale = the sidecar's recorded source hash (``embedding_hash``)
-    differs from the doc's current ``xml_hash`` — the vectors were built
-    from text that has since changed (e.g. a keyless sync updated the
-    Markdown but skipped the embedder) — or the ``.bin`` is absent. The
-    hash compare is in-memory (no file read); existence is checked only
-    when the hash matches, to catch a deleted-but-recorded sidecar.
+    Stale when any of (ADR-0005 Stage 1 §5):
+
+    1. the recorded source hash differs from the doc's current ``xml_hash`` —
+       the vectors were built from text that has since changed;
+    2. the ``.bin`` is absent;
+    3. the ``.bin`` is unreadable — previously a corrupt file was skipped at
+       search time and never selected for repair, so it stayed broken forever;
+    4. the recorded embedding space differs from the configured target space.
+
+    ``target_space_id`` is ``None`` when no embedder is configured. Condition 4
+    is then skipped: with no target there is nothing to differ from, and a
+    keyless run must not mark the corpus stale on a comparison it cannot make.
+    Content staleness still applies.
+
+    **A record with no recorded space is deliberately NOT stale here.** It is
+    Unknown/legacy, and `semantic_search` refuses to use it — but refusing to
+    *search* it and silently *re-embedding* it are different acts. Treating
+    absent identity as stale would make the first keyed sync after this change
+    re-embed every document in the published corpus, spending real money and
+    rewriting every sidecar, and it would settle by default the annotate-versus-
+    regenerate question that ADR-0005 §6 reserves for an empirically gated
+    migration. Legacy records are that migration's business. They still drift
+    into a stamped state naturally: any document whose content changes is
+    re-embedded by condition 1 and stamped on the way through.
+
+    Cheap checks run first: the hash compare is in-memory, existence is a
+    stat, and the file is only parsed once both pass.
     """
-    if embedding_hash != xml_hash:
+    if record.embedding_hash != record.xml_hash:
         return True
-    return not embed_path.exists()
+    if not embed_path.exists():
+        return True
+    if (
+        target_space_id is not None
+        and record.embedding_space_id is not None
+        and record.embedding_space_id != target_space_id
+    ):
+        return True
+    return not _embedding_file_is_readable(embed_path)
 
 
-def _needs_sprint9_embeddings_migration(prior: Manifest, repo_path: Path) -> bool:
+def _embedding_file_is_readable(embed_path: Path) -> bool:
+    """Whether a sidecar parses, so corruption becomes a repairable state.
+
+    Regenerating is idempotent and driven by the document's own text, so a
+    file that fails to parse is rewritten from scratch on the next keyed sync
+    rather than being skipped indefinitely. A file that cannot be *written*
+    still fails loudly at write time, so this cannot become a silent
+    regenerate/fail loop: the same doc is either fixed or the sync errors.
+    """
+    try:
+        read_embeddings(embed_path)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _needs_sprint9_embeddings_migration(
+    prior: Manifest,
+    repo_path: Path,
+    target_space_id: str | None = None,
+) -> bool:
     """True if any current record has a missing or stale ``<slug>.bin``.
 
     Triggers the embeddings backfill whenever a sidecar is absent OR its
@@ -1638,7 +1724,7 @@ def _needs_sprint9_embeddings_migration(prior: Manifest, repo_path: Path) -> boo
         if record.status != "current" or record.slug is None:
             continue
         embed_path = _embeddings_path(repo_path, record.source_dataset, record.slug)
-        if _embedding_is_stale(record.embedding_hash, record.xml_hash, embed_path):
+        if _embedding_is_stale(record, embed_path, target_space_id):
             return True
     return False
 
@@ -1648,6 +1734,7 @@ def _run_sprint9_embeddings_migration(
     prior: Manifest,
     embedder: EmbeddingModel,
     now: datetime,
+    target_space_id: str | None = None,
 ) -> Manifest:
     """Backfill embedding sidecars for every current doc whose sidecar is
     missing or stale, stamp each rebuilt record's ``embedding_hash``, and
@@ -1668,7 +1755,7 @@ def _run_sprint9_embeddings_migration(
         if record.status != "current" or record.slug is None:
             continue
         embed_path = _embeddings_path(repo, record.source_dataset, record.slug)
-        if not _embedding_is_stale(record.embedding_hash, record.xml_hash, embed_path):
+        if not _embedding_is_stale(record, embed_path, target_space_id):
             continue
         markdown_path = repo / record.markdown_path
         if not markdown_path.exists():
@@ -1685,7 +1772,14 @@ def _run_sprint9_embeddings_migration(
             embedder,
         )
         written.append(new_path)
-        new_records[doc_id] = record.model_copy(update={"embedding_hash": record.xml_hash})
+        descriptor, space_id = _embedder_identity(embedder)
+        new_records[doc_id] = record.model_copy(
+            update={
+                "embedding_hash": record.xml_hash,
+                "embedding_space": descriptor,
+                "embedding_space_id": space_id,
+            },
+        )
     if not written:
         return prior
     new_manifest = Manifest(generated_at=now, documents=new_records)

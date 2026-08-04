@@ -26,7 +26,10 @@ configured space instead of guessing. Kept intentionally small: an explicit
 dict of builders, not a plugin framework.
 """
 
+import hashlib
 import os
+import posixpath
+import unicodedata
 from typing import TYPE_CHECKING, Self
 from urllib.parse import urlsplit
 
@@ -50,19 +53,68 @@ parameter, but this engine uses native dim because storage savings (~33% for
 
 OPENAI_ENDPOINT = "https://api.openai.com/v1/embeddings"
 
-LEGACY_SPACE_ID = f"{DEFAULT_PROVIDER}:{DEFAULT_MODEL_NAME}:{DEFAULT_DIMENSION}"
-"""The space every embedding sidecar in the published corpus was written in.
-
-Not a default anyone chose to record — it is a fact reconstructed from the code
-that wrote those files, because the files themselves carry no model identity.
-Treat it as the *only* space whose compatibility with an existing corpus can be
-asserted; see the module docstring.
-"""
-
 UNKNOWN_SPACE_ID = "unknown"
 """Space of an adapter that does not declare one — never provably compatible."""
 
 SUPPORTED_PROVIDERS = frozenset({DEFAULT_PROVIDER})
+
+_DESCRIPTOR_KEYS = ("provider", "model", "dim", "endpoint")
+"""Fixed positional key order (ADR-0005 §1 rule 1). Not alphabetical, and never
+reordered: a new key appends and bumps the descriptor revision."""
+
+_DEFAULT_ENDPOINT_SENTINEL = "default"
+_ESI_HEX_CHARS = 32
+"""128 bits of SHA-256, hex-encoded (ADR-0005 §1)."""
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _escape(value: str) -> str:
+    """Percent-encode the three reserved characters (ADR-0005 §1 rule 3).
+
+    ``%`` goes first, otherwise the escapes introduced for ``;`` and ``=`` would
+    themselves be re-escaped and the transform would stop being reversible.
+    """
+    return value.replace("%", "%25").replace(";", "%3B").replace("=", "%3D")
+
+
+def normalize_endpoint(base_url: str | None) -> str:
+    """Canonical endpoint identity (ADR-0005 §1 rule 7).
+
+    ``None`` is the adapter's built-in endpoint and serialises as ``default``.
+
+    Everything else normalises to an absolute URL that keeps **the whole
+    origin and path**, not just the host. Two models served from one gateway on
+    different paths are different spaces, and collapsing them to a host — which
+    is what the pre-ADR implementation did — made them indistinguishable.
+
+    Query and fragment are rejected rather than stripped: silently discarding
+    part of an endpoint the operator configured would produce an identity for a
+    URL nobody asked for.
+    """
+    parts = urlsplit(base_url or "")
+    if not parts.scheme or not parts.hostname:
+        raise ConfigError(
+            f"embedding endpoint must be an absolute URL with scheme and host, got: {base_url!r}",
+        )
+    if parts.query or parts.fragment:
+        raise ConfigError(
+            f"embedding endpoint must not carry a query or fragment, got: {base_url!r}",
+        )
+
+    scheme = parts.scheme.lower()
+    # hostname is already lower-cased and IDNA-decoded by urlsplit; encode back
+    # to punycode so a Unicode host and its ASCII form share one identity.
+    host = parts.hostname.encode("idna").decode("ascii")
+    port = parts.port
+    authority = host if port is None or _DEFAULT_PORTS.get(scheme) == port else f"{host}:{port}"
+
+    path = posixpath.normpath(parts.path) if parts.path else "/"
+    if path == ".":
+        path = "/"
+    if len(path) > 1 and path.endswith("/"):
+        path = path[:-1]
+    return f"{scheme}://{authority}{path}"
 
 
 class EmbeddingConfig(BaseModel):
@@ -86,29 +138,41 @@ class EmbeddingConfig(BaseModel):
         return value
 
     @property
-    def space_id(self) -> str:
-        """Stable identity of the vector space this config produces.
+    def descriptor(self) -> str:
+        """Human-readable canonical descriptor — the ESI's authoritative form.
 
-        A custom ``base_url`` is reported as ``openai-compatible:<host>:…``
-        rather than ``openai:…``: the request/response protocol may be
-        identical, but whatever serves that host is not necessarily the model
-        OpenAI serves under that name, and labelling it "openai" would make
-        provenance a guess. Different label, different space, no silent mixing.
+        Exactly the four keys of :data:`_DESCRIPTOR_KEYS`, in that fixed order,
+        NFC-normalized, with the three reserved characters percent-encoded. The
+        digest is a pure function of this string, so any deviation from the
+        rules produces a different identity and is wrong rather than merely
+        different (ADR-0005 §1).
+
+        The credential is deliberately absent: it is a secret, and it is not a
+        property of the vector space.
         """
-        if self.base_url is None:
-            return f"{self.provider}:{self.model_name}:{self.dimension}"
-        host = urlsplit(self.base_url).netloc or self.base_url
-        return f"{self.provider}-compatible:{host}:{self.model_name}:{self.dimension}"
+        values = {
+            "provider": self.provider.lower(),
+            # Verbatim and case-sensitive: vendors treat model names as
+            # case-sensitive identifiers, and normalising would erase a
+            # distinction the vendor makes.
+            "model": self.model_name,
+            "dim": str(int(self.dimension)),
+            "endpoint": normalize_endpoint(self.base_url)
+            if self.base_url is not None
+            else _DEFAULT_ENDPOINT_SENTINEL,
+        }
+        joined = ";".join(f"{key}={_escape(values[key])}" for key in _DESCRIPTOR_KEYS)
+        return unicodedata.normalize("NFC", joined)
 
     @property
-    def is_corpus_compatible(self) -> bool:
-        """Whether this space is the one the published corpus holds.
+    def space_id(self) -> str:
+        """Machine compatibility identity: 128 bits of SHA-256 over the descriptor.
 
-        The honest answer is only available for :data:`LEGACY_SPACE_ID`; every
-        other space is unprovable rather than known-wrong, and is refused for
-        that reason.
+        Fixed width and opaque. Only equality is meaningful — there is no
+        ordering, no partial match, and no cross-identity compatibility
+        relation (ADR-0005 §4).
         """
-        return self.space_id == LEGACY_SPACE_ID
+        return esi_for_descriptor(self.descriptor)
 
     @classmethod
     def from_env(cls, **overrides: object) -> Self:
@@ -234,6 +298,31 @@ def create_embedder(
         base_url=config.base_url,
         **kwargs,  # type: ignore[arg-type]
     )
+
+
+def esi_for_descriptor(descriptor: str) -> str:
+    """Machine identity for a canonical descriptor.
+
+    Split out from :attr:`EmbeddingConfig.space_id` so a migration can compute
+    the identity of a descriptor it read from a manifest, without needing a
+    live config that reproduces it.
+    """
+    normalized = unicodedata.normalize("NFC", descriptor)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:_ESI_HEX_CHARS]
+
+
+LEGACY_SPACE_DESCRIPTOR = (
+    f"provider={DEFAULT_PROVIDER};model={DEFAULT_MODEL_NAME};"
+    f"dim={DEFAULT_DIMENSION};endpoint={_DEFAULT_ENDPOINT_SENTINEL}"
+)
+"""The descriptor the published corpus is *believed* to hold.
+
+Reconstructed from the code that wrote those sidecars, not read from them —
+the files record no model identity at all. It is **not** a runtime gate and
+must never be used as one: nothing may assume an unannotated corpus is in this
+space. It exists so the separate grandfathering migration has a name for the
+identity it would assert, once the empirical check in ADR-0005 §6 confirms it.
+"""
 
 
 def space_id_of(embedder: "EmbeddingModel | None") -> str | None:

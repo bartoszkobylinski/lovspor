@@ -39,7 +39,12 @@ from lovspor.access import (
     hash_token,
     write_credential_file,
 )
-from lovspor.embeddings import LEGACY_SPACE_ID, OpenAIEmbedder, write_embeddings
+from lovspor.embeddings import (
+    LEGACY_SPACE_DESCRIPTOR,
+    OpenAIEmbedder,
+    esi_for_descriptor,
+    write_embeddings,
+)
 from lovspor.embeddings.search import SearchHit
 from lovspor.errors import ConfigError
 from lovspor.mcp import (
@@ -84,6 +89,10 @@ from lovspor.storage.manifest import Manifest, ManifestRecord, write_manifest
 from lovspor.timetravel import RevisionNotFoundError, RevisionResult, ShallowHistoryError
 from lovspor.workos_auth import CompositeVerifier
 
+# The identity a stamped, corpus-compatible record and its query embedder
+# share. Records seeded without it are Unknown/legacy and are refused.
+LEGACY_SPACE_ID = esi_for_descriptor(LEGACY_SPACE_DESCRIPTOR)
+
 _AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
 _PUBLIC_URL = "https://lovspor.bartoszkobylinski.com/mcp"
 
@@ -109,6 +118,7 @@ def _record(
     last_changed: str | None = None,
     total_changes: int | None = None,
     eu_basis: list[str] | None = None,
+    embedding_space_id: str | None = LEGACY_SPACE_ID,
 ) -> ManifestRecord:
     subdir = "lover" if source_dataset == "gjeldende-lover" else "forskrifter"
     return ManifestRecord(
@@ -123,6 +133,8 @@ def _record(
         last_changed=last_changed,
         total_changes=total_changes,
         eu_basis=eu_basis,
+        embedding_space=LEGACY_SPACE_DESCRIPTOR if embedding_space_id else None,
+        embedding_space_id=embedding_space_id,
     )
 
 
