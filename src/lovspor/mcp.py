@@ -1574,13 +1574,23 @@ class CorpusReader:
             for record in self.manifest.documents.values():
                 if record.status != "current" or record.slug is None:
                     continue
+                # Every `continue` below this point MUST count the record.
+                # A current, slugged document that is neither indexed nor
+                # counted has silently left the searchable corpus, and the
+                # coverage notice — the only signal a caller gets — would say
+                # nothing. Three separate exclusions reached production
+                # uncounted before this rule was written down.
                 try:
                     subdir = _subdir_for_dataset(record.source_dataset)
                 except CorpusNotFoundError:
+                    # A dataset this build does not know: a corpus written by a
+                    # newer engine, read by an older one.
+                    excluded["unknown_dataset"] += 1
                     continue
                 try:
                     bin_path = self._safe_join(subdir, "embeddings", f"{record.slug}.bin")
                 except CorpusNotFoundError:
+                    excluded["unsafe_path"] += 1
                     continue
                 if not bin_path.exists():
                     # Counted, not merely skipped. A document with no sidecar is
@@ -1648,6 +1658,11 @@ class CorpusReader:
                 "have no embedding sidecar yet — 'lovspor sync' with the configured "
                 "provider embeds them"
             ),
+            "unknown_dataset": (
+                "belong to a dataset this build does not recognise — the corpus may have "
+                "been written by a newer lovspor; upgrade it"
+            ),
+            "unsafe_path": "resolve to a path outside the corpus and were not read",
             "unknown_space": (
                 "have no recorded embedding space — written before the space was "
                 "stamped, and an ordinary sync will not re-embed them; they need "

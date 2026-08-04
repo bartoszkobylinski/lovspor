@@ -731,6 +731,101 @@ def test_a_refreshed_corpus_does_not_report_the_previous_manifest_exclusions(
     assert result["notice"] is None
 
 
+def test_every_current_document_is_either_indexed_or_counted(tmp_path: Path) -> None:
+    """The structural invariant behind every exclusion test above.
+
+    Three separate exclusion paths reached review uncounted — missing sidecar,
+    unresolvable dataset, unsafe path — each found only by someone stumbling
+    onto that exact corpus shape. This asserts the property directly instead:
+    a current, slugged record is either in the index or in the exclusion
+    counter, never neither. A future `continue` that forgets to count fails
+    here rather than in someone's search results.
+    """
+    _seed_corpus(tmp_path, dim=4)
+    manifest = read_manifest(tmp_path / "manifest.json")
+    extras = {
+        "nl-missing": _record(slug="missing", markdown_path="lover/missing.md"),
+        "nl-unknown-ds": _record(
+            slug="unknown",
+            markdown_path="lover/unknown.md",
+            source_dataset="gjeldende-noe-annet",
+        ),
+        "nl-legacy": _record(
+            slug="legacy",
+            markdown_path="lover/legacy.md",
+            embedding_space_id=None,
+        ),
+        "nl-other-space": _record(
+            slug="other",
+            markdown_path="lover/other.md",
+            embedding_space=_OTHER_DESCRIPTOR,
+            embedding_space_id=esi_for_descriptor(_OTHER_DESCRIPTOR),
+        ),
+    }
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={**manifest.documents, **extras},
+        ),
+        tmp_path / "manifest.json",
+    )
+    for slug in ("legacy", "other"):
+        write_embeddings(
+            tmp_path / "lover" / "embeddings" / f"{slug}.bin",
+            [("1-1", np.ones(4, dtype=np.int8))],
+            0.01,
+            4,
+        )
+
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder())
+    index = reader._load_embedding_index()
+
+    current = [
+        r
+        for r in read_manifest(tmp_path / "manifest.json").documents.values()
+        if r.status == "current" and r.slug is not None
+    ]
+    indexed = len(index.unique_slugs)
+    counted = sum(reader._excluded_bins.values())
+
+    assert indexed + counted == len(current), (
+        f"{len(current) - indexed - counted} document(s) left the searchable corpus "
+        f"without being counted: indexed={indexed} excluded={dict(reader._excluded_bins)}"
+    )
+    assert indexed == 1
+    assert set(reader._excluded_bins) == {
+        "missing",
+        "unknown_dataset",
+        "unknown_space",
+        "different_space",
+    }
+
+
+def test_an_unrecognised_dataset_is_reported_not_silently_dropped(
+    tmp_path: Path,
+) -> None:
+    """A corpus written by a newer engine must not shrink an older reader's answer."""
+    _seed_corpus(tmp_path, dim=4)
+    manifest = read_manifest(tmp_path / "manifest.json")
+    future = _record(
+        slug="framtid",
+        markdown_path="lover/framtid.md",
+        source_dataset="gjeldende-noe-helt-nytt",
+    )
+    write_manifest(
+        Manifest(
+            generated_at=datetime.now(UTC),
+            documents={**manifest.documents, "nl-9": future},
+        ),
+        tmp_path / "manifest.json",
+    )
+
+    result = CorpusReader(tmp_path, embedder=_FakeEmbedder()).semantic_search("Tekst")
+
+    assert result["notice"] is not None
+    assert "does not recognise" in result["notice"]
+
+
 def test_the_other_tools_need_no_identity_at_all(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, dim=4, stamped=False)
     reader = CorpusReader(tmp_path, embedder=None)
