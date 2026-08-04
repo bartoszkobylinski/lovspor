@@ -509,8 +509,14 @@ def test_sync_invokes_run_sync_and_reports_counts(
     )
     seen: dict[str, object] = {}
 
-    def _fake(settings: object, *, force_rerender: bool = False) -> SyncReport:
+    def _fake(
+        settings: object,
+        *,
+        force_rerender: bool = False,
+        allow_mass_reembed: bool = False,
+    ) -> SyncReport:
         seen["force_rerender"] = force_rerender
+        seen["allow_mass_reembed"] = allow_mass_reembed
         return canned
 
     monkeypatch.setattr("lovspor.cli.run_sync", _fake)
@@ -536,8 +542,14 @@ def test_sync_force_rerender_flag_reaches_run_sync(
     canned = SyncReport(new_count=0, changed_count=1, removed_count=0, unchanged_count=0)
     seen: dict[str, object] = {}
 
-    def _fake(settings: object, *, force_rerender: bool = False) -> SyncReport:
+    def _fake(
+        settings: object,
+        *,
+        force_rerender: bool = False,
+        allow_mass_reembed: bool = False,
+    ) -> SyncReport:
         seen["force_rerender"] = force_rerender
+        seen["allow_mass_reembed"] = allow_mass_reembed
         return canned
 
     monkeypatch.setattr("lovspor.cli.run_sync", _fake)

@@ -66,6 +66,19 @@ class ManifestRecord(BaseModel):
     still matches the record. Closing that needs the sidecar to carry its own
     digest, which is ADR-0005 Stage 2 and has not shipped.
 
+    ``embedding_input_hash`` records the **Embedding Input Identity**
+    (ADR-0006): the canonical SHA-256 of the exact ordered
+    ``(section_id, chunk_text)`` stream the vectors were generated from — a
+    freshness axis, distinct from the source hash, the embedding space and
+    the storage format. A keyed writer stamps it from the inputs it actually
+    embedded (the empty-stream digest for a sectionless document); keyless
+    writes and tombstones carry ``None``. Under a *keyed* sync an absent or
+    mismatching value is stale and selects the record for regeneration —
+    absence is deliberately NOT the ADR-0005 legacy-immune state, because an
+    absent input hash is unverifiable and an old keyed writer strips the
+    field on rewrite; the mass-re-embed guard, not absent-immunity, is what
+    prevents surprise corpus-wide spend.
+
     ``renderer_version`` records the ``RENDERER_VERSION`` that produced the
     Markdown. Change detection keys on the *upstream XML* hash, so a renderer
     fix leaves the record ``unchanged`` and never reaches it; sync compares this
@@ -108,6 +121,7 @@ class ManifestRecord(BaseModel):
     embedding_hash: str | None = None
     embedding_space: str | None = None
     embedding_space_id: str | None = None
+    embedding_input_hash: str | None = None
     renderer_version: int | None = None
     removed_reason: str | None = None
 

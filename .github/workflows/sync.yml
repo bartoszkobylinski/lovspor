@@ -143,10 +143,13 @@ jobs:
 
       # Clears embedding_hash on documents whose sidecar holds fewer vectors
       # than the current chunker would write, so the sync below rebuilds them.
-      # The staleness signal alone cannot see these: the hash matches, the file
-      # is present, and only a per-section-id count reveals the shortfall. It
-      # arises when the embedding pipeline changes rather than the law — after
-      # split_to_token_chunks landed, 791 documents held pre-chunking vectors,
+      # Diagnostic/recovery tooling since ADR-0006: the embedding_input_hash
+      # staleness condition now catches pipeline drift automatically on every
+      # keyed sync (including the same-count case this heuristic cannot see);
+      # this step stays as an independent safety net during the rollout. The
+      # incident class it was built for: pipeline changes rather than law
+      # changes — the 2026-07-23 grammar/block changes stranded 797 documents
+      # (measured from the flag migration; an earlier comment here said 791),
       # and only those whose Markdown also changed were ever rebuilt.
       #
       # Opt-in and never scheduled, for two reasons: it rewrites the manifest

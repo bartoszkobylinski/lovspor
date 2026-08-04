@@ -45,6 +45,18 @@ class CorpusStateError(LovsporError):
     """
 
 
+class MassReembedError(LovsporError):
+    """A keyed sync selected more embedding-input repair than the guard allows.
+
+    ADR-0006's mandatory fail-closed guard: the input-hash repair population
+    is measured deterministically — document count/fraction AND token
+    workload — before any provider call. A wholly unannotated corpus, a broad
+    transformation drift, or mass old-writer field-stripping all land here
+    instead of silently spending the embedding budget. When the large repair
+    is genuinely intended, re-run with the explicit operator override.
+    """
+
+
 class MassRemovalError(LovsporError):
     """A sync would remove more of a dataset than the safety threshold allows.
 

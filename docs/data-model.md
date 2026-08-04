@@ -87,6 +87,7 @@ defaults) — the XML cannot supply provenance, so the caller provides it.
 | `renderer_version` | `int \| None` | `None` |
 | `embedding_space` | `str \| None` | `None` |
 | `embedding_space_id` | `str \| None` | `None` |
+| `embedding_input_hash` | `str \| None` | `None` |
 | `removed_reason` | `str \| None` | `None` |
 
 The optional fields default to `None` for backward compatibility with older-sprint
@@ -109,6 +110,19 @@ record is refused by search but is not silently re-embedded. Both fields apply t
 `current` records only. The full ESI definition, canonical serialization and staleness
 rules live in `docs/embeddings.md` — this table deliberately does not restate them.
 
+`embedding_input_hash` records the **Embedding Input Identity** (ADR-0006): the
+canonical SHA-256 of the exact ordered `(section_id, chunk_text)` stream the sidecar's
+vectors were generated from — a freshness axis, distinct from the source hash, the
+embedding space, and the storage format. Keyed writers stamp it at generation time
+(the empty-stream digest for a sectionless document); keyless writes and tombstones
+carry `None`. Under a keyed sync an **absent or mismatching** value is stale and the
+document is re-embedded — absence is deliberately not a legacy-immune state here,
+because it is unverifiable and old writers strip unknown fields on rewrite; the
+mass-re-embed guard (both a document-fraction and a token-workload threshold,
+fail-closed before any provider call, overridable only via
+`lovspor sync --allow-mass-reembed`) is what prevents surprise corpus-wide spend.
+The identity definition and staleness rules live in `docs/embeddings.md`.
+
 `removed_reason` explains a `removed` status: `None` means the document simply left the
 upstream dataset; `"upstream_placeholder"` marks a document Lovdata still lists but serves
 as an error notice rather than legal text, which the corpus withholds rather than
@@ -118,7 +132,7 @@ A `removed` record is a **tombstone** — `status` is flipped to
 `"removed"`, `xml_hash` / `markdown_path` / `last_seen` / `slug` / `title` are kept,
 `removed_reason` is set as above, and
 `total_changes` / `last_changed` / `eu_basis` / `embedding_hash` / `renderer_version` /
-`embedding_space` / `embedding_space_id` revert to `None` — a tombstone claims no
+`embedding_space` / `embedding_space_id` / `embedding_input_hash` revert to `None` — a tombstone claims no
 embedding identity because it has no current sidecar to describe.
 
 ### History

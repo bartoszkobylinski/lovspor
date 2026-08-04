@@ -525,7 +525,8 @@ def test_write_one_renders_document_record_and_optional_embeddings(
         orchestrator_module,
         "_write_embeddings_for_doc",
         lambda repo, dataset, slug, rendered, embedder: (
-            repo / "lover" / "embeddings" / f"{slug}.bin"
+            repo / "lover" / "embeddings" / f"{slug}.bin",
+            "f" * 64,
         ),
     )
 
@@ -548,6 +549,7 @@ def test_write_one_renders_document_record_and_optional_embeddings(
         title="Lov 1",
         eu_basis=["32024R0001"],
         embedding_hash="a" * 64,
+        embedding_input_hash="f" * 64,
         renderer_version=RENDERER_VERSION,
     )
     context = rendered_contexts[0]

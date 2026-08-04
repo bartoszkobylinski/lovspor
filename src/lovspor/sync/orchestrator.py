@@ -42,6 +42,7 @@ Commit strategy (decisions.md §12a + §12d):
 
 import logging
 import re
+import sys
 from collections import Counter
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -51,14 +52,22 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.embeddings.model import EmbeddingModel, split_to_token_chunks
+from lovspor.embeddings.inputs import (
+    build_embedding_inputs,
+    hash_embedding_inputs,
+)
+from lovspor.embeddings.model import (
+    EmbeddingModel,
+    count_input_tokens,
+)
 from lovspor.embeddings.provider import UNKNOWN_SPACE_ID, create_embedder, space_id_of
 from lovspor.embeddings.quantize import quantize_int8
-from lovspor.embeddings.sections import iter_sections, strip_frontmatter
+from lovspor.embeddings.sections import strip_frontmatter
 from lovspor.embeddings.store import read_embeddings, write_embeddings
 from lovspor.errors import (
     ConfigError,
     CorpusStateError,
+    MassReembedError,
     MassRemovalError,
     ParseError,
     RenderError,
@@ -109,6 +118,14 @@ _TRACKED_DATASETS = (
     "gjeldende-lover",
     "gjeldende-sentrale-forskrifter",
 )
+_REEMBED_GUARD_MIN_DOCS = 100
+"""Corpora below this size skip the guard's FRACTION dimension only.
+
+A tiny corpus backfilling 100% of itself is the ordinary keyless-then-
+keyed bootstrap, not transformation drift; the token-workload dimension
+still applies at every size, so real spend is never waved through.
+"""
+
 _MANIFEST_FILENAME = "manifest.json"
 _EMBEDDINGS_SUBDIR = "embeddings"
 """Per-dataset directory holding ``<slug>.bin`` embedding files.
@@ -187,7 +204,12 @@ class _DocAction:
         return (*self.paths, *self.sidecar_paths)
 
 
-def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:  # noqa: PLR0912, PLR0915
+def run_sync(  # noqa: PLR0912, PLR0915
+    settings: Settings,
+    *,
+    force_rerender: bool = False,
+    allow_mass_reembed: bool = False,
+) -> SyncReport:
     """Execute a full sync cycle against the configured lovverk repo.
 
     If upstream has no new / changed / removed documents, the manifest
@@ -270,6 +292,7 @@ def run_sync(settings: Settings, *, force_rerender: bool = False) -> SyncReport:
             sprint9_embedder,
             datetime.now(UTC),
             sprint9_target,
+            allow_mass_reembed=allow_mass_reembed,
         )
 
     upstream_hashes = {doc_id: u.xml_hash for doc_id, u in upstream.items()}
@@ -949,8 +972,9 @@ def _write_one(
     written_paths: list[Path] = [path]
     descriptor: str | None = None
     space_id: str | None = None
+    input_hash: str | None = None
     if embedder is not None:
-        embed_path = _write_embeddings_for_doc(
+        embed_path, input_hash = _write_embeddings_for_doc(
             settings.lovverk_repo_path,
             upstream.source_dataset,
             upstream.slug,
@@ -988,6 +1012,11 @@ def _write_one(
         # identity exists to prevent.
         embedding_space=descriptor,
         embedding_space_id=space_id,
+        # ...and the ADR-0006 input identity of the exact ordered inputs the
+        # sidecar was generated from — returned by the writer itself, never
+        # recomputed, so it cannot drift from the embedded payload. Keyless:
+        # None, same honesty rule as the space fields above.
+        embedding_input_hash=input_hash,
         # Stamp the renderer that produced this Markdown, so a later renderer
         # bump makes the doc detectably stale even though its XML is unchanged.
         renderer_version=RENDERER_VERSION,
@@ -1066,19 +1095,21 @@ def _write_embeddings_for_doc(
     slug: str,
     rendered_markdown: str,
     embedder: EmbeddingModel,
-) -> Path:
+) -> tuple[Path, str]:
     """Compute and write embeddings for one document.
 
-    Parses sections out of the rendered Markdown (frontmatter +
-    leading H1 stripped, ``### §`` headings split into units), encodes
-    them with the model, int8-quantizes, and writes one binary file.
-    Returns the written path.
+    Derives the ordered embedding inputs through the ONE canonical path
+    (``build_embedding_inputs`` — ADR-0006 §2), encodes them with the model,
+    int8-quantizes, and writes one binary file. Returns the written path and
+    the ``embedding_input_hash`` of the exact inputs embedded, so the caller
+    stamps an identity that can never drift from the payload.
 
     A doc with zero embedding-eligible sections (very short act with
     only chapter headers, or a malformed render) gets an empty file
-    with a valid header. Empty is intentional — the file exists and its
-    manifest ``embedding_hash`` matches ``xml_hash``, so the staleness
-    check in ``_needs_sprint9_embeddings_migration`` stops re-triggering.
+    with a valid header and the empty-stream input hash. Empty is
+    intentional — the file exists and its manifest ``embedding_hash``
+    matches ``xml_hash``, so the staleness check in
+    ``_needs_sprint9_embeddings_migration`` stops re-triggering.
 
     Sections longer than the model's input window are split into
     token-bounded chunks, each embedded under the same section_id —
@@ -1086,28 +1117,22 @@ def _write_embeddings_for_doc(
     invisible to semantic search. The search side dedupes by
     ``(slug, section_id)`` keeping the best chunk score.
     """
-    body = strip_frontmatter(rendered_markdown)
-    sections = iter_sections(body)
+    inputs = build_embedding_inputs(rendered_markdown)
+    input_hash = hash_embedding_inputs(inputs)
     path = _embeddings_path(corpus_root, dataset, slug)
     # Take the header's dim from the embedder that produced the vectors rather
     # than from write_embeddings' module-level default. The default happens to
     # equal the production model's dimensionality, so this is byte-identical
     # today; it stops being a coincidence the moment the model is configurable.
     dim = embedder.get_dimension()
-    if not sections:
+    if not inputs:
         write_embeddings(path, [], scale=1.0, dim=dim)
-        return path
-    texts: list[str] = []
-    section_ids: list[str] = []
-    for section in sections:
-        for chunk in split_to_token_chunks(section.text):
-            texts.append(chunk)
-            section_ids.append(section.section_id)
-    matrix = embedder.encode(texts)
+        return path, input_hash
+    matrix = embedder.encode([item.text for item in inputs])
     quantized, scale = quantize_int8(matrix)
-    pairs = [(section_ids[i], quantized[i]) for i in range(len(section_ids))]
+    pairs = [(inputs[i].section_id, quantized[i]) for i in range(len(inputs))]
     write_embeddings(path, pairs, scale, dim=dim)
-    return path
+    return path, input_hash
 
 
 def _maybe_delete_old_embeddings(
@@ -1643,36 +1668,40 @@ def _embedding_is_stale(
     record: ManifestRecord,
     embed_path: Path,
     target_space_id: str | None = None,
+    current_input_hash: str | None = None,
 ) -> bool:
     """True if a doc's embedding sidecar needs regenerating.
 
-    Stale when any of (ADR-0005 Stage 1 §5):
+    Stale when any of (ADR-0005 Stage 1 §5; ADR-0006 §3):
 
     1. the recorded source hash differs from the doc's current ``xml_hash`` —
        the vectors were built from text that has since changed;
     2. the ``.bin`` is absent;
     3. the ``.bin`` is unreadable — previously a corrupt file was skipped at
        search time and never selected for repair, so it stayed broken forever;
-    4. the recorded embedding space differs from the configured target space.
+    4. the recorded embedding space differs from the configured target space;
+    5. the recorded embedding input hash is **absent or** differs from the
+       identity of the inputs the current pipeline derives for the document.
 
-    ``target_space_id`` is ``None`` when no embedder is configured. Condition 4
-    is then skipped: with no target there is nothing to differ from, and a
-    keyless run must not mark the corpus stale on a comparison it cannot make.
-    Content staleness still applies.
+    ``target_space_id`` and ``current_input_hash`` are ``None`` when no
+    embedder is configured. Conditions 4 and 5 are then skipped: with no
+    target there is nothing to differ from, and a keyless run must not mark
+    the corpus stale on comparisons it cannot act on. Content staleness
+    still applies.
 
-    **A record with no recorded space is deliberately NOT stale here.** It is
-    Unknown/legacy, and `semantic_search` refuses to use it — but refusing to
-    *search* it and silently *re-embedding* it are different acts. Treating
-    absent identity as stale would make the first keyed sync after this change
-    re-embed every document in the published corpus, spending real money and
-    rewriting every sidecar, and it would settle by default the annotate-versus-
-    regenerate question that ADR-0005 §6 reserves for an empirically gated
-    migration. Legacy records are that migration's business. They still drift
-    into a stamped state naturally: any document whose content changes is
-    re-embedded by condition 1 and stamped on the way through.
+    **A record with no recorded space is deliberately NOT stale here** —
+    Unknown/legacy, refused by search, repaired only by an explicitly gated
+    migration (ADR-0005 §6). **A record with no recorded input hash IS stale
+    on a keyed run** — the opposite rule, on purpose (ADR-0006 §3): an absent
+    input hash is unverifiable (id-sequence alignment cannot see same-count
+    boundary drift), and an old keyed writer strips the field on rewrite, so
+    absent-immunity here would leave old-transformation vectors searchable
+    indefinitely. What protects against surprise corpus-wide spend is the
+    mass-re-embed guard in the backfill, not a pretense that absent identity
+    is current. Do not harmonize the two rules.
 
-    Cheap checks run first: the hash compare is in-memory, existence is a
-    stat, and the file is only parsed once both pass.
+    Cheap checks run first: the hash compares are in-memory, existence is a
+    stat, and the file is only parsed after all of them pass.
     """
     if record.embedding_hash != record.xml_hash:
         return True
@@ -1683,6 +1712,8 @@ def _embedding_is_stale(
         and record.embedding_space_id is not None
         and record.embedding_space_id != target_space_id
     ):
+        return True
+    if current_input_hash is not None and record.embedding_input_hash != current_input_hash:
         return True
     return not _embedding_file_is_readable(embed_path)
 
@@ -1719,6 +1750,12 @@ def _needs_sprint9_embeddings_migration(
     Tombstones (``status='removed'``) and slug-less records are skipped —
     their files don't exist and the legacy schema is the Sprint 4 rename
     migration's concern.
+
+    On keyed runs (``target_space_id`` set) the check also evaluates the
+    ADR-0006 input identity, which requires reconstructing each document's
+    current embedding inputs; the loop short-circuits on the first stale
+    record, and the expensive reconstruction happens only after the cheap
+    conditions have passed for that record.
     """
     for record in prior.documents.values():
         if record.status != "current" or record.slug is None:
@@ -1726,7 +1763,147 @@ def _needs_sprint9_embeddings_migration(
         embed_path = _embeddings_path(repo_path, record.source_dataset, record.slug)
         if _embedding_is_stale(record, embed_path, target_space_id):
             return True
+        if target_space_id is not None and _embedding_is_stale(
+            record,
+            embed_path,
+            target_space_id,
+            _current_input_hash(repo_path, record),
+        ):
+            return True
     return False
+
+
+@dataclass(frozen=True)
+class _BackfillItem:
+    """One document the input-identity/staleness selection chose for repair."""
+
+    doc_id: str
+    record: ManifestRecord
+    rendered: str
+    input_tokens: int
+
+
+def _require_slug(record: ManifestRecord) -> str:
+    """Selection only admits slugged records; make that explicit for typing."""
+    if record.slug is None:  # pragma: no cover - guarded by selection
+        raise CorpusStateError(f"record without slug reached the backfill: {record}")
+    return record.slug
+
+
+def _current_input_hash(repo_path: Path, record: ManifestRecord) -> str | None:
+    """ADR-0006 identity of the inputs the current pipeline derives for a doc.
+
+    ``None`` when the record's Markdown is missing on disk — the stale
+    manifest-entry case the backfill has always skipped rather than raised.
+    """
+    markdown_path = repo_path / record.markdown_path
+    if not markdown_path.exists():
+        return None
+    rendered = markdown_path.read_text(encoding="utf-8")
+    return hash_embedding_inputs(build_embedding_inputs(rendered))
+
+
+def _select_embedding_backfill(
+    prior: Manifest,
+    repo: Path,
+    target_space_id: str | None,
+) -> list[_BackfillItem]:
+    """The complete repair population, computed BEFORE any provider call.
+
+    Reconstructs each candidate's current embedding inputs once, evaluates the
+    full staleness predicate (including the ADR-0006 input-identity condition)
+    and sizes the guard's workload dimension with the production tokenizer.
+    Discover → assess → embed: the embedding loop consumes this list, so the
+    guard can see the whole run's scope up front.
+    """
+    selection: list[_BackfillItem] = []
+    for doc_id, record in prior.documents.items():
+        if record.status != "current" or record.slug is None:
+            continue
+        markdown_path = repo / record.markdown_path
+        if not markdown_path.exists():
+            # Stale manifest entry — record claims a Markdown file that is
+            # missing on disk. Skip rather than raise; the next regular sync
+            # flow will surface the inconsistency.
+            continue
+        rendered = markdown_path.read_text(encoding="utf-8")
+        inputs = build_embedding_inputs(rendered)
+        embed_path = _embeddings_path(repo, record.source_dataset, record.slug)
+        if not _embedding_is_stale(
+            record,
+            embed_path,
+            target_space_id,
+            hash_embedding_inputs(inputs),
+        ):
+            continue
+        tokens = sum(count_input_tokens(item.text) for item in inputs)
+        selection.append(
+            _BackfillItem(
+                doc_id=doc_id,
+                record=record,
+                rendered=rendered,
+                input_tokens=tokens,
+            ),
+        )
+    return selection
+
+
+def _guard_mass_reembed(
+    selection: list[_BackfillItem],
+    prior: Manifest,
+    settings: Settings,
+    allow: bool,
+) -> None:
+    """ADR-0006 §7: fail closed on an unexpectedly large repair scope.
+
+    Both dimensions are computed deterministically from the selection alone —
+    no provider is consulted. ``allow`` is the explicit operator override
+    (``lovspor sync --allow-mass-reembed``); it never comes from the
+    environment and the scheduled workflow never passes it, so a tripped
+    guard fails the job before a cent of spend.
+    """
+    current_total = sum(1 for r in prior.documents.values() if r.status == "current")
+    fraction = len(selection) / max(current_total, 1)
+    # The fraction dimension only means "blast radius" on a corpus big enough
+    # for a fraction to be meaningful — on a bootstrap or test corpus of a
+    # handful of documents, 100% selection is the NORMAL keyless->keyed
+    # lifecycle, not drift. Same floor pattern as the mass-removal guard.
+    # The token dimension below applies unconditionally: spend is spend.
+    fraction_applies = current_total >= _REEMBED_GUARD_MIN_DOCS
+    tokens = sum(item.input_tokens for item in selection)
+    summary = (
+        f"{len(selection)} document(s) selected for re-embedding "
+        f"({fraction:.1%} of {current_total} current documents), "
+        f"~{tokens:,} input tokens"
+    )
+    if allow:
+        print(f"mass-reembed override active: {summary}", file=sys.stderr, flush=True)
+        return
+    over_fraction = fraction_applies and fraction > settings.reembed_guard_max_fraction
+    over_tokens = tokens > settings.reembed_guard_max_tokens
+    if not (over_fraction or over_tokens):
+        return
+    fired = " and ".join(
+        name
+        for name, hit in (
+            (
+                f"document fraction {fraction:.1%} > {settings.reembed_guard_max_fraction:.1%}",
+                over_fraction,
+            ),
+            (
+                f"token workload {tokens:,} > {settings.reembed_guard_max_tokens:,}",
+                over_tokens,
+            ),
+        )
+        if hit
+    )
+    raise MassReembedError(
+        f"embedding-input repair scope exceeds the mass-re-embed guard: {summary}. "
+        f"Threshold exceeded: {fired}. No provider call was made and no sidecar was "
+        f"written. If this repair is intended (annotation-less corpus, deliberate "
+        f"pipeline change), re-run with 'lovspor sync --allow-mass-reembed' or raise "
+        f"LOVSPOR_REEMBED_GUARD_MAX_FRACTION / LOVSPOR_REEMBED_GUARD_MAX_TOKENS.",
+    )
 
 
 def _run_sprint9_embeddings_migration(
@@ -1735,6 +1912,8 @@ def _run_sprint9_embeddings_migration(
     embedder: EmbeddingModel,
     now: datetime,
     target_space_id: str | None = None,
+    *,
+    allow_mass_reembed: bool = False,
 ) -> Manifest:
     """Backfill embedding sidecars for every current doc whose sidecar is
     missing or stale, stamp each rebuilt record's ``embedding_hash``, and
@@ -1749,39 +1928,33 @@ def _run_sprint9_embeddings_migration(
     """
     repo = settings.lovverk_repo_path
     manifest_path = repo / _MANIFEST_FILENAME
+    selection = _select_embedding_backfill(prior, repo, target_space_id)
+    if not selection:
+        return prior
+    # ADR-0006 §7: the guard runs on the COMPLETE selection, strictly before
+    # the first provider call, so a tripped guard means zero spend, zero new
+    # sidecars and zero stamps.
+    _guard_mass_reembed(selection, prior, settings, allow=allow_mass_reembed)
     written: list[Path] = []
     new_records = dict(prior.documents)
-    for doc_id, record in prior.documents.items():
-        if record.status != "current" or record.slug is None:
-            continue
-        embed_path = _embeddings_path(repo, record.source_dataset, record.slug)
-        if not _embedding_is_stale(record, embed_path, target_space_id):
-            continue
-        markdown_path = repo / record.markdown_path
-        if not markdown_path.exists():
-            # Stale manifest entry — record claims a Markdown file
-            # that is missing on disk. Skip rather than raise; the
-            # next regular sync flow will surface the inconsistency.
-            continue
-        rendered = markdown_path.read_text(encoding="utf-8")
-        new_path = _write_embeddings_for_doc(
+    descriptor, space_id = _embedder_identity(embedder)
+    for item in selection:
+        new_path, input_hash = _write_embeddings_for_doc(
             repo,
-            record.source_dataset,
-            record.slug,
-            rendered,
+            item.record.source_dataset,
+            _require_slug(item.record),
+            item.rendered,
             embedder,
         )
         written.append(new_path)
-        descriptor, space_id = _embedder_identity(embedder)
-        new_records[doc_id] = record.model_copy(
+        new_records[item.doc_id] = item.record.model_copy(
             update={
-                "embedding_hash": record.xml_hash,
+                "embedding_hash": item.record.xml_hash,
                 "embedding_space": descriptor,
                 "embedding_space_id": space_id,
+                "embedding_input_hash": input_hash,
             },
         )
-    if not written:
-        return prior
     new_manifest = Manifest(generated_at=now, documents=new_records)
     write_manifest(new_manifest, manifest_path)
     git_add(repo, [manifest_path, *written])
@@ -1795,18 +1968,15 @@ def _run_sprint9_embeddings_migration(
 
 def _expected_section_id_counts(body: str) -> Counter[str]:
     """Section-id multiset the embedder writes for ``body`` — one entry per
-    chunk, matching ``_write_embeddings_for_doc`` exactly.
+    chunk, derived through the ONE canonical input path (ADR-0006 §2) so this
+    heuristic can never disagree with what the writer actually embeds.
 
     A section longer than the model's input window is embedded as several
     vectors under one id, and an act may legitimately repeat an id. So a plain
     section count cannot tell an over-chunked doc (more vectors than sections)
     from one genuinely missing a section; a per-id count can.
     """
-    counts: Counter[str] = Counter()
-    for section in iter_sections(body):
-        for _chunk in split_to_token_chunks(section.text):
-            counts[section.section_id] += 1
-    return counts
+    return Counter(item.section_id for item in build_embedding_inputs(body))
 
 
 def _stored_section_id_counts(embed_path: Path) -> Counter[str]:

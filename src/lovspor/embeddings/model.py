@@ -49,6 +49,7 @@ __all__ = [
     "DEFAULT_MODEL_NAME",
     "EmbeddingModel",
     "OpenAIEmbedder",
+    "count_input_tokens",
     "split_to_token_chunks",
 ]
 
@@ -126,6 +127,20 @@ def _encoding_for(model_name: str) -> tiktoken.Encoding:
     """Cached tiktoken encoding lookup — ``encoding_for_model`` walks a
     registry on every call, and the chunker calls it per section."""
     return _resolve_encoding(model_name)
+
+
+def count_input_tokens(
+    text: str,
+    model_name: str = DEFAULT_MODEL_NAME,
+) -> int:
+    """Deterministic token count of one embedding input, capped at the
+    per-input limit the client enforces before sending.
+
+    The ADR-0006 mass-re-embed guard sizes its workload dimension with this —
+    the same cached tiktoken encoding the payload path uses, so the cost proxy
+    can never disagree with what would actually be sent. No network.
+    """
+    return min(len(_encoding_for(model_name).encode(text)), _MAX_INPUT_TOKENS)
 
 
 def split_to_token_chunks(
