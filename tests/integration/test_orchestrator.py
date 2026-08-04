@@ -25,6 +25,7 @@ from hypothesis import strategies as st
 from pytest_httpx import HTTPXMock
 
 import lovspor.sync.orchestrator as orchestrator_module
+from lovspor.embeddings.provider import DEFAULT_MODEL_NAME, EmbeddingConfig
 from lovspor.embeddings.quantize import quantize_int8
 from lovspor.embeddings.sections import iter_sections, strip_frontmatter
 from lovspor.embeddings.store import EMBEDDING_DIM, read_embeddings, write_embeddings
@@ -184,8 +185,21 @@ def _install_fake_embedder(
     api_keys: list[str] = []
 
     class FakeOpenAIEmbedder:
-        def __init__(self, api_key: str, **_kwargs: object) -> None:
+        def __init__(self, api_key: str, **kwargs: object) -> None:
             api_keys.append(api_key)
+            # Mirror the real adapter's identity derivation exactly: the space
+            # is a pure function of the configuration the factory passed in,
+            # never of the credential. Without this the fake declared no
+            # identity, every keyed test run stamped honestly-unidentified
+            # records, and the suite could not observe a regression that
+            # stopped persisting ESI (ADR-0005 Stage 1).
+            model_name = kwargs.get("model_name")
+            base_url = kwargs.get("base_url")
+            self._config = EmbeddingConfig(
+                model_name=str(model_name) if model_name else DEFAULT_MODEL_NAME,
+                dimension=int(kwargs.get("dim") or EMBEDDING_DIM),  # type: ignore[call-overload]
+                base_url=str(base_url) if base_url else None,
+            )
 
         def encode(self, texts: list[str]) -> np.ndarray:
             calls.append(list(texts))
@@ -193,6 +207,14 @@ def _install_fake_embedder(
 
         def get_dimension(self) -> int:
             return EMBEDDING_DIM
+
+        @property
+        def space_id(self) -> str:
+            return self._config.space_id
+
+        @property
+        def descriptor(self) -> str:
+            return self._config.descriptor
 
     # Patched where the adapter is defined: the orchestrator asks the shared
     # factory for an embedder instead of naming a provider itself.
@@ -4953,3 +4975,217 @@ def test_repeated_renderer_migrations_reach_a_fixpoint(
     assert report.rerendered_count == 0
     assert (corpus / "lover" / "vimpel.md").read_bytes() == bytes_after_first
     assert (corpus / "manifest.json").read_bytes() == manifest_after_first
+
+
+def _expected_production_identity() -> tuple[str, str]:
+    """Authoritative descriptor and ESI from the production implementation.
+
+    Derived through ``EmbeddingConfig`` rather than hard-coded so these tests
+    pin *persistence*, not the digest's value — the digest itself is pinned
+    separately in ``test_embedding_space_identity.py``. If the canonical
+    serialization ever changes under its own ADR, these tests follow the
+    implementation instead of freezing a stale expectation.
+    """
+    config = EmbeddingConfig()
+    return config.descriptor, config.space_id
+
+
+def test_keyed_sync_stamps_embedding_space_identity_on_written_documents(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0005 Stage 1: the normal keyed write path must persist ESI.
+
+    Production evidence shows ``_write_one`` stamps ``embedding_space`` and
+    ``embedding_space_id``, but no other test asserts it end-to-end — removing
+    the two fields from the record would previously have passed the whole
+    suite while shipping a corpus ``semantic_search`` refuses wholesale (and,
+    because absent identity is deliberately not stale, one that no later sync
+    would repair). Covers new documents, changed documents, and the
+    header-only case: a document with zero embeddable sections still records
+    the identity it was *generated* under — a generation-time claim, distinct
+    from the grandfathering claim Stage 1 refused to invent.
+    """
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body.")),
+            ("nl/lov-2.xml", _minimal_law_html("tomrom", "Tomrom")),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        openai_api_key="sk-test",
+    )
+    run_sync(settings)
+
+    descriptor, space_id = _expected_production_identity()
+    manifest = read_manifest(corpus / "manifest.json")
+    current = {
+        record.slug: record for record in manifest.documents.values() if record.status == "current"
+    }
+    assert set(current) == {"alpha", "tomrom"}
+    for record in current.values():
+        assert record.embedding_hash == record.xml_hash
+        assert record.embedding_space == descriptor
+        assert record.embedding_space_id == space_id
+
+    # The sectionless document's sidecar is header-only, and stamped anyway.
+    tomrom_sidecar = read_embeddings(_embedding_path(corpus, "tomrom"))
+    assert tomrom_sidecar.sections == []
+
+    alpha_bytes_before = _embedding_path(corpus, "alpha").read_bytes()
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_section("Alpha", "Changed alpha body.")),
+            ("nl/lov-2.xml", _minimal_law_html("tomrom", "Tomrom")),
+        ],
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(settings)
+
+    # A genuinely changed embedding input regenerates when keyed, and the
+    # update path stamps identity the same way the add path does.
+    assert _embedding_path(corpus, "alpha").read_bytes() != alpha_bytes_before
+    updated = read_manifest(corpus / "manifest.json")
+    alpha = next(
+        record
+        for record in updated.documents.values()
+        if record.slug == "alpha" and record.status == "current"
+    )
+    assert alpha.embedding_hash == alpha.xml_hash
+    assert alpha.embedding_space == descriptor
+    assert alpha.embedding_space_id == space_id
+
+
+def test_sprint9_backfill_stamps_embedding_space_identity(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The backfill/repair write path must persist ESI too.
+
+    A keyless sync publishes records with no sidecars and no identity; the
+    next keyed run repairs them through the Sprint 9 backfill migration — the
+    second, independent stamp site (``_run_sprint9_embeddings_migration``).
+    The commit-subject assertion pins that the stamps came from the backfill,
+    not from a re-render: upstream is unchanged, so ``_write_one`` never runs.
+    """
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body.")),
+            ("nl/lov-2.xml", _law_with_section("Beta", "Beta body.")),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    assert not (corpus / "lover" / "embeddings").exists()
+    keyless = read_manifest(corpus / "manifest.json")
+    for record in keyless.documents.values():
+        assert record.embedding_hash is None
+        assert record.embedding_space is None
+        assert record.embedding_space_id is None
+
+    _install_fake_embedder(monkeypatch)
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(
+        Settings(
+            data_dir=data_dir,
+            lovverk_repo_path=corpus,
+            openai_api_key="sk-test",
+        ),
+    )
+
+    assert "migration: backfill embeddings for 2 documents" in _git_log_subjects(corpus)
+    descriptor, space_id = _expected_production_identity()
+    repaired = read_manifest(corpus / "manifest.json")
+    for record in repaired.documents.values():
+        assert record.status == "current"
+        assert record.embedding_hash == record.xml_hash
+        assert record.embedding_space == descriptor
+        assert record.embedding_space_id == space_id
+        sidecar = read_embeddings(
+            _embedding_path(corpus, record.slug or ""),
+        )
+        assert sidecar.dim == EMBEDDING_DIM
+
+
+def test_keyless_sync_preserves_recorded_embedding_space_identity(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keyless operation must not destroy valid recorded identity.
+
+    Stage 1 rule: an operator without the credential may be unable to create
+    new embeddings, but must never erase existing embedding identity. Runs
+    the real orchestrator keyless over an unchanged, fully stamped corpus and
+    asserts records and sidecar bytes survive verbatim; the raising
+    constructor proves no embedder was even built.
+    """
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(
+        Settings(
+            data_dir=data_dir,
+            lovverk_repo_path=corpus,
+            openai_api_key="sk-test",
+        ),
+    )
+
+    descriptor, space_id = _expected_production_identity()
+    stamped = read_manifest(corpus / "manifest.json")
+    alpha_before = next(record for record in stamped.documents.values() if record.slug == "alpha")
+    assert alpha_before.embedding_space == descriptor
+    assert alpha_before.embedding_space_id == space_id
+    sidecar_bytes_before = _embedding_path(corpus, "alpha").read_bytes()
+
+    def fail_openai_embedder(**_kwargs: object) -> None:
+        raise AssertionError("a keyless run must not construct an embedder")
+
+    monkeypatch.setattr(
+        "lovspor.embeddings.model.OpenAIEmbedder",
+        fail_openai_embedder,
+    )
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    run_sync(Settings(data_dir=data_dir, lovverk_repo_path=corpus))
+
+    preserved = read_manifest(corpus / "manifest.json")
+    alpha_after = next(record for record in preserved.documents.values() if record.slug == "alpha")
+    assert alpha_after.embedding_hash == alpha_before.embedding_hash
+    assert alpha_after.embedding_space == descriptor
+    assert alpha_after.embedding_space_id == space_id
+    assert _embedding_path(corpus, "alpha").read_bytes() == sidecar_bytes_before
