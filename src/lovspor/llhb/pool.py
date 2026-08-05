@@ -35,6 +35,7 @@ from lovspor.llhb.generation import (
     fabricated_quote_for,
     is_usable_topic,
     mutate_quote,
+    oracle_occurrences,
     quote_ref_fields,
     quote_span,
     scan_duplicate_ids,
@@ -334,8 +335,9 @@ def _build_c5(builder: _Builder, duplicates: list[dict[str, Any]]) -> None:
     The repealed-as-current subcategory is gone (RC1: manifest lifecycle is
     not legal validity). Ground truth encodes ALL oracle-computed
     occurrences; the model's task is to surface the ambiguity, never to
-    silently pick one. NOTE: final C5 population regenerates after the RC3
-    parser fix so veileder-layer occurrences stop counting as sections.
+    silently pick one. Layer-aware since the RC3 parser fix: the oracle
+    counts provision rows only, so veileder echoes neither qualify a case
+    nor appear in ``valid_occurrences``.
     """
     target = builder.config.targets["C5"]
     for finding in duplicates:
@@ -346,11 +348,7 @@ def _build_c5(builder: _Builder, duplicates: list[dict[str, Any]]) -> None:
         for section_id in sorted(dup_ids):
             if builder.counters["C5"] >= target or not builder.caps.allows("C5", slug, section_id):
                 continue
-            occurrences = sorted(
-                int(row["occurrence"])
-                for row in builder.reader.list_sections(slug)
-                if str(row["section_id"]) == section_id
-            )
+            occurrences = oracle_occurrences(builder.reader, slug, section_id)
             if len(occurrences) < 2:  # noqa: PLR2004 — not genuinely duplicated
                 continue
             case = builder.new_case(

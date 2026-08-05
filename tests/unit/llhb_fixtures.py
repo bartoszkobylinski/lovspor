@@ -38,6 +38,12 @@ Tekst nummer en om første tema.
 ### § 6-2. Andre versjon
 
 Tekst nummer to om andre tema.
+
+## Veileder til loven
+
+### § 6-2. Første versjon
+
+Kommentar til bestemmelsen, ikke en bestemmelse selv.
 """
 
 
