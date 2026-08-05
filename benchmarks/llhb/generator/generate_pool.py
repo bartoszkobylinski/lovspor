@@ -32,6 +32,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--lovspor-commit", required=True)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--id-offset", type=int, default=0)
+    parser.add_argument(
+        "--timestamp",
+        default=None,
+        help="ISO datetime stamped into run metadata and every case's "
+        "validation record. Defaults to now; pass the committed manifest's "
+        "timestamp to reproduce an existing artifact byte-for-byte.",
+    )
     return parser.parse_args()
 
 
@@ -54,7 +61,7 @@ def main() -> None:
     args = _parse_args()
     pin = current_pin(args.corpus)
     verify_pin(args.corpus, pin)
-    now = datetime.now(UTC)
+    now = datetime.fromisoformat(args.timestamp) if args.timestamp else datetime.now(UTC)
     run = GenerationRun(
         lovspor_commit=args.lovspor_commit,
         created=now.date().isoformat(),
