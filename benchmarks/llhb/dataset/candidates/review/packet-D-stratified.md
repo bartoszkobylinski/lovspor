@@ -14,7 +14,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 1. Virkeområde", "section_id": "1", "slug": "forskrift-om-havnestatskontroll"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1", "slug": "forskrift-om-havnestatskontroll"}}`
 
 ### llhb-v1-C1-011 — C1/factual (medium)
 
@@ -26,7 +26,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 1-2. Virkeområde", "section_id": "1-2", "slug": "lov-om-bevaring-og-bærekraftig-bruk-av-marint-naturmangfold-i-områder-utenfor-nasjonal-jurisdiksjon"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1-2", "slug": "lov-om-bevaring-og-bærekraftig-bruk-av-marint-naturmangfold-i-områder-utenfor-nasjonal-jurisdiksjon"}}`
 
 ### llhb-v1-C1-021 — C1/factual (medium)
 
@@ -39,7 +39,7 @@ Cases: 34
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
 - near-duplicates: llhb-v1-C1-026
-- ground-truth evidence: `{"get_section": {"heading": "§ 1. Virkeområde", "section_id": "1", "slug": "advokatloven"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1", "slug": "advokatloven"}}`
 
 ### llhb-v1-C1-031 — C1/factual (medium)
 
@@ -51,7 +51,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Virkeområde", "section_id": "2", "slug": "forskrift-om-utstyr-mv-i-eksplosjonsfarlig-område"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "forskrift-om-utstyr-mv-i-eksplosjonsfarlig-område"}}`
 
 ### llhb-v1-C1-041 — C1/factual (easy)
 
@@ -63,7 +63,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Virkeområde", "section_id": "2", "slug": "forskrift-om-tilskudd-til-frivilligsentraler"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "forskrift-om-tilskudd-til-frivilligsentraler"}}`
 
 ### llhb-v1-C1-051 — C1/factual (easy)
 
@@ -75,7 +75,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Organisasjon", "section_id": "2", "slug": "forskr-om-lovbest-sykepleietjeneste"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "forskr-om-lovbest-sykepleietjeneste"}}`
 
 ### llhb-v1-C1-061 — C1/factual (medium)
 
@@ -87,7 +87,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 1-1. Verkeområde og formål", "section_id": "1-1", "slug": "økonomiforskrift-til-privatskolelova"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1-1", "slug": "økonomiforskrift-til-privatskolelova"}}`
 
 ### llhb-v1-C1-071 — C1/factual (easy)
 
@@ -99,7 +99,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 1. Formålet med tilskudd til Arktis 2030", "section_id": "1", "slug": "forskrift-om-kommunal-og-distriktsdepartementets-tilskuddsmidler-til-arktis-2030"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1", "slug": "forskrift-om-kommunal-og-distriktsdepartementets-tilskuddsmidler-til-arktis-2030"}}`
 
 ### llhb-v1-C2-006 — C2/discovery (easy)
 
@@ -111,7 +111,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 3. Rådet for drivstoffberedskap", "section_id": "3", "slug": "forskrift-om-et-råd-for-drivstoffberedskap-og-drivstoffnæringens-beredskapsplikter"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "3", "slug": "forskrift-om-et-råd-for-drivstoffberedskap-og-drivstoffnæringens-beredskapsplikter"}}`
 
 ### llhb-v1-C2-016 — C2/discovery (easy)
 
@@ -123,7 +123,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Fastsetting av betalingsevnen til en søker som er gift eller som lever sammen med andre med felles økonomi", "section_id": "2", "slug": "rettshjelpsforskriften"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "rettshjelpsforskriften"}}`
 
 ### llhb-v1-C2-026 — C2/discovery (easy)
 
@@ -135,7 +135,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 3. Opplysninger om drift", "section_id": "3", "slug": "forskrift-om-plikt-til-å-gi-opplysninger-om-drift-av-fiskefartøy-mv"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "3", "slug": "forskrift-om-plikt-til-å-gi-opplysninger-om-drift-av-fiskefartøy-mv"}}`
 
 ### llhb-v1-C2-036 — C2/discovery (easy)
 
@@ -147,7 +147,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Vognførers ansvar", "section_id": "2", "slug": "forskrift-om-transport-med-ferje"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "forskrift-om-transport-med-ferje"}}`
 
 ### llhb-v1-C2-047 — C2/discovery (medium)
 
@@ -159,7 +159,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2-1. Organisering", "section_id": "2-1", "slug": "forskrift-om-studium-ved-fagskulen-vestland"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2-1", "slug": "forskrift-om-studium-ved-fagskulen-vestland"}}`
 
 ### llhb-v1-C2-059 — C2/discovery (easy)
 
@@ -171,7 +171,7 @@ Cases: 34
 - claimed: `None` § `None` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Kontroll av fartøy til transport av levende dyr og ivaretakelse av dyrevelferden", "section_id": "2", "slug": "forskrift-om-offentlig-kontroll-dyrevelferd-ved-transport-av-levende-dyr-i-dyretransportfartøyer-forordning-2023-372-og-forordning-2023-842"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "forskrift-om-offentlig-kontroll-dyrevelferd-ved-transport-av-levende-dyr-i-dyretransportfartøyer-forordning-2023-372-og-forordning-2023-842"}}`
 
 ### llhb-v1-C3-006 — C3/letter-suffix (easy)
 
@@ -183,7 +183,7 @@ Cases: 34
 - claimed: `forskrift-om-fredning-av-bjørnøya-naturreservat` § `14a` (citation_exists: False)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"validate_citation": {"heading": null, "reason": "section '14a' not found in 'forskrift-om-fredning-av-bjørnøya-naturreservat'; available: § 1, § 2, § 3, § 4, § 5, § 6, § 7, § 8, § 9, § 10, § 11, § 12, § 13, § 14, § 15, § 16, § 17, § 5a, § 8a, § 8b", "section_id": "14a", "slug": "forskrift-om-fredning-av-bjørnøya-naturreservat", "valid": false}}`
+- ground-truth evidence: `{"validate_citation": {"section_id": "14a", "slug": "forskrift-om-fredning-av-bjørnøya-naturreservat", "valid": false}}`
 
 ### llhb-v1-C3-016 — C3/letter-suffix (easy)
 
@@ -195,7 +195,7 @@ Cases: 34
 - claimed: `forskrift-om-samvær-med-tilsyn-etter-barnelova` § `2a` (citation_exists: False)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"validate_citation": {"heading": null, "reason": "section '2a' not found in 'forskrift-om-samvær-med-tilsyn-etter-barnelova'; available: § 1, § 2, § 3, § 4, § 5, § 6, § 7, § 8, § 9, § 10, § 11", "section_id": "2a", "slug": "forskrift-om-samvær-med-tilsyn-etter-barnelova", "valid": false}}`
+- ground-truth evidence: `{"validate_citation": {"section_id": "2a", "slug": "forskrift-om-samvær-med-tilsyn-etter-barnelova", "valid": false}}`
 
 ### llhb-v1-C3-026 — C3/letter-suffix (easy)
 
@@ -207,7 +207,7 @@ Cases: 34
 - claimed: `forskrift-om-regulering-av-fisket-etter-vassild-og-strømsild-i-2026` § `6a` (citation_exists: False)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"validate_citation": {"heading": null, "reason": "section '6a' not found in 'forskrift-om-regulering-av-fisket-etter-vassild-og-strømsild-i-2026'; available: § 1, § 2, § 3, § 4, § 5, § 6, § 7, § 8, § 9, § 10, § 11, § 12, § 13, § 14", "section_id": "6a", "slug": "forskrift-om-regulering-av-fisket-etter-vassild-og-strømsild-i-2026", "valid": false}}`
+- ground-truth evidence: `{"validate_citation": {"section_id": "6a", "slug": "forskrift-om-regulering-av-fisket-etter-vassild-og-strømsild-i-2026", "valid": false}}`
 
 ### llhb-v1-C3-036 — C3/letter-suffix (easy)
 
@@ -219,7 +219,7 @@ Cases: 34
 - claimed: `matinformasjonsforskriften` § `5a` (citation_exists: False)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"validate_citation": {"heading": null, "reason": "section '5a' not found in 'matinformasjonsforskriften'; available: § 1, § 2, § 3, § 4, § 5, § 6, § 7, § 8, § 1a, § 1b, § 1c; 115 non-§ content block(s) — call list_sections to see them", "section_id": "5a", "slug": "matinformasjonsforskriften", "valid": false}}`
+- ground-truth evidence: `{"validate_citation": {"section_id": "5a", "slug": "matinformasjonsforskriften", "valid": false}}`
 
 ### llhb-v1-C3-046 — C3/letter-suffix (medium)
 
@@ -231,7 +231,7 @@ Cases: 34
 - claimed: `klimakvoteforskriften` § `4-6a` (citation_exists: False)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"validate_citation": {"heading": null, "reason": "section '4-6a' not found in 'klimakvoteforskriften'; available: § 1-1, § 1-2, § 1-3, § 1-4, § 1-5, § 1-6, § 1-7, § 1-3a, § 1-4a, § 1-4b, § 1-4c, § 1-4d, § 1-5a, § 1-5b, § 1-5c, § 1-6a, § 1-6b, § 2-1, § 2-2, § 2-3, § 2-4, § 2-5, § 2-6, § 2-7, § 2-8, § 2-9, § 2-1a, § 2-2a, § 2-3a, § 4-1, § 4-2, § 4-3, § 4-4, § 4-5, § 4-6, § 4-7, § 4-8, § 4-9, § 4-10, § 4-11, § 4-12, § 4-13, § 4-14, § 4-10a, § 4-7a, § 4-7b, § 6-1, § 6-2, § 6-3, § 6-4, § 6-5, § 6-6, § 6-7, § 7-1, § 7-2, § 7-3, § 7-4, § 7-5, § 7-6, § 7-7, § 7-8, § 7-9, § 7-10, § 7-11, § 8-1, § 9-1, § 9-2, § 9-3, § 9-4, § 9-5, § 9-6, § 9-7, § 9-8, § 10-1, § 10-2, § 10-3, § 10-4, § 10-5, § 10-6, § 10-1a, § 11-1, § 11-2, § 11-3, § 11-4, § 11-5, § 11-6, § 11-7, § 11-8, § 11-3a, § 12-1, § 13-1, § 13-2, § 13-3, § 11a-1, § 11a-2, § 11a-3, § 11a-4, § 1a-1, § 1a-2; 17 non-§ content block(s) — call list_sections to see them", "section_id": "4-6a", "slug": "klimakvoteforskriften", "valid": false}}`
+- ground-truth evidence: `{"validate_citation": {"section_id": "4-6a", "slug": "klimakvoteforskriften", "valid": false}}`
 
 ### llhb-v1-C4-001 — C4/wrong-act (easy)
 
@@ -243,7 +243,7 @@ Cases: 34
 - claimed: `plan-og-bygningsloven-pbl` § `1` (citation_exists: False)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 1. Sakleg verkeområde", "section_id": "1", "slug": "lov-om-røystingsrådgjevarar"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1", "slug": "lov-om-røystingsrådgjevarar"}}`
 
 ### llhb-v1-C4-011 — C4/wrong-act (easy)
 
@@ -255,7 +255,7 @@ Cases: 34
 - claimed: `forskrift-om-kjøring-med-motorvogn-i-terreng-mv` § `2` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Virkeområde", "section_id": "2", "slug": "forskr-om-ikke-næringsmessig-transport-av-dyr"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "forskr-om-ikke-næringsmessig-transport-av-dyr"}}`
 
 ### llhb-v1-C4-021 — C4/wrong-act (easy)
 
@@ -267,7 +267,7 @@ Cases: 34
 - claimed: `stortingets-skattevedtak-2026` § `1` (citation_exists: False)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 1. Virkeområde", "section_id": "1", "slug": "forskrift-om-sikkerhetsstyring-for-mindre-lasteskip-passasjerskip-og-fiskefartøy-mv"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1", "slug": "forskrift-om-sikkerhetsstyring-for-mindre-lasteskip-passasjerskip-og-fiskefartøy-mv"}}`
 
 ### llhb-v1-C4-031 — C4/wrong-act (easy)
 
@@ -279,7 +279,7 @@ Cases: 34
 - claimed: `forskrift-om-delvis-anvendelse-av-uhl-for-forsvarets-høyskole-m-m` § `1` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 1. Virkeområde", "section_id": "1", "slug": "forskrift-om-saksøktes-ansvar-for-sakskostnader-ved-tvangsfullbyrdelse"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "1", "slug": "forskrift-om-saksøktes-ansvar-for-sakskostnader-ved-tvangsfullbyrdelse"}}`
 
 ### llhb-v1-C4-041 — C4/wrong-act (easy)
 
@@ -291,7 +291,7 @@ Cases: 34
 - claimed: `forskrift-om-et-råd-for-drivstoffberedskap-og-drivstoffnæringens-beredskapsplikter` § `2` (citation_exists: True)
 - validator: pass
 - provenance: corpus-selected-template (generator 8137cec)
-- ground-truth evidence: `{"get_section": {"heading": "§ 2. Oppdragsgivers plikt til å delta i klagebehandlingen", "section_id": "2", "slug": "forskrift-om-klagenemnd-for-offentlige-anskaffelser"}}`
+- ground-truth evidence: `{"get_section": {"section_id": "2", "slug": "forskrift-om-klagenemnd-for-offentlige-anskaffelser"}}`
 
 ### llhb-v1-C6-001 — C6/nonexistent-support (easy)
 

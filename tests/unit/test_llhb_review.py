@@ -126,6 +126,55 @@ def test_invalid_decided_record_blocks_even_when_all_reviewed() -> None:
     assert report.stage4_unblocked is False
 
 
+def test_duplicate_decision_rows_block_stage4() -> None:
+    """Codex PR #18 finding 1a: same queued case twice with conflicting
+    final decisions must never unblock."""
+    decisions = [
+        _decided("llhb-v1-C5-001", "keep", "useful-ambiguity"),
+        _decided("llhb-v1-C5-001", "drop", "redundant"),
+        _decided("llhb-v1-C8-001", "keep", "scope-boundary-clear"),
+        _decided("llhb-v1-C1-001", "keep", "valid"),
+    ]
+    report = completeness(_QUEUE, decisions)
+    assert report.stage4_unblocked is False
+    assert any("appears 2 times" in i for i in report.invalid_records)
+
+
+def test_stray_decision_rows_block_stage4() -> None:
+    """Codex PR #18 finding 1b: a decided non-queued extra row must block."""
+    decisions = [
+        _decided("llhb-v1-C5-001", "keep", "useful-ambiguity"),
+        _decided("llhb-v1-C8-001", "keep", "scope-boundary-clear"),
+        _decided("llhb-v1-C1-001", "keep", "valid"),
+        _decided("llhb-v1-C9-999", "keep", "valid"),
+    ]
+    report = completeness(_QUEUE, decisions)
+    assert report.stage4_unblocked is False
+    assert any("not in the review queue" in i for i in report.invalid_records)
+
+
+def test_sanitize_evidence_drops_free_text_keeps_identifiers() -> None:
+    from lovspor.llhb.review import sanitize_evidence  # noqa: PLC0415
+
+    evidence = {
+        "get_section": {"slug": "testloven", "section_id": "1", "heading": "§ 1. Formål"},
+        "validate_citation": {
+            "valid": False,
+            "slug": "testloven",
+            "reason": "section '9' not found; available: § 1, § 2",
+        },
+        "duplicate_occurrences": {"count": 2},
+        "scope": {"source_class": "rettspraksis", "in_corpus": False, "authority": "docs"},
+    }
+    sanitized = sanitize_evidence(evidence)
+    assert sanitized == {
+        "get_section": {"slug": "testloven", "section_id": "1"},
+        "validate_citation": {"valid": False, "slug": "testloven"},
+        "duplicate_occurrences": {"count": 2},
+        "scope": {"source_class": "rettspraksis", "in_corpus": False, "authority": "docs"},
+    }
+
+
 def test_near_duplicate_clusters_union_transitively() -> None:
     flags = [
         {"a": "x-1", "b": "x-2", "jaccard": 0.9},
@@ -199,6 +248,9 @@ def test_review_items_carry_evidence_and_structural_notes() -> None:
     items = build_review_items(queue, candidates, ledger, flags)
 
     c5, c8, c7 = items
+    # Sanitized evidence: identifiers/counts survive, free text does not.
+    assert c5.ground_truth_evidence == {"duplicate_occurrences": {"count": 2}}
+    assert "heading" not in str(items)
     assert any("duplicate section id" in n for n in c5.structural_notes)
     assert any("DEBATABLE" in n for n in c5.structural_notes)
     assert c5.near_duplicates == ["llhb-v1-C7-001"]

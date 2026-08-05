@@ -52,6 +52,16 @@ REASONS_BY_DECISION: Final[dict[str, tuple[str, ...]]] = {
 
 _GENERIC_TOPIC_MAX_WORDS = 2
 
+_EVIDENCE_STRING_KEYS: Final[frozenset[str]] = frozenset(
+    {"slug", "section_id", "source_class", "authority", "status", "subtype"},
+)
+"""Evidence keys whose STRING values are identifiers/metadata, safe to show.
+
+Every other string value in oracle evidence may carry rendered statutory
+text (headings, validate_citation reasons with section inventories) and is
+dropped from review items — packets are coordinates + hashes + counts only
+(Codex, PR #18 finding 2)."""
+
 
 class ReviewError(LovsporError):
     """A decisions file violates the review contract."""
@@ -166,14 +176,33 @@ def completeness(
     queue: list[dict[str, Any]],
     decisions: list[ReviewDecision],
 ) -> CompletenessReport:
-    """The deterministic Stage 4 gate over queue + decisions."""
-    by_id = {d.case_id: d for d in decisions}
+    """The deterministic Stage 4 gate over queue + decisions.
+
+    The decisions file must correspond to the queue EXACTLY: every queued
+    case once, no duplicates, no stray rows. Codex (PR #18 finding 1)
+    showed the set-based version passed a file with duplicate conflicting
+    rows or an extra non-queued id — both must block.
+    """
+    queue_ids = {str(e["case_id"]) for e in queue}
+    id_counts: dict[str, int] = {}
+    for decision in decisions:
+        id_counts[decision.case_id] = id_counts.get(decision.case_id, 0) + 1
     invalid = sorted(
         f"{d.case_id}: {problem}" for d in decisions for problem in decision_problems(d)
     )
-    reviewed_ids = {d.case_id for d in decisions if d.decision is not None}
+    invalid += sorted(
+        f"{case_id}: appears {count} times in decisions file"
+        for case_id, count in id_counts.items()
+        if count > 1
+    )
+    invalid += sorted(
+        f"{case_id}: not in the review queue" for case_id in id_counts if case_id not in queue_ids
+    )
+    reviewed_ids = {
+        d.case_id for d in decisions if d.decision is not None and d.case_id in queue_ids
+    }
     remaining = [str(e["case_id"]) for e in queue if str(e["case_id"]) not in reviewed_ids]
-    missing = [str(e["case_id"]) for e in queue if str(e["case_id"]) not in by_id]
+    missing = [str(e["case_id"]) for e in queue if str(e["case_id"]) not in id_counts]
     counts = {"keep": 0, "drop": 0, "needs_fix": 0}
     for decision in decisions:
         if decision.decision in counts:
@@ -272,13 +301,40 @@ def _review_item(
         citation_exists=case.get("citation_exists"),
         quote_ref=case.get("quote_ref"),
         fabricated_quote_text=case.get("fabricated_quote_text"),
-        ground_truth_evidence=dict(case["ground_truth_evidence"]),
+        ground_truth_evidence=sanitize_evidence(dict(case["ground_truth_evidence"])),
         validator_status=str(ledger_entry["status"]) if ledger_entry else "unknown",
         validator_issues=list(ledger_entry["issues"]) if ledger_entry else [],
         near_duplicates=near,
         provenance=dict(case["provenance"]),
         structural_notes=_structural_notes(case),
     )
+
+
+def sanitize_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
+    """Evidence view safe for committed artifacts: no free-text values."""
+    sanitized = _sanitize_value(evidence, None)
+    return sanitized if isinstance(sanitized, dict) else {}
+
+
+_EVIDENCE_DROP_KEYS: Final[frozenset[str]] = frozenset({"heading", "reason"})
+"""Keys that only ever carry rendered text — dropped even when null."""
+
+
+def _sanitize_value(value: Any, key: str | None) -> Any:
+    if isinstance(value, dict):
+        cleaned = {
+            k: _sanitize_value(v, k) for k, v in value.items() if k not in _EVIDENCE_DROP_KEYS
+        }
+        return {k: v for k, v in cleaned.items() if v is not _DROPPED}
+    if isinstance(value, list):
+        items = [_sanitize_value(v, key) for v in value]
+        return [v for v in items if v is not _DROPPED]
+    if isinstance(value, str):
+        return value if key in _EVIDENCE_STRING_KEYS else _DROPPED
+    return value
+
+
+_DROPPED: Final = object()
 
 
 def _structural_notes(case: dict[str, Any]) -> list[str]:
