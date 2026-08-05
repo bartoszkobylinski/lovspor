@@ -196,3 +196,68 @@ def test_name_calibration_reports_collisions_and_coverage(result: PoolResult) ->
     assert calibration["documents"] == 6  # 5 current + 1 tombstone
     assert calibration["keys"] > 0
     assert "collision_count" in calibration
+
+
+def test_exhausted_corpus_reports_shortfall_not_padding(tmp_path: Path) -> None:
+    """Targets far above the material: every builder must run dry honestly."""
+    reader = rich_corpus(tmp_path)
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    config = PoolConfig(
+        schema_path=SCHEMA_PATH,
+        targets=dict.fromkeys(("C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"), 50),
+        inventory_size=10,
+        per_act_total_cap=50,
+        per_act_category_cap=3,
+    )
+    result = generate_pool(reader, pin, config, _RUN)
+    counts = result.distribution["by_category"]
+    assert all(count < 50 for count in counts.values())
+    assert result.rejected == []
+    # Shortfalls are visible in the manifest, never silently padded:
+    assert result.generation_manifest["targets"]["C1"] == 50
+    assert result.generation_manifest["emitted_by_category"]["C1"] == counts["C1"]
+
+
+def test_exact_duplicate_questions_are_removed_and_recorded() -> None:
+    from lovspor.llhb.pool import _dedup  # noqa: PLC0415
+
+    first = {"case_id": "llhb-v1-C1-001", "category": "C1", "question": "Hva gjelder her?"}
+    second = {"case_id": "llhb-v1-C1-002", "category": "C1", "question": "hva  gjelder her?"}
+    kept, report = _dedup([first, second])
+    assert [c["case_id"] for c in kept] == ["llhb-v1-C1-001"]
+    assert report["exact_removed"] == [
+        {"case_id": "llhb-v1-C1-002", "duplicate_of": "llhb-v1-C1-001"},
+    ]
+
+
+def test_validate_all_without_validator_fails_closed(tmp_path: Path) -> None:
+    from lovspor.llhb.pool import _Builder, _validate_all  # noqa: PLC0415
+
+    reader = rich_corpus(tmp_path)
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    builder = _Builder(reader, pin, PoolConfig(schema_path=SCHEMA_PATH), _RUN)
+    with pytest.raises(RuntimeError, match="no validator"):
+        _validate_all(builder)
+
+
+def test_claimed_exists_skips_ambiguous_pairs(tmp_path: Path) -> None:
+    from lovspor.llhb.pool import _claimed_exists  # noqa: PLC0415
+
+    reader = rich_corpus(tmp_path)
+    assert _claimed_exists(reader, "dobbeltloven", "6-2") is None
+    assert _claimed_exists(reader, "alfaloven", "1-1") is True
+    assert _claimed_exists(reader, "alfaloven", "9-9") is False
+
+
+def test_pair_wrong_act_falls_back_to_doc_type(tmp_path: Path) -> None:
+    from lovspor.llhb.generation import CorpusSampler  # noqa: PLC0415
+    from lovspor.llhb.pool import _pair_wrong_act  # noqa: PLC0415
+
+    reader = rich_corpus(tmp_path)
+    sampler = CorpusSampler(reader)
+    acts = [a for i in sampler.shuffled_current_doc_ids() if (a := sampler.act_info(i))]
+    alfa = next(a for a in acts if a.slug == "alfaloven")
+    no_ministry = alfa.model_copy(update={"ministry": None})
+    paired = _pair_wrong_act(acts, no_ministry, 0)
+    assert paired is not None and paired.slug != "alfaloven"
+    assert _pair_wrong_act([alfa], alfa, 0) is None
