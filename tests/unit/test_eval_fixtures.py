@@ -53,7 +53,7 @@ class _FakeEmbedder:
 class _FakeReader:
     def __init__(self) -> None:
         self.semantic_calls: list[tuple[str, str | None, int]] = []
-        self.verify_quote_calls: list[tuple[str, str, str]] = []
+        self.verify_quote_calls: list[tuple[str, str, str, int | None]] = []
 
     def semantic_search(
         self,
@@ -64,8 +64,14 @@ class _FakeReader:
         self.semantic_calls.append((query, dataset, limit))
         return [{"slug": "husleieloven", "section_id": "9-5"}]
 
-    def verify_quote(self, slug: str, section_id: str, quote: str) -> dict[str, Any]:
-        self.verify_quote_calls.append((slug, section_id, quote))
+    def verify_quote(
+        self,
+        slug: str,
+        section_id: str,
+        quote: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
+        self.verify_quote_calls.append((slug, section_id, quote, occurrence))
         return {"verified": True, "slug": slug, "section_id": section_id}
 
     def get_law(self, slug: str) -> dict[str, Any]:
@@ -317,6 +323,20 @@ def test_eval_runner_tool_args_supports_semantic_search_and_verify_quote() -> No
             },
         )["slug"]
         == "avtaleloven"
+    )
+    # A scenario disambiguating a repeated quote forwards the occurrence
+    # (PR #10 semantics); one without it must not inject the key.
+    assert (
+        _tool_args(
+            {
+                "tool": "verify_quote",
+                "slug": "avtaleloven",
+                "section_id": "36",
+                "quote": "urimelig",
+                "occurrence": 2,
+            },
+        )["occurrence"]
+        == 2
     )
 
 
@@ -580,8 +600,25 @@ def test_eval_runner_dispatches_verify_quote() -> None:
 
     assert response == {"verified": True, "slug": "husleieloven", "section_id": "9-5"}
     assert reader.verify_quote_calls == [
-        ("husleieloven", "9-5", "Oppsigelsen skal være skriftlig."),
+        ("husleieloven", "9-5", "Oppsigelsen skal være skriftlig.", None),
     ]
+
+    _call_reader(
+        cast(CorpusReader, reader),
+        "verify_quote",
+        {
+            "slug": "husleieloven",
+            "section_id": "9-5",
+            "quote": "Oppsigelsen skal være skriftlig.",
+            "occurrence": 2,
+        },
+    )
+    assert reader.verify_quote_calls[-1] == (
+        "husleieloven",
+        "9-5",
+        "Oppsigelsen skal være skriftlig.",
+        2,
+    )
 
 
 def test_eval_runner_dispatches_semantic_search_default_limit() -> None:
