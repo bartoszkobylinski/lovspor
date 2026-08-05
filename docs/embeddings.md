@@ -128,11 +128,12 @@ A **version-1** header carries no identity and Stage 1 semantics
 apply unchanged: a v1 `.bin` read on its own cannot tell you which
 model produced it and is classified Unknown/legacy.
 
-**Version discipline (ADR-0005 §3, binding).** The writer emits
-version 1 until the one coordinated corpus-wide cutover
-(`lovspor migrate-lspe-v2`) has landed; `lspe_writer_version`
-(`LOVSPOR_LSPE_WRITER_VERSION`) flips to 2 only as part of that
-rollout. A reader meeting a version it does not implement raises
+**Version discipline (ADR-0005 §3, binding).** The one coordinated
+corpus-wide cutover (`lovspor migrate-lspe-v2`) landed on 2026-08-05
+(lovverk `2fa5d121`); version 2 has been normal writer output since and
+is the `lspe_writer_version` default. `LOVSPOR_LSPE_WRITER_VERSION=1`
+remains an explicit rollback lever only. A reader meeting a version it
+does not implement raises
 `UnsupportedSidecarVersionError` — deliberately not a `ValueError` —
 so the search path's per-file corrupt skip cannot silently shrink the
 corpus when the reader is behind the format.
@@ -262,14 +263,13 @@ fails with an explanation rather than answering over an empty corpus.
   another space still matches the record.
 * **`read_embeddings(path)` on a detached file tells you nothing about its space.**
   The file parses; its identity is Unknown.
-* **The published corpus format has not changed yet.** The engine implements
-  LSPE version 2 (sidecar-carried ESI digest — see the format section above) and
-  reads both versions, but the corpus stays version 1 until the ADR-0005 §3
-  sequence completes: dual-reader release, propagation period, then the single
-  coordinated cutover (`lovspor migrate-lspe-v2`). A mixed version-1/version-2
-  corpus is forbidden, because pre-Stage-2 readers skip an unreadable sidecar
-  silently and would answer over a quietly smaller corpus. After the cutover
-  lands, the Stage 1 limitations above close for every v2 file.
+* **Closed by Stage 2 (2026-08-05).** The §3 sequence completed: dual-reader
+  release (0.5.0 on PyPI), propagation, and the coordinated cutover
+  (`lovspor migrate-lspe-v2`, lovverk `2fa5d121`) — the published corpus is
+  version 2 throughout and version 2 is normal writer output. The Stage 1
+  limitations above are closed for every sidecar in the published corpus; a
+  mixed corpus remains forbidden and the format-version rules above keep the
+  failure mode loud if one ever appears.
 
 ## Model changes
 
