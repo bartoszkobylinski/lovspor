@@ -5368,8 +5368,16 @@ def test_provider_output_has_no_influence_on_the_input_identity(
         )
         _build_tarball(forskrifter_tar, [])
         _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+        # lspe_version=1: this test's embedders are deliberately anonymous
+        # (no declared space), and a v2 writer rightly refuses them. The
+        # input-identity property under test is format-independent.
         run_sync(
-            Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test"),
+            Settings(
+                data_dir=data_dir,
+                lovverk_repo_path=corpus,
+                openai_api_key="sk-test",
+                lspe_writer_version=1,
+            ),
         )
         manifest = read_manifest(corpus / "manifest.json")
         [record] = list(manifest.documents.values())
@@ -5415,8 +5423,15 @@ def test_a_failed_embedding_leaves_no_false_input_stamp(
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
 
     with pytest.raises(RuntimeError, match="provider unavailable"):
+        # lspe_version=1: the exploding embedder is deliberately anonymous;
+        # the no-false-stamp property under test is format-independent.
         run_sync(
-            Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test"),
+            Settings(
+                data_dir=data_dir,
+                lovverk_repo_path=corpus,
+                openai_api_key="sk-test",
+                lspe_writer_version=1,
+            ),
         )
 
     if manifest_before is None:
@@ -5518,14 +5533,14 @@ def test_keyless_sync_preserves_a_recorded_input_identity(
     assert _embedding_path(corpus, "alpha").read_bytes() == sidecar_before
 
 
-def test_keyed_sync_emits_lspe_v1_by_default(
+def test_keyed_sync_emits_lspe_v2_by_default(
     tmp_path: Path,
     httpx_mock: HTTPXMock,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ADR-0005 §3: a version-2 file must never be published
-    opportunistically — until the coordinated cutover, the writer emits
-    version 1 even though the engine can read and write both."""
+    """ADR-0005 §3 step 5: since the corpus-wide cutover landed, version 2
+    is normal writer output — the default, with no configuration. An
+    unconfigured manual keyed sync must not reintroduce a version-1 file."""
     data_dir = tmp_path / "data"
     corpus = tmp_path / "lovverk"
     _git_init_corpus(corpus)
@@ -5536,6 +5551,40 @@ def test_keyed_sync_emits_lspe_v1_by_default(
     _build_tarball(forskrifter_tar, [])
     _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
     settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test")
+
+    run_sync(settings)
+
+    parsed = read_embeddings(_embedding_path(corpus, "alpha"))
+    assert parsed.version == 2
+    assert parsed.embedding_space_id is not None
+    manifest = read_manifest(corpus / "manifest.json")
+    record = next(r for r in manifest.documents.values() if r.slug == "alpha")
+    assert parsed.embedding_space_id == record.embedding_space_id
+
+
+def test_writer_version_1_remains_an_explicit_rollback_lever(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LOVSPOR_LSPE_WRITER_VERSION=1 must still work as a deliberate
+    rollback: explicitly selected version 1 writes the historical
+    byte format with no identity."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))])
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        openai_api_key="sk-test",
+        lspe_writer_version=1,
+    )
 
     run_sync(settings)
 

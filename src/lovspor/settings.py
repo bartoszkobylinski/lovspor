@@ -75,12 +75,13 @@ class Settings(BaseModel):
     staying far under the count threshold. Full corpus is ~37.9M tokens.
     Override: ``LOVSPOR_REEMBED_GUARD_MAX_TOKENS`` or the sync flag.
     """
-    lspe_writer_version: int = 1
-    """LSPE format version the sync writer emits (ADR-0005 §3). Stays 1 —
-    the corpus emits version 1 until the one coordinated corpus-wide cutover
-    has landed; a version-2 file must never be published opportunistically.
-    Set 2 (``LOVSPOR_LSPE_WRITER_VERSION``) only as part of the Stage 2
-    cutover rollout; a later release flips the default and retires the flag.
+    lspe_writer_version: int = 2
+    """LSPE format version the sync writer emits (ADR-0005 §3 step 5).
+    Version 2 has been normal writer output since the corpus-wide cutover
+    landed (lovverk ``2fa5d121``, 2026-08-05) — the default matches, so no
+    configuration is needed and an unconfigured manual sync cannot
+    reintroduce a version-1 file. ``LOVSPOR_LSPE_WRITER_VERSION=1`` remains
+    available as an explicit, deliberate rollback lever only.
     """
     http_timeout_seconds: float = 120.0
     http_user_agent: str = "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"

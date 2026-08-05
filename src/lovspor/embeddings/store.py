@@ -42,9 +42,9 @@ work`` section). No compression — the embeddings themselves are the
 compression. Per-doc sharding lets ``git`` diff per-section changes
 without rewriting a monolithic blob.
 
-Version discipline (ADR-0005 §3, binding): the writer emits version 1
-until the one coordinated corpus-wide cutover has landed; a version-2
-file must never be published opportunistically. The reader reads both.
+Version discipline (ADR-0005 §3, binding): the one coordinated
+corpus-wide cutover landed on 2026-08-05 (lovverk ``2fa5d121``), and
+version 2 has been normal writer output since. The reader reads both.
 A version this reader does not know raises
 :class:`~lovspor.errors.UnsupportedSidecarVersionError` — deliberately
 NOT a ``ValueError`` — so the search path's corrupt-file skip cannot

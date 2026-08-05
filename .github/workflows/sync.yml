@@ -173,11 +173,6 @@ jobs:
         # timeout-minutes raised accordingly).
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # ADR-0005 Stage 2, §3 step 5: the writer emits LSPE version 2 —
-          # merged only AFTER the coordinated corpus cutover landed, so a
-          # post-cutover document update can never reintroduce a v1 file.
-          # A later engine release flips the default and retires this flag.
-          LOVSPOR_LSPE_WRITER_VERSION: "2"
         run: uv run --no-dev lovspor sync
 
       # The audit is the only check that compares the manifest against disk;
