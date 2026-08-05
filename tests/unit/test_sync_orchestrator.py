@@ -2241,3 +2241,26 @@ def test_writing_v2_without_an_embedder_identity_fails_loudly(tmp_path: Path) ->
             _AnonymousEmbedder(),  # type: ignore[arg-type]
             lspe_version=2,
         )
+
+
+def test_an_unknown_lspe_version_is_rejected_before_any_work(tmp_path: Path) -> None:
+    """Settings validates 1|2 on the production path, but the writer is its
+    own last line of defense: an internal caller passing a bogus version
+    must get an error, never a silent fall-through to version 1."""
+
+    class _AnonymousEmbedder:
+        def encode(self, texts: list[str]) -> np.ndarray:
+            return np.zeros((len(texts), 4), dtype=np.float32)
+
+        def get_dimension(self) -> int:
+            return 4
+
+    with pytest.raises(ValueError, match="lspe_version must be 1 or 2"):
+        orchestrator_module._write_embeddings_for_doc(
+            tmp_path,
+            "gjeldende-lover",
+            "alpha",
+            "---\ntitle: A\n---\n# A\n\n### § 1. En\n\nTekst.\n",
+            _AnonymousEmbedder(),  # type: ignore[arg-type]
+            lspe_version=7,
+        )

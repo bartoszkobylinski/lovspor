@@ -22,6 +22,13 @@ corpus byte-identical and the worktree clean: rewrites are written and
 verified as staged sibling files first, and the tracked ``.bin`` paths are
 only replaced — in a validation-free rename pass — after every staged file
 has verified and the drift check has passed again.
+
+The precise guarantee is that the canonical corpus cannot be PARTIALLY
+PUBLISHED: nothing is committed (let alone pushed) until every tracked path
+holds a verified version-2 file. A process killed mid-rename can leave the
+LOCAL worktree temporarily mixed — some paths swapped, some not — but that
+state is uncommitted, a rerun refuses it at the clean-worktree guard, and
+the operator discards the clone; the remote never sees it.
 """
 
 from dataclasses import dataclass
@@ -209,7 +216,10 @@ def _apply_cutover(repo: Path, items: list[_CutoverItem], head_before: str) -> N
     captured before selection has been re-checked. Any failure up to that
     point discards the staging and leaves the tracked corpus byte-identical.
     The final swap is a validation-free same-directory rename pass — the
-    narrowest publishable step this tool can make.
+    narrowest publishable step this tool can make. A kill inside that pass
+    can leave the local worktree mixed but uncommitted (the module docstring
+    states the exact guarantee); the commit only ever captures the fully
+    swapped set.
     """
     _require_head_unmoved(repo, head_before)
     try:

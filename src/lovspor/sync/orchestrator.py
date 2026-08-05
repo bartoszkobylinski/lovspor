@@ -1134,6 +1134,10 @@ def _write_embeddings_for_doc(
     # equal the production model's dimensionality, so this is byte-identical
     # today; it stops being a coincidence the moment the model is configurable.
     dim = embedder.get_dimension()
+    if lspe_version not in (1, 2):
+        raise ValueError(
+            f"lspe_version must be 1 or 2, got: {lspe_version!r}",
+        )
     header_esi: str | None = None
     if lspe_version == 2:  # noqa: PLR2004 - the two literal format versions
         _, header_esi = _embedder_identity(embedder)
