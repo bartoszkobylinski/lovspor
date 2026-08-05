@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/bartoszkobylinski/lovspor/benchmarks/llhb/schema/case.schema.json",
   "title": "LLHB v1 benchmark case",
-  "description": "One frozen or candidate benchmark case. Quote-free: statutory text is referenced by corpus coordinates, never embedded. All coordinates resolve at the pinned lovverk commit in corpus_pin.",
+  "description": "One frozen or candidate benchmark case. Quote-free: statutory text is referenced by corpus coordinates, never embedded. All coordinates resolve at the pinned lovverk commit in corpus_pin. Pre-freeze amendment 2026-08-05 (Stage 3.6, owner-approved): adds valid_occurrences and the must_disambiguate expected behaviour for C5 duplicate-section cases - ground truth encodes ALL deterministically valid occurrences instead of pinning one.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -59,7 +59,8 @@
         "reject_premise",
         "verify_quote",
         "deny_quote",
-        "abstain"
+        "abstain",
+        "must_disambiguate"
       ]
     },
     "expected_act_slug": {
@@ -74,6 +75,13 @@
       "type": ["integer", "null"],
       "minimum": 1,
       "description": "One-based occurrence for duplicate section ids; null when unambiguous."
+    },
+    "valid_occurrences": {
+      "type": ["array", "null"],
+      "items": { "type": "integer", "minimum": 1 },
+      "minItems": 2,
+      "uniqueItems": true,
+      "description": "C5 duplicate cases: ALL deterministically valid one-based occurrences of the expected section id, computed by the oracle after document-layer classification (never a curated subset). Null for every other case."
     },
     "claimed_act_slug": {
       "type": ["string", "null"],
@@ -198,6 +206,16 @@
         "properties": {
           "expected_behaviour": { "enum": ["verify_quote", "deny_quote"] }
         }
+      }
+    },
+    {
+      "if": { "properties": { "expected_behaviour": { "const": "must_disambiguate" } } },
+      "then": {
+        "properties": {
+          "category": { "const": "C5" },
+          "valid_occurrences": { "type": "array" }
+        },
+        "required": ["expected_act_slug", "expected_section_id", "valid_occurrences"]
       }
     },
     {

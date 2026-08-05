@@ -25,6 +25,18 @@ from lovspor.storage.manifest import ManifestRecord
 
 GENERATION_SEED_DEFAULT = 20260805
 
+TOPIC_FILTER_VERSION = "llhb-topic-filter-v1"
+"""Freeze-surface version of the meta-topic lexicon and usability rule."""
+
+META_TOPIC = re.compile(
+    r"virkeområde|verkeområde|definisjon|ikrafttred|ikraftset|iverkset|overgangs"
+    r"|formål|innledende|alminnelige|avsluttende|sluttbestemmelser|fellesbestemmelser"
+    r"|oppheving|endringer i andre|generelle bestemmelser",
+)
+"""Meta/structural heading topics. Owner review (Stage 3.5) showed they
+cannot anchor discovery/premise questions: they occur in most acts, so a
+question built on them has no unique referent (RC4)."""
+
 _MINISTRY_LINE = re.compile(r'^ministry:\s*"?([^"\n]+)"?\s*$', re.MULTILINE)
 _PARENTHETICAL = re.compile(r"\(([^()]+)\)")
 _LAW_NAME_SUFFIXES = ("loven", "lova", "forskriften", "forskrifta")
@@ -85,6 +97,31 @@ def topic_of(heading: str) -> str | None:
     if len(topic) < _MIN_TOPIC_CHARS or "opphevet" in topic.casefold():
         return None
     return topic[0].lower() + topic[1:]
+
+
+def is_usable_topic(topic: str, *, strict: bool) -> bool:
+    """Whether a heading topic can anchor a question (RC4 filter).
+
+    Meta/structural topics never qualify. In ``strict`` mode (discovery
+    C2/C8, premise C6, fabricated C7) a topic must also carry at least
+    three words — a one/two-word topic rarely identifies a provision.
+    C1 stays unfiltered by owner ruling: with the act named, even a
+    structural topic is answerable (every reviewed C1 was kept).
+    """
+    if META_TOPIC.search(topic):
+        return False
+    return not (strict and len(topic.split()) <= 2)  # noqa: PLR2004 — frozen rule
+
+
+def trap_has_sibling(existing_ids: set[str], trap: str) -> bool:
+    """True when the corpus contains a near-miss sibling of ``trap`` (RC7).
+
+    ``§ 1`` claimed while ``§ 1-1`` exists (or ``§ 1 a``/``1a``) is not a
+    fair non-existence trap — the citation reads as a sloppy reference to
+    the sibling rather than an invention.
+    """
+    pattern = re.compile(re.escape(trap) + r"(-.+|\s?[a-zæøå])$")
+    return any(pattern.fullmatch(existing) for existing in existing_ids)
 
 
 def parse_ministry(markdown: str) -> str | None:
@@ -168,7 +205,11 @@ def trap_section_ids(act: ActInfo) -> list[tuple[str, str]]:
     found.extend(_chapter_traps(chapters, ids))
     found.extend(_suffix_traps(ids))
     found.extend(_flat_traps(ids))
-    return [(strategy, trap) for strategy, trap in found if trap not in ids]
+    return [
+        (strategy, trap)
+        for strategy, trap in found
+        if trap not in ids and not trap_has_sibling(ids, trap)
+    ]
 
 
 def _chapter_traps(chapters: dict[int, list[int]], ids: set[str]) -> list[tuple[str, str]]:
@@ -198,23 +239,26 @@ def _flat_traps(ids: set[str]) -> list[tuple[str, str]]:
 def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, int, str] | None:
     """Deterministic (start, end, text) span in the normalized section body.
 
-    Starts after the heading sentence; snaps the end to a word boundary.
-    Returns None when the section is too short for a meaningful quote.
+    Starts after the heading sentence and ends at a SENTENCE boundary
+    (v2, RC6): a quote cut mid-sentence reads as corrupted and lets a
+    model deny it without consulting the source. Returns None when the
+    section has no complete sentence of quotable length.
     """
     section = reader.get_section(slug, section_id)
     normalized = normalize_quote_text(str(section["body"]))
     dot = normalized.find(". ")
     start = dot + 2 if dot != -1 else 0
     window = normalized[start : start + _MAX_QUOTE_CHARS]
-    if len(window) < _MIN_QUOTE_CHARS:
+    boundary = window.rfind(". ")
+    if boundary == -1 and normalized.endswith(".") and len(normalized) - start <= _MAX_QUOTE_CHARS:
+        boundary = len(normalized) - start - 1  # last sentence of the section
+    if boundary < _MIN_QUOTE_CHARS:
         return None
-    end = start + (window.rfind(" ") if " " in window else len(window))
-    # The hash is computed over normalized[start:end] EXACTLY as the
-    # materializer will slice it — trim the span, never a copy of the text.
+    end = start + boundary + 1  # include the closing period
     while start < end and normalized[start] == " ":
         start += 1
-    while end > start and normalized[end - 1] == " ":
-        end -= 1
+    # The hash is computed over normalized[start:end] EXACTLY as the
+    # materializer will slice it — the span is trimmed, never a text copy.
     text = normalized[start:end]
     if len(text) < _MIN_QUOTE_CHARS:
         return None
@@ -229,12 +273,24 @@ _QUOTE_MUTATIONS: tuple[tuple[str, str], ...] = (
     (" eller ", " og "),
 )
 
+_MUTATION_TAIL_GUARD = 15
+"""A mutation this close to the end of the quote produces a visibly ragged
+tail (owner finding, RC6); mutations must sit inside the sentence body."""
+
 
 def mutate_quote(text: str) -> str | None:
-    """Deterministic subtle modification; None when no mutation applies."""
+    """Deterministic subtle modification; None when no mutation applies.
+
+    v2 (RC6): the mutation must land inside the body of the quote — never
+    within the final ``_MUTATION_TAIL_GUARD`` characters — so the result
+    still reads as plausible statutory prose and denying it requires an
+    actual source comparison.
+    """
+    limit = len(text) - _MUTATION_TAIL_GUARD
     for needle, replacement in _QUOTE_MUTATIONS:
-        if needle in text:
-            mutated = text.replace(needle, replacement, 1)
+        position = text.find(needle)
+        if 0 <= position < limit:
+            mutated = text[:position] + replacement + text[position + len(needle) :]
             if mutated != text:
                 return mutated
     return None
@@ -268,6 +324,7 @@ def base_case(pin: CorpusPin, provenance: dict[str, str | None]) -> dict[str, ob
         "expected_act_slug": None,
         "expected_section_id": None,
         "expected_occurrence": None,
+        "valid_occurrences": None,
         "claimed_act_slug": None,
         "claimed_section_id": None,
         "citation_exists": None,

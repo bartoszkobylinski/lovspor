@@ -185,6 +185,9 @@ class CandidateValidator:
         return issues or self._provision_absent(case, slug, section_id)
 
     def _check_c5(self, case: dict[str, Any]) -> list[CaseIssue]:
+        if case["expected_behaviour"] == "must_disambiguate":
+            return self._check_c5_occurrences(case)
+        # Legacy pre-amendment C5 form (Stage 3 pool, pending remediation).
         slug = str(case["claimed_act_slug"] or case["expected_act_slug"])
         section_id = str(case["claimed_section_id"] or case["expected_section_id"])
         if _is_tombstone(self._reader, slug):
@@ -202,6 +205,41 @@ class CandidateValidator:
                 f"{slug} § {section_id} resolves uniquely and {slug!r} is not a tombstone",
             )
         ]
+
+    def _check_c5_occurrences(self, case: dict[str, Any]) -> list[CaseIssue]:
+        """C5 v2: valid_occurrences must equal the oracle's occurrence set.
+
+        The oracle is authoritative and the list is never a curated subset
+        (owner ruling, Stage 3.6). NOTE: until the RC3 parser fix lands,
+        list_sections may still count veileder-layer headings — final C5
+        material regenerates after that fix.
+        """
+        slug = str(case["expected_act_slug"])
+        section_id = str(case["expected_section_id"])
+        oracle = sorted(
+            int(row["occurrence"])
+            for row in self._reader.list_sections(slug)
+            if str(row["section_id"]) == section_id
+        )
+        if len(oracle) < 2:  # noqa: PLR2004 — a unique section cannot be ambiguous
+            return [
+                _issue(
+                    case,
+                    "not-genuinely-ambiguous",
+                    f"{slug} § {section_id} has {len(oracle)} occurrence(s) in the corpus",
+                )
+            ]
+        declared = sorted(int(o) for o in case["valid_occurrences"] or [])
+        if declared != oracle:
+            return [
+                _issue(
+                    case,
+                    "valid-occurrences-mismatch",
+                    f"case declares {declared} but the oracle finds {oracle}; "
+                    "the occurrence set is computed, never curated",
+                )
+            ]
+        return []
 
     def _check_c6(self, case: dict[str, Any]) -> list[CaseIssue]:
         issues = self._expected_exists(case)

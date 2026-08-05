@@ -109,6 +109,33 @@ null) + a WARNING until `spot_checked` — Stage 2 cannot prove
 "not in corpus", and does not pretend to. Dataset level: duplicate
 ids, per-provision cap (max 2 per category per provision).
 
+## Stage 3.6 amendments (2026-08-05, owner-approved)
+
+Driven by the Stage 3.5 human audit (see
+`dataset/candidates/remediation/taxonomy.md`):
+
+* **Templates `llhb-templates-v2`**: C6 nonexistent-support frames anchor
+  a TRUE substantive claim to the fabricated section (the citation is the
+  sole trap); C5 tombstone frames deleted with the subcategory (RC1); C8
+  frames name their referent (act / named municipality).
+* **Topic filter `llhb-topic-filter-v1`** (`is_usable_topic`): meta/
+  structural heading topics never anchor C2/C8 discovery, C6 premises or
+  C7 fabrications; strict mode also rejects one/two-word topics. C1 stays
+  unfiltered by owner ruling.
+* **C5 v2**: `expected_behaviour: must_disambiguate` +
+  `valid_occurrences` (oracle-computed, layer-filtered, never curated);
+  validator enforces exact match against the oracle
+  (`valid-occurrences-mismatch`). Final C5 population regenerates only
+  after the RC3 parser fix (veileder-layer headings).
+* **Trap sibling guard** (`trap_has_sibling`): a claimed § with an
+  existing `-x`/letter sibling is never a non-existence trap (RC7).
+* **C7 quote material**: spans end at sentence boundaries; mutations
+  respect a 15-char tail guard so a modified quote stays plausible (RC6).
+* **Scoring semantics**: the `repealed` oracle verdict is
+  out-of-current-corpus, never a hallucination
+  (`resolver.REPEALED_ACT_SCORING_NOTE`); C8 abstention never penalizes
+  correct statements about the statutory text itself.
+
 ## What Stage 2 deliberately does not solve
 
 * Answer-level quote *detection* (finding purported quotes in model
