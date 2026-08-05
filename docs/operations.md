@@ -12,6 +12,7 @@ uv run lovspor sync            # incremental update against latest tarballs
 uv run lovspor sync --force-rerender  # re-render every doc, to land a renderer fix (see Maintenance)
 uv run lovspor repair-embeddings  # diagnostic: flag under-embedded docs (see Maintenance)
 uv run lovspor annotate-input-identity  # one-time ADR-0006 manifest annotation (see Maintenance)
+uv run lovspor migrate-lspe-v2  # one-time ADR-0005 Stage 2 sidecar cutover (see Maintenance)
 uv run lovspor sync --allow-mass-reembed  # explicit override for a large intended re-embed (see Maintenance)
 uv run lovspor fetch-corpus    # clone/update the local lovverk corpus that `lovspor mcp` reads
 uv run lovspor mcp             # serve the corpus to AI assistants over MCP (stdio)
@@ -40,6 +41,31 @@ never passes the override, so a tripped guard fails the job before any spend.
 existing fully-embedded corpus: manifest-only, keyless, idempotent, and
 drift-guarded (corpus HEAD re-verified and every digest recomputed immediately
 before the manifest is written; any drift aborts with nothing written).
+
+### Maintenance: `migrate-lspe-v2` (ADR-0005 Stage 2 cutover)
+
+`lovspor migrate-lspe-v2` is the one coordinated corpus-wide LSPE version-2
+cutover: every current sidecar is rewritten with its manifest ESI embedded in
+the header, vectors preserved bit-for-bit and every written file re-read and
+verified. Keyless, clean-worktree- and HEAD-drift-guarded, idempotent;
+Markdown, manifest and history are untouched. It aborts on a record without a
+recorded ESI and on an existing version-2 file that disagrees with the
+manifest.
+
+The ADR-0005 §3 ordering is **binding** — no step may be skipped:
+
+1. The dual-reader engine release (reads v1 and v2) is merged and deployed to
+   every consumer — including the hosted MCP droplet and any cached `uvx` MCP
+   builds. A pre-Stage-2 reader meeting a v2 file skips it as "corrupt"
+   silently; that is the failure the ordering exists to prevent.
+2. A deliberate propagation window passes, decided by the owner. The corpus
+   emits only version 1 throughout (`lspe_writer_version` stays 1).
+3. The cutover runs against a pristine clone, is verified, and is pushed as
+   one commit. Never a partial or incremental rollout.
+4. The writer flips to version 2 (`LOVSPOR_LSPE_WRITER_VERSION=2` in the
+   scheduled workflow, then a release changing the default) — only after the
+   cutover has landed, and promptly after it, so a post-cutover document
+   update does not reintroduce a version-1 file.
 
 ### Maintenance: `repair-embeddings` (diagnostic/recovery)
 

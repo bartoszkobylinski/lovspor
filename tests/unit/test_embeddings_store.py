@@ -6,6 +6,9 @@ import numpy as np
 import pytest
 
 from lovspor.embeddings.store import EMBEDDING_DIM, EmbeddingFile, read_embeddings, write_embeddings
+from lovspor.errors import UnsupportedSidecarVersionError
+
+ESI = "738c919fa57385d94c558d93c4b0e588"
 
 HEADER_FMT = "<4sBBHIf"
 MAX_SECTIONS = 65535
@@ -161,7 +164,7 @@ def test_write_embeddings_invalid_section_messages_are_exact(tmp_path: Path) -> 
     [
         (b"short", "file too short"),
         (_header(magic=b"NOPE") + b"\x011abc", "bad magic"),
-        (_header(version=2) + b"\x011abc", "unsupported version 2"),
+        (_header(version=2) + b"\x011abc", "version-2 header truncated"),
         (_header(count=1, dim=3), "truncated body at section index 0"),
         (_header(count=1, dim=3) + b"\x05ab", "truncated section_id at index 0"),
         (_header(count=1, dim=3) + b"\x01\xffabc", "invalid UTF-8 in section_id"),
@@ -198,7 +201,7 @@ def test_read_embeddings_malformed_messages_are_exact(tmp_path: Path) -> None:
     path.write_bytes(_header(version=2) + b"\x011abc")
     with pytest.raises(ValueError) as exc_info:
         read_embeddings(path)
-    assert str(exc_info.value) == f"{path}: unsupported version 2 (this engine reads 1)"
+    assert str(exc_info.value) == (f"{path}: version-2 header truncated (21 bytes, need 32)")
 
     path.write_bytes(_header(count=1, dim=3))
     with pytest.raises(ValueError) as exc_info:
@@ -241,3 +244,105 @@ def test_embedding_file_is_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         result.dim = 4
+
+
+def test_v2_round_trip_carries_the_esi(tmp_path: Path) -> None:
+    path = tmp_path / "v2.bin"
+    sections = [("15-3", _vector([1, -2, 3])), ("15-4", _vector([4, 5, -6]))]
+
+    write_embeddings(path, sections, scale=0.25, dim=3, embedding_space_id=ESI)
+    result = read_embeddings(path)
+
+    assert result.version == 2
+    assert result.embedding_space_id == ESI
+    assert result.dim == 3
+    assert result.scale == pytest.approx(0.25)
+    np.testing.assert_array_equal(result.sections[0][1], sections[0][1])
+    np.testing.assert_array_equal(result.sections[1][1], sections[1][1])
+
+
+def test_v1_read_carries_no_identity(tmp_path: Path) -> None:
+    """A v1 file cannot prove its space: the parsed identity must be None,
+    never inferred from configuration or dimension (ADR-0005 §2)."""
+    path = tmp_path / "v1.bin"
+    write_embeddings(path, [("1", _vector([1, 2, 3]))], scale=1.0, dim=3)
+
+    result = read_embeddings(path)
+
+    assert result.version == 1
+    assert result.embedding_space_id is None
+
+
+def test_v2_bytes_are_the_v1_bytes_with_the_digest_spliced_in(tmp_path: Path) -> None:
+    """Golden structural pin: v2 = v1 header with version byte 2 plus the raw
+    16-byte digest, then the identical body. Nothing else may differ."""
+    sections = [("15-3", _vector([1, -2, 3]))]
+    v1_path, v2_path = tmp_path / "v1.bin", tmp_path / "v2.bin"
+    write_embeddings(v1_path, sections, scale=0.25, dim=3)
+    write_embeddings(v2_path, sections, scale=0.25, dim=3, embedding_space_id=ESI)
+
+    v1, v2 = v1_path.read_bytes(), v2_path.read_bytes()
+
+    assert v2[:4] == v1[:4] == b"LSPE"
+    assert (v1[4], v2[4]) == (1, 2)
+    assert v2[5:16] == v1[5:16], "shared header fields must be identical"
+    assert v2[16:32] == bytes.fromhex(ESI)
+    assert v2[32:] == v1[16:], "body must be byte-identical across versions"
+    assert len(v2) == len(v1) + 16
+
+
+def test_v2_write_is_byte_deterministic(tmp_path: Path) -> None:
+    sections = [("2-1", _vector([7, 8, 9]))]
+    a, b = tmp_path / "a.bin", tmp_path / "b.bin"
+    write_embeddings(a, sections, scale=0.5, dim=3, embedding_space_id=ESI)
+    write_embeddings(b, sections, scale=0.5, dim=3, embedding_space_id=ESI)
+
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_a_future_version_raises_unsupported_not_valueerror(tmp_path: Path) -> None:
+    """ADR-0005 §3: an unsupported version must be distinguishable from a
+    corrupt file, or the search path's corrupt-skip silently shrinks the
+    corpus. The error type IS the distinction — it must never be a
+    ValueError."""
+    path = tmp_path / "v3.bin"
+    path.write_bytes(_header(version=3) + b"\x011abc")
+
+    with pytest.raises(UnsupportedSidecarVersionError) as exc_info:
+        read_embeddings(path)
+
+    assert not isinstance(exc_info.value, ValueError)
+    assert "version 3" in str(exc_info.value)
+    assert "update lovspor" in str(exc_info.value)
+
+
+def test_header_only_v2_round_trip(tmp_path: Path) -> None:
+    """A sectionless doc's sidecar still carries the space identity in v2."""
+    path = tmp_path / "empty.bin"
+    write_embeddings(path, [], scale=1.0, dim=3, embedding_space_id=ESI)
+
+    result = read_embeddings(path)
+
+    assert result.version == 2
+    assert result.embedding_space_id == ESI
+    assert result.sections == []
+    assert len(path.read_bytes()) == 32
+
+
+@pytest.mark.parametrize(
+    ("esi", "match"),
+    [
+        ("abc", "must be 32 hex chars"),
+        ("g" * 32, "not valid hex"),
+        ("738c919fa57385d94c558d93c4b0e5", "must be 32 hex chars"),
+    ],
+)
+def test_write_rejects_a_malformed_esi(tmp_path: Path, esi: str, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        write_embeddings(
+            tmp_path / "bad.bin",
+            [("1", _vector([1, 2, 3]))],
+            scale=1.0,
+            dim=3,
+            embedding_space_id=esi,
+        )

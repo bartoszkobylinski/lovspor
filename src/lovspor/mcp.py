@@ -68,6 +68,7 @@ from starlette.responses import JSONResponse, Response
 from lovspor.access import CredentialStore
 from lovspor.embeddings import (
     EmbeddingConfig,
+    EmbeddingFile,
     EmbeddingIndex,
     EmbeddingModel,
     SearchHit,
@@ -75,7 +76,7 @@ from lovspor.embeddings import (
     read_embeddings,
     space_id_of,
 )
-from lovspor.errors import ConfigError, LovsporError
+from lovspor.errors import ConfigError, CorpusStateError, LovsporError
 from lovspor.headings import (
     ANY_HEADING,
     BLOCK_ID_PREFIX,
@@ -1627,6 +1628,10 @@ class CorpusReader:
                     excluded["different_space"] += 1
                     continue
                 try:
+                    # UnsupportedSidecarVersionError is deliberately NOT caught
+                    # here: it is not a ValueError, so a corpus written in a
+                    # newer format fails this whole call loudly instead of
+                    # being silently skipped file-by-file (ADR-0005 §3).
                     embedding_file = read_embeddings(bin_path)
                 except (ValueError, OSError) as exc:
                     print(
@@ -1636,6 +1641,7 @@ class CorpusReader:
                     )
                     excluded["corrupt"] += 1
                     continue
+                _require_sidecar_matches_manifest(embedding_file, record, bin_path)
                 if self._expected_dim is not None and embedding_file.dim != self._expected_dim:
                     print(
                         f"semantic_search: skipping {bin_path.name} with dim "
@@ -2085,6 +2091,34 @@ class CorpusReader:
         """
         absolute = self._safe_join(*parts)
         return str(absolute.relative_to(self.corpus_path.resolve()))
+
+
+def _require_sidecar_matches_manifest(
+    embedding_file: EmbeddingFile,
+    record: ManifestRecord,
+    bin_path: Path,
+) -> None:
+    """ADR-0005 Stage 2: the file's own identity must agree with the manifest.
+
+    A version-2 sidecar carries its ESI in the header, so a substituted
+    file at a manifest-referenced path is finally detectable. A mismatch is
+    a tamper/corpus-corruption signal, not a per-file condition — refuse the
+    whole call rather than silently shrink the searched corpus. Version-1
+    files carry no identity (``embedding_space_id is None``) and pass
+    through: for them the manifest remains the sole authority, exactly the
+    Stage 1 status quo.
+    """
+    if (
+        embedding_file.embedding_space_id is not None
+        and embedding_file.embedding_space_id != record.embedding_space_id
+    ):
+        raise CorpusStateError(
+            f"{bin_path.name}: sidecar-carried embedding space "
+            f"{embedding_file.embedding_space_id} does not match the "
+            f"manifest's {record.embedding_space_id} for {record.slug!r} — "
+            f"the file is not the one the manifest describes; refusing to "
+            f"search",
+        )
 
 
 def _slug_token_in_citation(slug: str, citation_lower: str) -> bool:

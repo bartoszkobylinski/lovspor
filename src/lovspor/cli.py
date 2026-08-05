@@ -26,6 +26,7 @@ from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
+from lovspor.sync.lspe_cutover import migrate_lspe_v2
 from lovspor.sync.orchestrator import mark_undersized_embeddings_stale, run_sync
 
 app = typer.Typer(
@@ -276,6 +277,31 @@ def annotate_input_identity() -> None:
         f"({report.already_annotated} already current, "
         f"{report.tombstones_skipped} tombstone(s) untouched, "
         f"{report.empty_input_documents} sectionless) "
+        f"at corpus {report.corpus_head[:12]} with engine {report.engine_version}.",
+    )
+
+
+@app.command(name="migrate-lspe-v2")
+def migrate_lspe_v2_command() -> None:
+    """Run the ADR-0005 Stage 2 coordinated LSPE version-2 cutover.
+
+    Rewrites every current sidecar to format version 2, embedding each
+    record's manifest ESI in the file header, with vectors preserved
+    bit-for-bit and every written file re-read and verified. Keyless and
+    derived-artifact-only: Markdown, manifest and history are untouched.
+    One commit for the whole corpus — never a mixed-version state — and the
+    binding ADR-0005 §3 ordering applies: run this only after the
+    dual-reader release has propagated, and switch the writer to version 2
+    only after this cutover has landed. Commits locally; publication is a
+    separate, deliberately manual step.
+    """
+    settings = Settings.from_env()
+    report = migrate_lspe_v2(settings)
+    typer.echo(
+        f"Rewrote {report.rewritten} sidecar(s) to LSPE v2 "
+        f"({report.already_v2} already v2, "
+        f"{report.tombstones_skipped} tombstone(s) untouched, "
+        f"{report.header_only} header-only) "
         f"at corpus {report.corpus_head[:12]} with engine {report.engine_version}.",
     )
 

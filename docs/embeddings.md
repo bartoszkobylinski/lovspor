@@ -81,15 +81,19 @@ Trade-offs accepted with the OpenAI choice:
 
 ## Binary format (LSPE)
 
-LSPE = LovSpor Embeddings. Little-endian, 16-byte header followed by
-contiguous section records.
+LSPE = LovSpor Embeddings. Little-endian header followed by contiguous
+section records. Two format versions exist: version 1 (16-byte header,
+no identity) and version 2 (ADR-0005 Stage 2: the same header with the
+version byte set to `2`, followed by the 16-byte raw ESI digest). The
+engine reads both; which version the writer emits is governed by the
+cutover discipline below.
 
-### Header (16 bytes)
+### Header (common prefix, 16 bytes)
 
 | Offset | Size | Field         | Notes                                  |
 |-------:|-----:|---------------|----------------------------------------|
 |      0 |    4 | magic         | `b"LSPE"`                              |
-|      4 |    1 | version       | `1`                                    |
+|      4 |    1 | version       | `1` or `2`                             |
 |      5 |    1 | reserved      | `0` (future flags)                     |
 |      6 |    2 | section count | uint16, must equal records that follow |
 |      8 |    4 | dim           | uint32, embedding dimension            |
@@ -104,10 +108,34 @@ embedder's, so one file from an older model cannot crash the search
 across the rest of the corpus; the drop is counted and reported in
 `semantic_search`'s `notice`.
 
-The header carries **no embedding-space identity**, and Stage 1 of
-ADR-0005 does not add one: the version stays `1` and the reserved
-byte stays `0`. A `.bin` read on its own therefore cannot tell you
-which model produced it.
+### Version-2 header extension (ADR-0005 Stage 2)
+
+A version-2 file appends exactly one field to the common prefix:
+
+| Offset | Size | Field      | Notes                                     |
+|-------:|-----:|------------|-------------------------------------------|
+|     16 |   16 | ESI digest | raw bytes of the `embedding_space_id`     |
+
+The digest is the same 128-bit value the manifest records as 32 hex
+characters. A version-2 sidecar therefore carries its own space
+identity: `read_embeddings` on a detached v2 file returns it
+(`EmbeddingFile.embedding_space_id`), and a consumer that reached the
+file through the manifest cross-checks the two — a substituted
+same-dimension `.bin` at a manifest-referenced path, undetectable
+under Stage 1, refuses the search loudly under Stage 2.
+
+A **version-1** header carries no identity and Stage 1 semantics
+apply unchanged: a v1 `.bin` read on its own cannot tell you which
+model produced it and is classified Unknown/legacy.
+
+**Version discipline (ADR-0005 §3, binding).** The writer emits
+version 1 until the one coordinated corpus-wide cutover
+(`lovspor migrate-lspe-v2`) has landed; `lspe_writer_version`
+(`LOVSPOR_LSPE_WRITER_VERSION`) flips to 2 only as part of that
+rollout. A reader meeting a version it does not implement raises
+`UnsupportedSidecarVersionError` — deliberately not a `ValueError` —
+so the search path's per-file corrupt skip cannot silently shrink the
+corpus when the reader is behind the format.
 
 ### Section record
 
@@ -234,12 +262,14 @@ fails with an explanation rather than answering over an empty corpus.
   another space still matches the record.
 * **`read_embeddings(path)` on a detached file tells you nothing about its space.**
   The file parses; its identity is Unknown.
-* **The binary format has not changed.** Sidecars are still `LSPE` version 1 and
-  carry no digest. Putting one there is Stage 2, which requires a reader that
-  accepts both versions, a propagation period, and a single coordinated corpus-wide
-  cutover — a mixed version-1/version-2 corpus is forbidden, because older readers
-  skip an unreadable sidecar silently and would answer over a quietly smaller
-  corpus.
+* **The published corpus format has not changed yet.** The engine implements
+  LSPE version 2 (sidecar-carried ESI digest — see the format section above) and
+  reads both versions, but the corpus stays version 1 until the ADR-0005 §3
+  sequence completes: dual-reader release, propagation period, then the single
+  coordinated cutover (`lovspor migrate-lspe-v2`). A mixed version-1/version-2
+  corpus is forbidden, because pre-Stage-2 readers skip an unreadable sidecar
+  silently and would answer over a quietly smaller corpus. After the cutover
+  lands, the Stage 1 limitations above close for every v2 file.
 
 ## Model changes
 

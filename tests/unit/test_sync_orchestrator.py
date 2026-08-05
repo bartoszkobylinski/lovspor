@@ -524,7 +524,7 @@ def test_write_one_renders_document_record_and_optional_embeddings(
     monkeypatch.setattr(
         orchestrator_module,
         "_write_embeddings_for_doc",
-        lambda repo, dataset, slug, rendered, embedder: (
+        lambda repo, dataset, slug, rendered, embedder, **_kwargs: (
             repo / "lover" / "embeddings" / f"{slug}.bin",
             "f" * 64,
         ),
@@ -2218,3 +2218,26 @@ def test_mark_undersized_embeddings_stale_is_noop_when_all_current(tmp_path: Pat
         check=True,
     ).stdout
     assert head_before == head_after
+
+
+def test_writing_v2_without_an_embedder_identity_fails_loudly(tmp_path: Path) -> None:
+    """A version-2 header carries the space identity; an adapter that
+    declares none cannot write one — silently downgrading to v1 or stamping
+    a guessed identity are both forbidden outcomes."""
+
+    class _AnonymousEmbedder:
+        def encode(self, texts: list[str]) -> np.ndarray:
+            return np.zeros((len(texts), 4), dtype=np.float32)
+
+        def get_dimension(self) -> int:
+            return 4
+
+    with pytest.raises(CorpusStateError, match="declares no embedding-space identity"):
+        orchestrator_module._write_embeddings_for_doc(
+            tmp_path,
+            "gjeldende-lover",
+            "alpha",
+            "---\ntitle: A\n---\n# A\n\n### § 1. En\n\nTekst.\n",
+            _AnonymousEmbedder(),  # type: ignore[arg-type]
+            lspe_version=2,
+        )
