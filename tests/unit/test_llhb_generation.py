@@ -21,7 +21,14 @@ from lovspor.llhb.generation import (
 )
 from lovspor.llhb.quotes import QuoteRef, QuoteStatus, materialize_quote, quote_sha256
 from lovspor.mcp import CorpusReader
-from tests.unit.llhb_fixtures import build_corpus, record_for, rich_corpus
+from lovspor.storage.manifest import Manifest, write_manifest
+from tests.unit.llhb_fixtures import (
+    DOBBELTLOVEN_BODY,
+    GENERATED_AT,
+    build_corpus,
+    record_for,
+    rich_corpus,
+)
 
 
 @pytest.fixture
@@ -174,6 +181,30 @@ Spesifikasjonene i dette vedlegget gjelder som forskrift.
 
 Kommentar som speiler forskriftens paragraf uten å være en bestemmelse.
 """
+
+
+def test_scan_skips_hostile_records_and_reports_provenance(tmp_path: Path) -> None:
+    """Loop-truncation guard: a record the scan cannot read and a tombstone
+    that sort BEFORE real material must be skipped, never abort the scan or
+    leak into it — and each finding carries its doc_id provenance."""
+    records = {
+        "a-unreadable": record_for("borteloven", "Lov om borte (borteloven)"),
+        "b-tombstone": record_for("utgåttloven", "Lov om utgåtte regler", status="removed"),
+        "c-dup": record_for("dobbeltloven", "Lov om doble paragrafer (dobbeltloven)"),
+    }
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "borteloven.md").write_bytes(b"---\nid: a\n---\n\n\xff\xfe ikke utf-8")
+    for doc_id, slug in (("b-tombstone", "utgåttloven"), ("c-dup", "dobbeltloven")):
+        (tmp_path / "lover" / f"{slug}.md").write_text(
+            f"---\nid: {doc_id}\ntitle: x\n---\n\n{DOBBELTLOVEN_BODY}",
+            encoding="utf-8",
+        )
+    write_manifest(
+        Manifest(generated_at=GENERATED_AT, documents=records),
+        tmp_path / "manifest.json",
+    )
+    findings = scan_duplicate_ids(CorpusReader(tmp_path))
+    assert findings == [{"slug": "dobbeltloven", "doc_id": "c-dup", "duplicates": {"6-2": 2}}]
 
 
 def test_oracle_counts_vedlegg_and_ignores_veileder(tmp_path: Path) -> None:
