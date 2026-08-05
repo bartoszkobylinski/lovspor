@@ -331,13 +331,44 @@ class ParsedSection(TypedDict):
     order — it is 1 for every section whose id is unique (the overwhelming
     majority), and only climbs where an id genuinely repeats. It is what makes
     an otherwise-ambiguous section addressable.
+
+    ``layer`` classifies the document region the section sits in, from its
+    governing chapter heading: ``"main"`` (the act's own body),
+    ``"vedlegg"`` (an appendix — often normative, frequently with its own
+    ``§`` numbering that legitimately collides with the main body), or
+    ``"veileder"`` (embedded guidance/commentary whose headings mirror the
+    act's sections without being provisions themselves). Purely additive:
+    nothing is dropped or renumbered — a ``veileder`` heading still parses,
+    still counts an occurrence, and stays addressable; the layer lets
+    consumers tell a genuine duplicate provision from a commentary echo
+    (LLHB RC3, 2026-08-05).
     """
 
     section_id: str
     occurrence: int
     heading: str
     parent_chapter: str
+    layer: str
     body: str
+
+
+_VEILEDER_CHAPTER = re.compile(r"^\s*veileder\b", re.IGNORECASE)
+_VEDLEGG_CHAPTER = re.compile(r"^\s*vedlegg\b", re.IGNORECASE)
+
+
+def _layer_for_chapter(chapter: str) -> str:
+    """Classify a governing chapter heading into a document layer.
+
+    Conservative on purpose: only headings that ANNOUNCE themselves as
+    ``Vedlegg …`` or ``Veileder …`` leave the ``main`` layer. A chapter the
+    rule cannot classify stays ``main`` — mislabelling a real provision as
+    commentary would be the harmful direction.
+    """
+    if _VEILEDER_CHAPTER.match(chapter):
+        return "veileder"
+    if _VEDLEGG_CHAPTER.match(chapter):
+        return "vedlegg"
+    return "main"
 
 
 class CorpusReader:
@@ -598,6 +629,7 @@ class CorpusReader:
             "occurrence": section["occurrence"],
             "heading": section["heading"],
             "parent_chapter": section["parent_chapter"],
+            "layer": section["layer"],
             "body": section["body"],
             "cross_references": cross_references,
         }
@@ -606,7 +638,7 @@ class CorpusReader:
         """Table of contents for one act, in document order.
 
         One row per ``§`` section: ``{section_id, occurrence, heading,
-        parent_chapter}``. The cheap navigation companion to
+        parent_chapter, layer, kind}``. The cheap navigation companion to
         ``get_section`` — an AI that doesn't know the exact section
         id can fetch the TOC instead of pulling the whole act
         through ``get_law`` (hundreds of KB for the big codes).
@@ -637,6 +669,11 @@ class CorpusReader:
                 "occurrence": section["occurrence"],
                 "heading": section["heading"],
                 "parent_chapter": section["parent_chapter"],
+                # Document region of the section: main | vedlegg | veileder.
+                # A veileder-layer row mirrors an act section without being a
+                # provision — callers deciding "is this id genuinely
+                # duplicated?" must not count it (RC3).
+                "layer": section["layer"],
                 # "block" entries are addressable content that is not a § of
                 # the act (a takst table, a vedlegg, a convention article).
                 # Flagged so a caller never cites one as a paragraph of law.
@@ -2201,6 +2238,7 @@ def _parse_sections(body: str) -> list[ParsedSection]:
                 occurrence=seen[current_id],
                 heading=current_data["heading"],
                 parent_chapter=current_data["parent_chapter"],
+                layer=_layer_for_chapter(current_data["parent_chapter"]),
                 body="\n".join(current_data["body_lines"]).strip(),
             ),
         )

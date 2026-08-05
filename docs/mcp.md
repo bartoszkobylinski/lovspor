@@ -196,6 +196,7 @@ Return a single ``§`` section of an act — the surgical alternative to `get_la
   "section_id": "5-12",
   "heading": "§ 5-12. Boligsparing for ungdom",
   "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+  "layer": "main",
   "body": "(1) Skattefradraget gis for sparing til bolig...\n\n(2) Fradraget reduseres ved utbetaling...",
   "cross_references": [
     {
@@ -232,17 +233,21 @@ List an act's table of contents: every `§` section id and heading, in document 
   {
     "section_id": "1-1",
     "heading": "§ 1-1. Lovens virkeområde",
-    "parent_chapter": "Kapittel 1. Alminnelige bestemmelser"
+    "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+    "layer": "main"
   },
   {
     "section_id": "5-12",
     "heading": "§ 5-12. Boligsparing for ungdom",
-    "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene"
+    "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+    "layer": "main"
   }
 ]
 ```
 
 `section_id` feeds straight into `get_section`. Empty list when the act has no `§` sections. Unknown slug raises with near-miss suggestions and a pointer to `search_laws`.
+
+`layer` classifies the document region a section sits in, from its governing chapter heading: `main` (the act's own body), `vedlegg` (an appendix — often normative, sometimes with its own `§` numbering that legitimately collides with the main body's), or `veileder` (embedded guidance whose headings mirror the act's sections without being provisions). Everything stays addressable and occurrences are unchanged; the field exists so a consumer can tell a genuine duplicate provision from a commentary echo — before it, an embedded *Veileder* chapter made `byggeforskrift-for-longyearbyen § 2` look like a duplicated provision. The rule is conservative: only chapters announcing themselves as `Vedlegg …`/`Veileder …` leave `main`.
 
 ### `get_law_history(slug)`
 
