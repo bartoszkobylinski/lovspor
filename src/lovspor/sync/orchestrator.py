@@ -980,6 +980,7 @@ def _write_one(
             upstream.slug,
             rendered,
             embedder,
+            lspe_version=settings.lspe_writer_version,
         )
         written_paths.append(embed_path)
         descriptor, space_id = _embedder_identity(embedder)
@@ -1095,8 +1096,16 @@ def _write_embeddings_for_doc(
     slug: str,
     rendered_markdown: str,
     embedder: EmbeddingModel,
+    *,
+    lspe_version: int = 1,
 ) -> tuple[Path, str]:
     """Compute and write embeddings for one document.
+
+    ``lspe_version`` selects the sidecar format (ADR-0005 §3): 1 until the
+    corpus-wide cutover has landed, 2 afterwards. Writing version 2 embeds
+    the embedder's own ESI in the header; an embedder that declares no
+    identity cannot write version 2 — that fails loudly rather than
+    publishing a sidecar whose self-identity would be a lie.
 
     Derives the ordered embedding inputs through the ONE canonical path
     (``build_embedding_inputs`` — ADR-0006 §2), encodes them with the model,
@@ -1125,13 +1134,21 @@ def _write_embeddings_for_doc(
     # equal the production model's dimensionality, so this is byte-identical
     # today; it stops being a coincidence the moment the model is configurable.
     dim = embedder.get_dimension()
+    header_esi: str | None = None
+    if lspe_version == 2:  # noqa: PLR2004 - the two literal format versions
+        _, header_esi = _embedder_identity(embedder)
+        if header_esi is None:
+            raise CorpusStateError(
+                "cannot write an LSPE version-2 sidecar: the configured "
+                "embedder declares no embedding-space identity",
+            )
     if not inputs:
-        write_embeddings(path, [], scale=1.0, dim=dim)
+        write_embeddings(path, [], scale=1.0, dim=dim, embedding_space_id=header_esi)
         return path, input_hash
     matrix = embedder.encode([item.text for item in inputs])
     quantized, scale = quantize_int8(matrix)
     pairs = [(inputs[i].section_id, quantized[i]) for i in range(len(inputs))]
-    write_embeddings(path, pairs, scale, dim=dim)
+    write_embeddings(path, pairs, scale, dim=dim, embedding_space_id=header_esi)
     return path, input_hash
 
 
@@ -1945,6 +1962,7 @@ def _run_sprint9_embeddings_migration(
             _require_slug(item.record),
             item.rendered,
             embedder,
+            lspe_version=settings.lspe_writer_version,
         )
         written.append(new_path)
         new_records[item.doc_id] = item.record.model_copy(

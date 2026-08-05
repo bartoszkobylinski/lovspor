@@ -879,14 +879,17 @@ def test_a_v1_sidecar_still_round_trips(tmp_path: Path) -> None:
 
 
 def test_a_detached_sidecar_is_structurally_readable_but_unidentified(tmp_path: Path) -> None:
-    """Stage 1 leaves detached files exactly as opaque as they were.
+    """A detached VERSION-1 file stays exactly as opaque as it always was.
 
-    ``read_embeddings`` is a documented public API and keeps working, but the
-    file it returns carries no space of its own — identity lives only in the
-    manifest until Stage 2.
+    ``read_embeddings`` is a documented public API and keeps working, but a
+    v1 file carries no space of its own — its parsed identity is ``None``
+    and must never be inferred. Stage 2 changes this only for version-2
+    files, which carry the ESI in their header.
     """
     parsed = read_embeddings(_sidecar(tmp_path))
 
     assert not hasattr(parsed, "space_id")
     assert not hasattr(parsed, "embedding_space")
-    assert set(vars(parsed)) == {"dim", "scale", "sections"}
+    assert set(vars(parsed)) == {"dim", "scale", "sections", "version", "embedding_space_id"}
+    assert parsed.version == 1
+    assert parsed.embedding_space_id is None

@@ -75,6 +75,13 @@ class Settings(BaseModel):
     staying far under the count threshold. Full corpus is ~37.9M tokens.
     Override: ``LOVSPOR_REEMBED_GUARD_MAX_TOKENS`` or the sync flag.
     """
+    lspe_writer_version: int = 1
+    """LSPE format version the sync writer emits (ADR-0005 §3). Stays 1 —
+    the corpus emits version 1 until the one coordinated corpus-wide cutover
+    has landed; a version-2 file must never be published opportunistically.
+    Set 2 (``LOVSPOR_LSPE_WRITER_VERSION``) only as part of the Stage 2
+    cutover rollout; a later release flips the default and retires the flag.
+    """
     http_timeout_seconds: float = 120.0
     http_user_agent: str = "lovspor/0.1 (+https://github.com/bartoszkobylinski/lovspor)"
     log_level: str = "INFO"
@@ -154,6 +161,15 @@ class Settings(BaseModel):
         if value <= 0:
             raise ValueError(
                 f"reembed_guard_max_tokens must be positive, got: {value!r}",
+            )
+        return value
+
+    @field_validator("lspe_writer_version")
+    @classmethod
+    def _lspe_version_known(cls, value: int) -> int:
+        if value not in (1, 2):
+            raise ValueError(
+                f"lspe_writer_version must be 1 or 2, got: {value!r}",
             )
         return value
 
@@ -239,6 +255,7 @@ class Settings(BaseModel):
                 ) from exc
 
         _apply_reembed_guard(data, overrides)
+        _apply_lspe_writer_version(data, overrides)
 
         embedding = _resolve_embedding(overrides)
         data["embedding"] = embedding
@@ -308,6 +325,23 @@ def _apply_reembed_guard(
         except ValueError as exc:
             raise ConfigError(
                 f"LOVSPOR_REEMBED_GUARD_MAX_TOKENS must be an int, got: {raw_tokens!r}",
+            ) from exc
+
+
+def _apply_lspe_writer_version(
+    data: dict[str, object],
+    overrides: dict[str, object],
+) -> None:
+    """Resolve the LSPE writer format version from overrides or env."""
+    raw = overrides.get("lspe_writer_version")
+    if raw is None:
+        raw = os.environ.get("LOVSPOR_LSPE_WRITER_VERSION")
+    if raw is not None:
+        try:
+            data["lspe_writer_version"] = int(str(raw))
+        except ValueError as exc:
+            raise ConfigError(
+                f"LOVSPOR_LSPE_WRITER_VERSION must be an int, got: {raw!r}",
             ) from exc
 
 

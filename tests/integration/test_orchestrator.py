@@ -2353,6 +2353,7 @@ def test_sprint9_embeddings_migration_skips_non_targets_and_commits_once(
         slug: str,
         rendered_markdown: str,
         _embedder: object,
+        **_kwargs: object,
     ) -> tuple[Path, str]:
         writes.append((slug, rendered_markdown))
         path = _embedding_path(repo, slug)
@@ -5515,3 +5516,71 @@ def test_keyless_sync_preserves_a_recorded_input_identity(
     [after] = [r for r in preserved.documents.values() if r.slug == "alpha"]
     assert after.embedding_input_hash == before.embedding_input_hash
     assert _embedding_path(corpus, "alpha").read_bytes() == sidecar_before
+
+
+def test_keyed_sync_emits_lspe_v1_by_default(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0005 §3: a version-2 file must never be published
+    opportunistically — until the coordinated cutover, the writer emits
+    version 1 even though the engine can read and write both."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(lover_tar, [("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body."))])
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(data_dir=data_dir, lovverk_repo_path=corpus, openai_api_key="sk-test")
+
+    run_sync(settings)
+
+    parsed = read_embeddings(_embedding_path(corpus, "alpha"))
+    assert parsed.version == 1
+    assert parsed.embedding_space_id is None
+
+
+def test_writer_version_2_emits_v2_carrying_the_embedder_identity(
+    tmp_path: Path,
+    httpx_mock: HTTPXMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After the cutover the writer emits version 2: the header carries the
+    embedder's own ESI — including for a header-only sectionless doc — and
+    it matches what the manifest stamps for the same record."""
+    data_dir = tmp_path / "data"
+    corpus = tmp_path / "lovverk"
+    _git_init_corpus(corpus)
+    _install_fake_embedder(monkeypatch)
+    lover_tar = tmp_path / "tarballs" / "lover.tar.bz2"
+    forskrifter_tar = tmp_path / "tarballs" / "forskrifter.tar.bz2"
+    _build_tarball(
+        lover_tar,
+        [
+            ("nl/lov-1.xml", _law_with_section("Alpha", "Alpha body.")),
+            ("nl/lov-2.xml", _minimal_law_html("tomrom", "Tomrom")),
+        ],
+    )
+    _build_tarball(forskrifter_tar, [])
+    _register_lovdata_mocks(httpx_mock, lover_tar, forskrifter_tar)
+    settings = Settings(
+        data_dir=data_dir,
+        lovverk_repo_path=corpus,
+        openai_api_key="sk-test",
+        lspe_writer_version=2,
+    )
+
+    run_sync(settings)
+
+    manifest = read_manifest(corpus / "manifest.json")
+    by_slug = {r.slug: r for r in manifest.documents.values()}
+    for slug in ("alpha", "tomrom"):
+        parsed = read_embeddings(_embedding_path(corpus, slug))
+        assert parsed.version == 2
+        assert parsed.embedding_space_id == by_slug[slug].embedding_space_id
+        assert parsed.embedding_space_id is not None
+    assert read_embeddings(_embedding_path(corpus, "tomrom")).sections == []

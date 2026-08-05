@@ -46,7 +46,7 @@ from lovspor.embeddings import (
     write_embeddings,
 )
 from lovspor.embeddings.search import SearchHit
-from lovspor.errors import ConfigError
+from lovspor.errors import ConfigError, CorpusStateError, UnsupportedSidecarVersionError
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
     _MAX_MARKER_TOLERANT_QUERY,
@@ -469,12 +469,14 @@ def _write_embedding_file(
     sections: list[tuple[str, list[int]]],
     *,
     scale: float = 1.0,
+    esi: str | None = None,
 ) -> None:
     write_embeddings(
         root / dataset_subdir / "embeddings" / f"{slug}.bin",
         [(section_id, np.asarray(vector, dtype=np.int8)) for section_id, vector in sections],
         scale=scale,
         dim=len(sections[0][1]) if sections else 3,
+        embedding_space_id=esi,
     )
 
 
@@ -7747,3 +7749,50 @@ def test_citation_suggestion_hint_skips_a_short_token_and_keeps_looking(
     hint = CorpusReader(tmp_path)._citation_suggestion_hint("jf skatteloven")
 
     assert hint == "; did you mean skatteloven-sktl? Use search_laws for canonical slugs"
+
+
+# ---------- ADR-0005 Stage 2: sidecar-carried identity ----------
+
+
+def test_semantic_search_accepts_a_v2_sidecar_matching_the_manifest(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(
+        tmp_path, "lover", "skatteloven", [("1", [10, 0, 0])], esi=LEGACY_SPACE_ID
+    )
+
+    rows = CorpusReader(
+        tmp_path,
+        embedder=_FakeEmbedder([1.0, 0.0, 0.0]),
+    ).semantic_search("query")["results"]
+
+    assert [r["slug"] for r in rows] == ["skatteloven"]
+
+
+def test_semantic_search_refuses_a_v2_sidecar_disagreeing_with_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """The substituted-file hole Stage 2 closes: a v2 sidecar whose header
+    identity contradicts the manifest is tamper evidence, and the whole call
+    refuses rather than silently shrinking the searched corpus."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("1", [10, 0, 0])], esi="0" * 32)
+
+    with pytest.raises(CorpusStateError, match="does not match the manifest"):
+        CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0])).semantic_search("query")
+
+
+def test_semantic_search_fails_loudly_on_an_unsupported_future_version(
+    tmp_path: Path,
+) -> None:
+    """ADR-0005 §3: an unsupported format version means the READER is behind
+    the corpus. Folding it into the per-file corrupt skip would silently
+    shrink recall — it must propagate instead."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("1", [10, 0, 0])])
+    bin_path = tmp_path / "lover" / "embeddings" / "skatteloven.bin"
+    raw = bytearray(bin_path.read_bytes())
+    raw[4] = 3
+    bin_path.write_bytes(bytes(raw))
+
+    with pytest.raises(UnsupportedSidecarVersionError, match="version 3"):
+        CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0])).semantic_search("query")

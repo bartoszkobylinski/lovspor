@@ -45,6 +45,18 @@ class CorpusStateError(LovsporError):
     """
 
 
+class UnsupportedSidecarVersionError(LovsporError):
+    """A sidecar is stored in a format version this engine does not read.
+
+    Deliberately NOT a ``ValueError``: the search path skips corrupt
+    sidecars per-file, and an unsupported version folded into that skip
+    would silently shrink the searched corpus (ADR-0005 §3's
+    silent-partial-recall failure). An unsupported version means the
+    reader is behind the corpus — the fix is updating the engine, never
+    ignoring the file.
+    """
+
+
 class MassReembedError(LovsporError):
     """A keyed sync selected more embedding-input repair than the guard allows.
 
