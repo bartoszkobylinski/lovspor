@@ -1,0 +1,198 @@
+"""Pool orchestration: determinism, ids, validation, dedup, leaks, queue."""
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from lovspor.llhb.corpus_pin import CorpusPin
+from lovspor.llhb.pool import GenerationRun, PoolConfig, PoolResult, generate_pool
+from lovspor.llhb.quotes import normalize_quote_text
+from lovspor.llhb.schema import canonical_jsonl, load_schema, validate_case
+from lovspor.mcp import CorpusNotFoundError, CorpusReader
+from tests.unit.llhb_fixtures import GENERATED_AT, rich_corpus
+from tests.unit.test_llhb_schema import SCHEMA_PATH
+
+_PIN_SHA = "a" * 40
+_RUN = GenerationRun(
+    lovspor_commit="b" * 40,
+    created="2026-08-05",
+    timestamp="2026-08-05T10:00:00+00:00",
+)
+_TARGETS = {"C1": 3, "C2": 2, "C3": 3, "C4": 2, "C5": 4, "C6": 2, "C7": 3, "C8": 2}
+
+
+@pytest.fixture(scope="module")
+def result(tmp_path_factory: pytest.TempPathFactory) -> PoolResult:
+    reader = rich_corpus(tmp_path_factory.mktemp("corpus"))
+    return _generate(reader)
+
+
+def _generate(reader: CorpusReader) -> PoolResult:
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    config = PoolConfig(
+        schema_path=SCHEMA_PATH,
+        targets=_TARGETS,
+        inventory_size=10,
+        per_act_total_cap=20,
+    )
+    return generate_pool(reader, pin, config, _RUN)
+
+
+def test_generation_is_deterministic(tmp_path: Path, result: PoolResult) -> None:
+    again = _generate(rich_corpus(tmp_path))
+    assert canonical_jsonl(result.candidates) == canonical_jsonl(again.candidates)
+    assert result.ledger == again.ledger
+    assert result.dedup_report == again.dedup_report
+
+
+def test_all_candidates_valid_and_none_rejected(result: PoolResult) -> None:
+    assert result.rejected == []
+    assert all(entry["status"] == "pass" for entry in result.ledger)
+
+
+def test_schema_validates_every_candidate(result: PoolResult) -> None:
+    schema = load_schema(SCHEMA_PATH)
+    for case in result.candidates:
+        assert validate_case(case, schema) == [], case["case_id"]
+
+
+def test_targets_hit_where_material_allows(result: PoolResult) -> None:
+    counts = result.distribution["by_category"]
+    assert counts["C1"] == 3
+    assert counts["C3"] == 3
+    assert counts["C7"] == 3
+    # C5 target is 4 but the REAL population is 1 duplicate + 1 tombstone:
+    # the shortfall is reported, never fabricated.
+    assert counts["C5"] == 2
+    assert result.generation_manifest["emitted_by_category"]["C5"] == 2
+
+
+def test_c3_traps_are_truly_nonexistent(
+    result: PoolResult,
+    tmp_path: Path,
+) -> None:
+    reader = rich_corpus(tmp_path)
+    for case in result.candidates:
+        if case["category"] != "C3":
+            continue
+        with pytest.raises(CorpusNotFoundError):
+            reader.get_section(str(case["claimed_act_slug"]), str(case["claimed_section_id"]))
+
+
+def test_c4_trap_differs_from_ground_truth(result: PoolResult) -> None:
+    c4 = [c for c in result.candidates if c["category"] == "C4"]
+    assert c4
+    for case in c4:
+        assert case["claimed_act_slug"] != case["expected_act_slug"]
+
+
+def test_ids_are_sequential_unique_and_category_visible(result: PoolResult) -> None:
+    ids = [str(c["case_id"]) for c in result.candidates]
+    assert len(ids) == len(set(ids))
+    for category, count in result.generation_manifest["emitted_by_category"].items():
+        emitted = [i for i in ids if f"-{category}-" in i]
+        assert len(emitted) == count  # nothing rejected in this corpus
+        assert emitted == [f"llhb-v1-{category}-{n:03d}" for n in range(1, count + 1)]
+
+
+def test_every_case_carries_the_corpus_pin(result: PoolResult) -> None:
+    for case in result.candidates:
+        assert case["corpus_pin"]["lovverk_commit"] == _PIN_SHA
+
+
+def test_c2_questions_leak_nothing(result: PoolResult) -> None:
+    for case in result.candidates:
+        if case["category"] == "C2":
+            question = str(case["question"]).casefold()
+            assert "§" not in question
+            assert str(case["expected_act_slug"]).casefold() not in question
+
+
+def test_c8_cases_are_structural_only(result: PoolResult) -> None:
+    c8 = [c for c in result.candidates if c["category"] == "C8"]
+    assert c8
+    for case in c8:
+        for field in ("expected_act_slug", "claimed_act_slug", "quote_ref", "citation_exists"):
+            assert case[field] is None, (case["case_id"], field)
+
+
+def test_no_authentic_statutory_text_leaks(result: PoolResult, tmp_path: Path) -> None:
+    """Questions and refs must not embed verbatim section text. The only
+    sanctioned near-verbatim content is the C7 'modified' trap text, which
+    must differ from every authentic normalized body."""
+    reader = rich_corpus(tmp_path)
+    bodies = [
+        normalize_quote_text(str(reader.get_section(slug, sid)["body"]))
+        for slug, sid in (("alfaloven", "1-1"), ("betaloven", "1"), ("gammaloven", "5-1"))
+    ]
+    for case in result.candidates:
+        if case["category"] == "C7":
+            _assert_c7_quote_free(case, bodies)
+            continue
+        question = " ".join(str(case["question"]).casefold().split())
+        for body in bodies:
+            probe = body[:60]
+            assert probe not in question, case["case_id"]
+
+
+def _assert_c7_quote_free(case: dict[str, Any], bodies: list[str]) -> None:
+    if case["subcategory"] == "authentic":
+        assert case["fabricated_quote_text"] is None
+        assert case["quote_ref"] is not None
+        assert "[SITAT]" in str(case["question"])
+    else:
+        text = normalize_quote_text(str(case["fabricated_quote_text"]))
+        assert all(text not in body for body in bodies), case["case_id"]
+
+
+def test_review_queue_contains_all_c5_and_c8(result: PoolResult) -> None:
+    queued = {entry["case_id"]: entry["reasons"] for entry in result.review_queue}
+    for case in result.candidates:
+        if case["category"] in ("C5", "C8"):
+            case_id = str(case["case_id"])
+            assert any("mandatory-manual-review" in r for r in queued[case_id])
+
+
+def test_quarantine_retains_id_and_reason(tmp_path: Path) -> None:
+    """A candidate that fails validation lands in rejected with its id kept."""
+    from lovspor.llhb.pool import _Builder, _validate_all  # noqa: PLC0415
+    from lovspor.llhb.validation import CandidateValidator  # noqa: PLC0415
+    from tests.unit.test_llhb_schema import make_case  # noqa: PLC0415
+
+    reader = rich_corpus(tmp_path)
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    builder = _Builder(reader, pin, PoolConfig(schema_path=SCHEMA_PATH), _RUN)
+    builder.validator = CandidateValidator(reader, load_schema(SCHEMA_PATH), pin)
+    broken = make_case(
+        case_id=None,
+        category="C3",
+        expected_behaviour="reject_citation",
+        expected_act_slug=None,
+        expected_section_id=None,
+        claimed_act_slug="alfaloven",
+        claimed_section_id="1-1",  # exists — not a trap
+        citation_exists=False,
+        corpus_pin={"lovverk_commit": _PIN_SHA, "manifest_generated_at": "2026-08-05T06:00:00Z"},
+    )
+    del broken["case_id"]
+    builder.emit("C3", broken)
+    valid, rejected, ledger = _validate_all(builder)
+    assert valid == []
+    (entry,) = rejected
+    assert entry["case"]["case_id"] == "llhb-v1-C3-001"
+    assert entry["case"]["validation"]["status"] == "quarantined"
+    assert [i["code"] for i in entry["issues"]] == ["trap-section-exists"]
+    assert ledger[0]["status"] == "fail"
+
+
+def test_dedup_report_is_stable_and_empty_on_template_pool(result: PoolResult) -> None:
+    assert result.dedup_report["exact_removed"] == []
+    assert isinstance(result.dedup_report["near_duplicate_flags"], list)
+
+
+def test_name_calibration_reports_collisions_and_coverage(result: PoolResult) -> None:
+    calibration = result.name_calibration
+    assert calibration["documents"] == 6  # 5 current + 1 tombstone
+    assert calibration["keys"] > 0
+    assert "collision_count" in calibration
