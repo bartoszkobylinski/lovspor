@@ -31,6 +31,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--lovspor-commit", required=True)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--id-offset", type=int, default=0)
     return parser.parse_args()
 
 
@@ -59,11 +60,10 @@ def main() -> None:
         created=now.date().isoformat(),
         timestamp=now.isoformat(),
     )
-    config = (
-        PoolConfig(schema_path=SCHEMA_PATH, seed=args.seed)
-        if args.seed is not None
-        else PoolConfig(schema_path=SCHEMA_PATH)
-    )
+    options: dict[str, Any] = {"schema_path": SCHEMA_PATH, "id_offset": args.id_offset}
+    if args.seed is not None:
+        options["seed"] = args.seed
+    config = PoolConfig(**options)
     result = generate_pool(CorpusReader(args.corpus), pin, config, run)
     _write_artifacts(args.out, result)
     print(f"pool written to {args.out}")

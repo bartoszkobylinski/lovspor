@@ -108,6 +108,25 @@ def _echo_corpus(root: Path) -> CorpusReader:
     )
 
 
+def test_id_offset_shifts_case_ids_into_a_fresh_range(tmp_path: Path) -> None:
+    """Stage 3.6-E: replacement generations must never reuse Stage 3 case
+    ids — offset counters keep the id space disjoint (owner ruling: new
+    material gets new ids, review history never mixes)."""
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    config = PoolConfig(
+        schema_path=SCHEMA_PATH,
+        targets=_TARGETS,
+        inventory_size=10,
+        per_act_total_cap=20,
+        id_offset=500,
+    )
+    result = generate_pool(rich_corpus(tmp_path), pin, config, _RUN)
+    ids = [str(c["case_id"]) for c in result.candidates]
+    assert ids
+    assert all(int(i.rsplit("-", 1)[1]) > 500 for i in ids)
+    assert any(i.endswith("-501") for i in ids)
+
+
 def test_veileder_only_duplicate_yields_no_c5(tmp_path: Path) -> None:
     """RC3 end-to-end: a corpus whose only duplication is a veileder echo
     produces zero C5 cases and an empty ambiguity scan."""
