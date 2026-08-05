@@ -85,6 +85,12 @@ dev = [
     # console script; making it a runtime dependency would force it on every
     # `pip install lovspor` for code the wheel no longer contains.
     "pyyaml>=6.0",
+    # jsonschema backs LLHB dataset validation (lovspor.llhb.schema). Dev-only
+    # like pyyaml: the module lazy-imports it with a clear error, so the wheel
+    # gains no runtime dependency for benchmark-only tooling. Stubs follow the
+    # lxml-stubs precedent so `mypy src/` stays strict-green.
+    "jsonschema>=4.23",
+    "types-jsonschema>=4.23",
 ]
 
 [build-system]
