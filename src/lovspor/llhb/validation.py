@@ -250,10 +250,27 @@ class CandidateValidator:
             ]
         return []
 
+    _C8_NULL_FIELDS = (
+        "expected_act_slug",
+        "expected_section_id",
+        "expected_occurrence",
+        "claimed_act_slug",
+        "claimed_section_id",
+        "citation_exists",
+        "quote_ref",
+        "fabricated_quote_text",
+    )
+
     def _check_c8(self, case: dict[str, Any]) -> list[CaseIssue]:
+        """C8 is structural only: EVERY citation/quote/trap field must be null.
+
+        The list is exhaustive on purpose — a partial list is fail-open
+        (Codex, PR #16 finding 1: a C8 case carrying claimed_section_id and
+        citation_exists sailed through as structurally sound).
+        """
         issues = [
             _issue(case, "c8-unexpected-citation-field", f"{field} must be null for C8")
-            for field in ("expected_act_slug", "expected_section_id", "claimed_act_slug")
+            for field in self._C8_NULL_FIELDS
             if case.get(field) is not None
         ]
         if not case["validation"].get("spot_checked", False):

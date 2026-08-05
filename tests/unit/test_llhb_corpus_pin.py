@@ -68,6 +68,18 @@ def test_verify_pin_rejects_wrong_commit(corpus_repo: Path) -> None:
         verify_pin(corpus_repo, pin)
 
 
+def test_verify_pin_rejects_wrong_manifest_timestamp(corpus_repo: Path) -> None:
+    """Codex PR #16 finding 2: verify_pin ignored manifest_generated_at, so a
+    lock with the right SHA and a fake timestamp verified. It must not."""
+    good = current_pin(corpus_repo)
+    forged = CorpusPin(
+        lovverk_commit=good.lovverk_commit,
+        manifest_generated_at=good.manifest_generated_at.replace(year=2000),
+    )
+    with pytest.raises(CorpusPinError, match="generated_at"):
+        verify_pin(corpus_repo, forged)
+
+
 def test_verify_pin_rejects_dirty_tree(corpus_repo: Path) -> None:
     pin = current_pin(corpus_repo)
     (corpus_repo / "lover" / "testloven.md").write_text("tampered", encoding="utf-8")

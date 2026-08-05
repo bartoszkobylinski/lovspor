@@ -250,6 +250,33 @@ def test_c8_with_citation_fields_fails(validator: CandidateValidator) -> None:
     assert "c8-unexpected-citation-field" in _codes(validator.validate_case(case))
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("expected_act_slug", "testloven"),
+        ("expected_section_id", "1"),
+        ("expected_occurrence", 1),
+        ("claimed_act_slug", "testloven"),
+        ("claimed_section_id", "1"),
+        ("citation_exists", True),
+        ("citation_exists", False),
+        ("quote_ref", {"slug": "testloven", "section_id": "1", "sha256_normalized": "0" * 64}),
+        ("fabricated_quote_text", "oppdiktet tekst"),
+    ],
+)
+def test_c8_rejects_every_nonnull_citation_or_quote_field(
+    validator: CandidateValidator,
+    field: str,
+    value: Any,
+) -> None:
+    """Codex PR #16 finding 1: a partial null-field list was fail-open —
+    claimed_section_id + citation_exists slipped through as structurally sound.
+    Every trap/citation/quote field must independently trip an ERROR."""
+    issues = validator.validate_case(_c8(**{field: value}))
+    errors = [i for i in issues if i.severity is IssueSeverity.ERROR]
+    assert _codes(errors) == ["c8-unexpected-citation-field"], (field, value)
+
+
 def test_pin_mismatch_is_reported(reader: CorpusReader) -> None:
     pin = CorpusPin(lovverk_commit="b" * 40, manifest_generated_at=GENERATED_AT)
     validator = CandidateValidator(reader, load_schema(SCHEMA_PATH), pin)

@@ -75,8 +75,11 @@ def current_pin(corpus_path: Path) -> CorpusPin:
 def verify_pin(corpus_path: Path, pin: CorpusPin) -> None:
     """Fail closed unless the checkout serves exactly the pinned state.
 
-    Requires HEAD == pinned SHA AND a clean working tree — a dirty tree
-    can serve content from no commit at all, so it never verifies.
+    Requires HEAD == pinned SHA, a clean working tree (a dirty tree can
+    serve content from no commit at all), AND the manifest
+    ``generated_at`` matching the pin — the FREEZE.md §3 cross-check. A
+    lock carrying the right SHA but the wrong timestamp is malformed and
+    must not verify (Codex, PR #16 finding 2).
     """
     head = git_head_sha(corpus_path)
     if head != pin.lovverk_commit:
@@ -87,6 +90,13 @@ def verify_pin(corpus_path: Path, pin: CorpusPin) -> None:
         raise CorpusPinError(
             f"corpus working tree at {corpus_path} is dirty; "
             "pinned material must come from a clean checkout",
+        )
+    generated_at = read_manifest(corpus_path / "manifest.json").generated_at
+    if generated_at != pin.manifest_generated_at:
+        raise CorpusPinError(
+            f"manifest generated_at {generated_at.isoformat()} does not match the "
+            f"pinned {pin.manifest_generated_at.isoformat()}; the pin is malformed "
+            "or the manifest was rewritten",
         )
 
 
