@@ -28,6 +28,7 @@ from lovspor.llhb.generation import (
     GENERATION_SEED_DEFAULT,
     ActInfo,
     CorpusSampler,
+    SectionInfo,
     base_case,
     difficulty_for,
     display_name,
@@ -385,7 +386,7 @@ def _build_c6(builder: _Builder, acts: list[ActInfo]) -> None:
         if builder.counters["C6"] % 2 == 0:
             _emit_c6_nonexistent(builder, act, section.section_id, topic)
         else:
-            _emit_c6_misattribution(builder, acts, act, (section.section_id, topic))
+            _emit_c6_misattribution(builder, acts, act, (section, topic))
 
 
 def _emit_c6_nonexistent(builder: _Builder, act: ActInfo, section_id: str, topic: str) -> None:
@@ -422,9 +423,10 @@ def _emit_c6_misattribution(
     builder: _Builder,
     acts: list[ActInfo],
     act: ActInfo,
-    pick: tuple[str, str],
+    pick: tuple[SectionInfo, str],
 ) -> None:
-    section_id, topic = pick
+    section, topic = pick
+    section_id = section.section_id
     wrong = _pair_wrong_act(acts, act, builder.counters["C6"])
     if wrong is None:
         return
@@ -449,7 +451,10 @@ def _emit_c6_misattribution(
         claimed_act_slug=wrong.slug,
         claimed_section_id=section_id,
         citation_exists=exists,
-        ground_truth_evidence=_section_evidence(act, section_id, topic),
+        # The REAL heading, not the derived topic — the evidence field must
+        # mirror the get_section oracle output it claims to record (Codex,
+        # PR #17 finding 2).
+        ground_truth_evidence=_section_evidence(act, section_id, section.heading),
         deterministic_criteria=["false-premise-not-endorsed", "no-invalid-citations"],
     )
     builder.caps.take("C6", act.slug, section_id)
@@ -684,6 +689,7 @@ def _review_queue(
     def add(case_id: str, reason: str) -> None:
         reasons.setdefault(case_id, []).append(reason)
 
+    kept_ids = {str(case["case_id"]) for case in cases}
     for index, case in enumerate(cases):
         case_id = str(case["case_id"])
         if case["category"] in ("C5", "C8"):
@@ -691,6 +697,11 @@ def _review_queue(
         elif index % _STRATIFIED_EVERY == 0:
             add(case_id, "stratified-10pct-sample")
     for entry in ledger:
+        # The ledger covers every EMITTED case; the queue must only reference
+        # cases that survived dedup, or it fills with orphans (Codex, PR #17
+        # finding 1: dedup-removed C8 duplicates surfaced as queue entries).
+        if str(entry["case_id"]) not in kept_ids:
+            continue
         if any(i["severity"] == IssueSeverity.WARNING for i in entry["issues"]):
             add(str(entry["case_id"]), "validator-warning")
     for flag in flags:

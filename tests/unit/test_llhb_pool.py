@@ -154,6 +154,46 @@ def test_review_queue_contains_all_c5_and_c8(result: PoolResult) -> None:
             assert any("mandatory-manual-review" in r for r in queued[case_id])
 
 
+def test_review_queue_never_references_removed_cases(result: PoolResult) -> None:
+    """Codex PR #17 finding 1: dedup-removed cases surfaced as queue orphans."""
+    kept = {str(case["case_id"]) for case in result.candidates}
+    assert all(entry["case_id"] in kept for entry in result.review_queue)
+
+
+def test_review_queue_drops_warnings_for_deduped_cases() -> None:
+    from lovspor.llhb.pool import _review_queue  # noqa: PLC0415
+
+    kept_case = {"case_id": "llhb-v1-C8-001", "category": "C8"}
+    warning = {"code": "c8-requires-manual-review", "severity": "warning", "message": "x"}
+    ledger = [
+        {"case_id": "llhb-v1-C8-001", "issues": [warning]},
+        {"case_id": "llhb-v1-C8-002", "issues": [warning]},  # dedup-removed
+    ]
+    queue = _review_queue([kept_case], ledger, [])
+    assert [entry["case_id"] for entry in queue] == ["llhb-v1-C8-001"]
+
+
+def test_c6_misattribution_evidence_mirrors_real_oracle_heading(
+    result: PoolResult,
+    tmp_path: Path,
+) -> None:
+    """Codex PR #17 finding 2: evidence stored the derived topic, not the
+    heading get_section actually returns."""
+    reader = rich_corpus(tmp_path)
+    checked = 0
+    for case in result.candidates:
+        if case["category"] != "C6" or case["subcategory"] != "attribution-mismatch":
+            continue
+        recorded = case["ground_truth_evidence"]["get_section"]["heading"]
+        actual = reader.get_section(
+            str(case["expected_act_slug"]),
+            str(case["expected_section_id"]),
+        )["heading"]
+        assert recorded == actual, case["case_id"]
+        checked += 1
+    assert checked > 0
+
+
 def test_quarantine_retains_id_and_reason(tmp_path: Path) -> None:
     """A candidate that fails validation lands in rejected with its id kept."""
     from lovspor.llhb.pool import _Builder, _validate_all  # noqa: PLC0415
