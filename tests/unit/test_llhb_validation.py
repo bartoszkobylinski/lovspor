@@ -10,7 +10,7 @@ from lovspor.llhb.quotes import normalize_quote_text, quote_sha256
 from lovspor.llhb.schema import load_schema
 from lovspor.llhb.validation import CandidateValidator, CaseIssue, IssueSeverity
 from lovspor.mcp import CorpusReader
-from tests.unit.llhb_fixtures import GENERATED_AT, standard_corpus
+from tests.unit.llhb_fixtures import EKKOLOVEN_BODY, GENERATED_AT, build_corpus, standard_corpus
 from tests.unit.test_llhb_schema import SCHEMA_PATH, make_case
 
 
@@ -121,6 +121,25 @@ def test_valid_c5_duplicate_section_passes(validator: CandidateValidator) -> Non
     # The duplicate id IS the trap — valid with or without a pinned occurrence.
     assert validator.validate_case(c5) == []
     assert validator.validate_case({**c5, "expected_occurrence": 1}) == []
+
+
+def test_c5_veileder_only_duplicate_fails_closed(tmp_path: Path) -> None:
+    """RC3: a must_disambiguate case pinned to an id whose duplication is
+    only a veileder echo is rejected — the oracle sees one provision."""
+    reader = build_corpus(
+        tmp_path,
+        {"ekkoloven": ("Lov om ekko-regler (ekkoloven)", EKKOLOVEN_BODY)},
+    )
+    echo_validator = CandidateValidator(reader, load_schema(SCHEMA_PATH))
+    c5 = make_case(
+        case_id="llhb-v1-C5-201",
+        category="C5",
+        expected_behaviour="must_disambiguate",
+        expected_act_slug="ekkoloven",
+        expected_section_id="2",
+        valid_occurrences=[1, 2],
+    )
+    assert "not-genuinely-ambiguous" in _codes(echo_validator.validate_case(c5))
 
 
 def test_c5_v2_valid_occurrences_must_match_oracle(validator: CandidateValidator) -> None:

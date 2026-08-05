@@ -46,6 +46,25 @@ Tekst nummer to om andre tema.
 Kommentar til bestemmelsen, ikke en bestemmelse selv.
 """
 
+EKKOLOVEN_BODY = """## Kapittel 1. Regler
+
+### § 1. Formål med ekko-regler
+
+Formålet er å teste kommentarlag i dokumenter.
+
+### § 2. Krav til ekko-dokumentasjon
+
+Virksomheten skal dokumentere ekko-praksis på forsvarlig vis.
+
+## Veileder til loven
+
+### § 2. Krav til ekko-dokumentasjon
+
+Kommentar som speiler paragrafen uten å være en bestemmelse.
+"""
+"""A law whose only duplication is a veileder echo — the RC3 negative case:
+no real ambiguity anywhere in the document."""
+
 
 def record_for(
     slug: str,

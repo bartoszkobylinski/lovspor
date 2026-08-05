@@ -6,11 +6,25 @@ from typing import Any
 import pytest
 
 from lovspor.llhb.corpus_pin import CorpusPin
-from lovspor.llhb.pool import GenerationRun, PoolConfig, PoolResult, generate_pool
+from lovspor.llhb.generation import scan_duplicate_ids
+from lovspor.llhb.pool import (
+    GenerationRun,
+    PoolConfig,
+    PoolResult,
+    _build_c5,
+    _Builder,
+    generate_pool,
+)
 from lovspor.llhb.quotes import normalize_quote_text
 from lovspor.llhb.schema import canonical_jsonl, load_schema, validate_case
 from lovspor.mcp import CorpusNotFoundError, CorpusReader
-from tests.unit.llhb_fixtures import GENERATED_AT, rich_corpus
+from tests.unit.llhb_fixtures import (
+    DOBBELTLOVEN_BODY,
+    EKKOLOVEN_BODY,
+    GENERATED_AT,
+    build_corpus,
+    rich_corpus,
+)
 from tests.unit.test_llhb_schema import SCHEMA_PATH
 
 _PIN_SHA = "a" * 40
@@ -74,6 +88,86 @@ def test_c5_v2_encodes_all_oracle_occurrences(result: PoolResult) -> None:
     assert c5["expected_behaviour"] == "must_disambiguate"
     assert c5["valid_occurrences"] == [1, 2]
     assert "must-disambiguate" in c5["deterministic_criteria"]
+
+
+def _echo_corpus(root: Path) -> CorpusReader:
+    return build_corpus(
+        root,
+        {
+            "ekkoloven": ("Lov om ekko-regler (ekkoloven)", EKKOLOVEN_BODY),
+            "solidloven": (
+                "Lov om solide regler (solidloven)",
+                "## Kapittel 1. Alminnelige bestemmelser\n\n"
+                "### § 1. Krav til solid dokumentasjon\n\n"
+                "Virksomheten skal dokumentere alle solide vurderinger.\n",
+            ),
+        },
+    )
+
+
+def test_veileder_only_duplicate_yields_no_c5(tmp_path: Path) -> None:
+    """RC3 end-to-end: a corpus whose only duplication is a veileder echo
+    produces zero C5 cases and an empty ambiguity scan."""
+    result = _generate(_echo_corpus(tmp_path))
+    assert result.generation_manifest["emitted_by_category"].get("C5", 0) == 0
+    assert all(c["category"] != "C5" for c in result.candidates)
+    assert result.ambiguity_scan == []
+
+
+def _c5_builder(reader: CorpusReader, c5_target: int) -> _Builder:
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    targets = {**_TARGETS, "C5": c5_target}
+    config = PoolConfig(schema_path=SCHEMA_PATH, targets=targets)
+    return _Builder(reader, pin, config, _RUN)
+
+
+def test_build_c5_ignores_scan_finding_the_oracle_disowns(tmp_path: Path) -> None:
+    """Defense in depth: a stale (pre-RC3) scan finding whose duplication
+    the layer-aware oracle disowns emits nothing."""
+    builder = _c5_builder(_echo_corpus(tmp_path), _TARGETS["C5"])
+    stale = [{"slug": "ekkoloven", "doc_id": "nl-0", "duplicates": {"2": 2}}]
+    _build_c5(builder, stale)
+    assert builder.cases == []
+    assert builder.counters["C5"] == 0
+
+
+TO_DUP_BODY = """## Kapittel 1. En
+
+### § 7. Krav til første tema
+
+Første versjon av kravet til første tema.
+
+### § 8. Krav til andre tema
+
+Første versjon av kravet til andre tema.
+
+## Kapittel 2. To
+
+### § 7. Krav til første tema
+
+Andre versjon av kravet til første tema.
+
+### § 8. Krav til andre tema
+
+Andre versjon av kravet til andre tema.
+"""
+
+
+def test_build_c5_stops_at_target(tmp_path: Path) -> None:
+    """Target saturation skips later duplicate ids and later findings."""
+    reader = build_corpus(
+        tmp_path,
+        {
+            "toloven": ("Lov om to doble paragrafer (toloven)", TO_DUP_BODY),
+            "dobbeltloven": ("Lov om doble paragrafer (dobbeltloven)", DOBBELTLOVEN_BODY),
+        },
+    )
+    builder = _c5_builder(reader, 1)
+    findings = scan_duplicate_ids(reader)
+    assert len(findings) == 2
+    _build_c5(builder, findings)
+    assert builder.counters["C5"] == 1
+    assert len(builder.cases) == 1
 
 
 def test_no_tombstone_subcategory_is_ever_emitted(result: PoolResult) -> None:
