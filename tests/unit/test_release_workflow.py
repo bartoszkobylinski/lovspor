@@ -138,7 +138,7 @@ def test_project_version_and_mcp_cap_are_pinned_for_the_first_re_release() -> No
     deps = project["dependencies"]
     runtime_mcp = [dep for dep in deps if dep.startswith("mcp")]
 
-    assert project["version"] == "0.4.0"
+    assert project["version"] == "0.5.0"
     assert runtime_mcp == ["mcp>=1.28.1,<2"]
 
 
@@ -189,7 +189,7 @@ def test_importing_lovspor_and_its_cli_surface_needs_no_openai_key() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.4.0"
+    assert result.stdout.strip() == "0.5.0"
 
 
 def test_release_docs_agree_on_version_workflow_environment_and_burned_versions() -> None:
