@@ -20,7 +20,7 @@
     "C7": 40,
     "C8": 30
   },
-  "lovspor_commit": "2216338273cb1917fcc1adad11d61a49b48a0af5",
+  "lovspor_commit": "8137cec7f0a1e33dbb04477149bbb2eeaa2b16aa",
   "phrasing": {
     "llm_assisted": 0,
     "template": 400
@@ -36,7 +36,7 @@
     "C7": 40,
     "C8": 30
   },
-  "timestamp": "2026-08-05T06:51:59.572632+00:00",
+  "timestamp": "2026-08-05T07:09:19.495229+00:00",
   "versions": {
     "abbreviations": "llhb-abbrev-v1",
     "stance_rules": "llhb-stance-v1",

@@ -7,8 +7,8 @@ no final selection has been made; nothing here is frozen.
 
 - lovverk commit: `6ec7059d53d25ddae99d8a64bf5157a90c4c166c`
 - manifest generated_at: `2026-08-04T20:48:16.533742+00:00`
-- lovspor generator commit: `2216338273cb1917fcc1adad11d61a49b48a0af5`
-- generated: 2026-08-05T06:51:59.572632+00:00 (seed 20260805)
+- lovspor generator commit: `8137cec7f0a1e33dbb04477149bbb2eeaa2b16aa`
+- generated: 2026-08-05T07:09:19.495229+00:00 (seed 20260805)
 - versions: {"abbreviations": "llhb-abbrev-v1", "stance_rules": "llhb-stance-v1", "templates": "llhb-templates-v1"}
 
 ## Counts
@@ -36,7 +36,7 @@ no final selection has been made; nothing here is frozen.
 
 ## Manual review
 
-- queue size: 124
+- queue size: 119
 - C8 candidates (100% mandatory review): 25
 
 ## Act-name calibration
