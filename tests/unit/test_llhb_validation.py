@@ -28,6 +28,20 @@ def _codes(issues: list[CaseIssue]) -> list[str]:
     return [issue.code for issue in issues]
 
 
+def test_issue_severity_vocabulary_is_frozen() -> None:
+    """Severity values are artifact vocabulary: validation.jsonl rows and the
+    review-queue split (pool matches serialized strings against the enum)."""
+    assert [severity.value for severity in IssueSeverity] == ["error", "warning"]
+
+
+def test_schema_issues_carry_the_case_id(validator: CandidateValidator) -> None:
+    """A schema issue must be attributable to the case that raised it."""
+    case = make_case(category="C9")
+    issues = validator.validate_case(case)
+    assert issues
+    assert all(issue.case_id == case["case_id"] for issue in issues)
+
+
 def test_valid_c1_passes(validator: CandidateValidator) -> None:
     assert validator.validate_case(make_case()) == []
 
