@@ -521,6 +521,9 @@ def _tool_args(spec: dict[str, Any]) -> dict[str, Any]:
             "slug": spec.get("slug") or spec.get("slug_match"),
             "section_id": spec["section_id"],
             "quote": spec["quote"],
+            # Only when the scenario disambiguates a repeated quote — the
+            # key must not appear otherwise, so arg-shape tests stay exact.
+            **({"occurrence": spec["occurrence"]} if "occurrence" in spec else {}),
         }
     elif tool == "search_eu_implementations":
         args = {"eu_doc_id": str(spec["eu_doc_id"])}
@@ -569,6 +572,7 @@ def _call_reader(reader: CorpusReader, tool: str, args: dict[str, Any]) -> Any:
             cast(str, args["slug"]),
             cast(str, args["section_id"]),
             cast(str, args["quote"]),
+            cast("int | None", args.get("occurrence")),
         ),
         "get_eu_basis": lambda: reader.get_eu_basis(cast(str, args["slug"])),
         "search_eu_implementations": lambda: reader.search_eu_implementations(
