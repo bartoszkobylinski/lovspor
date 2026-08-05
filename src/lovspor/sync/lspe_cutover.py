@@ -13,11 +13,15 @@ published in a mixed-version state (§3, binding ordering) — and the run is
 idempotent: on an already-cut-over corpus it rewrites nothing and commits
 nothing.
 
-Abort conditions, all fail-closed with nothing committed: dirty worktree,
-corpus HEAD drift, a current record with no recorded ESI (a header identity
-nobody recorded would be fabricated provenance), a missing or unreadable
-sidecar, an existing version-2 sidecar whose header disagrees with the
-manifest (tamper signal), or a post-write verification mismatch.
+Abort conditions, all fail-closed: dirty worktree, corpus HEAD drift, a
+current record with no recorded ESI (a header identity nobody recorded would
+be fabricated provenance), a missing or unreadable sidecar, an existing
+version-2 sidecar whose header disagrees with the manifest (tamper signal),
+or a staged-file verification mismatch. Every abort leaves the tracked
+corpus byte-identical and the worktree clean: rewrites are written and
+verified as staged sibling files first, and the tracked ``.bin`` paths are
+only replaced — in a validation-free rename pass — after every staged file
+has verified and the drift check has passed again.
 """
 
 from dataclasses import dataclass
@@ -128,9 +132,9 @@ def _select_items(repo: Path, manifest: Manifest) -> tuple[list[_CutoverItem], i
     return items, already_v2
 
 
-def _verify_rewrite(item: _CutoverItem) -> None:
-    """Re-read a written file and prove the payload survived unchanged."""
-    reread = read_embeddings(item.path)
+def _verify_staged(item: _CutoverItem, staged: Path) -> None:
+    """Re-read a staged file and prove the payload survived unchanged."""
+    reread = read_embeddings(staged)
     payload_equal = (
         reread.version == 2  # noqa: PLR2004 - the format version literal
         and reread.embedding_space_id == item.esi
@@ -149,8 +153,8 @@ def _verify_rewrite(item: _CutoverItem) -> None:
     if not payload_equal:
         raise CorpusStateError(
             f"cutover aborted: {item.path.name} did not verify after the "
-            f"version-2 rewrite; the worktree is partially rewritten and "
-            f"must be discarded (nothing was committed)",
+            f"staged version-2 rewrite; the tracked corpus is untouched "
+            f"and nothing was committed",
         )
 
 
@@ -181,24 +185,50 @@ def migrate_lspe_v2(settings: Settings) -> CutoverReport:
     )
 
 
-def _apply_cutover(repo: Path, items: list[_CutoverItem], head_before: str) -> None:
-    """Rewrite, verify, and commit — with the drift invariant enforced.
+def _staged_path(item: _CutoverItem) -> Path:
+    return item.path.with_name(f"{item.path.name}.v2staged")
 
-    The HEAD captured before selection is re-verified immediately before the
-    first byte is written and again before the commit, so the rewrite can
-    never publish against a corpus that moved under it.
+
+def _discard_staging(items: list[_CutoverItem]) -> None:
+    """Remove every staging artifact so an abort leaves the worktree clean.
+
+    Covers both the staged files themselves and ``write_embeddings``'s own
+    ``.tmp`` sibling, in case the abort struck mid-write.
+    """
+    for item in items:
+        staged = _staged_path(item)
+        staged.unlink(missing_ok=True)
+        staged.with_name(f"{staged.name}.tmp").unlink(missing_ok=True)
+
+
+def _apply_cutover(repo: Path, items: list[_CutoverItem], head_before: str) -> None:
+    """Stage, verify everything, then swap in and commit.
+
+    Every rewrite is written and verified as a staged sibling file; no
+    tracked path changes until the whole set has verified and the HEAD
+    captured before selection has been re-checked. Any failure up to that
+    point discards the staging and leaves the tracked corpus byte-identical.
+    The final swap is a validation-free same-directory rename pass — the
+    narrowest publishable step this tool can make.
     """
     _require_head_unmoved(repo, head_before)
+    try:
+        for item in items:
+            staged = _staged_path(item)
+            write_embeddings(
+                staged,
+                item.parsed.sections,
+                item.parsed.scale,
+                dim=item.parsed.dim,
+                embedding_space_id=item.esi,
+            )
+            _verify_staged(item, staged)
+        _require_head_unmoved(repo, head_before)
+    except BaseException:
+        _discard_staging(items)
+        raise
     for item in items:
-        write_embeddings(
-            item.path,
-            item.parsed.sections,
-            item.parsed.scale,
-            dim=item.parsed.dim,
-            embedding_space_id=item.esi,
-        )
-        _verify_rewrite(item)
-    _require_head_unmoved(repo, head_before)
+        _staged_path(item).replace(item.path)
     git_add(repo, sorted({item.path.parent for item in items}))
     if has_staged_changes(repo):
         git_commit_msg(repo, _COMMIT_SUBJECT)

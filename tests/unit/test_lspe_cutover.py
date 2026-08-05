@@ -245,25 +245,64 @@ def test_header_only_sidecars_are_rewritten_and_counted(tmp_path: Path) -> None:
     assert rewritten.sections == []
 
 
-def test_verification_failure_aborts_without_a_commit(
+def _assert_worktree_untouched(corpus: Path, before: dict[str, bytes]) -> None:
+    """Tracked sidecars byte-identical, no commit, no staging residue."""
+    for slug, raw in before.items():
+        assert (corpus / "lover" / "embeddings" / f"{slug}.bin").read_bytes() == raw
+    assert _git(corpus, "log", "--format=%s", "-1") == "seed"
+    assert _git(corpus, "status", "--porcelain") == ""
+
+
+def test_verification_failure_aborts_with_the_tracked_corpus_untouched(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If a written file does not re-read as the exact original payload the
-    cutover must stop before the commit — a partially rewritten worktree is
-    discardable, a published bad rewrite is not."""
+    """A verification failure on ANY staged file — even the last — must leave
+    every tracked sidecar byte-identical and the worktree clean. The Codex
+    review of PR #19 demonstrated the in-place variant rewrote earlier files
+    before failing; staging is the fix, and this test pins it."""
     settings, corpus = _seed_corpus(tmp_path, _default_records())
-    original_verify = cutover_module._verify_rewrite
+    before = {
+        slug: (corpus / "lover" / "embeddings" / f"{slug}.bin").read_bytes() for slug in ("x", "y")
+    }
+    original_verify = cutover_module._verify_staged
+    calls: list[str] = []
 
-    def sabotage_then_verify(item: cutover_module._CutoverItem) -> None:
-        raw = bytearray(item.path.read_bytes())
-        raw[-1] ^= 0xFF
-        item.path.write_bytes(bytes(raw))
-        original_verify(item)
+    def sabotage_last_then_verify(
+        item: cutover_module._CutoverItem,
+        staged: Path,
+    ) -> None:
+        calls.append(item.path.name)
+        if len(calls) == 2:
+            raw = bytearray(staged.read_bytes())
+            raw[-1] ^= 0xFF
+            staged.write_bytes(bytes(raw))
+        original_verify(item, staged)
 
-    monkeypatch.setattr(cutover_module, "_verify_rewrite", sabotage_then_verify)
+    monkeypatch.setattr(cutover_module, "_verify_staged", sabotage_last_then_verify)
 
     with pytest.raises(CorpusStateError, match="did not verify"):
         migrate_lspe_v2(settings)
 
-    assert _git(corpus, "log", "--format=%s", "-1") == "seed"
+    assert len(calls) == 2, "the failure must be on the LAST file"
+    _assert_worktree_untouched(corpus, before)
+
+
+def test_late_head_drift_aborts_with_the_tracked_corpus_untouched(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HEAD drift discovered AFTER all files are staged — the second drift
+    check — must also leave tracked paths untouched and no staging residue."""
+    settings, corpus = _seed_corpus(tmp_path, _default_records())
+    before = {
+        slug: (corpus / "lover" / "embeddings" / f"{slug}.bin").read_bytes() for slug in ("x", "y")
+    }
+    real_head = cutover_module._git_head(corpus)
+    heads = iter([real_head, real_head, "b" * 40])
+    monkeypatch.setattr(cutover_module, "_git_head", lambda _repo: next(heads))
+
+    with pytest.raises(CorpusStateError, match="corpus HEAD moved"):
+        migrate_lspe_v2(settings)
+
+    _assert_worktree_untouched(corpus, before)
