@@ -236,6 +236,17 @@ Added 2026-04-27 after the first scheduled migration sync crashed in production 
 
 **Cost:** `hypothesis` added to dev dependencies (`pyproject.toml`). Default 100 examples per test × 5 tests ≈ < 1 s in local CI. Negligible.
 
+## 9c. Per-PR mutation runs are scoped to changed files
+
+Decided 2026-08-05, closing issue #4. Codex review of PR #3 showed full-repo `mutmut run` is not operationally usable as a per-PR gate: 9 of 4338 mutants processed in over a minute on a fresh clone, no terminating run ever observed (reconfirmed across PR #3/#5/#7/#8 reviews). Release/packaging PRs additionally have zero mutation surface, so a full run there yields nothing by construction.
+
+**Mechanism:** `scripts/mutmut-pr.sh`. It diffs `base_ref...HEAD` (default `origin/main`, `--diff-filter=ACMR`) for `src/lovspor/**/*.py`, then:
+
+- changed files exist → wipes `.mutmut-cache` (a cache from another scope silently skews the score — the Sprint 8 stale-cache trap in §"Carried debts") and runs `mutmut run --paths-to-mutate=<changed files>`;
+- no changed files → prints `mutation not applicable: no src/lovspor logic changed relative to <base>` and exits 0. Codex reports that line verbatim — an explicit recorded exemption, not a skipped step and never a fabricated score.
+
+**What this does NOT change:** §9 (mutmut 2.x pin, no PEP 695) and §9a (baseline expectations, survivor policy, revisit triggers) stand. Baseline numbers still come from explicitly requested full-repo runs, not from per-PR scoped runs — a scoped score is authoritative only for the PR's own surface and must not be compared against the §9a baseline.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:

@@ -31,6 +31,6 @@ What NOT to do:
 - [ ] `uv run mypy src/` green
 - [ ] `uv run pytest` green
 - [ ] Coverage ≥ 90% on changed files
-- [ ] Mutation score reviewed by Codex on the PR (if logic changes)
+- [ ] Mutation reviewed by Codex via `./scripts/mutmut-pr.sh` (a `mutation not applicable` notice is a valid outcome for PRs with no `src/` changes)
 - [ ] `/security-check` clean
 - [ ] Codex review pass

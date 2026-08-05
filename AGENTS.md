@@ -26,11 +26,14 @@ For every PR, evaluate:
 
 ## Mutation testing
 
-Run `uv run mutmut run` and report the score. Investigate any survived mutants in critical paths:
-- normalization
-- hashing
-- change detection
-- manifest serialization
+Run `./scripts/mutmut-pr.sh` and report the result. The script mutates only the `src/lovspor/` files the PR branch changed relative to `origin/main` (pass a different base ref as an argument if needed) and wipes `.mutmut-cache` first, so the score is authoritative for exactly the PR's surface. Do not run full-repo `uv run mutmut run` on PR review — it does not terminate in reviewable time (issue #4); full runs are reserved for explicitly requested baseline measurements (decisions.md §9a/§9c).
+
+- If the script prints `mutation not applicable: ...` (release/packaging/docs PRs), report that line verbatim as the mutation result. Never substitute a full-repo run and never fabricate a score.
+- Otherwise report the kill score plus survivors, and investigate survived mutants in critical paths:
+  - normalization
+  - hashing
+  - change detection
+  - manifest serialization
 
 For survived mutants in critical paths, propose additional tests that would kill them.
 

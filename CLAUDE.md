@@ -61,7 +61,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - `tests/unit/` — fast, isolated, one module at a time. Every public function covered.
 - `tests/integration/` — pipeline end-to-end on real fixture tarballs and XML samples.
 - `tests/fixtures/` — real XML/JSON samples from Lovdata, captured once, committed, never regenerated unless source schema changes.
-- Mutation testing: **Codex runs `uv run mutmut run` on every PR review** and reports the kill score plus survivors. Claude does not run mutmut locally before opening a PR — it would be duplicate work and slow the push cycle. If a Codex round flags a critical-path survivor, fix it on the same branch and ask Codex to re-run. **mutmut 2.x only** — mutmut 3 has open bugs around editable installs and dataclasses. Consequence: **no PEP 695 type parameter syntax** (`def foo[T](...)`), because mutmut 2's parser predates PEP 695 and crashes. Use `TypeVar` from `typing` instead. Ruff rule `UP047` is globally disabled to prevent accidental reintroduction.
+- Mutation testing: **Codex runs `./scripts/mutmut-pr.sh` on every PR review** and reports the result. The script scopes mutation to the `src/lovspor/` files the PR changed (full-repo runs don't terminate in reviewable time — issue #4, decisions.md §9c) and prints an explicit `mutation not applicable` notice for PRs with no engine-logic changes; that notice is a valid review outcome, not a skipped step. Full-repo `uv run mutmut run` only when explicitly asked (baseline runs, §9a). Claude does not run mutmut locally before opening a PR — it would be duplicate work and slow the push cycle (`./scripts/mutmut-pr.sh --list` to preview scope is fine). If a Codex round flags a critical-path survivor, fix it on the same branch and ask Codex to re-run. **mutmut 2.x only** — mutmut 3 has open bugs around editable installs and dataclasses. Consequence: **no PEP 695 type parameter syntax** (`def foo[T](...)`), because mutmut 2's parser predates PEP 695 and crashes. Use `TypeVar` from `typing` instead. Ruff rule `UP047` is globally disabled to prevent accidental reintroduction.
 - HTTP transport mocked with `pytest-httpx` only. Logic is never mocked.
 
 ## Forbidden
@@ -101,7 +101,8 @@ uv run pytest tests/unit/             # fast loop
 uv run ruff check && uv run ruff format --check
 uv run mypy src/
 # Mutation testing is Codex's job on PR review, not Claude's pre-push step.
-# uv run mutmut run                   # only if explicitly asked
+# ./scripts/mutmut-pr.sh              # PR-scoped run (Codex); --list previews scope
+# uv run mutmut run                   # full-repo baseline — only if explicitly asked
 ```
 
 ## Definition of done (per PR)
