@@ -4,7 +4,7 @@ Single source of truth for why this project looks the way it does. Every non-obv
 
 Update this file whenever a new decision lands.
 
-Last updated: 2026-08-02
+Last updated: 2026-08-05
 
 ---
 
@@ -671,6 +671,35 @@ The accepted direction is **open infrastructure**:
 Current state vs direction (2026-08-02): GitHub visibility of `lovspor` is still **PRIVATE** — a temporary implementation-state mismatch while publication-readiness work completes, tracked in `docs/publication-plan.md`. The withdrawn PyPI releases (`0.2.0`–`0.3.0`) have not returned; whether PyPI publishing resumes is an open decision (`docs/releasing.md`).
 
 ---
+
+## 16. LLHB — deterministic hallucination benchmark (decided 2026-08-05)
+
+Project-owner decision. **LLHB v1 (Lovspor Legal Hallucination Benchmark)** is a new
+self-contained study under `benchmarks/llhb/`: 250 frozen Norwegian-law cases
+(bokmål), run against one flagship model per provider (Anthropic, OpenAI, Google) in
+two conditions — control (no tools) vs treatment (Lovspor tools over a local pinned
+corpus) — measuring hallucinated statutory citations, fabricated quotes,
+false-premise acceptance and post-retrieval hallucination.
+
+Key rulings:
+
+- **100% deterministic scoring.** No LLM-as-judge, no rubric, no jurist — consistent
+  with the Phase 3 doctrine in `docs/publication-plan.md`. Semantic/interpretive
+  metrics (unsupported-claim grounding, misrepresentation of retrieved text) are
+  future work, not part of any v1 score.
+- **Quote-free dataset.** Statutory text never enters this repo; quotes are stored as
+  corpus coordinates (slug, section_id, occurrence, char span, hash) and materialized
+  from the pinned lovverk commit at evaluation time. Fabricated trap quotes are stored
+  verbatim (not statutory text).
+- **Freeze before first model call**: lovverk SHA + manifest `generated_at` + lovspor
+  SHA + canonical-JSONL SHA-256 + tag `llhb-v1-freeze`; errata-only changes after;
+  dataset published only together with results (contamination control).
+- **Distinct from `evals/`** (which asks "if the correct tools are invoked, do they
+  behave correctly?"; LLHB asks "does a real model hallucinate less with Lovspor?")
+  and **distinct from the Phase 3 staleness benchmark** (temporal anchoring; not
+  replaced, not consumed).
+- Methodology ADR: notebook `ADR-0007` (Proposed). Specs: `benchmarks/llhb/`
+  (`METHODOLOGY.md`, `SCORING.md`, `FREEZE.md`, `DECISIONS.md`, `schema/`).
 
 ## How to use this document
 

@@ -1,8 +1,13 @@
 # LLHB v1 — Lovspor Legal Hallucination Benchmark: Design Proposal
 
-Status: PROPOSED — awaiting owner review. Nothing in this document is implemented.
+Status: APPROVED 2026-08-05 with owner amendments — see `DECISIONS.md`, which
+supersedes this document wherever they differ. Material amendments: v1 is 100%
+deterministic (§12 Tier 2 LLM-judge dropped from v1 entirely; no ADR authorizes
+a judge), branch is `feat/llhb-v1` (§3.1 resolved), bokmål-only confirmed,
+dataset published only together with results. This file is kept as the
+historical design proposal.
 Date: 2026-08-05
-Branch: `eval/llhb-v1` (naming conflict — see §3.1)
+Branch: `feat/llhb-v1`
 
 ---
 

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bartoszkobylinski/lovspor/benchmarks/llhb/schema/run_metadata.schema.json",
+  "title": "LLHB run metadata",
+  "description": "Run-level experiment metadata. One document per run (one provider x one condition x one dataset pass). A published number that cannot be traced to a document of this shape must not be published.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "llhb_version",
+    "dataset_checksum",
+    "provider",
+    "model_id",
+    "condition",
+    "system_prompt_sha256",
+    "sampling",
+    "started_at",
+    "lovspor_commit",
+    "lovverk_commit",
+    "runner_commit",
+    "case_order_seed"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "pattern": "^llhb-v1-run-[0-9]{8}-[a-z0-9]{4,12}$",
+      "description": "e.g. llhb-v1-run-20261101-a3f9"
+    },
+    "llhb_version": { "type": "string", "pattern": "^1(\\.[0-9]+)?$" },
+    "dataset_checksum": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical frozen JSONL (FREEZE.md §4); asserted before the run."
+    },
+    "provider": { "type": "string", "enum": ["anthropic", "openai", "google"] },
+    "model_id": {
+      "type": "string",
+      "description": "Exact provider model identifier, recorded at run time."
+    },
+    "api_version": {
+      "type": ["string", "null"],
+      "description": "Provider API version/date header where the provider exposes one."
+    },
+    "condition": { "type": "string", "enum": ["control", "lovspor"] },
+    "system_prompt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the exact system prompt bytes. Must be identical across both conditions and all providers of one evaluation."
+    },
+    "system_prompt_path": {
+      "type": "string",
+      "description": "Repo-relative path to the prompt text used."
+    },
+    "tool_config": {
+      "type": ["object", "null"],
+      "description": "Condition 'lovspor' only: transport (native-mcp | function-bridge), tool list, schema hash, backend (local stdio + lovverk checkout path/commit). Null for control.",
+      "properties": {
+        "transport": { "type": "string", "enum": ["native-mcp", "function-bridge"] },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "tool_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "backend": { "type": "string" }
+      }
+    },
+    "sampling": {
+      "type": "object",
+      "description": "All sampling/reasoning settings sent to the provider, verbatim; temperature 0/minimum where supported.",
+      "required": ["temperature"],
+      "properties": {
+        "temperature": { "type": ["number", "null"] },
+        "top_p": { "type": ["number", "null"] },
+        "max_output_tokens": { "type": ["integer", "null"] },
+        "reasoning": { "type": ["object", "string", "null"] }
+      }
+    },
+    "max_turns": { "type": ["integer", "null"], "minimum": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": ["string", "null"], "format": "date-time" },
+    "lovspor_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "lovverk_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Must equal the dataset lock's pin."
+    },
+    "runner_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "evaluator_version": {
+      "type": ["string", "null"],
+      "description": "Scorer/extractor version (incl. frozen cue-list and abbreviation-table version) once scoring has run."
+    },
+    "case_order_seed": { "type": "integer" },
+    "cases_total": { "type": ["integer", "null"], "minimum": 0 },
+    "cases_completed": { "type": ["integer", "null"], "minimum": 0 },
+    "errors_total": { "type": ["integer", "null"], "minimum": 0 },
+    "notes": {
+      "type": ["string", "null"],
+      "description": "Free-form operational notes (cap hits, retries, interruptions)."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "condition": { "const": "lovspor" } } },
+      "then": {
+        "properties": { "tool_config": { "type": "object" } },
+        "required": ["tool_config"]
+      }
+    },
+    {
+      "if": { "properties": { "condition": { "const": "control" } } },
+      "then": { "properties": { "tool_config": { "type": "null" } } }
+    }
+  ]
+}
