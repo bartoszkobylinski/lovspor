@@ -129,6 +129,13 @@ Driven by the Stage 3.5 human audit (see
   veileder-layer echoes never count, normative vedlegg rows do (RC3
   parser fix, lovspor #26). Rescan evidence:
   `dataset/candidates/remediation/c5-rescan.json`.
+* **Quarantine ledger** (`remediation/apply_quarantine.py`, DECISIONS.md
+  #16): objective rule match → automatic quarantine, never automatic
+  drop; owner drop/needs_fix carried from the immutable Stage 3.5
+  snapshot; rc4-borderline stays with the owner; a kept case matching an
+  objective rule is quarantined fail-closed with `owner_conflict: true`.
+  Full per-case disposition:
+  `dataset/candidates/remediation/quarantine.jsonl`.
 * **Trap sibling guard** (`trap_has_sibling`): a claimed § with an
   existing `-x`/letter sibling is never a non-existence trap (RC7).
 * **C7 quote material**: spans end at sentence boundaries; mutations
