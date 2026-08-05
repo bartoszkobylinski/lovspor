@@ -22,7 +22,10 @@ published as-is.
    recorded in the notebook research log.
 6. Final 250 selected by a documented selection rule, independent of any
    anticipated model performance.
-7. ADR-0007 (notebook) accepted by the owner.
+7. ADR-0007 (notebook) accepted by the owner — **satisfied: Accepted
+   2026-08-05**. ADR-0007 authorizes only the deterministic methodology; it
+   explicitly does not authorize LLM-as-a-judge, jurist scoring, a
+   legal-correctness benchmark, or H5/H6 in the v1 headline score.
 
 ## 3. Corpus pin
 

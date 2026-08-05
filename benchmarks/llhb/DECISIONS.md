@@ -55,6 +55,18 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     PYSEC-2026-3552 is NOT fixed on the LLHB branch; recorded as an unrelated
     finding for a separate `fix/` branch.
 
+## Addendum — Stage 1 review (2026-08-05)
+
+14. **ADR-0007 clarification and acceptance.** Decision 2's "no ADR is created"
+    referred specifically to an ADR permitting LLM-as-a-judge. Notebook
+    governance requires an ADR for benchmark methodology, so ADR-0007 for the
+    deterministic LLHB v1 methodology is appropriate — **Accepted 2026-08-05**,
+    with an explicit non-authorization section: no LLM-as-a-judge, no jurist
+    scoring, no general legal-correctness benchmark, no H5/H6 semantic
+    interpretation in the v1 headline score.
+15. **Stage 2 phrasing strategy:** template-first; LLM-assisted phrasing only
+    where templates are insufficient; deterministic ground truth throughout.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,

@@ -698,7 +698,9 @@ Key rulings:
   behave correctly?"; LLHB asks "does a real model hallucinate less with Lovspor?")
   and **distinct from the Phase 3 staleness benchmark** (temporal anchoring; not
   replaced, not consumed).
-- Methodology ADR: notebook `ADR-0007` (Proposed). Specs: `benchmarks/llhb/`
+- Methodology ADR: notebook `ADR-0007` (Accepted 2026-08-05; authorizes the
+  deterministic methodology only — explicitly no LLM-judge, no jurist, no
+  legal-correctness benchmark). Specs: `benchmarks/llhb/`
   (`METHODOLOGY.md`, `SCORING.md`, `FREEZE.md`, `DECISIONS.md`, `schema/`).
 
 ## How to use this document
