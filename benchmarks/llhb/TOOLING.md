@@ -136,6 +136,14 @@ Driven by the Stage 3.5 human audit (see
   objective rule is quarantined fail-closed with `owner_conflict: true`.
   Full per-case disposition:
   `dataset/candidates/remediation/quarantine.jsonl`.
+* **Regenerated pool (Stage 3.6-E)** under `dataset/candidates/regen/`:
+  the v2 generator run against the same corpus pin with
+  `PoolConfig.id_offset=500`, so generation-2 ids (`C*-501+`) are
+  disjoint from Stage 3 ids and a Stage 3.5 decision can never point at
+  regenerated content. The Stage 3 pool and its artifacts stay frozen as
+  evidence. Per-category supply vs frozen targets (and the open C5
+  cap-vs-target decision, ruling #19):
+  `dataset/candidates/remediation/replacement-supply.json`.
 * **Trap sibling guard** (`trap_has_sibling`): a claimed § with an
   existing `-x`/letter sibling is never a non-existence trap (RC7).
 * **C7 quote material**: spans end at sentence boundaries; mutations

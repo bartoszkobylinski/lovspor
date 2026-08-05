@@ -1,0 +1,82 @@
+{
+  "by_category": {
+    "C1": 75,
+    "C2": 65,
+    "C3": 55,
+    "C4": 50,
+    "C5": 11,
+    "C6": 55,
+    "C7": 40,
+    "C8": 30
+  },
+  "max_provision_reuse": 1,
+  "section_id_shapes": {
+    "hyphen": 52,
+    "letter": 2,
+    "other": 2,
+    "plain": 240
+  },
+  "top_acts": [
+    [
+      "-",
+      30
+    ],
+    [
+      "utleggsregistreringsforskriften",
+      3
+    ],
+    [
+      "forskrift-om-fordeling-av-norsk-tippings-overskudd-til-kulturformål",
+      3
+    ],
+    [
+      "klimakvoteforskriften",
+      3
+    ],
+    [
+      "forskrift-om-avskrivning-på-driftsmidler",
+      3
+    ],
+    [
+      "forskrift-om-erstatning-for-tap-av-tamrein",
+      3
+    ],
+    [
+      "forskrift-om-utskriving-m-v-av-terminskatt",
+      3
+    ],
+    [
+      "forskrift-om-naturfaretilskudd",
+      3
+    ],
+    [
+      "forskrift-om-utmåling-av-tvangsmulkt-og-overtredelsesgebyr",
+      3
+    ],
+    [
+      "straffelovens-ikraftsettingslov",
+      3
+    ],
+    [
+      "lov-om-reservasjonssystemer-for-flyreiser-mv",
+      3
+    ],
+    [
+      "forskrift-om-utfyllende-regler-til-det-forenklede-solvenskapitalkravet-for-pensjonskasser",
+      3
+    ],
+    [
+      "forskrift-om-tilbakebetaling-av-utdanningslån-2022",
+      3
+    ],
+    [
+      "forskrift-om-frakt-av-last-på-norske-skip-og-lektere",
+      3
+    ],
+    [
+      "svine-og-fjørfeproduksjonsloven",
+      3
+    ]
+  ],
+  "unique_acts": 242
+}

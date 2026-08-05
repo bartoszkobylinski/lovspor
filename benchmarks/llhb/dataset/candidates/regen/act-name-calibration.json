@@ -1,0 +1,745 @@
+{
+  "collision_count": 154,
+  "collision_keys": {
+    "a-opplysningsloven": [
+      "a-opplysningsloven",
+      "forskrift-om-opplysningsplikt-til-lønnsstatistikken"
+    ],
+    "aksjeloven": [
+      "aksjeloven-asl",
+      "delegering-etter-aksjeloven-3",
+      "delegering-etter-aksjel-og-allmennaksjel"
+    ],
+    "aktivitetsforskriften": [
+      "aktivitetsforskriften",
+      "endr-i-aktivitetsforskriften"
+    ],
+    "allmennaksjeloven": [
+      "allmennaksjeloven-asal",
+      "delegering-etter-aksjel-og-allmennaksjel"
+    ],
+    "anskaffelsesloven": [
+      "anskaffelsesloven",
+      "forskrift-om-overgangsregler-for-anskaffelsesloven",
+      "myndighet-til-å-gi-forskrift-etter-anskaffelsesloven-16-tredje-ledd-til-kmd"
+    ],
+    "apotekloven": [
+      "apotekloven-apotl",
+      "delegering-til-shd-etter-apotekloven",
+      "delegering-av-myndighet-til-direktoratet-for-medisinske-produkter-etter-lov-av-2-juni-2000-nr-39-om-apotek"
+    ],
+    "arbeidsmarkedsloven": [
+      "arbeidsmarkedsloven",
+      "forskrift-om-unntak-fra-arbeidsmarkedsloven"
+    ],
+    "arbeidsmiljøloven": [
+      "arbeidsmiljøloven-aml",
+      "delvis-ikrafttr-av-lov-2005-62-arbeidsmiljøl"
+    ],
+    "barnebortføringsloven": [
+      "barnebortføringsloven",
+      "overføring-av-forvaltningsansvaret-for-lov-8-juli-1988-nr-72-om-anerkjennelse-og-fullbyrding-av-utenlandske-avgjørelser-om-foreldreansvar-m-v-og-om-tilbakelevering-av-barn-haagkonvensjonen-1980-om"
+    ],
+    "barnelova": [
+      "barnelova-bl",
+      "barnelova"
+    ],
+    "barnetrygdloven": [
+      "barnetrygdloven-btrl",
+      "forskrift-om-overgangsregler-til-endringer-i-lov-8-mars-2002-nr-4-om-barnetrygd-4-femte-ledd-og-11"
+    ],
+    "barnevernsloven": [
+      "barnevernsloven-bvl",
+      "forskrift-om-oppfostringsbidrag",
+      "delegering-av-kongens-myndighet-etter-lov-18-juni-2021-nr-97-om-barnevern-12-8-tredje-ledd-til-å-utnevne-medlemmer-i-barnesakkyndig-kommisjon",
+      "forskrift-om-overgangsregler-til-lov-18-juni-2021-nr-97-om-barnevern"
+    ],
+    "bilansvarslova": [
+      "bilansvarslova-bal",
+      "overføring-av-forvaltningsansvar-for-bilansvarslova"
+    ],
+    "blåreseptforskriften": [
+      "blåreseptforskriften",
+      "endr-i-blåreseptforskriften"
+    ],
+    "bokføringsloven": [
+      "bokføringsloven",
+      "ikrafttr-og-overgangsregler-til-bokføringsloven",
+      "deleg-etter-endringslov-til-bokføringsloven"
+    ],
+    "clp-forskriften": [
+      "clp-forskriften",
+      "deleg-av-myndighet-etter-clp-forskriften-til-mattilsynet"
+    ],
+    "delegering av justis- og beredskapsdepartementets myndighet etter lov 17. juni 2005 nr. 90 om mekling og rettergang i sivile tvister § 22-3 annet og tredje ledd til politidirektoratet": [
+      "deleg-av-myndighet-etter-tvisteloven-22-3-annet-og-tredje-ledd-til-politidirektoratet",
+      "deleg-av-myndighet-etter-tvisteloven-22-3-annet-og-tredje-ledd-til-politidirektoratet-2"
+    ],
+    "delegering av justis- og beredskapsdepartementets myndighet etter lov 22. mai 1981 nr. 25 om rettergangsmåten i straffesaker (straffeprosessloven) § 118 første og annet ledd til politidirektoratet": [
+      "deleg-av-myndighet-etter-straffeprosessloven-118-første-og-annet-ledd-til-politidirektoratet",
+      "deleg-av-myndighet-etter-straffeprosessloven-118-første-og-annet-ledd-til-politidirektoratet-2"
+    ],
+    "delegering av kongens myndighet etter forvaltningsloven § 28 fjerde ledd til kulturdepartementet": [
+      "deleg-etter-forvaltningsloven-til-kud",
+      "deleg-av-myndighet-etter-forvaltningsloven-28-fjerde-ledd-til-kulturdepartementet",
+      "deleg-av-kongens-myndighet-etter-forvaltningsloven-28-fjerde-ledd-til-kulturdepartementet"
+    ],
+    "delegering av kongens myndighet etter lov 5. august 1994 nr. 55 om vern mot smittsomme sykdommer § 7-12 til helse- og omsorgsdepartementet": [
+      "deleg-av-myndighet-etter-smittevernloven-7-12-til-helse-og-omsorgsdepartementet",
+      "deleg-av-kongens-myndighet-etter-lov-om-vern-mot-smittsomme-sykdommer-7-12-til-helse-og-omsorgsdepartementet",
+      "deleg-av-kongens-myndighet-etter-lov-om-vern-mot-smittsomme-sykdommer-7-12-til-helse-og-omsorgsdepartementet-2"
+    ],
+    "delegering av kongens myndighet etter straffeloven § 38 til justis- og beredskapsdepartementet": [
+      "deleg-av-myndighet-etter-straffeloven-38",
+      "deleg-av-myndighet-etter-straffeloven-38-til-jd"
+    ],
+    "delegering av myndighet etter forvaltningsloven § 13d første ledd til skattedirektoratet": [
+      "delegering-av-myndighet-etter-forvaltningsloven-13d-første-ledd-til-skattedirektoratet",
+      "delegering-av-myndighet-etter-forvaltningsloven-13d-første-ledd-til-skattedirektoratet-2"
+    ],
+    "delegering av myndighet etter lov om kontroll med produkter og forbrukertjenester (produktkontrolloven) til landbruks- og matdepartementet": [
+      "delegering-av-myndighet-etter-produktkontrolloven-til-lmd",
+      "deleg-av-myndighet-etter-produktkontrolloven-til-landbruks-og-matdepartementet"
+    ],
+    "delegering av myndighet etter merverdiavgiftsloven": [
+      "deleg-etter-merverdiavgiftsloven",
+      "deleg-av-myndighet-etter-merverdiavgiftsloven-2",
+      "delegering-av-myndighet-etter-merverdiavgiftsloven"
+    ],
+    "delegering av myndighet etter merverdiavgiftsloven § 3-31, § 6-36 og § 7-9": [
+      "delegering-etter-merverdiavgiftsloven-3-31-6-36-og-7-9",
+      "deleg-av-myndighet-etter-mval-3-31-6-36-og-7-9"
+    ],
+    "delegering av myndighet etter skattebetalingsforskriften § 11-7-4": [
+      "deleg-etter-skattebetalingsforskriften",
+      "deleg-etter-skattebetalingsforskriften-2"
+    ],
+    "delegering av myndighet til finans- og tolldepartementet etter lov om revisjon og revisorer (revisorloven).": [
+      "delegering-etter-revisorloven",
+      "delegering-til-fin-etter-revisorloven"
+    ],
+    "delegering av myndighet til finans- og tolldepartementet etter tolloven.": [
+      "delegering-av-myndighet-etter-tolloven",
+      "delegering-til-fin-etter-tolloven-2"
+    ],
+    "delegering av myndighet til kommunaldepartementet etter arbeidsmiljøloven.": [
+      "delegering-av-myndighet-etter-arbeidsmiljøloven",
+      "delegering-etter-arbeidsmiljøloven-2",
+      "delegering-av-myndighet-etter-arbeidsmiljøloven-2"
+    ],
+    "delegering av myndighet til luftfartstilsynet etter luftfartsloven": [
+      "deleg-av-myndighet-til-luftfartstilsynet-etter-luftfartsloven",
+      "delegering-av-myndighet-til-luftfartstilsynet-etter-luftfartsloven"
+    ],
+    "delegering av myndighet til samferdselsdepartementet etter lov om merking av forbruksvarer m.v.": [
+      "deleg-til-sd-etter-lov-om-merking-av-forbruksvarer",
+      "deleg-til-sd-etter-lov-om-merking-av-forbruksvarer-2",
+      "deleg-til-sd-etter-forbrukermerkeloven"
+    ],
+    "delegering av myndighet til statens dyrehelsetilsyn – sentralforvaltningen etter lov av 20. desember 1974 nr. 73 om dyrevern § 24c.": [
+      "deleg-av-myndighet-etter-dyrevernloven-24c",
+      "deleg-av-myndighet-til-statens-dyrehelsetilsyn-2"
+    ],
+    "delegering av myndighet til å gi tillatelse til midlertidig oppbevaring av brannfarlig gass (lpg/propan) på byggeplasser.": [
+      "delegering-av-myndighet-til-oslo-kommune",
+      "del-av-mynd-oppbevaring-av-gass"
+    ],
+    "delegering etter lov 16. desember 2011 nr. 65 om næringsberedskap": [
+      "deleg-etter-lov-om-næringsberedskap",
+      "delegering-etter-lov-16-desember-2011-nr-65-om-næringsberedskap"
+    ],
+    "deltakerloven": [
+      "deltakerloven-deltl",
+      "delegering-etter-deltakerloven"
+    ],
+    "delvis ikrafttredelse av lov 22. desember 1995 nr. 82 om endringer i lovgivningen om industrielt rettsvern.": [
+      "delv-ikrafttr-industrielt-rettsvern",
+      "ikrafttr-av-lov-1995-82-rettsvernlover"
+    ],
+    "diskrimineringsombudsloven": [
+      "diskrimineringsombudsloven-diskrol",
+      "deleg-til-bld-etter-diskrimineringsombudsloven"
+    ],
+    "domstolloven": [
+      "domstolloven-dl",
+      "delegering-av-kongens-myndighet-etter-lov-13-august-1915-nr-5-om-domstolene-27-femte-ledd-første-punktum-til-justis-og-beredskapsdepartementet"
+    ],
+    "eierseksjonsloven": [
+      "eierseksjonsloven-eiersl",
+      "ikrafttr-av-eierseksjonsloven-delegering"
+    ],
+    "eigedomsskattelova": [
+      "eigedomsskattelova",
+      "endringslov-til-eigedomsskattelova"
+    ],
+    "ekomloven": [
+      "endringslov-til-ekomloven",
+      "ekomloven",
+      "forskrift-om-delegering-av-myndighet-etter-lov-om-elektronisk-kommunikasjon"
+    ],
+    "endringer i departementsstrukturen og i ansvarsfordelingen mellom departementene": [
+      "endr-i-departementsstrukturen-og-i-ansvarsfordelingen-mellom-departementene",
+      "endr-i-departementsstrukturen-og-i-ansvarsfordelingen-mellom-departementene-2"
+    ],
+    "eøs-arbeidstakarlova": [
+      "eøs-arbeidstakarlova",
+      "delegering-av-kongens-myndighet-etter-lov-14-desember-2012-nr-81-om-fri-rørsle-av-arbeidstakarar-innanfor-eøs-mv-2-til-arbeids-og-inkluderingsdepartementet"
+    ],
+    "fagskoleloven": [
+      "fagskoleloven",
+      "delegering-av-myndighet-til-forsvarsdepartementet-etter-lov-8-juni-2018-nr-28-om-høyere-yrkesfaglig-utdanning-2-andre-ledd"
+    ],
+    "finansforetaksloven": [
+      "finansforetaksloven",
+      "forskrift-om-overgangsregler-mv-til-finansforetaksloven"
+    ],
+    "finansieringsvirksomhetsloven": [
+      "delvis-ikrafttr-lov-2005-43",
+      "ikrafttr-av-lov-2006-38",
+      "deleg-til-finansdepartementet-2"
+    ],
+    "fjellova": [
+      "fjellova-fjell",
+      "ikrafttr-av-fjellova-delegering-av-myndighet",
+      "forskrift-om-delegering-etter-fjellova",
+      "forskrift-om-ikrafttredelse-av-fjellstyrevedtak"
+    ],
+    "folketrygdloven": [
+      "folketrygdloven-ftrl",
+      "overgangsregler-etter-folketrygdloven-m-v"
+    ],
+    "forbrukermerkeloven": [
+      "forbrukermerkeloven",
+      "deleg-av-myndighet-til-norges-vassdrags-og-energidirektorat-nve-etter-forbrukermerkeloven"
+    ],
+    "forskrift om arbeidsgiveres plikt til å yde sykepleie m.v. og om arbeidsgiveres ansvar ved ulykker på svalbard.": [
+      "forskrift-om-arbeidsgiveransvar-svalbard",
+      "forskrift-om-arbeidsgiveransvar-svalbard-2"
+    ],
+    "forskrift om bekreftelse av underskrift på eksigible gjeldsbrev.": [
+      "forskrift-om-eksigible-gjeldsbrev",
+      "forskr-om-underskrift-på-eksigible-gjeldsbrev"
+    ],
+    "forskrift om beregning av underskudd og gjennomføring av fradrag i toppskattegrunnlaget.": [
+      "forskrift-om-fradrag-i-toppskattegrunnlaget",
+      "forsk-om-undersk-og-fradrag-i-toppskattegr-l",
+      "forskrift-om-fradrag-i-toppskattegrunnlaget-2"
+    ],
+    "forskrift om endring i forskrift om fastsetting av inndeling i lensmanns- og politistasjonsdistrikter og tjenestesteder i politi- og lensmannsetaten": [
+      "endr-i-forskrift-om-distriktsinndelinger-mv-i-politi-og-lensmannsetaten",
+      "endr-i-forskrift-om-distriktsinndelinger-mv-i-politi-og-lensmannsetaten-2",
+      "endr-i-forskrift-om-distriktsinndelinger-mv-i-politi-og-lensmannsetaten-3"
+    ],
+    "forskrift om endring i forskrift om grunnskoleopplæringa og den vidaregåande opplæringa": [
+      "endr-i-opplæringsforskrifta",
+      "endr-i-opplæringsforskrifta-2"
+    ],
+    "forskrift om endring i forskrift om grunnskoleopplæringa og den vidaregåande opplæringa (opplæringsforskrifta) og forskrift til privatskolelova (privatskoleforskrifta)": [
+      "endr-i-opplæringsforskrifta-og-privatskoleforskrifta",
+      "endr-i-opplæringsforskrifta-og-privatskoleforskrifta-2"
+    ],
+    "forskrift om endring i forskrift om inn- og utførsel av varer (vareførselsforskriften)": [
+      "endr-i-vareførselsforskriften",
+      "endr-i-vareførselsforskriften-2",
+      "endr-i-vareførselsforskriften-3",
+      "endr-i-vareførselsforskriften-4",
+      "endr-i-vareførselsforskriften-5"
+    ],
+    "forskrift om endring i forskrift om nasjonal retningslinje for sykepleierutdanning": [
+      "forskrift-om-endring-i-forskrift-om-nasjonal-retningslinje-for-sykepleierutdanning",
+      "forskrift-om-endring-i-forskrift-om-nasjonal-retningslinje-for-sykepleierutdanning-2",
+      "forskrift-om-endring-i-forskrift-om-nasjonal-retningslinje-for-sykepleierutdanning-3"
+    ],
+    "forskrift om endring i forskrift om yrkestransport med motorvogn og fartøy (yrkestransportforskriften)": [
+      "endr-i-yrkestransportforskriften-overgangsbestemmelser",
+      "endr-i-yrkestransportforskriften"
+    ],
+    "forskrift om midlertidig kompensasjonsordning for frivillighets- og idrettssektoren som følge av covid-19-utbruddet": [
+      "forskrift-om-midl-kompensasjonsordning-for-frivillighets-og-idrettssektoren-covid-19-utbruddet",
+      "forskrift-om-midl-kompensasjonsordning-for-frivillighets-og-idrettssektoren-som-følge-av-covid-19-utbruddet"
+    ],
+    "forskrift om opptak, studier og eksamen ved fagskolen kristiania": [
+      "forskrift-om-opptak-studier-og-eksamen-ved-fagskolen-kristiania",
+      "forskrift-om-opptak-studier-og-eksamen-ved-fagskolen-kristiania-2"
+    ],
+    "forskrift om opptak, studium og eksamen ved høgskulen i volda": [
+      "forskrift-om-opptak-studium-og-eksamen-ved-høgskulen-i-volda",
+      "forskrift-om-opptak-studium-og-eksamen-ved-høgskulen-i-volda-2"
+    ],
+    "forskrift til mineralloven": [
+      "forskrift-til-mineralloven",
+      "forskrift-til-mineralloven-2"
+    ],
+    "forskrifter om skattefrie fondsavsetninger, avsetninger til miljøverntiltak.": [
+      "forskr-om-fondsavsetn-miljøtiltak-1977",
+      "forskrift-om-fondsavsetninger-1979",
+      "forskrift-om-fondsavsetninger-1980",
+      "forskrift-om-fondsavsetning-miljøvern-1981"
+    ],
+    "forurensningsloven": [
+      "forurensningsloven-forurl",
+      "ikrafttr-av-forurensningsloven-delegering",
+      "delegering-etter-forurensningsloven-m-m",
+      "delegering-til-fylkesmannen-forurensningsloven",
+      "delegering-til-kmd-etter-forurensningsloven",
+      "overføring-av-forvaltningsansvaret-for-og-delegering-av-myndighet-etter-forurensningsloven-44-til-nærings-og-fiskeridepartementet",
+      "delegering-av-kongens-myndighet-etter-lov-13-mars-1981-nr-6-om-vern-mot-forurensninger-og-om-avfall-82-første-annet-og-tredje-ledd"
+    ],
+    "forvaltningsloven": [
+      "forvaltningsloven-fvl",
+      "forvaltningsloven",
+      "delegering-av-kongens-myndighet-etter-lov-10-februar-1967-13g",
+      "overføring-av-ansvar-for-utøvelse-av-statens-prosessuelle-handleevne-i-saker-etter-lov-4-juli-2003-nr-74-om-forsvarlig-hundehold-og-overføring-av-instruksjonsmyndighet-omgjøringsadgang-og"
+    ],
+    "genteknologiloven": [
+      "genteknologiloven-gentl",
+      "ikrafttr-av-genteknologiloven-delegering",
+      "delegering-etter-genteknologiloven"
+    ],
+    "gjeldsordningsloven": [
+      "gjeldsordningsloven-gol",
+      "delegering-etter-gjeldsordningsloven",
+      "forskr-om-overgangsbestemmelser-gjeldsordning"
+    ],
+    "havenergilova": [
+      "havenergilova-havenl",
+      "deleg-til-sd-etter-havenergilova",
+      "overføring-av-forvaltningsansvaret-for-havenergilova-5-1-fra-arbeids-og-sosialdepartementet-til-petroleumstilsynet"
+    ],
+    "havressurslova": [
+      "havressurslova",
+      "deleg-til-fylkeskommunen-etter-havressurslova",
+      "forskrift-om-utviding-av-det-stadlege-verkeområde-til-havressurslova"
+    ],
+    "helseforetaksloven": [
+      "helseforetaksloven-hfl",
+      "regler-for-nemnd-etter-helseforetaksloven"
+    ],
+    "helseregisterloven": [
+      "helseregisterloven-hregl",
+      "ikrafttr-av-lov-2001-24-helseregisterloven"
+    ],
+    "hundeloven": [
+      "hundeloven-hul",
+      "overføring-av-forvaltningsansvaret-for-hundeloven",
+      "delegering-av-myndighet-til-landbruks-og-matdepartementet-etter-lov-om-forsvarlig-hundehold",
+      "overføring-av-ansvar-for-utøvelse-av-statens-prosessuelle-handleevne-i-saker-etter-lov-4-juli-2003-nr-74-om-forsvarlig-hundehold-og-overføring-av-instruksjonsmyndighet-omgjøringsadgang-og"
+    ],
+    "hvitvaskingsloven": [
+      "hvitvaskingsloven-hvvl",
+      "ikrafttr-av-lov-2003-41-hvitvaskingsloven"
+    ],
+    "ikraftsetting av lov 7. april 1972 nr. 13 om endringer i lov av 20. juli 1893 nr. 1 om sjøfarten og om delegasjon av myndighet etter loven.": [
+      "delegering-etter-sjøloven",
+      "delegering-til-jd-etter-tinglysingsloven-m-v"
+    ],
+    "inkassoloven": [
+      "inkassoloven-inkl",
+      "inkassoloven",
+      "ikrafttredelse-av-inkassoloven-delegering"
+    ],
+    "innkrevingsloven": [
+      "innkrevingsloven",
+      "delegering-av-myndighet-til-skattedirektoratet-etter-lov-om-innkreving-av-statlige-krav-mv"
+    ],
+    "innskuddspensjonsloven": [
+      "innskuddspensjonsloven-innskpensjl",
+      "deleg-til-fin-etter-innskuddspensjonsloven-2",
+      "forskrift-til-innskuddspensjonsloven"
+    ],
+    "jordlova": [
+      "jordlova-jl",
+      "delegering-av-myndighet-etter-jordlova"
+    ],
+    "jordskiftelova": [
+      "jordskiftelova-jskl",
+      "deleg-til-lmd-etter-jordskiftelova"
+    ],
+    "justering av distriktsinndelingen mv. i politi- og lensmannsetaten som følge av kommune- og regionreformen": [
+      "justering-av-distriktsinndelingen-mv-i-politi-og-lensmannsetaten",
+      "justering-av-distriktsinndelingen-mv-i-politi-og-lensmannsetaten-som-følge-av-kommune-og-regionreformen"
+    ],
+    "kommuneloven": [
+      "kommuneloven",
+      "deleg-av-myndighet-etter-kommuneloven-inndelingslova-og-forvaltningsloven",
+      "meddelelse-om-ikrafttr-av-lov-2018-83-kommuneloven",
+      "delegering-av-myndighet-etter-lov-22-juni-2018-nr-83-om-kommuner-og-fylkeskommuner-kapittel-27-lov-17-juni-2005-nr-90-om-mekling-og-rettergang-i-sivile-tvister-22-3-og-lov-22-mai-1982-nr-25-om"
+    ],
+    "konkurranseloven": [
+      "konkurranseloven-krrl",
+      "forskrift-om-overgangsregler-konkurranseloven",
+      "delegering-av-myndighet-etter-konkurranseloven"
+    ],
+    "konsesjonsloven": [
+      "konsesjonsloven-konsl",
+      "ikrafttr-av-endr-til-konsesjonsloven",
+      "delegering-av-myndighet-etter-jordlova"
+    ],
+    "kredittopplysningsloven": [
+      "kredittopplysningsloven",
+      "delegering-av-kongens-myndighet-etter-lov-om-behandling-av-opplysninger-i-kredittopplysningsvirksomhet-til-barne-og-familiedepartementet"
+    ],
+    "kringkastingsloven": [
+      "kringkastingsloven-kringkl",
+      "delegering-av-kongens-myndighet-etter-lov-4-desember-1992-nr-127-om-kringkasting-og-audiovisuelle-bestillingstjenester-til-kultur-og-likestillingsdepartementet"
+    ],
+    "landingsforskriften": [
+      "landingsforskriften",
+      "endr-i-landingsforskriften"
+    ],
+    "leketøyforskriften": [
+      "leketøyforskriften",
+      "endr-i-leketøyforskriften"
+    ],
+    "ligningsloven": [
+      "delegering-av-myndighet-til-skattedirektoratet-3",
+      "delegering-til-skd-etter-ligningsloven-2",
+      "delegering-til-skd-etter-ligningsloven-3",
+      "delegering-til-skd-etter-ligningsloven-4",
+      "deleg-til-skattedir-etter-lov-2007-103",
+      "deleg-til-skattekontoret-etter-ligningsloven"
+    ],
+    "lov om barn og foreldre (barnelova)": [
+      "barnelova-bl",
+      "barnelova"
+    ],
+    "lov om endringer i skatteloven": [
+      "endringslov-til-skatteloven-3",
+      "endringslov-til-skatteloven-4"
+    ],
+    "lov om infrastruktur for alternativt drivstoff": [
+      "lov-om-infrastruktur-for-alternativt-drivstoff",
+      "lov-om-infrastruktur-for-alternativt-drivstoff-2"
+    ],
+    "lov om medisinsk utstyr": [
+      "lov-om-medisinsk-utstyr-medutstl",
+      "lov-om-medisinsk-utstyr"
+    ],
+    "lov om motorferdsel i utmark og vassdrag (motorferdselloven)": [
+      "motorferdselloven",
+      "motorferdselloven-2"
+    ],
+    "lov om særavgifter (særavgiftsloven)": [
+      "særavgiftsloven",
+      "særavgiftsloven-2"
+    ],
+    "luftfartsloven": [
+      "luftfartsloven-luftl",
+      "deleg-til-sd-etter-luftfartsloven-16-1"
+    ],
+    "matloven": [
+      "matloven-matl",
+      "myndighetsfordeling-etter-matloven"
+    ],
+    "matrikkellova": [
+      "matrikkellova",
+      "endr-i-delvis-ikrafts-av-lov-2005-101"
+    ],
+    "mellombels forskrift om sensurfristar ved norges handelshøyskole (nhh)": [
+      "mellombels-forskrift-om-sensurfristar-ved-norges-handelshøyskole-nhh",
+      "mellombels-forskrift-om-sensurfristar-ved-norges-handelshøyskole"
+    ],
+    "merverdiavgiftsloven": [
+      "merverdiavgiftsloven-mval",
+      "deleg-til-skattedir-etter-merverdiavgiftsloven",
+      "deleg-til-skattekontorene-etter-mva-loven"
+    ],
+    "motorferdselloven": [
+      "motorferdselloven",
+      "motorferdselloven-2"
+    ],
+    "naturmangfoldloven": [
+      "naturmangfoldloven-nml",
+      "forskrift-om-bruk-av-naturmangfoldloven-på-jan-mayen"
+    ],
+    "naturskadeerstatningsloven": [
+      "naturskadeerstatningsloven",
+      "deleg-til-lmd-etter-naturskadeerstatningsloven"
+    ],
+    "naturskadeloven": [
+      "naturskadeloven",
+      "delegering-av-myndighet-etter-naturskadeloven",
+      "deleg-til-ed-etter-naturskadeloven"
+    ],
+    "nettinntektsforskriften": [
+      "nettinntektsforskriften",
+      "endr-i-nettinntekstforskriften"
+    ],
+    "opplæringsforskrifta": [
+      "opplæringsforskrifta",
+      "endr-i-opplæringsforskrifta-og-privatskoleforskrifta",
+      "endr-i-opplæringsforskrifta-og-privatskoleforskrifta-2"
+    ],
+    "overgangsregler om integreringsloven kapittel 6a": [
+      "overgangsregler-om-integreringsloven-kapittel-6a",
+      "overgangsregler-om-integreringsloven-kapittel-6a-2"
+    ],
+    "overgangsregler til lov 11. mai 2023 nr. 13 om endringer i tvisteloven mv. (rettsmekling, ankenektelse mv.)": [
+      "overgangsregler-til-lov-11-mai-2023-nr-13-om-endringer-i-tvisteloven-mv",
+      "overgangsregler-til-lov-11-mai-2023-nr-13-om-endringer-i-tvisteloven-mv-2"
+    ],
+    "pasientreiseforskriften": [
+      "pasientreiseforskriften",
+      "endr-i-pasientreiseforskriften"
+    ],
+    "pasientskadeloven": [
+      "pasientskadeloven-passkl",
+      "delvis-ikrafttr-av-lov-2001-53-pasientskadel",
+      "deleg-til-hod-etter-pasientskadeloven"
+    ],
+    "pengespilloven": [
+      "pengespilloven",
+      "delegering-av-kongens-myndighet-etter-lov-28-august-1992-nr-103-om-pengespill-10-fjerde-ledd-for-så-vidt-gjelder-disponering-av-ikke-utbetalte-midler-til-kultur-og-likestillingsdepartementet"
+    ],
+    "personopplysningsloven": [
+      "personopplysningsloven",
+      "ikrafts-av-lov-2018-38-personopplysningsloven",
+      "meddelelse-om-ikrafttredelse-av-lov-2018-38"
+    ],
+    "poliklinikkforskriften": [
+      "poliklinikkforskriften",
+      "endr-i-poliklinikkforskriften"
+    ],
+    "postloven": [
+      "postloven",
+      "delvis-ikrafttr-av-postloven-delegering",
+      "delegering-av-kongens-myndighet-etter-lov-4-september-2015-nr-91-om-posttjenester-til-samferdselsdepartementet-nasjonal-kommunikasjonsmyndighet-kommunal-og-distriktsdepartementet-og-digitaliserings"
+    ],
+    "privatskoleforskrifta": [
+      "privatskoleforskrifta",
+      "endr-i-opplæringsforskrifta-og-privatskoleforskrifta",
+      "endr-i-opplæringsforskrifta-og-privatskoleforskrifta-2"
+    ],
+    "produktkontrolloven": [
+      "produktkontrolloven-prodktrl",
+      "delegering-til-ed-etter-produktkontrolloven",
+      "delegering-til-nve-etter-produktkontrolloven",
+      "deleg-av-myndighet-til-sd-etter-produktkontrolloven",
+      "deleg-av-myndighet-til-statens-vegvesen-etter-produktkontrolloven",
+      "delegering-av-myndighet-etter-produktkontrolloven-til-lmd",
+      "deleg-av-myndighet-etter-produktkontrolloven-til-landbruks-og-matdepartementet",
+      "deleg-av-myndighet-etter-produktkontrolloven-8a-til-mattilsynet",
+      "delegering-av-kongens-myndighet-etter-lov-11-juni-1976-nr-79-om-kontroll-med-produkter-og-forbrukertjenester-12a-til-klima-og-miljødepartementet",
+      "delegering-av-kongens-myndighet-etter-lov-11-juni-1976-nr-79-om-kontroll-med-produkter-og-forbrukertjenester-4-12a-og-13-til-helse-og-omsorgsdepartementet-for-så-vidt-gjelder-forskrift-om-omsetning"
+    ],
+    "regnskapsførerloven": [
+      "regnskapsførerloven",
+      "ikrafttr-av-lov-2006-38"
+    ],
+    "regnskapsloven": [
+      "regnskapsloven-rskl",
+      "delegering-til-fin-etter-regnskapsloven",
+      "forskrift-om-overgangsregler-årsregnskap",
+      "forskrift-om-overgangsregler-til-regnskapsloven",
+      "delvis-ikrafttr-av-lov-2004-81-endr-i-rskl",
+      "ikrafttr-av-lov-2005-46-endr-i-regnskapsl",
+      "deleg-til-fin-etter-endr-lov-til-regnskapsl",
+      "deleg-av-myndighet-til-fin-etter-regnskapsloven"
+    ],
+    "reindriftsloven": [
+      "reindriftsloven",
+      "forskr-overgangsbestemmelser-til-reindriftsloven"
+    ],
+    "reseptformidlerforskriften": [
+      "reseptformidlerforskriften",
+      "endr-i-reseptformidlerforskriften"
+    ],
+    "revisorloven": [
+      "revisorloven",
+      "delegering-etter-revisorloven",
+      "delegering-til-fin-etter-revisorloven",
+      "forskrift-om-overgangsregler-til-revisorloven",
+      "ikrafttr-av-lov-2006-38"
+    ],
+    "sameloven": [
+      "sameloven-samel",
+      "overføring-av-forvaltningsansvaret-for-sameloven-1-4-og-2-3-til-2-11-fra-distrikts-og-digitaliseringsministeren-til-kommunal-og-moderniseringsministeren"
+    ],
+    "sentralbankloven": [
+      "sentralbankloven",
+      "delegering-av-myndighet-etter-sentralbankloven",
+      "deleg-til-fin-etter-sentralbankloven-3"
+    ],
+    "sikkerhetsforskriften": [
+      "sikkerhetsforskriften-skip-mv",
+      "sikkerhetsforskriften-jernbane"
+    ],
+    "sivilbeskyttelsesloven": [
+      "sivilbeskyttelsesloven",
+      "deleg-til-dsb-etter-sivilbeskyttelsesloven",
+      "anvendelse-av-sivilbeskyttelsesloven-på-svalbard",
+      "delegering-av-myndighet-til-direktoratet-for-samfunnssikkerhet-og-beredskap-etter-lov-25-juni-2010-nr-45-om-kommunal-beredskapsplikt-sivile-beskyttelsestiltak-og-sivilforsvaret-2"
+    ],
+    "sjøloven": [
+      "sjøloven-sjøl",
+      "delegering-til-sfd-etter-sjøloven"
+    ],
+    "skattebetalingsloven": [
+      "skattebetalingsloven-sktbl",
+      "delegering-av-myndighet-til-skattedirektoratet"
+    ],
+    "skatteloven": [
+      "skatteloven-sktl",
+      "endringslov-til-skatteloven-2"
+    ],
+    "skikkethetsforskriften": [
+      "godkjennelse-av-ny-forskrift-om-skikkethetsvurdering-utvisning-bortvisning-og-utestenging-av-studenter-ved-politihøgskolen-og-delegering-av-myndighet-etter-politiloven-24a-og-24c-for-fastsettelse-av",
+      "skikkethetsforskriften"
+    ],
+    "skipsarbeidsloven": [
+      "skipsarbeidsloven",
+      "deleg-til-sjøfartsdir-etter-skipsarbeidsloven",
+      "deleg-til-sfd-etter-skipsarbeidsloven",
+      "forskrift-om-kontrolltiltak-overfor-arbeidstakere-som-er-omfattet-av-skipsarbeidsloven"
+    ],
+    "statistikkloven": [
+      "statistikkloven",
+      "delegering-til-fin-etter-statistikkloven"
+    ],
+    "statsansatteloven": [
+      "statsansatteloven",
+      "deleg-av-kongens-myndighet-etter-statsansatteloven",
+      "forskrift-om-anvendelse-av-lov-16-juni-2017-nr-67-om-statens-ansatte-mv-og-lov-18-juli-1958-nr-2-om-offentlige-tjenestetvister-på-jan-mayen"
+    ],
+    "straffegjennomføringsloven": [
+      "straffegjennomføringsloven-strgjfl",
+      "delvis-ikrafttr-av-lov-2001-181",
+      "delegering-av-kongens-myndighet-etter-lov-18-mai-2001-nr-21-om-gjennomføring-av-straff-mv-1-andre-ledd-og-lov-20-mai-2005-nr-28-om-straff-52c-femte-ledd"
+    ],
+    "straffeloven": [
+      "straffeloven-strl",
+      "delvis-ikrafts-av-lov-2005-131-og-lov-2005-28",
+      "delegering-av-kongens-myndighet-etter-lov-18-mai-2001-nr-21-om-gjennomføring-av-straff-mv-1-andre-ledd-og-lov-20-mai-2005-nr-28-om-straff-52c-femte-ledd"
+    ],
+    "straffeprosessloven": [
+      "straffeprosessloven-strpl",
+      "deleg-av-myndighet-etter-straffeprosessloven-118-første-og-annet-ledd-til-politidirektoratet",
+      "deleg-av-myndighet-etter-straffeprosessloven-118-første-og-annet-ledd-til-riksadvokaten",
+      "deleg-av-myndighet-etter-straffeprosessloven-118-første-og-annet-ledd-til-politidirektoratet-2",
+      "delegering-av-myndighet-etter-lov-22-juni-2018-nr-83-om-kommuner-og-fylkeskommuner-kapittel-27-lov-17-juni-2005-nr-90-om-mekling-og-rettergang-i-sivile-tvister-22-3-og-lov-22-mai-1982-nr-25-om",
+      "delegering-av-kongens-myndighet-etter-lov-22-mai-1981-nr-25-om-rettergangsmåten-i-straffesaker-146-til-justis-og-beredskapsdepartementet"
+    ],
+    "strålevernforskriften": [
+      "strålevernforskriften",
+      "endr-i-strålevernforskriften"
+    ],
+    "svalbardmiljøloven": [
+      "svalbardmiljøloven",
+      "forskrift-om-overgangsbest-svalbardmiljøl"
+    ],
+    "særavgiftsloven": [
+      "særavgiftsloven",
+      "særavgiftsloven-2"
+    ],
+    "taubaneforskriften": [
+      "taubaneforskriften",
+      "endr-i-taubaneforskriften"
+    ],
+    "taubaneloven": [
+      "taubaneloven",
+      "delegering-av-myndighet-etter-taubaneloven"
+    ],
+    "tiltaksforskriften": [
+      "tiltaksforskriften",
+      "endr-i-tiltaksforskriften"
+    ],
+    "tivoliloven": [
+      "tivoliloven",
+      "deleg-til-jernbanetilsynet-etter-tivoliloven",
+      "delegering-av-samferdselsdepartementets-myndighet-etter-tivoliloven-til-statens-jernbanetilsyn",
+      "delegering-av-myndighet-etter-tivoliloven-til-statens-jernbanetilsyn"
+    ],
+    "tolloven": [
+      "deleg-til-tad-etter-tolloven",
+      "deleg-til-tad-etter-tolloven-2"
+    ],
+    "trafikklærerforskriften": [
+      "trafikklærerforskriften",
+      "endr-i-trafikklærerforskriften"
+    ],
+    "tvisteloven": [
+      "tvisteloven-tvl",
+      "ikrafts-av-lov-2005-90-tvisteloven",
+      "delegering-av-myndighet-etter-lov-22-juni-2018-nr-83-om-kommuner-og-fylkeskommuner-kapittel-27-lov-17-juni-2005-nr-90-om-mekling-og-rettergang-i-sivile-tvister-22-3-og-lov-22-mai-1982-nr-25-om"
+    ],
+    "utlendingsloven": [
+      "utlendingsloven-utlendl",
+      "delegering-av-myndighet-m-v-til-jd",
+      "overføring-av-forvaltningsansvaret-for-utlendingsloven-125a-fra-asd-til-jd"
+    ],
+    "vareførselsforskriften": [
+      "vareførselsforskriften",
+      "endr-i-vareførselsforskriften",
+      "endr-i-vareførselsforskriften-2",
+      "endr-i-vareførselsforskriften-3",
+      "endr-i-vareførselsforskriften-4",
+      "endr-i-vareførselsforskriften-5"
+    ],
+    "vedtak om delegering og endring i vedtak om delegering av myndighet fra helse- og omsorgsdepartementet til helsedirektoratet": [
+      "vedtak-om-delegering-og-endring-i-vedtak-om-delegering-av-myndighet-fra-helse-og-omsorgsdepartementet-til-helsedirektoratet",
+      "vedtak-om-delegering-og-endring-i-vedtak-om-delegering-av-myndighet-fra-helse-og-omsorgsdepartementet-til-helsedirektoratet-2"
+    ],
+    "verdipapirhandelloven": [
+      "verdipapirhandelloven-vphl",
+      "forskr-overgangsregler-lov-2007-74-lov-2007-75"
+    ],
+    "verdipapirregisterloven": [
+      "deleg-til-fin-etter-verdipapirregisterloven",
+      "delv-ikrafttr-lov-2002-64-verdipapirregister",
+      "ikrafttr-overg-regler-til-lov-2002-64-vprl"
+    ],
+    "verdipapirsentralloven": [
+      "verdipapirsentralloven",
+      "forskrift-om-overgangsregler-til-verdipapirsentralloven"
+    ],
+    "vergemålsloven": [
+      "vergemålsloven-vgml",
+      "deleg-til-jd-etter-vergemålsloven"
+    ],
+    "viltressursloven": [
+      "viltressursloven",
+      "delegering-av-kongens-myndighet-etter-lov-20-juni-2025-nr-102-om-jakt-fangst-og-felling-av-vilt-mv",
+      "forskrift-om-utmåling-av-overtredelsesgebyr-ved-brudd-på-regler-etter-lov-om-jakt-fangst-og-felling-av-vilt-mv"
+    ],
+    "voldserstatningsloven": [
+      "voldserstatningsloven",
+      "overgangsregler-til-lov-17-juni-2022-nr-57-om-erstatning-fra-staten-til-voldsutsatte",
+      "delegering-av-kongens-myndighet-etter-lov-17-juni-2022-nr-57-om-erstatning-fra-staten-til-voldsutsatte-11-tredje-ledd-til-justis-og-beredskapsdepartementet"
+    ],
+    "yrkestransportforskriften": [
+      "yrkestransportforskriften",
+      "endr-i-yrkestransportforskriften-overgangsbestemmelser",
+      "endr-i-yrkestransportforskriften"
+    ]
+  },
+  "docs_without_short_name": 5118,
+  "docs_without_short_name_sample": [
+    "12-pax-forskriften",
+    "admin-instruks-for-pensjonsordningen-for-apotekvirksomhet",
+    "agnforsyningsloven",
+    "aif-forskriften",
+    "aif-loven",
+    "alternativ-behandlingsloven-albhl",
+    "andre-arter-forskriften",
+    "anerkjennelse-av-norges-røde-kors-rett",
+    "anerkjennelse-av-visse-typer-legitimasjonsdokumenter-ved-reise-til-svalbard-jf-forskrift-om-kontroll-av-reisende-til-og-fra-svalbard-4-annet-ledd",
+    "ankringsforskriften-09",
+    "ansvaret-for-arbeidsforskningsinstituttet-as",
+    "ansvaret-for-arbeidsmiljø-og-sikkerhetsavd",
+    "ansvaret-for-samfunnssikkerhet-i-sivil-sektor-på-nasjonalt-nivå-og-justis-og-beredskapsdepartementets-samordningsrolle-innen-samfunnssikkerhet-og-ikt-sikkerhet",
+    "ansvarlighetsloven-riksrl",
+    "apotekpensjonsloven",
+    "arbeidstakeroppfinnelsesloven",
+    "atomenergiloven-atomenl",
+    "atp-forskriften",
+    "auksjonsforskriften-2020",
+    "auksjonsforskriften-2022",
+    "auksjonsforskriften-2024",
+    "auksjonsloven",
+    "autorisasjon-av-verksteder",
+    "avgiftsregulativ-for-sterkstrømanlegg",
+    "avhendingsinstruksen"
+  ],
+  "documents": 5923,
+  "keys": 11936
+}
