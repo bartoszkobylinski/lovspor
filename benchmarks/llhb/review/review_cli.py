@@ -41,6 +41,16 @@ DECISIONS_PATH = DATA_DIR / "manual-review-decisions.jsonl"
 REVIEW_DIR = DATA_DIR / "review"
 
 
+def _point_at(data_dir: Path) -> None:
+    """Re-target every path at another pool's artifact dir (Stage 3.6-F:
+    the regen queue gets its own decisions file; the immutable Stage 3.5
+    snapshot is never opened for writing through this tool)."""
+    global DATA_DIR, DECISIONS_PATH, REVIEW_DIR  # noqa: PLW0603 — CLI-scoped config
+    DATA_DIR = data_dir
+    DECISIONS_PATH = data_dir / "manual-review-decisions.jsonl"
+    REVIEW_DIR = data_dir / "review"
+
+
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     return [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
@@ -290,6 +300,14 @@ def _prompt_one(record: ReviewDecision, reviewer: str) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="Pool artifact dir to review (default: the Stage 3 pool). "
+        "Stage 3.6-F: pass dataset/candidates/regen to review the "
+        "regenerated queue with its own decisions file.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("packets")
     sub.add_parser("status")
@@ -303,6 +321,8 @@ def main() -> None:
     review.add_argument("--reviewer", required=True)
     review.add_argument("--category", default=None)
     args = parser.parse_args()
+    if args.data_dir is not None:
+        _point_at(args.data_dir.resolve())
     if args.command == "packets":
         cmd_packets()
     elif args.command == "status":
