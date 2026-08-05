@@ -1,0 +1,125 @@
+"""Generation helpers: topics, display names, traps, quotes, shapes."""
+
+from pathlib import Path
+
+import pytest
+
+from lovspor.llhb.generation import (
+    ActInfo,
+    CorpusSampler,
+    SectionInfo,
+    difficulty_for,
+    display_name,
+    mutate_quote,
+    parse_ministry,
+    quote_span,
+    scan_duplicate_ids,
+    section_shape,
+    topic_of,
+    trap_section_ids,
+)
+from lovspor.llhb.quotes import QuoteRef, QuoteStatus, materialize_quote, quote_sha256
+from lovspor.mcp import CorpusReader
+from tests.unit.llhb_fixtures import record_for, rich_corpus
+
+
+@pytest.fixture
+def reader(tmp_path: Path) -> CorpusReader:
+    return rich_corpus(tmp_path)
+
+
+def test_topic_of_strips_prefix_and_rejects_unusable() -> None:
+    assert topic_of("§ 15-7. Vern mot usaklig oppsigelse") == "vern mot usaklig oppsigelse"
+    assert topic_of("§ 14.") is None
+    assert topic_of("§ 3. (Opphevet)") is None
+    assert topic_of("§ 2. Kort") is None
+
+
+def test_display_name_prefers_law_name_parenthetical() -> None:
+    record = record_for("alfaloven", "Lov om alfa-testing av verktøy (alfaloven)")
+    assert display_name(record) == "alfaloven"
+    bare = record_for("x", "Forskrift om noe helt annet")
+    assert display_name(bare) == "Forskrift om noe helt annet"
+
+
+def test_parse_ministry_reads_front_matter(reader: CorpusReader) -> None:
+    assert parse_ministry(reader.get_law("alfaloven")) == "Testdepartementet"
+    assert parse_ministry("---\nid: x\n---\n\nbody") is None
+
+
+def test_difficulty_and_shape_rules_are_fixed() -> None:
+    assert [difficulty_for(n) for n in (10, 100, 500)] == ["easy", "medium", "hard"]
+    assert [section_shape(s) for s in ("12", "5-12", "5-12a", "8.1")] == [
+        "plain",
+        "hyphen",
+        "letter",
+        "dotted",
+    ]
+
+
+def test_trap_ids_are_absent_and_strategy_labelled(reader: CorpusReader) -> None:
+    sampler = CorpusSampler(reader)
+    act = next(
+        a
+        for doc_id in sampler.shuffled_current_doc_ids()
+        if (a := sampler.act_info(doc_id)) and a.slug == "alfaloven"
+    )
+    traps = trap_section_ids(act)
+    assert traps
+    existing = {s.section_id for s in act.sections}
+    for strategy, trap in traps:
+        assert trap not in existing
+        assert strategy in {"adjacent-gap", "chapter-overrun", "letter-suffix", "flat-overrun"}
+    assert ("chapter-overrun", "1-3") in traps
+
+
+def test_trap_adjacent_gap_found_when_sequence_has_hole() -> None:
+    act = ActInfo(
+        slug="hull-loven",
+        doc_id="nl-x",
+        doc_type="lov",
+        title="Lov om hull (hulloven)",
+        display_name="hulloven",
+        ministry=None,
+        sections=[
+            SectionInfo(section_id="1-1", occurrence=1, heading="§ 1-1. En", kind="section"),
+            SectionInfo(section_id="1-3", occurrence=1, heading="§ 1-3. Tre", kind="section"),
+        ],
+    )
+    assert ("adjacent-gap", "1-2") in trap_section_ids(act)
+
+
+def test_quote_span_round_trips_through_materializer(reader: CorpusReader) -> None:
+    span = quote_span(reader, "alfaloven", "1-1")
+    assert span is not None
+    start, end, text = span
+    ref = QuoteRef(
+        slug="alfaloven",
+        section_id="1-1",
+        char_span=(start, end),
+        sha256_normalized=quote_sha256(text),
+    )
+    result = materialize_quote(reader, ref)
+    assert result.status is QuoteStatus.OK
+    assert result.text == text
+
+
+def test_mutate_quote_changes_text_deterministically() -> None:
+    text = "virksomheten skal dokumentere alle resultater"
+    mutated = mutate_quote(text)
+    assert mutated == "virksomheten kan dokumentere alle resultater"
+    assert mutate_quote("ingen mutasjonsord her") is None
+
+
+def test_scan_finds_real_duplicates_only(reader: CorpusReader) -> None:
+    findings = scan_duplicate_ids(reader)
+    assert [f["slug"] for f in findings] == ["dobbeltloven"]
+    assert findings[0]["duplicates"] == {"6-2": 2}
+
+
+def test_sampler_is_seed_deterministic(reader: CorpusReader) -> None:
+    first = CorpusSampler(reader, 42).shuffled_current_doc_ids()
+    second = CorpusSampler(reader, 42).shuffled_current_doc_ids()
+    third = CorpusSampler(reader, 43).shuffled_current_doc_ids()
+    assert first == second
+    assert sorted(first) == sorted(third)
