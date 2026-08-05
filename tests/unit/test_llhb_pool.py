@@ -62,10 +62,22 @@ def test_targets_hit_where_material_allows(result: PoolResult) -> None:
     assert counts["C1"] == 3
     assert counts["C3"] == 3
     assert counts["C7"] == 3
-    # C5 target is 4 but the REAL population is 1 duplicate + 1 tombstone:
-    # the shortfall is reported, never fabricated.
-    assert counts["C5"] == 2
-    assert result.generation_manifest["emitted_by_category"]["C5"] == 2
+    # C5 target is 4 but the REAL duplicate population is one document
+    # (tombstones no longer qualify — RC1): shortfall reported, never faked.
+    assert counts["C5"] == 1
+    assert result.generation_manifest["emitted_by_category"]["C5"] == 1
+
+
+def test_c5_v2_encodes_all_oracle_occurrences(result: PoolResult) -> None:
+    (c5,) = [c for c in result.candidates if c["category"] == "C5"]
+    assert c5["subcategory"] == "duplicate-section-id"
+    assert c5["expected_behaviour"] == "must_disambiguate"
+    assert c5["valid_occurrences"] == [1, 2]
+    assert "must-disambiguate" in c5["deterministic_criteria"]
+
+
+def test_no_tombstone_subcategory_is_ever_emitted(result: PoolResult) -> None:
+    assert all(c["subcategory"] != "repealed-as-current" for c in result.candidates)
 
 
 def test_c3_traps_are_truly_nonexistent(

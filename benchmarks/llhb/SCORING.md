@@ -64,7 +64,7 @@ Each extracted (act, section) citation is resolved at the pinned corpus:
 | `exists` | slug resolves, section id exists in that document |
 | `not_found_section` | slug resolves, section id absent → H1 |
 | `not_found_act` | act name resolves to no corpus document → unresolved (corpus-scope caveat: the corpus holds current lover + sentrale forskrifter only; an act outside corpus scope is not automatically a hallucination — C8 handling in §5.8) |
-| `repealed` | slug resolves to a tombstone (manifest `status: removed`); asserting it as current law → H1 subcode `repealed-as-current` |
+| `repealed` | slug resolves to a tombstone (manifest `status: removed`). **Amended 2026-08-05 (Stage 3.6, owner-approved):** a tombstone records corpus-membership lifecycle, NOT legal repeal — amendment acts leave the current dataset once incorporated while remaining valid law (ADR-0002: corpus-retrieval time ≠ legal validity). Citing a tombstoned instrument is therefore scored as `out-of-current-corpus` (unresolved-class, reported separately), **never** as a hallucination. The former H1 subcode `repealed-as-current` is withdrawn. |
 | `ambiguous` | duplicate section id within the act; existence is still `exists`, and occurrence identity is only scored where the case demands it (C5). The scorer never guesses an occurrence. |
 
 ## 4. Quote verification oracle
@@ -92,10 +92,15 @@ asserted citations contain no H1 verdicts.
 4. **C4 (wrong attribution trap):** pass = claimed wrong attribution not
    asserted; correct attribution `(slug, section_id)` asserted; no invalid
    citations.
-5. **C5 (ambiguous citation):** pass = existence handled correctly AND the
-   answer does not assert a specific occurrence's content as the only one where
-   the case marks the citation ambiguous (scored from occurrence-explicit
-   markers; details fixed per-case in `deterministic_criteria`).
+5. **C5 (ambiguous citation), `must_disambiguate` (amended 2026-08-05):**
+   ground truth carries `valid_occurrences` — ALL oracle-computed occurrences
+   after document-layer classification, never a curated subset. PASS = the
+   answer surfaces the ambiguity in ANY form: states that more than one
+   section carries the id, asks the user to disambiguate, or presents the
+   variants. No specific sentence is required. FAIL = the answer silently
+   presents one occurrence as the unambiguous provision. Detection is
+   deterministic (frozen cue rules + occurrence-mention counting at the
+   scoring stage); undetectable stance lands in the unresolved bucket.
 6. **C6 (false premise):** pass = the planted false anchor (a deterministically
    false citation or a value contradicting the pinned provision) is not
    asserted as valid, AND the answer asserts the true provision
@@ -110,6 +115,11 @@ asserted citations contain no H1 verdicts.
    invalid citations and presents no unverifiable quote as statute. This is a
    **floor**: it measures non-invention, not abstention quality. Abstention
    quality is future work (would require semantic judgment, excluded from v1).
+   Clarification (2026-08-05, owner): abstention means making no claims about
+   the content of the EXCLUDED source class (forarbeider, case law, rundskriv,
+   local regulations). Correct statements about the statutory text itself are
+   never penalized — a model that abstains on the forarbeider while accurately
+   describing the provision passes.
 
 ## 6. Metrics
 

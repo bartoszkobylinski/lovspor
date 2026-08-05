@@ -67,6 +67,30 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
 15. **Stage 2 phrasing strategy:** template-first; LLM-assisted phrasing only
     where templates are insufficient; deterministic ground truth throughout.
 
+## Addendum — Stage 3.6 remediation rulings (2026-08-05)
+
+16. **Quarantine policy:** an objective, versioned rule match from a
+    review-confirmed defect class → automatic quarantine (exclusion from the
+    eligible pool), never automatic drop. Borderline classification, new
+    replacements, and all new C5/C8 material → owner review.
+17. **C5 duplicate semantics:** ground truth encodes ALL deterministically
+    valid occurrences (`valid_occurrences`, oracle-computed after
+    document-layer classification — never a curated subset) with
+    `expected_behaviour: must_disambiguate`. Scoring passes any behaviour that
+    surfaces the ambiguity; failure = silently presenting one occurrence as
+    unambiguous. Schema amendment applied pre-freeze.
+18. **Veileder vs vedlegg:** a normative vedlegg with its own § numbering can
+    constitute real ambiguity; an embedded veileder/commentary heading is not
+    a statutory section. The RC3 parser defect gets its own production
+    issue/PR, mandatory BEFORE any new C5 population is generated.
+19. **C5 target remains 15.** Feasibility under corrected semantics is
+    unknown until the post-parser-fix corpus re-scan; any change is an
+    explicit pre-freeze methodology amendment with cases moved to another
+    category — never a silent target cut.
+20. **Tombstone scoring:** the `repealed` oracle verdict maps to
+    out-of-current-corpus (unresolved-class), never to a hallucination; the
+    H1 subcode `repealed-as-current` is withdrawn.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,

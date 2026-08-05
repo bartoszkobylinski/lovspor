@@ -111,6 +111,39 @@ def test_mutate_quote_changes_text_deterministically() -> None:
     assert mutate_quote("ingen mutasjonsord her") is None
 
 
+def test_mutate_quote_never_touches_the_tail() -> None:
+    """RC6: a mutation near the end produces a visibly ragged quote."""
+    text = "detta er en lang setning som slutter med at noen skal x"
+    assert mutate_quote(text) is None  # only mutation site is within the tail guard
+
+
+def test_quote_span_ends_at_sentence_boundary(reader: CorpusReader) -> None:
+    span = quote_span(reader, "alfaloven", "1-1")
+    assert span is not None
+    assert span[2].endswith(".")
+
+
+def test_trap_ids_exclude_near_miss_siblings() -> None:
+    """RC7: § 1 is no trap when § 1-1 or § 1a exists."""
+    from lovspor.llhb.generation import trap_has_sibling  # noqa: PLC0415
+
+    assert trap_has_sibling({"1-1", "2"}, "1") is True
+    assert trap_has_sibling({"1a", "2"}, "1") is True
+    assert trap_has_sibling({"12", "2"}, "1") is False
+    assert trap_has_sibling({"2", "3"}, "1") is False
+
+
+def test_topic_filter_rejects_meta_and_short_topics() -> None:
+    from lovspor.llhb.generation import is_usable_topic  # noqa: PLC0415
+
+    assert is_usable_topic("lovens virkeområde", strict=False) is False
+    assert is_usable_topic("overgangsbestemmelser for gamle avtaler", strict=True) is False
+    assert is_usable_topic("hvem kan søke", strict=True) is True
+    assert is_usable_topic("krav til dokumentasjon ved testing", strict=True) is True
+    assert is_usable_topic("registreringsplikt", strict=True) is False  # too short
+    assert is_usable_topic("registreringsplikt", strict=False) is True
+
+
 def test_scan_finds_real_duplicates_only(reader: CorpusReader) -> None:
     findings = scan_duplicate_ids(reader)
     assert [f["slug"] for f in findings] == ["dobbeltloven"]

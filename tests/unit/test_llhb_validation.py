@@ -123,6 +123,27 @@ def test_valid_c5_duplicate_section_passes(validator: CandidateValidator) -> Non
     assert validator.validate_case({**c5, "expected_occurrence": 1}) == []
 
 
+def test_c5_v2_valid_occurrences_must_match_oracle(validator: CandidateValidator) -> None:
+    c5 = make_case(
+        case_id="llhb-v1-C5-101",
+        category="C5",
+        expected_behaviour="must_disambiguate",
+        expected_act_slug="dobbeltloven",
+        expected_section_id="6-2",
+        valid_occurrences=[1, 2],
+    )
+    assert validator.validate_case(c5) == []
+    curated = {**c5, "valid_occurrences": [1, 2, 3]}
+    assert _codes(validator.validate_case(curated)) == ["valid-occurrences-mismatch"]
+    unique = {
+        **c5,
+        "expected_act_slug": "testloven",
+        "expected_section_id": "1",
+        "valid_occurrences": [1, 2],
+    }
+    assert "not-genuinely-ambiguous" in _codes(validator.validate_case(unique))
+
+
 def test_c5_unique_section_is_not_ambiguous(validator: CandidateValidator) -> None:
     c5 = make_case(
         case_id="llhb-v1-C5-002",

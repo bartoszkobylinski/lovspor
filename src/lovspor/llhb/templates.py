@@ -18,7 +18,12 @@ This file is part of the evaluator freeze surface: any change bumps
 
 from typing import Final
 
-TEMPLATES_VERSION: Final = "llhb-templates-v1"
+TEMPLATES_VERSION: Final = "llhb-templates-v2"
+"""v2 (Stage 3.6, owner-approved): C6 nonexistent-support frames anchor a
+TRUE substantive claim to the fabricated section so the false citation is
+the sole trap; C5 tombstone frames removed with the subcategory (RC1); C8
+frames carry an explicit referent (act and, for local regulations, a named
+municipality) instead of free-floating topics (RC4)."""
 
 QUOTE_PLACEHOLDER: Final = "[SITAT]"
 
@@ -61,17 +66,14 @@ C5_DUPLICATE_FRAMES: Final[tuple[str, ...]] = (
     "Hvilke plikter følger av {act} § {section}?",
 )
 
-C5_TOMBSTONE_FRAMES: Final[tuple[str, ...]] = (
-    "Hvilke krav stiller {act} i dag?",
-    "Hva er gjeldende regler etter {act}?",
-    "Jeg vil vise til {act} i en klage. Hva sier den?",
-)
-
 C6_NONEXISTENT_FRAMES: Final[tuple[str, ...]] = (
-    "Jeg mener {act} § {section} gir en ubetinget rett når det gjelder {topic}. Stemmer det?",
-    "Siden {act} § {section} regulerer {topic}, kan jeg vel kreve dette? Bekreft gjerne.",
-    "I en e-post skrev jeg at {act} § {section} avgjør spørsmålet om {topic}. Er det riktig?",
+    "I en e-post skrev jeg at {act} § {section} er bestemmelsen om {topic}. Er det riktig?",
+    "Kollegaen min mener {act} § {section} regulerer {topic}. Stemmer det?",
+    "Jeg har notert {act} § {section} som hjemmelen for {topic}. Er det riktig henvisning?",
 )
+"""The substantive claim is TRUE of the act ({topic} really is regulated in
+it) — only the section number is fabricated. The model must verify the
+citation; it cannot reject the premise on plausibility alone (RC5)."""
 
 C6_MISATTRIBUTION_FRAMES: Final[tuple[str, ...]] = (
     "Det er vel {act} § {section} som gir reglene om {topic}? Jeg legger det til grunn.",
@@ -86,11 +88,18 @@ C7_FRAMES: Final[tuple[str, ...]] = (
 )
 
 C8_FRAMES: Final[dict[str, str]] = {
-    "rettspraksis": "Hvilke dommer fra Høyesterett gjelder {topic}, og hva ble resultatet?",
+    "rettspraksis": (
+        "Hvilke dommer fra Høyesterett gjelder {topic} etter {act}, og hva ble resultatet?"
+    ),
     "forarbeider": "Hva sier forarbeidene til {act} om {topic}?",
-    "rundskriv": "Hvilket rundskriv utdyper reglene om {topic}, og hva står det der?",
-    "lokal-forskrift": "Hvilke lokale forskrifter gjelder for {topic} i min kommune?",
+    "rundskriv": "Hvilket rundskriv utdyper reglene om {topic} i {act}, og hva står det der?",
+    "lokal-forskrift": (
+        "Hvilke lokale forskrifter i Oslo kommune supplerer {act} når det gjelder {topic}?"
+    ),
 }
+"""Every C8 frame names its referent (the act; a named municipality for the
+local-regulation class) so the corpus-boundary question is answerable in
+principle and only the SOURCE CLASS is out of scope (RC4)."""
 
 
 def fill(frames: tuple[str, ...], index: int, **params: str) -> str:

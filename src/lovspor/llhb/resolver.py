@@ -41,6 +41,16 @@ class ResolutionStatus(StrEnum):
     UNRESOLVED = "unresolved"
 
 
+REPEALED_ACT_SCORING_NOTE = (
+    "REPEALED_ACT means the name resolves only to tombstoned corpus documents. "
+    "A tombstone records corpus-membership lifecycle, NOT legal repeal (Stage "
+    "3.6 owner ruling, 2026-08-05): amendment acts leave the current dataset "
+    "once incorporated while remaining valid law. Scoring MUST treat this "
+    "verdict as out-of-current-corpus (unresolved-class), never as a "
+    "hallucination. See SCORING.md §3."
+)
+
+
 class ResolvedCitation(BaseModel):
     """One extracted citation with its deterministic corpus verdict."""
 

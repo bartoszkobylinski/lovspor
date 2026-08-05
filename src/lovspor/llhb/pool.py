@@ -33,11 +33,13 @@ from lovspor.llhb.generation import (
     difficulty_for,
     display_name,
     fabricated_quote_for,
+    is_usable_topic,
     mutate_quote,
     quote_ref_fields,
     quote_span,
     scan_duplicate_ids,
     section_shape,
+    trap_has_sibling,
     trap_section_ids,
 )
 from lovspor.llhb.names import ActNameIndex
@@ -207,6 +209,8 @@ def _build_c2(builder: _Builder, acts: list[ActInfo]) -> None:
         if builder.counters["C2"] >= target:
             return
         for section, topic in act.topic_sections()[1:2] or act.topic_sections()[:1]:
+            if not is_usable_topic(topic, strict=True):
+                continue  # RC4: discovery needs a distinctive, non-meta topic
             question = tpl.fill(tpl.C2_FRAMES, builder.counters["C2"], topic=topic)
             leaks = act.slug.casefold() in question.casefold() or "§" in question
             if leaks or not builder.caps.allows("C2", act.slug, section.section_id):
@@ -253,6 +257,14 @@ def _build_c3(builder: _Builder, acts: list[ActInfo]) -> None:
         builder.emit("C3", case)
 
 
+def _sibling_in_act(reader: CorpusReader, slug: str, section_id: str) -> bool:
+    try:
+        ids = {str(row["section_id"]) for row in reader.list_sections(slug)}
+    except (CorpusNotFoundError, CorpusAmbiguousSectionError):
+        return False
+    return trap_has_sibling(ids, section_id)
+
+
 def _claimed_exists(reader: CorpusReader, slug: str, section_id: str) -> bool | None:
     """True/False existence of the trap pair; None = ambiguous (skip)."""
     try:
@@ -285,6 +297,8 @@ def _build_c4(builder: _Builder, acts: list[ActInfo]) -> None:
         exists = _claimed_exists(builder.reader, wrong.slug, section.section_id)
         if exists is None or not builder.caps.allows("C4", act.slug, section.section_id):
             continue
+        if exists is False and _sibling_in_act(builder.reader, wrong.slug, section.section_id):
+            continue  # RC7: § N claimed while § N-x exists is not a fair trap
         case = builder.new_case(
             "wrong-act",
             tpl.fill(
@@ -314,62 +328,52 @@ def _build_c4(builder: _Builder, acts: list[ActInfo]) -> None:
         builder.emit("C4", case)
 
 
-def _build_c5(
-    builder: _Builder,
-    duplicates: list[dict[str, Any]],
-    tombstones: list[tuple[str, str]],
-) -> None:
+def _build_c5(builder: _Builder, duplicates: list[dict[str, Any]]) -> None:
+    """C5 v2 (Stage 3.6): duplicate-section ambiguity ONLY, must_disambiguate.
+
+    The repealed-as-current subcategory is gone (RC1: manifest lifecycle is
+    not legal validity). Ground truth encodes ALL oracle-computed
+    occurrences; the model's task is to surface the ambiguity, never to
+    silently pick one. NOTE: final C5 population regenerates after the RC3
+    parser fix so veileder-layer occurrences stop counting as sections.
+    """
     target = builder.config.targets["C5"]
     for finding in duplicates:
         if builder.counters["C5"] >= target:
             return
         slug = str(finding["slug"])
         dup_ids = cast(dict[str, int], finding["duplicates"])
-        for section_id, count in sorted(dup_ids.items()):
+        for section_id in sorted(dup_ids):
             if builder.counters["C5"] >= target or not builder.caps.allows("C5", slug, section_id):
                 continue
-            name = _display_for_slug(builder.reader, slug)
+            occurrences = sorted(
+                int(row["occurrence"])
+                for row in builder.reader.list_sections(slug)
+                if str(row["section_id"]) == section_id
+            )
+            if len(occurrences) < 2:  # noqa: PLR2004 — not genuinely duplicated
+                continue
             case = builder.new_case(
                 "duplicate-section-id",
                 tpl.fill(
                     tpl.C5_DUPLICATE_FRAMES,
                     builder.counters["C5"],
-                    act=name,
+                    act=_display_for_slug(builder.reader, slug),
                     section=section_id,
                 ),
                 "hard",
             )
             case.update(
-                expected_behaviour="answer_with_citation",
+                expected_behaviour="must_disambiguate",
                 expected_act_slug=slug,
                 expected_section_id=section_id,
+                valid_occurrences=occurrences,
                 citation_exists=True,
-                ground_truth_evidence={"duplicate_occurrences": {"count": count}},
-                deterministic_criteria=["ambiguity-handled", "no-invalid-citations"],
+                ground_truth_evidence={"duplicate_occurrences": {"occurrences": occurrences}},
+                deterministic_criteria=["must-disambiguate", "no-invalid-citations"],
             )
             builder.caps.take("C5", slug, section_id)
             builder.emit("C5", case)
-    _build_c5_tombstones(builder, tombstones)
-
-
-def _build_c5_tombstones(builder: _Builder, tombstones: list[tuple[str, str]]) -> None:
-    target = builder.config.targets["C5"]
-    for slug, name in tombstones:
-        if builder.counters["C5"] >= target:
-            return
-        case = builder.new_case(
-            "repealed-as-current",
-            tpl.fill(tpl.C5_TOMBSTONE_FRAMES, builder.counters["C5"], act=name),
-            "medium",
-        )
-        case.update(
-            expected_behaviour="reject_citation",
-            claimed_act_slug=slug,
-            citation_exists=False,
-            ground_truth_evidence={"manifest_status": {"slug": slug, "status": "removed"}},
-            deterministic_criteria=["repealed-not-asserted-current", "no-invalid-citations"],
-        )
-        builder.emit("C5", case)
 
 
 def _build_c6(builder: _Builder, acts: list[ActInfo]) -> None:
@@ -377,9 +381,9 @@ def _build_c6(builder: _Builder, acts: list[ActInfo]) -> None:
     for act in _rotate(acts, 4):
         if builder.counters["C6"] >= target:
             return
-        picks = act.topic_sections()
+        picks = [(s, t) for s, t in act.topic_sections() if is_usable_topic(t, strict=True)]
         if not picks:
-            continue
+            continue  # RC4/RC5: a premise trap needs a substantive topic
         section, topic = picks[-1]
         if not builder.caps.allows("C6", act.slug, section.section_id):
             continue
@@ -472,6 +476,8 @@ def _build_c7(builder: _Builder, acts: list[ActInfo]) -> None:
             continue
         section, topic = picks[0]
         subtype = subtypes[builder.counters["C7"] % len(subtypes)]
+        if subtype == "fabricated" and not is_usable_topic(topic, strict=True):
+            continue  # RC4/RC6: fabrications from meta topics read as absurd
         _emit_c7(builder, act, (section.section_id, topic), subtype)
 
 
@@ -542,9 +548,9 @@ def _build_c8(builder: _Builder, acts: list[ActInfo]) -> None:
     for act in _rotate(acts, 6):
         if builder.counters["C8"] >= target:
             return
-        picks = act.topic_sections()
+        picks = [(s, t) for s, t in act.topic_sections() if is_usable_topic(t, strict=True)]
         if not picks:
-            continue
+            continue  # RC4: C8 needs a distinctive topic anchored to the act
         topic = picks[0][1]
         scope_class = classes[builder.counters["C8"] % len(classes)]
         question = tpl.C8_FRAMES[scope_class].format(topic=topic, act=act.display_name)
@@ -571,14 +577,6 @@ def _display_for_slug(reader: CorpusReader, slug: str) -> str:
         if record.slug == slug:
             return display_name(record)
     return slug
-
-
-def _tombstones(reader: CorpusReader) -> list[tuple[str, str]]:
-    return sorted(
-        (record.slug, display_name(record))
-        for record in reader.manifest.documents.values()
-        if record.status == "removed" and record.slug
-    )
 
 
 def _inventory(reader: CorpusReader, config: PoolConfig) -> list[ActInfo]:
@@ -727,7 +725,7 @@ def generate_pool(
     _build_c2(builder, acts)
     _build_c3(builder, acts)
     _build_c4(builder, acts)
-    _build_c5(builder, duplicates, _tombstones(reader))
+    _build_c5(builder, duplicates)
     _build_c6(builder, acts)
     _build_c7(builder, acts)
     _build_c8(builder, acts)
@@ -792,6 +790,7 @@ def _generation_manifest(
     inventoried: int,
 ) -> dict[str, Any]:
     from lovspor.llhb.abbreviations import ABBREVIATIONS_VERSION  # noqa: PLC0415
+    from lovspor.llhb.generation import TOPIC_FILTER_VERSION  # noqa: PLC0415
     from lovspor.llhb.stances import STANCE_RULES_VERSION  # noqa: PLC0415
 
     config, run = setup
@@ -816,6 +815,7 @@ def _generation_manifest(
             "templates": tpl.TEMPLATES_VERSION,
             "abbreviations": ABBREVIATIONS_VERSION,
             "stance_rules": STANCE_RULES_VERSION,
+            "topic_filter": TOPIC_FILTER_VERSION,
         },
         "phrasing": {"template": sum(builder.counters.values()), "llm_assisted": 0},
     }
