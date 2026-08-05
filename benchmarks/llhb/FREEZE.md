@@ -53,11 +53,13 @@ legal-validity time. Recorded in the dataset lock and the dataset card.
 
 ### Canonical JSONL and checksum
 
-One case per line; each line is JSON with lexicographically sorted keys,
-compact separators (`,` / `:`), UTF-8, no escaping of non-ASCII (`ensure_ascii`
-false), LF line endings, trailing LF at end of file. The dataset checksum is
-SHA-256 over the file bytes. The checksum is recomputed and asserted by tooling
-before every scored run.
+One case per line, lines sorted by `case_id` (so the checksum is independent
+of generation order; duplicate `case_id` values are refused); each line is
+JSON with lexicographically sorted keys, compact separators (`,` / `:`),
+UTF-8, no escaping of non-ASCII (`ensure_ascii` false), LF line endings,
+trailing LF at end of file. The dataset checksum is SHA-256 over the file
+bytes. The checksum is recomputed and asserted by tooling before every scored
+run. Implementation: `lovspor.llhb.schema` (byte-level golden test).
 
 ## 5. Post-freeze rules
 

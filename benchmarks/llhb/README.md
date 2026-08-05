@@ -38,6 +38,7 @@ hallucinations" or guarantees legally correct answers.
 |---|---|
 | `METHODOLOGY.md` | Research questions, hallucination taxonomy H1–H6, category design, experimental conditions, fairness invariants, limitations |
 | `SCORING.md` | Deterministic scoring rules: citation extraction, oracle mapping, metric definitions |
+| `TOOLING.md` | Stage 2 tooling reference: extractor syntax, stance rules, resolver verdicts, quote refs, canonicalization (`src/lovspor/llhb/`) |
 | `FREEZE.md` | Dataset freeze protocol, corpus pinning, checksum, errata and versioning policy |
 | `DECISIONS.md` | Owner decisions of 2026-08-05 governing v1 |
 | `PROPOSAL.md` | Original design proposal (historical; superseded where DECISIONS.md differs) |
