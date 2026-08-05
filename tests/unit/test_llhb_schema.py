@@ -134,3 +134,28 @@ def test_jsonl_loader_rejects_non_object_lines(tmp_path: Path) -> None:
     path.write_text('{"case_id": "x"}\n[1, 2]\n', encoding="utf-8")
     with pytest.raises(DatasetFormatError, match="not a JSON object"):
         load_cases_jsonl(path)
+
+
+def test_jsonl_loader_rejects_invalid_json_with_line_number(tmp_path: Path) -> None:
+    path = tmp_path / "broken.jsonl"
+    path.write_text('{"case_id": "x"}\n{not json}\n', encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match=r"broken\.jsonl:2: invalid JSON"):
+        load_cases_jsonl(path)
+
+
+def test_jsonl_loader_skips_blank_lines(tmp_path: Path) -> None:
+    path = tmp_path / "gaps.jsonl"
+    path.write_text('{"case_id": "x"}\n\n  \n{"case_id": "y"}\n', encoding="utf-8")
+    assert [case["case_id"] for case in load_cases_jsonl(path)] == ["x", "y"]
+
+
+def test_schema_loader_rejects_non_object_schema(tmp_path: Path) -> None:
+    path = tmp_path / "schema.json"
+    path.write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(DatasetFormatError, match="not a JSON object"):
+        load_schema(path)
+
+
+def test_canonical_jsonl_refuses_missing_case_id() -> None:
+    with pytest.raises(DatasetFormatError, match="needs a case_id"):
+        canonical_jsonl([{"category": "C1"}])
