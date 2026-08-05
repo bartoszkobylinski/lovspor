@@ -2370,6 +2370,7 @@ def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
             "occurrence": 1,
             "heading": "§ 1-1. Virkeområde",
             "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+            "layer": "main",
             "kind": "section",
         },
         {
@@ -2377,6 +2378,7 @@ def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
             "occurrence": 1,
             "heading": "§ 1-2. Hvem som pålegger skatt",
             "parent_chapter": "Kapittel 1. Alminnelige bestemmelser",
+            "layer": "main",
             "kind": "section",
         },
         {
@@ -2385,6 +2387,7 @@ def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
             "occurrence": 1,
             "heading": "Subsection grouping without section",
             "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+            "layer": "main",
             "kind": "block",
         },
         {
@@ -2392,6 +2395,7 @@ def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
             "occurrence": 1,
             "heading": "§ 5-12. Boligsparing for ungdom",
             "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+            "layer": "main",
             "kind": "section",
         },
         {
@@ -2399,6 +2403,7 @@ def test_list_sections_returns_toc_in_document_order(tmp_path: Path) -> None:
             "occurrence": 1,
             "heading": "§ 5-13. Annet",
             "parent_chapter": "Kapittel 5. Alminnelig inntekt og fradragene",
+            "layer": "main",
             "kind": "section",
         },
     ]
