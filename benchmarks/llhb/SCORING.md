@@ -16,16 +16,23 @@ MCP tools `validate_citation` and `verify_quote` — never against a live corpus
 The scorer extracts **citation-shaped claims** from the final answer:
 
 - Act references: statute names resolved against a name index built from the
-  pinned manifest (title, short_title, slug per document). Matching is
-  deterministic longest-match over normalized text (NFKC, casefold, punctuation
-  fold). Common abbreviation forms are resolved only via a frozen, versioned
+  pinned manifest — per document: the slug, the normalized title, and
+  single-token law-name parentheticals inside the title (the manifest carries
+  no short_title field; short names reach the index via the official title's
+  trailing parenthetical). Matching is deterministic leftmost-longest over
+  normalized text (NFKC, casefold, whitespace collapse) with word boundaries.
+  Common abbreviation forms are resolved only via a frozen, versioned
   abbreviation table shipped with the evaluator — never fuzzily.
 - Section references: `§` patterns in the corpus's section-id grammar (bare ids
   like `5-12`, `1`, `3a`, `5-12a`; no `§` prefix in the normalized form).
-- Pairing rule (deterministic anaphora): a `§` reference binds to the nearest
-  act reference at or before it within the same sentence, else the nearest act
-  reference in the same paragraph. A `§` with no act antecedent in scope is an
-  **unresolved citation-shaped claim**.
+- Pairing rule (deterministic anaphora), precedence order: (1) an act
+  reference or frozen-table abbreviation immediately before the `§` construct;
+  (2) an act reference immediately after the section id, optionally via
+  «i»/«etter» («§ 15-7 arbeidsmiljøloven», «§ 12 i skatteloven»); (3) the
+  nearest act reference at or before the citation within the same sentence;
+  (4) the nearest act reference in the same paragraph. A `§` with no act
+  reference in any of these scopes is an **unresolved citation-shaped claim**
+  (missing act).
 - `§§` conjunctions (`§§ 4 og 5`) split into individual citations. Ranges
   (`§§ 4 til 8`) contribute their two endpoints; interior sections are not
   assumed. (`validate_citation` itself refuses ranges as ambiguous; the
