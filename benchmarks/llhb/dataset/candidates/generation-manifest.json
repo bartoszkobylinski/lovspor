@@ -1,0 +1,45 @@
+{
+  "acts_inventoried": 320,
+  "caps": {
+    "inventory_size": 320,
+    "per_act_category_cap": 2,
+    "per_act_total_cap": 8
+  },
+  "corpus_pin": {
+    "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+    "manifest_generated_at": "2026-08-04T20:48:16.533742+00:00"
+  },
+  "created": "2026-08-05",
+  "emitted_by_category": {
+    "C1": 75,
+    "C2": 65,
+    "C3": 55,
+    "C4": 50,
+    "C5": 30,
+    "C6": 55,
+    "C7": 40,
+    "C8": 30
+  },
+  "lovspor_commit": "2216338273cb1917fcc1adad11d61a49b48a0af5",
+  "phrasing": {
+    "llm_assisted": 0,
+    "template": 400
+  },
+  "seed": 20260805,
+  "targets": {
+    "C1": 75,
+    "C2": 65,
+    "C3": 55,
+    "C4": 50,
+    "C5": 30,
+    "C6": 55,
+    "C7": 40,
+    "C8": 30
+  },
+  "timestamp": "2026-08-05T06:51:59.572632+00:00",
+  "versions": {
+    "abbreviations": "llhb-abbrev-v1",
+    "stance_rules": "llhb-stance-v1",
+    "templates": "llhb-templates-v1"
+  }
+}
