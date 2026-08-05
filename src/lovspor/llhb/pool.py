@@ -69,6 +69,10 @@ class PoolConfig(BaseModel):
     inventory_size: int = 320
     per_act_category_cap: int = 2
     per_act_total_cap: int = 8
+    id_offset: int = 0
+    """Shifts case-id counters (Stage 3.6-E): replacement generations use a
+    disjoint id range (501+) so a Stage 3 review decision can never point at
+    regenerated content."""
 
 
 class GenerationRun(BaseModel):
@@ -137,7 +141,8 @@ class _Builder:
 
     def emit(self, category: str, case: dict[str, Any]) -> None:
         self.counters[category] += 1
-        case["case_id"] = f"llhb-v1-{category}-{self.counters[category]:03d}"
+        number = self.counters[category] + self.config.id_offset
+        case["case_id"] = f"llhb-v1-{category}-{number:03d}"
         case["category"] = category
         self.cases.append(case)
 

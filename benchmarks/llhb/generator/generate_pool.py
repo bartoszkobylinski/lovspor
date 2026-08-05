@@ -31,6 +31,14 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--lovspor-commit", required=True)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--id-offset", type=int, default=0)
+    parser.add_argument(
+        "--timestamp",
+        default=None,
+        help="ISO datetime stamped into run metadata and every case's "
+        "validation record. Defaults to now; pass the committed manifest's "
+        "timestamp to reproduce an existing artifact byte-for-byte.",
+    )
     return parser.parse_args()
 
 
@@ -53,17 +61,16 @@ def main() -> None:
     args = _parse_args()
     pin = current_pin(args.corpus)
     verify_pin(args.corpus, pin)
-    now = datetime.now(UTC)
+    now = datetime.fromisoformat(args.timestamp) if args.timestamp else datetime.now(UTC)
     run = GenerationRun(
         lovspor_commit=args.lovspor_commit,
         created=now.date().isoformat(),
         timestamp=now.isoformat(),
     )
-    config = (
-        PoolConfig(schema_path=SCHEMA_PATH, seed=args.seed)
-        if args.seed is not None
-        else PoolConfig(schema_path=SCHEMA_PATH)
-    )
+    options: dict[str, Any] = {"schema_path": SCHEMA_PATH, "id_offset": args.id_offset}
+    if args.seed is not None:
+        options["seed"] = args.seed
+    config = PoolConfig(**options)
     result = generate_pool(CorpusReader(args.corpus), pin, config, run)
     _write_artifacts(args.out, result)
     print(f"pool written to {args.out}")
