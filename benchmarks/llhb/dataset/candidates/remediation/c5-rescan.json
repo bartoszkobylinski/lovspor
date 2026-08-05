@@ -1,0 +1,1078 @@
+{
+  "corpus_pin": {
+    "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+    "manifest_generated_at": "2026-08-04T20:48:16.533742+00:00"
+  },
+  "documents": [
+    {
+      "doc_id": "nl-19991217-095",
+      "ids": {
+        "6-2": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "Kapittel 6. Øvrige bestemmelser"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "Kapittel 7. Ikrafttredelse. Overgangsregler. Endringer i andre lover"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        }
+      },
+      "slug": "betalingssystemloven"
+    },
+    {
+      "doc_id": "sf-19801121-0014",
+      "ids": {
+        "1": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "Overgangsbestemmelser"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        }
+      },
+      "slug": "pantelovforskriften"
+    },
+    {
+      "doc_id": "sf-20001222-1412",
+      "ids": {
+        "1": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 3,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "11": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "12": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "13": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "14": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "15": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "16": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "2": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 3,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "3": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "4": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "5": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "6": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "7": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "I"
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": "I"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        }
+      },
+      "slug": "forskr-om-overg-regler-for-privat-pensjonsordn"
+    },
+    {
+      "doc_id": "sf-20040119-0298",
+      "ids": {
+        "1": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 2 – Førerkortblanketten"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 3,
+              "parent_chapter": "Vedlegg 5 – Overgangsregler – førerkort utstedt i henhold til førerkortforskriften av 28. mars 1967"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 4,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "10": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "11": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "2": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 2 – Førerkortblanketten"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 3,
+              "parent_chapter": "Vedlegg 5 – Overgangsregler – førerkort utstedt i henhold til førerkortforskriften av 28. mars 1967"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 4,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "3": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 2 – Førerkortblanketten"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 3,
+              "parent_chapter": "Vedlegg 5 – Overgangsregler – førerkort utstedt i henhold til førerkortforskriften av 28. mars 1967"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 4,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "4": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 2 – Førerkortblanketten"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 3,
+              "parent_chapter": "Vedlegg 5 – Overgangsregler – førerkort utstedt i henhold til førerkortforskriften av 28. mars 1967"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 4,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "5": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 2 – Førerkortblanketten"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 3,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "6": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 2 – Førerkortblanketten"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 3,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2,
+            3
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "7": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "8": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "9": {
+          "occurrences": [
+            {
+              "layer": "vedlegg",
+              "occurrence": 1,
+              "parent_chapter": "Vedlegg 1 – Helsekrav"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 6 – Overgangsregler og administrative bestemmelser for førerkort utstedt i henhold til denne forskriften og førerkortforskriften 23. februar 1979 nr. 4"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        }
+      },
+      "slug": "førerkortforskriften"
+    },
+    {
+      "doc_id": "sf-20071005-1112",
+      "ids": {
+        "1": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "10": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "11": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "2": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "3": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "4": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "5": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "6": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "7": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "8": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "9": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg I. Inspeksjonsprosedyrer for inspeksjoner på bakken (SAFA-inspeksjon)"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        }
+      },
+      "slug": "forskrift-om-bakkeinspeksjoner-av-luftfartøy"
+    },
+    {
+      "doc_id": "sf-20161115-1329",
+      "ids": {
+        "2": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "veileder",
+              "occurrence": 2,
+              "parent_chapter": "Veileder til byggeforskrift for Longyearbyen"
+            }
+          ],
+          "valid_occurrences": [
+            1
+          ],
+          "verdict": "veileder-echo-only"
+        },
+        "3": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "veileder",
+              "occurrence": 2,
+              "parent_chapter": "Veileder til byggeforskrift for Longyearbyen"
+            }
+          ],
+          "valid_occurrences": [
+            1
+          ],
+          "verdict": "veileder-echo-only"
+        },
+        "4": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "veileder",
+              "occurrence": 2,
+              "parent_chapter": "Veileder til byggeforskrift for Longyearbyen"
+            }
+          ],
+          "valid_occurrences": [
+            1
+          ],
+          "verdict": "veileder-echo-only"
+        }
+      },
+      "slug": "byggeforskrift-for-longyearbyen"
+    },
+    {
+      "doc_id": "sf-20161227-1883",
+      "ids": {
+        "1": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "Del A"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 1"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "2": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "Del A"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 1"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "3": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "Del A"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 1"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        },
+        "4": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": "Del A"
+            },
+            {
+              "layer": "vedlegg",
+              "occurrence": 2,
+              "parent_chapter": "Vedlegg 1"
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        }
+      },
+      "slug": "forskrift-om-skip-som-bruker-drivstoff-med-flammepunkt-under-60-c"
+    },
+    {
+      "doc_id": "sf-20241113-3329",
+      "ids": {
+        "6": {
+          "occurrences": [
+            {
+              "layer": "main",
+              "occurrence": 1,
+              "parent_chapter": ""
+            },
+            {
+              "layer": "main",
+              "occurrence": 2,
+              "parent_chapter": ""
+            }
+          ],
+          "valid_occurrences": [
+            1,
+            2
+          ],
+          "verdict": "real-ambiguity"
+        }
+      },
+      "slug": "forskrift-om-krav-til-nullutslipp-av-klimagasser-ved-offentlig-anskaffelse-av-sjøtransport"
+    }
+  ],
+  "new_since_stage3": [],
+  "rescan": [
+    {
+      "doc_id": "nl-19991217-095",
+      "duplicates": {
+        "6-2": 2
+      },
+      "slug": "betalingssystemloven"
+    },
+    {
+      "doc_id": "sf-19801121-0014",
+      "duplicates": {
+        "1": 2
+      },
+      "slug": "pantelovforskriften"
+    },
+    {
+      "doc_id": "sf-20001222-1412",
+      "duplicates": {
+        "1": 3,
+        "11": 2,
+        "12": 2,
+        "13": 2,
+        "14": 2,
+        "15": 2,
+        "16": 2,
+        "2": 3,
+        "3": 2,
+        "4": 2,
+        "5": 2,
+        "6": 2,
+        "7": 2
+      },
+      "slug": "forskr-om-overg-regler-for-privat-pensjonsordn"
+    },
+    {
+      "doc_id": "sf-20040119-0298",
+      "duplicates": {
+        "1": 4,
+        "10": 2,
+        "11": 2,
+        "2": 4,
+        "3": 4,
+        "4": 4,
+        "5": 3,
+        "6": 3,
+        "7": 2,
+        "8": 2,
+        "9": 2
+      },
+      "slug": "førerkortforskriften"
+    },
+    {
+      "doc_id": "sf-20071005-1112",
+      "duplicates": {
+        "1": 2,
+        "10": 2,
+        "11": 2,
+        "2": 2,
+        "3": 2,
+        "4": 2,
+        "5": 2,
+        "6": 2,
+        "7": 2,
+        "8": 2,
+        "9": 2
+      },
+      "slug": "forskrift-om-bakkeinspeksjoner-av-luftfartøy"
+    },
+    {
+      "doc_id": "sf-20161227-1883",
+      "duplicates": {
+        "1": 2,
+        "2": 2,
+        "3": 2,
+        "4": 2
+      },
+      "slug": "forskrift-om-skip-som-bruker-drivstoff-med-flammepunkt-under-60-c"
+    },
+    {
+      "doc_id": "sf-20241113-3329",
+      "duplicates": {
+        "6": 2
+      },
+      "slug": "forskrift-om-krav-til-nullutslipp-av-klimagasser-ved-offentlig-anskaffelse-av-sjøtransport"
+    }
+  ],
+  "rules_version": "llhb-c5-rescan-v1",
+  "summary": {
+    "benchmark_target_c5": 15,
+    "docs_after": 7,
+    "docs_before": 8,
+    "feasible_vs_benchmark_target": true,
+    "ids_before": 45,
+    "ids_real_ambiguity": 42,
+    "ids_veileder_echo_only": 3,
+    "pool_target_c5": 30
+  }
+}

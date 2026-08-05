@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from lovspor.llhb.corpus_pin import CorpusPin
+from lovspor.llhb.generation import oracle_occurrences
 from lovspor.llhb.quotes import QuoteRef, QuoteStatus, materialize_quote
 from lovspor.llhb.schema import validate_case as validate_against_schema
 from lovspor.mcp import CorpusAmbiguousSectionError, CorpusNotFoundError, CorpusReader
@@ -210,17 +211,12 @@ class CandidateValidator:
         """C5 v2: valid_occurrences must equal the oracle's occurrence set.
 
         The oracle is authoritative and the list is never a curated subset
-        (owner ruling, Stage 3.6). NOTE: until the RC3 parser fix lands,
-        list_sections may still count veileder-layer headings — final C5
-        material regenerates after that fix.
+        (owner ruling, Stage 3.6). Layer-aware since the RC3 parser fix:
+        veileder-layer echoes carry no occurrence the oracle acknowledges.
         """
         slug = str(case["expected_act_slug"])
         section_id = str(case["expected_section_id"])
-        oracle = sorted(
-            int(row["occurrence"])
-            for row in self._reader.list_sections(slug)
-            if str(row["section_id"]) == section_id
-        )
+        oracle = oracle_occurrences(self._reader, slug, section_id)
         if len(oracle) < 2:  # noqa: PLR2004 — a unique section cannot be ambiguous
             return [
                 _issue(

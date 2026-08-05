@@ -11,6 +11,7 @@ from lovspor.llhb.generation import (
     difficulty_for,
     display_name,
     mutate_quote,
+    oracle_occurrences,
     parse_ministry,
     quote_span,
     scan_duplicate_ids,
@@ -20,7 +21,14 @@ from lovspor.llhb.generation import (
 )
 from lovspor.llhb.quotes import QuoteRef, QuoteStatus, materialize_quote, quote_sha256
 from lovspor.mcp import CorpusReader
-from tests.unit.llhb_fixtures import record_for, rich_corpus
+from lovspor.storage.manifest import Manifest, write_manifest
+from tests.unit.llhb_fixtures import (
+    DOBBELTLOVEN_BODY,
+    GENERATED_AT,
+    build_corpus,
+    record_for,
+    rich_corpus,
+)
 
 
 @pytest.fixture
@@ -145,9 +153,72 @@ def test_topic_filter_rejects_meta_and_short_topics() -> None:
 
 
 def test_scan_finds_real_duplicates_only(reader: CorpusReader) -> None:
+    """RC3: the fixture's veileder echo of § 6-2 must not count as occurrence 3."""
     findings = scan_duplicate_ids(reader)
     assert [f["slug"] for f in findings] == ["dobbeltloven"]
     assert findings[0]["duplicates"] == {"6-2": 2}
+
+
+LAGDELT_BODY = """## Kapittel 1. Krav
+
+### § 2. Krav til utstyr
+
+Utstyret skal være egnet for formålet og vedlikeholdes forsvarlig.
+
+### § 3. Krav til bruk
+
+Bruken skal skje i samsvar med produsentens anvisninger.
+
+## Vedlegg 1. Tekniske krav
+
+### § 2. Tekniske spesifikasjoner
+
+Spesifikasjonene i dette vedlegget gjelder som forskrift.
+
+## Veileder til forskriften
+
+### § 3. Krav til bruk
+
+Kommentar som speiler forskriftens paragraf uten å være en bestemmelse.
+"""
+
+
+def test_scan_skips_hostile_records_and_reports_provenance(tmp_path: Path) -> None:
+    """Loop-truncation guard: a record the scan cannot read and a tombstone
+    that sort BEFORE real material must be skipped, never abort the scan or
+    leak into it — and each finding carries its doc_id provenance."""
+    records = {
+        "a-unreadable": record_for("borteloven", "Lov om borte (borteloven)"),
+        "b-tombstone": record_for("utgåttloven", "Lov om utgåtte regler", status="removed"),
+        "c-dup": record_for("dobbeltloven", "Lov om doble paragrafer (dobbeltloven)"),
+    }
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "borteloven.md").write_bytes(b"---\nid: a\n---\n\n\xff\xfe ikke utf-8")
+    for doc_id, slug in (("b-tombstone", "utgåttloven"), ("c-dup", "dobbeltloven")):
+        (tmp_path / "lover" / f"{slug}.md").write_text(
+            f"---\nid: {doc_id}\ntitle: x\n---\n\n{DOBBELTLOVEN_BODY}",
+            encoding="utf-8",
+        )
+    write_manifest(
+        Manifest(generated_at=GENERATED_AT, documents=records),
+        tmp_path / "manifest.json",
+    )
+    findings = scan_duplicate_ids(CorpusReader(tmp_path))
+    assert findings == [{"slug": "dobbeltloven", "doc_id": "c-dup", "duplicates": {"6-2": 2}}]
+
+
+def test_oracle_counts_vedlegg_and_ignores_veileder(tmp_path: Path) -> None:
+    """RC3 ruling: normative vedlegg duplicates are real ambiguity; a veileder
+    echo is commentary and never an occurrence the oracle acknowledges."""
+    reader = build_corpus(
+        tmp_path,
+        {"lagdeltforskriften": ("Forskrift om lagdelte krav (lagdeltforskriften)", LAGDELT_BODY)},
+    )
+    assert oracle_occurrences(reader, "lagdeltforskriften", "2") == [1, 2]
+    assert oracle_occurrences(reader, "lagdeltforskriften", "3") == [1]
+    findings = scan_duplicate_ids(reader)
+    assert [f["slug"] for f in findings] == ["lagdeltforskriften"]
+    assert findings[0]["duplicates"] == {"2": 2}
 
 
 def test_sampler_is_seed_deterministic(reader: CorpusReader) -> None:

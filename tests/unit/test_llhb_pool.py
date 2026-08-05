@@ -5,12 +5,27 @@ from typing import Any
 
 import pytest
 
+from lovspor.llhb import templates as tpl
 from lovspor.llhb.corpus_pin import CorpusPin
-from lovspor.llhb.pool import GenerationRun, PoolConfig, PoolResult, generate_pool
+from lovspor.llhb.generation import scan_duplicate_ids
+from lovspor.llhb.pool import (
+    GenerationRun,
+    PoolConfig,
+    PoolResult,
+    _build_c5,
+    _Builder,
+    generate_pool,
+)
 from lovspor.llhb.quotes import normalize_quote_text
 from lovspor.llhb.schema import canonical_jsonl, load_schema, validate_case
 from lovspor.mcp import CorpusNotFoundError, CorpusReader
-from tests.unit.llhb_fixtures import GENERATED_AT, rich_corpus
+from tests.unit.llhb_fixtures import (
+    DOBBELTLOVEN_BODY,
+    EKKOLOVEN_BODY,
+    GENERATED_AT,
+    build_corpus,
+    rich_corpus,
+)
 from tests.unit.test_llhb_schema import SCHEMA_PATH
 
 _PIN_SHA = "a" * 40
@@ -73,7 +88,173 @@ def test_c5_v2_encodes_all_oracle_occurrences(result: PoolResult) -> None:
     assert c5["subcategory"] == "duplicate-section-id"
     assert c5["expected_behaviour"] == "must_disambiguate"
     assert c5["valid_occurrences"] == [1, 2]
-    assert "must-disambiguate" in c5["deterministic_criteria"]
+    assert c5["citation_exists"] is True
+    assert c5["deterministic_criteria"] == ["must-disambiguate", "no-invalid-citations"]
+    assert c5["ground_truth_evidence"] == {"duplicate_occurrences": {"occurrences": [1, 2]}}
+
+
+def _echo_corpus(root: Path) -> CorpusReader:
+    return build_corpus(
+        root,
+        {
+            "ekkoloven": ("Lov om ekko-regler (ekkoloven)", EKKOLOVEN_BODY),
+            "solidloven": (
+                "Lov om solide regler (solidloven)",
+                "## Kapittel 1. Alminnelige bestemmelser\n\n"
+                "### § 1. Krav til solid dokumentasjon\n\n"
+                "Virksomheten skal dokumentere alle solide vurderinger.\n",
+            ),
+        },
+    )
+
+
+def test_veileder_only_duplicate_yields_no_c5(tmp_path: Path) -> None:
+    """RC3 end-to-end: a corpus whose only duplication is a veileder echo
+    produces zero C5 cases and an empty ambiguity scan."""
+    result = _generate(_echo_corpus(tmp_path))
+    assert result.generation_manifest["emitted_by_category"].get("C5", 0) == 0
+    assert all(c["category"] != "C5" for c in result.candidates)
+    assert result.ambiguity_scan == []
+
+
+def _c5_builder(reader: CorpusReader, c5_target: int) -> _Builder:
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    targets = {**_TARGETS, "C5": c5_target}
+    config = PoolConfig(schema_path=SCHEMA_PATH, targets=targets)
+    return _Builder(reader, pin, config, _RUN)
+
+
+def test_build_c5_ignores_scan_finding_the_oracle_disowns(tmp_path: Path) -> None:
+    """Defense in depth: a stale (pre-RC3) scan finding whose duplication
+    the layer-aware oracle disowns emits nothing."""
+    builder = _c5_builder(_echo_corpus(tmp_path), _TARGETS["C5"])
+    stale = [{"slug": "ekkoloven", "doc_id": "nl-0", "duplicates": {"2": 2}}]
+    _build_c5(builder, stale)
+    assert builder.cases == []
+    assert builder.counters["C5"] == 0
+
+
+TO_DUP_BODY = """## Kapittel 1. En
+
+### § 7. Krav til første tema
+
+Første versjon av kravet til første tema.
+
+### § 8. Krav til andre tema
+
+Første versjon av kravet til andre tema.
+
+## Kapittel 2. To
+
+### § 7. Krav til første tema
+
+Andre versjon av kravet til første tema.
+
+### § 8. Krav til andre tema
+
+Andre versjon av kravet til andre tema.
+"""
+
+
+MIKS_BODY = """## Kapittel 1. En
+
+### § 2. Krav til utstyr
+
+Kravet til utstyr i hovedteksten.
+
+### § 7. Krav til bruk
+
+Første versjon av kravet til bruk.
+
+## Kapittel 2. To
+
+### § 7. Krav til bruk
+
+Andre versjon av kravet til bruk.
+
+## Veileder til loven
+
+### § 2. Krav til utstyr
+
+Kommentar som speiler paragrafen uten å være en bestemmelse.
+"""
+
+
+def test_build_c5_skips_disowned_id_and_still_emits_the_next(tmp_path: Path) -> None:
+    """A stale finding mixing a veileder-echo id with a real duplicate must
+    skip the echo and still emit the real one — never abort the id loop."""
+    reader = build_corpus(
+        tmp_path,
+        {"miksloven": ("Lov om blandede paragrafer (miksloven)", MIKS_BODY)},
+    )
+    builder = _c5_builder(reader, _TARGETS["C5"])
+    stale = [{"slug": "miksloven", "doc_id": "nl-0", "duplicates": {"2": 2, "7": 2}}]
+    _build_c5(builder, stale)
+    assert [c["expected_section_id"] for c in builder.cases] == ["7"]
+
+
+TRE_DUP_BODY = """## Kapittel 1. En
+
+### § 7. Krav til første tema
+
+Første versjon av kravet til første tema.
+
+### § 8. Krav til andre tema
+
+Første versjon av kravet til andre tema.
+
+### § 9. Krav til tredje tema
+
+Første versjon av kravet til tredje tema.
+
+## Kapittel 2. To
+
+### § 7. Krav til første tema
+
+Andre versjon av kravet til første tema.
+
+### § 8. Krav til andre tema
+
+Andre versjon av kravet til andre tema.
+
+### § 9. Krav til tredje tema
+
+Andre versjon av kravet til tredje tema.
+"""
+
+
+def test_build_c5_respects_per_act_category_cap_and_rotates_frames(tmp_path: Path) -> None:
+    """The per-(category, act) cap stops the third duplicate id of one act,
+    and the two emitted cases use different question frames."""
+    reader = build_corpus(
+        tmp_path,
+        {"treloven": ("Lov om tre doble paragrafer (treloven)", TRE_DUP_BODY)},
+    )
+    builder = _c5_builder(reader, 10)
+    _build_c5(builder, scan_duplicate_ids(reader))
+    assert [c["expected_section_id"] for c in builder.cases] == ["7", "8"]
+    frames = [
+        tpl.fill(tpl.C5_DUPLICATE_FRAMES, n, act="treloven", section=s)
+        for n, s in ((0, "7"), (1, "8"))
+    ]
+    assert [c["question"] for c in builder.cases] == frames
+
+
+def test_build_c5_stops_at_target(tmp_path: Path) -> None:
+    """Target saturation skips later duplicate ids and later findings."""
+    reader = build_corpus(
+        tmp_path,
+        {
+            "toloven": ("Lov om to doble paragrafer (toloven)", TO_DUP_BODY),
+            "dobbeltloven": ("Lov om doble paragrafer (dobbeltloven)", DOBBELTLOVEN_BODY),
+        },
+    )
+    builder = _c5_builder(reader, 1)
+    findings = scan_duplicate_ids(reader)
+    assert len(findings) == 2
+    _build_c5(builder, findings)
+    assert builder.counters["C5"] == 1
+    assert len(builder.cases) == 1
 
 
 def test_no_tombstone_subcategory_is_ever_emitted(result: PoolResult) -> None:

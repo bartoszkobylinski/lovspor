@@ -296,8 +296,27 @@ def mutate_quote(text: str) -> str | None:
     return None
 
 
+def oracle_occurrences(reader: CorpusReader, slug: str, section_id: str) -> list[int]:
+    """C5 oracle: sorted occurrences of a section id that are provisions.
+
+    Veileder-layer rows are commentary echoes of the act's sections, never
+    provisions, so they carry no occurrence the oracle acknowledges (RC3).
+    Vedlegg rows count: a normative appendix with its own ``§`` numbering
+    is exactly the real ambiguity C5 encodes (owner ruling, Stage 3.6).
+    """
+    return sorted(
+        int(row["occurrence"])
+        for row in reader.list_sections(slug)
+        if str(row["section_id"]) == section_id and row["layer"] != "veileder"
+    )
+
+
 def scan_duplicate_ids(reader: CorpusReader) -> list[dict[str, object]]:
-    """Full-corpus duplicate-section-id scan — the real C5 population."""
+    """Full-corpus duplicate-section-id scan — the real C5 population.
+
+    Layer-aware since the RC3 parser fix: only provision rows (``main`` and
+    ``vedlegg`` layers) count towards duplication; veileder echoes do not.
+    """
     findings: list[dict[str, object]] = []
     for doc_id, record in sorted(reader.manifest.documents.items()):
         if record.status != "current" or record.slug is None:
@@ -308,7 +327,7 @@ def scan_duplicate_ids(reader: CorpusReader) -> list[dict[str, object]]:
             continue  # the scan reports what it can read
         counts: dict[str, int] = {}
         for row in rows:
-            if row["kind"] == "section":
+            if row["kind"] == "section" and row["layer"] != "veileder":
                 counts[str(row["section_id"])] = counts.get(str(row["section_id"]), 0) + 1
         duplicates = {sid: n for sid, n in counts.items() if n > 1}
         if duplicates:

@@ -125,8 +125,10 @@ Driven by the Stage 3.5 human audit (see
 * **C5 v2**: `expected_behaviour: must_disambiguate` +
   `valid_occurrences` (oracle-computed, layer-filtered, never curated);
   validator enforces exact match against the oracle
-  (`valid-occurrences-mismatch`). Final C5 population regenerates only
-  after the RC3 parser fix (veileder-layer headings).
+  (`valid-occurrences-mismatch`). The oracle is `oracle_occurrences`:
+  veileder-layer echoes never count, normative vedlegg rows do (RC3
+  parser fix, lovspor #26). Rescan evidence:
+  `dataset/candidates/remediation/c5-rescan.json`.
 * **Trap sibling guard** (`trap_has_sibling`): a claimed § with an
   existing `-x`/letter sibling is never a non-existence trap (RC7).
 * **C7 quote material**: spans end at sentence boundaries; mutations
