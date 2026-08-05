@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bartoszkobylinski/lovspor/benchmarks/llhb/schema/case.schema.json",
+  "title": "LLHB v1 benchmark case",
+  "description": "One frozen or candidate benchmark case. Quote-free: statutory text is referenced by corpus coordinates, never embedded. All coordinates resolve at the pinned lovverk commit in corpus_pin.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "llhb_version",
+    "case_id",
+    "category",
+    "difficulty",
+    "language",
+    "question",
+    "expected_behaviour",
+    "citation_exists",
+    "corpus_pin",
+    "ground_truth_evidence",
+    "deterministic_criteria",
+    "provenance",
+    "validation"
+  ],
+  "properties": {
+    "llhb_version": {
+      "type": "string",
+      "pattern": "^1(\\.[0-9]+)?$"
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^llhb-v1-C[1-8]-[0-9]{3}$"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"]
+    },
+    "subcategory": {
+      "type": "string",
+      "description": "Free-form refinement, e.g. 'out-of-range-section', 'repealed-as-current', 'duplicate-section-id'."
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["easy", "medium", "hard"]
+    },
+    "language": {
+      "type": "string",
+      "const": "nb"
+    },
+    "question": {
+      "type": "string",
+      "minLength": 10,
+      "description": "The user question, Norwegian bokmål."
+    },
+    "expected_behaviour": {
+      "type": "string",
+      "enum": [
+        "answer_with_citation",
+        "identify_provision",
+        "reject_citation",
+        "reject_premise",
+        "verify_quote",
+        "deny_quote",
+        "abstain"
+      ]
+    },
+    "expected_act_slug": {
+      "type": ["string", "null"],
+      "description": "Ground-truth act slug where applicable (C1/C2/C4/C6)."
+    },
+    "expected_section_id": {
+      "type": ["string", "null"],
+      "description": "Bare section id, no '§' prefix (e.g. '5-12', '3a')."
+    },
+    "expected_occurrence": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "One-based occurrence for duplicate section ids; null when unambiguous."
+    },
+    "claimed_act_slug": {
+      "type": ["string", "null"],
+      "description": "The act asserted by an adversarial question (C3/C4/C5/C6)."
+    },
+    "claimed_section_id": {
+      "type": ["string", "null"]
+    },
+    "citation_exists": {
+      "type": ["boolean", "null"],
+      "description": "Whether the claimed citation exists in the pinned corpus. Null when no citation is claimed by the question."
+    },
+    "quote_ref": {
+      "type": ["object", "null"],
+      "description": "Reference to a true statutory quote; materialized at evaluation time. Never contains the text itself.",
+      "additionalProperties": false,
+      "required": ["slug", "section_id", "sha256_normalized"],
+      "properties": {
+        "slug": { "type": "string" },
+        "section_id": { "type": "string" },
+        "occurrence": { "type": ["integer", "null"], "minimum": 1 },
+        "char_span": {
+          "type": ["array", "null"],
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[start, end) offsets in the normalized section text at the pinned commit."
+        },
+        "sha256_normalized": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the normalized quoted span (verify_quote normalization)."
+        }
+      }
+    },
+    "fabricated_quote_text": {
+      "type": ["string", "null"],
+      "description": "Adversarial fabricated quote, stored verbatim (not statutory source text)."
+    },
+    "corpus_pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lovverk_commit", "manifest_generated_at"],
+      "properties": {
+        "lovverk_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "manifest_generated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ground_truth_evidence": {
+      "type": "object",
+      "description": "Oracle outputs recorded at validation time (e.g. validate_citation / verify_quote result digests).",
+      "minProperties": 1
+    },
+    "deterministic_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Named criteria from SCORING.md §5 that apply to this case."
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "generator_commit", "created"],
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["corpus-selected-template", "corpus-selected-llm-phrased", "manual-corpus-validated"]
+        },
+        "phrasing_model": {
+          "type": ["string", "null"],
+          "description": "Exact model id used for phrasing, or null for template/manual."
+        },
+        "generator_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "created": { "type": "string", "format": "date" }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "validated_at", "validator_commit"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "quarantined"]
+        },
+        "validated_at": { "type": "string", "format": "date-time" },
+        "validator_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "spot_checked": {
+          "type": "boolean",
+          "description": "True when this case was part of manual review (all C5/C8; 10% sample elsewhere)."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "category": { "const": "C3" } } },
+      "then": {
+        "properties": {
+          "citation_exists": { "const": false },
+          "expected_behaviour": { "const": "reject_citation" }
+        },
+        "required": ["claimed_act_slug", "claimed_section_id"]
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "C4" } } },
+      "then": {
+        "required": ["claimed_act_slug", "claimed_section_id", "expected_act_slug", "expected_section_id"]
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "C6" } } },
+      "then": {
+        "properties": { "expected_behaviour": { "const": "reject_premise" } },
+        "required": ["expected_act_slug", "expected_section_id"]
+      }
+    },
+    {
+      "if": { "properties": { "category": { "const": "C7" } } },
+      "then": {
+        "properties": {
+          "expected_behaviour": { "enum": ["verify_quote", "deny_quote"] }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "expected_behaviour": { "const": "verify_quote" } } },
+      "then": { "required": ["quote_ref"] }
+    },
+    {
+      "if": { "properties": { "expected_behaviour": { "const": "deny_quote" } } },
+      "then": { "required": ["fabricated_quote_text"] }
+    },
+    {
+      "if": { "properties": { "category": { "const": "C8" } } },
+      "then": {
+        "properties": { "expected_behaviour": { "const": "abstain" } }
+      }
+    },
+    {
+      "if": { "properties": { "category": { "enum": ["C1", "C2"] } } },
+      "then": {
+        "properties": {
+          "expected_behaviour": { "enum": ["answer_with_citation", "identify_provision"] }
+        },
+        "required": ["expected_act_slug", "expected_section_id"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/bartoszkobylinski/lovspor/benchmarks/llhb/schema/result_record.schema.json",
+  "title": "LLHB per-case result record",
+  "description": "Raw retained output of one case under one run. Stored as JSONL under results/runs/<run-id>/. Scoring reads these records; they are never edited after capture.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "run_id",
+    "case_id",
+    "provider",
+    "model_id",
+    "condition",
+    "final_answer",
+    "tool_calls",
+    "timing",
+    "errors",
+    "completed"
+  ],
+  "properties": {
+    "run_id": { "type": "string" },
+    "case_id": { "type": "string", "pattern": "^llhb-v1-C[1-8]-[0-9]{3}$" },
+    "provider": { "type": "string", "enum": ["anthropic", "openai", "google"] },
+    "model_id": { "type": "string" },
+    "condition": { "type": "string", "enum": ["control", "lovspor"] },
+    "final_answer": {
+      "type": ["string", "null"],
+      "description": "The model's final answer text, verbatim. Null only when the case errored before an answer."
+    },
+    "tool_calls": {
+      "type": "array",
+      "description": "Empty for control. Ordered as issued.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "name", "arguments"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "name": { "type": "string" },
+          "arguments": { "type": "object" },
+          "result": {
+            "description": "Full tool result payload when small enough to inline.",
+            "type": ["object", "array", "string", "null"]
+          },
+          "result_ref": {
+            "type": ["string", "null"],
+            "description": "Stable reference to the stored payload (path within the run dir) when not inlined."
+          },
+          "result_sha256": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the canonical JSON payload; always present when result_ref is used."
+          },
+          "is_error": { "type": "boolean" },
+          "duration_ms": { "type": ["integer", "null"], "minimum": 0 }
+        }
+      }
+    },
+    "turns": { "type": ["integer", "null"], "minimum": 1 },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "total_ms"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time" },
+        "total_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "usage": {
+      "type": ["object", "null"],
+      "description": "Provider-reported token usage, verbatim shape."
+    },
+    "truncated": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when a max-turn or token cap was hit; recorded, never silently dropped."
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["stage", "message"],
+        "properties": {
+          "stage": { "type": "string", "enum": ["request", "tool", "parse", "other"] },
+          "message": { "type": "string" },
+          "at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      }
+    },
+    "completed": {
+      "type": "boolean",
+      "description": "True when a final answer was captured without a fatal error."
+    },
+    "raw_response_ref": {
+      "type": ["string", "null"],
+      "description": "Path within the run dir to the full raw provider response stream, when retained separately."
+    },
+    "repeat_index": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Set only for stability-subset repeats (METHODOLOGY §5); null for the primary pass."
+    }
+  }
+}
