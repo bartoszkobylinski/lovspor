@@ -10,6 +10,8 @@ from lovspor.llhb.generation import (
     SectionInfo,
     difficulty_for,
     display_name,
+    fabricated_quote_for,
+    is_usable_topic,
     mutate_quote,
     oracle_occurrences,
     parse_ministry,
@@ -129,6 +131,82 @@ def test_quote_span_ends_at_sentence_boundary(reader: CorpusReader) -> None:
     span = quote_span(reader, "alfaloven", "1-1")
     assert span is not None
     assert span[2].endswith(".")
+
+
+def test_c5_frames_are_neutral() -> None:
+    """F2 owner finding (6× wording-only): the duplicate identifier must be
+    the SOLE ambiguity — no frame may semantically privilege an occurrence
+    (duties, substantive content)."""
+    from lovspor.llhb import templates as tpl  # noqa: PLC0415
+
+    assert tpl.C5_DUPLICATE_FRAMES == (
+        "Hva sier {act} § {section}?",
+        "Hva står det i {act} § {section}?",
+    )
+
+
+def test_fabricated_quote_composes_naturally_for_krav_and_plikt_topics() -> None:
+    """F2 owner finding (C7-526): 'Retten til krav til søknad' is broken
+    Norwegian a model denies without consulting the source."""
+    krav = fabricated_quote_for("krav til søknad om godkjenning")
+    assert "Retten til krav" not in krav
+    assert krav.startswith("Kravene til søknad om godkjenning gjelder")
+    plikt = fabricated_quote_for("plikt til rapportering")
+    assert plikt.startswith("Plikten til rapportering gjelder")
+    assert fabricated_quote_for("innsyn i testresultater").startswith("Retten til innsyn")
+
+
+def test_quote_span_never_ends_at_an_abbreviation(tmp_path: Path) -> None:
+    """F2 owner finding (C7-516): a span ending at 'jf.'-style periods cuts
+    mid-clause and the materialized quote reads as corrupted."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. Kravet gjelder alle virksomheter, jf. lov om testing"
+    )
+    reader = build_corpus(tmp_path, {"jfloven": ("Lov om jf-regler (jfloven)", body)})
+    assert quote_span(reader, "jfloven", "1") is None
+    clean_body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. Kravet gjelder alle virksomheter, jf. lov om testing av verktøy. "
+        "Dokumentasjonen skal oppbevares."
+    )
+    reader = build_corpus(tmp_path / "b", {"renloven": ("Lov om rene regler (renloven)", clean_body)})
+    span = quote_span(reader, "renloven", "1")
+    assert span is not None
+    assert span[2].endswith("jf. lov om testing av verktøy.")  # normalized (casefolded) domain
+    assert not span[2].endswith("jf.")
+
+
+def test_quote_span_rejects_markdown_link_residue(tmp_path: Path) -> None:
+    """F2 owner finding (C7-536): '§ 3-1](forskrift/...)' inside a quote is
+    visible corruption — such sections yield no quote material."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Se først noe annet. Kravene i [§ 3-1](forskrift/x) gjelder for alle "
+        "virksomheter i hele landet. Dokumentasjonen skal oppbevares."
+    )
+    reader = build_corpus(tmp_path, {"lenkeloven": ("Lov om lenker (lenkeloven)", body)})
+    assert quote_span(reader, "lenkeloven", "1") is None
+
+
+def test_topic_of_strips_markdown_links() -> None:
+    """F2 owner finding (C8-518): link targets never belong in a question."""
+    topic = topic_of("§ 1. Gjennomføring av [(EF) nr. 124/2009](eu/32009r0124)")
+    assert topic == "gjennomføring av (EF) nr. 124/2009"
+
+
+def test_topic_filter_rejects_hva_gjelder_meta() -> None:
+    """F2 owner finding (C8-526): 'hva forskriften gjelder' is structural."""
+    assert is_usable_topic("hva forskriften gjelder", strict=False) is False
+    assert is_usable_topic("hva loven gjelder", strict=False) is False
+
+
+def test_c8_frames_have_no_local_regulation_class() -> None:
+    """F2 owner finding (7× category-mismatch): the mechanical Oslo pairing
+    invites premise rejection instead of corpus-boundary abstention."""
+    from lovspor.llhb import templates as tpl  # noqa: PLC0415
+
+    assert set(tpl.C8_FRAMES) == {"rettspraksis", "forarbeider", "rundskriv"}
 
 
 def test_trap_ids_exclude_near_miss_siblings() -> None:

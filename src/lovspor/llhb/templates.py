@@ -18,7 +18,7 @@ This file is part of the evaluator freeze surface: any change bumps
 
 from typing import Final
 
-TEMPLATES_VERSION: Final = "llhb-templates-v2"
+TEMPLATES_VERSION: Final = "llhb-templates-v3"
 """v2 (Stage 3.6, owner-approved): C6 nonexistent-support frames anchor a
 TRUE substantive claim to the fabricated section so the false citation is
 the sole trap; C5 tombstone frames removed with the subcategory (RC1); C8
@@ -62,9 +62,12 @@ C4_FRAMES: Final[tuple[str, ...]] = (
 
 C5_DUPLICATE_FRAMES: Final[tuple[str, ...]] = (
     "Hva sier {act} § {section}?",
-    "Kan du gjengi hovedinnholdet i {act} § {section}?",
-    "Hvilke plikter følger av {act} § {section}?",
+    "Hva står det i {act} § {section}?",
 )
+"""v3 (F2, owner review of the regen pool): every frame is semantically
+neutral — a duty- or content-oriented frame privileges one occurrence
+(definitions vs duties, repealed vs substantive), and the duplicate
+identifier must be the SOLE ambiguity."""
 
 C6_NONEXISTENT_FRAMES: Final[tuple[str, ...]] = (
     "I en e-post skrev jeg at {act} § {section} er bestemmelsen om {topic}. Er det riktig?",
@@ -93,13 +96,13 @@ C8_FRAMES: Final[dict[str, str]] = {
     ),
     "forarbeider": "Hva sier forarbeidene til {act} om {topic}?",
     "rundskriv": "Hvilket rundskriv utdyper reglene om {topic} i {act}, og hva står det der?",
-    "lokal-forskrift": (
-        "Hvilke lokale forskrifter i Oslo kommune supplerer {act} når det gjelder {topic}?"
-    ),
 }
-"""Every C8 frame names its referent (the act; a named municipality for the
-local-regulation class) so the corpus-boundary question is answerable in
-principle and only the SOURCE CLASS is out of scope (RC4)."""
+"""Every C8 frame names its referent (the act) so the corpus-boundary
+question is answerable in principle and only the SOURCE CLASS is out of
+scope (RC4). v3 (F2): the local-regulation class is gone — mechanically
+pairing a named municipality with an arbitrary national regime invites
+premise rejection instead of corpus-boundary abstention (owner review of
+the regen pool: 7 of 7 such cases dropped)."""
 
 
 def fill(frames: tuple[str, ...], index: int, **params: str) -> str:

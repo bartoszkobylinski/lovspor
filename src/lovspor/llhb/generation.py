@@ -31,7 +31,8 @@ TOPIC_FILTER_VERSION = "llhb-topic-filter-v1"
 META_TOPIC = re.compile(
     r"virkeområde|verkeområde|definisjon|ikrafttred|ikraftset|iverkset|overgangs"
     r"|formål|innledende|alminnelige|avsluttende|sluttbestemmelser|fellesbestemmelser"
-    r"|oppheving|endringer i andre|generelle bestemmelser",
+    r"|oppheving|endringer i andre|generelle bestemmelser"
+    r"|hva (?:loven|forskriften) gjelder",
 )
 """Meta/structural heading topics. Owner review (Stage 3.5) showed they
 cannot anchor discovery/premise questions: they occur in most acts, so a
@@ -91,9 +92,16 @@ def display_name(record: ManifestRecord) -> str:
     return record.title or record.slug or ""
 
 
+_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
 def topic_of(heading: str) -> str | None:
-    """Heading title as a question topic; None when unusable."""
-    topic = _HEADING_PREFIX.sub("", heading).strip().rstrip(".")
+    """Heading title as a question topic; None when unusable.
+
+    Markdown links collapse to their link text (F2, C8-518): a rendered
+    heading like ``[(EF) nr. 124/2009](eu/32009r0124)`` must never leak a
+    link target into a question."""
+    topic = _MARKDOWN_LINK.sub(r"\1", _HEADING_PREFIX.sub("", heading)).strip().rstrip(".")
     if len(topic) < _MIN_TOPIC_CHARS or "opphevet" in topic.casefold():
         return None
     return topic[0].lower() + topic[1:]
@@ -236,31 +244,56 @@ def _flat_traps(ids: set[str]) -> list[tuple[str, str]]:
     return [("flat-overrun", str(plain[-1] + 1))] if plain else []
 
 
+_ABBREVIATIONS_BEFORE_PERIOD = frozenset(
+    {"jf", "bl.a", "f.eks", "nr", "pkt", "mv", "mfl", "evt", "ca", "mm", "kap", "s"},
+)
+
+
+_NUMERIC_BEFORE_PERIOD = re.compile(r"\d+(\.\d+)*")
+
+
+def _is_sentence_boundary(text: str, dot: int) -> bool:
+    """Whether ``text[dot] == '.'`` genuinely ends a sentence (F2, C7-516).
+
+    Operates on the NORMALIZED (casefolded) quote domain, so capitalization
+    carries no signal; instead the period must not belong to a Norwegian
+    abbreviation (``jf.``, ``bl.a.``) or an ordinal/section number
+    (``§ 2.``, ``3.1.``) — both cut mid-clause."""
+    if dot + 1 >= len(text) or text[dot + 1] != " ":
+        return False
+    word = text[:dot].rsplit(" ", 1)[-1].lstrip("(«").casefold()
+    if word in _ABBREVIATIONS_BEFORE_PERIOD:
+        return False
+    return _NUMERIC_BEFORE_PERIOD.fullmatch(word) is None
+
+
 def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, int, str] | None:
     """Deterministic (start, end, text) span in the normalized section body.
 
-    Starts after the heading sentence and ends at a SENTENCE boundary
-    (v2, RC6): a quote cut mid-sentence reads as corrupted and lets a
-    model deny it without consulting the source. Returns None when the
-    section has no complete sentence of quotable length.
+    Starts after the heading sentence and ends at a validated SENTENCE
+    boundary (v2 RC6; v3 F2): a quote cut mid-sentence or at an
+    abbreviation period reads as corrupted, and any markdown-link residue
+    in the span disqualifies the section as quote material. Returns None
+    when the section has no clean, complete sentence of quotable length.
     """
     section = reader.get_section(slug, section_id)
     normalized = normalize_quote_text(str(section["body"]))
-    dot = normalized.find(". ")
-    start = dot + 2 if dot != -1 else 0
-    window = normalized[start : start + _MAX_QUOTE_CHARS]
-    boundary = window.rfind(". ")
-    if boundary == -1 and normalized.endswith(".") and len(normalized) - start <= _MAX_QUOTE_CHARS:
-        boundary = len(normalized) - start - 1  # last sentence of the section
-    if boundary < _MIN_QUOTE_CHARS:
-        return None
-    end = start + boundary + 1  # include the closing period
-    while start < end and normalized[start] == " ":
+    boundaries = [
+        i for i in range(len(normalized) - 1) if normalized[i] == "." and _is_sentence_boundary(normalized, i)
+    ]
+    start = boundaries[0] + 2 if boundaries else 0
+    end = next(
+        (i + 1 for i in reversed(boundaries) if start < i < start + _MAX_QUOTE_CHARS),
+        -1,
+    )
+    if end == -1 and normalized.endswith(".") and len(normalized) - start <= _MAX_QUOTE_CHARS:
+        end = len(normalized)  # last sentence of the section
+    while 0 < start < end and normalized[start] == " ":
         start += 1
     # The hash is computed over normalized[start:end] EXACTLY as the
     # materializer will slice it — the span is trimmed, never a text copy.
     text = normalized[start:end]
-    if len(text) < _MIN_QUOTE_CHARS:
+    if end == -1 or len(text) < _MIN_QUOTE_CHARS or _MARKDOWN_LINK.search(text) or "[" in text:
         return None
     return start, end, text
 
@@ -358,12 +391,19 @@ def base_case(pin: CorpusPin, provenance: dict[str, str | None]) -> dict[str, ob
     }
 
 
+_FABRICATED_SUFFIX = "gjelder ubetinget og kan ikke fravikes ved avtale, uansett omstendighetene."
+
+
 def fabricated_quote_for(topic: str) -> str:
-    """A legal-sounding sentence that exists in no statute (template-built)."""
-    return (
-        f"Retten til {topic} gjelder ubetinget og kan ikke fravikes ved avtale, "
-        f"uansett omstendighetene."
-    )
+    """A legal-sounding sentence that exists in no statute (template-built).
+
+    The opener composes with the topic's own shape (F2, C7-526): 'Retten
+    til krav til søknad' is broken Norwegian a model denies unread."""
+    if topic.startswith("krav til "):
+        return f"Kravene til {topic.removeprefix('krav til ')} {_FABRICATED_SUFFIX}"
+    if topic.startswith("plikt til "):
+        return f"Plikten til {topic.removeprefix('plikt til ')} {_FABRICATED_SUFFIX}"
+    return f"Retten til {topic} {_FABRICATED_SUFFIX}"
 
 
 def quote_ref_fields(
