@@ -144,18 +144,21 @@ def test_c2_skips_topics_that_repeat_across_the_corpus(tmp_path: Path) -> None:
     )
     shared_a = "## Kapittel 1. Regler\n\n" + _SOKNAD_SECTION.format(sid="4")
     shared_b = "## Kapittel 1. Regler\n\n" + _SOKNAD_SECTION.format(sid="3")
-    reader = build_corpus(
-        tmp_path,
-        {
-            "tilskuddloven": ("Forskrift om tilskudd A (tilskuddloven)", shared_a + unique),
+    # the unique topic lives in BOTH iteration orders: whichever act the
+    # sampler visits first, a census rejection precedes a later emission —
+    # so a census 'continue' mutated to 'break' can never pass
+    for unique_holder in ("tilskuddloven", "stotteloven"):
+        docs = {
+            "tilskuddloven": ("Forskrift om tilskudd A (tilskuddloven)", shared_a),
             "stotteloven": ("Forskrift om tilskudd B (stotteloven)", shared_b),
-        },
-    )
-    result = _generate(reader)
-    c2_questions = [str(c["question"]) for c in result.candidates if c["category"] == "C2"]
-    assert all("søknad og utbetaling" not in q.casefold() for q in c2_questions)
-    # the census threshold is > 1, never >= 1: a unique topic still emits
-    assert any("unik solid dokumentasjon" in q.casefold() for q in c2_questions)
+        }
+        title, body = docs[unique_holder]
+        docs[unique_holder] = (title, body + unique)
+        result = _generate(build_corpus(tmp_path / unique_holder, docs))
+        c2_questions = [str(c["question"]) for c in result.candidates if c["category"] == "C2"]
+        assert all("søknad og utbetaling" not in q.casefold() for q in c2_questions)
+        # the census threshold is > 1, never >= 1: a unique topic still emits
+        assert any("unik solid dokumentasjon" in q.casefold() for q in c2_questions), unique_holder
 
 
 def test_c4_claimed_section_must_exist_in_the_wrong_act(tmp_path: Path) -> None:
