@@ -10,12 +10,15 @@ from lovspor.llhb.generation import (
     SectionInfo,
     difficulty_for,
     display_name,
+    fabricated_quote_for,
+    is_usable_topic,
     mutate_quote,
     oracle_occurrences,
     parse_ministry,
     quote_span,
     scan_duplicate_ids,
     section_shape,
+    topic_census,
     topic_of,
     trap_section_ids,
 )
@@ -131,6 +134,239 @@ def test_quote_span_ends_at_sentence_boundary(reader: CorpusReader) -> None:
     assert span[2].endswith(".")
 
 
+def test_c5_frames_are_neutral() -> None:
+    """F2 owner finding (6x wording-only): the duplicate identifier must be
+    the SOLE ambiguity — no frame may semantically privilege an occurrence
+    (duties, substantive content)."""
+    from lovspor.llhb import templates as tpl  # noqa: PLC0415
+
+    assert tpl.C5_DUPLICATE_FRAMES == (
+        "Hva sier {act} § {section}?",
+        "Hva står det i {act} § {section}?",
+    )
+
+
+def test_fabricated_quote_composes_naturally_for_krav_and_plikt_topics() -> None:
+    """F2 owner finding (C7-526): 'Retten til krav til søknad' is broken
+    Norwegian a model denies without consulting the source."""
+    krav = fabricated_quote_for("krav til søknad om godkjenning")
+    assert "Retten til krav" not in krav
+    assert krav.startswith("Kravene til søknad om godkjenning gjelder")
+    plikt = fabricated_quote_for("plikt til rapportering")
+    assert plikt.startswith("Plikten til rapportering gjelder")
+    assert fabricated_quote_for("innsyn i testresultater").startswith("Retten til innsyn")
+
+
+def test_quote_span_never_ends_at_an_abbreviation(tmp_path: Path) -> None:
+    """F2 owner finding (C7-516): a span ending at 'jf.'-style periods cuts
+    mid-clause and the materialized quote reads as corrupted."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. Kravet gjelder alle virksomheter, jf. lov om testing"
+    )
+    reader = build_corpus(tmp_path, {"jfloven": ("Lov om jf-regler (jfloven)", body)})
+    assert quote_span(reader, "jfloven", "1") is None
+    clean_body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. Kravet gjelder alle virksomheter, jf. lov om testing av verktøy. "
+        "Dokumentasjonen skal oppbevares."
+    )
+    reader = build_corpus(
+        tmp_path / "b", {"renloven": ("Lov om rene regler (renloven)", clean_body)}
+    )
+    span = quote_span(reader, "renloven", "1")
+    assert span is not None
+    assert span[2].endswith("jf. lov om testing av verktøy.")  # normalized (casefolded) domain
+    assert not span[2].endswith("jf.")
+
+
+def test_quote_span_rejects_markdown_link_residue(tmp_path: Path) -> None:
+    """F2 owner finding (C7-536): '§ 3-1](forskrift/...)' inside a quote is
+    visible corruption — such sections yield no quote material."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Se først noe annet. Kravene i [§ 3-1](forskrift/x) gjelder for alle "
+        "virksomheter i hele landet. Dokumentasjonen skal oppbevares."
+    )
+    reader = build_corpus(tmp_path, {"lenkeloven": ("Lov om lenker (lenkeloven)", body)})
+    assert quote_span(reader, "lenkeloven", "1") is None
+    orphan = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Se først noe annet. Kravene i § 3-1](forskrift/x) gjelder for alle "
+        "virksomheter i hele landet. Dokumentasjonen skal oppbevares.\n"
+    )
+    reader = build_corpus(tmp_path / "o", {"restloven": ("Lov om rester (restloven)", orphan)})
+    assert quote_span(reader, "restloven", "1") is None
+
+
+def test_quote_span_accepts_plain_bracketed_text(tmp_path: Path) -> None:
+    """Codex PR #37 finding: only markdown-LINK residue disqualifies —
+    ordinary bracketed statutory text like [første ledd] is quotable."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. Kravene etter [første ledd] gjelder for alle "
+        "virksomheter i hele landet. Dokumentasjonen skal oppbevares.\n"
+    )
+    reader = build_corpus(tmp_path, {"leddloven": ("Lov om ledd (leddloven)", body)})
+    span = quote_span(reader, "leddloven", "1")
+    assert span is not None
+    assert "[første ledd]" in span[2]
+
+
+_ABBREVIATIONS = ("jf", "bl.a", "f.eks", "nr", "pkt", "mv", "mfl", "evt", "ca", "mm", "kap", "s")
+
+
+@pytest.mark.parametrize("abbrev", _ABBREVIATIONS)
+def test_sentence_boundary_blocks_each_abbreviation(abbrev: str) -> None:
+    from lovspor.llhb.generation import _is_sentence_boundary  # noqa: PLC0415
+
+    text = f"se {abbrev}. neste ord"
+    # the TRAILING period — index(".") would hit the dot inside bl.a/f.eks
+    assert _is_sentence_boundary(text, text.index(". ")) is False
+
+
+def test_sentence_boundary_edge_positions() -> None:
+    from lovspor.llhb.generation import _is_sentence_boundary  # noqa: PLC0415
+
+    # a boundary whose space is the very last character still counts
+    assert _is_sentence_boundary("kravet gjelder. ", 14) is True
+    # a single-word sentence has no preceding space to split on
+    assert _is_sentence_boundary("slutt. neste", 5) is True
+
+
+def test_sentence_boundary_rules() -> None:
+    from lovspor.llhb.generation import _is_sentence_boundary  # noqa: PLC0415
+
+    assert _is_sentence_boundary("kravet gjelder verktøy. dokumentasjonen", 22) is True
+    assert _is_sentence_boundary("se § 2. tredje ledd", 6) is False  # ordinal number
+    assert _is_sentence_boundary("se punkt 3.1. neste", 12) is False  # dotted number
+    assert _is_sentence_boundary("slutt.", 5) is False  # no following space
+    assert _is_sentence_boundary("se (jf. lov om x", 6) is False  # paren-wrapped abbrev
+    assert _is_sentence_boundary("kravet gjelder.  neste", 14) is True
+
+
+def test_meta_topic_arms_all_reject() -> None:
+    """Every alternation arm of the meta filter must hold on its own."""
+    meta = (
+        "lovens virkeområde",
+        "definisjoner",
+        "ikrafttredelse",
+        "overgangsregler",
+        "formål",
+        "innledende bestemmelser",
+        "alminnelige bestemmelser",
+        "avsluttende bestemmelser",
+        "sluttbestemmelser",
+        "fellesbestemmelser",
+        "oppheving av forskrifter",
+        "endringer i andre forskrifter",
+        "generelle bestemmelser",
+        "hva loven gjelder",
+        "hva forskriften gjelder",
+    )
+    for topic in meta:
+        assert is_usable_topic(topic, strict=False) is False, topic
+
+
+def test_topic_of_strips_trailing_period() -> None:
+    assert topic_of("§ 2. Krav til dokumentasjon.") == "krav til dokumentasjon"
+
+
+def test_quote_span_start_end_are_exact_slice_coordinates(tmp_path: Path) -> None:
+    """The span must slice the normalized body exactly — off-by-one in
+    start or end breaks the materializer contract."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. Kravet gjelder alle virksomheter i landet. Slutten kommer nå.\n"
+    )
+    reader = build_corpus(tmp_path, {"eksaktloven": ("Lov om eksakt (eksaktloven)", body)})
+    span = quote_span(reader, "eksaktloven", "1")
+    assert span is not None
+    start, end, text = span
+    from lovspor.llhb.quotes import normalize_quote_text  # noqa: PLC0415
+
+    normalized = normalize_quote_text(str(reader.get_section("eksaktloven", "1")["body"]))
+    assert normalized[start:end] == text
+    assert text == "kravet gjelder alle virksomheter i landet."
+    assert normalized[start - 1] == " " and normalized[start - 2] == "."
+
+
+def test_quote_span_length_bounds_are_exact(tmp_path: Path) -> None:
+    """Boundary values of the frozen 40/140 constants: exactly-40 accepted,
+    39 rejected, and a 141-char sentence never becomes the span."""
+    core39 = "regelen gjelder for alle virksomheter x"
+    assert len(core39) == 39
+    at_min = (
+        f"## Kapittel 1. R\n\n### § 1. K\n\n"
+        f"Innledning her. {core39.capitalize()}. Etterpå kommer en hale."
+    )
+    reader = build_corpus(tmp_path / "a", {"minloven": ("Lov om min (minloven)", at_min)})
+    span = quote_span(reader, "minloven", "1")
+    assert span is not None
+    # exactly the 40-char sentence: at MIN there is no tail extension
+    assert len(span[2]) == 40
+    below = f"## Kapittel 1. R\n\n### § 1. K\n\nInnledning her. {core39.capitalize()[:-2]}."
+    reader = build_corpus(tmp_path / "b", {"underloven": ("Lov om under (underloven)", below)})
+    assert quote_span(reader, "underloven", "1") is None
+    core141 = ("regelen gjelder for alle virksomheter og " * 4).strip()[:140] + "."
+    assert len(core141) == 141
+    over = (
+        f"## Kapittel 1. R\n\n### § 1. K\n\n"
+        f"Innledning her. {core141.capitalize()} Etterpå kommer mer tekst her."
+    )
+    reader = build_corpus(tmp_path / "c", {"overloven": ("Lov om over (overloven)", over)})
+    assert quote_span(reader, "overloven", "1") is None  # 141-char sentence: no valid span
+
+
+def test_quote_span_without_internal_boundary_starts_at_zero(tmp_path: Path) -> None:
+    """A section that is one long sentence quotes from position 0."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Kravene gjelder for alle virksomheter i hele landet uten unntak."
+    )
+    reader = build_corpus(tmp_path, {"heleloven": ("Lov om hele (heleloven)", body)})
+    span = quote_span(reader, "heleloven", "1")
+    assert span is not None
+    assert span[0] == 0
+    assert span[2].startswith("kravene")
+
+
+def test_quote_span_respects_length_bounds(tmp_path: Path) -> None:
+    short = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. Kort regel her. Dokumentasjonen skal være etterprøvbar og "
+        "oppbevares slik at kontroll er mulig i ettertid uten urimelig arbeid for noen.\n"
+    )
+    reader = build_corpus(tmp_path, {"kortloven": ("Lov om kort (kortloven)", short)})
+    span = quote_span(reader, "kortloven", "1")
+    assert span is not None
+    assert len(span[2]) >= 40
+    assert len(span[2]) <= 140
+    only_short = "## Kapittel 1. Regler\n\n### § 1. Krav\n\nInnledning her. Kort regel.\n"
+    reader = build_corpus(tmp_path / "s", {"miniloven": ("Lov om mini (miniloven)", only_short)})
+    assert quote_span(reader, "miniloven", "1") is None
+
+
+def test_topic_of_strips_markdown_links() -> None:
+    """F2 owner finding (C8-518): link targets never belong in a question."""
+    topic = topic_of("§ 1. Gjennomføring av [(EF) nr. 124/2009](eu/32009r0124)")
+    assert topic == "gjennomføring av (EF) nr. 124/2009"
+
+
+def test_topic_filter_rejects_hva_gjelder_meta() -> None:
+    """F2 owner finding (C8-526): 'hva forskriften gjelder' is structural."""
+    assert is_usable_topic("hva forskriften gjelder", strict=False) is False
+    assert is_usable_topic("hva loven gjelder", strict=False) is False
+
+
+def test_c8_frames_have_no_local_regulation_class() -> None:
+    """F2 owner finding (7x category-mismatch): the mechanical Oslo pairing
+    invites premise rejection instead of corpus-boundary abstention."""
+    from lovspor.llhb import templates as tpl  # noqa: PLC0415
+
+    assert set(tpl.C8_FRAMES) == {"rettspraksis", "forarbeider", "rundskriv"}
+
+
 def test_trap_ids_exclude_near_miss_siblings() -> None:
     """RC7: § 1 is no trap when § 1-1 or § 1a exists."""
     from lovspor.llhb.generation import trap_has_sibling  # noqa: PLC0415
@@ -181,6 +417,104 @@ Spesifikasjonene i dette vedlegget gjelder som forskrift.
 
 Kommentar som speiler forskriftens paragraf uten å være en bestemmelse.
 """
+
+
+def test_topic_census_counts_repeated_headings_corpus_wide(tmp_path: Path) -> None:
+    """F2 owner finding (4x C2 ambiguous-ground-truth): headings like
+    'Søknad og utbetaling' repeat across grant schemes, so a discovery
+    question built on them has no deterministic referent."""
+    body_a = (
+        "## Kapittel 1. Regler\n\n### § 4. Søknad og utbetaling\n\nRegler om søknad her.\n\n"
+        "### § 5. Krav til egen dokumentasjon\n\nDokumentasjonskrav her.\n"
+    )
+    body_b = "## Kapittel 1. Regler\n\n### § 3. Søknad og utbetaling\n\nAndre regler om søknad.\n"
+    reader = build_corpus(
+        tmp_path,
+        {
+            "tilskuddloven": ("Forskrift om tilskudd A", body_a),
+            "stotteloven": ("Forskrift om tilskudd B", body_b),
+        },
+    )
+    census = topic_census(reader)
+    assert census["søknad og utbetaling"] == 2
+    assert census["krav til egen dokumentasjon"] == 1
+
+
+def test_topic_census_counts_distinct_acts_not_occurrences(tmp_path: Path) -> None:
+    """Codex PR #37 finding: two sections with the same heading INSIDE one
+    act must count once — the census measures cross-act ambiguity."""
+    body = (
+        "## Kapittel 1. En\n\n### § 1. Krav til intern kontroll\n\nFørste regel om kontroll.\n\n"
+        "## Kapittel 2. To\n\n### § 7. Krav til intern kontroll\n\nAndre regel om kontroll.\n"
+    )
+    reader = build_corpus(tmp_path, {"kontrolloven": ("Lov om kontroll (kontrolloven)", body)})
+    assert topic_census(reader)["krav til intern kontroll"] == 1
+
+
+def test_topic_census_ignores_non_section_rows(tmp_path: Path) -> None:
+    """Codex PR #37 round 3: C2 topics come only from kind=='section' rows,
+    so a block heading (### without §) sharing the text must not make the
+    topic cross-act ambiguous."""
+    section_act = (
+        "## Kapittel 1. Regler\n\n### § 2. Krav til felles dokumentasjon\n\nRegelen står her.\n"
+    )
+    block_act = "## Kapittel 1. Regler\n\n### Krav til felles dokumentasjon\n\n| rad | verdi |\n"
+    reader = build_corpus(
+        tmp_path,
+        {
+            "paragrafloven": ("Lov om paragrafer (paragrafloven)", section_act),
+            "tabelloven": ("Lov om tabeller (tabelloven)", block_act),
+        },
+    )
+    assert topic_census(reader)["krav til felles dokumentasjon"] == 1
+
+
+def test_topic_of_keeps_trailing_uppercase_letters() -> None:
+    """rstrip works on a charset — a mutated set must not eat a trailing
+    roman-numeral X along with the period."""
+    assert topic_of("§ 2. Krav til vedlegg X.") == "krav til vedlegg X"
+
+
+def test_sentence_boundary_strips_quote_openers_before_the_word() -> None:
+    from lovspor.llhb.generation import _is_sentence_boundary  # noqa: PLC0415
+
+    assert _is_sentence_boundary("se («jf. neste ord", 7) is False
+    assert _is_sentence_boundary("se «jf. neste ord", 6) is False
+
+
+def test_quote_span_tail_respects_the_window_exactly(tmp_path: Path) -> None:
+    """A single-sentence section of exactly 140 chars quotes whole; one
+    char more and there is no valid span."""
+    core139 = ("kravene gjelder for alle virksomheter og " * 4).strip()[:139]
+    fits = f"## Kapittel 1. R\n\n### § 1. K\n\n{core139.capitalize()}."
+    reader = build_corpus(tmp_path / "a", {"passloven": ("Lov om pass (passloven)", fits)})
+    span = quote_span(reader, "passloven", "1")
+    assert span is not None
+    assert len(span[2]) == 140
+    over = f"## Kapittel 1. R\n\n### § 1. K\n\n{core139.capitalize()}s."
+    reader = build_corpus(tmp_path / "b", {"sprekkloven": ("Lov om sprekk (sprekkloven)", over)})
+    assert quote_span(reader, "sprekkloven", "1") is None
+
+
+def test_topic_census_skips_hostile_records(tmp_path: Path) -> None:
+    """Loop-truncation guard, census edition: a tombstone and an
+    undecodable record sorting BEFORE real material never abort the pass."""
+    records = {
+        "a-unreadable": record_for("borteloven", "Lov om borte (borteloven)"),
+        "b-tombstone": record_for("utgåttloven", "Lov om utgåtte regler", status="removed"),
+        "c-real": record_for("ekteloven", "Lov om ekte regler (ekteloven)"),
+    }
+    (tmp_path / "lover").mkdir(parents=True)
+    (tmp_path / "lover" / "borteloven.md").write_bytes(b"---\nid: a\n---\n\n\xff\xfe ikke utf-8")
+    (tmp_path / "lover" / "ekteloven.md").write_text(
+        "---\nid: c-real\ntitle: x\n---\n\n## Kapittel 1. Regler\n\n"
+        "### § 1. Krav til ekte dokumentasjon\n\nRegelen står her.\n",
+        encoding="utf-8",
+    )
+    write_manifest(
+        Manifest(generated_at=GENERATED_AT, documents=records), tmp_path / "manifest.json"
+    )
+    assert topic_census(CorpusReader(tmp_path))["krav til ekte dokumentasjon"] == 1
 
 
 def test_scan_skips_hostile_records_and_reports_provenance(tmp_path: Path) -> None:

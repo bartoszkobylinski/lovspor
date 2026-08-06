@@ -29,6 +29,10 @@ Denne bestemmelsen har et ekte i-suffiks.
 
 DOBBELTLOVEN_BODY = """## Kapittel 1. Første del
 
+### § 1. Registrering av doble saker
+
+Sakene skal registreres i det doble registeret.
+
 ### § 6-2. Første versjon
 
 Tekst nummer en om første tema.
@@ -154,6 +158,9 @@ def rich_corpus(root: Path) -> CorpusReader:
                 [
                     ("1", "Virkeområde for beta-verktøy", extra),
                     ("2", "Plikter for virksomheten ved beta-bruk", extra),
+                    # id overlap with alfaloven's § 1-1 — C4 wrong-act traps
+                    # must cite a § that exists in the claimed act (F2)
+                    ("1-1", "Melding om beta-avvik til tilsynet", extra),
                 ],
             ),
         ),

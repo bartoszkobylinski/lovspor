@@ -127,6 +127,75 @@ def test_id_offset_shifts_case_ids_into_a_fresh_range(tmp_path: Path) -> None:
     assert any(i.endswith("-501") for i in ids)
 
 
+_SOKNAD_SECTION = (
+    "### § {sid}. Søknad og utbetaling for ordningen\n\n"
+    "Virksomheten skal sende søknad og motta utbetaling etter disse reglene. "
+    "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n"
+)
+
+
+def test_c2_skips_topics_that_repeat_across_the_corpus(tmp_path: Path) -> None:
+    """F2: a discovery topic occurring in more than one act has no
+    deterministic referent — no C2 case may be built on it."""
+    unique = (
+        "## Kapittel 1. Regler\n\n### § 2. Krav til unik solid dokumentasjon\n\n"
+        "Virksomheten skal dokumentere alle solide vurderinger. "
+        "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n"
+    )
+    shared_a = "## Kapittel 1. Regler\n\n" + _SOKNAD_SECTION.format(sid="4")
+    shared_b = "## Kapittel 1. Regler\n\n" + _SOKNAD_SECTION.format(sid="3")
+    # the unique topic lives in BOTH iteration orders: whichever act the
+    # sampler visits first, a census rejection precedes a later emission —
+    # so a census 'continue' mutated to 'break' can never pass
+    for unique_holder in ("tilskuddloven", "stotteloven"):
+        docs = {
+            "tilskuddloven": ("Forskrift om tilskudd A (tilskuddloven)", shared_a),
+            "stotteloven": ("Forskrift om tilskudd B (stotteloven)", shared_b),
+        }
+        title, body = docs[unique_holder]
+        docs[unique_holder] = (title, body + unique)
+        result = _generate(build_corpus(tmp_path / unique_holder, docs))
+        c2_questions = [str(c["question"]) for c in result.candidates if c["category"] == "C2"]
+        assert all("søknad og utbetaling" not in q.casefold() for q in c2_questions)
+        # the census threshold is > 1, never >= 1: a unique topic still emits
+        assert any("unik solid dokumentasjon" in q.casefold() for q in c2_questions), unique_holder
+
+
+def _one_section_act(sid: str, title: str) -> str:
+    return (
+        f"## Kapittel 1. Regler\n\n### § {sid}. {title}\n\n"
+        f"Virksomheten skal sørge for at {title.lower()} følges opp i praksis. "
+        f"Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n"
+    )
+
+
+def test_build_c4_failing_act_never_aborts_the_loop(tmp_path: Path) -> None:
+    """An act whose claimed § exists in no partner is skipped — later acts
+    still pair (a continue mutated to break emits nothing)."""
+    docs = {
+        "aloven": ("Lov om a-kontroll (aloven)", _one_section_act("9", "Krav til a-kontroll")),
+        "bloven": ("Lov om b-kontroll (bloven)", _one_section_act("1", "Krav til b-kontroll")),
+        "cloven": ("Lov om c-kontroll (cloven)", _one_section_act("1", "Krav til c-kontroll")),
+    }
+    ministries = dict.fromkeys(docs, "Testdepartementet")
+    reader = build_corpus(tmp_path, docs, ministries=ministries)
+    result = _generate(reader)
+    c4 = [c for c in result.candidates if c["category"] == "C4"]
+    assert c4
+    assert all(c["expected_act_slug"] in {"bloven", "cloven"} for c in c4)
+
+
+def test_c4_claimed_section_must_exist_in_the_wrong_act(tmp_path: Path) -> None:
+    """F2 owner finding (C4-536): a claimed § that does not exist in the
+    cited act reads as an intra-act wrong-section case — the wrong-act
+    target is not recoverable. Every C4 trap must cite an existing §."""
+    result = _generate(rich_corpus(tmp_path))
+    c4 = [c for c in result.candidates if c["category"] == "C4"]
+    assert c4
+    for case in c4:
+        assert case["citation_exists"] is True, case["case_id"]
+
+
 def test_veileder_only_duplicate_yields_no_c5(tmp_path: Path) -> None:
     """RC3 end-to-end: a corpus whose only duplication is a veileder echo
     produces zero C5 cases and an empty ambiguity scan."""
