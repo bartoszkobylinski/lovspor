@@ -106,6 +106,18 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     alternative — moving 4 cases to another category — was rejected because
     the population supports the original target.
 
+## Addendum — Stage 3.6-F review-assist ruling (2026-08-06)
+
+22. **Model-assisted review annotations (Stage 3.6-F).** An LLM may
+    pre-screen review packets and produce per-case ADVISORY annotations: a
+    recommended decision, a rationale, and language-naturalness flags. The
+    model never fills the decisions file, never defines ground truth, and its
+    output is not a score. The owner makes every final decision in the review
+    CLI; `reviewer` remains the owner. Notes derived from model annotations
+    are marked `(model-assisted)`. Publication discloses: "owner review with
+    model-assisted annotations." Consistent with decisions 8/15 (bounded LLM
+    roles); decisions 2/14 (no LLM-as-a-judge in scoring) untouched.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,

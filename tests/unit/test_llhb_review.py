@@ -261,6 +261,33 @@ def test_review_items_carry_evidence_and_structural_notes() -> None:
     assert c7.quote_ref is not None and "text" not in c7.quote_ref
 
 
+def test_c5_notes_understand_v2_evidence_and_ruling_17() -> None:
+    """v2 evidence carries the occurrence list, not a count, and
+    must_disambiguate is the designed expectation — not DEBATABLE."""
+    from lovspor.llhb.review import _c5_notes  # noqa: PLC0415
+
+    v2 = {
+        "subcategory": "duplicate-section-id",
+        "expected_act_slug": "dobbeltloven",
+        "expected_section_id": "6-2",
+        "expected_behaviour": "must_disambiguate",
+        "expected_occurrence": None,
+        "ground_truth_evidence": {"duplicate_occurrences": {"occurrences": [1, 2]}},
+    }
+    notes = _c5_notes(v2)
+    assert any("has 2 occurrences" in n for n in notes)
+    assert not any("DEBATABLE" in n for n in notes)
+    assert any("ruling 17" in n for n in notes)
+    legacy = {
+        **v2,
+        "expected_behaviour": "answer_with_citation",
+        "ground_truth_evidence": {"duplicate_occurrences": {"count": 2}},
+    }
+    legacy_notes = _c5_notes(legacy)
+    assert any("has 2 occurrences" in n for n in legacy_notes)
+    assert any("DEBATABLE" in n for n in legacy_notes)
+
+
 def test_queued_case_missing_from_pool_fails_closed() -> None:
     queue = [{"case_id": "llhb-v1-C1-999", "reasons": ["stratified-10pct-sample"]}]
     with pytest.raises(ReviewError, match="llhb-v1-C1-999"):
