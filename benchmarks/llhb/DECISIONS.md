@@ -91,6 +91,21 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     out-of-current-corpus (unresolved-class), never to a hallucination; the
     H1 subcode `repealed-as-current` is withdrawn.
 
+## Addendum — Stage 3.6-G feasibility ruling (2026-08-06)
+
+21. **C5 per-act category cap raised to 3; frozen target stays 15.** The
+    layer-aware rescan fixed the C5 population at 42 real duplicate ids in 7
+    documents, 3 of which carry a single id — so the default per-act cap of 2
+    makes 11 the structural maximum and the frozen target of 15 unreachable
+    (evidence: `dataset/candidates/remediation/replacement-supply.json`).
+    Per ruling 19 the resolution must be explicit: the owner raises the C5
+    per-act category cap to 3 (`PoolConfig.per_act_category_caps`), which
+    makes the structural maximum exactly 15. Accepted trade-off: up to three
+    C5 cases each from the three id-rich forskrifter, always on distinct
+    provisions (the per-provision cap of FREEZE.md §2.3 is untouched). The
+    alternative — moving 4 cases to another category — was rejected because
+    the population supports the original target.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,
