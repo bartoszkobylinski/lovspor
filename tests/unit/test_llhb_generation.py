@@ -221,7 +221,17 @@ def test_sentence_boundary_blocks_each_abbreviation(abbrev: str) -> None:
     from lovspor.llhb.generation import _is_sentence_boundary  # noqa: PLC0415
 
     text = f"se {abbrev}. neste ord"
-    assert _is_sentence_boundary(text, text.index(".", 3)) is False
+    # the TRAILING period — index(".") would hit the dot inside bl.a/f.eks
+    assert _is_sentence_boundary(text, text.index(". ")) is False
+
+
+def test_sentence_boundary_edge_positions() -> None:
+    from lovspor.llhb.generation import _is_sentence_boundary  # noqa: PLC0415
+
+    # a boundary whose space is the very last character still counts
+    assert _is_sentence_boundary("kravet gjelder. ", 14) is True
+    # a single-word sentence has no preceding space to split on
+    assert _is_sentence_boundary("slutt. neste", 5) is True
 
 
 def test_sentence_boundary_rules() -> None:
@@ -279,6 +289,42 @@ def test_quote_span_start_end_are_exact_slice_coordinates(tmp_path: Path) -> Non
     assert normalized[start:end] == text
     assert text == "kravet gjelder alle virksomheter i landet."
     assert normalized[start - 1] == " " and normalized[start - 2] == "."
+
+
+def test_quote_span_length_bounds_are_exact(tmp_path: Path) -> None:
+    """Boundary values of the frozen 40/140 constants: exactly-40 accepted,
+    39 rejected, and a 141-char sentence never becomes the span."""
+    core39 = "regelen gjelder for alle virksomheter x"
+    assert len(core39) == 39
+    at_min = f"## Kapittel 1. R\n\n### § 1. K\n\nInnledning her. {core39.capitalize()}."
+    reader = build_corpus(tmp_path / "a", {"minloven": ("Lov om min (minloven)", at_min)})
+    span = quote_span(reader, "minloven", "1")
+    assert span is not None
+    assert len(span[2]) == 40
+    below = f"## Kapittel 1. R\n\n### § 1. K\n\nInnledning her. {core39.capitalize()[:-2]}."
+    reader = build_corpus(tmp_path / "b", {"underloven": ("Lov om under (underloven)", below)})
+    assert quote_span(reader, "underloven", "1") is None
+    core141 = ("regelen gjelder for alle virksomheter og " * 4).strip()[:140] + "."
+    assert len(core141) == 141
+    over = (
+        f"## Kapittel 1. R\n\n### § 1. K\n\n"
+        f"Innledning her. {core141.capitalize()} Etterpå kommer mer tekst her."
+    )
+    reader = build_corpus(tmp_path / "c", {"overloven": ("Lov om over (overloven)", over)})
+    assert quote_span(reader, "overloven", "1") is None  # 141-char sentence: no valid span
+
+
+def test_quote_span_without_internal_boundary_starts_at_zero(tmp_path: Path) -> None:
+    """A section that is one long sentence quotes from position 0."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Kravene gjelder for alle virksomheter i hele landet uten unntak."
+    )
+    reader = build_corpus(tmp_path, {"heleloven": ("Lov om hele (heleloven)", body)})
+    span = quote_span(reader, "heleloven", "1")
+    assert span is not None
+    assert span[0] == 0
+    assert span[2].startswith("kravene")
 
 
 def test_quote_span_respects_length_bounds(tmp_path: Path) -> None:
