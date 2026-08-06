@@ -249,7 +249,13 @@ def test_build_c5_respects_per_act_category_cap_and_rotates_frames(tmp_path: Pat
         tmp_path,
         {"treloven": ("Lov om tre doble paragrafer (treloven)", TRE_DUP_BODY)},
     )
-    builder = _c5_builder(reader, 10)
+    pin = CorpusPin(lovverk_commit=_PIN_SHA, manifest_generated_at=GENERATED_AT)
+    config = PoolConfig(
+        schema_path=SCHEMA_PATH,
+        targets={**_TARGETS, "C5": 10},
+        per_act_category_caps={},
+    )
+    builder = _Builder(reader, pin, config, _RUN)
     _build_c5(builder, scan_duplicate_ids(reader))
     assert [c["expected_section_id"] for c in builder.cases] == ["7", "8"]
     frames = [
@@ -257,6 +263,19 @@ def test_build_c5_respects_per_act_category_cap_and_rotates_frames(tmp_path: Pat
         for n, s in ((0, "7"), (1, "8"))
     ]
     assert [c["question"] for c in builder.cases] == frames
+
+
+def test_c5_cap_override_allows_three_per_act(tmp_path: Path) -> None:
+    """Owner ruling #21 (Stage 3.6-G): C5's per-act cap is 3 by default —
+    the real ambiguity population is concentrated in few documents, and
+    cap 2 makes the frozen target of 15 structurally unreachable."""
+    reader = build_corpus(
+        tmp_path,
+        {"treloven": ("Lov om tre doble paragrafer (treloven)", TRE_DUP_BODY)},
+    )
+    builder = _c5_builder(reader, 10)
+    _build_c5(builder, scan_duplicate_ids(reader))
+    assert [c["expected_section_id"] for c in builder.cases] == ["7", "8", "9"]
 
 
 def test_build_c5_stops_at_target(tmp_path: Path) -> None:

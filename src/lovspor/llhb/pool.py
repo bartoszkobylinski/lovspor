@@ -68,6 +68,11 @@ class PoolConfig(BaseModel):
     targets: dict[str, int] = DEFAULT_TARGETS
     inventory_size: int = 320
     per_act_category_cap: int = 2
+    per_act_category_caps: dict[str, int] = {"C5": 3}
+    """Per-category overrides of ``per_act_category_cap``. C5 runs at 3 by
+    owner ruling #21 (Stage 3.6-G): the layer-aware ambiguity population is
+    concentrated in few documents, and cap 2 makes the frozen target of 15
+    structurally unreachable (see remediation/replacement-supply.json)."""
     per_act_total_cap: int = 8
     id_offset: int = 0
     """Shifts case-id counters (Stage 3.6-E): replacement generations use a
@@ -107,7 +112,10 @@ class _Caps:
     def allows(self, category: str, slug: str, section_id: str | None) -> bool:
         if self._per_act[slug] >= self._config.per_act_total_cap:
             return False
-        if self._per_cat_act[(category, slug)] >= self._config.per_act_category_cap:
+        category_cap = self._config.per_act_category_caps.get(
+            category, self._config.per_act_category_cap
+        )
+        if self._per_cat_act[(category, slug)] >= category_cap:
             return False
         if section_id is not None:
             return self._per_provision[(category, slug, section_id)] < 2  # noqa: PLR2004
