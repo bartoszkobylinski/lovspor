@@ -26,6 +26,12 @@ _RELEASING_DOC = _ROOT / "docs" / "releasing.md"
 _PENDING_MARKER = "first PyPI release is pending"
 _RELEASED_MARKER = "Lovspor is distributed on PyPI"
 
+# The version this working tree would publish. Single-sourced here because a
+# bump has to move `pyproject.toml`, `uv.lock` and the installed metadata
+# together — CI runs `uv sync --frozen`, so a forgotten `uv lock` fails the
+# build rather than shipping a mismatched artifact.
+_EXPECTED_VERSION = "0.5.1"
+
 # The README is deliberately NOT here. Since the 2026-08-06 user-first rewrite it
 # is a landing page, not a release doc: it shows the `uvx` install and delegates
 # every distribution fact (version, burned `0.2.0`-`0.3.0`, release process) to
@@ -191,12 +197,12 @@ def test_release_workflow_fails_if_the_expected_dist_artifact_is_missing() -> No
     assert upload["with"]["if-no-files-found"] == "error"
 
 
-def test_project_version_and_mcp_cap_are_pinned_for_the_first_re_release() -> None:
+def test_project_version_and_mcp_cap_are_pinned() -> None:
     project = _pyproject()["project"]
     deps = project["dependencies"]
     runtime_mcp = [dep for dep in deps if dep.startswith("mcp")]
 
-    assert project["version"] == "0.5.0"
+    assert project["version"] == _EXPECTED_VERSION
     assert runtime_mcp == ["mcp>=1.28.1,<2"]
 
 
@@ -205,6 +211,13 @@ def test_lockfile_matches_the_declared_mcp_cap_and_resolves_to_a_1x_release() ->
 
     assert '{ name = "mcp", specifier = ">=1.28.1,<2" }' in lock
     assert 'name = "mcp"\nversion = "1.28.1"' in lock
+
+
+def test_lockfile_carries_the_same_version_as_pyproject() -> None:
+    """A bump without `uv lock` builds fine locally and fails CI's `--frozen` sync."""
+    lock = (_ROOT / "uv.lock").read_text(encoding="utf-8")
+
+    assert f'name = "lovspor"\nversion = "{_EXPECTED_VERSION}"' in lock
 
 
 def test_the_mcp_cap_is_load_bearing_because_the_server_imports_fastmcp() -> None:
@@ -247,7 +260,7 @@ def test_importing_lovspor_and_its_cli_surface_needs_no_openai_key() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "0.5.0"
+    assert result.stdout.strip() == _EXPECTED_VERSION
 
 
 def test_release_docs_agree_on_version_workflow_environment_and_burned_versions() -> None:
