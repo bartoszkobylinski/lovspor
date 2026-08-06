@@ -161,6 +161,30 @@ def test_c2_skips_topics_that_repeat_across_the_corpus(tmp_path: Path) -> None:
         assert any("unik solid dokumentasjon" in q.casefold() for q in c2_questions), unique_holder
 
 
+def _one_section_act(sid: str, title: str) -> str:
+    return (
+        f"## Kapittel 1. Regler\n\n### § {sid}. {title}\n\n"
+        f"Virksomheten skal sørge for at {title.lower()} følges opp i praksis. "
+        f"Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n"
+    )
+
+
+def test_build_c4_failing_act_never_aborts_the_loop(tmp_path: Path) -> None:
+    """An act whose claimed § exists in no partner is skipped — later acts
+    still pair (a continue mutated to break emits nothing)."""
+    docs = {
+        "aloven": ("Lov om a-kontroll (aloven)", _one_section_act("9", "Krav til a-kontroll")),
+        "bloven": ("Lov om b-kontroll (bloven)", _one_section_act("1", "Krav til b-kontroll")),
+        "cloven": ("Lov om c-kontroll (cloven)", _one_section_act("1", "Krav til c-kontroll")),
+    }
+    ministries = dict.fromkeys(docs, "Testdepartementet")
+    reader = build_corpus(tmp_path, docs, ministries=ministries)
+    result = _generate(reader)
+    c4 = [c for c in result.candidates if c["category"] == "C4"]
+    assert c4
+    assert all(c["expected_act_slug"] in {"bloven", "cloven"} for c in c4)
+
+
 def test_c4_claimed_section_must_exist_in_the_wrong_act(tmp_path: Path) -> None:
     """F2 owner finding (C4-536): a claimed § that does not exist in the
     cited act reads as an intra-act wrong-section case — the wrong-act

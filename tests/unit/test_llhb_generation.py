@@ -296,10 +296,14 @@ def test_quote_span_length_bounds_are_exact(tmp_path: Path) -> None:
     39 rejected, and a 141-char sentence never becomes the span."""
     core39 = "regelen gjelder for alle virksomheter x"
     assert len(core39) == 39
-    at_min = f"## Kapittel 1. R\n\n### § 1. K\n\nInnledning her. {core39.capitalize()}."
+    at_min = (
+        f"## Kapittel 1. R\n\n### § 1. K\n\n"
+        f"Innledning her. {core39.capitalize()}. Etterpå kommer en hale."
+    )
     reader = build_corpus(tmp_path / "a", {"minloven": ("Lov om min (minloven)", at_min)})
     span = quote_span(reader, "minloven", "1")
     assert span is not None
+    # exactly the 40-char sentence: at MIN there is no tail extension
     assert len(span[2]) == 40
     below = f"## Kapittel 1. R\n\n### § 1. K\n\nInnledning her. {core39.capitalize()[:-2]}."
     reader = build_corpus(tmp_path / "b", {"underloven": ("Lov om under (underloven)", below)})
@@ -445,6 +449,51 @@ def test_topic_census_counts_distinct_acts_not_occurrences(tmp_path: Path) -> No
     )
     reader = build_corpus(tmp_path, {"kontrolloven": ("Lov om kontroll (kontrolloven)", body)})
     assert topic_census(reader)["krav til intern kontroll"] == 1
+
+
+def test_topic_census_ignores_non_section_rows(tmp_path: Path) -> None:
+    """Codex PR #37 round 3: C2 topics come only from kind=='section' rows,
+    so a block heading (### without §) sharing the text must not make the
+    topic cross-act ambiguous."""
+    section_act = (
+        "## Kapittel 1. Regler\n\n### § 2. Krav til felles dokumentasjon\n\nRegelen står her.\n"
+    )
+    block_act = "## Kapittel 1. Regler\n\n### Krav til felles dokumentasjon\n\n| rad | verdi |\n"
+    reader = build_corpus(
+        tmp_path,
+        {
+            "paragrafloven": ("Lov om paragrafer (paragrafloven)", section_act),
+            "tabelloven": ("Lov om tabeller (tabelloven)", block_act),
+        },
+    )
+    assert topic_census(reader)["krav til felles dokumentasjon"] == 1
+
+
+def test_topic_of_keeps_trailing_uppercase_letters() -> None:
+    """rstrip works on a charset — a mutated set must not eat a trailing
+    roman-numeral X along with the period."""
+    assert topic_of("§ 2. Krav til vedlegg X.") == "krav til vedlegg X"
+
+
+def test_sentence_boundary_strips_quote_openers_before_the_word() -> None:
+    from lovspor.llhb.generation import _is_sentence_boundary  # noqa: PLC0415
+
+    assert _is_sentence_boundary("se («jf. neste ord", 7) is False
+    assert _is_sentence_boundary("se «jf. neste ord", 6) is False
+
+
+def test_quote_span_tail_respects_the_window_exactly(tmp_path: Path) -> None:
+    """A single-sentence section of exactly 140 chars quotes whole; one
+    char more and there is no valid span."""
+    core139 = ("kravene gjelder for alle virksomheter og " * 4).strip()[:139]
+    fits = f"## Kapittel 1. R\n\n### § 1. K\n\n{core139.capitalize()}."
+    reader = build_corpus(tmp_path / "a", {"passloven": ("Lov om pass (passloven)", fits)})
+    span = quote_span(reader, "passloven", "1")
+    assert span is not None
+    assert len(span[2]) == 140
+    over = f"## Kapittel 1. R\n\n### § 1. K\n\n{core139.capitalize()}s."
+    reader = build_corpus(tmp_path / "b", {"sprekkloven": ("Lov om sprekk (sprekkloven)", over)})
+    assert quote_span(reader, "sprekkloven", "1") is None
 
 
 def test_topic_census_skips_hostile_records(tmp_path: Path) -> None:

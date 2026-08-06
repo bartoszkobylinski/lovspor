@@ -285,17 +285,19 @@ def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, i
         if normalized[i] == "." and _is_sentence_boundary(normalized, i)
     ]
     start = boundaries[0] + 2 if boundaries else 0
-    end = next(
+    end: int | None = next(
         (i + 1 for i in reversed(boundaries) if start < i < start + _MAX_QUOTE_CHARS),
-        -1,
+        None,
     )
     tail_fits = normalized.endswith(".") and 0 < len(normalized) - start <= _MAX_QUOTE_CHARS
-    if end - start < _MIN_QUOTE_CHARS and tail_fits:
+    if (end is None or end - start < _MIN_QUOTE_CHARS) and tail_fits:
         end = len(normalized)  # extend to the section's final sentence
+    if end is None:
+        return None
     # The hash is computed over normalized[start:end] EXACTLY as the
     # materializer will slice it — the span is a slice, never a text copy.
     text = normalized[start:end]
-    if end == -1 or len(text) < _MIN_QUOTE_CHARS:
+    if len(text) < _MIN_QUOTE_CHARS:
         return None
     if _MARKDOWN_LINK.search(text) or "](" in text:
         return None  # link residue only; plain [bracketed] statutory text quotes fine
@@ -351,7 +353,11 @@ def topic_census(reader: CorpusReader) -> Counter[str]:
         except (LovsporError, OSError, UnicodeDecodeError):
             continue  # the census reports what it can read
         act_topics = {
-            topic.casefold() for row in rows if (topic := topic_of(str(row["heading"]))) is not None
+            topic.casefold()
+            for row in rows
+            # kind mirrors ActInfo.topic_sections: C2 draws only from §
+            # sections, so a block heading must not poison the census
+            if row["kind"] == "section" and (topic := topic_of(str(row["heading"]))) is not None
         }
         counts.update(act_topics)  # one count per act: cross-act ambiguity only
     return counts
