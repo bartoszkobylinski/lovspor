@@ -18,6 +18,7 @@ from lovspor.llhb.generation import (
     quote_span,
     scan_duplicate_ids,
     section_shape,
+    topic_census,
     topic_of,
     trap_section_ids,
 )
@@ -134,7 +135,7 @@ def test_quote_span_ends_at_sentence_boundary(reader: CorpusReader) -> None:
 
 
 def test_c5_frames_are_neutral() -> None:
-    """F2 owner finding (6× wording-only): the duplicate identifier must be
+    """F2 owner finding (6x wording-only): the duplicate identifier must be
     the SOLE ambiguity — no frame may semantically privilege an occurrence
     (duties, substantive content)."""
     from lovspor.llhb import templates as tpl  # noqa: PLC0415
@@ -170,7 +171,9 @@ def test_quote_span_never_ends_at_an_abbreviation(tmp_path: Path) -> None:
         "Innledning her. Kravet gjelder alle virksomheter, jf. lov om testing av verktøy. "
         "Dokumentasjonen skal oppbevares."
     )
-    reader = build_corpus(tmp_path / "b", {"renloven": ("Lov om rene regler (renloven)", clean_body)})
+    reader = build_corpus(
+        tmp_path / "b", {"renloven": ("Lov om rene regler (renloven)", clean_body)}
+    )
     span = quote_span(reader, "renloven", "1")
     assert span is not None
     assert span[2].endswith("jf. lov om testing av verktøy.")  # normalized (casefolded) domain
@@ -202,7 +205,7 @@ def test_topic_filter_rejects_hva_gjelder_meta() -> None:
 
 
 def test_c8_frames_have_no_local_regulation_class() -> None:
-    """F2 owner finding (7× category-mismatch): the mechanical Oslo pairing
+    """F2 owner finding (7x category-mismatch): the mechanical Oslo pairing
     invites premise rejection instead of corpus-boundary abstention."""
     from lovspor.llhb import templates as tpl  # noqa: PLC0415
 
@@ -259,6 +262,27 @@ Spesifikasjonene i dette vedlegget gjelder som forskrift.
 
 Kommentar som speiler forskriftens paragraf uten å være en bestemmelse.
 """
+
+
+def test_topic_census_counts_repeated_headings_corpus_wide(tmp_path: Path) -> None:
+    """F2 owner finding (4x C2 ambiguous-ground-truth): headings like
+    'Søknad og utbetaling' repeat across grant schemes, so a discovery
+    question built on them has no deterministic referent."""
+    body_a = (
+        "## Kapittel 1. Regler\n\n### § 4. Søknad og utbetaling\n\nRegler om søknad her.\n\n"
+        "### § 5. Krav til egen dokumentasjon\n\nDokumentasjonskrav her.\n"
+    )
+    body_b = "## Kapittel 1. Regler\n\n### § 3. Søknad og utbetaling\n\nAndre regler om søknad.\n"
+    reader = build_corpus(
+        tmp_path,
+        {
+            "tilskuddloven": ("Forskrift om tilskudd A", body_a),
+            "stotteloven": ("Forskrift om tilskudd B", body_b),
+        },
+    )
+    census = topic_census(reader)
+    assert census["søknad og utbetaling"] == 2
+    assert census["krav til egen dokumentasjon"] == 1
 
 
 def test_scan_skips_hostile_records_and_reports_provenance(tmp_path: Path) -> None:

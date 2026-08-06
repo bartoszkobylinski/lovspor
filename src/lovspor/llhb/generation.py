@@ -14,6 +14,7 @@ runs the Stage 2 ``CandidateValidator`` over everything.
 
 import random
 import re
+from collections import Counter
 
 from pydantic import BaseModel
 
@@ -279,7 +280,9 @@ def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, i
     section = reader.get_section(slug, section_id)
     normalized = normalize_quote_text(str(section["body"]))
     boundaries = [
-        i for i in range(len(normalized) - 1) if normalized[i] == "." and _is_sentence_boundary(normalized, i)
+        i
+        for i in range(len(normalized) - 1)
+        if normalized[i] == "." and _is_sentence_boundary(normalized, i)
     ]
     start = boundaries[0] + 2 if boundaries else 0
     end = next(
@@ -327,6 +330,30 @@ def mutate_quote(text: str) -> str | None:
             if mutated != text:
                 return mutated
     return None
+
+
+def topic_census(reader: CorpusReader) -> Counter[str]:
+    """Corpus-wide count of casefolded heading topics (F2, C2 drops).
+
+    A discovery question is deterministic only when its topic maps to one
+    provision in the whole corpus — headings like 'Søknad og utbetaling'
+    repeat across grant schemes, and nothing in a C2 question names the
+    act. Counted over every readable current document, same skip rules as
+    ``scan_duplicate_ids``.
+    """
+    counts: Counter[str] = Counter()
+    for _doc_id, record in sorted(reader.manifest.documents.items()):
+        if record.status != "current" or record.slug is None:
+            continue
+        try:
+            rows = reader.list_sections(record.slug)
+        except (LovsporError, OSError, UnicodeDecodeError):
+            continue  # the census reports what it can read
+        for row in rows:
+            topic = topic_of(str(row["heading"]))
+            if topic:
+                counts[topic.casefold()] += 1
+    return counts
 
 
 def oracle_occurrences(reader: CorpusReader, slug: str, section_id: str) -> list[int]:

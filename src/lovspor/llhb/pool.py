@@ -40,7 +40,7 @@ from lovspor.llhb.generation import (
     quote_span,
     scan_duplicate_ids,
     section_shape,
-    trap_has_sibling,
+    topic_census,
     trap_section_ids,
 )
 from lovspor.llhb.names import ActNameIndex
@@ -217,7 +217,7 @@ def _build_c1(builder: _Builder, acts: list[ActInfo]) -> None:
             builder.emit("C1", case)
 
 
-def _build_c2(builder: _Builder, acts: list[ActInfo]) -> None:
+def _build_c2(builder: _Builder, acts: list[ActInfo], census: Counter[str]) -> None:
     target = builder.config.targets["C2"]
     for act in _rotate(acts, 1):
         if builder.counters["C2"] >= target:
@@ -225,6 +225,8 @@ def _build_c2(builder: _Builder, acts: list[ActInfo]) -> None:
         for section, topic in act.topic_sections()[1:2] or act.topic_sections()[:1]:
             if not is_usable_topic(topic, strict=True):
                 continue  # RC4: discovery needs a distinctive, non-meta topic
+            if census[topic.casefold()] > 1:
+                continue  # F2: a topic repeated across acts has no deterministic referent
             question = tpl.fill(tpl.C2_FRAMES, builder.counters["C2"], topic=topic)
             leaks = act.slug.casefold() in question.casefold() or "§" in question
             if leaks or not builder.caps.allows("C2", act.slug, section.section_id):
@@ -271,14 +273,6 @@ def _build_c3(builder: _Builder, acts: list[ActInfo]) -> None:
         builder.emit("C3", case)
 
 
-def _sibling_in_act(reader: CorpusReader, slug: str, section_id: str) -> bool:
-    try:
-        ids = {str(row["section_id"]) for row in reader.list_sections(slug)}
-    except (CorpusNotFoundError, CorpusAmbiguousSectionError):
-        return False
-    return trap_has_sibling(ids, section_id)
-
-
 def _claimed_exists(reader: CorpusReader, slug: str, section_id: str) -> bool | None:
     """True/False existence of the trap pair; None = ambiguous (skip)."""
     try:
@@ -309,10 +303,11 @@ def _build_c4(builder: _Builder, acts: list[ActInfo]) -> None:
             continue
         section, topic = picks[0]
         exists = _claimed_exists(builder.reader, wrong.slug, section.section_id)
-        if exists is None or not builder.caps.allows("C4", act.slug, section.section_id):
+        if exists is not True or not builder.caps.allows("C4", act.slug, section.section_id):
+            # F2 (C4-536): a claimed § absent from the cited act reads as an
+            # intra-act wrong-section case — the wrong-act target is not
+            # recoverable. The trap must cite a § that exists there.
             continue
-        if exists is False and _sibling_in_act(builder.reader, wrong.slug, section.section_id):
-            continue  # RC7: § N claimed while § N-x exists is not a fair trap
         case = builder.new_case(
             "wrong-act",
             tpl.fill(
@@ -730,10 +725,11 @@ def generate_pool(
 
     acts = _inventory(reader, config)
     duplicates = scan_duplicate_ids(reader)
+    census = topic_census(reader)
     builder = _Builder(reader, pin, config, run)
     builder.validator = CandidateValidator(reader, load_schema(config.schema_path), pin)
     _build_c1(builder, acts)
-    _build_c2(builder, acts)
+    _build_c2(builder, acts, census)
     _build_c3(builder, acts)
     _build_c4(builder, acts)
     _build_c5(builder, duplicates)
