@@ -817,6 +817,7 @@ def _generation_manifest(
         "targets": dict(config.targets),
         "caps": {
             "per_act_category_cap": config.per_act_category_cap,
+            "per_act_category_caps": dict(config.per_act_category_caps),
             "per_act_total_cap": config.per_act_total_cap,
             "inventory_size": config.inventory_size,
         },
