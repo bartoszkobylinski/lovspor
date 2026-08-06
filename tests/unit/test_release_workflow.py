@@ -26,8 +26,14 @@ _RELEASING_DOC = _ROOT / "docs" / "releasing.md"
 _PENDING_MARKER = "first PyPI release is pending"
 _RELEASED_MARKER = "Lovspor is distributed on PyPI"
 
+# The README is deliberately NOT here. Since the 2026-08-06 user-first rewrite it
+# is a landing page, not a release doc: it shows the `uvx` install and delegates
+# every distribution fact (version, burned `0.2.0`-`0.3.0`, release process) to
+# docs/releasing.md. It cannot carry a release-state marker without carrying that
+# trivia back. What still binds it is the contradiction guard below — a README
+# telling the reader to wait for a release the other docs call published is the
+# failure this invariant exists to catch, and that check survives the move.
 _DISTRIBUTION_DOCS = (
-    ("README", _README),
     ("docs/mcp.md", _MCP_DOC),
     ("docs/releasing.md", _RELEASING_DOC),
 )
@@ -194,7 +200,6 @@ def test_importing_lovspor_and_its_cli_surface_needs_no_openai_key() -> None:
 
 def test_release_docs_agree_on_version_workflow_environment_and_burned_versions() -> None:
     texts = {
-        "README": _README.read_text(encoding="utf-8"),
         "docs/mcp.md": _MCP_DOC.read_text(encoding="utf-8"),
         "docs/releasing.md": _RELEASING_DOC.read_text(encoding="utf-8"),
     }
@@ -227,25 +232,41 @@ def test_distribution_docs_agree_on_whether_lovspor_is_on_pypi_yet() -> None:
 
 
 @pytest.mark.parametrize(
-    ("original", "stale"),
+    "stale",
     [
-        ("From PyPI:", "From PyPI — works once `0.4.0` is published:"),
-        ("From PyPI:", "From PyPI (the first release is still pending):"),
-        ("## Install", "## Install\n\nlovspor is not currently on PyPI."),
+        "From PyPI — works once `0.4.0` is published:",
+        "From PyPI (the first release is still pending):",
+        "lovspor is not currently on PyPI.",
     ],
 )
-def test_release_state_invariant_rejects_stale_publish_caveats(original: str, stale: str) -> None:
+def test_release_state_invariant_rejects_stale_publish_caveats(stale: str) -> None:
     """Guard the guard: marker presence must not be enough to pass as released.
 
     A half-finished transition leaves the released marker in the banner while
     prose further down still tells the reader to wait for the release. Feeding
     that shape through the invariant must raise, not classify it as released.
+    Built from a real released doc, so the fixture cannot drift into a shape
+    the invariant never sees in this repo.
     """
-    mutated = _README.read_text(encoding="utf-8").replace(original, stale, 1)
-    assert mutated != _README.read_text(encoding="utf-8"), "mutation did not apply"
+    doc = _MCP_DOC.read_text(encoding="utf-8")
+    assert _release_state("docs/mcp.md", doc) == "released", "fixture doc is not in released state"
 
     with pytest.raises(AssertionError, match="pre-release prose"):
-        _release_state("README", mutated)
+        _release_state("docs/mcp.md", f"{doc}\n\n{stale}\n")
+
+
+def test_readme_never_tells_the_reader_to_wait_for_a_published_release() -> None:
+    """The README states no release state, so pin the half-finished shape directly.
+
+    It shows `uvx lovspor`, which only works once the package is on PyPI. If a
+    future transition leaves pre-release prose there while docs/releasing.md
+    says published, a reader gets both answers from the same project — the exact
+    contradiction `_release_state` rejects for the docs that do carry markers.
+    """
+    readme = _README.read_text(encoding="utf-8")
+
+    stale = [pattern.pattern for pattern in _PRE_RELEASE_PROSE if pattern.search(readme)]
+    assert not stale, f"README carries pre-release prose: {stale}"
 
 
 def test_post_stage1_closure_state_holds_on_active_surfaces() -> None:
