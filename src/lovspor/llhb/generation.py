@@ -289,15 +289,16 @@ def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, i
         (i + 1 for i in reversed(boundaries) if start < i < start + _MAX_QUOTE_CHARS),
         -1,
     )
-    if end == -1 and normalized.endswith(".") and len(normalized) - start <= _MAX_QUOTE_CHARS:
-        end = len(normalized)  # last sentence of the section
-    while 0 < start < end and normalized[start] == " ":
-        start += 1
+    tail_fits = normalized.endswith(".") and 0 < len(normalized) - start <= _MAX_QUOTE_CHARS
+    if end - start < _MIN_QUOTE_CHARS and tail_fits:
+        end = len(normalized)  # extend to the section's final sentence
     # The hash is computed over normalized[start:end] EXACTLY as the
-    # materializer will slice it — the span is trimmed, never a text copy.
+    # materializer will slice it — the span is a slice, never a text copy.
     text = normalized[start:end]
-    if end == -1 or len(text) < _MIN_QUOTE_CHARS or _MARKDOWN_LINK.search(text) or "[" in text:
+    if end == -1 or len(text) < _MIN_QUOTE_CHARS:
         return None
+    if _MARKDOWN_LINK.search(text) or "](" in text:
+        return None  # link residue only; plain [bracketed] statutory text quotes fine
     return start, end, text
 
 
@@ -349,10 +350,10 @@ def topic_census(reader: CorpusReader) -> Counter[str]:
             rows = reader.list_sections(record.slug)
         except (LovsporError, OSError, UnicodeDecodeError):
             continue  # the census reports what it can read
-        for row in rows:
-            topic = topic_of(str(row["heading"]))
-            if topic:
-                counts[topic.casefold()] += 1
+        act_topics = {
+            topic.casefold() for row in rows if (topic := topic_of(str(row["heading"]))) is not None
+        }
+        counts.update(act_topics)  # one count per act: cross-act ambiguity only
     return counts
 
 

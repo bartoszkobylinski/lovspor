@@ -137,18 +137,25 @@ _SOKNAD_SECTION = (
 def test_c2_skips_topics_that_repeat_across_the_corpus(tmp_path: Path) -> None:
     """F2: a discovery topic occurring in more than one act has no
     deterministic referent — no C2 case may be built on it."""
+    unique = (
+        "## Kapittel 1. Regler\n\n### § 2. Krav til unik solid dokumentasjon\n\n"
+        "Virksomheten skal dokumentere alle solide vurderinger. "
+        "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n"
+    )
     shared_a = "## Kapittel 1. Regler\n\n" + _SOKNAD_SECTION.format(sid="4")
     shared_b = "## Kapittel 1. Regler\n\n" + _SOKNAD_SECTION.format(sid="3")
     reader = build_corpus(
         tmp_path,
         {
-            "tilskuddloven": ("Forskrift om tilskudd A (tilskuddloven)", shared_a),
+            "tilskuddloven": ("Forskrift om tilskudd A (tilskuddloven)", shared_a + unique),
             "stotteloven": ("Forskrift om tilskudd B (stotteloven)", shared_b),
         },
     )
     result = _generate(reader)
-    c2_topics = [str(c["question"]) for c in result.candidates if c["category"] == "C2"]
-    assert all("søknad og utbetaling" not in q.casefold() for q in c2_topics)
+    c2_questions = [str(c["question"]) for c in result.candidates if c["category"] == "C2"]
+    assert all("søknad og utbetaling" not in q.casefold() for q in c2_questions)
+    # the census threshold is > 1, never >= 1: a unique topic still emits
+    assert any("unik solid dokumentasjon" in q.casefold() for q in c2_questions)
 
 
 def test_c4_claimed_section_must_exist_in_the_wrong_act(tmp_path: Path) -> None:
