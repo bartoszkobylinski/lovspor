@@ -40,16 +40,44 @@ _DISTRIBUTION_DOCS = (
 
 # Prose that only makes sense before the first release. A doc claiming the
 # released state while still carrying any of it is a half-finished transition:
-# the banner says "on PyPI", the install steps still say "wait". Deliberately a
-# denylist of the framings these docs have actually used — it narrows the gap
-# rather than closing it, so add to it when a new pre-release phrasing appears.
+# the banner says "on PyPI", the install steps still say "wait".
+#
+# SCOPE, stated plainly: this is a denylist of phrasings, so it is a tripwire,
+# never a proof. It cannot catch a pre-release framing nobody has written yet —
+# add one when it appears. What carries the real weight for docs/mcp.md and
+# docs/releasing.md is the positive marker requirement in `_release_state`: they
+# must commit to a release state, and the two must agree. The README has no
+# marker (see `_DISTRIBUTION_DOCS`), so its guard adds a phrasing-independent
+# check on top of this list — see the README test at the bottom of this file.
 _PRE_RELEASE_PROSE = (
-    re.compile(r"once\s+`?\d+\.\d+\.\d+`?\s+is\s+published", re.IGNORECASE),
+    re.compile(
+        r"once\s+(?:`?\d+\.\d+\.\d+`?|it|the\s+(?:first\s+)?"
+        r"(?:release|package|version|publication))\s+is\s+published",
+        re.IGNORECASE,
+    ),
     re.compile(r"until\s+\S+\s+(?:lands|publishes|is\s+published)", re.IGNORECASE),
     re.compile(r"release\s+is\s+(?:still\s+)?pending", re.IGNORECASE),
     re.compile(r"not\s+(?:currently\s+)?on\s+PyPI", re.IGNORECASE),
+    re.compile(r"not\s+yet\s+(?:published|released|on\s+PyPI)", re.IGNORECASE),
+    re.compile(r"(?:will\s+be|becomes)\s+available\s+(?:on\s+PyPI|after|once|when)", re.IGNORECASE),
+    re.compile(r"after\s+the\s+first\s+(?:publication|release|upload)", re.IGNORECASE),
+    re.compile(r"awaiting\s+(?:the\s+)?(?:first\s+)?(?:release|publication)", re.IGNORECASE),
+    re.compile(r"coming\s+(?:soon\s+)?to\s+PyPI", re.IGNORECASE),
     re.compile(r"page\s+is\s+currently\s+absent", re.IGNORECASE),
     re.compile(r"page\s+404s", re.IGNORECASE),
+)
+
+# README-only, phrasing-independent backstop: any single sentence that talks
+# about distribution *and* puts it in the future or in the negative. Too blunt
+# for docs/releasing.md, which legitimately discusses PyPI's own "pending
+# publisher" state and quotes the pre-release wording it replaced — but the
+# README is a landing page with no such meta-discussion, so a sentence there
+# matching both halves is the bug this is looking for.
+_DISTRIBUTION_TOPIC = re.compile(r"\bPyPI\b|\bpublish(?:ed|ing)?\b|\brelease[sd]?\b", re.IGNORECASE)
+_FUTURE_OR_ABSENT = re.compile(
+    r"\b(?:will\s+be|soon|upcoming|awaiting|pending|not\s+yet|yet\s+to\s+be|"
+    r"once\s+\w+\s+is\s+published|after\s+the\s+first\s+(?:release|publication|upload))\b",
+    re.IGNORECASE,
 )
 
 
@@ -262,11 +290,48 @@ def test_readme_never_tells_the_reader_to_wait_for_a_published_release() -> None
     future transition leaves pre-release prose there while docs/releasing.md
     says published, a reader gets both answers from the same project — the exact
     contradiction `_release_state` rejects for the docs that do carry markers.
+
+    Three layers, weakest last: the pending marker must be absent outright; no
+    known pre-release phrasing may appear; and no sentence may pair a
+    distribution topic with a future or absence framing, which catches wordings
+    the denylist has never seen.
     """
     readme = _README.read_text(encoding="utf-8")
 
+    assert _PENDING_MARKER not in readme, "README claims the release is still pending"
+
     stale = [pattern.pattern for pattern in _PRE_RELEASE_PROSE if pattern.search(readme)]
     assert not stale, f"README carries pre-release prose: {stale}"
+
+    deferred = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+", readme)
+        if _DISTRIBUTION_TOPIC.search(sentence) and _FUTURE_OR_ABSENT.search(sentence)
+    ]
+    assert not deferred, f"README defers distribution to the future: {deferred}"
+
+
+@pytest.mark.parametrize(
+    "unseen",
+    [
+        "The PyPI package will be available after the first publication.",
+        "A release is coming soon; the package is not yet published.",
+        "Installation from PyPI is pending our first upload.",
+    ],
+)
+def test_readme_guard_catches_pre_release_wordings_the_denylist_never_saw(unseen: str) -> None:
+    """Guard the guard, second layer: an unseen phrasing must still fail.
+
+    The denylist alone cannot promise this — the sentence-level check is what
+    makes the promise, so it is tested against wordings deliberately absent
+    from `_PRE_RELEASE_PROSE`.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+", unseen)
+
+    assert any(
+        _DISTRIBUTION_TOPIC.search(sentence) and _FUTURE_OR_ABSENT.search(sentence)
+        for sentence in sentences
+    ), f"unseen pre-release wording slipped through: {unseen!r}"
 
 
 def test_post_stage1_closure_state_holds_on_active_surfaces() -> None:

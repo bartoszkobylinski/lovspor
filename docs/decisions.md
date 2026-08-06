@@ -681,6 +681,8 @@ The accepted direction is **open infrastructure**:
 
 Current state vs direction (2026-08-02): GitHub visibility of `lovspor` is still **PRIVATE** — a temporary implementation-state mismatch while publication-readiness work completes, tracked in `docs/publication-plan.md`. The withdrawn PyPI releases (`0.2.0`–`0.3.0`) have not returned; whether PyPI publishing resumes is an open decision (`docs/releasing.md`).
 
+**Closed 2026-08-03 — the paragraph above is history, not current state.** The repository is **PUBLIC** and PyPI publishing **resumed**: `0.4.0` shipped via Trusted Publishing, so the open question is answered and the implementation-state mismatch is gone. The withdrawn `0.2.0`–`0.3.0` stay permanently burned — PyPI never reuses a filename ([`releasing.md`](releasing.md)). Recorded here in 2026-08-06 after a review found this entry still describing the closed state.
+
 ---
 
 ## 16. LLHB — deterministic hallucination benchmark (decided 2026-08-05)
