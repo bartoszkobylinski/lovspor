@@ -714,6 +714,18 @@ Key rulings:
   legal-correctness benchmark). Specs: `benchmarks/llhb/`
   (`METHODOLOGY.md`, `SCORING.md`, `FREEZE.md`, `DECISIONS.md`, `schema/`).
 
+---
+
+## 17. Planned commercial layer dropped (decided 2026-08-06)
+
+Project-owner decision, closing the last forward-looking remnant of the 2026-07-14
+commercial pivot: **the planned commercial layer (billing, subscriptions, paid
+self-service accounts) is dropped.** The hosted MCP endpoint stays a **free,
+operator-provisioned convenience** on top of the open engine — its auth and quotas
+remain operational controls on one deployment, exactly as §15 framed them, not a
+paywall. `roadmap.md` Sprint 12 item 8 is struck accordingly; the historical pivot
+records stay as history.
+
 ## How to use this document
 
 - **Before starting a session**: read this + `CLAUDE.md`. Those two together are the full context.
