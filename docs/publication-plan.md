@@ -193,7 +193,10 @@ Everything after this phase is invisible while the engine stays closed.
 
 Deliverables:
 - engine repository public
-- README rewritten to lead with the problem, not the architecture
+- README rewritten to lead with the problem, not the architecture *(landed
+  2026-08-06, after the phase closed: the 2026-08-03 pass fixed the framing but
+  the page still opened on engine internals; the rewrite moved distribution and
+  sprint history out to `releasing.md` / `decisions.md`)*
 - `analysis/llm-infra/10-byte-audit-results.md` promoted out of the analysis
   directory — the audit is an exhibit, not a working note
 - explicit scope statement in the README, mirroring `corpus_status`: acts and

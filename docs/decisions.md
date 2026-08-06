@@ -681,6 +681,8 @@ The accepted direction is **open infrastructure**:
 
 Current state vs direction (2026-08-02): GitHub visibility of `lovspor` is still **PRIVATE** — a temporary implementation-state mismatch while publication-readiness work completes, tracked in `docs/publication-plan.md`. The withdrawn PyPI releases (`0.2.0`–`0.3.0`) have not returned; whether PyPI publishing resumes is an open decision (`docs/releasing.md`).
 
+**Closed 2026-08-03 — the paragraph above is history, not current state.** The repository is **PUBLIC** and PyPI publishing **resumed**: `0.4.0` shipped via Trusted Publishing, so the open question is answered and the implementation-state mismatch is gone. The withdrawn `0.2.0`–`0.3.0` stay permanently burned — PyPI never reuses a filename ([`releasing.md`](releasing.md)). Recorded here in 2026-08-06 after a review found this entry still describing the closed state.
+
 ---
 
 ## 16. LLHB — deterministic hallucination benchmark (decided 2026-08-05)
@@ -713,6 +715,18 @@ Key rulings:
   deterministic methodology only — explicitly no LLM-judge, no jurist, no
   legal-correctness benchmark). Specs: `benchmarks/llhb/`
   (`METHODOLOGY.md`, `SCORING.md`, `FREEZE.md`, `DECISIONS.md`, `schema/`).
+
+---
+
+## 17. Planned commercial layer dropped (decided 2026-08-06)
+
+Project-owner decision, closing the last forward-looking remnant of the 2026-07-14
+commercial pivot: **the planned commercial layer (billing, subscriptions, paid
+self-service accounts) is dropped.** The hosted MCP endpoint stays a **free,
+operator-provisioned convenience** on top of the open engine — its auth and quotas
+remain operational controls on one deployment, exactly as §15 framed them, not a
+paywall. `roadmap.md` Sprint 12 item 8 is struck accordingly; the historical pivot
+records stay as history.
 
 ## How to use this document
 

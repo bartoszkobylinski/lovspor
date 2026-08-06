@@ -26,25 +26,79 @@ _RELEASING_DOC = _ROOT / "docs" / "releasing.md"
 _PENDING_MARKER = "first PyPI release is pending"
 _RELEASED_MARKER = "Lovspor is distributed on PyPI"
 
+# The README is deliberately NOT here. Since the 2026-08-06 user-first rewrite it
+# is a landing page, not a release doc: it shows the `uvx` install and delegates
+# every distribution fact (version, burned `0.2.0`-`0.3.0`, release process) to
+# docs/releasing.md. It cannot carry a release-state marker without carrying that
+# trivia back. What still binds it is the contradiction guard below — a README
+# telling the reader to wait for a release the other docs call published is the
+# failure this invariant exists to catch, and that check survives the move.
 _DISTRIBUTION_DOCS = (
-    ("README", _README),
     ("docs/mcp.md", _MCP_DOC),
     ("docs/releasing.md", _RELEASING_DOC),
 )
 
 # Prose that only makes sense before the first release. A doc claiming the
 # released state while still carrying any of it is a half-finished transition:
-# the banner says "on PyPI", the install steps still say "wait". Deliberately a
-# denylist of the framings these docs have actually used — it narrows the gap
-# rather than closing it, so add to it when a new pre-release phrasing appears.
+# the banner says "on PyPI", the install steps still say "wait".
+#
+# SCOPE, stated plainly: this is a denylist of phrasings, so it is a tripwire,
+# never a proof. It cannot catch a pre-release framing nobody has written yet —
+# add one when it appears. What carries the real weight for docs/mcp.md and
+# docs/releasing.md is the positive marker requirement in `_release_state`: they
+# must commit to a release state, and the two must agree. The README has no
+# marker (see `_DISTRIBUTION_DOCS`), so its guard adds a phrasing-independent
+# check on top of this list — see the README test at the bottom of this file.
 _PRE_RELEASE_PROSE = (
-    re.compile(r"once\s+`?\d+\.\d+\.\d+`?\s+is\s+published", re.IGNORECASE),
+    re.compile(
+        r"once\s+(?:`?\d+\.\d+\.\d+`?|it|the\s+(?:first\s+)?"
+        r"(?:release|package|version|publication))\s+is\s+published",
+        re.IGNORECASE,
+    ),
     re.compile(r"until\s+\S+\s+(?:lands|publishes|is\s+published)", re.IGNORECASE),
     re.compile(r"release\s+is\s+(?:still\s+)?pending", re.IGNORECASE),
     re.compile(r"not\s+(?:currently\s+)?on\s+PyPI", re.IGNORECASE),
+    re.compile(r"not\s+yet\s+(?:published|released|on\s+PyPI)", re.IGNORECASE),
+    re.compile(r"(?:will\s+be|becomes)\s+available\s+(?:on\s+PyPI|after|once|when)", re.IGNORECASE),
+    re.compile(r"after\s+the\s+first\s+(?:publication|release|upload)", re.IGNORECASE),
+    re.compile(r"awaiting\s+(?:the\s+)?(?:first\s+)?(?:release|publication)", re.IGNORECASE),
+    re.compile(r"coming\s+(?:soon\s+)?to\s+PyPI", re.IGNORECASE),
     re.compile(r"page\s+is\s+currently\s+absent", re.IGNORECASE),
     re.compile(r"page\s+404s", re.IGNORECASE),
 )
+
+# Phrasing-independent backstop, applied to every active distribution doc: any
+# single sentence that talks about distribution *and* puts it in the future or
+# in the negative. This is what the denylist above cannot promise — it fails on
+# wordings nobody has written yet, because it matches shape, not vocabulary.
+_DISTRIBUTION_TOPIC = re.compile(r"\bPyPI\b|\bpublish(?:ed|ing)?\b|\brelease[sd]?\b", re.IGNORECASE)
+_FUTURE_OR_ABSENT = re.compile(
+    r"\b(?:will\s+be|soon|upcoming|awaiting|pending|planned|future|not\s+yet|yet\s+to\s+be|"
+    r"not\s+available|once\s+\w+\s+is\s+published|"
+    r"after\s+the\s+first\s+(?:release|publication|upload))\b",
+    re.IGNORECASE,
+)
+
+# The two sentences in docs/releasing.md that legitimately pair both halves,
+# because that document is *about* releasing: PyPI's own "pending publisher"
+# registration state, and the step that swapped the quoted "pending" wording out
+# of these docs. Narrow on purpose — a third one must be looked at, not waved
+# through, so a real regression cannot hide behind a broad exemption.
+_META_DISCUSSION_ALLOWANCES = (
+    re.compile(r"pending\s+publisher", re.IGNORECASE),
+    re.compile(r"[\"'`]pending[\"'`]\s+wording", re.IGNORECASE),
+)
+
+
+def _deferred_distribution_sentences(text: str) -> list[str]:
+    """Sentences that put distribution in the future or in the negative."""
+    return [
+        " ".join(sentence.split())
+        for sentence in re.split(r"(?<=[.!?])\s+", text)
+        if _DISTRIBUTION_TOPIC.search(sentence)
+        and _FUTURE_OR_ABSENT.search(sentence)
+        and not any(allowed.search(sentence) for allowed in _META_DISCUSSION_ALLOWANCES)
+    ]
 
 
 def _release_state(label: str, text: str) -> str:
@@ -52,7 +106,8 @@ def _release_state(label: str, text: str) -> str:
 
     Marker presence alone is too weak: a doc can carry the released marker in
     its banner and still tell the reader further down to wait for the release.
-    So a released doc must also be free of pre-release prose.
+    So a released doc must also be free of pre-release prose — by known phrasing
+    *and* by shape, so an unseen wording fails here too.
     """
     pending = _PENDING_MARKER in text
     released = _RELEASED_MARKER in text
@@ -62,7 +117,10 @@ def _release_state(label: str, text: str) -> str:
     )
 
     if released:
-        stale = [pattern.pattern for pattern in _PRE_RELEASE_PROSE if pattern.search(text)]
+        stale: list[str] = [
+            pattern.pattern for pattern in _PRE_RELEASE_PROSE if pattern.search(text)
+        ]
+        stale += _deferred_distribution_sentences(text)
         assert not stale, (
             f"{label} says lovspor is on PyPI but still carries pre-release prose: {stale}"
         )
@@ -194,7 +252,6 @@ def test_importing_lovspor_and_its_cli_surface_needs_no_openai_key() -> None:
 
 def test_release_docs_agree_on_version_workflow_environment_and_burned_versions() -> None:
     texts = {
-        "README": _README.read_text(encoding="utf-8"),
         "docs/mcp.md": _MCP_DOC.read_text(encoding="utf-8"),
         "docs/releasing.md": _RELEASING_DOC.read_text(encoding="utf-8"),
     }
@@ -227,25 +284,99 @@ def test_distribution_docs_agree_on_whether_lovspor_is_on_pypi_yet() -> None:
 
 
 @pytest.mark.parametrize(
-    ("original", "stale"),
+    "stale",
     [
-        ("From PyPI:", "From PyPI — works once `0.4.0` is published:"),
-        ("From PyPI:", "From PyPI (the first release is still pending):"),
-        ("## Install", "## Install\n\nlovspor is not currently on PyPI."),
+        "From PyPI — works once `0.4.0` is published:",
+        "From PyPI (the first release is still pending):",
+        "lovspor is not currently on PyPI.",
     ],
 )
-def test_release_state_invariant_rejects_stale_publish_caveats(original: str, stale: str) -> None:
+def test_release_state_invariant_rejects_stale_publish_caveats(stale: str) -> None:
     """Guard the guard: marker presence must not be enough to pass as released.
 
     A half-finished transition leaves the released marker in the banner while
     prose further down still tells the reader to wait for the release. Feeding
     that shape through the invariant must raise, not classify it as released.
+    Built from a real released doc, so the fixture cannot drift into a shape
+    the invariant never sees in this repo.
     """
-    mutated = _README.read_text(encoding="utf-8").replace(original, stale, 1)
-    assert mutated != _README.read_text(encoding="utf-8"), "mutation did not apply"
+    doc = _MCP_DOC.read_text(encoding="utf-8")
+    assert _release_state("docs/mcp.md", doc) == "released", "fixture doc is not in released state"
 
     with pytest.raises(AssertionError, match="pre-release prose"):
-        _release_state("README", mutated)
+        _release_state("docs/mcp.md", f"{doc}\n\n{stale}\n")
+
+
+def test_readme_never_tells_the_reader_to_wait_for_a_published_release() -> None:
+    """The README states no release state, so pin the half-finished shape directly.
+
+    It shows `uvx lovspor`, which only works once the package is on PyPI. If a
+    future transition leaves pre-release prose there while docs/releasing.md
+    says published, a reader gets both answers from the same project — the exact
+    contradiction `_release_state` rejects for the docs that do carry markers.
+
+    Three layers, weakest last: the pending marker must be absent outright; no
+    known pre-release phrasing may appear; and no sentence may pair a
+    distribution topic with a future or absence framing, which catches wordings
+    the denylist has never seen.
+    """
+    readme = _README.read_text(encoding="utf-8")
+
+    assert _PENDING_MARKER not in readme, "README claims the release is still pending"
+
+    stale = [pattern.pattern for pattern in _PRE_RELEASE_PROSE if pattern.search(readme)]
+    assert not stale, f"README carries pre-release prose: {stale}"
+
+    assert not _deferred_distribution_sentences(readme), "README defers distribution to the future"
+
+
+@pytest.mark.parametrize(
+    "unseen",
+    [
+        "PyPI availability depends on a future release.",
+        "The PyPI package will be available after the first publication.",
+        "A release is coming soon; the package is not yet published.",
+        "Installation from PyPI is pending our first upload.",
+    ],
+)
+@pytest.mark.parametrize("label,path", (*_DISTRIBUTION_DOCS, ("README", _README)))
+def test_distribution_docs_reject_pre_release_wordings_the_denylist_never_saw(
+    unseen: str, label: str, path: Path
+) -> None:
+    """Guard the guard, second layer: an unseen phrasing must fail in every doc.
+
+    The denylist cannot promise this — the sentence-level check is what makes
+    the promise, so it is tested against wordings deliberately absent from
+    `_PRE_RELEASE_PROSE`, against each real active distribution doc rather than
+    a synthetic string.
+    """
+    doc = path.read_text(encoding="utf-8")
+
+    assert not _deferred_distribution_sentences(doc), f"{label} is already flagged before mutation"
+    assert _deferred_distribution_sentences(f"{doc}\n\n{unseen}\n"), (
+        f"unseen pre-release wording slipped through {label}: {unseen!r}"
+    )
+
+
+@pytest.mark.parametrize("label,path", _DISTRIBUTION_DOCS)
+def test_release_state_itself_rejects_unseen_pre_release_wordings(label: str, path: Path) -> None:
+    """The shape check must fire through the invariant, not only in the helper.
+
+    `_release_state` is what the agreement test calls, so a doc keeping the
+    released marker while adding an unseen pre-release sentence must fail there.
+    """
+    doc = path.read_text(encoding="utf-8")
+
+    with pytest.raises(AssertionError, match="pre-release prose"):
+        _release_state(label, f"{doc}\n\nPyPI availability depends on a future release.\n")
+
+
+def test_every_meta_discussion_allowance_still_matches_the_doc_it_was_written_for() -> None:
+    """A dead allowance is a hole: it exempts nothing today and hides drift later."""
+    releasing = _RELEASING_DOC.read_text(encoding="utf-8")
+
+    for allowed in _META_DISCUSSION_ALLOWANCES:
+        assert allowed.search(releasing), f"allowance no longer matches anything: {allowed.pattern}"
 
 
 def test_post_stage1_closure_state_holds_on_active_surfaces() -> None:
