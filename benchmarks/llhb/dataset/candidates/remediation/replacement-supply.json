@@ -1,6 +1,5 @@
 {
   "c5_feasibility": {
-    "decision_required": "owner (DECISIONS.md #19): raise the C5 per-act category cap to 3 (structural max becomes exactly 15) OR an explicit pre-freeze methodology amendment moving 4 cases to another category — never a silent target cut",
     "documents": 7,
     "frozen_target": 15,
     "ids_per_document": {
@@ -13,9 +12,10 @@
       "pantelovforskriften": 1
     },
     "real_duplicate_ids": 42,
+    "resolution": "owner ruling #21 (2026-08-06, DECISIONS.md): C5 per-act category cap raised to 3; frozen target stays 15; per-provision cap untouched",
     "structural_max_per_act_category_cap_2": 11,
     "structural_max_per_act_category_cap_3": 15,
-    "v2_pool_emitted": 11
+    "v2_pool_emitted": 15
   },
   "frozen_targets": {
     "C1": 50,
@@ -33,7 +33,7 @@
       "manifest_generated_at": "2026-08-04T20:48:16.533742+00:00"
     },
     "id_offset": 500,
-    "lovspor_commit": "ca546fbc81a1e4497af885244fee0a7911b09cd8",
+    "lovspor_commit": "dacf8a5e75b323ab155cd47a621bef2a9e7964bc",
     "seed": 20260805
   },
   "inputs": [
@@ -55,7 +55,7 @@
     "C2": 65,
     "C3": 55,
     "C4": 50,
-    "C5": 11,
+    "C5": 15,
     "C6": 55,
     "C7": 40,
     "C8": 30

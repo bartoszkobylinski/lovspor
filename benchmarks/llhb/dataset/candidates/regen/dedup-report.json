@@ -20,6 +20,16 @@
       "a": "llhb-v1-C5-503",
       "b": "llhb-v1-C5-504",
       "jaccard": 0.851
+    },
+    {
+      "a": "llhb-v1-C5-503",
+      "b": "llhb-v1-C5-505",
+      "jaccard": 0.816
+    },
+    {
+      "a": "llhb-v1-C5-504",
+      "b": "llhb-v1-C5-505",
+      "jaccard": 0.833
     }
   ]
 }
