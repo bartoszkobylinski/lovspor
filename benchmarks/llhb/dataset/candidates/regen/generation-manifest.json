@@ -3,6 +3,9 @@
   "caps": {
     "inventory_size": 320,
     "per_act_category_cap": 2,
+    "per_act_category_caps": {
+      "C5": 3
+    },
     "per_act_total_cap": 8
   },
   "corpus_pin": {
@@ -20,7 +23,7 @@
     "C7": 40,
     "C8": 30
   },
-  "lovspor_commit": "dacf8a5e75b323ab155cd47a621bef2a9e7964bc",
+  "lovspor_commit": "1bd3ab4f310c576a3ed21957160a3afe537390c0",
   "phrasing": {
     "llm_assisted": 0,
     "template": 385
@@ -36,7 +39,7 @@
     "C7": 40,
     "C8": 30
   },
-  "timestamp": "2026-08-06T05:39:08.484439+00:00",
+  "timestamp": "2026-08-06T05:51:49.541812+00:00",
   "versions": {
     "abbreviations": "llhb-abbrev-v1",
     "stance_rules": "llhb-stance-v1",

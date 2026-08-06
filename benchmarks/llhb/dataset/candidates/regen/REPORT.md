@@ -7,8 +7,8 @@ no final selection has been made; nothing here is frozen.
 
 - lovverk commit: `6ec7059d53d25ddae99d8a64bf5157a90c4c166c`
 - manifest generated_at: `2026-08-04T20:48:16.533742+00:00`
-- lovspor generator commit: `dacf8a5e75b323ab155cd47a621bef2a9e7964bc`
-- generated: 2026-08-06T05:39:08.484439+00:00 (seed 20260805)
+- lovspor generator commit: `1bd3ab4f310c576a3ed21957160a3afe537390c0`
+- generated: 2026-08-06T05:51:49.541812+00:00 (seed 20260805)
 - versions: {"abbreviations": "llhb-abbrev-v1", "stance_rules": "llhb-stance-v1", "templates": "llhb-templates-v2", "topic_filter": "llhb-topic-filter-v1"}
 
 ## Counts
