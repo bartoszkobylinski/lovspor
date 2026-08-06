@@ -357,12 +357,20 @@ def _structural_notes(case: dict[str, Any]) -> list[str]:
 
 def _c5_notes(case: dict[str, Any]) -> list[str]:
     if case["subcategory"] == "duplicate-section-id":
-        count = case["ground_truth_evidence"].get("duplicate_occurrences", {}).get("count")
+        evidence = case["ground_truth_evidence"].get("duplicate_occurrences", {})
+        occurrences = evidence.get("occurrences")
+        count = len(occurrences) if occurrences is not None else evidence.get("count")
         notes = [
             f"ambiguity mechanism: duplicate section id — {case['expected_act_slug']} "
             f"§ {case['expected_section_id']} has {count} occurrences",
         ]
-        if case.get("expected_occurrence") is None:
+        if case.get("expected_behaviour") == "must_disambiguate":
+            notes.append(
+                "ground truth encodes every valid occurrence; must_disambiguate is "
+                "the designed expectation (ruling 17) — review the question wording, "
+                "not the ambiguity itself"
+            )
+        elif case.get("expected_occurrence") is None:
             notes.append(
                 "DEBATABLE: no occurrence pinned — decide whether 'handle the ambiguity' "
                 "is a fair expected behaviour for this question wording"
