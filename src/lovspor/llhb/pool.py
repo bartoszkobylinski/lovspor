@@ -28,6 +28,7 @@ from lovspor.llhb.generation import (
     GENERATION_SEED_DEFAULT,
     ActInfo,
     CorpusSampler,
+    QuoteSpan,
     SectionInfo,
     base_case,
     difficulty_for,
@@ -519,7 +520,7 @@ def _c7_fields(
     builder: _Builder,
     act: ActInfo,
     section_id: str,
-    details: tuple[str, str, tuple[int, int, str] | None],
+    details: tuple[str, str, QuoteSpan | None],
 ) -> tuple[str, dict[str, Any]] | None:
     topic, subtype, span = details
     if subtype == "authentic":
@@ -529,7 +530,7 @@ def _c7_fields(
             "expected_behaviour": "verify_quote",
             "citation_exists": True,
             "quote_ref": quote_ref_fields(act.slug, section_id, span),
-            "ground_truth_evidence": {"quote_ref": {"span": list(span[:2])}},
+            "ground_truth_evidence": {"quote_ref": {"span": [span.start, span.end]}},
             "deterministic_criteria": ["quote-verified"],
         }
     text = fabricated_quote_for(topic) if subtype == "fabricated" else _mutated(span)
@@ -544,8 +545,10 @@ def _c7_fields(
     }
 
 
-def _mutated(span: tuple[int, int, str] | None) -> str | None:
-    return mutate_quote(span[2]) if span is not None else None
+def _mutated(span: QuoteSpan | None) -> str | None:
+    # F3: mutations act on the DISPLAY text — a modified quote presented
+    # casefolded reads as corrupted rather than subtly wrong.
+    return mutate_quote(span.display) if span is not None else None
 
 
 def _build_c8(builder: _Builder, acts: list[ActInfo]) -> None:

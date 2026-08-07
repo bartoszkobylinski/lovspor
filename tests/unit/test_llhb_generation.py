@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.llhb.generation import (
     ActInfo,
@@ -53,6 +54,50 @@ def test_display_name_prefers_law_name_parenthetical() -> None:
     assert display_name(bare) == "Forskrift om noe helt annet"
 
 
+def test_topic_filter_version_is_frozen() -> None:
+    """The version string is wire format — it lands in every generation
+    manifest, so a changed value silently relabels the freeze surface."""
+    from lovspor.llhb.generation import TOPIC_FILTER_VERSION  # noqa: PLC0415
+
+    assert TOPIC_FILTER_VERSION == "llhb-topic-filter-v2"
+
+
+@pytest.mark.parametrize("suffix", ("testloven", "testlova", "testforskriften", "testforskrifta"))
+def test_display_name_recognizes_every_law_name_suffix(suffix: str) -> None:
+    record = record_for("x", f"Lov om testing av alle suffikser ({suffix})")
+    assert display_name(record) == suffix
+
+
+def test_strip_title_period_handles_single_word_title() -> None:
+    from lovspor.llhb.generation import _strip_title_period  # noqa: PLC0415
+
+    assert _strip_title_period("Testloven.") == "Testloven"
+    assert _strip_title_period("mv.") == "mv."
+
+
+def test_display_name_strips_title_final_sentence_period() -> None:
+    """F3 owner finding (C5-703..705): a title-final sentence period composes
+    into '… pensjonskassers innskudd. § 1?' — the § reference reads as a
+    fresh sentence instead of a citation of the named act."""
+    monster = record_for(
+        "overgangsforskriften",
+        "Forskrift om overgangsregler etter skatteloven § 6-46, jf. tidligere "
+        "forskrift av 9. mars 1994 nr. 166 om overføring av avkastning på "
+        "pensjonskassers innskudd.",
+    )
+    assert display_name(monster).endswith("pensjonskassers innskudd")
+    nummer = record_for("nrforskriften", "Forskrift gitt ved kgl.res. 9. mars 1994 nr. 166.")
+    assert display_name(nummer) == "Forskrift gitt ved kgl.res. 9. mars 1994 nr. 166"
+
+
+@pytest.mark.parametrize("abbrev", ("mv", "m.v", "m.m"))
+def test_display_name_keeps_title_final_abbreviation_period(abbrev: str) -> None:
+    """The corpus has 200+ titles ending 'mv.' / 'm.v.' / 'm.m.' — that
+    period is spelling, and stripping it would corrupt the act name."""
+    record = record_for("utstyrsloven", f"Lov om testing av utstyr {abbrev}.")
+    assert display_name(record) == f"Lov om testing av utstyr {abbrev}."
+
+
 def test_parse_ministry_reads_front_matter(reader: CorpusReader) -> None:
     assert parse_ministry(reader.get_law("alfaloven")) == "Testdepartementet"
     assert parse_ministry("---\nid: x\n---\n\nbody") is None
@@ -60,6 +105,8 @@ def test_parse_ministry_reads_front_matter(reader: CorpusReader) -> None:
 
 def test_difficulty_and_shape_rules_are_fixed() -> None:
     assert [difficulty_for(n) for n in (10, 100, 500)] == ["easy", "medium", "hard"]
+    # frozen boundary values: 30 is the last easy act, 150 the last medium
+    assert [difficulty_for(n) for n in (30, 31, 150, 151)] == ["easy", "medium", "medium", "hard"]
     assert [section_shape(s) for s in ("12", "5-12", "5-12a", "8.1")] == [
         "plain",
         "hyphen",
@@ -103,16 +150,16 @@ def test_trap_adjacent_gap_found_when_sequence_has_hole() -> None:
 def test_quote_span_round_trips_through_materializer(reader: CorpusReader) -> None:
     span = quote_span(reader, "alfaloven", "1-1")
     assert span is not None
-    start, end, text = span
     ref = QuoteRef(
         slug="alfaloven",
         section_id="1-1",
-        char_span=(start, end),
-        sha256_normalized=quote_sha256(text),
+        char_span=(span.start, span.end),
+        sha256_normalized=quote_sha256(span.text),
     )
     result = materialize_quote(reader, ref)
     assert result.status is QuoteStatus.OK
-    assert result.text == text
+    assert result.text == span.text
+    assert result.display_text == span.display
 
 
 def test_mutate_quote_changes_text_deterministically() -> None:
@@ -120,6 +167,80 @@ def test_mutate_quote_changes_text_deterministically() -> None:
     mutated = mutate_quote(text)
     assert mutated == "virksomheten kan dokumentere alle resultater"
     assert mutate_quote("ingen mutasjonsord her") is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "virksomheten skal dokumentere resultatene sine hvert år",
+            "virksomheten kan dokumentere resultatene sine hvert år",
+        ),
+        (
+            "virksomheten kan dokumentere resultatene sine hvert år",
+            "virksomheten skal dokumentere resultatene sine hvert år",
+        ),
+        (
+            "kravet gjelder ikke virksomheter med færre enn ti ansatte",
+            "kravet gjelder virksomheter med færre enn ti ansatte",
+        ),
+        (
+            "kravet gjelder bygg og anlegg i hele landet uten unntak",
+            "kravet gjelder bygg eller anlegg i hele landet uten unntak",
+        ),
+        (
+            "kravet gjelder bygg eller anlegg i hele landet uten unntak",
+            "kravet gjelder bygg og anlegg i hele landet uten unntak",
+        ),
+    ],
+)
+def test_mutation_table_every_pair_applies(text: str, expected: str) -> None:
+    """Each frozen mutation pair must hold on its own — the table is part
+    of the deterministic modified-quote semantics."""
+    assert mutate_quote(text) == expected
+
+
+def test_mutation_tail_guard_boundary_is_exact() -> None:
+    """RC6 guard, boundary values: a site at len-16 is the last admitted
+    position; a site at len-15 sits ON the guard and is refused."""
+    admitted = "virksomheten skal dokumenter"  # " skal " at 12, len 28
+    assert len(admitted) == 28
+    assert mutate_quote(admitted) == "virksomheten kan dokumenter"
+    refused = "virksomheten skal dokumente"  # " skal " at 12, len 27
+    assert len(refused) == 27
+    assert mutate_quote(refused) is None
+
+
+def test_mutate_quote_preserves_source_casing() -> None:
+    """F3: modified quotes are built from the DISPLAY text — a casefolded
+    'modified' quote reads as corrupted rather than subtly wrong."""
+    text = "Dokumentasjonen skal oppbevares hos virksomheten i minst ti år"
+    assert mutate_quote(text) == "Dokumentasjonen kan oppbevares hos virksomheten i minst ti år"
+
+
+def test_quote_span_carries_source_cased_display(reader: CorpusReader) -> None:
+    """F3 (C7-710/716/731/737): presentation must not inherit the
+    casefolded hash domain."""
+    span = quote_span(reader, "alfaloven", "1-1")
+    assert span is not None
+    assert span.display[:1].isupper()
+    with pytest.raises(ValidationError):
+        span.start = 1  # type: ignore[misc]
+    from lovspor.llhb.quotes import normalize_quote_text  # noqa: PLC0415
+
+    assert normalize_quote_text(span.display) == span.text
+
+
+def test_quote_span_rejects_source_text_starting_mid_sentence(tmp_path: Path) -> None:
+    """F3: a candidate span whose SOURCE text starts lowercase is
+    mid-sentence material, invisible in the casefolded domain."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. og kravet gjelder alle virksomheter i hele landet. "
+        "Dokumentasjonen skal oppbevares her.\n"
+    )
+    reader = build_corpus(tmp_path, {"småloven": ("Lov om småbokstaver (småloven)", body)})
+    assert quote_span(reader, "småloven", "1") is None
 
 
 def test_mutate_quote_never_touches_the_tail() -> None:
@@ -131,7 +252,7 @@ def test_mutate_quote_never_touches_the_tail() -> None:
 def test_quote_span_ends_at_sentence_boundary(reader: CorpusReader) -> None:
     span = quote_span(reader, "alfaloven", "1-1")
     assert span is not None
-    assert span[2].endswith(".")
+    assert span.text.endswith(".")
 
 
 def test_c5_frames_are_neutral() -> None:
@@ -176,8 +297,8 @@ def test_quote_span_never_ends_at_an_abbreviation(tmp_path: Path) -> None:
     )
     span = quote_span(reader, "renloven", "1")
     assert span is not None
-    assert span[2].endswith("jf. lov om testing av verktøy.")  # normalized (casefolded) domain
-    assert not span[2].endswith("jf.")
+    assert span.text.endswith("jf. lov om testing av verktøy.")  # normalized (casefolded) domain
+    assert not span.text.endswith("jf.")
 
 
 def test_quote_span_rejects_markdown_link_residue(tmp_path: Path) -> None:
@@ -210,7 +331,7 @@ def test_quote_span_accepts_plain_bracketed_text(tmp_path: Path) -> None:
     reader = build_corpus(tmp_path, {"leddloven": ("Lov om ledd (leddloven)", body)})
     span = quote_span(reader, "leddloven", "1")
     assert span is not None
-    assert "[første ledd]" in span[2]
+    assert "[første ledd]" in span.text
 
 
 _ABBREVIATIONS = ("jf", "bl.a", "f.eks", "nr", "pkt", "mv", "mfl", "evt", "ca", "mm", "kap", "s")
@@ -272,6 +393,24 @@ def test_topic_of_strips_trailing_period() -> None:
     assert topic_of("§ 2. Krav til dokumentasjon.") == "krav til dokumentasjon"
 
 
+def test_topic_of_strips_generic_om_prefixes() -> None:
+    """F3 owner finding (C2-746): 'reglene om generelt om behandling av
+    dyr' — an 'om'-phrase opener doubles the preposition when the frame
+    supplies its own 'om'."""
+    assert topic_of("§ 5. Generelt om behandling av dyr") == "behandling av dyr"
+    assert topic_of("§ 6. Nærmere om søknad ved tilskudd") == "søknad ved tilskudd"
+    assert topic_of("§ 7. Særlig om vern av arbeidstakere") == "vern av arbeidstakere"
+    # the minimum-length rule applies to the STRIPPED topic
+    assert topic_of("§ 8. Generelt om dyr") is None
+    # exactly ONE prefix is stripped — the rule never recurses
+    assert topic_of("§ 9. Generelt om særlig om vern av folk") == "særlig om vern av folk"
+
+
+def test_topic_of_minimum_length_boundary_is_exact() -> None:
+    assert topic_of("§ 2. Krav til x") == "krav til x"  # exactly 10 chars
+    assert topic_of("§ 2. Krav om x") is None  # 9 chars
+
+
 def test_quote_span_start_end_are_exact_slice_coordinates(tmp_path: Path) -> None:
     """The span must slice the normalized body exactly — off-by-one in
     start or end breaks the materializer contract."""
@@ -282,13 +421,12 @@ def test_quote_span_start_end_are_exact_slice_coordinates(tmp_path: Path) -> Non
     reader = build_corpus(tmp_path, {"eksaktloven": ("Lov om eksakt (eksaktloven)", body)})
     span = quote_span(reader, "eksaktloven", "1")
     assert span is not None
-    start, end, text = span
     from lovspor.llhb.quotes import normalize_quote_text  # noqa: PLC0415
 
     normalized = normalize_quote_text(str(reader.get_section("eksaktloven", "1")["body"]))
-    assert normalized[start:end] == text
-    assert text == "kravet gjelder alle virksomheter i landet."
-    assert normalized[start - 1] == " " and normalized[start - 2] == "."
+    assert normalized[span.start : span.end] == span.text
+    assert span.text == "kravet gjelder alle virksomheter i landet."
+    assert normalized[span.start - 1] == " " and normalized[span.start - 2] == "."
 
 
 def test_quote_span_length_bounds_are_exact(tmp_path: Path) -> None:
@@ -304,7 +442,7 @@ def test_quote_span_length_bounds_are_exact(tmp_path: Path) -> None:
     span = quote_span(reader, "minloven", "1")
     assert span is not None
     # exactly the 40-char sentence: at MIN there is no tail extension
-    assert len(span[2]) == 40
+    assert len(span.text) == 40
     below = f"## Kapittel 1. R\n\n### § 1. K\n\nInnledning her. {core39.capitalize()[:-2]}."
     reader = build_corpus(tmp_path / "b", {"underloven": ("Lov om under (underloven)", below)})
     assert quote_span(reader, "underloven", "1") is None
@@ -327,8 +465,9 @@ def test_quote_span_without_internal_boundary_starts_at_zero(tmp_path: Path) -> 
     reader = build_corpus(tmp_path, {"heleloven": ("Lov om hele (heleloven)", body)})
     span = quote_span(reader, "heleloven", "1")
     assert span is not None
-    assert span[0] == 0
-    assert span[2].startswith("kravene")
+    assert span.start == 0
+    assert span.text.startswith("kravene")
+    assert span.display.startswith("Kravene")
 
 
 def test_quote_span_respects_length_bounds(tmp_path: Path) -> None:
@@ -340,8 +479,8 @@ def test_quote_span_respects_length_bounds(tmp_path: Path) -> None:
     reader = build_corpus(tmp_path, {"kortloven": ("Lov om kort (kortloven)", short)})
     span = quote_span(reader, "kortloven", "1")
     assert span is not None
-    assert len(span[2]) >= 40
-    assert len(span[2]) <= 140
+    assert len(span.text) >= 40
+    assert len(span.text) <= 140
     only_short = "## Kapittel 1. Regler\n\n### § 1. Krav\n\nInnledning her. Kort regel.\n"
     reader = build_corpus(tmp_path / "s", {"miniloven": ("Lov om mini (miniloven)", only_short)})
     assert quote_span(reader, "miniloven", "1") is None
@@ -385,6 +524,7 @@ def test_topic_filter_rejects_meta_and_short_topics() -> None:
     assert is_usable_topic("hvem kan søke", strict=True) is True
     assert is_usable_topic("krav til dokumentasjon ved testing", strict=True) is True
     assert is_usable_topic("registreringsplikt", strict=True) is False  # too short
+    assert is_usable_topic("skriftlig melding", strict=True) is False  # two words: still short
     assert is_usable_topic("registreringsplikt", strict=False) is True
 
 
@@ -490,7 +630,7 @@ def test_quote_span_tail_respects_the_window_exactly(tmp_path: Path) -> None:
     reader = build_corpus(tmp_path / "a", {"passloven": ("Lov om pass (passloven)", fits)})
     span = quote_span(reader, "passloven", "1")
     assert span is not None
-    assert len(span[2]) == 140
+    assert len(span.text) == 140
     over = f"## Kapittel 1. R\n\n### § 1. K\n\n{core139.capitalize()}s."
     reader = build_corpus(tmp_path / "b", {"sprekkloven": ("Lov om sprekk (sprekkloven)", over)})
     assert quote_span(reader, "sprekkloven", "1") is None
@@ -506,6 +646,11 @@ def test_topic_census_skips_hostile_records(tmp_path: Path) -> None:
     }
     (tmp_path / "lover").mkdir(parents=True)
     (tmp_path / "lover" / "borteloven.md").write_bytes(b"---\nid: a\n---\n\n\xff\xfe ikke utf-8")
+    (tmp_path / "lover" / "utgåttloven.md").write_text(
+        "---\nid: b-tombstone\ntitle: x\n---\n\n## Kapittel 1. Regler\n\n"
+        "### § 1. Krav til utgåtte regler\n\nDenne regelen er historisk.\n",
+        encoding="utf-8",
+    )
     (tmp_path / "lover" / "ekteloven.md").write_text(
         "---\nid: c-real\ntitle: x\n---\n\n## Kapittel 1. Regler\n\n"
         "### § 1. Krav til ekte dokumentasjon\n\nRegelen står her.\n",
@@ -514,7 +659,11 @@ def test_topic_census_skips_hostile_records(tmp_path: Path) -> None:
     write_manifest(
         Manifest(generated_at=GENERATED_AT, documents=records), tmp_path / "manifest.json"
     )
-    assert topic_census(CorpusReader(tmp_path))["krav til ekte dokumentasjon"] == 1
+    census = topic_census(CorpusReader(tmp_path))
+    assert census["krav til ekte dokumentasjon"] == 1
+    # a READABLE tombstone must still be excluded — removed docs never
+    # poison the census
+    assert "krav til utgåtte regler" not in census
 
 
 def test_scan_skips_hostile_records_and_reports_provenance(tmp_path: Path) -> None:

@@ -1,0 +1,82 @@
+{
+  "by_category": {
+    "C1": 75,
+    "C2": 65,
+    "C3": 55,
+    "C4": 50,
+    "C5": 15,
+    "C6": 55,
+    "C7": 40,
+    "C8": 30
+  },
+  "max_provision_reuse": 1,
+  "section_id_shapes": {
+    "hyphen": 42,
+    "letter": 4,
+    "other": 1,
+    "plain": 253
+  },
+  "top_acts": [
+    [
+      "-",
+      30
+    ],
+    [
+      "utleggsregistreringsforskriften",
+      3
+    ],
+    [
+      "forskrift-om-erstatning-for-tap-av-tamrein",
+      3
+    ],
+    [
+      "forskrift-om-utskriving-m-v-av-terminskatt",
+      3
+    ],
+    [
+      "forskrift-om-utmåling-av-tvangsmulkt-og-overtredelsesgebyr",
+      3
+    ],
+    [
+      "forskrift-om-avtalefestet-pensjon-for-medlemmer-av-statens-pensjonskasse-født-i-1963-eller-senere",
+      3
+    ],
+    [
+      "forskrift-om-utfyllende-regler-til-det-forenklede-solvenskapitalkravet-for-pensjonskasser",
+      3
+    ],
+    [
+      "forskrift-om-frakt-av-last-på-norske-skip-og-lektere",
+      3
+    ],
+    [
+      "forskrift-om-elektronisk-stiftelse-og-registrering-av-aksjeselskaper-og-om-elektronisk-registrering-av-utenlandske-foretak-mv",
+      3
+    ],
+    [
+      "forskrift-om-tiltak-mot-pærebrann-erwinia-amylovora",
+      3
+    ],
+    [
+      "tomtefestelova-tfl",
+      3
+    ],
+    [
+      "bustøttelova",
+      3
+    ],
+    [
+      "forskrift-om-produktavgift-til-folketrygden",
+      3
+    ],
+    [
+      "forskrift-om-fond-for-lyd-og-bilde",
+      3
+    ],
+    [
+      "forskrift-om-elfenbenslav-som-prioritert-art",
+      3
+    ]
+  ],
+  "unique_acts": 251
+}

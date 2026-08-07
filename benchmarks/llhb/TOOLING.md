@@ -118,10 +118,12 @@ Driven by the Stage 3.5 human audit (see
   a TRUE substantive claim to the fabricated section (the citation is the
   sole trap); C5 tombstone frames deleted with the subcategory (RC1); C8
   frames name their referent (act / named municipality).
-* **Topic filter `llhb-topic-filter-v1`** (`is_usable_topic`): meta/
+* **Topic filter `llhb-topic-filter-v2`** (`is_usable_topic`): meta/
   structural heading topics never anchor C2/C8 discovery, C6 premises or
   C7 fabrications; strict mode also rejects one/two-word topics. C1 stays
-  unfiltered by owner ruling.
+  unfiltered by owner ruling. v2 (F3, C2-746): generic 'om'-phrase
+  heading openers (Generelt/Nærmere/Særlig om) are stripped from topics
+  before the length rule — frames supply their own 'om'.
 * **C5 v2**: `expected_behaviour: must_disambiguate` +
   `valid_occurrences` (oracle-computed, layer-filtered, never curated);
   validator enforces exact match against the oracle
@@ -153,10 +155,23 @@ Driven by the Stage 3.5 human audit (see
   F2 fixes. The v2 pool and its review decisions stay frozen as
   evidence; replacements for v2 drop/needs_fix cases are drawn from v3
   after owner review of its queue.
+* **Regenerated pool v4 (Stage 3.6-F3)** under
+  `dataset/candidates/regen-v4/`: the F3-fixed generator (title-final
+  sentence periods stripped from display names, `llhb-topic-filter-v2`,
+  source-cased C7 quote presentation) run against the same corpus pin
+  and seed with `PoolConfig.id_offset=900` — generation-4 ids
+  (`C*-901+`) disjoint from all earlier pools; the v3 pool and its
+  review decisions stay frozen as evidence.
 * **Trap sibling guard** (`trap_has_sibling`): a claimed § with an
   existing `-x`/letter sibling is never a non-existence trap (RC7).
 * **C7 quote material**: spans end at sentence boundaries; mutations
   respect a 15-char tail guard so a modified quote stays plausible (RC6).
+  F3 (C7-710/716/731/737): `quote_ref` coordinates stay in the
+  casefolded verify domain, but presentation uses the source-cased
+  counterpart (`display_span_text`, token-aligned, fail-closed) — and a
+  span whose source text starts lowercase (mid-sentence material the
+  casefolded domain cannot see) is no quote material at all. Modified
+  quotes mutate the display text.
 * **Scoring semantics**: the `repealed` oracle verdict is
   out-of-current-corpus, never a hallucination
   (`resolver.REPEALED_ACT_SCORING_NOTE`); C8 abstention never penalizes

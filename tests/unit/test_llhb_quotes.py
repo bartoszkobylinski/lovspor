@@ -3,11 +3,13 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.llhb.quotes import (
     MaterializedQuote,
     QuoteRef,
     QuoteStatus,
+    display_span_text,
     drift_or_invalid,
     materialize_quote,
     normalize_quote_text,
@@ -42,6 +44,38 @@ def test_valid_span_reference_materializes(reader: CorpusReader) -> None:
     result = materialize_quote(reader, ref)
     assert result.status is QuoteStatus.OK
     assert result.text == "fradrag for kostnader"
+    assert result.reason is None
+
+
+def test_quote_status_wire_values_are_frozen() -> None:
+    """The status values are wire format — artifacts and CLI output carry
+    them, so a changed value is a silent format break."""
+    assert [s.value for s in QuoteStatus] == [
+        "ok",
+        "not-found",
+        "ambiguous",
+        "span-invalid",
+        "hash-mismatch",
+    ]
+
+
+def test_quote_ref_is_immutable(reader: CorpusReader) -> None:
+    ref = _span_ref(reader, "fradrag for kostnader")
+    with pytest.raises(ValidationError):
+        ref.slug = "annenloven"  # type: ignore[misc]
+
+
+def test_span_starting_at_zero_materializes(reader: CorpusReader) -> None:
+    """start=0 is a legal span (a section that is one long sentence quotes
+    from position 0) — the bounds check must accept it."""
+    normalized = normalize_quote_text(str(reader.get_section("testloven", "1")["body"]))
+    ref = QuoteRef(
+        slug="testloven",
+        section_id="1",
+        char_span=(0, len(normalized)),
+        sha256_normalized=quote_sha256(normalized),
+    )
+    assert materialize_quote(reader, ref).status is QuoteStatus.OK
 
 
 def test_materialized_quote_passes_production_verify_quote(reader: CorpusReader) -> None:
@@ -67,6 +101,7 @@ def test_wrong_hash_fails_closed(reader: CorpusReader) -> None:
     result = materialize_quote(reader, tampered)
     assert result.status is QuoteStatus.HASH_MISMATCH
     assert result.text is None
+    assert result.display_text is None
 
 
 def test_out_of_bounds_span_is_invalid_not_clamped(reader: CorpusReader) -> None:
@@ -115,6 +150,41 @@ def test_source_drift_surfaces_as_hash_mismatch(
     assert result.status is QuoteStatus.HASH_MISMATCH
     assert drift_or_invalid(pin_matches=False) == "source-drift"
     assert drift_or_invalid(pin_matches=True) == "invalid-case-definition"
+
+
+def test_display_span_text_recovers_source_casing() -> None:
+    """F3 (C7-731): the normalized domain is casefolded, so 'Forskriften gir
+    regler …' materializes as 'forskriften gir …' and reads mid-sentence.
+    The display counterpart restores the source spelling."""
+    original = "Første setning her. Forskriften gir regler for Kongen og «riket».\n"
+    normalized = normalize_quote_text(original)
+    start = normalized.find("forskriften")
+    end = normalized.find("«riket».") + len("«riket».")
+    assert display_span_text(original, (start, end)) == (
+        "Forskriften gir regler for Kongen og «riket»."
+    )
+
+
+def test_display_span_text_covers_whole_body_when_span_omitted() -> None:
+    original = "Kravet gjelder\nalle  virksomheter."
+    assert display_span_text(original, None) == "Kravet gjelder alle virksomheter."
+
+
+def test_display_span_text_fails_closed_off_token_boundaries() -> None:
+    """A span that starts or ends inside a token is never partially
+    restored — None, not a guess."""
+    original = "Kravet gjelder alle virksomheter."
+    normalized = normalize_quote_text(original)
+    start = normalized.find("gjelder")
+    assert display_span_text(original, (start + 1, len(normalized))) is None
+    assert display_span_text(original, (start, len(normalized) - 1)) is None
+
+
+def test_materialize_quote_carries_display_text(reader: CorpusReader) -> None:
+    ref = _span_ref(reader, "fradrag for kostnader")
+    result = materialize_quote(reader, ref)
+    assert result.status is QuoteStatus.OK
+    assert result.display_text == "fradrag for kostnader"
 
 
 def test_empty_span_is_invalid(reader: CorpusReader) -> None:

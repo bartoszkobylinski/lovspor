@@ -244,7 +244,7 @@ def cmd_show_source(case_id: str, corpus: Path) -> None:
     if item.quote_ref is not None:
         result = materialize_quote(reader, QuoteRef.model_validate(item.quote_ref))
         print(f"quote_ref status: {result.status}")
-        print(result.text if result.text else result.reason)
+        print(result.display_text or result.text or result.reason)
         return
     slug = item.expected_act_slug or item.claimed_act_slug
     section = item.expected_section_id or item.claimed_section_id

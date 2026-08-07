@@ -500,6 +500,9 @@ def _assert_c7_quote_free(case: dict[str, Any], bodies: list[str]) -> None:
         assert case["quote_ref"] is not None
         assert "[SITAT]" in str(case["question"])
     else:
+        # F3: fabricated AND modified quotes carry source casing — a
+        # casefolded trap quote announces itself as corrupted.
+        assert str(case["fabricated_quote_text"])[:1].isupper(), case["case_id"]
         text = normalize_quote_text(str(case["fabricated_quote_text"]))
         assert all(text not in body for body in bodies), case["case_id"]
 
