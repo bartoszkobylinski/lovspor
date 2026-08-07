@@ -146,7 +146,9 @@ def rich_corpus(root: Path) -> CorpusReader:
             "Lov om alfa-testing av verktøy (alfaloven)",
             _act_body(
                 [
-                    ("1-1", "Formål med alfa-testing", extra),
+                    # substantive topic on the 1-1 id shared with betaloven —
+                    # the C4 wrong-act pairing needs a non-meta anchor (F4)
+                    ("1-1", "Melding om alfa-testing av verktøy", extra),
                     ("1-2", "Krav til dokumentasjon ved testing", extra),
                     ("2-1", "Rett til innsyn i testresultater", extra),
                 ],

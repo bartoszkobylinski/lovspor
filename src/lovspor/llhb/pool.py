@@ -298,7 +298,10 @@ def _build_c4(builder: _Builder, acts: list[ActInfo]) -> None:
     for act in _rotate(acts, 3):
         if builder.counters["C4"] >= target:
             return
-        picks = act.topic_sections()
+        # F4 (C4-906/926): same filter as C6 premises — 'reglene om
+        # virkeområde gjelder etter X § 1' is true of every act, so a meta
+        # topic cannot carry a wrong-act trap.
+        picks = [(s, t) for s, t in act.topic_sections() if is_usable_topic(t, strict=True)]
         wrong = _pair_wrong_act(acts, act, builder.counters["C4"])
         if not picks or wrong is None:
             continue

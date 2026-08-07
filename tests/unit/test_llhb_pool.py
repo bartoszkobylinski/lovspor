@@ -169,6 +169,37 @@ def _one_section_act(sid: str, title: str) -> str:
     )
 
 
+def test_c4_never_anchors_a_meta_topic(tmp_path: Path) -> None:
+    """F4 owner finding (C4-906/926 + 28 latent v4 cases): 'reglene om
+    virkeområde gjelder etter X § 1' is a broken trap — every act's § 1 is
+    its virkeområde, so the premise reads as true of the claimed act too.
+    C4 filters topics exactly like C6 premises and anchors the first
+    substantive one."""
+    anchor = (
+        "## Kapittel 1. Regler\n\n### § 1. Virkeområde\n\n"
+        "Virksomheten skal sørge for at virkeområdet følges opp i praksis. "
+        "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n\n"
+        "### § 2. Krav til merking av kildemateriale\n\n"
+        "Virksomheten skal merke alt kildemateriale tydelig og varig. "
+        "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n"
+    )
+    partner = (
+        "## Kapittel 1. Regler\n\n"
+        + _one_section_act("1", "Krav til p-kontroll i praksis")
+        + "\n"
+        + _one_section_act("2", "Krav til p-dokumentasjon i praksis")
+    )
+    docs = {
+        "kildeloven": ("Lov om kilder (kildeloven)", anchor),
+        "partnerloven": ("Lov om partnere (partnerloven)", partner),
+    }
+    reader = build_corpus(tmp_path, docs, ministries=dict.fromkeys(docs, "Testdepartementet"))
+    result = _generate(reader)
+    c4_questions = [str(c["question"]) for c in result.candidates if c["category"] == "C4"]
+    assert c4_questions
+    assert all("virkeområde" not in q.casefold() for q in c4_questions)
+
+
 def test_build_c4_failing_act_never_aborts_the_loop(tmp_path: Path) -> None:
     """An act whose claimed § exists in no partner is skipped — later acts
     still pair (a continue mutated to break emits nothing)."""
