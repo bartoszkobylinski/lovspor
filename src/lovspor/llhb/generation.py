@@ -139,10 +139,10 @@ def is_usable_topic(topic: str, *, strict: bool) -> bool:
     """Whether a heading topic can anchor a question (RC4 filter).
 
     Meta/structural topics never qualify. In ``strict`` mode (discovery
-    C2/C8, premise C6, fabricated C7) a topic must also carry at least
-    three words — a one/two-word topic rarely identifies a provision.
-    C1 stays unfiltered by owner ruling: with the act named, even a
-    structural topic is answerable (every reviewed C1 was kept).
+    C2/C8, premise C4/C6, fabricated C7) a topic must also carry at
+    least three words — a one/two-word topic rarely identifies a
+    provision. C1 stays unfiltered by owner ruling: with the act named,
+    even a structural topic is answerable (every reviewed C1 was kept).
     """
     if META_TOPIC.search(topic):
         return False
