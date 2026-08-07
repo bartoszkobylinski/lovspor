@@ -8,6 +8,7 @@ from lovspor.llhb.quotes import (
     MaterializedQuote,
     QuoteRef,
     QuoteStatus,
+    display_span_text,
     drift_or_invalid,
     materialize_quote,
     normalize_quote_text,
@@ -115,6 +116,41 @@ def test_source_drift_surfaces_as_hash_mismatch(
     assert result.status is QuoteStatus.HASH_MISMATCH
     assert drift_or_invalid(pin_matches=False) == "source-drift"
     assert drift_or_invalid(pin_matches=True) == "invalid-case-definition"
+
+
+def test_display_span_text_recovers_source_casing() -> None:
+    """F3 (C7-731): the normalized domain is casefolded, so 'Forskriften gir
+    regler …' materializes as 'forskriften gir …' and reads mid-sentence.
+    The display counterpart restores the source spelling."""
+    original = "Første setning her. Forskriften gir regler for Kongen og «riket».\n"
+    normalized = normalize_quote_text(original)
+    start = normalized.find("forskriften")
+    end = normalized.find("«riket».") + len("«riket».")
+    assert display_span_text(original, (start, end)) == (
+        "Forskriften gir regler for Kongen og «riket»."
+    )
+
+
+def test_display_span_text_covers_whole_body_when_span_omitted() -> None:
+    original = "Kravet gjelder\nalle  virksomheter."
+    assert display_span_text(original, None) == "Kravet gjelder alle virksomheter."
+
+
+def test_display_span_text_fails_closed_off_token_boundaries() -> None:
+    """A span that starts or ends inside a token is never partially
+    restored — None, not a guess."""
+    original = "Kravet gjelder alle virksomheter."
+    normalized = normalize_quote_text(original)
+    start = normalized.find("gjelder")
+    assert display_span_text(original, (start + 1, len(normalized))) is None
+    assert display_span_text(original, (start, len(normalized) - 1)) is None
+
+
+def test_materialize_quote_carries_display_text(reader: CorpusReader) -> None:
+    ref = _span_ref(reader, "fradrag for kostnader")
+    result = materialize_quote(reader, ref)
+    assert result.status is QuoteStatus.OK
+    assert result.display_text == "fradrag for kostnader"
 
 
 def test_empty_span_is_invalid(reader: CorpusReader) -> None:

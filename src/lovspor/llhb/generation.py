@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from lovspor.errors import LovsporError
 from lovspor.llhb.corpus_pin import CorpusPin
-from lovspor.llhb.quotes import normalize_quote_text, quote_sha256
+from lovspor.llhb.quotes import display_span_text, normalize_quote_text, quote_sha256
 from lovspor.mcp import CorpusReader
 from lovspor.storage.manifest import ManifestRecord
 
@@ -295,8 +295,17 @@ def _is_sentence_boundary(text: str, dot: int) -> bool:
     return _NUMERIC_BEFORE_PERIOD.fullmatch(word) is None
 
 
-def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, int, str] | None:
-    """Deterministic (start, end, text) span in the normalized section body.
+class QuoteSpan(BaseModel, frozen=True):
+    """Normalized-domain slice plus its original-cased presentation (F3)."""
+
+    start: int
+    end: int
+    text: str  # normalized slice — the hash/verify domain
+    display: str  # source spelling — the presentation domain
+
+
+def quote_span(reader: CorpusReader, slug: str, section_id: str) -> QuoteSpan | None:
+    """Deterministic sentence-bounded span in the normalized section body.
 
     Starts after the heading sentence and ends at a validated SENTENCE
     boundary (v2 RC6; v3 F2): a quote cut mid-sentence or at an
@@ -304,8 +313,8 @@ def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, i
     in the span disqualifies the section as quote material. Returns None
     when the section has no clean, complete sentence of quotable length.
     """
-    section = reader.get_section(slug, section_id)
-    normalized = normalize_quote_text(str(section["body"]))
+    body = str(reader.get_section(slug, section_id)["body"])
+    normalized = normalize_quote_text(body)
     boundaries = [
         i
         for i in range(len(normalized) - 1)
@@ -319,8 +328,10 @@ def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, i
     tail_fits = normalized.endswith(".") and 0 < len(normalized) - start <= _MAX_QUOTE_CHARS
     if (end is None or end - start < _MIN_QUOTE_CHARS) and tail_fits:
         end = len(normalized)  # extend to the section's final sentence
-    if end is None:
-        return None
+    return _span_result(body, normalized, start, end) if end is not None else None
+
+
+def _span_result(body: str, normalized: str, start: int, end: int) -> QuoteSpan | None:
     # The hash is computed over normalized[start:end] EXACTLY as the
     # materializer will slice it — the span is a slice, never a text copy.
     text = normalized[start:end]
@@ -328,7 +339,13 @@ def quote_span(reader: CorpusReader, slug: str, section_id: str) -> tuple[int, i
         return None
     if _MARKDOWN_LINK.search(text) or "](" in text:
         return None  # link residue only; plain [bracketed] statutory text quotes fine
-    return start, end, text
+    display = display_span_text(body, (start, end))
+    if display is None or not display.lstrip("«([")[:1].isupper():
+        # F3 (C7-710/716/731/737): the casefolded domain hides casing, so a
+        # span whose SOURCE text starts lowercase — mid-sentence material —
+        # only shows up here; such sections are not quote material.
+        return None
+    return QuoteSpan(start=start, end=end, text=text, display=display)
 
 
 _QUOTE_MUTATIONS: tuple[tuple[str, str], ...] = (
@@ -470,13 +487,12 @@ def fabricated_quote_for(topic: str) -> str:
 def quote_ref_fields(
     slug: str,
     section_id: str,
-    span: tuple[int, int, str],
+    span: QuoteSpan,
 ) -> dict[str, object]:
-    start, end, text = span
     return {
         "slug": slug,
         "section_id": section_id,
         "occurrence": None,
-        "char_span": [start, end],
-        "sha256_normalized": quote_sha256(text),
+        "char_span": [span.start, span.end],
+        "sha256_normalized": quote_sha256(span.text),
     }

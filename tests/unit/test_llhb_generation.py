@@ -126,16 +126,16 @@ def test_trap_adjacent_gap_found_when_sequence_has_hole() -> None:
 def test_quote_span_round_trips_through_materializer(reader: CorpusReader) -> None:
     span = quote_span(reader, "alfaloven", "1-1")
     assert span is not None
-    start, end, text = span
     ref = QuoteRef(
         slug="alfaloven",
         section_id="1-1",
-        char_span=(start, end),
-        sha256_normalized=quote_sha256(text),
+        char_span=(span.start, span.end),
+        sha256_normalized=quote_sha256(span.text),
     )
     result = materialize_quote(reader, ref)
     assert result.status is QuoteStatus.OK
-    assert result.text == text
+    assert result.text == span.text
+    assert result.display_text == span.display
 
 
 def test_mutate_quote_changes_text_deterministically() -> None:
@@ -143,6 +143,36 @@ def test_mutate_quote_changes_text_deterministically() -> None:
     mutated = mutate_quote(text)
     assert mutated == "virksomheten kan dokumentere alle resultater"
     assert mutate_quote("ingen mutasjonsord her") is None
+
+
+def test_mutate_quote_preserves_source_casing() -> None:
+    """F3: modified quotes are built from the DISPLAY text — a casefolded
+    'modified' quote reads as corrupted rather than subtly wrong."""
+    text = "Dokumentasjonen skal oppbevares hos virksomheten i minst ti år"
+    assert mutate_quote(text) == "Dokumentasjonen kan oppbevares hos virksomheten i minst ti år"
+
+
+def test_quote_span_carries_source_cased_display(reader: CorpusReader) -> None:
+    """F3 (C7-710/716/731/737): presentation must not inherit the
+    casefolded hash domain."""
+    span = quote_span(reader, "alfaloven", "1-1")
+    assert span is not None
+    assert span.display[:1].isupper()
+    from lovspor.llhb.quotes import normalize_quote_text  # noqa: PLC0415
+
+    assert normalize_quote_text(span.display) == span.text
+
+
+def test_quote_span_rejects_source_text_starting_mid_sentence(tmp_path: Path) -> None:
+    """F3: a candidate span whose SOURCE text starts lowercase is
+    mid-sentence material, invisible in the casefolded domain."""
+    body = (
+        "## Kapittel 1. Regler\n\n### § 1. Krav\n\n"
+        "Innledning her. og kravet gjelder alle virksomheter i hele landet. "
+        "Dokumentasjonen skal oppbevares her.\n"
+    )
+    reader = build_corpus(tmp_path, {"småloven": ("Lov om småbokstaver (småloven)", body)})
+    assert quote_span(reader, "småloven", "1") is None
 
 
 def test_mutate_quote_never_touches_the_tail() -> None:
@@ -154,7 +184,7 @@ def test_mutate_quote_never_touches_the_tail() -> None:
 def test_quote_span_ends_at_sentence_boundary(reader: CorpusReader) -> None:
     span = quote_span(reader, "alfaloven", "1-1")
     assert span is not None
-    assert span[2].endswith(".")
+    assert span.text.endswith(".")
 
 
 def test_c5_frames_are_neutral() -> None:
@@ -199,8 +229,8 @@ def test_quote_span_never_ends_at_an_abbreviation(tmp_path: Path) -> None:
     )
     span = quote_span(reader, "renloven", "1")
     assert span is not None
-    assert span[2].endswith("jf. lov om testing av verktøy.")  # normalized (casefolded) domain
-    assert not span[2].endswith("jf.")
+    assert span.text.endswith("jf. lov om testing av verktøy.")  # normalized (casefolded) domain
+    assert not span.text.endswith("jf.")
 
 
 def test_quote_span_rejects_markdown_link_residue(tmp_path: Path) -> None:
@@ -233,7 +263,7 @@ def test_quote_span_accepts_plain_bracketed_text(tmp_path: Path) -> None:
     reader = build_corpus(tmp_path, {"leddloven": ("Lov om ledd (leddloven)", body)})
     span = quote_span(reader, "leddloven", "1")
     assert span is not None
-    assert "[første ledd]" in span[2]
+    assert "[første ledd]" in span.text
 
 
 _ABBREVIATIONS = ("jf", "bl.a", "f.eks", "nr", "pkt", "mv", "mfl", "evt", "ca", "mm", "kap", "s")
@@ -316,13 +346,12 @@ def test_quote_span_start_end_are_exact_slice_coordinates(tmp_path: Path) -> Non
     reader = build_corpus(tmp_path, {"eksaktloven": ("Lov om eksakt (eksaktloven)", body)})
     span = quote_span(reader, "eksaktloven", "1")
     assert span is not None
-    start, end, text = span
     from lovspor.llhb.quotes import normalize_quote_text  # noqa: PLC0415
 
     normalized = normalize_quote_text(str(reader.get_section("eksaktloven", "1")["body"]))
-    assert normalized[start:end] == text
-    assert text == "kravet gjelder alle virksomheter i landet."
-    assert normalized[start - 1] == " " and normalized[start - 2] == "."
+    assert normalized[span.start : span.end] == span.text
+    assert span.text == "kravet gjelder alle virksomheter i landet."
+    assert normalized[span.start - 1] == " " and normalized[span.start - 2] == "."
 
 
 def test_quote_span_length_bounds_are_exact(tmp_path: Path) -> None:
@@ -338,7 +367,7 @@ def test_quote_span_length_bounds_are_exact(tmp_path: Path) -> None:
     span = quote_span(reader, "minloven", "1")
     assert span is not None
     # exactly the 40-char sentence: at MIN there is no tail extension
-    assert len(span[2]) == 40
+    assert len(span.text) == 40
     below = f"## Kapittel 1. R\n\n### § 1. K\n\nInnledning her. {core39.capitalize()[:-2]}."
     reader = build_corpus(tmp_path / "b", {"underloven": ("Lov om under (underloven)", below)})
     assert quote_span(reader, "underloven", "1") is None
@@ -361,8 +390,9 @@ def test_quote_span_without_internal_boundary_starts_at_zero(tmp_path: Path) -> 
     reader = build_corpus(tmp_path, {"heleloven": ("Lov om hele (heleloven)", body)})
     span = quote_span(reader, "heleloven", "1")
     assert span is not None
-    assert span[0] == 0
-    assert span[2].startswith("kravene")
+    assert span.start == 0
+    assert span.text.startswith("kravene")
+    assert span.display.startswith("Kravene")
 
 
 def test_quote_span_respects_length_bounds(tmp_path: Path) -> None:
@@ -374,8 +404,8 @@ def test_quote_span_respects_length_bounds(tmp_path: Path) -> None:
     reader = build_corpus(tmp_path, {"kortloven": ("Lov om kort (kortloven)", short)})
     span = quote_span(reader, "kortloven", "1")
     assert span is not None
-    assert len(span[2]) >= 40
-    assert len(span[2]) <= 140
+    assert len(span.text) >= 40
+    assert len(span.text) <= 140
     only_short = "## Kapittel 1. Regler\n\n### § 1. Krav\n\nInnledning her. Kort regel.\n"
     reader = build_corpus(tmp_path / "s", {"miniloven": ("Lov om mini (miniloven)", only_short)})
     assert quote_span(reader, "miniloven", "1") is None
@@ -524,7 +554,7 @@ def test_quote_span_tail_respects_the_window_exactly(tmp_path: Path) -> None:
     reader = build_corpus(tmp_path / "a", {"passloven": ("Lov om pass (passloven)", fits)})
     span = quote_span(reader, "passloven", "1")
     assert span is not None
-    assert len(span[2]) == 140
+    assert len(span.text) == 140
     over = f"## Kapittel 1. R\n\n### § 1. K\n\n{core139.capitalize()}s."
     reader = build_corpus(tmp_path / "b", {"sprekkloven": ("Lov om sprekk (sprekkloven)", over)})
     assert quote_span(reader, "sprekkloven", "1") is None
