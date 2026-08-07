@@ -295,6 +295,17 @@ def test_topic_of_strips_trailing_period() -> None:
     assert topic_of("§ 2. Krav til dokumentasjon.") == "krav til dokumentasjon"
 
 
+def test_topic_of_strips_generic_om_prefixes() -> None:
+    """F3 owner finding (C2-746): 'reglene om generelt om behandling av
+    dyr' — an 'om'-phrase opener doubles the preposition when the frame
+    supplies its own 'om'."""
+    assert topic_of("§ 5. Generelt om behandling av dyr") == "behandling av dyr"
+    assert topic_of("§ 6. Nærmere om søknad ved tilskudd") == "søknad ved tilskudd"
+    assert topic_of("§ 7. Særlig om vern av arbeidstakere") == "vern av arbeidstakere"
+    # the minimum-length rule applies to the STRIPPED topic
+    assert topic_of("§ 8. Generelt om dyr") is None
+
+
 def test_quote_span_start_end_are_exact_slice_coordinates(tmp_path: Path) -> None:
     """The span must slice the normalized body exactly — off-by-one in
     start or end breaks the materializer contract."""

@@ -26,8 +26,13 @@ from lovspor.storage.manifest import ManifestRecord
 
 GENERATION_SEED_DEFAULT = 20260805
 
-TOPIC_FILTER_VERSION = "llhb-topic-filter-v1"
-"""Freeze-surface version of the meta-topic lexicon and usability rule."""
+TOPIC_FILTER_VERSION = "llhb-topic-filter-v2"
+"""Freeze-surface version of the meta-topic lexicon and usability rule.
+
+v2 (F3, C2-746): 'om'-phrase heading prefixes (Generelt om / Nærmere om /
+Særlig om) are stripped from topics — a frame that supplies its own 'om'
+('reglene om {topic}') otherwise doubles the preposition: 'reglene om
+generelt om behandling av dyr'."""
 
 META_TOPIC = re.compile(
     r"virkeområde|verkeområde|definisjon|ikrafttred|ikraftset|iverkset|overgangs"
@@ -108,14 +113,23 @@ def _strip_title_period(title: str) -> str:
 
 _MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 
+_GENERIC_TOPIC_PREFIXES = ("generelt om ", "nærmere om ", "særlig om ")
+"""'Om'-phrase heading openers (F3, C2-746): they double the preposition
+inside frames that supply their own 'om' and carry no topical content."""
+
 
 def topic_of(heading: str) -> str | None:
     """Heading title as a question topic; None when unusable.
 
     Markdown links collapse to their link text (F2, C8-518): a rendered
     heading like ``[(EF) nr. 124/2009](eu/32009r0124)`` must never leak a
-    link target into a question."""
+    link target into a question. Generic 'om'-phrase openers are stripped
+    (F3); the minimum-length rule applies to the stripped topic."""
     topic = _MARKDOWN_LINK.sub(r"\1", _HEADING_PREFIX.sub("", heading)).strip().rstrip(".")
+    for prefix in _GENERIC_TOPIC_PREFIXES:
+        if topic.casefold().startswith(prefix):
+            topic = topic[len(prefix) :]
+            break
     if len(topic) < _MIN_TOPIC_CHARS or "opphevet" in topic.casefold():
         return None
     return topic[0].lower() + topic[1:]
