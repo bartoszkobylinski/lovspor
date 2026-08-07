@@ -144,6 +144,15 @@ Driven by the Stage 3.5 human audit (see
   evidence. Per-category supply vs frozen targets (and the open C5
   cap-vs-target decision, ruling #19):
   `dataset/candidates/remediation/replacement-supply.json`.
+* **Regenerated pool v3 (Stage 3.6-F2)** under
+  `dataset/candidates/regen-v3/`: the F2-fixed generator
+  (`llhb-templates-v3`, review-F structural rules) run against the same
+  corpus pin and seed as v2 with `PoolConfig.id_offset=700`, so
+  generation-3 ids (`C*-701+`) are disjoint from both earlier pools.
+  Same seed as v2 on purpose: the v2/v3 diff isolates the effect of the
+  F2 fixes. The v2 pool and its review decisions stay frozen as
+  evidence; replacements for v2 drop/needs_fix cases are drawn from v3
+  after owner review of its queue.
 * **Trap sibling guard** (`trap_has_sibling`): a claimed § with an
   existing `-x`/letter sibling is never a non-existence trap (RC7).
 * **C7 quote material**: spans end at sentence boundaries; mutations
