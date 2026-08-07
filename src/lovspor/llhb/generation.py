@@ -90,7 +90,20 @@ def display_name(record: ManifestRecord) -> str:
         candidate: str = str(group).strip()
         if " " not in candidate and candidate.casefold().endswith(_LAW_NAME_SUFFIXES):
             return candidate
-    return record.title or record.slug or ""
+    return _strip_title_period(record.title or record.slug or "")
+
+
+def _strip_title_period(title: str) -> str:
+    """Drop a title-final SENTENCE period (F3, C5-703..705).
+
+    1437 corpus titles end with a period; composed into a frame it reads
+    '… pensjonskassers innskudd. § 1?' — the section reference lands in a
+    new sentence. Abbreviation periods (``mv.``, ``m.v.``) are spelling,
+    not sentence punctuation, and stay."""
+    if not title.endswith("."):
+        return title
+    word = title[:-1].rsplit(" ", 1)[-1].lstrip("(«").casefold()
+    return title if word in _ABBREVIATIONS_BEFORE_PERIOD else title[:-1]
 
 
 _MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
@@ -246,7 +259,7 @@ def _flat_traps(ids: set[str]) -> list[tuple[str, str]]:
 
 
 _ABBREVIATIONS_BEFORE_PERIOD = frozenset(
-    {"jf", "bl.a", "f.eks", "nr", "pkt", "mv", "mfl", "evt", "ca", "mm", "kap", "s"},
+    {"jf", "bl.a", "f.eks", "nr", "pkt", "mv", "m.v", "m.m", "mfl", "evt", "ca", "mm", "kap", "s"},
 )
 
 

@@ -53,6 +53,29 @@ def test_display_name_prefers_law_name_parenthetical() -> None:
     assert display_name(bare) == "Forskrift om noe helt annet"
 
 
+def test_display_name_strips_title_final_sentence_period() -> None:
+    """F3 owner finding (C5-703..705): a title-final sentence period composes
+    into '… pensjonskassers innskudd. § 1?' — the § reference reads as a
+    fresh sentence instead of a citation of the named act."""
+    monster = record_for(
+        "overgangsforskriften",
+        "Forskrift om overgangsregler etter skatteloven § 6-46, jf. tidligere "
+        "forskrift av 9. mars 1994 nr. 166 om overføring av avkastning på "
+        "pensjonskassers innskudd.",
+    )
+    assert display_name(monster).endswith("pensjonskassers innskudd")
+    nummer = record_for("nrforskriften", "Forskrift gitt ved kgl.res. 9. mars 1994 nr. 166.")
+    assert display_name(nummer) == "Forskrift gitt ved kgl.res. 9. mars 1994 nr. 166"
+
+
+@pytest.mark.parametrize("abbrev", ("mv", "m.v", "m.m"))
+def test_display_name_keeps_title_final_abbreviation_period(abbrev: str) -> None:
+    """The corpus has 200+ titles ending 'mv.' / 'm.v.' / 'm.m.' — that
+    period is spelling, and stripping it would corrupt the act name."""
+    record = record_for("utstyrsloven", f"Lov om testing av utstyr {abbrev}.")
+    assert display_name(record) == f"Lov om testing av utstyr {abbrev}."
+
+
 def test_parse_ministry_reads_front_matter(reader: CorpusReader) -> None:
     assert parse_ministry(reader.get_law("alfaloven")) == "Testdepartementet"
     assert parse_ministry("---\nid: x\n---\n\nbody") is None
