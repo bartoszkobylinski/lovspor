@@ -181,6 +181,9 @@ def test_c4_never_anchors_a_meta_topic(tmp_path: Path) -> None:
         "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n\n"
         "### § 2. Krav til merking av kildemateriale\n\n"
         "Virksomheten skal merke alt kildemateriale tydelig og varig. "
+        "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n\n"
+        "### § 3. Krav til lagring av kildemateriale\n\n"
+        "Virksomheten skal lagre alt kildemateriale trygt og varig. "
         "Dokumentasjonen skal være etterprøvbar og oppbevares forsvarlig.\n"
     )
     partner = (
@@ -188,6 +191,8 @@ def test_c4_never_anchors_a_meta_topic(tmp_path: Path) -> None:
         + _one_section_act("1", "Krav til p-kontroll i praksis")
         + "\n"
         + _one_section_act("2", "Krav til p-dokumentasjon i praksis")
+        + "\n"
+        + _one_section_act("3", "Krav til p-lagring i praksis")
     )
     docs = {
         "kildeloven": ("Lov om kilder (kildeloven)", anchor),
@@ -198,6 +203,34 @@ def test_c4_never_anchors_a_meta_topic(tmp_path: Path) -> None:
     c4_questions = [str(c["question"]) for c in result.candidates if c["category"] == "C4"]
     assert c4_questions
     assert all("virkeområde" not in q.casefold() for q in c4_questions)
+    kilde = [
+        str(c["question"])
+        for c in result.candidates
+        if c["category"] == "C4" and c["expected_act_slug"] == "kildeloven"
+    ]
+    # the FIRST substantive topic anchors — never a later one
+    assert any("krav til merking" in q.casefold() for q in kilde)
+    assert all("krav til lagring" not in q.casefold() for q in kilde)
+
+
+def test_c4_strict_filter_skips_two_word_topics(tmp_path: Path) -> None:
+    """F4, C6 parity: C4 premises use the STRICT rule, so a two-word
+    topic never anchors a wrong-act trap."""
+    docs = {
+        "toordloven": (
+            "Lov om to ord (toordloven)",
+            _one_section_act("1", "Solid dokumentasjon"),
+        ),
+        "makkerloven": (
+            "Lov om makkere (makkerloven)",
+            _one_section_act("1", "Krav til makker-kontroll i praksis"),
+        ),
+    }
+    reader = build_corpus(tmp_path, docs, ministries=dict.fromkeys(docs, "Testdepartementet"))
+    result = _generate(reader)
+    assert all(
+        c["expected_act_slug"] != "toordloven" for c in result.candidates if c["category"] == "C4"
+    )
 
 
 def test_build_c4_failing_act_never_aborts_the_loop(tmp_path: Path) -> None:
