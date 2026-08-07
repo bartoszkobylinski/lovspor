@@ -119,9 +119,11 @@ Driven by the Stage 3.5 human audit (see
   sole trap); C5 tombstone frames deleted with the subcategory (RC1); C8
   frames name their referent (act / named municipality).
 * **Topic filter `llhb-topic-filter-v2`** (`is_usable_topic`): meta/
-  structural heading topics never anchor C2/C8 discovery, C6 premises or
-  C7 fabrications; strict mode also rejects one/two-word topics. C1 stays
-  unfiltered by owner ruling. v2 (F3, C2-746): generic 'om'-phrase
+  structural heading topics never anchor C2/C8 discovery, C4/C6
+  premises or C7 fabrications; strict mode also rejects one/two-word
+  topics. C1 stays unfiltered by owner ruling. (C4 joined in F4 —
+  it was the only premise builder without the filter, so 30 of 50 v4
+  C4 cases anchored 'virkeområde'-class topics.) v2 (F3, C2-746): generic 'om'-phrase
   heading openers (Generelt/Nærmere/Særlig om) are stripped from topics
   before the length rule — frames supply their own 'om'.
 * **C5 v2**: `expected_behaviour: must_disambiguate` +
@@ -162,6 +164,14 @@ Driven by the Stage 3.5 human audit (see
   and seed with `PoolConfig.id_offset=900` — generation-4 ids
   (`C*-901+`) disjoint from all earlier pools; the v3 pool and its
   review decisions stay frozen as evidence.
+* **Regenerated pool v5 (Stage 3.6-F4)** under
+  `dataset/candidates/regen-v5/`: the F4-fixed generator (C4 premises
+  filter meta topics, C6-parity) run against the same corpus pin and
+  seed with `PoolConfig.id_offset=100` — generation-5 ids (`C*-101+`)
+  take the unused range between Stage 3 (`0xx`) and Stage 3.6-E
+  (`5xx`), because the case-id schema fixes ids at three digits. Only
+  C4 differs from v4 (39 of 50 cases); the v4 pool and its review
+  decisions stay frozen as evidence.
 * **Trap sibling guard** (`trap_has_sibling`): a claimed § with an
   existing `-x`/letter sibling is never a non-existence trap (RC7).
 * **C7 quote material**: spans end at sentence boundaries; mutations

@@ -1,0 +1,70 @@
+{
+  "exact_removed": [],
+  "near_duplicate_flags": [
+    {
+      "a": "llhb-v1-C1-121",
+      "b": "llhb-v1-C1-126",
+      "jaccard": 0.818
+    },
+    {
+      "a": "llhb-v1-C1-145",
+      "b": "llhb-v1-C1-165",
+      "jaccard": 0.833
+    },
+    {
+      "a": "llhb-v1-C2-114",
+      "b": "llhb-v1-C2-164",
+      "jaccard": 0.812
+    },
+    {
+      "a": "llhb-v1-C2-123",
+      "b": "llhb-v1-C2-148",
+      "jaccard": 0.8
+    },
+    {
+      "a": "llhb-v1-C5-103",
+      "b": "llhb-v1-C5-104",
+      "jaccard": 0.891
+    },
+    {
+      "a": "llhb-v1-C5-103",
+      "b": "llhb-v1-C5-105",
+      "jaccard": 0.955
+    },
+    {
+      "a": "llhb-v1-C5-104",
+      "b": "llhb-v1-C5-105",
+      "jaccard": 0.891
+    },
+    {
+      "a": "llhb-v1-C5-109",
+      "b": "llhb-v1-C5-111",
+      "jaccard": 0.833
+    },
+    {
+      "a": "llhb-v1-C5-112",
+      "b": "llhb-v1-C5-114",
+      "jaccard": 0.889
+    },
+    {
+      "a": "llhb-v1-C7-110",
+      "b": "llhb-v1-C7-116",
+      "jaccard": 0.857
+    },
+    {
+      "a": "llhb-v1-C7-131",
+      "b": "llhb-v1-C7-134",
+      "jaccard": 0.857
+    },
+    {
+      "a": "llhb-v1-C7-131",
+      "b": "llhb-v1-C7-137",
+      "jaccard": 0.857
+    },
+    {
+      "a": "llhb-v1-C7-134",
+      "b": "llhb-v1-C7-137",
+      "jaccard": 0.857
+    }
+  ]
+}
