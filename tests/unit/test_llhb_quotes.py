@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.llhb.quotes import (
     MaterializedQuote,
@@ -43,6 +44,38 @@ def test_valid_span_reference_materializes(reader: CorpusReader) -> None:
     result = materialize_quote(reader, ref)
     assert result.status is QuoteStatus.OK
     assert result.text == "fradrag for kostnader"
+    assert result.reason is None
+
+
+def test_quote_status_wire_values_are_frozen() -> None:
+    """The status values are wire format — artifacts and CLI output carry
+    them, so a changed value is a silent format break."""
+    assert [s.value for s in QuoteStatus] == [
+        "ok",
+        "not-found",
+        "ambiguous",
+        "span-invalid",
+        "hash-mismatch",
+    ]
+
+
+def test_quote_ref_is_immutable(reader: CorpusReader) -> None:
+    ref = _span_ref(reader, "fradrag for kostnader")
+    with pytest.raises(ValidationError):
+        ref.slug = "annenloven"  # type: ignore[misc]
+
+
+def test_span_starting_at_zero_materializes(reader: CorpusReader) -> None:
+    """start=0 is a legal span (a section that is one long sentence quotes
+    from position 0) — the bounds check must accept it."""
+    normalized = normalize_quote_text(str(reader.get_section("testloven", "1")["body"]))
+    ref = QuoteRef(
+        slug="testloven",
+        section_id="1",
+        char_span=(0, len(normalized)),
+        sha256_normalized=quote_sha256(normalized),
+    )
+    assert materialize_quote(reader, ref).status is QuoteStatus.OK
 
 
 def test_materialized_quote_passes_production_verify_quote(reader: CorpusReader) -> None:
@@ -68,6 +101,7 @@ def test_wrong_hash_fails_closed(reader: CorpusReader) -> None:
     result = materialize_quote(reader, tampered)
     assert result.status is QuoteStatus.HASH_MISMATCH
     assert result.text is None
+    assert result.display_text is None
 
 
 def test_out_of_bounds_span_is_invalid_not_clamped(reader: CorpusReader) -> None:

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.llhb.generation import (
     ActInfo,
@@ -53,6 +54,27 @@ def test_display_name_prefers_law_name_parenthetical() -> None:
     assert display_name(bare) == "Forskrift om noe helt annet"
 
 
+def test_topic_filter_version_is_frozen() -> None:
+    """The version string is wire format — it lands in every generation
+    manifest, so a changed value silently relabels the freeze surface."""
+    from lovspor.llhb.generation import TOPIC_FILTER_VERSION  # noqa: PLC0415
+
+    assert TOPIC_FILTER_VERSION == "llhb-topic-filter-v2"
+
+
+@pytest.mark.parametrize("suffix", ("testloven", "testlova", "testforskriften", "testforskrifta"))
+def test_display_name_recognizes_every_law_name_suffix(suffix: str) -> None:
+    record = record_for("x", f"Lov om testing av alle suffikser ({suffix})")
+    assert display_name(record) == suffix
+
+
+def test_strip_title_period_handles_single_word_title() -> None:
+    from lovspor.llhb.generation import _strip_title_period  # noqa: PLC0415
+
+    assert _strip_title_period("Testloven.") == "Testloven"
+    assert _strip_title_period("mv.") == "mv."
+
+
 def test_display_name_strips_title_final_sentence_period() -> None:
     """F3 owner finding (C5-703..705): a title-final sentence period composes
     into '… pensjonskassers innskudd. § 1?' — the § reference reads as a
@@ -83,6 +105,8 @@ def test_parse_ministry_reads_front_matter(reader: CorpusReader) -> None:
 
 def test_difficulty_and_shape_rules_are_fixed() -> None:
     assert [difficulty_for(n) for n in (10, 100, 500)] == ["easy", "medium", "hard"]
+    # frozen boundary values: 30 is the last easy act, 150 the last medium
+    assert [difficulty_for(n) for n in (30, 31, 150, 151)] == ["easy", "medium", "medium", "hard"]
     assert [section_shape(s) for s in ("12", "5-12", "5-12a", "8.1")] == [
         "plain",
         "hyphen",
@@ -145,6 +169,48 @@ def test_mutate_quote_changes_text_deterministically() -> None:
     assert mutate_quote("ingen mutasjonsord her") is None
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "virksomheten skal dokumentere resultatene sine hvert år",
+            "virksomheten kan dokumentere resultatene sine hvert år",
+        ),
+        (
+            "virksomheten kan dokumentere resultatene sine hvert år",
+            "virksomheten skal dokumentere resultatene sine hvert år",
+        ),
+        (
+            "kravet gjelder ikke virksomheter med færre enn ti ansatte",
+            "kravet gjelder virksomheter med færre enn ti ansatte",
+        ),
+        (
+            "kravet gjelder bygg og anlegg i hele landet uten unntak",
+            "kravet gjelder bygg eller anlegg i hele landet uten unntak",
+        ),
+        (
+            "kravet gjelder bygg eller anlegg i hele landet uten unntak",
+            "kravet gjelder bygg og anlegg i hele landet uten unntak",
+        ),
+    ],
+)
+def test_mutation_table_every_pair_applies(text: str, expected: str) -> None:
+    """Each frozen mutation pair must hold on its own — the table is part
+    of the deterministic modified-quote semantics."""
+    assert mutate_quote(text) == expected
+
+
+def test_mutation_tail_guard_boundary_is_exact() -> None:
+    """RC6 guard, boundary values: a site at len-16 is the last admitted
+    position; a site at len-15 sits ON the guard and is refused."""
+    admitted = "virksomheten skal dokumenter"  # " skal " at 12, len 28
+    assert len(admitted) == 28
+    assert mutate_quote(admitted) == "virksomheten kan dokumenter"
+    refused = "virksomheten skal dokumente"  # " skal " at 12, len 27
+    assert len(refused) == 27
+    assert mutate_quote(refused) is None
+
+
 def test_mutate_quote_preserves_source_casing() -> None:
     """F3: modified quotes are built from the DISPLAY text — a casefolded
     'modified' quote reads as corrupted rather than subtly wrong."""
@@ -158,6 +224,8 @@ def test_quote_span_carries_source_cased_display(reader: CorpusReader) -> None:
     span = quote_span(reader, "alfaloven", "1-1")
     assert span is not None
     assert span.display[:1].isupper()
+    with pytest.raises(ValidationError):
+        span.start = 1  # type: ignore[misc]
     from lovspor.llhb.quotes import normalize_quote_text  # noqa: PLC0415
 
     assert normalize_quote_text(span.display) == span.text
@@ -334,6 +402,13 @@ def test_topic_of_strips_generic_om_prefixes() -> None:
     assert topic_of("§ 7. Særlig om vern av arbeidstakere") == "vern av arbeidstakere"
     # the minimum-length rule applies to the STRIPPED topic
     assert topic_of("§ 8. Generelt om dyr") is None
+    # exactly ONE prefix is stripped — the rule never recurses
+    assert topic_of("§ 9. Generelt om særlig om vern av folk") == "særlig om vern av folk"
+
+
+def test_topic_of_minimum_length_boundary_is_exact() -> None:
+    assert topic_of("§ 2. Krav til x") == "krav til x"  # exactly 10 chars
+    assert topic_of("§ 2. Krav om x") is None  # 9 chars
 
 
 def test_quote_span_start_end_are_exact_slice_coordinates(tmp_path: Path) -> None:
@@ -449,6 +524,7 @@ def test_topic_filter_rejects_meta_and_short_topics() -> None:
     assert is_usable_topic("hvem kan søke", strict=True) is True
     assert is_usable_topic("krav til dokumentasjon ved testing", strict=True) is True
     assert is_usable_topic("registreringsplikt", strict=True) is False  # too short
+    assert is_usable_topic("skriftlig melding", strict=True) is False  # two words: still short
     assert is_usable_topic("registreringsplikt", strict=False) is True
 
 
@@ -570,6 +646,11 @@ def test_topic_census_skips_hostile_records(tmp_path: Path) -> None:
     }
     (tmp_path / "lover").mkdir(parents=True)
     (tmp_path / "lover" / "borteloven.md").write_bytes(b"---\nid: a\n---\n\n\xff\xfe ikke utf-8")
+    (tmp_path / "lover" / "utgåttloven.md").write_text(
+        "---\nid: b-tombstone\ntitle: x\n---\n\n## Kapittel 1. Regler\n\n"
+        "### § 1. Krav til utgåtte regler\n\nDenne regelen er historisk.\n",
+        encoding="utf-8",
+    )
     (tmp_path / "lover" / "ekteloven.md").write_text(
         "---\nid: c-real\ntitle: x\n---\n\n## Kapittel 1. Regler\n\n"
         "### § 1. Krav til ekte dokumentasjon\n\nRegelen står her.\n",
@@ -578,7 +659,11 @@ def test_topic_census_skips_hostile_records(tmp_path: Path) -> None:
     write_manifest(
         Manifest(generated_at=GENERATED_AT, documents=records), tmp_path / "manifest.json"
     )
-    assert topic_census(CorpusReader(tmp_path))["krav til ekte dokumentasjon"] == 1
+    census = topic_census(CorpusReader(tmp_path))
+    assert census["krav til ekte dokumentasjon"] == 1
+    # a READABLE tombstone must still be excluded — removed docs never
+    # poison the census
+    assert "krav til utgåtte regler" not in census
 
 
 def test_scan_skips_hostile_records_and_reports_provenance(tmp_path: Path) -> None:

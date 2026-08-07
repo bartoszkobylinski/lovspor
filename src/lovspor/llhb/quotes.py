@@ -35,8 +35,6 @@ from lovspor.mcp import (
     _normalize_for_quote_match,
 )
 
-_SHA256_HEX_LENGTH = 64
-
 
 class QuoteStatus(StrEnum):
     OK = "ok"
