@@ -63,6 +63,26 @@ DEFAULT_TARGETS: dict[str, int] = {
 }
 
 
+def targets_override(pairs: list[str]) -> dict[str, int]:
+    """Category-scoped targets from ``CAT=N`` pairs (Stage-4 top-up pools).
+
+    Every named category must be a known one with a positive count and may
+    appear once; every unnamed category is zeroed — a top-up pool contains
+    ONLY what it names, so its review gate never drags in other categories.
+    """
+    targets = dict.fromkeys(DEFAULT_TARGETS, 0)
+    seen: set[str] = set()
+    for pair in pairs:
+        category, equals, count = pair.partition("=")
+        if not equals or category not in DEFAULT_TARGETS or category in seen:
+            raise ValueError(f"bad target {pair!r}: use CAT=N with a known category, once each")
+        if not count.isdigit() or int(count) < 1:
+            raise ValueError(f"bad target {pair!r}: count must be a positive integer")
+        seen.add(category)
+        targets[category] = int(count)
+    return targets
+
+
 class PoolConfig(BaseModel):
     schema_path: Path  # the committed case.schema.json — always injected, never guessed
     seed: int = GENERATION_SEED_DEFAULT
