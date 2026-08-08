@@ -99,12 +99,14 @@ def execute_argv(argv: list[str], env: dict[str, str], timeout_s: int) -> CliInv
     """Run one CLI process; a timeout becomes a result, not an exception."""
     started = time.monotonic()
     try:
+        # Bytes on purpose: text=True decodes strictly, so one non-UTF-8 byte
+        # in CLI output would raise instead of becoming an error record.
         completed = subprocess.run(  # noqa: S603 — argv list built in-repo, shell never used
-            argv, capture_output=True, text=True, env=env, timeout=timeout_s, check=False
+            argv, capture_output=True, env=env, timeout=timeout_s, check=False
         )
         stdout, stderr, returncode, timed_out = (
-            completed.stdout,
-            completed.stderr,
+            _text(completed.stdout),
+            _text(completed.stderr),
             completed.returncode,
             False,
         )

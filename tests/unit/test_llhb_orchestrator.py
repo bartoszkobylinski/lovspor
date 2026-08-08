@@ -176,6 +176,14 @@ class TestExecuteArgv:
         assert result.returncode == -1
         assert 500 <= result.duration_ms <= 30_000
 
+    def test_survives_non_utf8_stdout(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, "printf '\\377\\376 not utf8'")
+
+        result = execute_argv(["claude"], hermetic_env(tmp_path, {"PATH": str(bin_dir)}), 30)
+
+        assert result.returncode == 0
+        assert "�" in result.stdout
+
     def test_missing_executable_is_a_result(self, tmp_path: Path) -> None:
         empty_bin = tmp_path / "empty-bin"
         empty_bin.mkdir()
@@ -262,6 +270,18 @@ class TestRunControlArm:
             run_control_arm(make_config(tmp_path, bin_dir), cases, make_metadata(), store)
         assert not (tmp_path / "runs").exists()
         assert not (tmp_path / "outside.json").exists()
+
+    def test_non_utf8_stdout_becomes_error_record(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, "printf '\\377\\376 not utf8'")
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_control_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is False
+        assert summary["errors_total"] == 1
 
     def test_timeout_becomes_error_record(self, tmp_path: Path) -> None:
         bin_dir = fake_claude(tmp_path, "exec /bin/sleep 3")
