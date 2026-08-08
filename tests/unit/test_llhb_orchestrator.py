@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import stat
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,19 @@ def make_config(tmp_path: Path, bin_dir: Path, timeout_s: int = 30) -> ControlRu
         sandbox_home=sandbox,
         extra_env={"PATH": str(bin_dir)},
     )
+
+
+class TestControlRunConfig:
+    def test_defaults(self, tmp_path: Path) -> None:
+        config = ControlRunConfig(
+            identity=IDENTITY,
+            system_prompt="SYSTEM",
+            case_order_seed=42,
+            sandbox_home=tmp_path,
+        )
+
+        assert config.timeout_s == 600
+        assert config.extra_env == {}
 
 
 class TestCaseOrder:
@@ -228,7 +242,7 @@ class TestRunControlArm:
         assert written["cases_total"] == 1
         assert written["cases_completed"] == 1
         assert written["errors_total"] == 0
-        assert written["finished_at"] is not None
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", written["finished_at"])
 
     def test_rejects_duplicate_cases_before_any_write(self, tmp_path: Path) -> None:
         bin_dir = fake_claude(tmp_path, f"echo '{SUCCESS_PAYLOAD}'")
@@ -248,6 +262,22 @@ class TestRunControlArm:
             run_control_arm(make_config(tmp_path, bin_dir), cases, make_metadata(), store)
         assert not (tmp_path / "runs").exists()
         assert not (tmp_path / "outside.json").exists()
+
+    def test_timeout_becomes_error_record(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, "exec /bin/sleep 3")
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_control_arm(
+            make_config(tmp_path, bin_dir, timeout_s=1),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is False
+        assert "timed out" in record["errors"][0]["message"]
+        assert summary["errors_total"] == 1
 
     def test_missing_executable_becomes_error_record(self, tmp_path: Path) -> None:
         empty_bin = tmp_path / "empty-bin"
