@@ -18,7 +18,13 @@ from pathlib import Path
 from typing import Any
 
 from lovspor.llhb.corpus_pin import current_pin, verify_pin
-from lovspor.llhb.pool import GenerationRun, PoolConfig, PoolResult, generate_pool
+from lovspor.llhb.pool import (
+    GenerationRun,
+    PoolConfig,
+    PoolResult,
+    generate_pool,
+    targets_override,
+)
 from lovspor.llhb.schema import canonical_jsonl
 from lovspor.mcp import CorpusReader
 
@@ -38,6 +44,15 @@ def _parse_args() -> argparse.Namespace:
         help="ISO datetime stamped into run metadata and every case's "
         "validation record. Defaults to now; pass the committed manifest's "
         "timestamp to reproduce an existing artifact byte-for-byte.",
+    )
+    parser.add_argument(
+        "--target",
+        action="append",
+        default=None,
+        metavar="CAT=N",
+        help="Generate ONLY the named category targets (repeatable, e.g. "
+        "--target C4=50); every unnamed category emits nothing. Without "
+        "the flag the full default distribution is generated.",
     )
     return parser.parse_args()
 
@@ -70,6 +85,8 @@ def main() -> None:
     options: dict[str, Any] = {"schema_path": SCHEMA_PATH, "id_offset": args.id_offset}
     if args.seed is not None:
         options["seed"] = args.seed
+    if args.target is not None:
+        options["targets"] = targets_override(args.target)
     config = PoolConfig(**options)
     result = generate_pool(CorpusReader(args.corpus), pin, config, run)
     _write_artifacts(args.out, result)
