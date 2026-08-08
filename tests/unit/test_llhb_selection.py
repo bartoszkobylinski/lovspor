@@ -87,6 +87,20 @@ def test_select_exempts_c8_from_the_provision_cap() -> None:
     assert result.report["C8"]["cap_skipped"] == []
 
 
+def test_select_stops_at_target_and_records_no_further_skips() -> None:
+    """The walk ends the moment the target is met: a later case that
+    WOULD be cap-skipped never enters the report — cap_skipped documents
+    only skips that happened while still selecting."""
+    cases = [
+        _case("llhb-v1-C3-101", "C3", "alfa", "1"),
+        _case("llhb-v1-C3-102", "C3", "alfa", "1"),
+        _case("llhb-v1-C3-103", "C3", "alfa", "1"),  # after target — never visited
+    ]
+    result = select(cases, {}, {"C3": 2})
+    assert [c["case_id"] for c in result.selected] == ["llhb-v1-C3-101", "llhb-v1-C3-102"]
+    assert result.report["C3"]["cap_skipped"] == []
+
+
 def test_select_fails_closed_on_shortfall() -> None:
     cases = [_case("llhb-v1-C7-101", "C7", "alfa", "1")]
     with pytest.raises(SelectionShortfallError, match="C7"):

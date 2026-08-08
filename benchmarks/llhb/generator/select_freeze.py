@@ -138,27 +138,25 @@ def _report(result: Any) -> None:
 
 
 def _write(args: argparse.Namespace, pin: Any, result: Any) -> None:
-    out = LLHB_DIR / "dataset" / "frozen"
-    out.mkdir(parents=True, exist_ok=True)
+    # Codex PR #48 finding: build EVERYTHING before touching disk — a lock
+    # failure after a partial write would leave a half-frozen dataset.
     timestamp = args.timestamp or datetime.datetime.now(datetime.UTC).isoformat()
     dataset = canonical_jsonl(result.selected)
-    (out / "llhb-v1.jsonl").write_bytes(dataset)
-    reader = CorpusReader(args.corpus)
     lock = build_lock(
         result.selected,
-        reader.manifest,
+        CorpusReader(args.corpus).manifest,
         pin,
         lovspor_commit=args.lovspor_commit,
         selection_rule=f"benchmarks/llhb/SELECTION.md@{args.lovspor_commit}",
         timestamp=timestamp,
     )
-    (out / "llhb-v1.lock.json").write_text(
-        json.dumps(lock, sort_keys=True, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    (out / "selection-report.json").write_text(
-        json.dumps(result.report, sort_keys=True, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    lock_text = json.dumps(lock, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+    report_text = json.dumps(result.report, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
+    out = LLHB_DIR / "dataset" / "frozen"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "llhb-v1.jsonl").write_bytes(dataset)
+    (out / "llhb-v1.lock.json").write_text(lock_text, encoding="utf-8")
+    (out / "selection-report.json").write_text(report_text, encoding="utf-8")
     print(f"frozen artifacts written to {out}")
     print(f"dataset sha256: {hashlib.sha256(dataset).hexdigest()}")
     sys.exit(0)
