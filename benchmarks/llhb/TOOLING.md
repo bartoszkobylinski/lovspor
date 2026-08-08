@@ -264,9 +264,23 @@ Driven by the Stage 3.5 human audit (see
   error record, never an aborted run. Raw stdout/stderr/exit of every
   invocation is retained at `raw/<case_id>.json` and referenced via
   `raw_response_ref`.
+* **Run setup** (`lovspor.llhb.run_setup` + `runner/run_control.py`):
+  `pilot_cases` selects drops only — every frozen case_id is excluded,
+  and a limit the drop pool cannot satisfy fails closed.
+  `compose_control_metadata` builds the run_metadata document from a
+  typed spec; `dataset_checksum` is always computed over the canonical
+  bytes of the case set actually being run (for the pilot: discarded
+  candidates, stated in `notes`, never the frozen 250).
+  `runner/run_control.py` is dry-run by default (prints metadata +
+  first-case argv, zero disk writes); `--execute` spawns the CLI and
+  writes `results/runs/<run-id>/`. The system prompt lives at
+  `runner/system-prompt-v1.txt` (bokmål, honesty + abstention, no
+  Lovspor mention) and must stay byte-identical across both conditions
+  and all providers of one evaluation; the CLI version is recorded in
+  metadata `notes`. The per-run sandbox HOME under
+  `results/runs/.sandbox/` is gitignored.
 * **Open item (pilot)**: confirm subscription OAuth survives the HOME
-  sandbox on macOS (Keychain-based auth) and record the CLI version in
-  run metadata `notes`.
+  sandbox on macOS (Keychain-based auth).
 
 ## What Stage 2 deliberately does not solve
 
