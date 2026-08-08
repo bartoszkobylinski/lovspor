@@ -23,6 +23,7 @@ freeze datasets, call models, or score runs.
 | `schema.py` | JSONL load, JSON-Schema validation (deterministic pathed messages), canonical JSONL + SHA-256 checksum. |
 | `validation.py` | `CandidateValidator`: schema layer then per-category C1-C8 deterministic checks; dataset-level duplicate-id and provision-cap checks. |
 | `results.py` | Stage 5 `ResultsStore`: validated, append-only run storage (`run-metadata.json` + `records.jsonl` under `results/runs/<run-id>/`). Contract below. |
+| `claude_cli.py` | Stage 5 control-arm driver for the Claude Code CLI: exact `claude -p` argv (tools + MCP hard-disabled), CLI JSON parsing, schema-valid record assembly. Contract below. |
 
 ## Extractor syntax (closed contract)
 
@@ -236,6 +237,25 @@ Driven by the Stage 3.5 human audit (see
   completion fields only (`finished_at`, `cases_total`,
   `cases_completed`, `errors_total`, `notes`, `evaluator_version`).
 * Records are never edited after capture; scoring reads them as-is.
+
+## Stage 5 Claude control-arm driver (2026-08-08, ruling #25)
+
+* **Module**: `lovspor.llhb.claude_cli` (unit-tested, no subprocess —
+  executing the argv belongs to the run orchestrator).
+* **Control argv**: `claude -p <question> --output-format json --model
+  <id> --system-prompt <text> --tools "" --strict-mcp-config
+  --mcp-config '{"mcpServers":{}}'` — built-in tools disabled and MCP
+  hard-blocked, so a control run cannot reach any tool (ruling #25:
+  a control run showing tool activity is invalid).
+* **Parsing**: `parse_cli_output` never raises — a non-zero exit,
+  non-JSON stdout, `is_error` or a non-`success` subtype become a
+  `ParsedCliResult(ok=False, error=...)`; `build_result_record` turns
+  either outcome into a schema-valid record (`errors[].stage:
+  "request"`, `completed: false`, `final_answer: null` on failure).
+* **Open item (orchestrator)**: full environment hermeticity — user
+  settings/hooks isolation for the CLI process (`--settings` merges
+  rather than replaces; needs an env/HOME sandbox at spawn time) and
+  retention of raw CLI stdout via `raw_response_ref`.
 
 ## What Stage 2 deliberately does not solve
 
