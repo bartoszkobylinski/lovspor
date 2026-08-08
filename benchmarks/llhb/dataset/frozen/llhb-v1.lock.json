@@ -1,0 +1,1196 @@
+{
+  "case_count": 250,
+  "corpus_pin": {
+    "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+    "manifest_generated_at": "2026-08-04T20:48:16.533742+00:00"
+  },
+  "dataset_sha256": "118eec543609442693643b3bdf29b3ec9aac30f0bee889afd6f47eefe07a4cc5",
+  "documents": {
+    "advokatforskriften": {
+      "embedding_hash": "5691153c02f64e0efe4e1f4805d4047f8312698c7d5e8703f3def838fc599a15",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5691153c02f64e0efe4e1f4805d4047f8312698c7d5e8703f3def838fc599a15"
+    },
+    "advokatloven": {
+      "embedding_hash": "82fb01e512dfb370a2a15be4fc7a6be0eb1f3ae164929dd10d85d4ca40334a91",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "82fb01e512dfb370a2a15be4fc7a6be0eb1f3ae164929dd10d85d4ca40334a91"
+    },
+    "aif-forskriften": {
+      "embedding_hash": "3ca3f244cefd0ec904132c6b5d5e99413cb70681587d88ac92a01ff502883521",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3ca3f244cefd0ec904132c6b5d5e99413cb70681587d88ac92a01ff502883521"
+    },
+    "allmennaksjeloven-asal": {
+      "embedding_hash": "c445f4f680a7b7188d62fb05e32d7a84ab813fd0d91f373cd3a220e19f795c5e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "c445f4f680a7b7188d62fb05e32d7a84ab813fd0d91f373cd3a220e19f795c5e"
+    },
+    "alternativ-behandlingsloven-albhl": {
+      "embedding_hash": "ca606527fe97f97b01a1d78761b91bbd3f3e26d004c842b34df34b45390fa1a3",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ca606527fe97f97b01a1d78761b91bbd3f3e26d004c842b34df34b45390fa1a3"
+    },
+    "avskjæringsforskriften": {
+      "embedding_hash": "e7aae4e014670659ba69d54704cea9624c4a5e659b4d9ddf487ad6fe85cfe79b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e7aae4e014670659ba69d54704cea9624c4a5e659b4d9ddf487ad6fe85cfe79b"
+    },
+    "besøksbidragsloven": {
+      "embedding_hash": "db67093486d2c27c96d8183604f265e5a54dda2421941bdbe3a961a6a084e3ff",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "db67093486d2c27c96d8183604f265e5a54dda2421941bdbe3a961a6a084e3ff"
+    },
+    "betalingssystemloven": {
+      "embedding_hash": "3966351eb8268e57649cf71829e9fe6b1184c470de1880faacc2719bd7a70a2b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3966351eb8268e57649cf71829e9fe6b1184c470de1880faacc2719bd7a70a2b"
+    },
+    "bioteknologiloven-biotl": {
+      "embedding_hash": "8c3737f782c5e119f60e5b32dc30379c0a7a811db6d52c8de6736d1af6b1cece",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8c3737f782c5e119f60e5b32dc30379c0a7a811db6d52c8de6736d1af6b1cece"
+    },
+    "bustøttelova": {
+      "embedding_hash": "25f2c5c65697c1ba9095855422cba485bedaab900cd60e3e24d88f3fb1d9e684",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "25f2c5c65697c1ba9095855422cba485bedaab900cd60e3e24d88f3fb1d9e684"
+    },
+    "cold-response-soneforskrift": {
+      "embedding_hash": "c22f948970cc361cde0ed3b797cc89e1db7e38c65d5dac7a658bc32e6b50a3c7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "c22f948970cc361cde0ed3b797cc89e1db7e38c65d5dac7a658bc32e6b50a3c7"
+    },
+    "dagpengeforskriften": {
+      "embedding_hash": "7a2457f16f42930ce3adc68a6c161b9abb5082bb7ce3b40d260bcf51d84bae73",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "7a2457f16f42930ce3adc68a6c161b9abb5082bb7ce3b40d260bcf51d84bae73"
+    },
+    "dekkmerkeforskriften": {
+      "embedding_hash": "b64361feb0c928b0c9aa6120dec63b5995391662860f9f5f04f80746f1216c73",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b64361feb0c928b0c9aa6120dec63b5995391662860f9f5f04f80746f1216c73"
+    },
+    "dyrehelsepersonelloven": {
+      "embedding_hash": "46072f94cf3d12adabbcca1e05c1fb655e4d6ba8b6cc10e5d2c92168f2a16a89",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "46072f94cf3d12adabbcca1e05c1fb655e4d6ba8b6cc10e5d2c92168f2a16a89"
+    },
+    "dyrevelferdsloven": {
+      "embedding_hash": "092263a5afb4e9584d073624200a6666832e3e181e8009fe5c8917e04b37653e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "092263a5afb4e9584d073624200a6666832e3e181e8009fe5c8917e04b37653e"
+    },
+    "eforvaltningsforskriften": {
+      "embedding_hash": "f1c649ed9e9db1ee9becaa57e9e5e5ae40554a5318ecaa593dccece2311a2520",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "f1c649ed9e9db1ee9becaa57e9e5e5ae40554a5318ecaa593dccece2311a2520"
+    },
+    "ekspropriasjonserstatningslova-orvl": {
+      "embedding_hash": "0c2725e0ef852ce62ac8e216156ba488b8ac8107fb08286f9ad2c09e089a44cb",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "0c2725e0ef852ce62ac8e216156ba488b8ac8107fb08286f9ad2c09e089a44cb"
+    },
+    "folkehøgskoleloven": {
+      "embedding_hash": "473d30d4365854e4051c48c50442cd9048dc4ed2f73da25054609bdee037db06",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "473d30d4365854e4051c48c50442cd9048dc4ed2f73da25054609bdee037db06"
+    },
+    "folkeregisterforskriften": {
+      "embedding_hash": "e848abb4af8a256f503c35f8d85a2a72509924a6a53f662a4a0a14de92026fda",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e848abb4af8a256f503c35f8d85a2a72509924a6a53f662a4a0a14de92026fda"
+    },
+    "formidlingsforskriften": {
+      "embedding_hash": "5a8a29e3ced13a315050f33537f437c9fdbc086ef00128be06c79a01450c29b5",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5a8a29e3ced13a315050f33537f437c9fdbc086ef00128be06c79a01450c29b5"
+    },
+    "forpaktingslova-fpl": {
+      "embedding_hash": "13e190ce0a968559bce3f2405054c9a4c9a00aa76191fe378a4f5515b7eb02b7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "13e190ce0a968559bce3f2405054c9a4c9a00aa76191fe378a4f5515b7eb02b7"
+    },
+    "forskr-om-administrasjon-av-fiskerpensjonstrygd": {
+      "embedding_hash": "8fceade4fa0f21db7197ff2ad16eb31aaa089c90a6e261bb8119d1c0aec6cae3",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8fceade4fa0f21db7197ff2ad16eb31aaa089c90a6e261bb8119d1c0aec6cae3"
+    },
+    "forskr-om-ikke-næringsmessig-transport-av-dyr": {
+      "embedding_hash": "cd4c4590cbefb229308f16d4a90ae5c74c35a014eeb91cb021f1d6426ab0a828",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "cd4c4590cbefb229308f16d4a90ae5c74c35a014eeb91cb021f1d6426ab0a828"
+    },
+    "forskr-om-overg-regler-for-privat-pensjonsordn": {
+      "embedding_hash": "69362ac28d42b9f21a7ef5df89639528b901156ffdd2f00e045bf14e4fd30c94",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "69362ac28d42b9f21a7ef5df89639528b901156ffdd2f00e045bf14e4fd30c94"
+    },
+    "forskr-om-skogbruksplanlegging-med-miljøreg": {
+      "embedding_hash": "ccac239bbe722e8e4722308a42acb25c129bf4b04961a294d8919b4cecc54fdd",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ccac239bbe722e8e4722308a42acb25c129bf4b04961a294d8919b4cecc54fdd"
+    },
+    "forskrift-om-aml-og-ikke-arbeidstakere": {
+      "embedding_hash": "5b7f24cb2d8da64fea57102347fc4122b478dd005d369824b142038b3faa1a1f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5b7f24cb2d8da64fea57102347fc4122b478dd005d369824b142038b3faa1a1f"
+    },
+    "forskrift-om-anvendelse-av-lov-om-informasjon-om-bestemt-angitte-områder-skjermingsverdige-objekter-og-bunnforhold-på-svalbard-og-jan-mayen": {
+      "embedding_hash": "e77c5fde0c1fd014aa6cf3ed04c5b3abf1fa6270e7a490fc02170ff255516e47",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e77c5fde0c1fd014aa6cf3ed04c5b3abf1fa6270e7a490fc02170ff255516e47"
+    },
+    "forskrift-om-arbeidernes-innflytelse-i-se": {
+      "embedding_hash": "32a1b4db16dfa748726e08192dd49f2808bda8ebd53142f5fd9978ddc03169a0",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "32a1b4db16dfa748726e08192dd49f2808bda8ebd53142f5fd9978ddc03169a0"
+    },
+    "forskrift-om-arbeidsreglement-i-hotellbransjen": {
+      "embedding_hash": "360869567627a70670b9ae217c7924686e05c13bc6e96b3cec6f57080072577e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "360869567627a70670b9ae217c7924686e05c13bc6e96b3cec6f57080072577e"
+    },
+    "forskrift-om-at-ører-med-reinmerke-skal-følge-skinnet-ved-slakt": {
+      "embedding_hash": "4ff626839a24e14543d3c8bf1e39d765cfe12fc618bc72f8906f967a63653419",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4ff626839a24e14543d3c8bf1e39d765cfe12fc618bc72f8906f967a63653419"
+    },
+    "forskrift-om-avskrivning-på-driftsmidler": {
+      "embedding_hash": "300081f146408942fbcb8e7b0d72dcc77c6a49950e7bc4c5295cd2e1229f921e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "300081f146408942fbcb8e7b0d72dcc77c6a49950e7bc4c5295cd2e1229f921e"
+    },
+    "forskrift-om-avtalefestet-pensjon-for-medlemmer-av-statens-pensjonskasse-født-i-1963-eller-senere": {
+      "embedding_hash": "8659522cb44e8487aebf1694115fb6d058fdd67e7e0427099cb1ae725daa2e9a",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8659522cb44e8487aebf1694115fb6d058fdd67e7e0427099cb1ae725daa2e9a"
+    },
+    "forskrift-om-bakkeinspeksjoner-av-luftfartøy": {
+      "embedding_hash": "9ecb534adb0cea6fb0d3466623155a0db643453a4daefd4fa19c7389a00ca27e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "9ecb534adb0cea6fb0d3466623155a0db643453a4daefd4fa19c7389a00ca27e"
+    },
+    "forskrift-om-behandling-av-næringsmidler-med-ioniserende-stråling": {
+      "embedding_hash": "292b2a4792fb8de8bc586b7743e208793d9d0c86a245a59b60673753edb0eecc",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "292b2a4792fb8de8bc586b7743e208793d9d0c86a245a59b60673753edb0eecc"
+    },
+    "forskrift-om-behandling-av-opplysninger-til-totalregnskapet-for-reindriftsnæringen": {
+      "embedding_hash": "7f51153b9c3c0199b297303694912724efc0dd82d6812d80611b61e324214d2f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "7f51153b9c3c0199b297303694912724efc0dd82d6812d80611b61e324214d2f"
+    },
+    "forskrift-om-behandling-av-personopplysninger-i-lånekassen": {
+      "embedding_hash": "0b6163265dfa92f5acfcc2cb2cbabd5d097afd334b0f1796e1d005ef4768d870",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "0b6163265dfa92f5acfcc2cb2cbabd5d097afd334b0f1796e1d005ef4768d870"
+    },
+    "forskrift-om-behandling-av-private-forslag-til-detaljregulering-etter-pbl": {
+      "embedding_hash": "80d16e27d5d183f507c054c4c3a8148c87a8e92d80a000b932ee0909b0fab2c7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "80d16e27d5d183f507c054c4c3a8148c87a8e92d80a000b932ee0909b0fab2c7"
+    },
+    "forskrift-om-bivirkninger-av-kosmetikk": {
+      "embedding_hash": "54e50feb6fcaee63691daabd547ad75d59a8566bf397f2a32d40360e527180e0",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "54e50feb6fcaee63691daabd547ad75d59a8566bf397f2a32d40360e527180e0"
+    },
+    "forskrift-om-bruk-av-vilkår-etter-sosialtjenesteloven": {
+      "embedding_hash": "d43e694fc5b683a03b3bc252f05f06804db7fc9e9d973469f41876fc90cddb91",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d43e694fc5b683a03b3bc252f05f06804db7fc9e9d973469f41876fc90cddb91"
+    },
+    "forskrift-om-delvis-allmenngjøring-av-biloverenskomsten": {
+      "embedding_hash": "52ecf49e38a840bc50bb2c36dce798a58e9738be7ba8d2a67fa105b818f9829f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "52ecf49e38a840bc50bb2c36dce798a58e9738be7ba8d2a67fa105b818f9829f"
+    },
+    "forskrift-om-delvis-anvendelse-av-uhl-for-forsvarets-høyskole-m-m": {
+      "embedding_hash": "473d2a5ce67ca0db53b581b9e8ba65d1ba87dc1037d022ef8823b97538b5e85b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "473d2a5ce67ca0db53b581b9e8ba65d1ba87dc1037d022ef8823b97538b5e85b"
+    },
+    "forskrift-om-det-alm-prisreguleringsfond": {
+      "embedding_hash": "8ad145c5e7b2257331583905c464579f97aac6d7d937c82ddaec93503c92a532",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8ad145c5e7b2257331583905c464579f97aac6d7d937c82ddaec93503c92a532"
+    },
+    "forskrift-om-elektromagnetisk-kompatibilitet": {
+      "embedding_hash": "2642b5145638a088779d0c308ad14e6df9b80d9f61faa1dd235c317d0ba0cd3e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "2642b5145638a088779d0c308ad14e6df9b80d9f61faa1dd235c317d0ba0cd3e"
+    },
+    "forskrift-om-elektronisk-faktura-i-offentlige-anskaffelser": {
+      "embedding_hash": "306cb625305d3489ed41ea37164bdb672e59faf0fdf8649eaa4deef30328bf3a",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "306cb625305d3489ed41ea37164bdb672e59faf0fdf8649eaa4deef30328bf3a"
+    },
+    "forskrift-om-elektronisk-stiftelse-og-registrering-av-aksjeselskaper-og-om-elektronisk-registrering-av-utenlandske-foretak-mv": {
+      "embedding_hash": "dcd10039080de48909e5e3e0d61c06a4d9216c3777b6d41e6b73177bf9885e55",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "dcd10039080de48909e5e3e0d61c06a4d9216c3777b6d41e6b73177bf9885e55"
+    },
+    "forskrift-om-elfenbenslav-som-prioritert-art": {
+      "embedding_hash": "4de17abb3cc7a0581756472bb4af15a84d332e98b60b860f73bb6d707d558259",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4de17abb3cc7a0581756472bb4af15a84d332e98b60b860f73bb6d707d558259"
+    },
+    "forskrift-om-erstatning-for-tap-av-tamrein": {
+      "embedding_hash": "d5be0490ee3684f9d9b6287823b4c6c4f57229fc7b3ed25b21e584630de1f0cf",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d5be0490ee3684f9d9b6287823b4c6c4f57229fc7b3ed25b21e584630de1f0cf"
+    },
+    "forskrift-om-et-råd-for-drivstoffberedskap-og-drivstoffnæringens-beredskapsplikter": {
+      "embedding_hash": "4616176fa422933a888d83d3b35c939802d017e5cc63d38cc09b3ee4b81f5beb",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4616176fa422933a888d83d3b35c939802d017e5cc63d38cc09b3ee4b81f5beb"
+    },
+    "forskrift-om-fangstbasert-akvakultur": {
+      "embedding_hash": "b84681b479041b40941d8f179805b7fd9213c8c7a746ed7b71f6ff8257c1a3e7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b84681b479041b40941d8f179805b7fd9213c8c7a746ed7b71f6ff8257c1a3e7"
+    },
+    "forskrift-om-fiskeaktivitet-i-kongsfjorden": {
+      "embedding_hash": "6cf8aa2df117b992f8d6e23115ed443cc6e94da51b2cb79de1b682e6f1075c34",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "6cf8aa2df117b992f8d6e23115ed443cc6e94da51b2cb79de1b682e6f1075c34"
+    },
+    "forskrift-om-fiskevareimport-fra-albania": {
+      "embedding_hash": "3cbf671fb7b0d669bd87ae252026c75f119125933033e3caa46dac834a26299a",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3cbf671fb7b0d669bd87ae252026c75f119125933033e3caa46dac834a26299a"
+    },
+    "forskrift-om-fjernmøter-og-fjernavhør": {
+      "embedding_hash": "dbd50ddc29539b5ab10796e229d9f05f5dc5becadd655e7cf7da278d43bdd123",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "dbd50ddc29539b5ab10796e229d9f05f5dc5becadd655e7cf7da278d43bdd123"
+    },
+    "forskrift-om-flyselskaper-med-driftsforbud": {
+      "embedding_hash": "43ac39ddf9173f408e8c68d0e894d6f0f1fdcc4e7252115ec2649464cf418b44",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "43ac39ddf9173f408e8c68d0e894d6f0f1fdcc4e7252115ec2649464cf418b44"
+    },
+    "forskrift-om-flyværtjeneste-på-norsk-kontinentalsokkel": {
+      "embedding_hash": "ff5c0cbdde1f7b2347d86a2434193970db89b045c4fd84b6d2629a72141e5e24",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ff5c0cbdde1f7b2347d86a2434193970db89b045c4fd84b6d2629a72141e5e24"
+    },
+    "forskrift-om-fond-for-lyd-og-bilde": {
+      "embedding_hash": "8fb87bdd1c725472af708d76923036e031cedd3cbb2cab75fc071faec66ee971",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8fb87bdd1c725472af708d76923036e031cedd3cbb2cab75fc071faec66ee971"
+    },
+    "forskrift-om-forbud-mot-innførsel-av-dyr-og-smitteførende-gjenstander": {
+      "embedding_hash": "30c0546cc0f1801a9130f597578f22c4ed738da49ea079f1e93f2b45a5417a31",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "30c0546cc0f1801a9130f597578f22c4ed738da49ea079f1e93f2b45a5417a31"
+    },
+    "forskrift-om-forbud-mot-markedsføring-distribusjon-og-salg-av-binære-opsjoner-til-ikke-profesjonelle-mv": {
+      "embedding_hash": "e081c1c2ed837ceeb04b7b8efd42f8f43097d138186b331149f9e230148e5831",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e081c1c2ed837ceeb04b7b8efd42f8f43097d138186b331149f9e230148e5831"
+    },
+    "forskrift-om-forelegg-i-vegtrafikksaker": {
+      "embedding_hash": "d70028147a255def42f47805f825255de8d118dd5957ce7a09d5a6d96e0f9324",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d70028147a255def42f47805f825255de8d118dd5957ce7a09d5a6d96e0f9324"
+    },
+    "forskrift-om-frakt-av-last-på-norske-skip-og-lektere": {
+      "embedding_hash": "6c1a25bee4edd3bdd76c4b2a98abfc23a7803ac561a20c7ada0ec61546edd41c",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "6c1a25bee4edd3bdd76c4b2a98abfc23a7803ac561a20c7ada0ec61546edd41c"
+    },
+    "forskrift-om-fredning-av-bjørnøya-naturreservat": {
+      "embedding_hash": "b56538a5b2be5c7928218a576d75009f10d4cfdbf9ba347998caca030f353dbc",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b56538a5b2be5c7928218a576d75009f10d4cfdbf9ba347998caca030f353dbc"
+    },
+    "forskrift-om-fri-rørsle-av-arbeidstakarar-innanfor-eøs-området-mv": {
+      "embedding_hash": "4e8a6b681ee6fa25f8888447d9368c01ffc1b7285db0a75d2a0c392e5bd8f5b7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4e8a6b681ee6fa25f8888447d9368c01ffc1b7285db0a75d2a0c392e5bd8f5b7"
+    },
+    "forskrift-om-førstehandsomsetning-av-fisk-mv": {
+      "embedding_hash": "ff9f308957c28cb08555099af2b2a8e2e22154119cdac19269876c934eb55491",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ff9f308957c28cb08555099af2b2a8e2e22154119cdac19269876c934eb55491"
+    },
+    "forskrift-om-gebyr-for-brudd-på-røykeforbudet-i-private-kjøretøy-med-barn-til-stede": {
+      "embedding_hash": "38d7eec9c98eb0e27ae3f8e45b3d11b886563b26c41ade739d53f44d3d706150",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "38d7eec9c98eb0e27ae3f8e45b3d11b886563b26c41ade739d53f44d3d706150"
+    },
+    "forskrift-om-gebyr-til-luftfartstilsynet-mv": {
+      "embedding_hash": "2de2080995e2fc1737c38d4c50977f434278f9b30eb3b0718114ccafb2028d92",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "2de2080995e2fc1737c38d4c50977f434278f9b30eb3b0718114ccafb2028d92"
+    },
+    "forskrift-om-gjennomføring-av-forordning-eu-nr-305-2013": {
+      "embedding_hash": "7296487b0be6b73336025c36cfa6aad04c7b56d70dc4f3eeea9f4243045f5073",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "7296487b0be6b73336025c36cfa6aad04c7b56d70dc4f3eeea9f4243045f5073"
+    },
+    "forskrift-om-graden-philosophiae-doctor-ved-høgskulen-på-vestlandet": {
+      "embedding_hash": "4451bb8052dca8faa7445ce62d2c806438e8ce1bb1810294b946e022a4e564ac",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4451bb8052dca8faa7445ce62d2c806438e8ce1bb1810294b946e022a4e564ac"
+    },
+    "forskrift-om-grenseverdier-i-f-r": {
+      "embedding_hash": "fa5c249d2bec7eccd139503ccf3a9515f9482c615ba305374c4fe686276d80bc",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "fa5c249d2bec7eccd139503ccf3a9515f9482c615ba305374c4fe686276d80bc"
+    },
+    "forskrift-om-havnestatskontroll": {
+      "embedding_hash": "9bc236a47b268ff0fd8e6f52e09f7076e0619688052c12ab2f3df0ae68e78f8f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "9bc236a47b268ff0fd8e6f52e09f7076e0619688052c12ab2f3df0ae68e78f8f"
+    },
+    "forskrift-om-hold-av-høns-og-kalkun": {
+      "embedding_hash": "64d33dea458c60196104740dd4e00f112db1a919010cfcd5a42a63e45e33cfa9",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "64d33dea458c60196104740dd4e00f112db1a919010cfcd5a42a63e45e33cfa9"
+    },
+    "forskrift-om-hvilke-domstoler-forskrift-om-opptak-i-retten-6-gjelder-for": {
+      "embedding_hash": "44397986595bf560966eeee44cc34d9ea30344de6bb6e02fb26089549475a0b2",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "44397986595bf560966eeee44cc34d9ea30344de6bb6e02fb26089549475a0b2"
+    },
+    "forskrift-om-høyere-yrkesfaglig-utdanning-for-tisip-fagskole": {
+      "embedding_hash": "3ca293aa7ae50a12bd809b3213789a2e71a127573861aefe25c81744aee2aae7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3ca293aa7ae50a12bd809b3213789a2e71a127573861aefe25c81744aee2aae7"
+    },
+    "forskrift-om-internasjonale-regnskapsstandarder": {
+      "embedding_hash": "e5d26ba10e16336fa35694461bf9b7565130c6321bf9656af9b0ef3135832bc9",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e5d26ba10e16336fa35694461bf9b7565130c6321bf9656af9b0ef3135832bc9"
+    },
+    "forskrift-om-kapasitetsjusteringer-for-tillatelser-til-akvakultur-med-matfisk-i-sjø-av-laks-ørret-og-regnbueørret-i-2024": {
+      "embedding_hash": "3d59e98092789decd52c24e108662dc00845e43adb2f99beef9317b1ef8620fe",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3d59e98092789decd52c24e108662dc00845e43adb2f99beef9317b1ef8620fe"
+    },
+    "forskrift-om-kjøre-og-hviletid-og-fartsskriver-for-vegtransport-i-eøs": {
+      "embedding_hash": "6cad44aab51f8db6a1b62283b1937e19c42fd417fd9e20bdb71ce56cac656225",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "6cad44aab51f8db6a1b62283b1937e19c42fd417fd9e20bdb71ce56cac656225"
+    },
+    "forskrift-om-kjøring-med-motorvogn-i-terreng-mv": {
+      "embedding_hash": "3cdc6ed98813ae973a6ca4648de3a280e935a795fa2930875fa267dbe969bd43",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3cdc6ed98813ae973a6ca4648de3a280e935a795fa2930875fa267dbe969bd43"
+    },
+    "forskrift-om-klagenemnd-for-offentlige-anskaffelser": {
+      "embedding_hash": "b93b0001a0e553f394cf27afce8ebec89fbf9835874291700d60a83cc33785f4",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b93b0001a0e553f394cf27afce8ebec89fbf9835874291700d60a83cc33785f4"
+    },
+    "forskrift-om-klageorganer-for-forbrukersaker": {
+      "embedding_hash": "097a047de4cd7751a6793a096c794ea49525f9af517d2c75b7112ba4cec99b37",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "097a047de4cd7751a6793a096c794ea49525f9af517d2c75b7112ba4cec99b37"
+    },
+    "forskrift-om-klippeblåvinge-som-prioritert-art": {
+      "embedding_hash": "f52f7661a70d1504d165cc2a06cf5cb077d4fad67824be794263d24430d885e6",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "f52f7661a70d1504d165cc2a06cf5cb077d4fad67824be794263d24430d885e6"
+    },
+    "forskrift-om-kompensasjon-for-produksjonstap-pga-mrsa": {
+      "embedding_hash": "434e5ddfe643661913587e0fef4f6cebb5c5c3b60172cb9105cff93c382f34d9",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "434e5ddfe643661913587e0fef4f6cebb5c5c3b60172cb9105cff93c382f34d9"
+    },
+    "forskrift-om-kontrollutvalg-og-revisjon": {
+      "embedding_hash": "7f8df3f2eff76aff5de28040e1c0a921c0c50d97717de0a187de55a90c97bcec",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "7f8df3f2eff76aff5de28040e1c0a921c0c50d97717de0a187de55a90c97bcec"
+    },
+    "forskrift-om-kran-og-løft-på-flyttbare-innretninger": {
+      "embedding_hash": "ceed2c0582e57efad7e26a605370aa2e875f1e27ff465d3913b671c88b3ec785",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ceed2c0582e57efad7e26a605370aa2e875f1e27ff465d3913b671c88b3ec785"
+    },
+    "forskrift-om-krav-til-måleflasker": {
+      "embedding_hash": "005ed4f62e924afb823206fb8baeec1c78e51f9188c7af002684e62009b8630a",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "005ed4f62e924afb823206fb8baeec1c78e51f9188c7af002684e62009b8630a"
+    },
+    "forskrift-om-krav-til-nullutslipp-av-klimagasser-ved-offentlig-anskaffelse-av-sjøtransport": {
+      "embedding_hash": "9fc9c558f77ce24377560d0b2c885ab474ae6d26ddba262f86370f68c2c7228d",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "9fc9c558f77ce24377560d0b2c885ab474ae6d26ddba262f86370f68c2c7228d"
+    },
+    "forskrift-om-krav-til-slepebåt-i-territorialfarvannet": {
+      "embedding_hash": "faec4028e5e8057ddcf4466b29f76de2cc11cb604b6c59308e2350e19e63a2d8",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "faec4028e5e8057ddcf4466b29f76de2cc11cb604b6c59308e2350e19e63a2d8"
+    },
+    "forskrift-om-kvalitet-på-melk": {
+      "embedding_hash": "ae05df470f0090ec37c5c9113190b96e5c49edd1117e84a589e95973752cf1bb",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ae05df470f0090ec37c5c9113190b96e5c49edd1117e84a589e95973752cf1bb"
+    },
+    "forskrift-om-lakselusbekjempelse": {
+      "embedding_hash": "96c3df0be65e802597da0ed095fdb6a02e6c91d814aa620b8ac434365161b0a5",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "96c3df0be65e802597da0ed095fdb6a02e6c91d814aa620b8ac434365161b0a5"
+    },
+    "forskrift-om-lisens-til-helsepersonell": {
+      "embedding_hash": "348d858dfb99e022995e416aaabf771e2d215b7a163e5def57239faaa5940484",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "348d858dfb99e022995e416aaabf771e2d215b7a163e5def57239faaa5940484"
+    },
+    "forskrift-om-midl-kompensasjonsordning-i-forbindelse-med-avlysning-stenging-eller-utsettelse-av-kulturarrangementer-planlagt-avholdt-i-september-2020-som-følge-av-covid-19-utbruddet": {
+      "embedding_hash": "ef7b1370371cdf337a42cb65a38fa13aa78ca71722a430dd398898d2575c9c65",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ef7b1370371cdf337a42cb65a38fa13aa78ca71722a430dd398898d2575c9c65"
+    },
+    "forskrift-om-midler-til-satsing-på-bærekraftig-matproduksjon-og-verdiskaping-i-nord": {
+      "embedding_hash": "c94655749ce25c0ccae30e11e0b08e75a353d31bc70d48881f86ec3b69b0c53b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "c94655749ce25c0ccae30e11e0b08e75a353d31bc70d48881f86ec3b69b0c53b"
+    },
+    "forskrift-om-militær-luftfartsmyndighets-krav-til-militære-landingsplasser": {
+      "embedding_hash": "3eb8a8fc84efda57059cbcc6f4e96399486431d3d5344c661d6749150c408e24",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3eb8a8fc84efda57059cbcc6f4e96399486431d3d5344c661d6749150c408e24"
+    },
+    "forskrift-om-nasjonal-retningslinje-for-helsesykepleierutdanning": {
+      "embedding_hash": "e99cb633354be0069de28443a006523483f40e865be1cb28cc9cfecbd38c90b5",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e99cb633354be0069de28443a006523483f40e865be1cb28cc9cfecbd38c90b5"
+    },
+    "forskrift-om-nasjonal-retningslinje-for-tannpleierutdanning": {
+      "embedding_hash": "63336c33a46c9bbbd8ba5c50388550a47d13e1278c4405835a982539fb4a70f1",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "63336c33a46c9bbbd8ba5c50388550a47d13e1278c4405835a982539fb4a70f1"
+    },
+    "forskrift-om-næringsmiddelenzymer": {
+      "embedding_hash": "f77a63198279864c51033497be583eccc6a6b294f3be8fad7f0e5881515338ee",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "f77a63198279864c51033497be583eccc6a6b294f3be8fad7f0e5881515338ee"
+    },
+    "forskrift-om-offentlig-kontroll-dyrevelferd-ved-transport-av-levende-dyr-i-dyretransportfartøyer-forordning-2023-372-og-forordning-2023-842": {
+      "embedding_hash": "c23a64a42b42a11e45eec359e7c43264c96a83ef6fe5316c79013f2b84323bcb",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "c23a64a42b42a11e45eec359e7c43264c96a83ef6fe5316c79013f2b84323bcb"
+    },
+    "forskrift-om-opplysningsplikt-og-angrerett-mv": {
+      "embedding_hash": "36244915935fa9f53038fba2e890b997039a419f598ac452478175c73d1d3a1c",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "36244915935fa9f53038fba2e890b997039a419f598ac452478175c73d1d3a1c"
+    },
+    "forskrift-om-opprettelse-av-et-harmonisert-europeisk-rapporteringssystem-for-sjøfart": {
+      "embedding_hash": "a8c44d8f5c53c7c94920a308eddc006aaf450b662a20a8f8782da1b502622e0a",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "a8c44d8f5c53c7c94920a308eddc006aaf450b662a20a8f8782da1b502622e0a"
+    },
+    "forskrift-om-opptak-mv-ved-fagskolen-aldring-og-helse": {
+      "embedding_hash": "dea8213c025939d4e3486f248936a5f93e6ff1878344c7eaf7112c7cd90e9bca",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "dea8213c025939d4e3486f248936a5f93e6ff1878344c7eaf7112c7cd90e9bca"
+    },
+    "forskrift-om-opptak-studier-og-eksamen-ved-designinstituttet": {
+      "embedding_hash": "3434d55aaa802637f772a3486dfba749af9766200cb8bb09e257b4eba762f007",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3434d55aaa802637f772a3486dfba749af9766200cb8bb09e257b4eba762f007"
+    },
+    "forskrift-om-opptak-til-bachelorutdanningen-ved-politihøgskolen": {
+      "embedding_hash": "43380aa48c92f00d143642e07c007dc8b37f4e35ddd431e7d391d755c40277ef",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "43380aa48c92f00d143642e07c007dc8b37f4e35ddd431e7d391d755c40277ef"
+    },
+    "forskrift-om-overgangsregler-i-forbindelse-med-endringer-i-folketrygdloven-15-6-og-15-8-fra-1-februar-2024": {
+      "embedding_hash": "49f44be99006434168978fe37fb8bf2fb5f0c80597d45569e3c51c3564b3be39",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "49f44be99006434168978fe37fb8bf2fb5f0c80597d45569e3c51c3564b3be39"
+    },
+    "forskrift-om-planområdene-på-svalbard-mv": {
+      "embedding_hash": "2f7d099fb8b63d3efbce29a58c664856628f16c80ad90eda41260a685fceb4c2",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "2f7d099fb8b63d3efbce29a58c664856628f16c80ad90eda41260a685fceb4c2"
+    },
+    "forskrift-om-politiattest-iht-arbeidsmarkedsloven": {
+      "embedding_hash": "8c62eb8248147f8ac097c6507af3eb0da1b5acd5eaab26c758e3d1d90b0935b1",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8c62eb8248147f8ac097c6507af3eb0da1b5acd5eaab26c758e3d1d90b0935b1"
+    },
+    "forskrift-om-prikkbelastning": {
+      "embedding_hash": "349272fb1382b6b098df29f65241ccb53c13628ac9c8ddec6fd4cad6bc6045aa",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "349272fb1382b6b098df29f65241ccb53c13628ac9c8ddec6fd4cad6bc6045aa"
+    },
+    "forskrift-om-produktavgift-til-folketrygden": {
+      "embedding_hash": "028d979ff63e4e271df40edfc72339b55ecd4dd9fd543bd2965ee3b7b4b58909",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "028d979ff63e4e271df40edfc72339b55ecd4dd9fd543bd2965ee3b7b4b58909"
+    },
+    "forskrift-om-prøving-m-v-av-containere": {
+      "embedding_hash": "97fff2f96bd23460bc177546bb6755e6c7e55f49939263451b33122d640bf91e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "97fff2f96bd23460bc177546bb6755e6c7e55f49939263451b33122d640bf91e"
+    },
+    "forskrift-om-rapportering-av-fangster-fra-turistfiskevirksomheter": {
+      "embedding_hash": "51a2964af436cb4477599fe669da5d8d07e29a7c7bb16bd03034f0a1f10cd9a2",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "51a2964af436cb4477599fe669da5d8d07e29a7c7bb16bd03034f0a1f10cd9a2"
+    },
+    "forskrift-om-redusert-kontroll-av-importerte-næringsmidler": {
+      "embedding_hash": "b3951fceea907309772c6b5c1aab82272fac6e14dac3744f6a621d1500864671",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b3951fceea907309772c6b5c1aab82272fac6e14dac3744f6a621d1500864671"
+    },
+    "forskrift-om-regulering-av-fisket-etter-kolmule-i-2026": {
+      "embedding_hash": "31c7dd906fcba29445b38452bfc9ca1831e80159666fbefaa4b4d2756840e744",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "31c7dd906fcba29445b38452bfc9ca1831e80159666fbefaa4b4d2756840e744"
+    },
+    "forskrift-om-regulering-av-fisket-etter-makrell-i-2026": {
+      "embedding_hash": "961a852a7c158406b43af963fe496c7caa35e1bd97e8a79bfe2593b05c3fba9e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "961a852a7c158406b43af963fe496c7caa35e1bd97e8a79bfe2593b05c3fba9e"
+    },
+    "forskrift-om-regulering-av-fisket-etter-vassild-og-strømsild-i-2026": {
+      "embedding_hash": "0b6cc92fd5d24d3c9ee740c4f0b82daa35ef95591d193ee1a4149a5988456ebe",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "0b6cc92fd5d24d3c9ee740c4f0b82daa35ef95591d193ee1a4149a5988456ebe"
+    },
+    "forskrift-om-rekvirering-og-utlevering-av-legemidler-m-m": {
+      "embedding_hash": "de4f269ba2c0f2b1c7134b6e015eb22cc5d0776002a1683adcb8204bfa8c6a8e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "de4f269ba2c0f2b1c7134b6e015eb22cc5d0776002a1683adcb8204bfa8c6a8e"
+    },
+    "forskrift-om-representasjon-av-begge-kjønn": {
+      "embedding_hash": "0a835c8e71ba859f35666278c447f7897f3c87308ba3e62b50465f60158290ea",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "0a835c8e71ba859f35666278c447f7897f3c87308ba3e62b50465f60158290ea"
+    },
+    "forskrift-om-restriktive-tiltak-mot-visse-personer-tunisia": {
+      "embedding_hash": "2bddf911ebe128010854a4ac9156b99db6ef0595989c36676ccf339bc85d5749",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "2bddf911ebe128010854a4ac9156b99db6ef0595989c36676ccf339bc85d5749"
+    },
+    "forskrift-om-rettspsykiatriske-undersøkelser-og-sakkyndige": {
+      "embedding_hash": "32466fea080aba3e176798f7d1869429a1030dbfdaf4e558933fef505acf90d7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "32466fea080aba3e176798f7d1869429a1030dbfdaf4e558933fef505acf90d7"
+    },
+    "forskrift-om-rød-skogfrue-som-prioritert-art": {
+      "embedding_hash": "d4fe735ef3a705b5d4d061527b1c588076f9651961857e3fd2007553831bae8f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d4fe735ef3a705b5d4d061527b1c588076f9651961857e3fd2007553831bae8f"
+    },
+    "forskrift-om-samordning-pensjons-og-trygdeytelser-ved-afp": {
+      "embedding_hash": "42a3cc5205e6a9ae433c455a5ab90cd4eda24e2e5bc2cc0b92cbbbcb0c93719b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "42a3cc5205e6a9ae433c455a5ab90cd4eda24e2e5bc2cc0b92cbbbcb0c93719b"
+    },
+    "forskrift-om-samvær-med-tilsyn-etter-barnelova": {
+      "embedding_hash": "a06c4370e6810b7d8b88cf4752cf9da2cc006e293a1f3a885f95ebd0a5740fe9",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "a06c4370e6810b7d8b88cf4752cf9da2cc006e293a1f3a885f95ebd0a5740fe9"
+    },
+    "forskrift-om-sanksjoner-og-tiltak-den-sentralafrikanske-republikk": {
+      "embedding_hash": "6700fac328eb29199a799aed14f3344821eeb781d5df29a317a33fe2f19713b0",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "6700fac328eb29199a799aed14f3344821eeb781d5df29a317a33fe2f19713b0"
+    },
+    "forskrift-om-satser-for-overlastgebyr": {
+      "embedding_hash": "37b051212614581118a6ba56a48fc477e3d7ca65f7fe9dba95fa03f832d4e8e8",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "37b051212614581118a6ba56a48fc477e3d7ca65f7fe9dba95fa03f832d4e8e8"
+    },
+    "forskrift-om-satser-for-tilskudd-til-frakt-av-slaktedyr": {
+      "embedding_hash": "9919c31d6d4283d6d9ecb9ef2c31d8ea4a456740279149c1814d5d17ce577d71",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "9919c31d6d4283d6d9ecb9ef2c31d8ea4a456740279149c1814d5d17ce577d71"
+    },
+    "forskrift-om-sikkerhet-og-tekniske-forhold-ved-jernbanen": {
+      "embedding_hash": "969ba4e27b1965df31fbab9dfda8654256a67ce03c0954902636f5be97e400ee",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "969ba4e27b1965df31fbab9dfda8654256a67ce03c0954902636f5be97e400ee"
+    },
+    "forskrift-om-skip-som-bruker-drivstoff-med-flammepunkt-under-60-c": {
+      "embedding_hash": "53c6d00eca7181ffc00bfc834876ce06677ede222bd2166dc20b30bd2dbb656c",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "53c6d00eca7181ffc00bfc834876ce06677ede222bd2166dc20b30bd2dbb656c"
+    },
+    "forskrift-om-studier-og-eksamen-ved-nord-universitet": {
+      "embedding_hash": "0f0e1b2fc3fb8101c714f84c249dd4193d98922d779c49e0db03371f2b7dc3fc",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "0f0e1b2fc3fb8101c714f84c249dd4193d98922d779c49e0db03371f2b7dc3fc"
+    },
+    "forskrift-om-studier-og-eksamen-ved-politihøgskolen-2": {
+      "embedding_hash": "584baa5073d567db9185c47527438145636cf963e4016f92140aaa3e312df1bc",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "584baa5073d567db9185c47527438145636cf963e4016f92140aaa3e312df1bc"
+    },
+    "forskrift-om-studium-ved-fagskulen-vestland": {
+      "embedding_hash": "b6904af271cf31dcdd8fdd3893789b6d483734f3a264ace891444c3374bf57d1",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b6904af271cf31dcdd8fdd3893789b6d483734f3a264ace891444c3374bf57d1"
+    },
+    "forskrift-om-stønad-til-hjelpemidler-mv": {
+      "embedding_hash": "ceb325ade1da70ed579b4ae831415e85e96d37ce3b2d224d45beda68ac58a575",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ceb325ade1da70ed579b4ae831415e85e96d37ce3b2d224d45beda68ac58a575"
+    },
+    "forskrift-om-tidligpensjon-i-reindriften": {
+      "embedding_hash": "d0a9480cc459a82671caa1ebb8321de30debf13ea824df2bc94f499d4a054df0",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d0a9480cc459a82671caa1ebb8321de30debf13ea824df2bc94f499d4a054df0"
+    },
+    "forskrift-om-tilbakebetaling-av-utdanningslån": {
+      "embedding_hash": "ccefdf786825a9b656372dcb892d8f662bc47ed62ab072736e3d2941f1be5d0b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ccefdf786825a9b656372dcb892d8f662bc47ed62ab072736e3d2941f1be5d0b"
+    },
+    "forskrift-om-tilbakebetaling-av-utdanningslån-2022": {
+      "embedding_hash": "1818a33e22709d9e917510b1ab307a658b0e8e30d68fd5fa9cb6437c5b664296",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "1818a33e22709d9e917510b1ab307a658b0e8e30d68fd5fa9cb6437c5b664296"
+    },
+    "forskrift-om-tillitsmannsutvalg-m-m": {
+      "embedding_hash": "f15a8980a7fd633fc9b4062beca8f616c860ac17cec44aa120c7f9403cae6d46",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "f15a8980a7fd633fc9b4062beca8f616c860ac17cec44aa120c7f9403cae6d46"
+    },
+    "forskrift-om-tilskudd-til-frivilligsentraler": {
+      "embedding_hash": "25535a31e07d4d1510cd98014fc9ac1a6a8baed06b6f6761957e0674392ee723",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "25535a31e07d4d1510cd98014fc9ac1a6a8baed06b6f6761957e0674392ee723"
+    },
+    "forskrift-om-tilskudd-til-tiltak-mot-menneskehandel-og-prostitusjon": {
+      "embedding_hash": "d75046ee492f32c0489aca1d058a80e857e0d3ba99a98b508457a5832be2e110",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d75046ee492f32c0489aca1d058a80e857e0d3ba99a98b508457a5832be2e110"
+    },
+    "forskrift-om-tilskudd-ved-inseminering-av-storfe-m-m": {
+      "embedding_hash": "227cd2fae86362ddd37401399a9a50b6c69eaf72c72561a3d29ab4a387b8ba74",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "227cd2fae86362ddd37401399a9a50b6c69eaf72c72561a3d29ab4a387b8ba74"
+    },
+    "forskrift-om-tilskuddsordning-forvaltet-av-barentssekretariatet-iks": {
+      "embedding_hash": "c3b9952cc3f3530efa19f38b7362fd65b6e285aea3981c9d7c1629c7b06b4f5e",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "c3b9952cc3f3530efa19f38b7362fd65b6e285aea3981c9d7c1629c7b06b4f5e"
+    },
+    "forskrift-om-tiltaks-og-grenseverdier": {
+      "embedding_hash": "04ae707dd9e9743cfea5ccbc337255009896047693da5bb8adb059a8020d7836",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "04ae707dd9e9743cfea5ccbc337255009896047693da5bb8adb059a8020d7836"
+    },
+    "forskrift-om-trafikkflytstyring": {
+      "embedding_hash": "03683465f6faa35604677e0661b5def53ab97996ec324039f9ff752a5f111ade",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "03683465f6faa35604677e0661b5def53ab97996ec324039f9ff752a5f111ade"
+    },
+    "forskrift-om-tvisteløsningsnemnd-etter-aml": {
+      "embedding_hash": "ea068fb094ddd3e6630960fd6ffacd7ddf1ce8fe2493548aa3e289b407bc805b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ea068fb094ddd3e6630960fd6ffacd7ddf1ce8fe2493548aa3e289b407bc805b"
+    },
+    "forskrift-om-ubemannede-luftfartøyer": {
+      "embedding_hash": "8153a8162c63e4799865677315dcf85df110b465d1cc8f8e278b36314b8f50e9",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8153a8162c63e4799865677315dcf85df110b465d1cc8f8e278b36314b8f50e9"
+    },
+    "forskrift-om-unntak-fra-arbeidsmiljøloven-med-tilhørende-forskrifter-for-sivil-luftfart-mv": {
+      "embedding_hash": "18be1f16e69a0eb0b28868a92f92c6ad64aee4bd4b671b38c60a6fbddef49b88",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "18be1f16e69a0eb0b28868a92f92c6ad64aee4bd4b671b38c60a6fbddef49b88"
+    },
+    "forskrift-om-unntak-fra-kravet-til-bruk-av-flyteutstyr": {
+      "embedding_hash": "c687bea0d79454dc64dbaf47e37d5aaeb9780177ef2dd6fd80246598f2d58d27",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "c687bea0d79454dc64dbaf47e37d5aaeb9780177ef2dd6fd80246598f2d58d27"
+    },
+    "forskrift-om-urimelig-handelspraksis": {
+      "embedding_hash": "8bf178a2d6b4cd66347bd7ef7410436fce8d149d684e7beb27cc66242ab9e76d",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8bf178a2d6b4cd66347bd7ef7410436fce8d149d684e7beb27cc66242ab9e76d"
+    },
+    "forskrift-om-utfyllende-regler-til-det-forenklede-solvenskapitalkravet-for-pensjonskasser": {
+      "embedding_hash": "f01cffbe493aee72fd86f580424ae5caadafd6cc141505d6609553d8fede4508",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "f01cffbe493aee72fd86f580424ae5caadafd6cc141505d6609553d8fede4508"
+    },
+    "forskrift-om-utlendingers-fiske-ved-jan-mayen": {
+      "embedding_hash": "1382bc6c8bc6b4ae3696fec7e5e1b9b1f8477109c8445c390a3409ffb217a1e7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "1382bc6c8bc6b4ae3696fec7e5e1b9b1f8477109c8445c390a3409ffb217a1e7"
+    },
+    "forskrift-om-utmåling-av-tvangsmulkt-og-overtredelsesgebyr": {
+      "embedding_hash": "d00b9c95bc1c69a1d4d5d10cb23256579b334aba5589f43c85d17007711e5380",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d00b9c95bc1c69a1d4d5d10cb23256579b334aba5589f43c85d17007711e5380"
+    },
+    "forskrift-om-utskriving-m-v-av-terminskatt": {
+      "embedding_hash": "283e83081d95c4c2b0b4e08eb48c751a86580f9cfe307dbd7822ee35f9515a56",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "283e83081d95c4c2b0b4e08eb48c751a86580f9cfe307dbd7822ee35f9515a56"
+    },
+    "forskrift-om-utstyr-mv-i-eksplosjonsfarlig-område": {
+      "embedding_hash": "4bfe061ddb98e5e578d00ce609b9e71222deb04538adc407260b269e3bdf2302",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4bfe061ddb98e5e578d00ce609b9e71222deb04538adc407260b269e3bdf2302"
+    },
+    "forskrift-om-utstyr-til-lufttrafikkstyring": {
+      "embedding_hash": "5d9f08fa6c952cdce515df18e3bb4f685a82148d6a605492bbfc1051431c031c",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5d9f08fa6c952cdce515df18e3bb4f685a82148d6a605492bbfc1051431c031c"
+    },
+    "forskrift-om-utvidelse-av-akvakulturanlegg-mv": {
+      "embedding_hash": "5b254ec4844df2d6e3eef685d28c63d634752a60bcc0cc70610c402dcfc39316",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5b254ec4844df2d6e3eef685d28c63d634752a60bcc0cc70610c402dcfc39316"
+    },
+    "forskrift-om-vektårsavgift": {
+      "embedding_hash": "4aae38adfac8d244ebf08fca06be1849983dd5d4514263e345c6d83f98baaffc",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4aae38adfac8d244ebf08fca06be1849983dd5d4514263e345c6d83f98baaffc"
+    },
+    "forskrift-om-vern-av-rein-frå-jotunheimen-rein-fra-jotunheimen-som-geografisk-nemning": {
+      "embedding_hash": "6d1ceb0c89c582665562607cbefd1bdd8e7a2ffa55d4b7fde115f4c1b4f16274",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "6d1ceb0c89c582665562607cbefd1bdd8e7a2ffa55d4b7fde115f4c1b4f16274"
+    },
+    "forskrift-om-vitamintilsetning-mv-til-næringsmidler": {
+      "embedding_hash": "e8964b67dd8b6c7a9d430604bad40d3d398f17c81cebd59568b3cdea49914b7a",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e8964b67dd8b6c7a9d430604bad40d3d398f17c81cebd59568b3cdea49914b7a"
+    },
+    "forskrift-om-å-begrense-utslipp-fra-bygge-og-anleggsplasser": {
+      "embedding_hash": "5a8080dad6b34739db11d387c61f742be075e4307cdcc84a625e4bfc6bdf1e3f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5a8080dad6b34739db11d387c61f742be075e4307cdcc84a625e4bfc6bdf1e3f"
+    },
+    "frivillighetsregisterloven": {
+      "embedding_hash": "9db8276572e48330dae1027c49864730ae059dc042909d313c868e9c29e106bf",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "9db8276572e48330dae1027c49864730ae059dc042909d313c868e9c29e106bf"
+    },
+    "førerkortforskriften": {
+      "embedding_hash": "62cb49289fcd8a6e6271a425be004f831bfce7fc1cedc9f4adb7030bfa816dc9",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "62cb49289fcd8a6e6271a425be004f831bfce7fc1cedc9f4adb7030bfa816dc9"
+    },
+    "geodataforskriften": {
+      "embedding_hash": "d81769d338243a02bf846fd86d87144accd460cd945d7815f0e9fb9011bc3bc2",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d81769d338243a02bf846fd86d87144accd460cd945d7815f0e9fb9011bc3bc2"
+    },
+    "ib-forskriften": {
+      "embedding_hash": "51ed656810f2aa9fc441e9e38087ed66ce46368ae97e99eefec46125beb199f5",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "51ed656810f2aa9fc441e9e38087ed66ce46368ae97e99eefec46125beb199f5"
+    },
+    "ikrafttr-mv-av-lov-2003-43-endr-i-vpfl": {
+      "embedding_hash": "6bca25d7e216d80300a44045b6b1d85ba6ce54beeac465ab294dff20da833cc4",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "6bca25d7e216d80300a44045b6b1d85ba6ce54beeac465ab294dff20da833cc4"
+    },
+    "klimakvoteforskriften": {
+      "embedding_hash": "64879b2b8f7b017fec1dd358e84286cc31b4cc75b43f899e016ea9f08b28f5a6",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "64879b2b8f7b017fec1dd358e84286cc31b4cc75b43f899e016ea9f08b28f5a6"
+    },
+    "kor-forskriften": {
+      "embedding_hash": "9094e997b0f9c7182fca0e56059509f6cdee259dc610b244c83975c132caf4dc",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "9094e997b0f9c7182fca0e56059509f6cdee259dc610b244c83975c132caf4dc"
+    },
+    "koronakommisjonsloven": {
+      "embedding_hash": "258f9d54c1d19335de4d48821222f3d1d0ecd6f3cad9282122aeed8b7cece604",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "258f9d54c1d19335de4d48821222f3d1d0ecd6f3cad9282122aeed8b7cece604"
+    },
+    "kravforskriften": {
+      "embedding_hash": "a2aa6dd7785a883dadef5efb20f4bbf1c917d18978e45015350af2096ef0c3a9",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "a2aa6dd7785a883dadef5efb20f4bbf1c917d18978e45015350af2096ef0c3a9"
+    },
+    "laksetildelingsforskriften": {
+      "embedding_hash": "07bf51826dfd2ad85d186be370732aa1dc90a4c70ce50a080e9dc3ea5f9040f4",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "07bf51826dfd2ad85d186be370732aa1dc90a4c70ce50a080e9dc3ea5f9040f4"
+    },
+    "legemiddelforskriften": {
+      "embedding_hash": "0c741888572fbaef88c21b679cea3f6dde3f3fa03fb1811f6b7f9f44e714d414",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "0c741888572fbaef88c21b679cea3f6dde3f3fa03fb1811f6b7f9f44e714d414"
+    },
+    "lov-om-bevaring-og-bærekraftig-bruk-av-marint-naturmangfold-i-områder-utenfor-nasjonal-jurisdiksjon": {
+      "embedding_hash": "e1ea3fc65c6ee853bc8d9ea39ac0dc8ac895d3ed7f5ccce02d6bd51db3f98452",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e1ea3fc65c6ee853bc8d9ea39ac0dc8ac895d3ed7f5ccce02d6bd51db3f98452"
+    },
+    "lov-om-reservasjonssystemer-for-flyreiser-mv": {
+      "embedding_hash": "aea43f57bc0418a65813d68972aa0491c1f50073aafe3db93a970c17cd4cf178",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "aea43f57bc0418a65813d68972aa0491c1f50073aafe3db93a970c17cd4cf178"
+    },
+    "lov-om-rituell-omskjæring-av-gutter": {
+      "embedding_hash": "8656c14c0ad35dfdb2dfa837d8b697d5557154a4ef3502d1c1199e4738bacafe",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "8656c14c0ad35dfdb2dfa837d8b697d5557154a4ef3502d1c1199e4738bacafe"
+    },
+    "lov-om-røystingsrådgjevarar": {
+      "embedding_hash": "b9c9d8aee13c0af27ebd9b9e78922bdf2ded21f63c0e2f90a8404edf1bb2893a",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b9c9d8aee13c0af27ebd9b9e78922bdf2ded21f63c0e2f90a8404edf1bb2893a"
+    },
+    "lov-om-supplerande-stønad-ved-kort-butid": {
+      "embedding_hash": "a2cf03a92e9f4ad2ac96c86fb910c63ef27057c04fd584483bccbd8179af760c",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "a2cf03a92e9f4ad2ac96c86fb910c63ef27057c04fd584483bccbd8179af760c"
+    },
+    "lov-om-tilskudd-til-sysselsetting-av-arbeidstakere-til-sjøs": {
+      "embedding_hash": "5143f1dffc56a65d5761ba677fb44a3198599f92315bc565127b3905f4d747c5",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5143f1dffc56a65d5761ba677fb44a3198599f92315bc565127b3905f4d747c5"
+    },
+    "matinformasjonsforskriften": {
+      "embedding_hash": "5e19be7aad83212e4c1001daecf3816415af9cc76b6e59dd461d2993b37af31b",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5e19be7aad83212e4c1001daecf3816415af9cc76b6e59dd461d2993b37af31b"
+    },
+    "mellombels-forskrift-om-sensurfristar-ved-norges-handelshøyskole-nhh": {
+      "embedding_hash": "4050f84bdedb87f1ea6c223e4a09ba8b952687ade6b241a97736ff37736aeb05",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "4050f84bdedb87f1ea6c223e4a09ba8b952687ade6b241a97736ff37736aeb05"
+    },
+    "opptaksforskrifta": {
+      "embedding_hash": "d5fadef715e37961be7df1fe33b7bf63ee3717be65e0cfee55e16bb252ece558",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "d5fadef715e37961be7df1fe33b7bf63ee3717be65e0cfee55e16bb252ece558"
+    },
+    "otp-loven": {
+      "embedding_hash": "e1c114cf03d35ae7f5ae9b11c599294c5a8726850f3ff227ab7069921f2e5751",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e1c114cf03d35ae7f5ae9b11c599294c5a8726850f3ff227ab7069921f2e5751"
+    },
+    "overgangsregler-om-behandling-av-personopplysninger": {
+      "embedding_hash": "2877d0146047522c5b456858f1b87536b3eb2659c194fab091f68b8248f72582",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "2877d0146047522c5b456858f1b87536b3eb2659c194fab091f68b8248f72582"
+    },
+    "overgangsregler-til-lov-22-juni-2022-nr-80-om-endringer-i-verdipapirhandelloven": {
+      "embedding_hash": "dea64a1121c8435b632b18f2a154d23b8ba19f556254b8f5c893dfef41a03490",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "dea64a1121c8435b632b18f2a154d23b8ba19f556254b8f5c893dfef41a03490"
+    },
+    "pantelovforskriften": {
+      "embedding_hash": "826c280b8e2c7239624d6f8d4a6bb2eb2a86972516f6e9749b71687cf85a7200",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "826c280b8e2c7239624d6f8d4a6bb2eb2a86972516f6e9749b71687cf85a7200"
+    },
+    "pasientreiseforskriften": {
+      "embedding_hash": "f7fdba660704d9bb8ddd343cdebedc6a3c3202a17d3ab7be64fc75ebc07db247",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "f7fdba660704d9bb8ddd343cdebedc6a3c3202a17d3ab7be64fc75ebc07db247"
+    },
+    "plan-og-bygningsloven-pbl": {
+      "embedding_hash": "5efe88a3bd918bf8fb9f185432317547233f467f6fd5c4d086a4fc2fa82c0ec5",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "5efe88a3bd918bf8fb9f185432317547233f467f6fd5c4d086a4fc2fa82c0ec5"
+    },
+    "priips-forskriften": {
+      "embedding_hash": "ac2369c58e8b1d0d47706f5cedc156a516ff2ff94e3d7b9b3e6a1185c6731424",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "ac2369c58e8b1d0d47706f5cedc156a516ff2ff94e3d7b9b3e6a1185c6731424"
+    },
+    "registrerings-og-bevillingsordning-for-tobakksvarer-mv": {
+      "embedding_hash": "961578ddb980c852bfba15f40fd664f5cc0ebad8f722b0ad5663254bd943ffa2",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "961578ddb980c852bfba15f40fd664f5cc0ebad8f722b0ad5663254bd943ffa2"
+    },
+    "rettshjelpsforskriften": {
+      "embedding_hash": "fff24713461087e1b0f09e5c4aad14e9df00a672d732902363a20e9dcfd6203f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "fff24713461087e1b0f09e5c4aad14e9df00a672d732902363a20e9dcfd6203f"
+    },
+    "salærforskriften": {
+      "embedding_hash": "868aa31b47ab11ed1da98a8de7e3d9e999487ac5eff30ff04395fba9a57eaa58",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "868aa31b47ab11ed1da98a8de7e3d9e999487ac5eff30ff04395fba9a57eaa58"
+    },
+    "sikringsforskriften": {
+      "embedding_hash": "b8eb752330cf7a1b922733ef21b361eaf7011f82824fec214322133f5575d894",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "b8eb752330cf7a1b922733ef21b361eaf7011f82824fec214322133f5575d894"
+    },
+    "skattebetalingsforskriften": {
+      "embedding_hash": "96790e5b7305ee06d6f07d1fd55b051e3a6f0d7694e702a0843c1f41cf051a23",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "96790e5b7305ee06d6f07d1fd55b051e3a6f0d7694e702a0843c1f41cf051a23"
+    },
+    "solvens-ii-forskriften": {
+      "embedding_hash": "1da156cdbaebd8f1c20a4322645d9b249ee2933c0c2af9c44830b6335011dbb2",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "1da156cdbaebd8f1c20a4322645d9b249ee2933c0c2af9c44830b6335011dbb2"
+    },
+    "stadnamnlova-stadnl": {
+      "embedding_hash": "3609e97d565cf64c9438b665f8af72236c639b130669fb0cb68d8760ce92ce4c",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "3609e97d565cf64c9438b665f8af72236c639b130669fb0cb68d8760ce92ce4c"
+    },
+    "stortingets-skattevedtak-2026": {
+      "embedding_hash": "e4575e053e72a5ecc2c00b7eaa45de1d1bfb83c5cd7f938afb623db3b352e1dd",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e4575e053e72a5ecc2c00b7eaa45de1d1bfb83c5cd7f938afb623db3b352e1dd"
+    },
+    "stortingsvedtak-om-fastsetting-av-finansskatt-på-lønn-for-2023": {
+      "embedding_hash": "184a509b250f64ea25d36e1b5caf41b911086a4c3a0f95642f131e0f425de1a1",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "184a509b250f64ea25d36e1b5caf41b911086a4c3a0f95642f131e0f425de1a1"
+    },
+    "straffelovens-ikraftsettingslov": {
+      "embedding_hash": "0ce6a870d023f22ef8ae5fdd078493811f66dd337c93e5c8de523c8258c9d5d5",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "0ce6a870d023f22ef8ae5fdd078493811f66dd337c93e5c8de523c8258c9d5d5"
+    },
+    "svine-og-fjørfeproduksjonsloven": {
+      "embedding_hash": "c952a69ff0a6fd9d8508bce46baaaaf663fa667b52d204ae536fe185c4eb5bfa",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "c952a69ff0a6fd9d8508bce46baaaaf663fa667b52d204ae536fe185c4eb5bfa"
+    },
+    "tobakksskadeloven-tobskl": {
+      "embedding_hash": "aca8ac8dc5a86b08152c15691641597043e2653b4f0b9e283e8a2e04ba437b74",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "aca8ac8dc5a86b08152c15691641597043e2653b4f0b9e283e8a2e04ba437b74"
+    },
+    "tomtefestelova-tfl": {
+      "embedding_hash": "e1039e41ac4fd067f58421724413e471a65435b86646640d88621f826a7444bf",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "e1039e41ac4fd067f58421724413e471a65435b86646640d88621f826a7444bf"
+    },
+    "utenrikstjenesteloven": {
+      "embedding_hash": "17f58c2702e78af8eb8a59da0883317f7ebe618d468457379ec5f6ce5ed7c4f7",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "17f58c2702e78af8eb8a59da0883317f7ebe618d468457379ec5f6ce5ed7c4f7"
+    },
+    "utleggsregistreringsforskriften": {
+      "embedding_hash": "2a0811af8a26d83d6778ce2bea53612f4e2b5c6b45f318dd672508a3f6b44f55",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "2a0811af8a26d83d6778ce2bea53612f4e2b5c6b45f318dd672508a3f6b44f55"
+    },
+    "vegdata-og-trafikkinformasjonsforskriften": {
+      "embedding_hash": "bedc5de01ed942bb88d06ea0f0443f4850bdc7747bbfa2feed4b4471efbe4051",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "bedc5de01ed942bb88d06ea0f0443f4850bdc7747bbfa2feed4b4471efbe4051"
+    },
+    "veglister-12-65-mobilkran-m-m": {
+      "embedding_hash": "cb934c50042a732901627e4cc814bf9d21c7ac8ba06966bf3a1fa4d773b0c948",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "cb934c50042a732901627e4cc814bf9d21c7ac8ba06966bf3a1fa4d773b0c948"
+    },
+    "viltressursloven": {
+      "embedding_hash": "f60e0babf73452a9b374dbbd53918892db05bf8bd4799f241c314c4d3fa5056f",
+      "embedding_space_id": "738c919fa57385d94c558d93c4b0e588",
+      "renderer_version": 8,
+      "xml_hash": "f60e0babf73452a9b374dbbd53918892db05bf8bd4799f241c314c4d3fa5056f"
+    }
+  },
+  "freeze_timestamp": "2026-08-08T14:46:53.140410+00:00",
+  "llhb_version": "1.0",
+  "lovspor_commit": "57fc9c93388ceb0908e39ca282867afcd1a05782",
+  "selection_rule": "benchmarks/llhb/SELECTION.md@57fc9c93388ceb0908e39ca282867afcd1a05782"
+}
