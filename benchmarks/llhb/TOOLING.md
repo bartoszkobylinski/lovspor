@@ -200,6 +200,25 @@ Driven by the Stage 3.5 human audit (see
   (`resolver.REPEALED_ACT_SCORING_NOTE`); C8 abstention never penalizes
   correct statements about the statutory text itself.
 
+## Stage 4 selection and freeze (2026-08-08)
+
+* **Selection rule**: SELECTION.md (rulings #23/#24) — sources are
+  exactly `regen-v5` + `topup-c4`; C2/C4 join C5/C8 as 100%-reviewed
+  categories; per category ascending case_id under the
+  ≤2-per-provision cap (C8 exempt: no ground-truth provision);
+  fail-closed on shortfall. Implementation:
+  `lovspor.llhb.selection` (unit-tested), orchestrated by
+  `generator/select_freeze.py` with hard gates (all review surfaces
+  final, pool pins match the corpus, pin re-verified as an ancestor of
+  lovverk `origin/main` after a fresh fetch).
+* **Freeze artifacts**: `lovspor.llhb.freeze.build_lock` captures per
+  cited document `xml_hash` / `renderer_version` / `embedding_space_id`
+  / `embedding_hash` from the pinned manifest, plus the dataset SHA-256
+  over canonical bytes (FREEZE.md §4). `select_freeze.py` is a dry run
+  by default; `--write` emits `dataset/frozen/` artifacts. The freeze
+  commit, the notebook sign-off (FREEZE.md §2.5) and the
+  `llhb-v1-freeze` tag remain owner acts.
+
 ## What Stage 2 deliberately does not solve
 
 * Answer-level quote *detection* (finding purported quotes in model
