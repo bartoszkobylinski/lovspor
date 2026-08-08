@@ -176,7 +176,10 @@ Driven by the Stage 3.5 human audit (see
   `dataset/candidates/topup-c4/`: the owner's C2/C4 genericity
   full-review round cut C4 eligible supply to 23 (< frozen target 30),
   so a category-scoped pool (`--target C4=50`, fresh seed 20260808 —
-  new sampler shuffle, new acts; zero provision overlap with v5) with
+  new sampler shuffle, new acts; one expected-provision pair with v5,
+  C4-225 ↔ C4-110, whose v5 side is owner-DROPPED, so eligible-supply
+  overlap is zero and the ≤2-per-provision freeze cap holds either way;
+  no claimed-side or question overlap) with
   `PoolConfig.id_offset=200` supplies replacements. Its whole C4
   population is owner-reviewed via the full-category slice
   (`review-full/`, `build_c2c4_slice.py --include-queued`); the pool's
