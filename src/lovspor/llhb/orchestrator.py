@@ -16,6 +16,7 @@ configuration cannot leak into the benchmark conversation.
 import json
 import os
 import random
+import re
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -36,6 +37,10 @@ from lovspor.llhb.claude_cli import (
 from lovspor.llhb.results import ResultsStore
 
 _RAW_DIR = "raw"
+_CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
+# Keys that would defeat the sandbox or flip billing if a caller smuggled
+# them in through extra_env — each one fails closed instead of merging.
+_BANNED_ENV = frozenset({"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "HOME", "CLAUDE_CONFIG_DIR"})
 
 
 class OrchestratorError(LovsporError):
@@ -75,10 +80,11 @@ def case_order(case_ids: list[str], seed: int) -> list[str]:
 
 def hermetic_env(sandbox_home: Path, extra_env: dict[str, str]) -> dict[str, str]:
     """Whitelist-built child environment; never inherits the parent's."""
-    if "ANTHROPIC_API_KEY" in extra_env:
+    banned = sorted(_BANNED_ENV & set(extra_env))
+    if banned:
         raise OrchestratorError(
-            "ANTHROPIC_API_KEY is banned from the run environment: in -p mode a "
-            "present key silently outranks subscription OAuth (per-token billing)"
+            f"extra_env keys {banned} are banned: credentials flip the run onto "
+            "per-token billing, HOME/CLAUDE_CONFIG_DIR would defeat the sandbox"
         )
     env = {
         "HOME": str(sandbox_home),
@@ -104,6 +110,9 @@ def execute_argv(argv: list[str], env: dict[str, str], timeout_s: int) -> CliInv
         )
     except subprocess.TimeoutExpired as exc:
         stdout, stderr, returncode, timed_out = (_text(exc.stdout), _text(exc.stderr), -1, True)
+    except OSError as exc:
+        # Missing/non-executable CLI must become an error record, not abort the run.
+        stdout, stderr, returncode, timed_out = ("", f"cannot execute {argv[0]}: {exc}", 127, False)
     duration_ms = int((time.monotonic() - started) * 1000)
     return CliInvocation(
         stdout=stdout,
@@ -121,10 +130,12 @@ def run_control_arm(
     store: ResultsStore,
 ) -> dict[str, Any]:
     """Execute every case of one control-arm run and finalize its metadata."""
+    ids = _checked_case_ids(cases)
+    ordered = case_order(ids, config.case_order_seed)
     run_dir = store.open_run(metadata)
     by_id = {str(case["case_id"]): case for case in cases}
     completed_count = 0
-    for case_id in case_order(sorted(by_id), config.case_order_seed):
+    for case_id in ordered:
         record = _run_case(config, by_id[case_id], run_dir)
         store.append_record(record)
         completed_count += 1 if record["completed"] else 0
@@ -136,6 +147,15 @@ def run_control_arm(
     }
     store.finalize_run(config.identity.run_id, summary)
     return summary
+
+
+def _checked_case_ids(cases: list[dict[str, Any]]) -> list[str]:
+    """Every case id, validated before anything touches disk."""
+    ids = [str(case.get("case_id", "")) for case in cases]
+    invalid = sorted(case_id for case_id in ids if not _CASE_ID_RE.match(case_id))
+    if invalid:
+        raise OrchestratorError(f"invalid case ids: {invalid}")
+    return ids
 
 
 def _run_case(config: ControlRunConfig, case: dict[str, Any], run_dir: Path) -> dict[str, Any]:
@@ -157,6 +177,8 @@ def _parse(invocation: CliInvocation) -> ParsedCliResult:
 
 
 def _write_raw(run_dir: Path, case_id: str, invocation: CliInvocation) -> str:
+    if not _CASE_ID_RE.match(case_id):
+        raise OrchestratorError(f"invalid case id {case_id!r} for raw retention")
     raw_dir = run_dir / _RAW_DIR
     raw_dir.mkdir(exist_ok=True)
     payload = json.dumps(invocation.model_dump(), sort_keys=True, ensure_ascii=False, indent=2)
