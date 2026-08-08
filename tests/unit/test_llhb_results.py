@@ -150,6 +150,46 @@ class TestAppendRecord:
         assert len(store.read_records(RUN_ID)) == 2
 
 
+class TestRunIdConfinement:
+    def test_finalize_rejects_traversal_run_id(self, store: ResultsStore) -> None:
+        with pytest.raises(ResultsStoreError, match="invalid run id"):
+            store.finalize_run("../../outside", {"finished_at": "2026-08-08T13:00:00Z"})
+
+    def test_read_records_rejects_invalid_run_id(self, store: ResultsStore) -> None:
+        with pytest.raises(ResultsStoreError, match="invalid run id"):
+            store.read_records("llhb-v1-run-20260808-..")
+
+
+class TestSurvivorRegressions:
+    def test_records_file_is_named_records_jsonl(self, store: ResultsStore) -> None:
+        run_dir = store.open_run(make_metadata())
+        store.append_record(make_record())
+
+        assert (run_dir / "records.jsonl").is_file()
+
+    def test_reopen_dedup_distinguishes_repeat_index(self, tmp_path: Path) -> None:
+        first = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        first.open_run(make_metadata())
+        first.append_record(make_record(repeat_index=1))
+
+        reopened = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        with pytest.raises(ResultsStoreError, match="duplicate"):
+            reopened.append_record(make_record(repeat_index=1))
+        reopened.append_record(make_record(repeat_index=2))
+
+    def test_finalize_accepts_notes_and_evaluator_version(
+        self, store: ResultsStore, tmp_path: Path
+    ) -> None:
+        store.open_run(make_metadata())
+
+        store.finalize_run(RUN_ID, {"notes": "cap hit twice", "evaluator_version": "scorer-v1"})
+
+        path = tmp_path / "runs" / RUN_ID / "run-metadata.json"
+        written = json.loads(path.read_text(encoding="utf-8"))
+        assert written["notes"] == "cap hit twice"
+        assert written["evaluator_version"] == "scorer-v1"
+
+
 class TestFinalizeRun:
     def test_updates_metadata(self, store: ResultsStore, tmp_path: Path) -> None:
         store.open_run(make_metadata())

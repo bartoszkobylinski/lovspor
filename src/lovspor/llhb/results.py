@@ -92,7 +92,12 @@ class ResultsStore:
         _write_metadata(self._run_dir(run_id) / _METADATA_FILE, merged)
 
     def _run_dir(self, run_id: str) -> Path:
-        return self._runs_root / run_id
+        if not _RUN_ID_RE.match(run_id):
+            raise ResultsStoreError(f"invalid run id {run_id!r}")
+        path = self._runs_root / run_id
+        if path.resolve().parent != self._runs_root.resolve():
+            raise ResultsStoreError(f"run id {run_id!r} escapes the runs root")
+        return path
 
     def _check(self, label: str, document: dict[str, Any], schema: dict[str, Any]) -> None:
         errors = validate_case(document, schema)
