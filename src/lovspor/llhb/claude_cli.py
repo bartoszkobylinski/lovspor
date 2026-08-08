@@ -69,8 +69,10 @@ def parse_cli_output(stdout: str, returncode: int) -> ParsedCliResult:
         return ParsedCliResult(ok=False, error=f"claude exited with exit code {returncode}")
     try:
         payload = json.loads(stdout)
-    except json.JSONDecodeError as exc:
-        return ParsedCliResult(ok=False, error=f"stdout is not valid JSON: {exc}")
+    except ValueError as exc:
+        # ValueError, not just JSONDecodeError: syntactically valid JSON can
+        # still blow CPython's 4300-digit int-conversion limit.
+        return ParsedCliResult(ok=False, error=f"stdout is not parseable JSON: {exc}")
     if not isinstance(payload, dict):
         return ParsedCliResult(ok=False, error="stdout JSON is not an object")
     return _from_payload(payload)

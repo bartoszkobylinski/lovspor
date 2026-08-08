@@ -94,6 +94,19 @@ class TestParseCliOutput:
         assert parsed.error is not None
         assert "JSON" in parsed.error
 
+    def test_never_raises_on_huge_integer_payload(self) -> None:
+        parsed = parse_cli_output('{"result": ' + "9" * 5000 + "}", returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+
+    def test_flags_non_object_json(self) -> None:
+        parsed = parse_cli_output('["a", "list"]', returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "object" in parsed.error
+
 
 class TestBuildResultRecord:
     def test_success_record_is_schema_valid(self) -> None:
