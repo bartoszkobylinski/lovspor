@@ -100,6 +100,23 @@ class TestParseCliOutput:
         assert parsed.ok is False
         assert parsed.error is not None
 
+    def test_flags_is_error_even_with_success_subtype(self) -> None:
+        parsed = parse_cli_output(success_stdout(is_error=True), returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+
+    def test_flags_non_string_result(self) -> None:
+        parsed = parse_cli_output(success_stdout(result=42), returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "result" in parsed.error
+
+    def test_normalizes_invalid_turns_to_none(self) -> None:
+        assert parse_cli_output(success_stdout(num_turns=0), returncode=0).turns is None
+        assert parse_cli_output(success_stdout(num_turns="mange"), returncode=0).turns is None
+
     def test_flags_non_object_json(self) -> None:
         parsed = parse_cli_output('["a", "list"]', returncode=0)
 
@@ -132,3 +149,4 @@ class TestBuildResultRecord:
         assert record["final_answer"] is None
         assert record["completed"] is False
         assert record["errors"][0]["stage"] == "request"
+        assert "exit code 1" in record["errors"][0]["message"]
