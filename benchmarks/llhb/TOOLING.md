@@ -24,6 +24,7 @@ freeze datasets, call models, or score runs.
 | `validation.py` | `CandidateValidator`: schema layer then per-category C1-C8 deterministic checks; dataset-level duplicate-id and provision-cap checks. |
 | `results.py` | Stage 5 `ResultsStore`: validated, append-only run storage (`run-metadata.json` + `records.jsonl` under `results/runs/<run-id>/`). Contract below. |
 | `claude_cli.py` | Stage 5 control-arm driver for the Claude Code CLI: exact `claude -p` argv (tools + MCP hard-disabled), CLI JSON parsing, schema-valid record assembly. Contract below. |
+| `orchestrator.py` | Stage 5 control-arm orchestrator: hermetic whitelist env (API key banned, HOME sandbox), seeded case order, per-case CLI execution with timeout-as-result, raw stdout retention, ResultsStore integration. Contract below. |
 
 ## Extractor syntax (closed contract)
 
@@ -252,10 +253,20 @@ Driven by the Stage 3.5 human audit (see
   `ParsedCliResult(ok=False, error=...)`; `build_result_record` turns
   either outcome into a schema-valid record (`errors[].stage:
   "request"`, `completed: false`, `final_answer: null` on failure).
-* **Open item (orchestrator)**: full environment hermeticity — user
-  settings/hooks isolation for the CLI process (`--settings` merges
-  rather than replaces; needs an env/HOME sandbox at spawn time) and
-  retention of raw CLI stdout via `raw_response_ref`.
+* **Orchestrator** (`lovspor.llhb.orchestrator`): the child environment
+  is whitelist-built (`HOME` = per-run sandbox, `PATH`, `TERM`), never
+  inherited — user-level settings, hooks and MCP config cannot leak
+  into the benchmark conversation. `ANTHROPIC_API_KEY` is banned
+  outright: in `-p` mode a present key silently outranks subscription
+  OAuth and would move the run onto per-token billing. Case order is a
+  seeded shuffle over sorted ids (`case_order_seed` in run metadata),
+  fail-closed on duplicate ids. A CLI timeout or crash becomes an
+  error record, never an aborted run. Raw stdout/stderr/exit of every
+  invocation is retained at `raw/<case_id>.json` and referenced via
+  `raw_response_ref`.
+* **Open item (pilot)**: confirm subscription OAuth survives the HOME
+  sandbox on macOS (Keychain-based auth) and record the CLI version in
+  run metadata `notes`.
 
 ## What Stage 2 deliberately does not solve
 

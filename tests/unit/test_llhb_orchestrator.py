@@ -1,0 +1,223 @@
+"""Stage 5 control-arm orchestrator: hermetic env, ordering, CLI execution."""
+
+import json
+import os
+import stat
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from lovspor.llhb.claude_cli import RunIdentity
+from lovspor.llhb.orchestrator import (
+    ControlRunConfig,
+    OrchestratorError,
+    case_order,
+    execute_argv,
+    hermetic_env,
+    run_control_arm,
+)
+from lovspor.llhb.results import ResultsStore
+
+SCHEMA_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "llhb" / "schema"
+
+RUN_ID = "llhb-v1-run-20260808-pilot1"
+
+IDENTITY = RunIdentity(
+    run_id=RUN_ID,
+    provider="anthropic",
+    model_id="claude-opus-5",
+    condition="control",
+)
+
+SUCCESS_PAYLOAD = json.dumps(
+    {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": "Svar fra modellen.",
+        "num_turns": 1,
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
+)
+
+
+def make_metadata() -> dict[str, Any]:
+    return {
+        "run_id": RUN_ID,
+        "llhb_version": "1.0",
+        "dataset_checksum": "a" * 64,
+        "provider": "anthropic",
+        "model_id": "claude-opus-5",
+        "condition": "control",
+        "system_prompt_sha256": "b" * 64,
+        "sampling": {"temperature": None},
+        "started_at": "2026-08-08T12:00:00Z",
+        "lovspor_commit": "0123abc",
+        "lovverk_commit": "0" * 40,
+        "runner_commit": "4567def",
+        "case_order_seed": 42,
+    }
+
+
+def make_case(case_id: str) -> dict[str, Any]:
+    return {"case_id": case_id, "question": "Hva sier loven?"}
+
+
+def fake_claude(tmp_path: Path, script_body: str) -> Path:
+    """Install a fake `claude` executable and return its bin dir."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    script = bin_dir / "claude"
+    script.write_text(f"#!/bin/sh\n{script_body}\n", encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return bin_dir
+
+
+def make_config(tmp_path: Path, bin_dir: Path, timeout_s: int = 30) -> ControlRunConfig:
+    sandbox = tmp_path / "sandbox-home"
+    sandbox.mkdir(exist_ok=True)
+    return ControlRunConfig(
+        identity=IDENTITY,
+        system_prompt="SYSTEM",
+        case_order_seed=42,
+        timeout_s=timeout_s,
+        sandbox_home=sandbox,
+        extra_env={"PATH": str(bin_dir)},
+    )
+
+
+class TestCaseOrder:
+    def test_deterministic_for_seed(self) -> None:
+        ids = [f"llhb-v1-C1-{i:03d}" for i in range(1, 9)]
+
+        assert case_order(ids, 42) == case_order(list(reversed(ids)), 42)
+
+    def test_seed_actually_shuffles(self) -> None:
+        ids = [f"llhb-v1-C1-{i:03d}" for i in range(1, 9)]
+
+        orders = {tuple(case_order(ids, seed)) for seed in range(5)}
+        assert len(orders) > 1
+
+    def test_rejects_duplicate_ids(self) -> None:
+        with pytest.raises(OrchestratorError, match="duplicate"):
+            case_order(["llhb-v1-C1-001", "llhb-v1-C1-001"], 42)
+
+
+class TestHermeticEnv:
+    def test_never_inherits_anthropic_api_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-leak")
+
+        env = hermetic_env(tmp_path, {})
+
+        assert "ANTHROPIC_API_KEY" not in env
+        assert env["HOME"] == str(tmp_path)
+
+    def test_rejects_api_key_in_extra_env(self, tmp_path: Path) -> None:
+        with pytest.raises(OrchestratorError, match="ANTHROPIC_API_KEY"):
+            hermetic_env(tmp_path, {"ANTHROPIC_API_KEY": "sk-explicit"})
+
+    def test_extra_env_overrides_path(self, tmp_path: Path) -> None:
+        env = hermetic_env(tmp_path, {"PATH": "/fake/bin"})
+
+        assert env["PATH"] == "/fake/bin"
+
+
+class TestExecuteArgv:
+    def test_captures_stdout_and_exit(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, f"echo '{SUCCESS_PAYLOAD}'")
+
+        env = hermetic_env(tmp_path, {"PATH": str(bin_dir)})
+
+        result = execute_argv(["claude", "-p", "q"], env, 30)
+
+        assert result.returncode == 0
+        assert result.timed_out is False
+        assert json.loads(result.stdout)["result"] == "Svar fra modellen."
+        assert result.duration_ms >= 0
+
+    def test_flags_timeout(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, "exec /bin/sleep 5")
+
+        result = execute_argv(["claude"], hermetic_env(tmp_path, {"PATH": str(bin_dir)}), 1)
+
+        assert result.timed_out is True
+        assert result.returncode != 0
+
+
+class TestRunControlArm:
+    def test_end_to_end_with_fake_cli(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, f"echo '{SUCCESS_PAYLOAD}'")
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        cases = [make_case("llhb-v1-C1-001"), make_case("llhb-v1-C2-001")]
+
+        summary = run_control_arm(make_config(tmp_path, bin_dir), cases, make_metadata(), store)
+
+        records = store.read_records(RUN_ID)
+        assert len(records) == 2
+        assert all(record["completed"] for record in records)
+        assert summary["cases_completed"] == 2
+        assert summary["errors_total"] == 0
+
+    def test_retains_raw_stdout_per_case(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, f"echo '{SUCCESS_PAYLOAD}'")
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_control_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["raw_response_ref"] == "raw/llhb-v1-C1-001.json"
+        raw_path = tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.json"
+        raw = json.loads(raw_path.read_text(encoding="utf-8"))
+        assert raw["returncode"] == 0
+        assert json.loads(raw["stdout"])["result"] == "Svar fra modellen."
+
+    def test_cli_failure_becomes_error_record(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, "echo boom >&2; exit 2")
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_control_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is False
+        assert record["final_answer"] is None
+        assert summary["errors_total"] == 1
+
+    def test_finalizes_metadata(self, tmp_path: Path) -> None:
+        bin_dir = fake_claude(tmp_path, f"echo '{SUCCESS_PAYLOAD}'")
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_control_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        metadata_path = tmp_path / "runs" / RUN_ID / "run-metadata.json"
+        written = json.loads(metadata_path.read_text(encoding="utf-8"))
+        assert written["cases_total"] == 1
+        assert written["cases_completed"] == 1
+        assert written["errors_total"] == 0
+        assert written["finished_at"] is not None
+
+    def test_cli_env_is_hermetic(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-leak")
+        probe = (
+            'printf \'{"type":"result","subtype":"success","is_error":false,'
+            '"num_turns":1,"result":"HOME=%s KEY=%s"}\' "$HOME" "${ANTHROPIC_API_KEY-unset}"'
+        )
+        bin_dir = fake_claude(tmp_path, probe)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_control_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        answer = store.read_records(RUN_ID)[0]["final_answer"]
+        assert f"HOME={tmp_path / 'sandbox-home'}" in answer
+        assert "KEY=unset" in answer
+        assert os.environ["ANTHROPIC_API_KEY"] == "sk-leak"
