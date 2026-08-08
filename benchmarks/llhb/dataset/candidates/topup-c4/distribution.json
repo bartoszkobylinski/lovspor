@@ -1,0 +1,73 @@
+{
+  "by_category": {
+    "C4": 50
+  },
+  "max_provision_reuse": 1,
+  "section_id_shapes": {
+    "hyphen": 4,
+    "plain": 46
+  },
+  "top_acts": [
+    [
+      "sanksjonsforskrift-ukraina-territoriell-integritet-mv",
+      1
+    ],
+    [
+      "kryptoeiendelsloven",
+      1
+    ],
+    [
+      "forskrift-om-flyselskaper-med-driftsforbud",
+      1
+    ],
+    [
+      "forskrift-om-takseringsregler-til-bruk-ved-beskatning-ved-trekk-i-lønn-mv-av-personer-som-skattlegges-på-svalbard-i-inntektsåret-2026-etter-lov-29-november-1996-nr-68-om-skatt-til-svalbard",
+      1
+    ],
+    [
+      "lov-om-gjennomføring-av-roma-vedtektene",
+      1
+    ],
+    [
+      "teknisk-og-operasjonell-forskrift",
+      1
+    ],
+    [
+      "forskrift-om-vareførselskontroll-på-svalbard",
+      1
+    ],
+    [
+      "forskrift-for-graden-philosophiae-doctor-i-kunstnerisk-utviklingsarbeid-ved-universitetet-i-bergen",
+      1
+    ],
+    [
+      "forskrift-om-beskyttelse-av-kvitsøylam-som-geografisk-betegnelse",
+      1
+    ],
+    [
+      "forskrift-om-krav-til-måleflasker",
+      1
+    ],
+    [
+      "forskrift-om-tilskudd-til-organisasjoner-i-barnevernet",
+      1
+    ],
+    [
+      "forskrift-om-eksport-av-forsvarsmateriell-mv",
+      1
+    ],
+    [
+      "dekkmerkeforskriften",
+      1
+    ],
+    [
+      "forskrift-for-graden-philosophiae-doctor-i-kunstnerisk-utviklingsarbeid-ved-universitetet-i-innlandet",
+      1
+    ],
+    [
+      "foretaksregisterforskriften",
+      1
+    ]
+  ],
+  "unique_acts": 50
+}

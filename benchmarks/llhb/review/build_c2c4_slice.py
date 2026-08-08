@@ -50,9 +50,15 @@ def slice_case_ids(
     candidates: list[dict[str, Any]],
     queue: list[dict[str, Any]],
     decisions: list[dict[str, Any]],
+    *,
+    include_queued: bool = False,
 ) -> list[str]:
-    """C2/C4 cases with no individual review: not queued, not dropped."""
-    queued = {str(entry["case_id"]) for entry in queue}
+    """C2/C4 cases with no individual review: not queued, not dropped.
+
+    ``include_queued`` builds a FULL-category slice instead (top-up pools:
+    every case is new material, the pool's own stratified queue would
+    split the owner's decisions across two files)."""
+    queued = set() if include_queued else {str(entry["case_id"]) for entry in queue}
     dropped = {str(d["case_id"]) for d in decisions if d.get("decision") == "drop"}
     return sorted(
         str(c["case_id"])
@@ -63,16 +69,24 @@ def slice_case_ids(
     )
 
 
-def build_slice(pool: Path, out: Path) -> dict[str, int]:
+def build_slice(
+    pool: Path,
+    out: Path,
+    *,
+    include_queued: bool = False,
+    reason: str = SLICE_REASON,
+) -> dict[str, int]:
     candidates = _load_jsonl(pool / "candidates.jsonl")
     ledger = _load_jsonl(pool / "validation.jsonl")
     queue = _load_jsonl(pool / "manual-review.jsonl")
-    decisions = _load_jsonl(pool / "manual-review-decisions.jsonl")
+    decisions_source = pool / "manual-review-decisions.jsonl"
+    # a fresh pool has no decisions yet — nothing is dropped
+    decisions = _load_jsonl(decisions_source) if decisions_source.exists() else []
     dedup = json.loads((pool / "dedup-report.json").read_text(encoding="utf-8"))
-    ids = slice_case_ids(candidates, queue, decisions)
+    ids = slice_case_ids(candidates, queue, decisions, include_queued=include_queued)
     id_set = set(ids)
     out.mkdir(parents=True, exist_ok=True)
-    slice_queue = [{"case_id": case_id, "reasons": [SLICE_REASON]} for case_id in ids]
+    slice_queue = [{"case_id": case_id, "reasons": [reason]} for case_id in ids]
     _write_jsonl(out / "manual-review.jsonl", slice_queue)
     _write_jsonl(out / "candidates.jsonl", [c for c in candidates if c["case_id"] in id_set])
     _write_jsonl(out / "validation.jsonl", [r for r in ledger if r["case_id"] in id_set])
@@ -97,8 +111,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pool", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--include-queued",
+        action="store_true",
+        help="Full-category slice: keep cases from the pool's own queue in "
+        "this slice too (top-up pools — one decisions file, no split).",
+    )
+    parser.add_argument("--reason", default=SLICE_REASON, help="Queue reason for slice rows.")
     args = parser.parse_args()
-    counts = build_slice(args.pool, args.out)
+    counts = build_slice(
+        args.pool, args.out, include_queued=args.include_queued, reason=args.reason
+    )
     print(f"slice queue written to {args.out}: {counts['slice']} cases, {counts['flags']} flags")
 
 
