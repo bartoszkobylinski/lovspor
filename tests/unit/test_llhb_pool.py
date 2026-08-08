@@ -180,6 +180,7 @@ def test_targets_override_parses_pairs_and_zeroes_the_rest() -> None:
     assert set(targets) == set(_TARGETS)
     both = targets_override(["C2=10", "C4=20"])
     assert (both["C2"], both["C4"]) == (10, 20)
+    assert targets_override(["C1=1"])["C1"] == 1  # 1 is the smallest legal count
     for bad in (["C9=5"], ["C4"], ["C4=x"], ["C4=0"], ["C4=-1"], ["C4=5", "C4=6"]):
         with pytest.raises(ValueError, match="target"):
             targets_override(bad)
