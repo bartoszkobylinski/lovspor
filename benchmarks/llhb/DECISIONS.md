@@ -118,6 +118,30 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     model-assisted annotations." Consistent with decisions 8/15 (bounded LLM
     roles); decisions 2/14 (no LLM-as-a-judge in scoring) untouched.
 
+## Addendum — Stage 4 rulings (2026-08-08)
+
+23. **Semantic genericity: drop over redesign; 100% owner review of C2
+    and C4.** The genericity defect class (a topic corpus-unique as a
+    heading yet too broad to identify one provision) is not
+    deterministically filterable — census counts occurrences, not
+    semantic breadth — and context-anchoring the questions would change
+    the C2/C4 category designs pre-freeze. Ruling: affected cases are
+    DROPPED (`ambiguous-ground-truth`), never patched; C2 and C4 join
+    C5/C8 as 100%-owner-reviewed categories for selection eligibility
+    (v5 queue + the two full-review slices); shortfalls are met by
+    fresh-seed category-scoped top-up pools, never by pre-F2 material.
+    Heuristic filters (token document frequency, self-retrieval) are
+    explicitly deferred to LLHB v2, where this round's ~120 labeled
+    decisions can calibrate them.
+24. **Selection rule.** Selection of the frozen 250 follows SELECTION.md
+    at its governing commit: sources are exactly regen-v5 and topup-c4;
+    eligibility per ruling #23; per category ascending case_id with the
+    ≤2-per-provision cap; fail-closed on any shortfall. The rule is
+    fixed before any benchmark model call and is independent of
+    anticipated model performance (FREEZE.md §2.6). Owner acceptance of
+    SELECTION.md authorizes the tool run; the freeze artifacts and the
+    `llhb-v1-freeze` tag remain separate owner acts.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,
