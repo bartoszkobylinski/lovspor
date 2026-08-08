@@ -1,0 +1,86 @@
+[
+  {
+    "doc_id": "nl-19991217-095",
+    "duplicates": {
+      "6-2": 2
+    },
+    "slug": "betalingssystemloven"
+  },
+  {
+    "doc_id": "sf-19801121-0014",
+    "duplicates": {
+      "1": 2
+    },
+    "slug": "pantelovforskriften"
+  },
+  {
+    "doc_id": "sf-20001222-1412",
+    "duplicates": {
+      "1": 3,
+      "11": 2,
+      "12": 2,
+      "13": 2,
+      "14": 2,
+      "15": 2,
+      "16": 2,
+      "2": 3,
+      "3": 2,
+      "4": 2,
+      "5": 2,
+      "6": 2,
+      "7": 2
+    },
+    "slug": "forskr-om-overg-regler-for-privat-pensjonsordn"
+  },
+  {
+    "doc_id": "sf-20040119-0298",
+    "duplicates": {
+      "1": 4,
+      "10": 2,
+      "11": 2,
+      "2": 4,
+      "3": 4,
+      "4": 4,
+      "5": 3,
+      "6": 3,
+      "7": 2,
+      "8": 2,
+      "9": 2
+    },
+    "slug": "førerkortforskriften"
+  },
+  {
+    "doc_id": "sf-20071005-1112",
+    "duplicates": {
+      "1": 2,
+      "10": 2,
+      "11": 2,
+      "2": 2,
+      "3": 2,
+      "4": 2,
+      "5": 2,
+      "6": 2,
+      "7": 2,
+      "8": 2,
+      "9": 2
+    },
+    "slug": "forskrift-om-bakkeinspeksjoner-av-luftfartøy"
+  },
+  {
+    "doc_id": "sf-20161227-1883",
+    "duplicates": {
+      "1": 2,
+      "2": 2,
+      "3": 2,
+      "4": 2
+    },
+    "slug": "forskrift-om-skip-som-bruker-drivstoff-med-flammepunkt-under-60-c"
+  },
+  {
+    "doc_id": "sf-20241113-3329",
+    "duplicates": {
+      "6": 2
+    },
+    "slug": "forskrift-om-krav-til-nullutslipp-av-klimagasser-ved-offentlig-anskaffelse-av-sjøtransport"
+  }
+]
