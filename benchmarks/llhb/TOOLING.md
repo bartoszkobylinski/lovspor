@@ -22,6 +22,7 @@ freeze datasets, call models, or score runs.
 | `corpus_pin.py` | `CorpusPin` (full SHA + manifest `generated_at`), `verify_pin` (fail closed on wrong HEAD or dirty tree), per-document freeze fields. |
 | `schema.py` | JSONL load, JSON-Schema validation (deterministic pathed messages), canonical JSONL + SHA-256 checksum. |
 | `validation.py` | `CandidateValidator`: schema layer then per-category C1-C8 deterministic checks; dataset-level duplicate-id and provision-cap checks. |
+| `results.py` | Stage 5 `ResultsStore`: validated, append-only run storage (`run-metadata.json` + `records.jsonl` under `results/runs/<run-id>/`). Contract below. |
 
 ## Extractor syntax (closed contract)
 
@@ -218,6 +219,23 @@ Driven by the Stage 3.5 human audit (see
   by default; `--write` emits `dataset/frozen/` artifacts. The freeze
   commit, the notebook sign-off (FREEZE.md §2.5) and the
   `llhb-v1-freeze` tag remain owner acts.
+
+## Stage 5 results store (2026-08-08)
+
+* **Module**: `lovspor.llhb.results` (unit-tested). Validated,
+  append-only storage under `results/runs/<run-id>/`:
+  `run-metadata.json` (run_metadata.schema.json) and `records.jsonl`
+  (result_record.schema.json), one canonical single-line JSON document
+  per record.
+* **Fail-closed contract**: every document validates against the
+  committed schema before any byte reaches disk; `open_run` never
+  reuses an existing run directory; a record must match its run's
+  `run_id`/`provider`/`model_id`/`condition`; one
+  (`case_id`, `repeat_index`) pair per run — dedup state is reseeded
+  from disk, so it survives process restarts; `finalize_run` may touch
+  completion fields only (`finished_at`, `cases_total`,
+  `cases_completed`, `errors_total`, `notes`, `evaluator_version`).
+* Records are never edited after capture; scoring reads them as-is.
 
 ## What Stage 2 deliberately does not solve
 

@@ -142,6 +142,28 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     SELECTION.md authorizes the tool run; the freeze artifacts and the
     `llhb-v1-freeze` tag remain separate owner acts.
 
+## Addendum — Stage 5 ruling (2026-08-08)
+
+25. **Runner: vendor-native CLI agents on subscription billing.** The
+    v1 runner executes each provider's own agent CLI — Claude Code
+    (`claude -p`), OpenAI Codex CLI, Gemini CLI — against the same
+    local stdio MCP server, instead of the raw-API function-calling
+    bridge of decision #11. Motivation: per-token API cost for the
+    full matrix is not affordable for v1; CLI subscriptions/free tiers
+    remove it, and the CLI surface is how these models are actually
+    deployed (ecological validity). PROPOSAL §11's cross-provider
+    invariant is narrowed accordingly: within one provider both
+    conditions run the identical harness, prompt and settings — the
+    only difference is MCP availability — and the control−treatment
+    delta per provider is the primary cross-provider comparison;
+    absolute rates across providers are reported with a documented
+    harness caveat. Control arms run with the CLI's built-in tools
+    hard-disabled (sandbox / no-network flags); a control run showing
+    any tool activity is invalid. CLI name and version, harness
+    settings and payload traces are recorded in run metadata. The
+    function-bridge design of decision #11 is deferred to a possible
+    v2 rerun on the same frozen dataset.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,
