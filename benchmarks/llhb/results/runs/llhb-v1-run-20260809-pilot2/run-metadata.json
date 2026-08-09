@@ -1,0 +1,27 @@
+{
+  "api_version": null,
+  "case_order_seed": 42,
+  "cases_completed": 10,
+  "cases_total": 10,
+  "condition": "control",
+  "dataset_checksum": "1489c5fdd84487d566a67f9dc6c343e31a8b80fb214c03e6eeed83a8ca23f22c",
+  "errors_total": 0,
+  "evaluator_version": null,
+  "finished_at": "2026-08-09T08:02:46Z",
+  "llhb_version": "1.0",
+  "lovspor_commit": "e58e50e723dd036818d50d20abc21067ab7d26e9",
+  "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+  "max_turns": null,
+  "model_id": "claude-opus-5",
+  "notes": "pilot on discarded candidates from candidates.jsonl; NOT the frozen dataset; cli=2.1.226 (Claude Code)",
+  "provider": "anthropic",
+  "run_id": "llhb-v1-run-20260809-pilot2",
+  "runner_commit": "e58e50e723dd036818d50d20abc21067ab7d26e9",
+  "sampling": {
+    "temperature": null
+  },
+  "started_at": "2026-08-09T07:57:00Z",
+  "system_prompt_path": "benchmarks/llhb/runner/system-prompt-v1.txt",
+  "system_prompt_sha256": "1e984ac1bdb481be7dda5a20b84c1b84edf608e9b4739b346aef59017ef890ec",
+  "tool_config": null
+}
