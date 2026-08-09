@@ -57,6 +57,24 @@ def pilot_cases(
     return drops[:limit]
 
 
+def verify_frozen_against_lock(frozen_cases: list[dict[str, Any]], lock: dict[str, Any]) -> None:
+    """Fail closed unless the frozen JSONL is exactly the locked dataset.
+
+    A truncated or otherwise corrupted frozen file would shrink the
+    excluded-id set and silently let frozen cases into a pilot; both the
+    declared case count and the canonical checksum must match the lock.
+    """
+    declared = int(lock.get("case_count", -1))
+    if len(frozen_cases) != declared:
+        raise RunSetupError(
+            f"frozen dataset has {len(frozen_cases)} cases, lock declares {declared}"
+        )
+    checksum = dataset_checksum(canonical_jsonl(frozen_cases))
+    locked = str(lock.get("dataset_sha256", ""))
+    if checksum != locked:
+        raise RunSetupError(f"frozen dataset checksum {checksum} does not match lock {locked}")
+
+
 def compose_control_metadata(spec: ControlRunSpec, cases: list[dict[str, Any]]) -> dict[str, Any]:
     """A schema-valid run-metadata document for the control condition."""
     return {

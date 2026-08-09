@@ -13,6 +13,7 @@ from lovspor.llhb.run_setup import (
     compose_control_metadata,
     pilot_cases,
     sha256_text,
+    verify_frozen_against_lock,
 )
 from lovspor.llhb.schema import canonical_jsonl, dataset_checksum, load_schema, validate_case
 
@@ -60,6 +61,50 @@ class TestPilotCases:
     def test_rejects_non_positive_limit(self) -> None:
         with pytest.raises(RunSetupError, match="limit"):
             pilot_cases([make_case("llhb-v1-C1-001")], set(), limit=0)
+
+    def test_limit_one_is_valid(self) -> None:
+        candidates = [make_case("llhb-v1-C1-001"), make_case("llhb-v1-C1-002")]
+
+        assert [c["case_id"] for c in pilot_cases(candidates, set(), 1)] == ["llhb-v1-C1-001"]
+
+    def test_limit_equal_to_pool_is_valid(self) -> None:
+        candidates = [make_case("llhb-v1-C1-001"), make_case("llhb-v1-C1-002")]
+
+        assert len(pilot_cases(candidates, set(), 2)) == 2
+
+
+class TestVerifyFrozenAgainstLock:
+    def make_lock(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "case_count": len(cases),
+            "dataset_sha256": dataset_checksum(canonical_jsonl(cases)),
+        }
+
+    def test_accepts_matching_lock(self) -> None:
+        cases = [make_case("llhb-v1-C1-001"), make_case("llhb-v1-C1-002")]
+
+        verify_frozen_against_lock(cases, self.make_lock(cases))
+
+    def test_rejects_count_mismatch(self) -> None:
+        cases = [make_case("llhb-v1-C1-001")]
+        lock = self.make_lock(cases) | {"case_count": 250}
+
+        with pytest.raises(RunSetupError, match="250"):
+            verify_frozen_against_lock(cases, lock)
+
+    def test_rejects_checksum_mismatch(self) -> None:
+        cases = [make_case("llhb-v1-C1-001")]
+        lock = self.make_lock(cases) | {"dataset_sha256": "f" * 64}
+
+        with pytest.raises(RunSetupError, match="checksum"):
+            verify_frozen_against_lock(cases, lock)
+
+    def test_rejects_truncated_frozen_file(self) -> None:
+        cases = [make_case("llhb-v1-C1-001"), make_case("llhb-v1-C1-002")]
+        lock = self.make_lock(cases)
+
+        with pytest.raises(RunSetupError, match="lock declares 2"):
+            verify_frozen_against_lock(cases[:1], lock)
 
 
 class TestComposeControlMetadata:

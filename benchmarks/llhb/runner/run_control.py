@@ -1,8 +1,9 @@
 """Stage 5: run the control arm over pilot cases (repo-only, dry by default).
 
 Without ``--execute`` this is a dry run: composes and prints the full
-run metadata and the exact ``claude`` argv for the first case; nothing
-is spawned, nothing lands on disk. With ``--execute`` it opens the run
+run metadata and the exact ``claude`` argv for the first case. The
+model CLI is never spawned (only ``git rev-parse`` runs, for the commit
+fields) and nothing lands on disk. With ``--execute`` it opens the run
 and writes records + raw output + finalized metadata under
 ``results/runs/<run-id>/``.
 
@@ -28,7 +29,12 @@ from lovspor.errors import LovsporError
 from lovspor.llhb.claude_cli import RunIdentity, build_control_argv
 from lovspor.llhb.orchestrator import ControlRunConfig, run_control_arm
 from lovspor.llhb.results import ResultsStore, new_run_id
-from lovspor.llhb.run_setup import ControlRunSpec, compose_control_metadata, pilot_cases
+from lovspor.llhb.run_setup import (
+    ControlRunSpec,
+    compose_control_metadata,
+    pilot_cases,
+    verify_frozen_against_lock,
+)
 from lovspor.llhb.schema import load_cases_jsonl
 
 LLHB_DIR = Path(__file__).resolve().parents[1]
@@ -77,16 +83,20 @@ def claude_version() -> str:
 
 
 def load_inputs(args: argparse.Namespace) -> tuple[list[dict[str, Any]], str]:
-    frozen_ids = {str(case["case_id"]) for case in load_cases_jsonl(FROZEN_JSONL)}
+    frozen_cases = load_cases_jsonl(FROZEN_JSONL)
+    lock = json.loads(FROZEN_LOCK.read_text(encoding="utf-8"))
+    verify_frozen_against_lock(frozen_cases, lock)
+    frozen_ids = {str(case["case_id"]) for case in frozen_cases}
     candidates = load_cases_jsonl(args.candidates)
     cases = pilot_cases(candidates, frozen_ids, args.limit)
-    lock = json.loads(FROZEN_LOCK.read_text(encoding="utf-8"))
     return cases, str(lock["corpus_pin"]["lovverk_commit"])
 
 
 def compose(args: argparse.Namespace, cases: list[dict[str, Any]], lovverk: str) -> dict[str, Any]:
     now = datetime.datetime.now(datetime.UTC)
     head = git_head(REPO_ROOT)
+    # claude --version only on --execute: a dry run must spawn nothing.
+    cli = claude_version() if args.execute else "not-captured-dry-run"
     spec = ControlRunSpec(
         run_id=new_run_id(now.strftime("%Y%m%d"), args.suffix),
         model_id=args.model,
@@ -99,7 +109,7 @@ def compose(args: argparse.Namespace, cases: list[dict[str, Any]], lovverk: str)
         started_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         notes=(
             f"pilot on discarded candidates from {args.candidates.name}; "
-            f"NOT the frozen dataset; cli={claude_version()}"
+            f"NOT the frozen dataset; cli={cli}"
         ),
     )
     return compose_control_metadata(spec, cases)
