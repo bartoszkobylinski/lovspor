@@ -1,4 +1,4 @@
-"""Stage 5 run setup: pilot case selection and metadata composition."""
+"""Run setup: pilot case selection and per-condition metadata composition."""
 
 import hashlib
 from pathlib import Path
@@ -8,9 +8,9 @@ import pytest
 
 from lovspor.llhb.results import ResultsStore
 from lovspor.llhb.run_setup import (
-    ControlRunSpec,
     RunSetupError,
-    compose_control_metadata,
+    RunSpec,
+    compose_run_metadata,
     pilot_cases,
     sha256_text,
     verify_frozen_against_lock,
@@ -21,15 +21,23 @@ SCHEMA_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "llhb" / "sche
 
 PROMPT = "Du er en juridisk assistent.\n"
 
+TOOL_CONFIG = {
+    "transport": "native-mcp",
+    "tools": ["mcp__lovverk__get_section"],
+    "tool_schema_sha256": "c" * 64,
+    "backend": "local stdio `lovspor mcp` on lovverk 1111 at /pin",
+}
+
 
 def make_case(case_id: str) -> dict[str, Any]:
     return {"case_id": case_id, "question": "Hva sier loven?"}
 
 
-def make_spec(**overrides: Any) -> ControlRunSpec:
+def make_spec(**overrides: Any) -> RunSpec:
     spec = {
         "run_id": "llhb-v1-run-20260808-pilot1",
         "model_id": "claude-opus-5",
+        "condition": "control",
         "system_prompt_text": PROMPT,
         "system_prompt_path": "benchmarks/llhb/runner/system-prompt-v1.txt",
         "lovspor_commit": "0" * 40,
@@ -40,7 +48,7 @@ def make_spec(**overrides: Any) -> ControlRunSpec:
         "notes": "pilot on discarded candidates; NOT the frozen dataset",
     }
     spec.update(overrides)
-    return ControlRunSpec(**spec)
+    return RunSpec(**spec)
 
 
 class TestPilotCases:
@@ -128,11 +136,11 @@ class TestVerifyFrozenAgainstLock:
             verify_frozen_against_lock(cases[:1], lock)
 
 
-class TestComposeControlMetadata:
+class TestComposeRunMetadata:
     def test_is_schema_valid_and_store_accepted(self, tmp_path: Path) -> None:
         cases = [make_case("llhb-v1-C1-001"), make_case("llhb-v1-C1-002")]
 
-        metadata = compose_control_metadata(make_spec(), cases)
+        metadata = compose_run_metadata(make_spec(), cases)
 
         schema = load_schema(SCHEMA_DIR / "run_metadata.schema.json")
         assert validate_case(metadata, schema) == []
@@ -142,18 +150,53 @@ class TestComposeControlMetadata:
     def test_checksum_covers_the_actual_case_set(self) -> None:
         cases = [make_case("llhb-v1-C1-002"), make_case("llhb-v1-C1-001")]
 
-        metadata = compose_control_metadata(make_spec(), cases)
+        metadata = compose_run_metadata(make_spec(), cases)
 
         assert metadata["dataset_checksum"] == dataset_checksum(canonical_jsonl(cases))
 
     def test_prompt_hash_and_control_shape(self) -> None:
-        metadata = compose_control_metadata(make_spec(), [make_case("llhb-v1-C1-001")])
+        metadata = compose_run_metadata(make_spec(), [make_case("llhb-v1-C1-001")])
 
         assert metadata["system_prompt_sha256"] == hashlib.sha256(PROMPT.encode()).hexdigest()
         assert metadata["condition"] == "control"
         assert metadata["tool_config"] is None
         assert metadata["sampling"] == {"temperature": None}
         assert metadata["provider"] == "anthropic"
+
+    def test_treatment_metadata_carries_the_tool_config(self, tmp_path: Path) -> None:
+        spec = make_spec(condition="lovspor", tool_config=TOOL_CONFIG)
+
+        metadata = compose_run_metadata(spec, [make_case("llhb-v1-C1-001")])
+
+        schema = load_schema(SCHEMA_DIR / "run_metadata.schema.json")
+        assert validate_case(metadata, schema) == []
+        assert metadata["tool_config"] == TOOL_CONFIG
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        assert store.open_run(metadata).is_dir()
+
+    def test_both_conditions_share_every_field_but_the_condition(self) -> None:
+        """The metadata pair is the fairness evidence: if composing the two
+        arms could drift a shared field, the comparison would be unfounded."""
+        cases = [make_case("llhb-v1-C1-001")]
+        control = compose_run_metadata(make_spec(), cases)
+        treatment = compose_run_metadata(
+            make_spec(condition="lovspor", tool_config=TOOL_CONFIG), cases
+        )
+
+        differing = {key for key in control if control[key] != treatment[key]}
+        assert differing == {"condition", "tool_config"}
+
+    def test_rejects_a_control_run_carrying_a_tool_config(self) -> None:
+        with pytest.raises(RunSetupError, match="no tool_config"):
+            compose_run_metadata(make_spec(tool_config=TOOL_CONFIG), [make_case("llhb-v1-C1-001")])
+
+    def test_rejects_a_treatment_run_without_a_tool_config(self) -> None:
+        with pytest.raises(RunSetupError, match="must carry the tool_config"):
+            compose_run_metadata(make_spec(condition="lovspor"), [make_case("llhb-v1-C1-001")])
+
+    def test_rejects_an_unknown_condition(self) -> None:
+        with pytest.raises(RunSetupError, match="unknown condition"):
+            compose_run_metadata(make_spec(condition="pilot"), [make_case("llhb-v1-C1-001")])
 
 
 class TestSha256Text:

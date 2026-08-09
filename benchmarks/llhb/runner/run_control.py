@@ -40,8 +40,8 @@ from lovspor.llhb.claude_cli import RunIdentity, build_argv
 from lovspor.llhb.orchestrator import RunConfig, run_arm
 from lovspor.llhb.results import ResultsStore, new_run_id
 from lovspor.llhb.run_setup import (
-    ControlRunSpec,
-    compose_control_metadata,
+    RunSpec,
+    compose_run_metadata,
     pilot_cases,
     verify_frozen_against_lock,
 )
@@ -107,9 +107,10 @@ def compose(args: argparse.Namespace, cases: list[dict[str, Any]], lovverk: str)
     head = git_head(REPO_ROOT)
     # claude --version only on --execute: a dry run must spawn nothing.
     cli = claude_version() if args.execute else "not-captured-dry-run"
-    spec = ControlRunSpec(
+    spec = RunSpec(
         run_id=new_run_id(now.strftime("%Y%m%d"), args.suffix),
         model_id=args.model,
+        condition="control",
         system_prompt_text=PROMPT_PATH.read_text(encoding="utf-8"),
         system_prompt_path=str(PROMPT_PATH.relative_to(REPO_ROOT)),
         lovspor_commit=head,
@@ -122,7 +123,7 @@ def compose(args: argparse.Namespace, cases: list[dict[str, Any]], lovverk: str)
             f"NOT the frozen dataset; cli={cli}"
         ),
     )
-    return compose_control_metadata(spec, cases)
+    return compose_run_metadata(spec, cases)
 
 
 def subscription_token() -> str:
