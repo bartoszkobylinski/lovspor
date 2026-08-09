@@ -91,6 +91,36 @@
       "type": "boolean",
       "description": "True when a final answer was captured without a fatal error."
     },
+    "harness": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["exposed_tools", "mcp_servers", "permission_denials"],
+      "description": "The CLI's own account of this case's tool environment, read back from its transcript: what the model was offered, whether the tool backend was up, and what the harness refused. Makes 'the control arm had no tools' checkable instead of asserted (ruling #25). Null for records captured before Stage 6.",
+      "properties": {
+        "exposed_tools": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tool names offered to the model. Empty for a valid control case."
+        },
+        "mcp_servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "status"],
+            "properties": {
+              "name": { "type": "string" },
+              "status": { "type": "string" }
+            }
+          },
+          "description": "Condition 'lovspor': every declared server and its connection status. A case whose server was not connected ran without the treatment."
+        },
+        "permission_denials": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Tool calls the harness blocked. Non-empty means the model was denied a tool it asked for; the case is not a clean measurement of either condition."
+        }
+      }
+    },
     "raw_response_ref": {
       "type": ["string", "null"],
       "description": "Path within the run dir to the full raw provider response stream, when retained separately."

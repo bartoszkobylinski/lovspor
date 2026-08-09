@@ -36,8 +36,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from lovspor.errors import LovsporError
-from lovspor.llhb.claude_cli import RunIdentity, build_control_argv
-from lovspor.llhb.orchestrator import ControlRunConfig, run_control_arm
+from lovspor.llhb.claude_cli import RunIdentity, build_argv
+from lovspor.llhb.orchestrator import RunConfig, run_arm
 from lovspor.llhb.results import ResultsStore, new_run_id
 from lovspor.llhb.run_setup import (
     ControlRunSpec,
@@ -139,7 +139,7 @@ def subscription_token() -> str:
 def execute(metadata: dict[str, Any], cases: list[dict[str, Any]], timeout_s: int) -> None:
     sandbox = RUNS_ROOT / ".sandbox" / str(metadata["run_id"])
     sandbox.mkdir(parents=True, exist_ok=True)
-    config = ControlRunConfig(
+    config = RunConfig(
         identity=_identity(metadata),
         system_prompt=PROMPT_PATH.read_text(encoding="utf-8"),
         case_order_seed=int(metadata["case_order_seed"]),
@@ -148,7 +148,7 @@ def execute(metadata: dict[str, Any], cases: list[dict[str, Any]], timeout_s: in
         extra_env={"CLAUDE_CODE_OAUTH_TOKEN": subscription_token()},
     )
     store = ResultsStore(runs_root=RUNS_ROOT, schema_dir=LLHB_DIR / "schema")
-    summary = run_control_arm(config, cases, metadata, store)
+    summary = run_arm(config, cases, metadata, store)
     print(json.dumps(summary, indent=2))
 
 
@@ -168,7 +168,7 @@ def main() -> int:
     print(json.dumps(metadata, indent=2, ensure_ascii=False))
     print(f"\ncases: {len(cases)} (drops only), runs root: {RUNS_ROOT}", flush=True)
     if not args.execute:
-        argv = build_control_argv(_identity(metadata), str(cases[0]["question"]), "<system-prompt>")
+        argv = build_argv(_identity(metadata), str(cases[0]["question"]), "<system-prompt>")
         print("\nDRY RUN - first-case argv (prompt elided):")
         print(json.dumps(argv, ensure_ascii=False))
         print("\nre-run with --execute to spawn the CLI")
