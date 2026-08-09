@@ -279,8 +279,18 @@ Driven by the Stage 3.5 human audit (see
   and all providers of one evaluation; the CLI version is recorded in
   metadata `notes`. The per-run sandbox HOME under
   `results/runs/.sandbox/` is gitignored.
-* **Open item (pilot)**: confirm subscription OAuth survives the HOME
-  sandbox on macOS (Keychain-based auth).
+* **Pilot findings (2026-08-09)**: macOS Keychain auth does NOT
+  survive the HOME sandbox — pilot1 (`llhb-v1-run-20260809-pilot1`)
+  failed 10/10 with "Not logged in" (records retained as evidence).
+  Resolution: a long-lived subscription token from `claude
+  setup-token`, stored as `LLHB_CLAUDE_CODE_OAUTH_TOKEN` in the
+  gitignored `.env` and passed to the child as
+  `CLAUDE_CODE_OAUTH_TOKEN`; `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`
+  stay banned (per-token billing). Pilot2
+  (`llhb-v1-run-20260809-pilot2`, 10 drops, control, claude-opus-5):
+  10/10 completed, 0 errors, 0 tool calls, 1 turn per case, avg
+  34.5 s/case (~2.4 h projected for a 250-case control arm), ~78k
+  in / ~20k out tokens per 10 cases, subscription-billed.
 
 ## What Stage 2 deliberately does not solve
 

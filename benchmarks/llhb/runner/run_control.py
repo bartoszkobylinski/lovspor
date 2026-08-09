@@ -9,8 +9,15 @@ and writes records + raw output + finalized metadata under
 
 Pilot scope (ruling #25): cases come from a candidates pool minus the
 frozen 250 (the drops) — the frozen dataset is never run before
-Stage 9. ANTHROPIC_API_KEY never reaches the child process; the CLI
-authenticates via subscription OAuth from a sandboxed HOME.
+Stage 9.
+
+Auth: macOS keychain credentials do NOT survive the sandboxed HOME
+(verified 2026-08-09, pilot1: 10/10 "Not logged in"), so ``--execute``
+requires ``LLHB_CLAUDE_CODE_OAUTH_TOKEN`` in ``.env`` — a long-lived
+subscription token minted by ``claude setup-token`` — passed to the
+child as ``CLAUDE_CODE_OAUTH_TOKEN``. ``ANTHROPIC_API_KEY`` and
+``ANTHROPIC_AUTH_TOKEN`` stay banned: they would flip the run onto
+per-token billing.
 
 Usage:
     uv run python benchmarks/llhb/runner/run_control.py \
@@ -20,10 +27,13 @@ Usage:
 import argparse
 import datetime
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
 
 from lovspor.errors import LovsporError
 from lovspor.llhb.claude_cli import RunIdentity, build_control_argv
@@ -115,6 +125,17 @@ def compose(args: argparse.Namespace, cases: list[dict[str, Any]], lovverk: str)
     return compose_control_metadata(spec, cases)
 
 
+def subscription_token() -> str:
+    load_dotenv(REPO_ROOT / ".env")
+    token = os.environ.get("LLHB_CLAUDE_CODE_OAUTH_TOKEN", "")
+    if not token.startswith("sk-ant-oat"):
+        raise LovsporError(
+            "LLHB_CLAUDE_CODE_OAUTH_TOKEN missing from .env or not an sk-ant-oat "
+            "subscription token; mint one with `claude setup-token`"
+        )
+    return token
+
+
 def execute(metadata: dict[str, Any], cases: list[dict[str, Any]], timeout_s: int) -> None:
     sandbox = RUNS_ROOT / ".sandbox" / str(metadata["run_id"])
     sandbox.mkdir(parents=True, exist_ok=True)
@@ -124,6 +145,7 @@ def execute(metadata: dict[str, Any], cases: list[dict[str, Any]], timeout_s: in
         case_order_seed=int(metadata["case_order_seed"]),
         timeout_s=timeout_s,
         sandbox_home=sandbox,
+        extra_env={"CLAUDE_CODE_OAUTH_TOKEN": subscription_token()},
     )
     store = ResultsStore(runs_root=RUNS_ROOT, schema_dir=LLHB_DIR / "schema")
     summary = run_control_arm(config, cases, metadata, store)
