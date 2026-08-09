@@ -164,6 +164,37 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     function-bridge design of decision #11 is deferred to a possible
     v2 rerun on the same frozen dataset.
 
+## Addendum — Stage 5 pilot ruling (2026-08-09)
+
+26. **One pass over the frozen 250; stability subset raised to 30×5.**
+    The primary matrix runs a single pass per case (R=1), and the
+    stability subset moves from 30 cases × 3 repeats (PROPOSAL §11) to
+    30 cases × **5**. Rationale, from two successful control-arm runs
+    over the same 10 discarded candidates —
+    `llhb-v1-run-20260809-pilot2` and `-pilot3`, both 10/10 completed,
+    artifacts committed under `results/runs/`: the deterministic layer
+    reproduced exactly (identical dataset checksum, prompt hash, seeded
+    case order and completion rate), while **0 of 10** answers were
+    byte-identical across the two runs — an exact figure that needs no
+    pattern to compute. An abstention proxy was also run under three
+    explicitly written phrase patterns
+    (`runner/stability_proxy.py`, regenerable): narrow 3→6 with 7 of 10
+    cases flipping, medium 8→8 with 4 flipping, broad 8→9 with 3
+    flipping. The counts are pattern-sensitive by construction and no
+    single one of them is quotable on its own; what survives every
+    pattern is that **individual cases change between runs while the
+    aggregate moves less** — aggregate stability without per-case
+    stability. The CLI exposes no temperature control (§11 records
+    settings verbatim instead). Stage 7's deterministic scorer replaces
+    this diagnostic entirely; nothing here is a publishable metric.
+    Statistically, repeats shrink sampling noise only as 1/√R while
+    costing wall-clock linearly, and 250 cases already supply 250 draws
+    for the headline; the subset's job is to *measure* per-case
+    variance, not to suppress it, so the extra repeats are spent there.
+    Adding repeats to the primary pass stays available as an
+    evidence-driven decision once a real delta and its confidence
+    interval exist. Supersedes the 30×3 figure in PROPOSAL §11.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,
