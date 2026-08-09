@@ -45,3 +45,6 @@ notes/
 .idea/
 .vscode/
 *.swp
+
+# LLHB runner: per-run CLI sandbox HOME (never versioned; records/raw ARE versioned)
+benchmarks/llhb/results/runs/.sandbox/
