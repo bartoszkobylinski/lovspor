@@ -116,6 +116,27 @@ are diffable across providers to verify this.
    a cap is recorded in the result record, never silently truncated.
 6. Pilot and smoke runs use only discarded candidates (pool minus frozen),
    never frozen cases.
+7. Both arms run through one driver and one transcript format, and every
+   run carries per-case evidence of its own tool environment (which tools
+   were offered, whether the corpus backend connected, what the harness
+   denied). A control case showing tool activity, or a treatment case
+   whose backend never connected, invalidates that case rather than being
+   absorbed into the aggregate; `runner/check_fairness.py` reports both
+   from the committed artifacts.
+
+### Recorded harness limitations (v1, Claude Code CLI)
+
+- `--system-prompt` **appends to** rather than replaces the CLI's own
+  preamble, so `system_prompt_sha256` covers the benchmark prompt bytes,
+  not the whole system context. The preamble is identical across arms.
+- The CLI exposes no temperature and no max-turn control; both are
+  recorded as unset rather than as chosen values (§11 records settings
+  verbatim).
+- The CLI discovers instruction files (`CLAUDE.md`) from its working
+  directory upward, and a sandboxed `HOME` does not stop it. Runs are
+  therefore spawned inside an empty per-run sandbox directory. The
+  Stage 5 pilots predate this fix and ran with development instructions
+  in context; their answer content is not comparable to later runs.
 
 ### Matrix and repeats
 

@@ -264,6 +264,11 @@ class TestParseStreamJson:
         assert parsed.error is not None
         assert "exit code 1" in parsed.error
 
+    def test_tolerates_blank_lines_between_events(self) -> None:
+        parsed = parse_stream_json(control_stream().replace("\n", "\n\n"), returncode=0)
+
+        assert parsed.ok is True
+
     def test_flags_an_unparseable_line(self) -> None:
         parsed = parse_stream_json(control_stream() + "not json\n", returncode=0)
 

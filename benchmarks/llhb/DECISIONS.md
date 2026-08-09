@@ -195,6 +195,36 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     evidence-driven decision once a real delta and its confidence
     interval exist. Supersedes the 30×3 figure in PROPOSAL §11.
 
+## Open for owner decision — Stage 6 harness findings (2026-08-09)
+
+Not rulings. Two facts measured while building the treatment arm, each
+with a decision attached that is the owner's to make.
+
+**F1 — the Stage 5 pilots ran with development instructions in
+context.** The CLI discovers `CLAUDE.md` upward from its working
+directory, and the sandboxed `HOME` does not stop it (on macOS the
+user-level file is resolved from the real home regardless of `$HOME`).
+Asked directly, a run spawned in the repository answered JA and named
+both `~/.claude/CLAUDE.md` and the project file; the same question from
+an empty sandbox directory answered that it had received only the
+system prompt. Fixed for all future runs by spawning the child inside
+the per-run sandbox. Ruling #26's evidence is about run-to-run variance
+between two runs contaminated identically, so it is unaffected; no
+*answer content* from pilots 1–3 is comparable to a fixed run.
+*Decision needed:* whether the pilot control arm is re-run under the
+fixed harness before the treatment comparison is reported.
+
+**F2 — both arms now use `--output-format stream-json`.** Ruling #25
+says the two conditions run the identical harness with MCP availability
+as the only difference; the previous single-JSON format left the
+control arm's `"tool_calls": []` as an assertion rather than an
+observation. The streaming transcript carries the offered tool list,
+every call and every permission denial, which is what makes "a control
+run showing any tool activity is invalid" checkable. Pilots 1–3 were
+captured under the old format and keep it. *Decision needed:* whether
+this is accepted as the recorded harness for v1, or whether the owner
+wants the format difference itself recorded as a superseding ruling.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,

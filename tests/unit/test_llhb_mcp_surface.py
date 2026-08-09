@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.llhb import mcp_surface
 from lovspor.llhb.mcp_surface import (
     ToolSurfaceError,
     allowed_tools,
@@ -55,6 +56,20 @@ class TestToolSurface:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
 
         assert tool_surface(corpus).schema_sha256 == without_key.schema_sha256
+
+    def test_rejects_a_server_that_exposes_nothing(
+        self, corpus: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An empty surface would record a treatment arm with no treatment."""
+
+        class _ToollessServer:
+            async def list_tools(self) -> list[object]:
+                return []
+
+        monkeypatch.setattr(mcp_surface, "build_server", lambda _path: _ToollessServer())
+
+        with pytest.raises(ToolSurfaceError, match="exposes no tools"):
+            tool_surface(corpus)
 
 
 class TestServerConfig:

@@ -23,8 +23,10 @@ freeze datasets, call models, or score runs.
 | `schema.py` | JSONL load, JSON-Schema validation (deterministic pathed messages), canonical JSONL + SHA-256 checksum. |
 | `validation.py` | `CandidateValidator`: schema layer then per-category C1-C8 deterministic checks; dataset-level duplicate-id and provision-cap checks. |
 | `results.py` | Stage 5 `ResultsStore`: validated, append-only run storage (`run-metadata.json` + `records.jsonl` under `results/runs/<run-id>/`). Contract below. |
-| `claude_cli.py` | Stage 5 control-arm driver for the Claude Code CLI: exact `claude -p` argv (tools + MCP hard-disabled), CLI JSON parsing, schema-valid record assembly. Contract below. |
-| `orchestrator.py` | Stage 5 control-arm orchestrator: hermetic whitelist env (API key banned, HOME sandbox), seeded case order, per-case CLI execution with timeout-as-result, raw stdout retention, ResultsStore integration. Contract below. |
+| `claude_cli.py` | Claude Code CLI driver for both conditions: exact `claude -p` argv, stream-json transcript parsing (tool trace + harness evidence), schema-valid record assembly. Contract below. |
+| `orchestrator.py` | Run orchestrator for both conditions: hermetic whitelist env (API key banned, HOME sandbox) and sandbox working directory, seeded case order, per-case CLI execution with timeout-as-result, raw transcript retention, tool-payload spill, ResultsStore integration. Contract below. |
+| `mcp_surface.py` | Stage 6 treatment surface: `--mcp-config` document for the pinned lovverk stdio server, tool names + tool-schema SHA-256 read from the server itself, run-metadata `tool_config`. Contract below. |
+| `fairness.py` | Stage 6 fairness checks over committed artifacts: metadata diff against an explicit may-differ list, paired case sets, per-record control/treatment violations. Contract below. |
 
 ## Extractor syntax (closed contract)
 
@@ -239,46 +241,77 @@ Driven by the Stage 3.5 human audit (see
   `cases_completed`, `errors_total`, `notes`, `evaluator_version`).
 * Records are never edited after capture; scoring reads them as-is.
 
-## Stage 5 Claude control-arm driver (2026-08-08, ruling #25)
+## Claude CLI driver, both arms (2026-08-08, extended 2026-08-09, ruling #25)
 
 * **Module**: `lovspor.llhb.claude_cli` (unit-tested, no subprocess —
   executing the argv belongs to the run orchestrator).
-* **Control argv**: `claude -p <question> --output-format json --model
-  <id> --system-prompt <text> --tools "" --strict-mcp-config
-  --mcp-config '{"mcpServers":{}}'` — built-in tools disabled and MCP
-  hard-blocked, so a control run cannot reach any tool (ruling #25:
-  a control run showing tool activity is invalid).
-* **Parsing**: `parse_cli_output` never raises — a non-zero exit,
-  non-JSON stdout, `is_error` or a non-`success` subtype become a
-  `ParsedCliResult(ok=False, error=...)`; `build_result_record` turns
-  either outcome into a schema-valid record (`errors[].stage:
-  "request"`, `completed: false`, `final_answer: null` on failure).
+* **Shared argv**: `claude -p <question> --output-format stream-json
+  --verbose --model <id> --system-prompt <text> --tools ""
+  --strict-mcp-config --mcp-config <config>`. Built-in tools are
+  disabled in both arms and MCP is confined to what `--mcp-config`
+  declares, so the arms differ in exactly one argument: control passes
+  `{"mcpServers":{}}` and nothing else, treatment passes the lovverk
+  server plus `--allowedTools mcp__lovverk__*` (last, because the flag
+  is variadic). `build_argv` fails closed when the condition and the
+  presence of tool access disagree.
+* **Why stream-json in both arms**: the single-JSON format reports only
+  a final answer, so a control record could only *assert*
+  `"tool_calls": []`. The transcript carries the tool list the model
+  was offered, every call it made and anything the harness denied — the
+  evidence ruling #25 needs to call a control run with tool activity
+  invalid. Pilots 1–3 predate this and ran on `--output-format json`.
+* **Parsing**: `parse_stream_json` never raises — a non-zero exit,
+  unreadable NDJSON, a missing result event, `is_error` or a
+  non-`success` subtype become a `ParsedCliResult(ok=False, error=...)`.
+  It is fail-closed on the trace: a transcript with no `system init`
+  event, a `tool_use` block without a readable name/input/id, or a
+  `tool_result` without a `tool_use_id` becomes an error record rather
+  than a case that silently reports less tool use than it had. Results
+  are matched to calls by `tool_use_id`, never by position.
+  `build_result_record` turns either outcome into a schema-valid record
+  (`errors[].stage: "request"`, `completed: false`, `final_answer: null`
+  on failure) and carries the `harness` block: `exposed_tools`,
+  `mcp_servers` (name + connection status), `permission_denials`.
 * **Orchestrator** (`lovspor.llhb.orchestrator`): the child environment
   is whitelist-built (`HOME` = per-run sandbox, `PATH`, `TERM`), never
   inherited — user-level settings, hooks and MCP config cannot leak
   into the benchmark conversation. `ANTHROPIC_API_KEY` is banned
   outright: in `-p` mode a present key silently outranks subscription
-  OAuth and would move the run onto per-token billing. Case order is a
-  seeded shuffle over sorted ids (`case_order_seed` in run metadata),
-  fail-closed on duplicate ids. A CLI timeout or crash becomes an
-  error record, never an aborted run. Raw stdout/stderr/exit of every
-  invocation is retained at `raw/<case_id>.json` and referenced via
-  `raw_response_ref`.
-* **Run setup** (`lovspor.llhb.run_setup` + `runner/run_control.py`):
+  OAuth and would move the run onto per-token billing. The child also
+  **runs in that sandbox** (`cwd`), because CLAUDE.md discovery walks up
+  from the working directory and a sandboxed HOME does not stop it —
+  see the contamination finding below. Case order is a seeded shuffle
+  over sorted ids (`case_order_seed` in run metadata), fail-closed on
+  duplicate ids. A CLI timeout or crash becomes an error record, never
+  an aborted run. The raw transcript/stderr/exit of every invocation is
+  retained at `raw/<case_id>.json` and referenced via
+  `raw_response_ref`; a tool payload whose canonical JSON exceeds 4 KB
+  is written to `tools/<case_id>-<index>.json` and referenced via
+  `result_ref`, with `result_sha256` recorded for every payload.
+* **Run setup** (`lovspor.llhb.run_setup` + `runner/run_arm.py`):
   `pilot_cases` selects drops only — every frozen case_id is excluded,
   and a limit the drop pool cannot satisfy fails closed.
-  `compose_control_metadata` builds the run_metadata document from a
-  typed spec; `dataset_checksum` is always computed over the canonical
-  bytes of the case set actually being run (for the pilot: discarded
-  candidates, stated in `notes`, never the frozen 250).
-  `runner/run_control.py` is dry-run by default (prints metadata +
+  `compose_run_metadata` builds the run_metadata document from a typed
+  spec and refuses a control run carrying a `tool_config` or a
+  treatment run without one; `dataset_checksum` is always computed over
+  the canonical bytes of the case set actually being run (for the
+  pilot: discarded candidates, stated in `notes`, never the frozen
+  250). `runner/run_arm.py` runs either condition (`--condition
+  control|lovspor`) and is dry-run by default (prints metadata +
   first-case argv, zero disk writes); `--execute` spawns the CLI and
-  writes `results/runs/<run-id>/`. The system prompt lives at
-  `runner/system-prompt-v1.txt` (bokmål, honesty + abstention, no
-  Lovspor mention) and must stay byte-identical across both conditions
-  and all providers of one evaluation; the CLI version is recorded in
-  metadata `notes`. The per-run sandbox HOME under
+  writes `results/runs/<run-id>/`. One driver on purpose: two scripts
+  would be two places for the arms to drift apart. The system prompt
+  lives at `runner/system-prompt-v1.txt` (bokmål, honesty + abstention,
+  no Lovspor mention) and must stay byte-identical across both
+  conditions and all providers of one evaluation; the CLI version is
+  recorded in metadata `notes`. The per-run sandbox HOME under
   `results/runs/.sandbox/` is gitignored.
+* **Recorded harness caveat**: `--system-prompt` does not replace the
+  CLI's own preamble. Asked what it had received, a run under the
+  benchmark prompt reported the Agent SDK preamble ahead of the
+  Norwegian instructions. `system_prompt_sha256` therefore covers the
+  benchmark's own prompt bytes, not the complete system context; the
+  preamble is identical in both arms, so the comparison holds.
 * **Pilot findings (2026-08-09)**: macOS Keychain auth does NOT
   survive the HOME sandbox — pilot1 (`llhb-v1-run-20260809-pilot1`)
   failed 10/10 with "Not logged in" (records retained as evidence).
@@ -291,6 +324,55 @@ Driven by the Stage 3.5 human audit (see
   10/10 completed, 0 errors, 0 tool calls, 1 turn per case, avg
   34.5 s/case (~2.4 h projected for a 250-case control arm), ~78k
   in / ~20k out tokens per 10 cases, subscription-billed.
+* **CLAUDE.md contamination (2026-08-09)**: the Stage 5 pilots spawned
+  the CLI with the repository as its working directory. Asked directly
+  whether it had received project instructions, a run in that
+  configuration answered JA and named both `~/.claude/CLAUDE.md` and
+  the project file; the same question from a sandbox working directory
+  answered that it had received only the system prompt. The sandboxed
+  HOME did not prevent it — on macOS the CLI resolves the user
+  instruction file from the real home regardless of `$HOME`. Pilots 1–3
+  therefore ran with development instructions in context. The
+  contamination was identical across pilot2 and pilot3, so ruling #26's
+  run-to-run variance evidence is unaffected; no answer content from
+  those runs is comparable to a fixed run. Fixed by running the child
+  in the sandbox directory.
+
+## Stage 6 treatment arm (2026-08-09, ruling #25)
+
+* **Backend**: a local stdio `lovspor mcp` server bound to the pinned
+  lovverk checkout — never the hosted production endpoint, whose corpus
+  moves (METHODOLOGY §5). `runner/run_arm.py --condition lovspor`
+  requires `--corpus-path` and calls `verify_pin` against the frozen
+  lock's `corpus_pin` before composing anything: wrong HEAD, dirty tree
+  or a mismatched manifest timestamp stops the run.
+* **Tool surface** (`lovspor.llhb.mcp_surface`): the tool list and
+  `tool_schema_sha256` come from `build_server(...).list_tools()` —
+  the client-facing view — so the recorded surface cannot drift from
+  the served one. The hash covers name, description and input/output
+  schema of all 16 tools and is independent of whether
+  `OPENAI_API_KEY` is set (tested), because a hash that moved with the
+  ambient environment would describe the machine, not the run. Both
+  paths in the `--mcp-config` document must be absolute: the CLI runs
+  from a sandbox where a relative path resolves elsewhere.
+* **Credentials**: the treatment child additionally receives
+  `OPENAI_API_KEY`, without which `semantic_search` is served but fails
+  on every call — a treatment arm quietly weaker than the one
+  METHODOLOGY §5 describes. The runner fails closed if it is missing.
+  Query embedding remains an external call at run time; retrieval
+  results are captured in full in the tool trace (recorded limitation).
+* **Fairness checks** (`lovspor.llhb.fairness` +
+  `runner/check_fairness.py`): reads two committed runs and reports
+  every way the pair fails to be a control-treatment comparison — a
+  metadata field that should have matched and did not (the may-differ
+  list is explicit: `run_id`, `condition`, `tool_config`, timestamps,
+  notes, per-run counts, `evaluator_version`; everything else is
+  compared, so a field added later is checked unless deliberately
+  exempted), a case only one arm ran, a control case that issued or was
+  offered a tool, a treatment case whose MCP server never connected or
+  that was offered no tools, and any tool call the harness denied. A
+  completed case with no `harness` block is itself a finding. Exits
+  non-zero, so it can gate a report.
 
 ## What Stage 2 deliberately does not solve
 

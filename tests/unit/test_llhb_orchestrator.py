@@ -331,6 +331,35 @@ class TestRunArm:
         assert len(call["result_sha256"]) == 64
         assert "result_ref" not in call
 
+    def test_unanswered_tool_call_is_stored_without_a_payload_hash(self, tmp_path: Path) -> None:
+        stream = emit(
+            init_event(["mcp__lovverk__get_section"]),
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu-1",
+                            "name": "mcp__lovverk__get_section",
+                            "input": {"slug": "testloven"},
+                        }
+                    ]
+                },
+            },
+            result_event(),
+        )
+        bin_dir = fake_claude(tmp_path, stream)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        metadata = make_metadata(condition="lovspor", tool_config={"transport": "native-mcp"})
+
+        run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
+
+        call = store.read_records(RUN_ID)[0]["tool_calls"][0]
+        assert call["result"] is None
+        assert "result_sha256" not in call
+        assert not (tmp_path / "runs" / RUN_ID / "tools").exists()
+
     def test_large_tool_payload_is_spilled_beside_the_run(self, tmp_path: Path) -> None:
         payload = "paragraf " * 1000
         stream = emit(
