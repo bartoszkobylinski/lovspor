@@ -44,9 +44,6 @@ from lovspor.llhb.results import ResultsStore
 _RAW_DIR = "raw"
 _TOOLS_DIR = "tools"
 _CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
-# A tool payload larger than this is stored beside the run instead of
-# inline, so records.jsonl stays readable when a case pulls whole acts.
-_INLINE_RESULT_LIMIT = 4096
 # Keys that would defeat the sandbox or flip billing if a caller smuggled
 # them in through extra_env — each one fails closed instead of merging.
 _BANNED_ENV = frozenset({"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "HOME", "CLAUDE_CONFIG_DIR"})
@@ -196,7 +193,13 @@ def _parse(invocation: CliInvocation) -> ParsedCliResult:
 
 
 def _stored_tool_calls(run_dir: Path, case_id: str, calls: Any) -> list[dict[str, Any]]:
-    """Hash every tool payload; spill the large ones next to the run."""
+    """Hash every tool payload and keep the bytes beside the run, not in it.
+
+    A lovverk tool answers with statutory text, which does not live in
+    this repository. The record therefore keeps the SHA-256 and a
+    reference; because the corpus is pinned, (tool, arguments, pin)
+    regenerates exactly the bytes the hash was taken over.
+    """
     stored: list[dict[str, Any]] = []
     for call in calls:
         entry = dict(call)
@@ -204,10 +207,9 @@ def _stored_tool_calls(run_dir: Path, case_id: str, calls: Any) -> list[dict[str
             stored.append(entry)
             continue
         canonical = _canonical(entry["result"])
+        entry["result"] = None
         entry["result_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        if len(canonical) > _INLINE_RESULT_LIMIT:
-            entry["result"] = None
-            entry["result_ref"] = _write_tool_payload(run_dir, case_id, entry["index"], canonical)
+        entry["result_ref"] = _write_tool_payload(run_dir, case_id, entry["index"], canonical)
         stored.append(entry)
     return stored
 

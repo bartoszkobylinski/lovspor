@@ -285,9 +285,17 @@ Driven by the Stage 3.5 human audit (see
   duplicate ids. A CLI timeout or crash becomes an error record, never
   an aborted run. The raw transcript/stderr/exit of every invocation is
   retained at `raw/<case_id>.json` and referenced via
-  `raw_response_ref`; a tool payload whose canonical JSON exceeds 4 KB
-  is written to `tools/<case_id>-<index>.json` and referenced via
-  `result_ref`, with `result_sha256` recorded for every payload.
+  `raw_response_ref`; every tool payload is written to
+  `tools/<case_id>-<index>.json` and referenced via `result_ref` +
+  `result_sha256`, never inlined into the record.
+* **Retention split**: `tools/` and `raw/` are gitignored, because a
+  lovverk tool answers with statutory text and legal text does not live
+  in this repo (CLAUDE.md). What is versioned — `run-metadata.json` and
+  `records.jsonl` — carries each payload's SHA-256, the tool name and
+  the exact arguments; the corpus is pinned, so (tool, arguments, pin)
+  regenerates the bytes the hash was taken over. The Stage 5 control
+  pilots predate the rule and stay tracked; they contain no tool
+  payloads.
 * **Run setup** (`lovspor.llhb.run_setup` + `runner/run_arm.py`):
   `pilot_cases` selects drops only — every frozen case_id is excluded,
   and a limit the drop pool cannot satisfy fails closed.

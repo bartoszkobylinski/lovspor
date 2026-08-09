@@ -225,6 +225,32 @@ captured under the old format and keep it. *Decision needed:* whether
 this is accepted as the recorded harness for v1, or whether the owner
 wants the format difference itself recorded as a superseding ruling.
 
+**F3 — treatment tool payloads are statutory text, and this repo holds
+none.** Every lovverk tool answers with corpus text, so a committed
+treatment run would move rendered legal text into the engine repo,
+against `CLAUDE.md`. Applied for now: payloads are never inlined into
+`records.jsonl`; each is written to `tools/<case_id>-<index>.json` and
+referenced by `result_ref` + `result_sha256`, and `tools/` and `raw/`
+are gitignored. What stays versioned is the tool name, the exact
+arguments and the payload hash — and because the corpus is pinned,
+(tool, arguments, pin) regenerates the bytes the hash was taken over,
+so the evidence is checkable without duplicating the corpus.
+*Decision needed:* ratify this, or rule that treatment transcripts are
+benchmark evidence rather than corpus material and may be versioned
+here (which also decides roughly 80–120 MB of artifacts for the full
+matrix, extrapolated from the pilot at ~876 KB per 10 treatment cases).
+
+**F4 — `semantic_search` was unavailable for the first treatment
+pilot.** No `OPENAI_API_KEY` exists on the build machine (both `.env`
+files carry an empty value), so the MCP server serves the tool but
+every call would fail. The runner refuses a treatment run in that state
+unless `--without-semantic-search` is passed, which records the weaker
+surface in `notes`. The pilot ran with 15 of 16 tools usable and the
+model never invoked the sixteenth. *Decision needed:* whether the full
+matrix requires the key (METHODOLOGY §5 assumes embedding-based
+retrieval is available and already records it as an external
+dependency), or whether v1 runs on the deterministic 15.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,

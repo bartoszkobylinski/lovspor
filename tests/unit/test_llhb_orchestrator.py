@@ -327,9 +327,9 @@ class TestRunArm:
 
         call = store.read_records(RUN_ID)[0]["tool_calls"][0]
         assert call["name"] == "mcp__lovverk__get_section"
-        assert call["result"] == "kort svar"
+        assert call["arguments"] == {"slug": "testloven"}
         assert len(call["result_sha256"]) == 64
-        assert "result_ref" not in call
+        assert call["result_ref"] == "tools/llhb-v1-C1-001-000.json"
 
     def test_unanswered_tool_call_is_stored_without_a_payload_hash(self, tmp_path: Path) -> None:
         stream = emit(
@@ -360,8 +360,10 @@ class TestRunArm:
         assert "result_sha256" not in call
         assert not (tmp_path / "runs" / RUN_ID / "tools").exists()
 
-    def test_large_tool_payload_is_spilled_beside_the_run(self, tmp_path: Path) -> None:
-        payload = "paragraf " * 1000
+    def test_no_tool_payload_is_kept_inside_the_record(self, tmp_path: Path) -> None:
+        """A lovverk payload is statutory text, which does not live in this
+        repo; the record keeps the hash and the pin regenerates the bytes."""
+        payload = "kort svar"
         stream = emit(
             init_event(["mcp__lovverk__get_law"]),
             {

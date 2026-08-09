@@ -83,6 +83,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server-command", type=Path, default=DEFAULT_SERVER_COMMAND)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--timeout", type=int, default=600, help="per-case timeout, seconds")
+    parser.add_argument(
+        "--without-semantic-search",
+        action="store_true",
+        help="run the lovspor arm with no OPENAI_API_KEY, recording the weaker surface",
+    )
     parser.add_argument("--execute", action="store_true", help="actually spawn the CLI")
     return parser.parse_args()
 
@@ -179,10 +184,16 @@ def compose(
 def _notes(args: argparse.Namespace) -> str:
     # claude --version only on --execute: a dry run must spawn nothing.
     cli = claude_version() if args.execute else "not-captured-dry-run"
+    degraded = (
+        "; semantic_search is served but non-functional (no OPENAI_API_KEY): "
+        "15 of 16 tools usable, embedding-based retrieval untested in this run"
+        if args.condition == "lovspor" and args.without_semantic_search
+        else ""
+    )
     return (
         f"pilot on discarded candidates from {args.candidates.name}; "
         f"NOT the frozen dataset; cli={cli}; the CLI exposes no temperature "
-        "or max-turn control, so both are recorded as unset"
+        f"or max-turn control, so both are recorded as unset{degraded}"
     )
 
 
@@ -196,7 +207,7 @@ def subscription_token() -> str:
     return token
 
 
-def child_env(condition: str) -> dict[str, str]:
+def child_env(args: argparse.Namespace) -> dict[str, str]:
     """Credentials the child needs, and nothing else.
 
     ``.env`` is loaded here, once, before any lookup: leaving it to a
@@ -205,16 +216,19 @@ def child_env(condition: str) -> dict[str, str]:
     """
     load_dotenv(REPO_ROOT / ".env")
     env = {"CLAUDE_CODE_OAUTH_TOKEN": subscription_token()}
-    if condition == "control":
+    if args.condition == "control":
         return env
     key = os.environ.get("OPENAI_API_KEY", "")
-    if not key:
+    if key:
+        return {**env, "OPENAI_API_KEY": key}
+    if not args.without_semantic_search:
         raise LovsporError(
             "OPENAI_API_KEY missing from .env; without it the MCP server still "
             "serves semantic_search but every call fails, so the treatment arm "
-            "would be quietly weaker than the one METHODOLOGY §5 describes"
+            "would be quietly weaker than the one METHODOLOGY §5 describes. "
+            "Pass --without-semantic-search to accept that, recorded in notes."
         )
-    return {**env, "OPENAI_API_KEY": key}
+    return env
 
 
 def execute(
@@ -232,7 +246,7 @@ def execute(
         timeout_s=args.timeout,
         sandbox_home=sandbox,
         tool_access=access,
-        extra_env=child_env(args.condition),
+        extra_env=child_env(args),
     )
     store = ResultsStore(runs_root=RUNS_ROOT, schema_dir=LLHB_DIR / "schema")
     print(json.dumps(run_arm(config, cases, metadata, store), indent=2))
