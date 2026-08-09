@@ -169,13 +169,19 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
 26. **One pass over the frozen 250; stability subset raised to 30×5.**
     The primary matrix runs a single pass per case (R=1), and the
     stability subset moves from 30 cases × 3 repeats (PROPOSAL §11) to
-    30 cases × **5**. Rationale, from the pilot: repeated control-arm
-    runs over the same 10 discarded candidates reproduced the
-    deterministic layer exactly (dataset checksum, prompt hash, seeded
-    case order, completion rate) but no model answer was byte-identical
-    across runs, and individual cases flipped their answer character
-    between runs even where the aggregate held — the CLI exposes no
-    temperature control (§11 records settings verbatim instead).
+    30 cases × **5**. Rationale, from two successful control-arm runs
+    over the same 10 discarded candidates —
+    `llhb-v1-run-20260809-pilot2` and `-pilot3`, both 10/10 completed,
+    artifacts committed under `results/runs/`: the deterministic layer
+    reproduced exactly (identical dataset checksum, prompt hash, seeded
+    case order and completion rate), while **0 of 10** answers were
+    byte-identical across the two runs. A crude abstention proxy (a
+    regex over "kan ikke belegge"-style phrases, not the Stage 7
+    scorer) held at 8/10 in both runs yet **4 of 10 cases flipped**
+    individually — aggregate stability without per-case stability. The
+    CLI exposes no temperature control (§11 records settings verbatim
+    instead). Treat those proxy counts as directional only; the
+    deterministic-layer and byte-identity findings are exact.
     Statistically, repeats shrink sampling noise only as 1/√R while
     costing wall-clock linearly, and 250 cases already supply 250 draws
     for the headline; the subset's job is to *measure* per-case
