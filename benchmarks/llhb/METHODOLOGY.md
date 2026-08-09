@@ -119,10 +119,17 @@ are diffable across providers to verify this.
 
 ### Matrix and repeats
 
-3 providers × 2 conditions × 250 cases = 1,500 primary case-runs. Stability
-check: a 30-case stratified subset × 3 repeats per provider×condition to
-estimate run-to-run variance. Aggregates are reported with bootstrap confidence
-intervals over cases, absolute per condition plus the control−treatment delta.
+3 providers × 2 conditions × 250 cases = 1,500 primary case-runs, one pass per
+case (no repeats — owner decision 26). Stability check: a 30-case stratified
+subset × **5** repeats per provider×condition to estimate run-to-run variance.
+Aggregates are reported with bootstrap confidence intervals over cases,
+absolute per condition plus the control−treatment delta.
+
+Repeats reduce sampling noise as 1/√R and do not correct harness differences,
+metric bias or scorer error, so the primary pass buys breadth (250 draws)
+while the subset buys a measured variance estimate. If an observed delta turns
+out small relative to its confidence interval, adding repeats to the primary
+pass is a later, evidence-driven decision — not a precaution paid up front.
 
 ### Recorded metadata
 
