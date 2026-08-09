@@ -175,13 +175,18 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     artifacts committed under `results/runs/`: the deterministic layer
     reproduced exactly (identical dataset checksum, prompt hash, seeded
     case order and completion rate), while **0 of 10** answers were
-    byte-identical across the two runs. A crude abstention proxy (a
-    regex over "kan ikke belegge"-style phrases, not the Stage 7
-    scorer) held at 8/10 in both runs yet **4 of 10 cases flipped**
-    individually — aggregate stability without per-case stability. The
-    CLI exposes no temperature control (§11 records settings verbatim
-    instead). Treat those proxy counts as directional only; the
-    deterministic-layer and byte-identity findings are exact.
+    byte-identical across the two runs — an exact figure that needs no
+    pattern to compute. An abstention proxy was also run under three
+    explicitly written phrase patterns
+    (`runner/stability_proxy.py`, regenerable): narrow 3→6 with 7 of 10
+    cases flipping, medium 8→8 with 4 flipping, broad 8→9 with 3
+    flipping. The counts are pattern-sensitive by construction and no
+    single one of them is quotable on its own; what survives every
+    pattern is that **individual cases change between runs while the
+    aggregate moves less** — aggregate stability without per-case
+    stability. The CLI exposes no temperature control (§11 records
+    settings verbatim instead). Stage 7's deterministic scorer replaces
+    this diagnostic entirely; nothing here is a publishable metric.
     Statistically, repeats shrink sampling noise only as 1/√R while
     costing wall-clock linearly, and 250 cases already supply 250 draws
     for the headline; the subset's job is to *measure* per-case
