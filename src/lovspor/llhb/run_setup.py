@@ -64,13 +64,18 @@ def verify_frozen_against_lock(frozen_cases: list[dict[str, Any]], lock: dict[st
     excluded-id set and silently let frozen cases into a pilot; both the
     declared case count and the canonical checksum must match the lock.
     """
-    declared = int(lock.get("case_count", -1))
+    declared = lock.get("case_count")
+    # bool is an int subclass in Python; exclude it so True never passes as 1.
+    if not isinstance(declared, int) or isinstance(declared, bool):
+        raise RunSetupError(f"lock case_count must be a JSON integer, got {declared!r}")
     if len(frozen_cases) != declared:
         raise RunSetupError(
             f"frozen dataset has {len(frozen_cases)} cases, lock declares {declared}"
         )
+    locked = lock.get("dataset_sha256")
+    if not isinstance(locked, str):
+        raise RunSetupError(f"lock dataset_sha256 must be a string, got {locked!r}")
     checksum = dataset_checksum(canonical_jsonl(frozen_cases))
-    locked = str(lock.get("dataset_sha256", ""))
     if checksum != locked:
         raise RunSetupError(f"frozen dataset checksum {checksum} does not match lock {locked}")
 

@@ -99,6 +99,27 @@ class TestVerifyFrozenAgainstLock:
         with pytest.raises(RunSetupError, match="checksum"):
             verify_frozen_against_lock(cases, lock)
 
+    def test_rejects_non_integer_case_count(self) -> None:
+        cases = [make_case("llhb-v1-C1-001")]
+        base = self.make_lock(cases)
+
+        for bad in (1.9, "1", True, None):
+            with pytest.raises(RunSetupError, match="JSON integer"):
+                verify_frozen_against_lock(cases, base | {"case_count": bad})
+
+    def test_rejects_missing_case_count(self) -> None:
+        cases = [make_case("llhb-v1-C1-001")]
+        lock = {"dataset_sha256": self.make_lock(cases)["dataset_sha256"]}
+
+        with pytest.raises(RunSetupError, match="JSON integer"):
+            verify_frozen_against_lock(cases, lock)
+
+    def test_rejects_non_string_sha(self) -> None:
+        cases = [make_case("llhb-v1-C1-001")]
+
+        with pytest.raises(RunSetupError, match="must be a string"):
+            verify_frozen_against_lock(cases, self.make_lock(cases) | {"dataset_sha256": None})
+
     def test_rejects_truncated_frozen_file(self) -> None:
         cases = [make_case("llhb-v1-C1-001"), make_case("llhb-v1-C1-002")]
         lock = self.make_lock(cases)
