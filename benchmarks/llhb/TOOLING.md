@@ -407,25 +407,26 @@ Driven by the Stage 3.5 human audit (see
   being empty — otherwise a treatment run with an empty `tool_config`
   would be graded as a control run and pass. Exits non-zero, so it can
   gate a report.
-* **First treatment pilot (2026-08-09)**: `llhb-v1-run-20260809-pilot5`
-  (control) and `llhb-v1-run-20260809-treat2` (lovspor), same 10
+* **First treatment pilot (2026-08-10)**: `llhb-v1-run-20260810-pilot6`
+  (control) and `llhb-v1-run-20260810-treat3` (lovspor), same 10
   discarded candidates, same seed, same prompt hash, same
-  `claude-opus-5`, both at lovspor `1c82429`. Both 10/10 completed, 0
+  `claude-opus-5`, both at lovspor `1b06ba6`. Both 10/10 completed, 0
   errors. Control: 0 tools offered, 0 tool calls, 1 turn per case, mean
-  34.9 s/case. Treatment: 16 tools offered and the server connected on
-  10/10 cases, 62 tool calls (4–11 per case), 5–12 turns, mean
-  33.5 s/case, 0 denied calls, 0 tool calls reporting an error, 0
-  truncations. Tools used: `get_section` 21, `search_laws` 12,
-  `verify_quote` 9, `list_sections` 8, `search_body` 7,
-  `corpus_status` 3, `get_law` 1, `validate_citation` 1;
-  `semantic_search` was unavailable in this run (F4) and the model
-  never invoked it. `check_fairness.py` reports the pair clean.
-  Answers ran shorter under treatment on 6 of 10 cases (mean 1932 →
-  1735 chars) — a length observation, not a quality one. All figures
-  are regenerable with `runner/pilot_summary.py`, which reads only the
-  versioned records. **Nothing here is scored**: whether tool access
-  changes hallucination rates is Stage 7's question, and this pilot ran
-  on discarded candidates, never the frozen 250.
+  32.6 s/case. Treatment: 16 tools offered and the server connected on
+  10/10 cases, 58 tool calls (4–9 per case), mean 30.1 s/case, 0 denied
+  calls, 0 truncations. Tools used: `get_section` 19, `search_laws` 12,
+  `verify_quote` 10, `list_sections` 8, `search_body` 4,
+  `corpus_status` 3, `get_law` 1, `semantic_search` 1 — that last one
+  is the single errored call of the run, since the tool is served but
+  has no key behind it (F4); the model tried it once and moved on.
+  `check_fairness.py` reports the pair clean. Answers ran shorter under
+  treatment (mean 1809 → 1584 chars) — a length observation, not a
+  quality one. All figures are regenerable with `runner/pilot_summary.py`,
+  which reads only the versioned records. **Nothing here is scored**:
+  whether tool access changes hallucination rates is Stage 7's question,
+  and this pilot ran on discarded candidates, never the frozen 250.
+  An earlier pair (`-pilot5`/`-treat2`, 62 tool calls) was replaced
+  because its metadata carried the absolute path of the corpus checkout.
 
 ## What Stage 2 deliberately does not solve
 
