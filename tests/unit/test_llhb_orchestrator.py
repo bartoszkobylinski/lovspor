@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from lovspor.llhb import orchestrator
 from lovspor.llhb.claude_cli import RunIdentity, ToolAccess
 from lovspor.llhb.orchestrator import (
     OrchestratorError,
@@ -61,8 +62,12 @@ def result_event(answer: str = "Svar fra modellen.") -> dict[str, Any]:
 
 
 def emit(*events: dict[str, Any]) -> str:
-    """A shell command emitting these events as a stream-json transcript."""
-    lines = " ".join(f"'{json.dumps(event)}'" for event in events)
+    """A shell command emitting these events as a stream-json transcript.
+
+    ``ensure_ascii=False`` because the real CLI emits UTF-8: escaping here
+    would hide whether the retention path keeps Norwegian letters literal.
+    """
+    lines = " ".join(f"'{json.dumps(event, ensure_ascii=False)}'" for event in events)
     return f"printf '%s\\n' {lines}"
 
 
@@ -477,6 +482,40 @@ class TestRunArm:
         raw = json.loads(raw_path.read_text(encoding="utf-8"))
         assert raw["returncode"] == 0
         assert json.loads(raw["stdout"].splitlines()[-1])["result"] == "Svar fra modellen."
+
+    def test_raw_retention_pins_its_own_written_form(self, tmp_path: Path) -> None:
+        """The raw file is the evidence a rerun is diffed against, so its
+        key order, indentation and non-ASCII escaping are part of the
+        artifact rather than incidental json.dumps defaults."""
+        bin_dir = fake_claude(tmp_path, emit(init_event(), result_event("Svar på nynorsk: æøå.")))
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        text = (tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.json").read_text(
+            encoding="utf-8"
+        )
+        assert "æøå" in text
+        assert text.startswith('{\n  "duration_ms"')
+        assert list(json.loads(text)) == sorted(json.loads(text))
+
+    def test_duration_is_recorded_in_whole_milliseconds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """total_ms is published run metadata; the seconds-to-milliseconds
+        conversion has to be exactly that, not merely the right order."""
+        # A whole second: x1000 and x1001 differ here, x1000 and x1001 on a
+        # quarter second both floor to 250 and would prove nothing.
+        ticks = iter([100.0, 101.0])
+        monkeypatch.setattr(orchestrator.time, "monotonic", lambda: next(ticks))
+
+        result = execute_argv(
+            ["claude"], hermetic_env(tmp_path, {"PATH": str(tmp_path)}), 5, tmp_path
+        )
+
+        assert result.duration_ms == 1000
 
     def test_cli_failure_becomes_error_record(self, tmp_path: Path) -> None:
         bin_dir = fake_claude(tmp_path, "echo boom >&2; exit 2")

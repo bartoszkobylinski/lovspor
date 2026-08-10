@@ -28,6 +28,7 @@ For every PR, evaluate:
 
 Run `./scripts/mutmut-pr.sh` and report the result. The script mutates only the `src/lovspor/` files the PR branch changed relative to `origin/main` (pass a different base ref as an argument if needed) and wipes `.mutmut-cache` first, so the score is authoritative for exactly the PR's surface. Do not run full-repo `uv run mutmut run` on PR review — it does not terminate in reviewable time (issue #4); full runs are reserved for explicitly requested baseline measurements (decisions.md §9a/§9c).
 
+- Each changed file is mutated against **its own test module** (`src/lovspor/llhb/fairness.py` → `tests/unit/test_llhb_fairness.py`), because running the whole unit suite per mutant took ~32 s and put a normal PR out of reach. A file with no matching test module falls back to the whole suite. Consequence to keep in mind when reading the report: a mutant that only some *other* module's test would have caught is reported as survived, so the score errs pessimistic. Check a survivor against the wider suite before calling it a real gap — and never widen the runner to make a survivor disappear.
 - If the script prints `mutation not applicable: ...` (release/packaging/docs PRs), report that line verbatim as the mutation result. Never substitute a full-repo run and never fabricate a score.
 - Otherwise report the kill score plus survivors, and investigate survived mutants in critical paths:
   - normalization

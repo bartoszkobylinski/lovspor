@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.llhb.claude_cli import (
     CaseTiming,
@@ -136,6 +137,14 @@ class TestBuildArgv:
     def test_rejects_unknown_condition(self) -> None:
         with pytest.raises(ValueError, match="unknown condition"):
             build_argv(IDENTITY.model_copy(update={"condition": "pilot"}), "Q", "SYSTEM")
+
+
+class TestToolAccess:
+    def test_cannot_be_edited_after_it_is_built(self) -> None:
+        """What the CLI is told and what the metadata records come from the
+        same object; a caller must not be able to change one afterwards."""
+        with pytest.raises(ValidationError):
+            ACCESS.allowed_tools = ()
 
 
 class TestParseStreamJson:
@@ -402,6 +411,53 @@ class TestParseStreamJson:
         assert parsed.error is not None
         assert "dup" in parsed.error
 
+    def test_flags_a_call_with_a_name_but_no_readable_input(self) -> None:
+        """Both halves of the guard matter on their own: a block naming a
+        tool but carrying no argument object is still unreadable."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "tu-1",
+                            "name": "mcp__lovverk__get_section",
+                            "input": "slug=testloven",
+                        }
+                    ]
+                },
+            },
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "no readable name or input" in parsed.error
+
+    def test_a_tool_result_block_in_an_assistant_event_is_not_a_call(self) -> None:
+        """Block scanning is filtered on event type as well as block type;
+        loosening either half would let one arm's blocks read as the
+        other's."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [{"type": "tool_result", "tool_use_id": "tu-1", "content": "svar"}]
+                },
+            },
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is True
+        assert parsed.tool_calls == []
+
     def test_flags_a_tool_result_without_an_id(self) -> None:
         transcript = stream(
             init_event(),
@@ -525,5 +581,9 @@ class TestBuildResultRecord:
         assert record["final_answer"] is None
         assert record["harness"] is None
         assert record["completed"] is False
+        # A case that never ran is not a case that hit a cap: recording it
+        # as truncated would put a cap hit in the results that never
+        # happened (METHODOLOGY §5 records cap hits, never invents them).
+        assert record["truncated"] is False
         assert record["errors"][0]["stage"] == "request"
         assert "exit code 1" in record["errors"][0]["message"]

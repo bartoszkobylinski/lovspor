@@ -125,6 +125,17 @@ class TestCompareRunMetadata:
         design's own differences, not violations of it."""
         assert compare_run_metadata(metadata(), treatment_metadata()) == []
 
+    def test_per_run_bookkeeping_is_exempt_from_the_comparison(self) -> None:
+        """The exemption list is the whole safety net: too short and honest
+        pairs are rejected, too long and a real difference slips past. Each
+        exempt field is named here so shortening the list fails a test."""
+        problems = compare_run_metadata(
+            metadata(),
+            treatment_metadata(cases_completed=1, errors_total=1, evaluator_version="scorer-v1"),
+        )
+
+        assert problems == []
+
     def test_flags_a_field_recorded_in_only_one_run(self) -> None:
         problems = compare_run_metadata(metadata(), treatment_metadata(api_version="2026-08-01"))
 
@@ -332,6 +343,39 @@ class TestPairedCompletion:
         problems = paired_completion_violations(control, treatment)
 
         assert problems == ["llhb-v1-C1-001: completed in the treatment arm only"]
+
+    def test_a_case_missing_from_the_treatment_arm_does_not_end_the_scan(self) -> None:
+        """The skip for an unpaired case skips that case only. Turning it
+        into an early exit would drop every finding after the first gap,
+        and a report that stops early reads exactly like a clean one."""
+        control = [
+            record("llhb-v1-C1-001"),
+            record("llhb-v1-C2-001"),
+        ]
+        treatment = [treatment_record("llhb-v1-C2-001", completed=False, harness=None)]
+
+        problems = paired_completion_violations(control, treatment)
+
+        assert problems == ["llhb-v1-C2-001: completed in the control arm only"]
+
+    def test_findings_come_back_in_case_order(self) -> None:
+        """A gate whose output humans diff between runs has to be ordered
+        by the data, not by whatever order the records were appended in."""
+        control = [
+            record("llhb-v1-C2-001", completed=False, final_answer=None, harness=None),
+            record("llhb-v1-C1-001"),
+        ]
+        treatment = [
+            treatment_record("llhb-v1-C2-001", completed=False, harness=None),
+            treatment_record("llhb-v1-C1-001", completed=False, harness=None),
+        ]
+
+        problems = paired_completion_violations(control, treatment)
+
+        assert problems == [
+            "llhb-v1-C1-001: completed in the control arm only",
+            "llhb-v1-C2-001: errored in both arms, so it compares nothing",
+        ]
 
     def test_flags_a_case_that_errored_in_both_arms(self) -> None:
         control = [record("llhb-v1-C1-001", completed=False, final_answer=None, harness=None)]

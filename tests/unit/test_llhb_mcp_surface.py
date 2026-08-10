@@ -1,10 +1,12 @@
 """Stage 6 treatment tool surface: server config, tool list, schema hash."""
 
+import hashlib
 import json
 import sysconfig
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.llhb import mcp_surface
 from lovspor.llhb.mcp_surface import (
@@ -58,6 +60,42 @@ class TestToolSurface:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-a-real-key")
 
         assert tool_surface(corpus).schema_sha256 == without_key.schema_sha256
+
+    def test_schema_hash_pins_the_canonical_form(
+        self, corpus: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Key order, separators, non-ASCII escaping and the omission of
+        empty fields are all part of what the hash means. Against a stub
+        surface the expected digest is computable by hand, so a change to
+        any of them stops matching instead of quietly renaming the hash."""
+
+        class _Tool:
+            def model_dump(self, **kwargs: object) -> dict[str, object]:
+                # The dump contract is part of what the hash covers, so the
+                # stub holds the caller to it instead of ignoring it.
+                assert kwargs["mode"] == "json"
+                document: dict[str, object] = {"name": "b", "title": None, "description": "æ"}
+                if kwargs["exclude_none"]:
+                    return {key: value for key, value in document.items() if value is not None}
+                return document
+
+        class _StubServer:
+            async def list_tools(self) -> list[object]:
+                return [_Tool(), _Tool()]
+
+        monkeypatch.setattr(mcp_surface, "build_server", lambda _path: _StubServer())
+
+        canonical = '[{"description":"æ","name":"b"},{"description":"æ","name":"b"}]'
+        expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        assert tool_surface(corpus).schema_sha256 == expected
+
+    def test_the_surface_cannot_be_edited_after_it_is_read(self, corpus: Path) -> None:
+        """The recorded surface is evidence; a caller must not be able to
+        adjust it between reading the server and writing the metadata."""
+        surface = tool_surface(corpus)
+
+        with pytest.raises(ValidationError):
+            surface.names = ()
 
     def test_rejects_a_server_that_exposes_nothing(
         self, corpus: Path, monkeypatch: pytest.MonkeyPatch
@@ -115,11 +153,25 @@ class TestServerConfig:
         with pytest.raises(ToolSurfaceError, match="corpus path"):
             server_config(tmp_path / "bin" / "lovspor", Path("../lovverk"))
 
-    def test_json_is_compact_and_key_sorted(self, tmp_path: Path) -> None:
-        rendered = server_config_json(tmp_path / "bin" / "lovspor", tmp_path / "pin")
+    def test_json_pins_the_exact_bytes_on_the_argv(self, tmp_path: Path) -> None:
+        """This string is passed to the CLI verbatim and is part of what a
+        rerun has to reproduce, so key order, separators and non-ASCII
+        escaping are pinned rather than merely round-tripped. The corpus
+        path carries a Norwegian letter on purpose: an ASCII-only path
+        cannot tell an escaping change from a no-op."""
+        corpus = tmp_path / "lovverk-æøå"
+        rendered = server_config_json(tmp_path / "bin" / "lovspor", corpus)
 
-        assert " " not in rendered.replace(str(tmp_path), "")
-        assert json.loads(rendered) == server_config(tmp_path / "bin" / "lovspor", tmp_path / "pin")
+        expected = (
+            '{"mcpServers":{"lovverk":{"args":["mcp","--corpus-path","'
+            + str(corpus)
+            + '"],"command":"'
+            + str(tmp_path / "bin" / "lovspor")
+            + '"}}}'
+        )
+        assert rendered == expected
+        assert "æ" in rendered
+        assert json.loads(rendered) == server_config(tmp_path / "bin" / "lovspor", corpus)
 
 
 class TestToolConfig:
