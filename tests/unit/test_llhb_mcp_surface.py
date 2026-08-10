@@ -78,6 +78,12 @@ class TestVerifyServerCommand:
     def test_accepts_this_environment_s_entry_point(self) -> None:
         verify_server_command(Path(sysconfig.get_path("scripts")) / "lovspor")
 
+    def test_rejects_another_executable_in_the_same_directory(self) -> None:
+        """Living in the right venv is not the same as being the server.
+        Any other entry point there may expose a different tool set."""
+        with pytest.raises(ToolSurfaceError, match="is not"):
+            verify_server_command(Path(sysconfig.get_path("scripts")) / "python")
+
     def test_rejects_a_command_from_another_environment(self, tmp_path: Path) -> None:
         """The surface is read in-process; launching a different install
         would record a server the run never spoke to."""
@@ -85,7 +91,7 @@ class TestVerifyServerCommand:
         stranger.parent.mkdir()
         stranger.write_text("#!/bin/sh\n", encoding="utf-8")
 
-        with pytest.raises(ToolSurfaceError, match="lives outside"):
+        with pytest.raises(ToolSurfaceError, match="is not"):
             verify_server_command(stranger)
 
     def test_rejects_a_missing_command(self, tmp_path: Path) -> None:

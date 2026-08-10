@@ -188,6 +188,7 @@ def _from_result_event(payload: dict[str, Any]) -> ParsedCliResult:
 
 def _tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
     payloads = _tool_results(events)
+    claimed: set[str] = set()
     calls: list[ToolCall] = []
     for index, block in enumerate(_blocks(events, "assistant", "tool_use")):
         name, arguments, use_id = block.get("name"), block.get("input"), block.get("id")
@@ -195,6 +196,9 @@ def _tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
             raise ValueError(f"tool_use block {index} has no readable name or input")
         if not isinstance(use_id, str):
             raise ValueError(f"tool_use block {index} ({name}) has no id to match its result")
+        if use_id in claimed:
+            raise ValueError(f"two tool_use blocks share the id {use_id!r}")
+        claimed.add(use_id)
         result, failed = payloads.pop(use_id, (None, False))
         calls.append(
             ToolCall(index=index, name=name, arguments=arguments, result=result, is_error=failed)
@@ -207,11 +211,19 @@ def _tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
 
 
 def _tool_results(events: list[dict[str, Any]]) -> dict[str, tuple[Any, bool]]:
+    """Every tool payload, keyed by the call it answers.
+
+    Ids are unique per conversation, so a repeat means the transcript is
+    not what it claims to be. Overwriting would silently discard one
+    real payload and attach the other to a call it may not belong to.
+    """
     payloads: dict[str, tuple[Any, bool]] = {}
     for block in _blocks(events, "user", "tool_result"):
         use_id = block.get("tool_use_id")
         if not isinstance(use_id, str):
             raise ValueError("tool_result block carries no tool_use_id")
+        if use_id in payloads:
+            raise ValueError(f"two tool_result blocks share the id {use_id!r}")
         payloads[use_id] = (block.get("content"), bool(block.get("is_error")))
     return payloads
 

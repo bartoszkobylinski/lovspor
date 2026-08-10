@@ -131,7 +131,7 @@ def control_violations(records: list[dict[str, Any]]) -> list[str]:
         calls = record.get("tool_calls") or []
         if calls:
             problems.append(f"{case_id}: control case issued {len(calls)} tool call(s)")
-        problems.extend(_harness_violations(record, case_id, ()))
+        problems.extend(_harness_violations(record, case_id, None))
     return problems
 
 
@@ -141,17 +141,22 @@ def treatment_violations(records: list[dict[str, Any]], declared_tools: Sequence
     ``declared_tools`` is the run metadata's ``tool_config.tools``: what
     the run says it offered. The transcript says what it did offer, and
     the two must be the same surface, not merely the same size.
+
+    The arm is decided by the caller, never inferred from that list
+    being empty — a treatment run declaring no tools is a finding, not a
+    control run.
     """
     declared = tuple(str(name) for name in declared_tools)
-    problems = []
+    problems = [] if declared else ["treatment run declares no tool surface in tool_config.tools"]
     for record in records:
         problems.extend(_harness_violations(record, str(record.get("case_id")), declared))
     return problems
 
 
 def _harness_violations(
-    record: dict[str, Any], case_id: str, declared: tuple[str, ...]
+    record: dict[str, Any], case_id: str, declared: tuple[str, ...] | None
 ) -> list[str]:
+    """``declared`` is None for the control arm, a surface for treatment."""
     harness = record.get("harness")
     if not isinstance(harness, dict):
         # An errored case never got far enough to report an environment;
@@ -166,10 +171,10 @@ def _harness_violations(
 
 
 def _offered_violations(
-    harness: dict[str, Any], case_id: str, declared: tuple[str, ...]
+    harness: dict[str, Any], case_id: str, declared: tuple[str, ...] | None
 ) -> list[str]:
     offered = tuple(str(name) for name in harness.get("exposed_tools") or ())
-    if not declared:
+    if declared is None:
         return [f"{case_id}: control case was offered {len(offered)} tool(s)"] if offered else []
     if sorted(offered) != sorted(declared):
         missing = sorted(set(declared) - set(offered))

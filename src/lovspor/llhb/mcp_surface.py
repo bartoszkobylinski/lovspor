@@ -25,6 +25,7 @@ from lovspor.mcp import build_server
 
 SERVER_NAME = "lovverk"
 TRANSPORT = "native-mcp"
+ENTRY_POINT = "lovspor"
 
 
 class ToolSurfaceError(LovsporError):
@@ -74,12 +75,12 @@ def verify_server_command(server_command: Path) -> None:
     # The scripts directory, not sys.executable: a venv's `python` is a
     # symlink, so resolving the interpreter walks straight out of the
     # environment whose entry points we are trying to identify.
-    environment_bin = Path(sysconfig.get_path("scripts")).resolve()
-    if command.parent.resolve() != environment_bin:
+    expected = (Path(sysconfig.get_path("scripts")) / ENTRY_POINT).resolve()
+    if command.resolve() != expected:
         raise ToolSurfaceError(
-            f"server command {command} lives outside {environment_bin}, the environment "
-            "whose lovspor produced the recorded tool surface; run the driver with that "
-            "environment's interpreter, or point --server-command into it"
+            f"server command {command} is not {expected}, the entry point of the environment "
+            "whose lovspor produced the recorded tool surface; any other executable — "
+            "including another one in the same directory — may serve a different tool set"
         )
 
 

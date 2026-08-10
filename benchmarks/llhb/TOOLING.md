@@ -269,10 +269,13 @@ Driven by the Stage 3.5 human audit (see
   than a case that silently reports less tool use than it had. Results
   are matched to calls by `tool_use_id`, never by position, and a
   result matching no call is itself a failure — it is evidence of a
-  call the parser did not see. A transcript carrying two `system init`
-  events fails too: which tool environment applied is not decidable,
-  and taking the first would let a case that gained MCP part-way
-  through be recorded as toolless.
+  call the parser did not see. A repeated `tool_use_id` fails on either
+  side: two results sharing an id would silently discard one payload,
+  two calls sharing one would split a single payload arbitrarily
+  between them. A transcript carrying two `system init` events fails
+  too: which tool environment applied is not decidable, and taking the
+  first would let a case that gained MCP part-way through be recorded
+  as toolless.
   `build_result_record` turns either outcome into a schema-valid record
   (`errors[].stage: "request"`, `completed: false`, `final_answer: null`
   on failure) and carries the `harness` block: `exposed_tools`,
@@ -368,6 +371,12 @@ Driven by the Stage 3.5 human audit (see
   ambient environment would describe the machine, not the run. Both
   paths in the `--mcp-config` document must be absolute: the CLI runs
   from a sandbox where a relative path resolves elsewhere.
+  `verify_server_command` pins `--server-command` to exactly one legal
+  path — this environment's `lovspor` entry point — since the surface is
+  read in-process and any other executable, including another one in the
+  same directory, may serve a different tool set. The anchor is
+  `sysconfig.get_path("scripts")`, not `sys.executable`: resolving the
+  interpreter follows a venv's `python` symlink out of the venv.
 * **Credentials**: the treatment child additionally receives
   `OPENAI_API_KEY`, without which `semantic_search` is served but fails
   on every call — a treatment arm quietly weaker than the one
@@ -386,10 +395,14 @@ Driven by the Stage 3.5 human audit (see
   case that issued or was offered a tool, a treatment case whose
   offered surface is not exactly `tool_config.tools` or whose MCP
   server never connected, and any tool call the harness denied. A
-  completed case with no `harness` block is itself a finding. The
-  surface comparison is by name, not by count: a run that offered a
-  different tool of the same arity is a different experiment. Exits
-  non-zero, so it can gate a report.
+  completed case with no `harness` block is itself a finding, and so is
+  a treatment run declaring no surface at all. The surface comparison is
+  by name, not by count: a run that offered a different tool of the same
+  arity is a different experiment. Which arm a record belongs to is
+  always the caller's claim, never inferred from the declared surface
+  being empty — otherwise a treatment run with an empty `tool_config`
+  would be graded as a control run and pass. Exits non-zero, so it can
+  gate a report.
 * **First treatment pilot (2026-08-09)**: `llhb-v1-run-20260809-pilot5`
   (control) and `llhb-v1-run-20260809-treat2` (lovspor), same 10
   discarded candidates, same seed, same prompt hash, same

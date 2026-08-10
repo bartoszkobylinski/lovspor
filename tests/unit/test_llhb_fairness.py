@@ -277,6 +277,33 @@ class TestDeclaredSurface:
 
         assert len(problems) == 1
 
+    def test_flags_a_treatment_run_that_declares_no_surface(self) -> None:
+        """An empty tool_config must never read as 'this is the control
+        arm'; the arm is what the caller says it is."""
+        empty = {"exposed_tools": [], "mcp_servers": [], "permission_denials": []}
+
+        problems = treatment_violations(
+            [treatment_record("llhb-v1-C1-001", harness=empty)], declared_tools=[]
+        )
+
+        assert "treatment run declares no tool surface in tool_config.tools" in problems
+        assert any("no MCP server was connected" in problem for problem in problems)
+
+    def test_an_empty_tool_config_is_not_a_fair_pair(self) -> None:
+        control = RunArtifacts(metadata=metadata(), records=[record("llhb-v1-C1-001")])
+        treatment = RunArtifacts(
+            metadata=treatment_metadata(tool_config={}),
+            records=[
+                treatment_record(
+                    "llhb-v1-C1-001",
+                    tool_calls=[],
+                    harness={"exposed_tools": [], "mcp_servers": [], "permission_denials": []},
+                )
+            ],
+        )
+
+        assert check_pair(control, treatment) != []
+
 
 class TestPairedCompletion:
     def test_matching_completions_pass(self) -> None:

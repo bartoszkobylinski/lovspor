@@ -368,6 +368,40 @@ class TestParseStreamJson:
         assert parsed.error is not None
         assert "init event" in parsed.error
 
+    def test_flags_two_results_sharing_one_id(self) -> None:
+        """Last-write-wins would drop a payload and keep the wrong one,
+        with nothing in the record saying which call it belonged to."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use("dup", "mcp__lovverk__get_section", {"slug": "a"}),
+            tool_result("dup", "første"),
+            tool_result("dup", "andre"),
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "dup" in parsed.error
+
+    def test_flags_two_calls_sharing_one_id(self) -> None:
+        """Whichever call is matched first takes the payload and the other
+        is recorded as unanswered - an arbitrary split of real evidence."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use("dup", "mcp__lovverk__get_section", {"slug": "a"}),
+            tool_use("dup", "mcp__lovverk__get_section", {"slug": "b"}),
+            tool_result("dup", "svar"),
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "dup" in parsed.error
+
     def test_flags_a_tool_result_without_an_id(self) -> None:
         transcript = stream(
             init_event(),
