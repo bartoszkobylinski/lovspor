@@ -68,15 +68,29 @@ tests_for() {
   fi
 }
 
-# The runner is built here, not inline, so --list and --tests-for can show
-# exactly what a real run would execute.
+# A mutant that breaks the orchestrator's env isolation makes the child
+# inherit this process's PATH and launch the REAL provider CLI: measured
+# once, a single such mutant spent 36 s on a live model call billed to the
+# subscription. Shadowing `claude` with a stub that exits non-zero costs
+# nothing when isolation holds (the tests put their own fake first via
+# hermetic_env) and turns that mutant into a fast, clean kill. Prepending
+# rather than removing a PATH entry keeps git and sh reachable.
+guard_dir="$(mktemp -d)"
+printf '#!/bin/sh\necho "mutation guard: the real provider CLI is blocked" >&2\nexit 127\n' \
+  >"$guard_dir/claude"
+chmod +x "$guard_dir/claude"
+trap 'rm -rf "$guard_dir"' EXIT
+
+# The runner is built here, not inline, so the probes can show exactly
+# what a real run would execute.
 runner_for() {
   # `|| exit 1`: mutmut reads "tests passed" as `returncode != 1`, so a
   # mutant that breaks the module outright makes pytest exit 2 (collection
   # error) and gets filed as SURVIVED. Collapsing every failure onto 1
   # scores those as killed, which is what a suite that refuses to run
   # actually means.
-  printf "sh -c '%s -m pytest -x -q %s || exit 1'" "$python_bin" "$(tests_for "$1")"
+  printf "sh -c 'PATH=%s:\$PATH %s -m pytest -x -q %s || exit 1'" \
+    "$guard_dir" "$python_bin" "$(tests_for "$1")"
 }
 
 # Probes: describe what a real run would do for one path, without running it.
