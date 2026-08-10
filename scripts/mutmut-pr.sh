@@ -39,6 +39,7 @@
 #   --runner-for PATH  print the exact runner command PATH would be mutated with
 #   --check-guard      run the PATH stub and confirm it refuses to execute
 #   --exit-code-for S T X   print the exit code for those bucket counts
+#   --score-for K S T X SK U  print the summary for those bucket counts
 #   base_ref           diff base (default: origin/main)
 set -euo pipefail
 
@@ -47,6 +48,7 @@ tests_for_path=""
 runner_for_path=""
 check_guard=0
 exit_code_probe=""
+score_probe=""
 base_ref="origin/main"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -55,6 +57,11 @@ while [ "$#" -gt 0 ]; do
     --runner-for) shift; runner_for_path="${1:-}" ;;
     --check-guard) check_guard=1 ;;
     --exit-code-for) shift; exit_code_probe="${1:-} ${2:-} ${3:-}"; shift 2 ;;
+    --score-for)
+      shift
+      score_probe="${1:-} ${2:-} ${3:-} ${4:-} ${5:-} ${6:-}"
+      shift 5
+      ;;
     *) base_ref="$1" ;;
   esac
   shift
@@ -125,6 +132,24 @@ runner_for() {
 # only the first non-empty bucket hid the others from anything reading the
 # code: a run with survivors AND timeouts came back 4, and a caller checking
 # for 2 concluded nothing survived.
+# AGENTS.md asks for X/Y killed, and the denominator has to be every mutant
+# the run produced — not the ones that got through. A report without the
+# killed bucket left the score to be assembled by hand from mutmut's
+# per-file progress lines, which is exactly where a number goes wrong.
+score_report() {
+  local killed="$1" survived="$2" timed_out="$3" suspicious="$4" skipped="$5" untested="$6"
+  local total=$((killed + survived + timed_out + suspicious + skipped + untested))
+  echo "killed:     $killed / $total"
+  echo "survived:   $survived"
+  echo "timed out:  $timed_out"
+  echo "suspicious: $suspicious"
+  if [ "$skipped" -gt 0 ]; then echo "skipped:    $skipped"; fi
+  if [ "$untested" -gt 0 ]; then
+    echo "untested:   $untested  — the run did not measure every mutant, so the"
+    echo "            score above is not over the whole surface."
+  fi
+}
+
 exit_code_for() {
   local code=0
   if [ "$1" -gt 0 ]; then code=$((code | 2)); fi
@@ -137,6 +162,10 @@ exit_code_for() {
 if [ -n "$exit_code_probe" ]; then
   exit_code_for $exit_code_probe
   echo
+  exit 0
+fi
+if [ -n "$score_probe" ]; then
+  score_report $score_probe
   exit 0
 fi
 if [ -n "$tests_for_path" ]; then
@@ -190,9 +219,12 @@ if [ "$list_only" -eq 1 ]; then
 fi
 
 cd "$repo_root"
+killed_total=0
 survived_total=0
 timeout_total=0
 suspicious_total=0
+skipped_total=0
+untested_total=0
 
 while IFS= read -r file; do
   echo
@@ -222,7 +254,7 @@ while IFS= read -r file; do
   # once the next file has replaced the cache. Suspicious mutants are dumped
   # alongside survivors because neither was killed, and a summary listing
   # only survivors claims more certainty than the run has.
-  for bucket in survived timeout suspicious; do
+  for bucket in killed survived timeout suspicious skipped untested; do
     if ! ids="$("$python_bin" -m mutmut result-ids "$bucket")"; then
       echo "error: mutmut result-ids $bucket failed for $file" >&2
       echo "no score for this PR — do not report one" >&2
@@ -231,10 +263,15 @@ while IFS= read -r file; do
     [ -z "$ids" ] && continue
     found="$(printf '%s\n' $ids | wc -w | tr -d ' ')"
     case "$bucket" in
+      killed) killed_total=$((killed_total + found)) ;;
       survived) survived_total=$((survived_total + found)) ;;
       timeout) timeout_total=$((timeout_total + found)) ;;
-      *) suspicious_total=$((suspicious_total + found)) ;;
+      suspicious) suspicious_total=$((suspicious_total + found)) ;;
+      skipped) skipped_total=$((skipped_total + found)) ;;
+      *) untested_total=$((untested_total + found)) ;;
     esac
+    # Killed mutants need no diff; the report is about what got through.
+    [ "$bucket" = killed ] && continue
     printf '\n--- %s in %s\n' "$bucket" "$file" >>"$unkilled_file"
     for id in $ids; do
       printf '  mutant %s\n' "$id" >>"$unkilled_file"
@@ -257,9 +294,8 @@ echo
 echo "=== mutants that were not killed, with the change each one made"
 cat "$unkilled_file"
 echo
-echo "survived:   $survived_total"
-echo "timed out:  $timeout_total"
-echo "suspicious: $suspicious_total"
+score_report "$killed_total" "$survived_total" "$timeout_total" "$suspicious_total" \
+  "$skipped_total" "$untested_total"
 echo
 echo "None of the three were killed. A timed-out mutant hung the tests rather"
 echo "than failing them, so it is a gap in the suite, not a pass."

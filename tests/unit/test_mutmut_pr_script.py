@@ -172,9 +172,11 @@ class TestUnkilledBuckets:
         `survived: 0, suspicious: 0` and exit 0 for a run full of them."""
         body = SCRIPT.read_text(encoding="utf-8")
 
-        assert "for bucket in survived timeout suspicious; do" in body
-        assert "timed out:  $timeout_total" in body
+        assert "for bucket in killed survived timeout suspicious skipped untested; do" in body
         assert "4 timed out" in body
+        assert probe("--score-for", "0", "0", "2", "0", "0", "0").splitlines()[2] == (
+            "timed out:  2"
+        )
 
 
 class TestLongOutput:
@@ -225,3 +227,41 @@ class TestExitCode:
         self, survived: int, timed_out: int, suspicious: int, expected: str
     ) -> None:
         assert probe("--exit-code-for", str(survived), str(timed_out), str(suspicious)) == expected
+
+
+class TestScoreReport:
+    """AGENTS.md asks for X/Y killed. Without the killed bucket the script
+    left that number to be assembled by hand from mutmut's per-file
+    progress lines, which is exactly where a reported score goes wrong."""
+
+    def test_reports_killed_over_every_mutant_the_run_produced(self) -> None:
+        lines = probe("--score-for", "45", "6", "0", "0", "0", "0").splitlines()
+
+        assert lines[0] == "killed:     45 / 51"
+
+    def test_the_denominator_counts_every_bucket(self) -> None:
+        lines = probe("--score-for", "10", "2", "1", "1", "4", "3").splitlines()
+
+        assert lines[0] == "killed:     10 / 21"
+
+    def test_states_each_unkilled_bucket_separately(self) -> None:
+        report = probe("--score-for", "10", "2", "1", "1", "0", "0")
+
+        assert "survived:   2" in report
+        assert "timed out:  1" in report
+        assert "suspicious: 1" in report
+
+    def test_an_untested_bucket_says_the_score_is_partial(self) -> None:
+        """Untested mutants were never measured, so the ratio above them is
+        not over the whole surface — silence there would overstate it."""
+        report = probe("--score-for", "10", "2", "0", "0", "0", "3")
+
+        assert "untested:   3" in report
+        assert "not over the whole surface" in report
+
+    def test_a_clean_run_says_nothing_about_empty_buckets(self) -> None:
+        report = probe("--score-for", "51", "0", "0", "0", "0", "0")
+
+        assert report.startswith("killed:     51 / 51")
+        assert "untested" not in report
+        assert "skipped" not in report
