@@ -163,7 +163,8 @@ while IFS= read -r file; do
 done <<<"$changed"
 
 if [ "$list_only" -eq 1 ]; then
-  echo "runner: $(runner_for "$(printf '%s\n' "$changed" | head -1)")"
+  # Expansion rather than `| head -1`, for the same SIGPIPE reason.
+  echo "runner: $(runner_for "${changed%%$'\n'*}")"
   exit 0
 fi
 
@@ -216,8 +217,17 @@ while IFS= read -r file; do
     printf '\n--- %s in %s\n' "$bucket" "$file" >>"$unkilled_file"
     for id in $ids; do
       printf '  mutant %s\n' "$id" >>"$unkilled_file"
-      "$python_bin" -m mutmut show "$id" 2>/dev/null |
-        grep -E '^[-+]' | grep -vE '^(---|\+\+\+)' | head -6 | sed 's/^/    /' >>"$unkilled_file"
+      # One awk, not `grep | grep | head`: `head` closes the pipe as soon as
+      # it has its lines, the producer takes SIGPIPE, and under `pipefail`
+      # that killed the whole script with 141 — losing the score over a
+      # survivor whose diff happened to be long. awk reads to EOF instead.
+      # A failed `show` costs the diff, not the run: the id and the counts
+      # are already known, so it is reported and the loop continues.
+      if ! "$python_bin" -m mutmut show "$id" 2>/dev/null |
+        awk '/^[-+]/ && !/^(---|\+\+\+)/ { if (++n <= 6) print "    " $0 }' \
+          >>"$unkilled_file"; then
+        printf '    (diff unavailable)\n' >>"$unkilled_file"
+      fi
     done
   done
 done <<<"$changed"

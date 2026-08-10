@@ -179,3 +179,27 @@ class TestUnkilledBuckets:
         tail = body.split("# Mirrors mutmut's own meanings", 1)[1]
 
         assert 'if [ "$timeout_total" -gt 0 ]; then\n  exit 4' in tail
+
+
+class TestLongOutput:
+    def test_the_diff_extractor_survives_a_long_producer(self) -> None:
+        """`head` closes the pipe once it has its lines, the producer takes
+        SIGPIPE, and under `pipefail` that killed the whole script with 141
+        — losing the score over a survivor whose diff happened to be long."""
+        extractor = SCRIPT.read_text(encoding="utf-8").split("awk '", 1)[1].split("' \\", 1)[0]
+        script = f"set -euo pipefail; seq 1 200000 | sed 's/^/+/' | awk '{extractor}'"
+
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
+
+        assert result.returncode == 0
+        assert len(result.stdout.splitlines()) == 6
+
+    def test_no_pipeline_closes_its_producer_early(self) -> None:
+        code = [
+            line
+            for line in SCRIPT.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")
+        ]
+
+        assert not [line for line in code if "| head " in line]
+        assert any("set -euo pipefail" in line for line in code)
