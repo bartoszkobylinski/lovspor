@@ -685,3 +685,59 @@ class TestPartialTrace:
         assert parsed.ok is False
         assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
         assert parsed.tool_calls[0].result is None
+
+
+class TestPayloadReferenceContract:
+    """A reference is only evidence if it can be checked and points inside
+    the run. The schema carries that, because the writer can change."""
+
+    def record_with(self, **call: object) -> dict[str, Any]:
+        return {
+            "run_id": "llhb-v1-run-20260810-x",
+            "case_id": "llhb-v1-C1-001",
+            "provider": "anthropic",
+            "model_id": "claude-opus-5",
+            "condition": "lovspor",
+            "final_answer": "Svar.",
+            "tool_calls": [{"index": 0, "name": "t", "arguments": {}, **call}],
+            "timing": {"started_at": "2026-08-10T09:00:01Z", "total_ms": 1},
+            "errors": [],
+            "completed": True,
+        }
+
+    def errors_for(self, document: dict[str, Any]) -> list[str]:
+        return validate_case(document, load_schema(SCHEMA_DIR / "result_record.schema.json"))
+
+    def test_a_reference_without_a_hash_is_refused(self) -> None:
+        """Nothing to check the regenerated payload against."""
+        errors = self.errors_for(self.record_with(result_ref="tools/llhb-v1-C1-001-000.json"))
+
+        assert any("result_sha256" in error for error in errors)
+
+    def test_a_hash_without_a_reference_is_refused(self) -> None:
+        errors = self.errors_for(self.record_with(result_sha256="a" * 64))
+
+        assert any("result_ref" in error for error in errors)
+
+    def test_a_reference_escaping_the_run_directory_is_refused(self) -> None:
+        errors = self.errors_for(
+            self.record_with(result_ref="../../outside-run.json", result_sha256="a" * 64)
+        )
+
+        assert any("does not match" in error for error in errors)
+
+    def test_the_raw_reference_is_constrained_the_same_way(self) -> None:
+        document = self.record_with(
+            result_ref="tools/llhb-v1-C1-001-000.json", result_sha256="a" * 64
+        )
+        document["raw_response_ref"] = "../../outside.json"
+
+        assert any("raw_response_ref" in error for error in self.errors_for(document))
+
+    def test_a_complete_reference_pair_is_accepted(self) -> None:
+        document = self.record_with(
+            result_ref="tools/llhb-v1-C1-001-000.json", result_sha256="a" * 64
+        )
+        document["raw_response_ref"] = "raw/llhb-v1-C1-001.json"
+
+        assert self.errors_for(document) == []

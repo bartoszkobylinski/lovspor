@@ -40,6 +40,9 @@ _MAY_DIFFER = frozenset(
 # rather than read from the schema so this module stays import-light; a test
 # asserts the two never drift apart.
 _CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
+# A namespaced MCP tool is mcp__<server>__<tool>; the middle field names the
+# server whose connection the case depended on.
+_NAMESPACED_TOOL_RE = re.compile(r"^mcp__(?P<server>[^_]+(?:_[^_]+)*)__")
 
 
 class RunArtifacts(BaseModel):
@@ -276,18 +279,33 @@ def _offered_violations(
             f"{case_id}: offered surface does not match the declared surface "
             f"(missing {missing}, unexpected {extra})"
         ]
-    return _server_violations(harness, case_id)
+    return _server_violations(harness, case_id, declared)
 
 
-def _server_violations(harness: dict[str, Any], case_id: str) -> list[str]:
-    servers = harness.get("mcp_servers") or []
-    connected = [
-        server
-        for server in servers
+def _server_violations(
+    harness: dict[str, Any], case_id: str, declared: tuple[str, ...]
+) -> list[str]:
+    """Every server the declared tools name, checked by name.
+
+    "Some server connected" is not the claim: a run where the lovverk
+    server failed and an unrelated one connected has no treatment in it
+    at all, and would otherwise pass. The names come from the run's own
+    declared tools (`mcp__<server>__<tool>`) rather than a constant, so
+    the check follows whatever surface the run says it offered.
+    """
+    connected = {
+        str(server.get("name"))
+        for server in harness.get("mcp_servers") or []
         if isinstance(server, dict) and server.get("status") == "connected"
-    ]
-    if not connected:
-        return [f"{case_id}: no MCP server was connected; the case ran without the treatment"]
+    }
+    named = (_NAMESPACED_TOOL_RE.match(name) for name in declared)
+    expected = {match.group("server") for match in named if match}
+    missing = sorted(expected - connected)
+    if missing:
+        return [
+            f"{case_id}: MCP server(s) {missing} did not connect, so the case ran "
+            "without the treatment its tools were supposed to provide"
+        ]
     return []
 
 

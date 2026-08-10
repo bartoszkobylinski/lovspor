@@ -233,7 +233,7 @@ class TestTreatmentViolations:
             [treatment_record("llhb-v1-C1-001", harness=broken)], TOOL_CONFIG["tools"]
         )
 
-        assert "no MCP server was connected" in problems[0]
+        assert "did not connect" in problems[0]
 
     def test_flags_a_case_offered_no_tools(self) -> None:
         empty = {"exposed_tools": [], "mcp_servers": [], "permission_denials": []}
@@ -306,8 +306,9 @@ class TestDeclaredSurface:
             [treatment_record("llhb-v1-C1-001", harness=empty)], declared_tools=[]
         )
 
-        assert "treatment run declares no tool surface in tool_config.tools" in problems
-        assert any("no MCP server was connected" in problem for problem in problems)
+        # With nothing declared there is no server to name, so the missing
+        # declaration is the whole finding — and it is the substantive one.
+        assert problems == ["treatment run declares no tool surface in tool_config.tools"]
 
     def test_an_empty_tool_config_is_not_a_fair_pair(self) -> None:
         control = RunArtifacts(metadata=metadata(), records=[record("llhb-v1-C1-001")])
@@ -600,3 +601,39 @@ class TestBookkeeping:
         )
 
         assert check_pair(control, treatment) != []
+
+
+class TestNamedServer:
+    """ "Some server connected" is not the claim. A case where the lovverk
+    server failed and an unrelated one connected has no treatment in it,
+    and the run's own declared tools name which server had to be up."""
+
+    def make(self, servers: list[dict[str, str]]) -> dict[str, Any]:
+        return treatment_record(
+            "llhb-v1-C1-001",
+            harness={
+                "exposed_tools": ["mcp__lovverk__get_section"],
+                "mcp_servers": servers,
+                "permission_denials": [],
+            },
+        )
+
+    def test_flags_a_case_where_a_different_server_connected(self) -> None:
+        record = self.make(
+            [
+                {"name": "lovverk", "status": "failed"},
+                {"name": "something-else", "status": "connected"},
+            ]
+        )
+
+        problems = treatment_violations([record], ["mcp__lovverk__get_section"])
+
+        assert problems == [
+            "llhb-v1-C1-001: MCP server(s) ['lovverk'] did not connect, so the case "
+            "ran without the treatment its tools were supposed to provide"
+        ]
+
+    def test_the_declared_tools_name_the_server_that_had_to_be_up(self) -> None:
+        record = self.make([{"name": "lovverk", "status": "connected"}])
+
+        assert treatment_violations([record], ["mcp__lovverk__get_section"]) == []
