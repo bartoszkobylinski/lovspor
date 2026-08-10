@@ -142,7 +142,7 @@ def treatment_config(args: argparse.Namespace, lock: dict[str, Any]) -> dict[str
     verify_pin(corpus_path, CorpusPin(**lock["corpus_pin"]))
     verify_server_command(args.server_command)
     surface = tool_surface(corpus_path)
-    return tool_config(surface, corpus_path, str(lock["corpus_pin"]["lovverk_commit"]))
+    return tool_config(surface, str(lock["corpus_pin"]["lovverk_commit"]))
 
 
 def _required_corpus_path(args: argparse.Namespace) -> Path:

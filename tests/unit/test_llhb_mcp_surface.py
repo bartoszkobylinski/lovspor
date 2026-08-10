@@ -178,11 +178,18 @@ class TestToolConfig:
     def test_namespaces_tools_and_records_the_backend(self, corpus: Path) -> None:
         surface = tool_surface(corpus)
 
-        config = tool_config(surface, corpus, "6ec7059d53d25ddae99d8a64bf5157a90c4c166c")
+        config = tool_config(surface, "6ec7059d53d25ddae99d8a64bf5157a90c4c166c")
 
         assert config["transport"] == "native-mcp"
         assert config["tool_schema_sha256"] == surface.schema_sha256
         assert config["tools"] == allowed_tools(surface)
         assert config["tools"][0].startswith("mcp__lovverk__")
         assert "6ec7059d53d25ddae99d8a64bf5157a90c4c166c" in config["backend"]
-        assert str(corpus) in config["backend"]
+
+    def test_the_backend_names_the_commit_not_the_machine(self, corpus: Path) -> None:
+        """Published metadata identifies the corpus by commit. A checkout
+        path identifies whoever ran it, and leaks their filesystem."""
+        config = tool_config(tool_surface(corpus), "6" * 40)
+
+        assert str(corpus) not in config["backend"]
+        assert str(Path.home()) not in config["backend"]

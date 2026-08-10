@@ -115,11 +115,14 @@ def server_config_json(server_command: Path, corpus_path: Path) -> str:
     return json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def tool_config(surface: ToolSurface, corpus_path: Path, lovverk_commit: str) -> dict[str, Any]:
+def tool_config(surface: ToolSurface, lovverk_commit: str) -> dict[str, Any]:
     """The run-metadata ``tool_config`` block for the treatment condition."""
     return {
         "transport": TRANSPORT,
         "tools": allowed_tools(surface),
         "tool_schema_sha256": surface.schema_sha256,
-        "backend": f"local stdio `lovspor mcp` on lovverk {lovverk_commit} at {corpus_path}",
+        # The commit identifies the corpus; the checkout path identifies the
+        # machine that happened to run it, and published metadata has no use
+        # for that.
+        "backend": f"local stdio `lovspor mcp` on lovverk {lovverk_commit}",
     }

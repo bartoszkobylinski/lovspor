@@ -18,9 +18,11 @@ from pathlib import Path
 
 from lovspor.errors import LovsporError
 from lovspor.llhb.fairness import RunArtifacts, check_pair
+from lovspor.llhb.schema import load_schema, validate_case
 
 LLHB_DIR = Path(__file__).resolve().parents[1]
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
+SCHEMA_DIR = LLHB_DIR / "schema"
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,20 +34,33 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_run(runs_root: Path, run_id: str) -> RunArtifacts:
+    """One run's artifacts, refused unless they are schema-valid.
+
+    ``ResultsStore`` validates on write, but this module reads committed
+    files — a document edited or assembled afterwards would otherwise be
+    compared as though the store had produced it.
+    """
     run_dir = runs_root / run_id
     metadata_path = run_dir / "run-metadata.json"
     records_path = run_dir / "records.jsonl"
     if not metadata_path.is_file():
         raise LovsporError(f"no run metadata at {metadata_path}")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    _check(f"{run_id} run metadata", metadata, "run_metadata.schema.json")
     records = [
         json.loads(line)
         for line in records_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    return RunArtifacts(
-        metadata=json.loads(metadata_path.read_text(encoding="utf-8")),
-        records=records,
-    )
+    for record in records:
+        _check(f"{run_id} record {record.get('case_id')}", record, "result_record.schema.json")
+    return RunArtifacts(metadata=metadata, records=records)
+
+
+def _check(label: str, document: dict[str, object], schema_name: str) -> None:
+    errors = validate_case(document, load_schema(SCHEMA_DIR / schema_name))
+    if errors:
+        raise LovsporError(f"{label} is not schema-valid: " + "; ".join(errors))
 
 
 def main() -> int:

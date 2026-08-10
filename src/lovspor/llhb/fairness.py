@@ -11,6 +11,7 @@ stored evidence: a run whose fairness report is not empty must not be
 reported as a control-treatment comparison.
 """
 
+import re
 from collections.abc import Sequence
 from typing import Any
 
@@ -33,6 +34,12 @@ _MAY_DIFFER = frozenset(
         "evaluator_version",
     }
 )
+
+
+# Mirrors result_record.schema.json's case_id pattern. Kept as a constant
+# rather than read from the schema so this module stays import-light; a test
+# asserts the two never drift apart.
+_CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
 
 
 class RunArtifacts(BaseModel):
@@ -69,11 +76,19 @@ def coverage_violations(run: RunArtifacts, label: str) -> list[str]:
     """
     if not run.records:
         return [f"{label} run has no records, so the pair compares nothing"]
-    unidentified = sum(1 for record in run.records if not str(record.get("case_id") or "").strip())
-    if unidentified:
+    malformed = sorted(
+        {
+            str(record.get("case_id"))
+            for record in run.records
+            if not _CASE_ID_RE.match(str(record.get("case_id") or ""))
+        }
+    )
+    if malformed:
         # str(None) is "None", which pairs happily with another record that
-        # also has no id — two anonymous records would look like a match.
-        return [f"{label} run holds {unidentified} record(s) with no case id to pair on"]
+        # also has no id, and any id outside the frozen grammar pairs with
+        # its twin in the other arm just as well — two runs agreeing on
+        # material the dataset could never have produced.
+        return [f"{label} run holds record(s) whose case id is not a dataset id: {malformed}"]
     case_ids = [str(record.get("case_id")) for record in run.records]
     duplicates = sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1})
     if duplicates:

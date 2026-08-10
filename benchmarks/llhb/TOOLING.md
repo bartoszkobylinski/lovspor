@@ -298,7 +298,11 @@ Driven by the Stage 3.5 human audit (see
   `result_sha256`, never inlined into the record.
 * **Retention split**: `tools/` and `raw/` are gitignored, because a
   lovverk tool answers with statutory text and legal text does not live
-  in this repo (CLAUDE.md). What is versioned — `run-metadata.json` and
+  in this repo (CLAUDE.md). The line is between *corpus material* and
+  *model output*: a tool payload is lovverk's text copied verbatim and
+  stays out, while a model's answer is the thing being measured and is
+  versioned even though it quotes provisions. A benchmark that discarded
+  the answers would have nothing left to score. What is versioned — `run-metadata.json` and
   `records.jsonl` — carries each payload's SHA-256, the tool name and
   the exact arguments; the corpus is pinned, so (tool, arguments, pin)
   regenerates the bytes the hash was taken over. The Stage 5 control

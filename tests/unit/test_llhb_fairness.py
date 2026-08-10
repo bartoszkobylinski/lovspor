@@ -1,7 +1,10 @@
 """Stage 6 fairness checks over committed control/treatment artifacts."""
 
+import json
+from pathlib import Path
 from typing import Any
 
+from lovspor.llhb import fairness as fairness_module
 from lovspor.llhb.fairness import (
     RunArtifacts,
     bookkeeping_violations,
@@ -518,7 +521,39 @@ class TestUnidentifiedRecords:
 
         problems = coverage_violations(run, "control")
 
-        assert problems == ["control run holds 1 record(s) with no case id to pair on"]
+        assert problems == [
+            "control run holds record(s) whose case id is not a dataset id: ['None']"
+        ]
+
+    def test_flags_an_id_outside_the_frozen_grammar(self) -> None:
+        """An id the dataset could never have produced pairs just as happily
+        with its twin in the other arm, so both runs agree on material that
+        is not the benchmark's."""
+        run = RunArtifacts(
+            metadata=metadata(cases_total=1),
+            records=[{**record("llhb-v1-C1-001"), "case_id": "not-an-llhb-case"}],
+        )
+
+        problems = coverage_violations(run, "control")
+
+        assert problems == [
+            "control run holds record(s) whose case id is not a dataset id: ['not-an-llhb-case']"
+        ]
+
+    def test_the_pattern_matches_the_committed_schema(self) -> None:
+        """The constant mirrors result_record.schema.json; a test rather
+        than an import keeps this module light without letting them drift."""
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parents[2]
+                / "benchmarks"
+                / "llhb"
+                / "schema"
+                / "result_record.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        assert fairness_module._CASE_ID_RE.pattern == schema["properties"]["case_id"]["pattern"]
 
     def test_an_empty_case_id_counts_as_missing(self) -> None:
         run = RunArtifacts(

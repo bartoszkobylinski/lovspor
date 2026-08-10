@@ -234,7 +234,12 @@ referenced by `result_ref` + `result_sha256`, and `tools/` and `raw/`
 are gitignored. What stays versioned is the tool name, the exact
 arguments and the payload hash — and because the corpus is pinned,
 (tool, arguments, pin) regenerates the bytes the hash was taken over,
-so the evidence is checkable without duplicating the corpus.
+so the evidence is checkable without duplicating the corpus. The rule
+separates corpus material from model output: a tool payload is
+lovverk's text copied verbatim and is excluded, while a model answer is
+the measurement itself and is versioned even though it quotes
+provisions — a benchmark that dropped the answers would have nothing to
+score.
 *Decision needed:* ratify this, or rule that treatment transcripts are
 benchmark evidence rather than corpus material and may be versioned
 here (which also decides roughly 80–120 MB of artifacts for the full

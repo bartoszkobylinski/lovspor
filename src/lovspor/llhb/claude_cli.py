@@ -20,7 +20,6 @@ trace would silently understate tool use, which is the one thing
 Stage 6 measures.
 """
 
-import contextlib
 import json
 from collections.abc import Iterator
 from typing import Any
@@ -153,7 +152,9 @@ def _partial(events: list[dict[str, Any]], message: str) -> ParsedCliResult:
     failure would understate tool use, which is the one thing this
     parser must never do.
     """
-    calls = _partial_tool_calls(events)
+    calls, unreadable = _readable_tool_calls(events)
+    if unreadable:
+        message = f"{message}; {unreadable} tool block(s) unreadable"
     try:
         harness: HarnessTrace | None = _harness(events, {})
     except ValueError:
@@ -235,21 +236,28 @@ def _tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
     return calls
 
 
-def _partial_tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
-    """Every call the transcript proves, stopping where it stops parsing.
+def _readable_tool_calls(events: list[dict[str, Any]]) -> tuple[list[ToolCall], int]:
+    """Every call the transcript still proves, and how many it lost.
 
-    For a case that already failed, the calls read before the damage
-    were still made. Returning none of them because a later event is
-    malformed reports less tool use than the transcript contains.
+    For a case that already failed, one unreadable block must not erase
+    the calls around it — a valid call after the damage was still made,
+    and dropping it reports less tool use than the transcript contains.
+    The count of what could not be read goes into the error, so nothing
+    disappears quietly.
     """
     try:
         payloads = _tool_results(events)
     except ValueError:
         payloads = {}
     calls: list[ToolCall] = []
-    with contextlib.suppress(ValueError):
-        calls.extend(_iter_calls(events, payloads))
-    return calls
+    unreadable = 0
+    claimed: set[str] = set()
+    for index, block in enumerate(_blocks(events, "assistant", "tool_use", lenient=True)):
+        try:
+            calls.append(_one_call(index, block, payloads, claimed))
+        except ValueError:
+            unreadable += 1
+    return calls, unreadable
 
 
 def _iter_calls(
@@ -257,16 +265,25 @@ def _iter_calls(
 ) -> Iterator[ToolCall]:
     claimed: set[str] = set()
     for index, block in enumerate(_blocks(events, "assistant", "tool_use")):
-        name, arguments, use_id = block.get("name"), block.get("input"), block.get("id")
-        if not isinstance(name, str) or not isinstance(arguments, dict):
-            raise ValueError(f"tool_use block {index} has no readable name or input")
-        if not isinstance(use_id, str):
-            raise ValueError(f"tool_use block {index} ({name}) has no id to match its result")
-        if use_id in claimed:
-            raise ValueError(f"two tool_use blocks share the id {use_id!r}")
-        claimed.add(use_id)
-        result, failed = payloads.pop(use_id, (None, False))
-        yield ToolCall(index=index, name=name, arguments=arguments, result=result, is_error=failed)
+        yield _one_call(index, block, payloads, claimed)
+
+
+def _one_call(
+    index: int,
+    block: dict[str, Any],
+    payloads: dict[str, tuple[Any, bool]],
+    claimed: set[str],
+) -> ToolCall:
+    name, arguments, use_id = block.get("name"), block.get("input"), block.get("id")
+    if not isinstance(name, str) or not isinstance(arguments, dict):
+        raise ValueError(f"tool_use block {index} has no readable name or input")
+    if not isinstance(use_id, str):
+        raise ValueError(f"tool_use block {index} ({name}) has no id to match its result")
+    if use_id in claimed:
+        raise ValueError(f"two tool_use blocks share the id {use_id!r}")
+    claimed.add(use_id)
+    result, failed = payloads.pop(use_id, (None, False))
+    return ToolCall(index=index, name=name, arguments=arguments, result=result, is_error=failed)
 
 
 def _tool_results(events: list[dict[str, Any]]) -> dict[str, tuple[Any, bool]]:
@@ -288,7 +305,11 @@ def _tool_results(events: list[dict[str, Any]]) -> dict[str, tuple[Any, bool]]:
 
 
 def _blocks(
-    events: list[dict[str, Any]], event_type: str, block_type: str
+    events: list[dict[str, Any]],
+    event_type: str,
+    block_type: str,
+    *,
+    lenient: bool = False,
 ) -> Iterator[dict[str, Any]]:
     """Every content block of one kind, in transcript order.
 
@@ -303,9 +324,13 @@ def _blocks(
             continue
         message = event.get("message")
         if not isinstance(message, dict):
+            if lenient:
+                continue
             raise ValueError(f"{event_type} event carries no readable message")
         content = message.get("content")
         if not isinstance(content, list):
+            if lenient:
+                continue
             raise ValueError(f"{event_type} event message carries no readable content list")
         for block in content:
             if isinstance(block, dict) and block.get("type") == block_type:
