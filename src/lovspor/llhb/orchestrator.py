@@ -35,6 +35,7 @@ from lovspor.llhb.claude_cli import (
     ParsedCliResult,
     RunIdentity,
     ToolAccess,
+    ToolCall,
     build_argv,
     build_result_record,
     parse_stream_json,
@@ -205,9 +206,10 @@ def _run_case(config: RunConfig, case: dict[str, Any], run_dir: Path) -> dict[st
     invocation = execute_argv(argv, env, config.timeout_s, config.sandbox_home)
     case_id = str(case["case_id"])
     timing = CaseTiming(started_at=started_at, total_ms=invocation.duration_ms)
-    record = build_result_record(config.identity, case_id, _parse(invocation), timing)
+    parsed = _parse(invocation)
+    record = build_result_record(config.identity, case_id, parsed, timing)
     _reconcile_tool_calls(record, invocation)
-    record["tool_calls"] = _stored_tool_calls(run_dir, case_id, record["tool_calls"])
+    record["tool_calls"] = _stored_tool_calls(run_dir, case_id, parsed.tool_calls)
     record["raw_response_ref"] = _write_raw(run_dir, case_id, invocation)
     return record
 
@@ -218,24 +220,24 @@ def _parse(invocation: CliInvocation) -> ParsedCliResult:
     return parse_stream_json(invocation.stdout, invocation.returncode)
 
 
-def _stored_tool_calls(run_dir: Path, case_id: str, calls: Any) -> list[dict[str, Any]]:
+def _stored_tool_calls(run_dir: Path, case_id: str, calls: list[ToolCall]) -> list[dict[str, Any]]:
     """Hash every tool payload and keep the bytes beside the run, not in it.
 
-    A lovverk tool answers with statutory text, which does not live in
-    this repository. The record therefore keeps the SHA-256 and a
-    reference; because the corpus is pinned, (tool, arguments, pin)
-    regenerates exactly the bytes the hash was taken over.
+    A tool result is regenerable from (tool, arguments, corpus pin), so
+    ruling #27 keeps it out of the versioned record: what stays is the
+    SHA-256 an audit checks against and a reference to the payload
+    beside the run. The key is dropped rather than set to null, and the
+    schema constrains it to null, so no future writer can inline one.
     """
     stored: list[dict[str, Any]] = []
     for call in calls:
-        entry = dict(call)
-        if entry.get("result") is None:
+        entry = call.model_dump(mode="json", exclude={"result"})
+        if call.result is None:
             stored.append(entry)
             continue
-        canonical = _canonical(entry["result"])
-        entry["result"] = None
+        canonical = _canonical(call.result)
         entry["result_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        entry["result_ref"] = _write_tool_payload(run_dir, case_id, entry["index"], canonical)
+        entry["result_ref"] = _write_tool_payload(run_dir, case_id, call.index, canonical)
         stored.append(entry)
     return stored
 

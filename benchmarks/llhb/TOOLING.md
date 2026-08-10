@@ -309,7 +309,11 @@ Driven by the Stage 3.5 human audit (see
   exists to measure. `raw/` is excluded because a treatment transcript
   embeds the payloads inline, which would put regenerable corpus
   material back in the repo; what it holds beyond `records.jsonl` —
-  thinking blocks, event order, stderr — is not scored.
+  thinking blocks and stderr — is not scored, and the ordering that
+  would carry evidentiary weight is already kept: `tool_calls` is
+  ordered as issued, with index, name, arguments and payload hash.
+  `tool_calls[].result` is schema-constrained to null, so the rule is
+  enforced at the gate rather than by whichever writer runs next.
 * **Tool-call reconciliation**: after each case the orchestrator counts
   `"type": "tool_use"` in the transcript text, without walking events,
   and stops the whole run if that disagrees with the parsed trace.

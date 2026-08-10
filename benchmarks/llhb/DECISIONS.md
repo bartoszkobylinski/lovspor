@@ -279,7 +279,27 @@ dependency), or whether v1 runs on the deterministic 15.
     which is one of the things LLHB measures. Applied: `tools/` and
     `raw/` gitignored, `records.jsonl` and `run-metadata.json`
     versioned, and the 30 previously tracked `raw/` files from pilots
-    1-3 removed from the index so the rule and the repository agree.
+    1-3 removed from the index so the rule and the repository agree. The
+    schema gates the rule rather than the writer: `tool_calls[].result`
+    is constrained to null, so no future writer can inline a payload
+    into a versioned record. It is constrained rather than deleted
+    because records already written carry an explicit null and stay
+    valid; deleting the field would have required re-running the pilot
+    a third time to satisfy a stricter shape of the same rule.
+
+28. **The measuring apparatus is frozen until the v1 runs finish.**
+    After the parser hardening, no further change to the runner,
+    driver, orchestrator or fairness gate until the v1 matrix has run.
+    Same discipline as the dataset freeze and for the same reason:
+    anything that changes what is being measured, between the freeze
+    and the measurement, invalidates the description of the experiment.
+    Defects that would make a run produce a wrong number are the only
+    admissible exception, and each is an owner call rather than a
+    judgement made while fixing something else. Improvements that only
+    make the apparatus nicer wait for v2 — including the transcript
+    rewrite considered and declined under #27, which if it ever happens
+    is runner-native at write time, never post-hoc, and lands on the
+    v1→v2 boundary.
 
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring

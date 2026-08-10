@@ -400,7 +400,13 @@ def build_result_record(
         "final_answer": parsed.final_answer,
         # mode="json" throughout: tuples are not JSON arrays to the schema
         # validator, so a dumped tuple would fail validation on write.
-        "tool_calls": [call.model_dump(mode="json") for call in parsed.tool_calls],
+        # `result` is excluded: a payload is regenerable from the pin and
+        # never belongs in a versioned record (ruling #27), so a record is
+        # schema-valid the moment it exists rather than after the
+        # orchestrator has stripped it.
+        "tool_calls": [
+            call.model_dump(mode="json", exclude={"result"}) for call in parsed.tool_calls
+        ],
         "turns": parsed.turns,
         "timing": timing.model_dump(),
         "usage": parsed.usage,

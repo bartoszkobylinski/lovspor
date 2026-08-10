@@ -21,6 +21,7 @@ from lovspor.llhb.orchestrator import (
     run_arm,
 )
 from lovspor.llhb.results import ResultsStore
+from lovspor.llhb.schema import load_schema, validate_case
 
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "llhb" / "schema"
 
@@ -380,7 +381,7 @@ class TestRunArm:
         run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
 
         call = store.read_records(RUN_ID)[0]["tool_calls"][0]
-        assert call["result"] is None
+        assert "result" not in call
         assert "result_sha256" not in call
         assert not (tmp_path / "runs" / RUN_ID / "tools").exists()
 
@@ -463,7 +464,7 @@ class TestRunArm:
         run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
 
         call = store.read_records(RUN_ID)[0]["tool_calls"][0]
-        assert call["result"] is None
+        assert "result" not in call
         assert call["result_ref"] == "tools/llhb-v1-C1-001-000.json"
         spilled = (tmp_path / "runs" / RUN_ID / call["result_ref"]).read_text(encoding="utf-8")
         assert json.loads(spilled) == payload
@@ -692,3 +693,52 @@ class TestToolCallReconciliation:
         run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
 
         assert len(store.read_records(RUN_ID)[0]["tool_calls"]) == 1
+
+
+class TestPayloadNeverInlined:
+    """The schema is the gate, not the writer: writers change, and a future
+    one inlining a payload would put regenerable corpus material into a
+    versioned record the day after ruling #27 (owner, 2026-08-10)."""
+
+    def test_the_schema_refuses_an_inlined_payload(self) -> None:
+        record = {
+            "run_id": RUN_ID,
+            "case_id": "llhb-v1-C1-001",
+            "provider": "anthropic",
+            "model_id": "claude-opus-5",
+            "condition": "lovspor",
+            "final_answer": "Svar.",
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "name": "mcp__lovverk__get_section",
+                    "arguments": {"slug": "testloven"},
+                    "result": "§ 1. Formål — the corpus text itself",
+                }
+            ],
+            "timing": {"started_at": "2026-08-10T09:00:01Z", "total_ms": 1},
+            "errors": [],
+            "completed": True,
+        }
+
+        errors = validate_case(record, load_schema(SCHEMA_DIR / "result_record.schema.json"))
+
+        assert any("result" in error and "null" in error for error in errors)
+
+    def test_a_written_call_carries_the_hash_and_no_payload(self, tmp_path: Path) -> None:
+        stream = emit(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use_event("tu-1", "mcp__lovverk__get_section", {"slug": "a"}),
+            tool_result_event("tu-1", "§ 1. Formål"),
+            result_event(),
+        )
+        bin_dir = fake_claude(tmp_path, stream)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        metadata = make_metadata(condition="lovspor", tool_config={"transport": "native-mcp"})
+
+        run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
+
+        call = store.read_records(RUN_ID)[0]["tool_calls"][0]
+        assert "result" not in call
+        assert len(call["result_sha256"]) == 64
+        assert "§" not in json.dumps(call, ensure_ascii=False)

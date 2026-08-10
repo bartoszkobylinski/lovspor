@@ -620,12 +620,14 @@ class TestBuildResultRecord:
 
         schema = load_schema(SCHEMA_DIR / "result_record.schema.json")
         assert validate_case(record, schema) == []
+        # No payload in the record: it is regenerable from the pin, and the
+        # orchestrator adds result_ref and result_sha256 when it stores the
+        # bytes beside the run (ruling #27).
         assert record["tool_calls"] == [
             {
                 "index": 0,
                 "name": "mcp__lovverk__get_section",
                 "arguments": {"slug": "testloven", "section_id": "1"},
-                "result": "§ 1. Formål",
                 "is_error": False,
             }
         ]
