@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from lovspor.llhb import fairness as fairness_module
 from lovspor.llhb.fairness import (
     RunArtifacts,
@@ -473,6 +475,30 @@ class TestRecordIdentity:
         )
 
         assert identity_violations(run, "control") != []
+
+    @pytest.mark.parametrize(
+        ("field", "wrong"),
+        [
+            ("run_id", "llhb-v1-run-20260810-other"),
+            ("provider", "openai"),
+            ("model_id", "claude-sonnet-5"),
+            ("condition", "control"),
+        ],
+    )
+    def test_every_identity_field_is_checked(self, field: str, wrong: str) -> None:
+        """Each field on its own: a record carrying the other arm's
+        condition, or another provider, is a record from a different
+        measurement, and dropping any one of them from the comparison
+        leaves that swap invisible."""
+        run = RunArtifacts(
+            metadata=treatment_metadata(cases_total=1),
+            records=[treatment_record("llhb-v1-C1-001", **{field: wrong})],
+        )
+
+        problems = identity_violations(run, "treatment")
+
+        assert len(problems) == 1
+        assert f"{field} {wrong!r}" in problems[0]
 
     def test_a_record_matching_its_run_passes(self) -> None:
         run = RunArtifacts(metadata=metadata(cases_total=1), records=[record("llhb-v1-C1-001")])
