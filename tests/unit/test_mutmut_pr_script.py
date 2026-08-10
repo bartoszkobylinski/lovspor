@@ -14,6 +14,8 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "mutmut-pr.sh"
 
@@ -174,12 +176,6 @@ class TestUnkilledBuckets:
         assert "timed out:  $timeout_total" in body
         assert "4 timed out" in body
 
-    def test_a_timeout_makes_the_run_report_non_zero(self) -> None:
-        body = SCRIPT.read_text(encoding="utf-8")
-        tail = body.split("# Mirrors mutmut's own meanings", 1)[1]
-
-        assert 'if [ "$timeout_total" -gt 0 ]; then\n  exit 4' in tail
-
 
 class TestLongOutput:
     def test_the_diff_extractor_survives_a_long_producer(self) -> None:
@@ -203,3 +199,29 @@ class TestLongOutput:
 
         assert not [line for line in code if "| head " in line]
         assert any("set -euo pipefail" in line for line in code)
+
+
+class TestExitCode:
+    """mutmut bit-ORs its statuses (2 survived, 4 timed out, 8 suspicious)
+    precisely so one run can report several at once. Returning only the
+    first non-empty bucket hid the rest from anything reading the code: a
+    run with survivors and timeouts came back 4, and a caller checking for
+    2 concluded nothing had survived."""
+
+    @pytest.mark.parametrize(
+        ("survived", "timed_out", "suspicious", "expected"),
+        [
+            (0, 0, 0, "0"),
+            (6, 0, 0, "2"),
+            (0, 1, 0, "4"),
+            (0, 0, 1, "8"),
+            (6, 1, 0, "6"),
+            (6, 0, 1, "10"),
+            (0, 1, 1, "12"),
+            (6, 1, 1, "14"),
+        ],
+    )
+    def test_every_non_empty_bucket_sets_its_bit(
+        self, survived: int, timed_out: int, suspicious: int, expected: str
+    ) -> None:
+        assert probe("--exit-code-for", str(survived), str(timed_out), str(suspicious)) == expected

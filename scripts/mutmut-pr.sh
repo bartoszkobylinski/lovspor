@@ -38,6 +38,7 @@
 #   --tests-for PATH   print the test module PATH would be mutated against
 #   --runner-for PATH  print the exact runner command PATH would be mutated with
 #   --check-guard      run the PATH stub and confirm it refuses to execute
+#   --exit-code-for S T X   print the exit code for those bucket counts
 #   base_ref           diff base (default: origin/main)
 set -euo pipefail
 
@@ -45,6 +46,7 @@ list_only=0
 tests_for_path=""
 runner_for_path=""
 check_guard=0
+exit_code_probe=""
 base_ref="origin/main"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -52,6 +54,7 @@ while [ "$#" -gt 0 ]; do
     --tests-for) shift; tests_for_path="${1:-}" ;;
     --runner-for) shift; runner_for_path="${1:-}" ;;
     --check-guard) check_guard=1 ;;
+    --exit-code-for) shift; exit_code_probe="${1:-} ${2:-} ${3:-}"; shift 2 ;;
     *) base_ref="$1" ;;
   esac
   shift
@@ -117,7 +120,25 @@ runner_for() {
   printf 'sh -c %s' "$(shell_quote "$(test_command "$1") || exit 1")"
 }
 
+# mutmut bit-ORs its statuses into the exit code (2 survived, 4 timed out,
+# 8 suspicious) precisely so one run can report several at once. Returning
+# only the first non-empty bucket hid the others from anything reading the
+# code: a run with survivors AND timeouts came back 4, and a caller checking
+# for 2 concluded nothing survived.
+exit_code_for() {
+  local code=0
+  if [ "$1" -gt 0 ]; then code=$((code | 2)); fi
+  if [ "$2" -gt 0 ]; then code=$((code | 4)); fi
+  if [ "$3" -gt 0 ]; then code=$((code | 8)); fi
+  printf '%s' "$code"
+}
+
 # Probes: describe what a real run would do for one path, without running it.
+if [ -n "$exit_code_probe" ]; then
+  exit_code_for $exit_code_probe
+  echo
+  exit 0
+fi
 if [ -n "$tests_for_path" ]; then
   tests_for "$tests_for_path"
   echo
@@ -255,12 +276,4 @@ echo "optimistic."
 
 # Recomputed rather than passed through: mutmut's exit code is per-file, so
 # the last file's would silently stand in for the whole run.
-# Mirrors mutmut's own meanings so the code says which bucket is non-empty.
-if [ "$timeout_total" -gt 0 ]; then
-  exit 4
-elif [ "$suspicious_total" -gt 0 ]; then
-  exit 8
-elif [ "$survived_total" -gt 0 ]; then
-  exit 2
-fi
-exit 0
+exit "$(exit_code_for "$survived_total" "$timeout_total" "$suspicious_total")"
