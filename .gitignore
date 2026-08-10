@@ -48,10 +48,13 @@ notes/
 
 # LLHB runner: per-run CLI sandbox HOME (never versioned)
 benchmarks/llhb/results/runs/.sandbox/
-# LLHB treatment runs retrieve statutory text, and legal text does not live in
-# this repo (CLAUDE.md). Tool payloads and the transcripts that embed them stay
-# local; records.jsonl keeps each payload's SHA-256, and the corpus is pinned,
-# so (tool, arguments, pin) regenerates the bytes the hash was taken over.
+# LLHB runs retrieve statutory text, and legal text does not live in this repo
+# (CLAUDE.md). Tool payloads and the transcripts that embed them stay local;
+# records.jsonl keeps each payload's SHA-256, and the corpus is pinned, so
+# (tool, arguments, pin) regenerates the bytes the hash was taken over.
+# These directories exist on disk after any run, so without the rule here
+# every branch cut from main re-exposes them to `git add -A` — which is
+# exactly how they once reached a review branch.
 # The Stage 5 control pilots predate this and stay tracked.
 benchmarks/llhb/results/runs/*/tools/
 benchmarks/llhb/results/runs/*/raw/
