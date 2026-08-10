@@ -123,3 +123,24 @@ class TestResolutionSafety:
 
         assert "--resolve F ID" in body
         assert 'resolve_suspicious "$resolve_probe" "$resolve_probe_id"' in body
+
+    def test_refuses_to_resolve_against_a_tree_that_differs_from_head(self) -> None:
+        """The mutants come from a cache built against the working tree, but
+        the re-run measures HEAD. When those differ the verdict describes
+        code nobody mutated, so refusing is the only honest outcome."""
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert 'diff --quiet HEAD -- "$file" "$tests"' in body
+        assert "not resolved:" in body
+
+    def test_refuses_to_resolve_a_file_that_is_not_in_head(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert 'cat-file -e "HEAD:$file"' in body
+
+    def test_restores_a_file_mutmut_created_rather_than_changed(self) -> None:
+        """`git checkout --` on a path absent from HEAD is a pathspec error,
+        which used to abort the loop mid-resolution."""
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert 'checkout -- "$file" 2>/dev/null) || rm -f "$resolve_tree/$file"' in body

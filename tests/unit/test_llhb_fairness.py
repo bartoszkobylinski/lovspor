@@ -4,6 +4,7 @@ from typing import Any
 
 from lovspor.llhb.fairness import (
     RunArtifacts,
+    bookkeeping_violations,
     check_pair,
     compare_run_metadata,
     control_violations,
@@ -476,9 +477,12 @@ class TestRecordIdentity:
 
 class TestCheckPair:
     def test_a_clean_pilot_pair_reports_nothing(self) -> None:
-        control = RunArtifacts(metadata=metadata(cases_total=1), records=[record("llhb-v1-C1-001")])
+        control = RunArtifacts(
+            metadata=metadata(cases_total=1, cases_completed=1),
+            records=[record("llhb-v1-C1-001")],
+        )
         treatment = RunArtifacts(
-            metadata=treatment_metadata(cases_total=1),
+            metadata=treatment_metadata(cases_total=1, cases_completed=1),
             records=[treatment_record("llhb-v1-C1-001")],
         )
 
@@ -523,3 +527,41 @@ class TestUnidentifiedRecords:
         )
 
         assert coverage_violations(run, "control") != []
+
+
+class TestBookkeeping:
+    def test_flags_a_summary_that_contradicts_the_records(self) -> None:
+        """cases_completed and errors_total are exempt from the cross-arm
+        comparison, so nothing else checks them at all."""
+        run = RunArtifacts(
+            metadata=metadata(cases_total=1, cases_completed=0, errors_total=1),
+            records=[record("llhb-v1-C1-001")],
+        )
+
+        problems = bookkeeping_violations(run, "control")
+
+        assert problems == [
+            "control run declares cases_completed 0, but its records show 1",
+            "control run declares errors_total 1, but its records show 0",
+        ]
+
+    def test_a_consistent_summary_passes(self) -> None:
+        errored = record("llhb-v1-C2-001", completed=False, final_answer=None, harness=None)
+        run = RunArtifacts(
+            metadata=metadata(cases_total=2, cases_completed=1, errors_total=1),
+            records=[record("llhb-v1-C1-001"), errored],
+        )
+
+        assert bookkeeping_violations(run, "control") == []
+
+    def test_a_contradictory_pair_is_not_fair(self) -> None:
+        control = RunArtifacts(
+            metadata=metadata(cases_total=1, cases_completed=0, errors_total=1),
+            records=[record("llhb-v1-C1-001")],
+        )
+        treatment = RunArtifacts(
+            metadata=treatment_metadata(cases_total=1, cases_completed=0, errors_total=1),
+            records=[treatment_record("llhb-v1-C1-001")],
+        )
+
+        assert check_pair(control, treatment) != []

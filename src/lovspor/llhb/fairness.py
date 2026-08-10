@@ -51,6 +51,8 @@ def check_pair(control: RunArtifacts, treatment: RunArtifacts) -> list[str]:
         *coverage_violations(treatment, "treatment"),
         *identity_violations(control, "control"),
         *identity_violations(treatment, "treatment"),
+        *bookkeeping_violations(control, "control"),
+        *bookkeeping_violations(treatment, "treatment"),
         *paired_case_violations(control.records, treatment.records),
         *paired_completion_violations(control.records, treatment.records),
         *control_violations(control.records),
@@ -90,6 +92,26 @@ def coverage_violations(run: RunArtifacts, label: str) -> list[str]:
             f"declares {declared} case(s)"
         ]
     return []
+
+
+def bookkeeping_violations(run: RunArtifacts, label: str) -> list[str]:
+    """A run's own summary contradicting the records it is a summary of.
+
+    ``cases_completed`` and ``errors_total`` are exempt from the
+    cross-arm comparison, because the arms may legitimately differ
+    there. That exemption is what makes them worth checking against
+    each run's own records instead: nothing else does.
+    """
+    completed = sum(1 for record in run.records if record.get("completed"))
+    counts = (("cases_completed", completed), ("errors_total", len(run.records) - completed))
+    problems = []
+    for field, observed in counts:
+        declared = run.metadata.get(field)
+        if isinstance(declared, int) and not isinstance(declared, bool) and declared != observed:
+            problems.append(
+                f"{label} run declares {field} {declared}, but its records show {observed}"
+            )
+    return problems
 
 
 def identity_violations(run: RunArtifacts, label: str) -> list[str]:

@@ -128,7 +128,23 @@ runner_for() {
 # nothing. PYTHONPATH points imports at the copy; it precedes the editable
 # install on sys.path, which is what makes the copy the code under test.
 resolve_suspicious() {
-  local file="$1" ids="$2" id verdict
+  local file="$1" ids="$2" id verdict tests
+  tests="$(tests_for "$file")"
+  # The mutants come from a cache built against the working tree, but the
+  # re-run measures HEAD. When the two differ the verdict describes code
+  # nobody mutated, and a mutant the working tree kills can come back
+  # "killed" for the wrong reason - or worse, "survived". Refusing is the
+  # honest outcome; the earlier in-tree version guarded this by accident.
+  if ! git -C "$repo_root" cat-file -e "HEAD:$file" 2>/dev/null; then
+    printf '  (not resolved: %s is not in HEAD, so the re-run has nothing to mutate)\n' \
+      "$file" >>"$unkilled_file"
+    return
+  fi
+  if ! git -C "$repo_root" diff --quiet HEAD -- "$file" "$tests"; then
+    printf '  (not resolved: %s or %s differs from HEAD, and the re-run measures HEAD)\n' \
+      "$file" "$tests" >>"$unkilled_file"
+    return
+  fi
   if [ ! -d "$resolve_tree" ] && ! setup_resolve_tree; then
     printf '  (cannot resolve: no throwaway worktree — left as suspicious)\n' >>"$unkilled_file"
     return
@@ -141,7 +157,9 @@ resolve_suspicious() {
     fi
     if (cd "$resolve_tree" && sh -c "PYTHONPATH=$resolve_tree/src $(test_command "$file")") \
       >/dev/null 2>&1; then verdict=SURVIVED; else verdict=killed; fi
-    (cd "$resolve_tree" && git checkout -- "$file")
+    # A file that mutmut created rather than changed has nothing to check
+    # out; removing it restores the copy just as well.
+    (cd "$resolve_tree" && git checkout -- "$file" 2>/dev/null) || rm -f "$resolve_tree/$file"
     printf '  mutant %s: re-run says %s\n' "$id" "$verdict" >>"$unkilled_file"
     if [ "$verdict" = SURVIVED ]; then
       resolved_survived=$((resolved_survived + 1))
