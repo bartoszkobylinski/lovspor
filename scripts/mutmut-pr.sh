@@ -94,14 +94,27 @@ tests_for() {
   fi
 }
 
+# POSIX single-quoting: close the quote, escape the apostrophe, reopen. Any
+# byte survives this, which double quotes cannot promise — and a checkout
+# path that breaks the runner is not a harmless failure. The runner then
+# fails to start and mutmut reads that as a killed mutant, on every mutant
+# of the run, so a broken path reads as a perfect score.
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+test_command() {
+  printf 'PATH=%s:$PATH %s -m pytest -x -q %s' \
+    "$(shell_quote "$guard_dir")" \
+    "$(shell_quote "$python_bin")" \
+    "$(shell_quote "$(tests_for "$1")")"
+}
+
 # Built here, not inline, so the probes show exactly what a run executes.
+# Quoted twice on purpose: once for the shell that runs the command, once
+# more because mutmut splits the runner string with shlex before exec.
 runner_for() {
-  # Every interpolated path is quoted inside the inner command: a checkout
-  # under a directory with a space otherwise splits into two words, the
-  # runner fails to start, and mutmut reads that failure as a killed mutant
-  # — a false kill on every single mutant of the run.
-  printf "sh -c 'PATH=\"%s:\$PATH\" \"%s\" -m pytest -x -q \"%s\" || exit 1'" \
-    "$guard_dir" "$python_bin" "$(tests_for "$1")"
+  printf 'sh -c %s' "$(shell_quote "$(test_command "$1") || exit 1")"
 }
 
 # Probes: describe what a real run would do for one path, without running it.
@@ -156,6 +169,7 @@ fi
 
 cd "$repo_root"
 survived_total=0
+timeout_total=0
 suspicious_total=0
 
 while IFS= read -r file; do
@@ -170,9 +184,9 @@ while IFS= read -r file; do
     --paths-to-mutate="$file" \
     --runner="$(runner_for "$file")" || run_status=$?
   # mutmut encodes its verdicts in the exit code as a bitfield: 2 survived,
-  # 4 untested, 8 suspicious. Any other non-zero status means mutmut itself
-  # failed, and swallowing that reported a clean "survived: 0, suspicious: 0"
-  # for a run that never measured anything.
+  # 4 timed out, 8 suspicious (mutmut/__init__.py, compute_exit_code). 1 is a
+  # fatal error, and swallowing it reported a clean "survived: 0" for a run
+  # that never measured anything.
   case "$run_status" in
     0 | 2 | 4 | 6 | 8 | 10 | 12 | 14) : ;;
     *)
@@ -186,7 +200,7 @@ while IFS= read -r file; do
   # once the next file has replaced the cache. Suspicious mutants are dumped
   # alongside survivors because neither was killed, and a summary listing
   # only survivors claims more certainty than the run has.
-  for bucket in survived suspicious; do
+  for bucket in survived timeout suspicious; do
     if ! ids="$("$python_bin" -m mutmut result-ids "$bucket")"; then
       echo "error: mutmut result-ids $bucket failed for $file" >&2
       echo "no score for this PR — do not report one" >&2
@@ -194,11 +208,11 @@ while IFS= read -r file; do
     fi
     [ -z "$ids" ] && continue
     found="$(printf '%s\n' $ids | wc -w | tr -d ' ')"
-    if [ "$bucket" = survived ]; then
-      survived_total=$((survived_total + found))
-    else
-      suspicious_total=$((suspicious_total + found))
-    fi
+    case "$bucket" in
+      survived) survived_total=$((survived_total + found)) ;;
+      timeout) timeout_total=$((timeout_total + found)) ;;
+      *) suspicious_total=$((suspicious_total + found)) ;;
+    esac
     printf '\n--- %s in %s\n' "$bucket" "$file" >>"$unkilled_file"
     for id in $ids; do
       printf '  mutant %s\n' "$id" >>"$unkilled_file"
@@ -213,9 +227,13 @@ echo "=== mutants that were not killed, with the change each one made"
 cat "$unkilled_file"
 echo
 echo "survived:   $survived_total"
+echo "timed out:  $timeout_total"
 echo "suspicious: $suspicious_total"
 echo
-echo "Suspicious mutants were NOT killed. mutmut files them on how long the"
+echo "None of the three were killed. A timed-out mutant hung the tests rather"
+echo "than failing them, so it is a gap in the suite, not a pass."
+echo
+echo "Suspicious mutants were NOT killed either. mutmut files them on how long the"
 echo "tests took, not on whether they failed, so the verdict moves with machine"
 echo "load — never fold them into the killed count. To settle one, in a clean"
 echo "checkout: mutmut apply <id>, run the runner printed above, read its exit"
@@ -227,7 +245,10 @@ echo "optimistic."
 
 # Recomputed rather than passed through: mutmut's exit code is per-file, so
 # the last file's would silently stand in for the whole run.
-if [ "$suspicious_total" -gt 0 ]; then
+# Mirrors mutmut's own meanings so the code says which bucket is non-empty.
+if [ "$timeout_total" -gt 0 ]; then
+  exit 4
+elif [ "$suspicious_total" -gt 0 ]; then
   exit 8
 elif [ "$survived_total" -gt 0 ]; then
   exit 2

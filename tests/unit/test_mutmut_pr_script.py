@@ -10,6 +10,7 @@ this: a full run takes ten minutes, and the decisions worth pinning are
 made before the first mutant.
 """
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -68,10 +69,10 @@ class TestRunner:
         assert "-x -q" in runner
 
     def test_puts_a_guard_directory_first_on_path(self) -> None:
-        runner = probe("--runner-for", "src/lovspor/llhb/results.py")
+        words = shlex.split(shlex.split(probe("--runner-for", "src/lovspor/llhb/results.py"))[2])
 
-        assert 'PATH="' in runner
-        assert runner.split('PATH="', 1)[1].startswith("/")
+        assert words[0].startswith("PATH=/")
+        assert words[0].endswith(":$PATH")
 
     def test_the_guard_actually_refuses_to_execute(self) -> None:
         """A mutant that breaks a subprocess call's env isolation otherwise
@@ -96,15 +97,14 @@ class TestCleanup:
 
 
 class TestFailureHandling:
-    def test_runner_paths_are_quoted(self) -> None:
+    def test_runner_paths_survive_shell_word_splitting(self) -> None:
         """A checkout under a directory with a space otherwise splits the
         runner into two words. The runner then fails to start, and mutmut
         reads that failure as a killed mutant — on every mutant of the run."""
-        runner = probe("--runner-for", "src/lovspor/llhb/results.py")
+        words = shlex.split(shlex.split(probe("--runner-for", "src/lovspor/llhb/results.py"))[2])
 
-        assert 'PATH="' in runner
-        assert f'"{REPO_ROOT / ".venv" / "bin" / "python"}"' in runner
-        assert '"tests/unit/test_llhb_results.py"' in runner
+        assert words[1] == str(REPO_ROOT / ".venv" / "bin" / "python")
+        assert words[-4:] == ["tests/unit/test_llhb_results.py", "||", "exit", "1"]
 
     def test_a_failing_mutmut_is_not_reported_as_a_clean_run(self) -> None:
         """mutmut encodes verdicts in its exit code (2 survived, 4 untested,
@@ -121,3 +121,61 @@ class TestFailureHandling:
         body = SCRIPT.read_text(encoding="utf-8")
 
         assert 'if ! ids="$("$python_bin" -m mutmut result-ids "$bucket")"; then' in body
+
+
+class TestHostilePaths:
+    def build_checkout(self, root: Path) -> Path:
+        """A checkout whose path contains an apostrophe, with a stub
+        interpreter standing in for .venv/bin/python."""
+        checkout = root / "it's a dir"
+        (checkout / ".venv" / "bin").mkdir(parents=True)
+        (checkout / "scripts").mkdir()
+        (checkout / "tests" / "unit").mkdir(parents=True)
+        (checkout / "scripts" / "mutmut-pr.sh").write_text(
+            SCRIPT.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        interpreter = checkout / ".venv" / "bin" / "python"
+        interpreter.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        interpreter.chmod(0o755)
+        (checkout / "tests" / "unit" / "test_llhb_results.py").touch()
+        subprocess.run(["git", "init", "-q"], cwd=checkout, check=True)
+        return checkout
+
+    def test_the_runner_survives_an_apostrophe_in_the_checkout_path(self, tmp_path: Path) -> None:
+        """mutmut splits the runner with shlex before exec, so a path that
+        breaks the quoting makes the runner fail to start — and mutmut reads
+        a runner that fails to start as a killed mutant, on every mutant of
+        the run. A broken path would read as a perfect score."""
+        checkout = self.build_checkout(tmp_path)
+
+        runner = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "--runner-for", "src/lovspor/llhb/results.py"],
+            capture_output=True,
+            text=True,
+            cwd=checkout,
+            check=True,
+        ).stdout.strip()
+
+        argv = shlex.split(runner, posix=True)
+        assert argv[:2] == ["sh", "-c"]
+        assert len(argv) == 3
+        assert subprocess.run(argv, capture_output=True, check=False).returncode == 0
+
+
+class TestUnkilledBuckets:
+    def test_timeouts_are_counted_and_named(self) -> None:
+        """mutmut's exit code 4 is a timeout, not an untested mutant. A
+        timed-out mutant hung the tests rather than failing them, so it is a
+        gap in the suite — leaving the bucket uncounted reported
+        `survived: 0, suspicious: 0` and exit 0 for a run full of them."""
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert "for bucket in survived timeout suspicious; do" in body
+        assert "timed out:  $timeout_total" in body
+        assert "4 timed out" in body
+
+    def test_a_timeout_makes_the_run_report_non_zero(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+        tail = body.split("# Mirrors mutmut's own meanings", 1)[1]
+
+        assert 'if [ "$timeout_total" -gt 0 ]; then\n  exit 4' in tail
