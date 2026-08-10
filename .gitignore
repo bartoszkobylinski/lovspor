@@ -48,3 +48,9 @@ notes/
 
 # LLHB runner: per-run CLI sandbox HOME (never versioned; records/raw ARE versioned)
 benchmarks/llhb/results/runs/.sandbox/
+# LLHB runs retrieve statutory text, and legal text does not live in this repo
+# (CLAUDE.md). These directories exist on disk after any pilot run, so without
+# the rule here every branch cut from main re-exposes them to `git add -A` —
+# which is exactly how they reached a review branch once.
+benchmarks/llhb/results/runs/*/tools/
+benchmarks/llhb/results/runs/*/raw/
