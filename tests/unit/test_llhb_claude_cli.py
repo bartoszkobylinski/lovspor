@@ -699,6 +699,26 @@ class TestPartialTrace:
         assert parsed.ok is False
         assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
 
+    def test_the_error_counts_every_block_it_could_not_read(self) -> None:
+        """The count is the promise that nothing disappeared quietly, so it
+        has to be the real number: two damaged blocks, not one, not some
+        fixed one."""
+        damaged = {"type": "tool_use", "id": "tu-1"}
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            {"type": "assistant", "message": {"content": [damaged, {"type": "tool_use"}]}},
+            {"type": "assistant"},
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.tool_calls == []
+        assert parsed.error is not None
+        # The separator is part of the assertion: "-2 tool block(s)" would
+        # otherwise satisfy a bare substring check.
+        assert "; 2 tool block(s) unreadable" in parsed.error
+
     def test_unreadable_results_still_leave_the_calls_visible(self) -> None:
         transcript = stream(
             init_event(["mcp__lovverk__get_section"]),
