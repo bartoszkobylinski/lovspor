@@ -31,6 +31,7 @@
 #   --tests-for PATH   print the test module PATH would be mutated against
 #   --runner-for PATH  print the exact runner command PATH would be mutated with
 #   --check-guard      run the PATH stub and confirm it refuses to execute
+#   --resolve F ID     resolve one mutant of file F from the current cache
 #   base_ref           diff base (default: origin/main)
 set -euo pipefail
 
@@ -38,6 +39,8 @@ list_only=0
 tests_for_path=""
 runner_for_path=""
 check_guard=0
+resolve_probe=""
+resolve_probe_id=""
 base_ref="origin/main"
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -45,6 +48,7 @@ while [ "$#" -gt 0 ]; do
     --tests-for) shift; tests_for_path="${1:-}" ;;
     --runner-for) shift; runner_for_path="${1:-}" ;;
     --check-guard) check_guard=1 ;;
+    --resolve) shift; resolve_probe="${1:-}"; shift; resolve_probe_id="${1:-}" ;;
     *) base_ref="$1" ;;
   esac
   shift
@@ -160,6 +164,17 @@ fi
 if [ -n "${runner_for_path:-}" ]; then
   runner_for "$runner_for_path"
   echo
+  exit 0
+fi
+if [ -n "${resolve_probe:-}" ]; then
+  # Exercises the resolution machinery on one mutant from the current cache,
+  # so the worktree/apply/PYTHONPATH/revert path can be checked without
+  # waiting for a suspicious verdict that only shows up under load.
+  unkilled_file="$(mktemp)"
+  resolved_killed=0
+  resolved_survived=0
+  resolve_suspicious "$resolve_probe" "$resolve_probe_id"
+  cat "$unkilled_file"
   exit 0
 fi
 if [ "$check_guard" -eq 1 ]; then

@@ -115,3 +115,11 @@ class TestResolutionSafety:
         body = SCRIPT.read_text(encoding="utf-8")
 
         assert "PYTHONPATH=$resolve_tree/src" in body
+
+    def test_the_resolution_path_can_be_exercised_without_a_full_run(self) -> None:
+        """A suspicious verdict only appears under load, so the machinery
+        would otherwise be reported as working without ever having run."""
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert "--resolve F ID" in body
+        assert 'resolve_suspicious "$resolve_probe" "$resolve_probe_id"' in body
