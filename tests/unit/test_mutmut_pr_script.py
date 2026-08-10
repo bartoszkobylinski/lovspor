@@ -78,3 +78,40 @@ class TestRunner:
 
         assert "tests/unit/test_llhb_orchestrator.py" in runner
         assert "-x -q" in runner
+
+
+class TestResolutionSafety:
+    """Resolving a suspicious mutant means applying it to a source file.
+
+    Doing that in the working tree put a reviewer's uncommitted work one
+    interrupted script away from a mutated or reverted file, so the whole
+    step moved into a throwaway worktree at HEAD. What follows checks the
+    script says so and never names the repository's own source path.
+    """
+
+    def test_resolution_never_writes_to_the_working_tree(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+        resolve = body.split("resolve_suspicious() {", 1)[1].split("\n}", 1)[0]
+
+        assert "$resolve_tree" in resolve
+        assert 'git -C "$repo_root" checkout' not in resolve
+        assert "$repo_root/src" not in resolve
+
+    def test_the_throwaway_tree_is_a_worktree_at_head(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert 'worktree add --detach -q "$resolve_tree" HEAD' in body
+
+    def test_cleanup_runs_on_interruption_too(self) -> None:
+        """An EXIT-only trap leaves the worktree and the stub behind when
+        the run is killed, which is how the previous version leaked."""
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        statements = [line for line in body.splitlines() if line.startswith("trap ")]
+
+        assert statements == ["trap cleanup EXIT INT TERM"]
+
+    def test_imports_resolve_to_the_copy_not_the_original(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert "PYTHONPATH=$resolve_tree/src" in body

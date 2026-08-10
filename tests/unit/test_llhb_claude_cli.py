@@ -651,3 +651,35 @@ class TestBuildResultRecord:
         assert record["truncated"] is False
         assert record["errors"][0]["stage"] == "request"
         assert "exit code 1" in record["errors"][0]["message"]
+
+
+class TestPartialTrace:
+    def test_a_malformed_event_after_a_good_call_keeps_the_good_call(self) -> None:
+        """The call before the damage was still made; dropping it reports
+        less tool use than the transcript contains."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use("tu-1", "mcp__lovverk__get_section", {"slug": "testloven"}),
+            tool_result("tu-1", "§ 1. Formål"),
+            {"type": "assistant"},
+            result_event(num_turns=2),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
+
+    def test_unreadable_results_still_leave_the_calls_visible(self) -> None:
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use("tu-1", "mcp__lovverk__get_section", {"slug": "testloven"}),
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": "x"}]}},
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
+        assert parsed.tool_calls[0].result is None

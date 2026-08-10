@@ -80,9 +80,18 @@ tests_for() {
 # rather than removing a PATH entry keeps git and sh reachable.
 guard_dir="$(mktemp -d)"
 unkilled_file="$(mktemp)"
+resolve_tree="$guard_dir/resolve-at-head"
 # One trap for both: a second `trap ... EXIT` replaces the first rather than
 # adding to it, which used to leave the stub directory behind on every run.
-trap 'rm -rf "$guard_dir"; rm -f "$unkilled_file"' EXIT
+# INT and TERM are trapped too, so an interrupted run cleans up as well.
+cleanup() {
+  [ -d "$resolve_tree" ] && git -C "$repo_root" worktree remove --force "$resolve_tree" \
+    >/dev/null 2>&1
+  git -C "$repo_root" worktree prune >/dev/null 2>&1 || true
+  rm -rf "$guard_dir"
+  rm -f "$unkilled_file"
+}
+trap cleanup EXIT INT TERM
 printf '#!/bin/sh\necho "mutation guard: the real provider CLI is blocked" >&2\nexit 127\n' \
   >"$guard_dir/claude"
 chmod +x "$guard_dir/claude"
@@ -106,17 +115,40 @@ runner_for() {
 # whether they failed, so the verdict moves with machine load and leaves the
 # score unsettled. Re-running each one and reading its exit code turns a
 # timing observation back into an outcome.
+#
+# The re-run happens in a throwaway worktree at HEAD, never in the tree you
+# are working in. Resolving means applying a mutant to a source file, and
+# doing that in place put the reviewer's work one interrupted script away
+# from a mutated or reverted file. Here nothing outside the worktree is
+# written, so an interrupt, a concurrent edit or a dirty checkout cost
+# nothing. PYTHONPATH points imports at the copy; it precedes the editable
+# install on sys.path, which is what makes the copy the code under test.
 resolve_suspicious() {
   local file="$1" ids="$2" id verdict
+  if [ ! -d "$resolve_tree" ] && ! setup_resolve_tree; then
+    printf '  (cannot resolve: no throwaway worktree — left as suspicious)\n' >>"$unkilled_file"
+    return
+  fi
+  cp "$repo_root/.mutmut-cache" "$resolve_tree/.mutmut-cache"
   for id in $ids; do
-    "$python_bin" -m mutmut apply "$id" >/dev/null 2>&1 || {
+    if ! (cd "$resolve_tree" && "$python_bin" -m mutmut apply "$id") >/dev/null 2>&1; then
       printf '  mutant %s: could not be applied, still unresolved\n' "$id" >>"$unkilled_file"
       continue
-    }
-    if sh -c "$(test_command "$file")" >/dev/null 2>&1; then verdict=SURVIVED; else verdict=killed; fi
-    git -C "$repo_root" checkout -- "$file"
+    fi
+    if (cd "$resolve_tree" && sh -c "PYTHONPATH=$resolve_tree/src $(test_command "$file")") \
+      >/dev/null 2>&1; then verdict=SURVIVED; else verdict=killed; fi
+    (cd "$resolve_tree" && git checkout -- "$file")
     printf '  mutant %s: re-run says %s\n' "$id" "$verdict" >>"$unkilled_file"
+    if [ "$verdict" = SURVIVED ]; then
+      resolved_survived=$((resolved_survived + 1))
+    else
+      resolved_killed=$((resolved_killed + 1))
+    fi
   done
+}
+
+setup_resolve_tree() {
+  git -C "$repo_root" worktree add --detach -q "$resolve_tree" HEAD >/dev/null 2>&1
 }
 
 # Probes: describe what a real run would do for one path, without running it.
@@ -172,16 +204,12 @@ fi
 
 cd "$repo_root"
 
-# Resolving a suspicious mutant applies it to the working tree and reverts
-# with `git checkout --`. That is only safe on files with nothing to lose.
-can_resolve=1
-if [ -n "$(git -C "$repo_root" status --porcelain -- $(printf '%s ' $changed))" ]; then
-  can_resolve=0
-  echo "note: changed files have uncommitted edits — suspicious mutants will be"
-  echo "      listed but not resolved, since resolving rewrites the file on disk"
-fi
-
-status=0
+# Resolution measures HEAD in a throwaway worktree, so it is independent of
+# whatever is currently uncommitted here — and cannot damage it.
+resolved_killed=0
+resolved_survived=0
+survived_total=0
+suspicious_total=0
 
 while IFS= read -r file; do
   tests="$(tests_for "$file")"
@@ -196,7 +224,7 @@ while IFS= read -r file; do
   rm -f "$repo_root/.mutmut-cache"
   "$python_bin" -m mutmut run \
     --paths-to-mutate="$file" \
-    --runner="$(runner_for "$file")" || status=$?
+    --runner="$(runner_for "$file")" || true
   # Dumped now, while this file's cache is the live one: mutant ids are
   # per-run indices, so `mutmut show` cannot resolve an earlier file's id
   # once the next file has replaced the cache. Suspicious mutants are
@@ -205,13 +233,19 @@ while IFS= read -r file; do
   for bucket in survived suspicious; do
     ids="$("$python_bin" -m mutmut result-ids "$bucket" 2>/dev/null || true)"
     [ -z "$ids" ] && continue
+    found=$(printf '%s\n' $ids | wc -w | tr -d ' ')
+    if [ "$bucket" = survived ]; then
+      survived_total=$((survived_total + found))
+    else
+      suspicious_total=$((suspicious_total + found))
+    fi
     printf '\n--- %s in %s\n' "$bucket" "$file" >>"$unkilled_file"
     for id in $ids; do
       printf '  mutant %s\n' "$id" >>"$unkilled_file"
       "$python_bin" -m mutmut show "$id" 2>/dev/null |
         grep -E '^[-+]' | grep -vE '^(---|\+\+\+)' | head -6 | sed 's/^/    /' >>"$unkilled_file"
     done
-    if [ "$bucket" = suspicious ] && [ "$can_resolve" -eq 1 ]; then
+    if [ "$bucket" = suspicious ]; then
       printf '  resolving by re-run (suspicious is a timing verdict, not an outcome):\n' \
         >>"$unkilled_file"
       resolve_suspicious "$file" "$ids"
@@ -223,8 +257,24 @@ echo
 echo "=== mutants that were not killed, with the change each one made"
 echo "(suspicious ones were not killed either — do not count them as passes)"
 cat "$unkilled_file"
+unresolved=$((suspicious_total - resolved_killed - resolved_survived))
 echo
-echo "Read the per-file tallies above for the score. Each file was mutated"
-echo "against its own tests, so a mutant another module's test would kill"
-echo "reads as survived: the score errs pessimistic, never optimistic."
-exit "$status"
+echo "=== corrected totals, after re-running every suspicious mutant"
+echo "survived (from the tallies above):        $survived_total"
+echo "suspicious, re-run says killed:           $resolved_killed"
+echo "suspicious, re-run says SURVIVED:         $resolved_survived"
+echo "suspicious, still unresolved:             $unresolved"
+echo
+echo "The per-file tallies above are mutmut's raw verdicts; the line above is"
+echo "what they mean after resolution. Each file was mutated against its own"
+echo "tests, so a mutant another module's test would kill reads as survived:"
+echo "the score errs pessimistic, never optimistic."
+
+# mutmut's own exit code still carries the pre-resolution suspicious bit, so
+# it is recomputed here rather than passed through.
+if [ "$unresolved" -gt 0 ]; then
+  exit 8
+elif [ $((survived_total + resolved_survived)) -gt 0 ]; then
+  exit 2
+fi
+exit 0

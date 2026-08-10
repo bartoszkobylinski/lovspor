@@ -20,6 +20,7 @@ trace would silently understate tool use, which is the one thing
 Stage 6 measures.
 """
 
+import contextlib
 import json
 from collections.abc import Iterator
 from typing import Any
@@ -152,10 +153,7 @@ def _partial(events: list[dict[str, Any]], message: str) -> ParsedCliResult:
     failure would understate tool use, which is the one thing this
     parser must never do.
     """
-    try:
-        calls = _tool_calls(events)
-    except ValueError:
-        calls = []
+    calls = _partial_tool_calls(events)
     try:
         harness: HarnessTrace | None = _harness(events, {})
     except ValueError:
@@ -227,9 +225,37 @@ def _from_result_event(payload: dict[str, Any]) -> ParsedCliResult:
 
 
 def _tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
+    """Every call, or a failure if the trace cannot be read whole."""
     payloads = _tool_results(events)
-    claimed: set[str] = set()
+    calls = list(_iter_calls(events, payloads))
+    if payloads:
+        # A result nobody asked for is evidence of a call this parser did
+        # not see. Returning the shorter list would understate tool use.
+        raise ValueError(f"tool results with no matching call: {sorted(payloads)}")
+    return calls
+
+
+def _partial_tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
+    """Every call the transcript proves, stopping where it stops parsing.
+
+    For a case that already failed, the calls read before the damage
+    were still made. Returning none of them because a later event is
+    malformed reports less tool use than the transcript contains.
+    """
+    try:
+        payloads = _tool_results(events)
+    except ValueError:
+        payloads = {}
     calls: list[ToolCall] = []
+    with contextlib.suppress(ValueError):
+        calls.extend(_iter_calls(events, payloads))
+    return calls
+
+
+def _iter_calls(
+    events: list[dict[str, Any]], payloads: dict[str, tuple[Any, bool]]
+) -> Iterator[ToolCall]:
+    claimed: set[str] = set()
     for index, block in enumerate(_blocks(events, "assistant", "tool_use")):
         name, arguments, use_id = block.get("name"), block.get("input"), block.get("id")
         if not isinstance(name, str) or not isinstance(arguments, dict):
@@ -240,14 +266,7 @@ def _tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
             raise ValueError(f"two tool_use blocks share the id {use_id!r}")
         claimed.add(use_id)
         result, failed = payloads.pop(use_id, (None, False))
-        calls.append(
-            ToolCall(index=index, name=name, arguments=arguments, result=result, is_error=failed)
-        )
-    if payloads:
-        # A result nobody asked for is evidence of a call this parser did
-        # not see. Returning the shorter list would understate tool use.
-        raise ValueError(f"tool results with no matching call: {sorted(payloads)}")
-    return calls
+        yield ToolCall(index=index, name=name, arguments=arguments, result=result, is_error=failed)
 
 
 def _tool_results(events: list[dict[str, Any]]) -> dict[str, tuple[Any, bool]]:

@@ -501,3 +501,25 @@ class TestCheckPair:
         assert any("case_order_seed differs" in problem for problem in problems)
         assert any("never ran case(s)" in problem for problem in problems)
         assert any("issued 1 tool call(s)" in problem for problem in problems)
+
+
+class TestUnidentifiedRecords:
+    def test_flags_records_with_no_case_id(self) -> None:
+        """str(None) is "None", so two anonymous records pair with each
+        other and the arms look matched when nothing was compared."""
+        run = RunArtifacts(
+            metadata=metadata(cases_total=1),
+            records=[{**record("llhb-v1-C1-001"), "case_id": None}],
+        )
+
+        problems = coverage_violations(run, "control")
+
+        assert problems == ["control run holds 1 record(s) with no case id to pair on"]
+
+    def test_an_empty_case_id_counts_as_missing(self) -> None:
+        run = RunArtifacts(
+            metadata=metadata(cases_total=1),
+            records=[{**record("llhb-v1-C1-001"), "case_id": "  "}],
+        )
+
+        assert coverage_violations(run, "control") != []
