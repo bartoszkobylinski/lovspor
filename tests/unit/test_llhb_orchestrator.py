@@ -1,5 +1,6 @@
 """LLHB run orchestrator: hermetic env and cwd, ordering, CLI execution."""
 
+import hashlib
 import json
 import os
 import re
@@ -63,6 +64,24 @@ def emit(*events: dict[str, Any]) -> str:
     """A shell command emitting these events as a stream-json transcript."""
     lines = " ".join(f"'{json.dumps(event)}'" for event in events)
     return f"printf '%s\\n' {lines}"
+
+
+def tool_use_event(use_id: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "assistant",
+        "message": {
+            "content": [{"type": "tool_use", "id": use_id, "name": name, "input": arguments}]
+        },
+    }
+
+
+def tool_result_event(use_id: str, content: Any) -> dict[str, Any]:
+    return {
+        "type": "user",
+        "message": {
+            "content": [{"type": "tool_result", "tool_use_id": use_id, "content": content}]
+        },
+    }
 
 
 SUCCESS_STREAM = emit(init_event(), result_event())
@@ -359,6 +378,51 @@ class TestRunArm:
         assert call["result"] is None
         assert "result_sha256" not in call
         assert not (tmp_path / "runs" / RUN_ID / "tools").exists()
+
+    def test_an_unanswered_call_does_not_drop_the_calls_after_it(self, tmp_path: Path) -> None:
+        """The unanswered branch skips one call, not the rest of the trace.
+        Turning that skip into an early exit would silently shorten the
+        tool history of every case where one call went unanswered."""
+        stream = emit(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use_event("tu-1", "mcp__lovverk__get_section", {"slug": "a"}),
+            tool_use_event("tu-2", "mcp__lovverk__get_section", {"slug": "b"}),
+            tool_result_event("tu-2", "svar-b"),
+            result_event(),
+        )
+        bin_dir = fake_claude(tmp_path, stream)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        metadata = make_metadata(condition="lovspor", tool_config={"transport": "native-mcp"})
+
+        run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
+
+        calls = store.read_records(RUN_ID)[0]["tool_calls"]
+        assert [call["index"] for call in calls] == [0, 1]
+        assert "result_sha256" not in calls[0]
+        assert calls[1]["result_ref"] == "tools/llhb-v1-C1-001-001.json"
+
+    def test_payload_hash_pins_the_canonical_form(self, tmp_path: Path) -> None:
+        """Key order, separators and non-ASCII escaping are part of the
+        hash contract: a payload rehashed under different settings would
+        stop matching the bytes the pinned corpus regenerates."""
+        payload = {"b": "æøå", "a": 1}
+        stream = emit(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use_event("tu-1", "mcp__lovverk__get_section", {"slug": "a"}),
+            tool_result_event("tu-1", payload),
+            result_event(),
+        )
+        bin_dir = fake_claude(tmp_path, stream)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        metadata = make_metadata(condition="lovspor", tool_config={"transport": "native-mcp"})
+
+        run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
+
+        canonical = '{"a":1,"b":"æøå"}'
+        call = store.read_records(RUN_ID)[0]["tool_calls"][0]
+        assert call["result_sha256"] == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        spilled = tmp_path / "runs" / RUN_ID / call["result_ref"]
+        assert spilled.read_text(encoding="utf-8") == canonical + "\n"
 
     def test_no_tool_payload_is_kept_inside_the_record(self, tmp_path: Path) -> None:
         """A lovverk payload is statutory text, which does not live in this

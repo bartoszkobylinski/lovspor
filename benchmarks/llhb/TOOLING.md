@@ -267,7 +267,12 @@ Driven by the Stage 3.5 human audit (see
   event, a `tool_use` block without a readable name/input/id, or a
   `tool_result` without a `tool_use_id` becomes an error record rather
   than a case that silently reports less tool use than it had. Results
-  are matched to calls by `tool_use_id`, never by position.
+  are matched to calls by `tool_use_id`, never by position, and a
+  result matching no call is itself a failure — it is evidence of a
+  call the parser did not see. A transcript carrying two `system init`
+  events fails too: which tool environment applied is not decidable,
+  and taking the first would let a case that gained MCP part-way
+  through be recorded as toolless.
   `build_result_record` turns either outcome into a schema-valid record
   (`errors[].stage: "request"`, `completed: false`, `final_answer: null`
   on failure) and carries the `harness` block: `exposed_tools`,
@@ -376,10 +381,14 @@ Driven by the Stage 3.5 human audit (see
   list is explicit: `run_id`, `condition`, `tool_config`, timestamps,
   notes, per-run counts, `evaluator_version`; everything else is
   compared, so a field added later is checked unless deliberately
-  exempted), a case only one arm ran, a control case that issued or was
-  offered a tool, a treatment case whose MCP server never connected or
-  that was offered no tools, and any tool call the harness denied. A
-  completed case with no `harness` block is itself a finding. Exits
+  exempted), a case only one arm ran, a case that completed in one arm
+  only or errored in both (either way it compares nothing), a control
+  case that issued or was offered a tool, a treatment case whose
+  offered surface is not exactly `tool_config.tools` or whose MCP
+  server never connected, and any tool call the harness denied. A
+  completed case with no `harness` block is itself a finding. The
+  surface comparison is by name, not by count: a run that offered a
+  different tool of the same arity is a different experiment. Exits
   non-zero, so it can gate a report.
 * **First treatment pilot (2026-08-09)**: `llhb-v1-run-20260809-pilot5`
   (control) and `llhb-v1-run-20260809-treat2` (lovspor), same 10

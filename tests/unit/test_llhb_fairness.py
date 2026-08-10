@@ -8,6 +8,7 @@ from lovspor.llhb.fairness import (
     compare_run_metadata,
     control_violations,
     paired_case_violations,
+    paired_completion_violations,
     treatment_violations,
 )
 
@@ -197,7 +198,9 @@ class TestControlViolations:
 
 class TestTreatmentViolations:
     def test_a_connected_treatment_run_passes(self) -> None:
-        assert treatment_violations([treatment_record("llhb-v1-C1-001")]) == []
+        assert (
+            treatment_violations([treatment_record("llhb-v1-C1-001")], TOOL_CONFIG["tools"]) == []
+        )
 
     def test_flags_a_case_whose_server_never_connected(self) -> None:
         broken = {
@@ -206,16 +209,23 @@ class TestTreatmentViolations:
             "permission_denials": [],
         }
 
-        problems = treatment_violations([treatment_record("llhb-v1-C1-001", harness=broken)])
+        problems = treatment_violations(
+            [treatment_record("llhb-v1-C1-001", harness=broken)], TOOL_CONFIG["tools"]
+        )
 
         assert "no MCP server was connected" in problems[0]
 
     def test_flags_a_case_offered_no_tools(self) -> None:
         empty = {"exposed_tools": [], "mcp_servers": [], "permission_denials": []}
 
-        problems = treatment_violations([treatment_record("llhb-v1-C1-001", harness=empty)])
+        problems = treatment_violations(
+            [treatment_record("llhb-v1-C1-001", harness=empty)], TOOL_CONFIG["tools"]
+        )
 
-        assert problems == ["llhb-v1-C1-001: treatment case was offered no tools"]
+        assert problems == [
+            "llhb-v1-C1-001: offered surface does not match the declared surface "
+            "(missing ['mcp__lovverk__get_section'], unexpected [])"
+        ]
 
     def test_flags_denied_tool_calls(self) -> None:
         denied = {
@@ -224,9 +234,87 @@ class TestTreatmentViolations:
             "permission_denials": [{"tool_name": "mcp__lovverk__get_law"}],
         }
 
-        problems = treatment_violations([treatment_record("llhb-v1-C1-001", harness=denied)])
+        problems = treatment_violations(
+            [treatment_record("llhb-v1-C1-001", harness=denied)], TOOL_CONFIG["tools"]
+        )
 
         assert "denied 1 tool call(s)" in problems[0]
+
+
+class TestDeclaredSurface:
+    def test_flags_a_surface_that_is_not_the_declared_one(self) -> None:
+        """tool_config says what the run offered; the transcript says what
+        it actually offered. A count check would pass a different tool."""
+        swapped = {
+            "exposed_tools": ["mcp__lovverk__get_law"],
+            "mcp_servers": [{"name": "lovverk", "status": "connected"}],
+            "permission_denials": [],
+        }
+
+        problems = treatment_violations(
+            [treatment_record("llhb-v1-C1-001", harness=swapped)],
+            declared_tools=TOOL_CONFIG["tools"],
+        )
+
+        assert any("does not match the declared surface" in problem for problem in problems)
+
+    def test_accepts_the_declared_surface_in_any_order(self) -> None:
+        declared = ["mcp__lovverk__get_section", "mcp__lovverk__get_law"]
+        harness = {
+            "exposed_tools": list(reversed(declared)),
+            "mcp_servers": [{"name": "lovverk", "status": "connected"}],
+            "permission_denials": [],
+        }
+
+        record = treatment_record("llhb-v1-C1-001", harness=harness)
+
+        assert treatment_violations([record], declared_tools=declared) == []
+
+    def test_control_surface_must_be_exactly_empty(self) -> None:
+        offered = {"exposed_tools": ["Bash"], "mcp_servers": [], "permission_denials": []}
+
+        problems = control_violations([record("llhb-v1-C1-001", harness=offered)])
+
+        assert len(problems) == 1
+
+
+class TestPairedCompletion:
+    def test_matching_completions_pass(self) -> None:
+        control = [record("llhb-v1-C1-001")]
+        treatment = [treatment_record("llhb-v1-C1-001")]
+
+        assert paired_completion_violations(control, treatment) == []
+
+    def test_flags_a_case_that_completed_in_one_arm_only(self) -> None:
+        """An errored treatment case has no answer to compare, and its
+        missing harness evidence is not itself a violation - so without
+        this check the pair passes while one arm never ran the case."""
+        control = [record("llhb-v1-C1-001")]
+        treatment = [
+            treatment_record("llhb-v1-C1-001", completed=False, final_answer=None, harness=None)
+        ]
+
+        problems = paired_completion_violations(control, treatment)
+
+        assert problems == ["llhb-v1-C1-001: completed in the control arm only"]
+
+    def test_flags_a_case_that_completed_in_the_treatment_arm_only(self) -> None:
+        control = [record("llhb-v1-C1-001", completed=False, final_answer=None, harness=None)]
+        treatment = [treatment_record("llhb-v1-C1-001")]
+
+        problems = paired_completion_violations(control, treatment)
+
+        assert problems == ["llhb-v1-C1-001: completed in the treatment arm only"]
+
+    def test_flags_a_case_that_errored_in_both_arms(self) -> None:
+        control = [record("llhb-v1-C1-001", completed=False, final_answer=None, harness=None)]
+        treatment = [
+            treatment_record("llhb-v1-C1-001", completed=False, final_answer=None, harness=None)
+        ]
+
+        problems = paired_completion_violations(control, treatment)
+
+        assert problems == ["llhb-v1-C1-001: errored in both arms, so it compares nothing"]
 
 
 class TestCheckPair:

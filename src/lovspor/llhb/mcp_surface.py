@@ -14,6 +14,7 @@ treatment arm at the hosted production endpoint, whose corpus moves.
 import asyncio
 import hashlib
 import json
+import sysconfig
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,30 @@ def tool_surface(corpus_path: Path) -> ToolSurface:
         names=tuple(str(document["name"]) for document in documents),
         schema_sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )
+
+
+def verify_server_command(server_command: Path) -> None:
+    """Fail closed unless that command serves the code this process read.
+
+    The recorded surface is built in-process from ``build_server``, so
+    the executable the CLI launches has to be the entry point of this
+    same environment. A ``lovspor`` from somewhere else may expose a
+    different tool set, and the metadata would then describe a server
+    the run never spoke to.
+    """
+    command = server_command.expanduser().absolute()
+    if not command.is_file():
+        raise ToolSurfaceError(f"no lovspor executable at {server_command}")
+    # The scripts directory, not sys.executable: a venv's `python` is a
+    # symlink, so resolving the interpreter walks straight out of the
+    # environment whose entry points we are trying to identify.
+    environment_bin = Path(sysconfig.get_path("scripts")).resolve()
+    if command.parent.resolve() != environment_bin:
+        raise ToolSurfaceError(
+            f"server command {command} lives outside {environment_bin}, the environment "
+            "whose lovspor produced the recorded tool surface; run the driver with that "
+            "environment's interpreter, or point --server-command into it"
+        )
 
 
 def allowed_tools(surface: ToolSurface) -> list[str]:

@@ -195,10 +195,14 @@ def _tool_calls(events: list[dict[str, Any]]) -> list[ToolCall]:
             raise ValueError(f"tool_use block {index} has no readable name or input")
         if not isinstance(use_id, str):
             raise ValueError(f"tool_use block {index} ({name}) has no id to match its result")
-        result, failed = payloads.get(use_id, (None, False))
+        result, failed = payloads.pop(use_id, (None, False))
         calls.append(
             ToolCall(index=index, name=name, arguments=arguments, result=result, is_error=failed)
         )
+    if payloads:
+        # A result nobody asked for is evidence of a call this parser did
+        # not see. Returning the shorter list would understate tool use.
+        raise ValueError(f"tool results with no matching call: {sorted(payloads)}")
     return calls
 
 
@@ -242,10 +246,24 @@ def _harness(events: list[dict[str, Any]], final: dict[str, Any]) -> HarnessTrac
 
 
 def _init_event(events: list[dict[str, Any]]) -> dict[str, Any]:
-    for event in events:
-        if event.get("type") == "system" and event.get("subtype") == "init":
-            return event
-    raise ValueError("transcript carries no system init event")
+    """The one init event; two of them describe two tool environments.
+
+    Taking the first would let a case that gained MCP part-way through
+    be recorded as toolless, so an ambiguous transcript fails instead.
+    """
+    inits = [
+        event
+        for event in events
+        if event.get("type") == "system" and event.get("subtype") == "init"
+    ]
+    if not inits:
+        raise ValueError("transcript carries no system init event")
+    if len(inits) > 1:
+        raise ValueError(
+            f"transcript carries {len(inits)} system init events; "
+            "which tool environment applied to this case is not decidable"
+        )
+    return inits[0]
 
 
 def _listed(event: dict[str, Any], key: str) -> list[Any]:

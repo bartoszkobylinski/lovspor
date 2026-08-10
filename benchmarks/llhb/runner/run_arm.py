@@ -51,7 +51,12 @@ from dotenv import load_dotenv
 from lovspor.errors import LovsporError
 from lovspor.llhb.claude_cli import RunIdentity, ToolAccess, build_argv
 from lovspor.llhb.corpus_pin import CorpusPin, verify_pin
-from lovspor.llhb.mcp_surface import server_config_json, tool_config, tool_surface
+from lovspor.llhb.mcp_surface import (
+    server_config_json,
+    tool_config,
+    tool_surface,
+    verify_server_command,
+)
 from lovspor.llhb.orchestrator import RunConfig, run_arm
 from lovspor.llhb.results import ResultsStore, new_run_id
 from lovspor.llhb.run_setup import (
@@ -135,8 +140,7 @@ def treatment_config(args: argparse.Namespace, lock: dict[str, Any]) -> dict[str
     """
     corpus_path = _required_corpus_path(args)
     verify_pin(corpus_path, CorpusPin(**lock["corpus_pin"]))
-    if not args.server_command.is_file():
-        raise LovsporError(f"no lovspor executable at {args.server_command}")
+    verify_server_command(args.server_command)
     surface = tool_surface(corpus_path)
     return tool_config(surface, corpus_path, str(lock["corpus_pin"]["lovverk_commit"]))
 

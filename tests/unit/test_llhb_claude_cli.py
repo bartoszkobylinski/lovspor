@@ -336,6 +336,38 @@ class TestParseStreamJson:
         assert parsed.error is not None
         assert "no id" in parsed.error
 
+    def test_flags_a_tool_result_with_no_matching_call(self) -> None:
+        """An orphan result is evidence of a call whose tool_use block we
+        did not read. Reporting zero calls for it would understate tool
+        use, which is the one thing this parser must never do."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_result("ghost", "et svar"),
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "ghost" in parsed.error
+
+    def test_flags_a_second_init_event(self) -> None:
+        """Two init events describe two tool environments; taking the
+        first would let a run that gained MCP mid-transcript be recorded
+        as toolless."""
+        transcript = stream(
+            init_event([]),
+            init_event(["mcp__lovverk__get_section"]),
+            result_event(),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "init event" in parsed.error
+
     def test_flags_a_tool_result_without_an_id(self) -> None:
         transcript = stream(
             init_event(),

@@ -1,6 +1,7 @@
 """Stage 6 treatment tool surface: server config, tool list, schema hash."""
 
 import json
+import sysconfig
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from lovspor.llhb.mcp_surface import (
     server_config_json,
     tool_config,
     tool_surface,
+    verify_server_command,
 )
 from tests.unit.llhb_fixtures import build_corpus
 
@@ -70,6 +72,25 @@ class TestToolSurface:
 
         with pytest.raises(ToolSurfaceError, match="exposes no tools"):
             tool_surface(corpus)
+
+
+class TestVerifyServerCommand:
+    def test_accepts_this_environment_s_entry_point(self) -> None:
+        verify_server_command(Path(sysconfig.get_path("scripts")) / "lovspor")
+
+    def test_rejects_a_command_from_another_environment(self, tmp_path: Path) -> None:
+        """The surface is read in-process; launching a different install
+        would record a server the run never spoke to."""
+        stranger = tmp_path / "bin" / "lovspor"
+        stranger.parent.mkdir()
+        stranger.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        with pytest.raises(ToolSurfaceError, match="lives outside"):
+            verify_server_command(stranger)
+
+    def test_rejects_a_missing_command(self, tmp_path: Path) -> None:
+        with pytest.raises(ToolSurfaceError, match="no lovspor executable"):
+            verify_server_command(tmp_path / "nowhere" / "lovspor")
 
 
 class TestServerConfig:
