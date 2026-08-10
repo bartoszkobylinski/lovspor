@@ -672,6 +672,33 @@ class TestPartialTrace:
         assert parsed.ok is False
         assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
 
+    @pytest.mark.parametrize(
+        "damaged",
+        [
+            {"type": "assistant"},
+            {"type": "assistant", "message": {"content": "not a list"}},
+        ],
+        ids=["no-message", "no-content-list"],
+    )
+    def test_a_malformed_event_before_a_call_does_not_hide_that_call(
+        self, damaged: dict[str, Any]
+    ) -> None:
+        """The lenient scan skips the damage and keeps reading. Stopping
+        there instead would drop every later call — the trace would report
+        less tool use than the transcript proves, silently."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            damaged,
+            tool_use("tu-1", "mcp__lovverk__get_section", {"slug": "testloven"}),
+            tool_result("tu-1", "§ 1. Formål"),
+            result_event(num_turns=2),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
+
     def test_unreadable_results_still_leave_the_calls_visible(self) -> None:
         transcript = stream(
             init_event(["mcp__lovverk__get_section"]),
