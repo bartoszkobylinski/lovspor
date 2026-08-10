@@ -240,7 +240,9 @@ lovverk's text copied verbatim and is excluded, while a model answer is
 the measurement itself and is versioned even though it quotes
 provisions — a benchmark that dropped the answers would have nothing to
 score.
-*Decision needed:* ratify this, or rule that treatment transcripts are
+*Resolved by ruling #27:* ratified with the rationale changed from
+licensing to regenerability. *Superseded question:* whether treatment
+transcripts are
 benchmark evidence rather than corpus material and may be versioned
 here (which also decides roughly 80–120 MB of artifacts for the full
 matrix, extrapolated from the pilot at ~876 KB per 10 treatment cases).
@@ -255,6 +257,29 @@ model never invoked the sixteenth. *Decision needed:* whether the full
 matrix requires the key (METHODOLOGY §5 assumes embedding-based
 retrieval is available and already records it as an external
 dependency), or whether v1 runs on the deterministic 15.
+
+## Addendum — Stage 6 retention ruling (2026-08-10)
+
+27. **Artifacts are kept by regenerability, not by content.** The
+    earlier framing — "legal text does not live in this repo" — is not
+    defensible as stated: lovverk is public NLOD 2.0 material, and read
+    literally the rule would deny the corpus repo's existence. The
+    constraint in `CLAUDE.md` concerns Lovdata's raw XML and its
+    editorial markup, not statutory text as such. The test that governs
+    LLHB artifacts is instead:
+    **regenerable from `corpus_pin` → not stored; not regenerable →
+    must be stored.** A tool payload is regenerable, since the freeze
+    pins lovverk at `6ec7059d` and (tool, arguments, pin) reproduces
+    the bytes; keeping it in the repo is a duplicate with no
+    evidentiary value. Model output is non-deterministic, so an answer
+    nobody kept is an answer nobody — including us — can re-score
+    later, which would defeat the pre-registration this stage exists to
+    support. Statutory quotes inside model answers therefore stay:
+    redacting them would remove the citation-fidelity measurement,
+    which is one of the things LLHB measures. Applied: `tools/` and
+    `raw/` gitignored, `records.jsonl` and `run-metadata.json`
+    versioned, and the 30 previously tracked `raw/` files from pilots
+    1-3 removed from the index so the rule and the repository agree.
 
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring

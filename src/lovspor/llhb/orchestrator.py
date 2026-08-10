@@ -41,6 +41,10 @@ from lovspor.llhb.claude_cli import (
 )
 from lovspor.llhb.results import ResultsStore
 
+# Counts `"type": "tool_use"` in the transcript text without walking events
+# at all. Deliberately dumber than the parser: every undercount so far came
+# from the block-walking logic, so the cross-check must not share it.
+_TOOL_USE_RE = re.compile(r'"type"\s*:\s*"tool_use"')
 _RAW_DIR = "raw"
 _TOOLS_DIR = "tools"
 _CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
@@ -171,6 +175,27 @@ def _checked_case_ids(cases: list[dict[str, Any]]) -> list[str]:
     return ids
 
 
+def _reconcile_tool_calls(record: dict[str, Any], invocation: CliInvocation) -> None:
+    """Fail the run when the parsed trace disagrees with the transcript.
+
+    Undercounting tool calls is the one error this pipeline cannot make
+    and has made three times, each in a different part of the parser. A
+    second, independent count means a fourth occurrence stops the run
+    instead of becoming a number in a published result. It errs toward
+    stopping: a literal `"type": "tool_use"` inside a tool payload would
+    trip it, and a failed run is cheaper than a wrong one.
+    """
+    parsed = len(record["tool_calls"])
+    in_transcript = len(_TOOL_USE_RE.findall(invocation.stdout))
+    if parsed != in_transcript:
+        raise OrchestratorError(
+            f"case {record['case_id']}: the parser found {parsed} tool call(s) but the "
+            f"transcript contains {in_transcript}; the run is stopped rather than "
+            "reported, because a miscounted trace is the one result this benchmark "
+            "must not publish"
+        )
+
+
 def _run_case(config: RunConfig, case: dict[str, Any], run_dir: Path) -> dict[str, Any]:
     argv = build_argv(
         config.identity, str(case["question"]), config.system_prompt, config.tool_access
@@ -181,6 +206,7 @@ def _run_case(config: RunConfig, case: dict[str, Any], run_dir: Path) -> dict[st
     case_id = str(case["case_id"])
     timing = CaseTiming(started_at=started_at, total_ms=invocation.duration_ms)
     record = build_result_record(config.identity, case_id, _parse(invocation), timing)
+    _reconcile_tool_calls(record, invocation)
     record["tool_calls"] = _stored_tool_calls(run_dir, case_id, record["tool_calls"])
     record["raw_response_ref"] = _write_raw(run_dir, case_id, invocation)
     return record

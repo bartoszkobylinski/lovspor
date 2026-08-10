@@ -642,3 +642,53 @@ class TestRunArm:
         assert f"HOME={tmp_path / 'sandbox-home'}" in answer
         assert "KEY=unset" in answer
         assert os.environ["ANTHROPIC_API_KEY"] == "sk-leak"
+
+
+class TestToolCallReconciliation:
+    """Undercounting tool calls is the one error this pipeline cannot make,
+    and it has made it three times, each in a different part of the parser.
+    A second count taken without walking events means a fourth occurrence
+    stops the run instead of becoming a number in a published result."""
+
+    def test_a_parser_that_misses_a_call_stops_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stream = emit(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use_event("tu-1", "mcp__lovverk__get_section", {"slug": "a"}),
+            tool_result_event("tu-1", "svar"),
+            result_event(),
+        )
+        bin_dir = fake_claude(tmp_path, stream)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        metadata = make_metadata(condition="lovspor", tool_config={"transport": "native-mcp"})
+        # A parser that silently drops the call — the shape of all three bugs.
+        real = orchestrator.parse_stream_json
+
+        def blinded(stdout: str, returncode: int) -> Any:
+            return real(stdout, returncode).model_copy(update={"tool_calls": []})
+
+        monkeypatch.setattr(orchestrator, "parse_stream_json", blinded)
+
+        with pytest.raises(OrchestratorError, match="the transcript contains 1"):
+            run_arm(
+                treatment_config(tmp_path, bin_dir),
+                [make_case("llhb-v1-C1-001")],
+                metadata,
+                store,
+            )
+
+    def test_an_honest_trace_passes_reconciliation(self, tmp_path: Path) -> None:
+        stream = emit(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use_event("tu-1", "mcp__lovverk__get_section", {"slug": "a"}),
+            tool_result_event("tu-1", "svar"),
+            result_event(),
+        )
+        bin_dir = fake_claude(tmp_path, stream)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        metadata = make_metadata(condition="lovspor", tool_config={"transport": "native-mcp"})
+
+        run_arm(treatment_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], metadata, store)
+
+        assert len(store.read_records(RUN_ID)[0]["tool_calls"]) == 1

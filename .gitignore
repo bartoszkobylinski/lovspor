@@ -48,13 +48,22 @@ notes/
 
 # LLHB runner: per-run CLI sandbox HOME (never versioned)
 benchmarks/llhb/results/runs/.sandbox/
-# LLHB runs retrieve statutory text, and legal text does not live in this repo
-# (CLAUDE.md). Tool payloads and the transcripts that embed them stay local;
-# records.jsonl keeps each payload's SHA-256, and the corpus is pinned, so
-# (tool, arguments, pin) regenerates the bytes the hash was taken over.
-# These directories exist on disk after any run, so without the rule here
-# every branch cut from main re-exposes them to `git add -A` — which is
-# exactly how they once reached a review branch.
-# The Stage 5 control pilots predate this and stay tracked.
+# What a run leaves behind is versioned by whether it can be regenerated, not
+# by what it contains — lovverk is public NLOD 2.0 material, so "no legal text"
+# read literally would deny the corpus repo's existence. The rule that holds:
+#
+#   * regenerable from the corpus pin -> not stored. A tool payload is exactly
+#     that: the freeze pins lovverk, so (tool, arguments, pin) reproduces the
+#     bytes, and records.jsonl keeps each payload's SHA-256 to check them
+#     against. A copy in git would be a duplicate with no evidentiary value.
+#   * not regenerable -> stored. Model output is non-deterministic, so an
+#     answer nobody kept is an answer nobody can ever re-score. records.jsonl
+#     holds every final answer and the full tool trace by name, arguments and
+#     payload hash; statutory quotes inside those answers stay, because
+#     redacting them would remove the citation fidelity LLHB exists to measure.
+#
+# raw/ is excluded because a treatment transcript embeds the payloads inline,
+# which would put regenerable corpus material back in the repo. What it holds
+# beyond records.jsonl — thinking blocks, event order, stderr — is not scored.
 benchmarks/llhb/results/runs/*/tools/
 benchmarks/llhb/results/runs/*/raw/

@@ -296,117 +296,31 @@ Driven by the Stage 3.5 human audit (see
   `raw_response_ref`; every tool payload is written to
   `tools/<case_id>-<index>.json` and referenced via `result_ref` +
   `result_sha256`, never inlined into the record.
-* **Retention split**: `tools/` and `raw/` are gitignored, because a
-  lovverk tool answers with statutory text and legal text does not live
-  in this repo (CLAUDE.md). The line is between *corpus material* and
-  *model output*: a tool payload is lovverk's text copied verbatim and
-  stays out, while a model's answer is the thing being measured and is
-  versioned even though it quotes provisions. A benchmark that discarded
-  the answers would have nothing left to score. What is versioned — `run-metadata.json` and
-  `records.jsonl` — carries each payload's SHA-256, the tool name and
-  the exact arguments; the corpus is pinned, so (tool, arguments, pin)
-  regenerates the bytes the hash was taken over. The Stage 5 control
-  pilots predate the rule and stay tracked; they contain no tool
-  payloads.
-* **Run setup** (`lovspor.llhb.run_setup` + `runner/run_arm.py`):
-  `pilot_cases` selects drops only — every frozen case_id is excluded,
-  and a limit the drop pool cannot satisfy fails closed.
-  `compose_run_metadata` builds the run_metadata document from a typed
-  spec and refuses a control run carrying a `tool_config` or a
-  treatment run without one; `dataset_checksum` is always computed over
-  the canonical bytes of the case set actually being run (for the
-  pilot: discarded candidates, stated in `notes`, never the frozen
-  250). `runner/run_arm.py` runs either condition (`--condition
-  control|lovspor`) and is dry-run by default (prints metadata +
-  first-case argv, zero disk writes); `--execute` spawns the CLI and
-  writes `results/runs/<run-id>/`. One driver on purpose: two scripts
-  would be two places for the arms to drift apart. The system prompt
-  lives at `runner/system-prompt-v1.txt` (bokmål, honesty + abstention,
-  no Lovspor mention) and must stay byte-identical across both
-  conditions and all providers of one evaluation; the CLI version is
-  recorded in metadata `notes`. The per-run sandbox HOME under
-  `results/runs/.sandbox/` is gitignored.
-* **Recorded harness caveat**: `--system-prompt` does not replace the
-  CLI's own preamble. Asked what it had received, a run under the
-  benchmark prompt reported the Agent SDK preamble ahead of the
-  Norwegian instructions. `system_prompt_sha256` therefore covers the
-  benchmark's own prompt bytes, not the complete system context; the
-  preamble is identical in both arms, so the comparison holds.
-* **Pilot findings (2026-08-09)**: macOS Keychain auth does NOT
-  survive the HOME sandbox — pilot1 (`llhb-v1-run-20260809-pilot1`)
-  failed 10/10 with "Not logged in" (records retained as evidence).
-  Resolution: a long-lived subscription token from `claude
-  setup-token`, stored as `LLHB_CLAUDE_CODE_OAUTH_TOKEN` in the
-  gitignored `.env` and passed to the child as
-  `CLAUDE_CODE_OAUTH_TOKEN`; `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`
-  stay banned (per-token billing). Pilot2
-  (`llhb-v1-run-20260809-pilot2`, 10 drops, control, claude-opus-5):
-  10/10 completed, 0 errors, 0 tool calls, 1 turn per case, avg
-  34.5 s/case (~2.4 h projected for a 250-case control arm), ~78k
-  in / ~20k out tokens per 10 cases, subscription-billed.
-* **CLAUDE.md contamination (2026-08-09)**: the Stage 5 pilots spawned
-  the CLI with the repository as its working directory. Asked directly
-  whether it had received project instructions, a run in that
-  configuration answered JA and named both `~/.claude/CLAUDE.md` and
-  the project file; the same question from a sandbox working directory
-  answered that it had received only the system prompt. The sandboxed
-  HOME did not prevent it — on macOS the CLI resolves the user
-  instruction file from the real home regardless of `$HOME`. Pilots 1–3
-  therefore ran with development instructions in context. The
-  contamination was identical across pilot2 and pilot3, so ruling #26's
-  run-to-run variance evidence is unaffected; no answer content from
-  those runs is comparable to a fixed run. Fixed by running the child
-  in the sandbox directory.
-
-## Stage 6 treatment arm (2026-08-09, ruling #25)
-
-* **Backend**: a local stdio `lovspor mcp` server bound to the pinned
-  lovverk checkout — never the hosted production endpoint, whose corpus
-  moves (METHODOLOGY §5). `runner/run_arm.py --condition lovspor`
-  requires `--corpus-path` and calls `verify_pin` against the frozen
-  lock's `corpus_pin` before composing anything: wrong HEAD, dirty tree
-  or a mismatched manifest timestamp stops the run.
-* **Tool surface** (`lovspor.llhb.mcp_surface`): the tool list and
-  `tool_schema_sha256` come from `build_server(...).list_tools()` —
-  the client-facing view — so the recorded surface cannot drift from
-  the served one. The hash covers name, description and input/output
-  schema of all 16 tools and is independent of whether
-  `OPENAI_API_KEY` is set (tested), because a hash that moved with the
-  ambient environment would describe the machine, not the run. Both
-  paths in the `--mcp-config` document must be absolute: the CLI runs
-  from a sandbox where a relative path resolves elsewhere.
-  `verify_server_command` pins `--server-command` to exactly one legal
-  path — this environment's `lovspor` entry point — since the surface is
-  read in-process and any other executable, including another one in the
-  same directory, may serve a different tool set. The anchor is
-  `sysconfig.get_path("scripts")`, not `sys.executable`: resolving the
-  interpreter follows a venv's `python` symlink out of the venv.
-* **Credentials**: the treatment child additionally receives
-  `OPENAI_API_KEY`, without which `semantic_search` is served but fails
-  on every call — a treatment arm quietly weaker than the one
-  METHODOLOGY §5 describes. The runner fails closed if it is missing.
-  Query embedding remains an external call at run time; retrieval
-  results are captured in full in the tool trace (recorded limitation).
-* **Fairness checks** (`lovspor.llhb.fairness` +
-  `runner/check_fairness.py`): reads two committed runs and reports
-  every way the pair fails to be a control-treatment comparison — a
-  metadata field that should have matched and did not (the may-differ
-  list is explicit: `run_id`, `condition`, `tool_config`, timestamps,
-  notes, per-run counts, `evaluator_version`; everything else is
-  compared, so a field added later is checked unless deliberately
-  exempted), a case only one arm ran, a case that completed in one arm
-  only or errored in both (either way it compares nothing), a control
-  case that issued or was offered a tool, a treatment case whose
-  offered surface is not exactly `tool_config.tools` or whose MCP
-  server never connected, and any tool call the harness denied. A
-  completed case with no `harness` block is itself a finding, and so is
-  a treatment run declaring no surface at all. The surface comparison is
-  by name, not by count: a run that offered a different tool of the same
-  arity is a different experiment. Which arm a record belongs to is
-  always the caller's claim, never inferred from the declared surface
-  being empty — otherwise a treatment run with an empty `tool_config`
-  would be graded as a control run and pass. Exits non-zero, so it can
-  gate a report.
+* **Retention split** (owner ruling #27): what a run leaves behind is
+  versioned by whether it can be regenerated, not by what it contains.
+  A tool payload is regenerable — the freeze pins lovverk, so
+  (tool, arguments, pin) reproduces the bytes and `records.jsonl` keeps
+  each payload's SHA-256 to check them against — so `tools/` is
+  gitignored; a copy in git would be a duplicate with no evidentiary
+  value. Model output is not regenerable, being non-deterministic, so
+  every final answer and the full tool trace (name, arguments, payload
+  hash) stay in `records.jsonl`. Statutory quotes inside those answers
+  stay too: redacting them would remove the citation fidelity LLHB
+  exists to measure. `raw/` is excluded because a treatment transcript
+  embeds the payloads inline, which would put regenerable corpus
+  material back in the repo; what it holds beyond `records.jsonl` —
+  thinking blocks, event order, stderr — is not scored.
+* **Tool-call reconciliation**: after each case the orchestrator counts
+  `"type": "tool_use"` in the transcript text, without walking events,
+  and stops the whole run if that disagrees with the parsed trace.
+  Undercounting tool calls is the one error this pipeline cannot make
+  and has made three times, each in a different part of the parser
+  (an aborted generator, a discarded partial trace, a non-zero exit
+  short-circuit). A count taken by different means turns a fourth
+  occurrence into a failed run rather than a number in a published
+  result. It errs toward stopping: a literal `"type": "tool_use"`
+  inside a payload would trip it, and a failed run is cheaper than a
+  wrong one.
 * **First treatment pilot (2026-08-10)**: `llhb-v1-run-20260810-pilot6`
   (control) and `llhb-v1-run-20260810-treat3` (lovspor), same 10
   discarded candidates, same seed, same prompt hash, same
