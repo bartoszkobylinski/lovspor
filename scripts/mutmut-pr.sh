@@ -30,18 +30,21 @@
 #   --list             print the scoped file list and runner, run nothing
 #   --tests-for PATH   print the test module PATH would be mutated against
 #   --runner-for PATH  print the exact runner command PATH would be mutated with
+#   --check-guard      run the PATH stub and confirm it refuses to execute
 #   base_ref           diff base (default: origin/main)
 set -euo pipefail
 
 list_only=0
 tests_for_path=""
 runner_for_path=""
+check_guard=0
 base_ref="origin/main"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --list) list_only=1 ;;
     --tests-for) shift; tests_for_path="${1:-}" ;;
     --runner-for) shift; runner_for_path="${1:-}" ;;
+    --check-guard) check_guard=1 ;;
     *) base_ref="$1" ;;
   esac
   shift
@@ -76,21 +79,44 @@ tests_for() {
 # hermetic_env) and turns that mutant into a fast, clean kill. Prepending
 # rather than removing a PATH entry keeps git and sh reachable.
 guard_dir="$(mktemp -d)"
+unkilled_file="$(mktemp)"
+# One trap for both: a second `trap ... EXIT` replaces the first rather than
+# adding to it, which used to leave the stub directory behind on every run.
+trap 'rm -rf "$guard_dir"; rm -f "$unkilled_file"' EXIT
 printf '#!/bin/sh\necho "mutation guard: the real provider CLI is blocked" >&2\nexit 127\n' \
   >"$guard_dir/claude"
 chmod +x "$guard_dir/claude"
-trap 'rm -rf "$guard_dir"' EXIT
 
 # The runner is built here, not inline, so the probes can show exactly
 # what a real run would execute.
+test_command() {
+  printf 'PATH=%s:$PATH %s -m pytest -x -q %s' "$guard_dir" "$python_bin" "$(tests_for "$1")"
+}
+
 runner_for() {
   # `|| exit 1`: mutmut reads "tests passed" as `returncode != 1`, so a
   # mutant that breaks the module outright makes pytest exit 2 (collection
   # error) and gets filed as SURVIVED. Collapsing every failure onto 1
   # scores those as killed, which is what a suite that refuses to run
   # actually means.
-  printf "sh -c 'PATH=%s:\$PATH %s -m pytest -x -q %s || exit 1'" \
-    "$guard_dir" "$python_bin" "$(tests_for "$1")"
+  printf "sh -c '%s || exit 1'" "$(test_command "$1")"
+}
+
+# mutmut files a mutant as "suspicious" on how long the tests took, not on
+# whether they failed, so the verdict moves with machine load and leaves the
+# score unsettled. Re-running each one and reading its exit code turns a
+# timing observation back into an outcome.
+resolve_suspicious() {
+  local file="$1" ids="$2" id verdict
+  for id in $ids; do
+    "$python_bin" -m mutmut apply "$id" >/dev/null 2>&1 || {
+      printf '  mutant %s: could not be applied, still unresolved\n' "$id" >>"$unkilled_file"
+      continue
+    }
+    if sh -c "$(test_command "$file")" >/dev/null 2>&1; then verdict=SURVIVED; else verdict=killed; fi
+    git -C "$repo_root" checkout -- "$file"
+    printf '  mutant %s: re-run says %s\n' "$id" "$verdict" >>"$unkilled_file"
+  done
 }
 
 # Probes: describe what a real run would do for one path, without running it.
@@ -102,6 +128,19 @@ fi
 if [ -n "${runner_for_path:-}" ]; then
   runner_for "$runner_for_path"
   echo
+  exit 0
+fi
+if [ "$check_guard" -eq 1 ]; then
+  # Exercised here rather than inspected from outside: the stub lives in a
+  # temp directory this script removes on exit, and what matters is that it
+  # runs and refuses, not that a path exists.
+  guard_status=0
+  "$guard_dir/claude" >/dev/null 2>&1 || guard_status=$?
+  if [ "$guard_status" -eq 0 ]; then
+    echo "guard: FAILS OPEN — the stub exited 0, a real CLI call would go through"
+    exit 1
+  fi
+  echo "guard: blocks the real provider CLI (stub exited $guard_status)"
   exit 0
 fi
 
@@ -132,9 +171,17 @@ if [ "$list_only" -eq 1 ]; then
 fi
 
 cd "$repo_root"
+
+# Resolving a suspicious mutant applies it to the working tree and reverts
+# with `git checkout --`. That is only safe on files with nothing to lose.
+can_resolve=1
+if [ -n "$(git -C "$repo_root" status --porcelain -- $(printf '%s ' $changed))" ]; then
+  can_resolve=0
+  echo "note: changed files have uncommitted edits — suspicious mutants will be"
+  echo "      listed but not resolved, since resolving rewrites the file on disk"
+fi
+
 status=0
-unkilled_file="$(mktemp)"
-trap 'rm -f "$unkilled_file"' EXIT
 
 while IFS= read -r file; do
   tests="$(tests_for "$file")"
@@ -164,6 +211,11 @@ while IFS= read -r file; do
       "$python_bin" -m mutmut show "$id" 2>/dev/null |
         grep -E '^[-+]' | grep -vE '^(---|\+\+\+)' | head -6 | sed 's/^/    /' >>"$unkilled_file"
     done
+    if [ "$bucket" = suspicious ] && [ "$can_resolve" -eq 1 ]; then
+      printf '  resolving by re-run (suspicious is a timing verdict, not an outcome):\n' \
+        >>"$unkilled_file"
+      resolve_suspicious "$file" "$ids"
+    fi
   done
 done <<<"$changed"
 

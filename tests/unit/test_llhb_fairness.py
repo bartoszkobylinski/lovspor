@@ -412,6 +412,30 @@ class TestCoverage:
 
         assert problems == ["control run holds 1 record(s) but its metadata declares 2 case(s)"]
 
+    def test_flags_duplicate_records_for_one_case(self) -> None:
+        """Every later check keys cases by id, so a duplicate collapses into
+        one comparison while still counting twice toward the total."""
+        run = RunArtifacts(
+            metadata=metadata(cases_total=2),
+            records=[record("llhb-v1-C1-001"), record("llhb-v1-C1-001")],
+        )
+
+        problems = coverage_violations(run, "control")
+
+        assert problems == ["control run holds more than one record for case(s) ['llhb-v1-C1-001']"]
+
+    def test_flags_a_run_that_declares_no_case_total(self) -> None:
+        """The schema allows a null cases_total, and a run carrying one
+        cannot be checked for coverage at all — that is the finding."""
+        run = RunArtifacts(metadata=metadata(cases_total=None), records=[record("llhb-v1-C1-001")])
+
+        problems = coverage_violations(run, "control")
+
+        assert problems == [
+            "control run declares no cases_total, so whether it covered the "
+            "dataset cannot be checked from the artifacts"
+        ]
+
     def test_a_complete_run_passes(self) -> None:
         run = RunArtifacts(
             metadata=metadata(cases_total=2),

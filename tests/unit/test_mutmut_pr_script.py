@@ -61,6 +61,18 @@ class TestRunner:
         assert str(REPO_ROOT / ".venv" / "bin" / "python") in runner
         assert "uv run" not in runner
 
+    def test_puts_a_guard_directory_first_on_path(self) -> None:
+        runner = probe("--runner-for", "src/lovspor/llhb/fairness.py")
+
+        assert "PATH=" in runner
+        assert runner.split("PATH=", 1)[1].startswith("/")
+
+    def test_the_guard_actually_refuses_to_execute(self) -> None:
+        """A mutant that breaks the orchestrator's env isolation otherwise
+        inherits this PATH and makes a live, subscription-billed call. The
+        stub has to run and fail, not merely exist."""
+        assert probe("--check-guard").startswith("guard: blocks the real provider CLI")
+
     def test_measures_the_mutated_file_against_its_own_tests(self) -> None:
         runner = probe("--runner-for", "src/lovspor/llhb/orchestrator.py")
 

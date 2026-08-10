@@ -67,14 +67,21 @@ def coverage_violations(run: RunArtifacts, label: str) -> list[str]:
     """
     if not run.records:
         return [f"{label} run has no records, so the pair compares nothing"]
+    case_ids = [str(record.get("case_id")) for record in run.records]
+    duplicates = sorted({case_id for case_id in case_ids if case_ids.count(case_id) > 1})
+    if duplicates:
+        # Every later check keys cases by id, so a duplicate collapses into
+        # one comparison while still counting twice toward the total.
+        return [f"{label} run holds more than one record for case(s) {duplicates}"]
     declared = run.metadata.get("cases_total")
-    if (
-        isinstance(declared, int)
-        and not isinstance(declared, bool)
-        and len(run.records) != declared
-    ):
+    if not isinstance(declared, int) or isinstance(declared, bool):
         return [
-            f"{label} run holds {len(run.records)} record(s) but its metadata "
+            f"{label} run declares no cases_total, so whether it covered the "
+            "dataset cannot be checked from the artifacts"
+        ]
+    if len(case_ids) != declared:
+        return [
+            f"{label} run holds {len(case_ids)} record(s) but its metadata "
             f"declares {declared} case(s)"
         ]
     return []

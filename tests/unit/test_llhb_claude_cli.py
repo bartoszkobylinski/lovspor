@@ -336,6 +336,39 @@ class TestParseStreamJson:
         assert parsed.error is not None
         assert "result event" in parsed.error
 
+    def test_a_transcript_that_stops_early_keeps_the_calls_it_showed(self) -> None:
+        """A process killed mid-run leaves a valid prefix, and the calls in
+        that prefix were really made."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use("tu-1", "mcp__lovverk__get_section", {"slug": "testloven"}),
+            tool_result("tu-1", "§ 1. Formål"),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
+        assert parsed.harness is not None
+        assert parsed.harness.exposed_tools == ("mcp__lovverk__get_section",)
+
+    def test_a_truncated_final_line_keeps_the_calls_before_it(self) -> None:
+        transcript = (
+            stream(
+                init_event(["mcp__lovverk__get_section"]),
+                tool_use("tu-1", "mcp__lovverk__get_section", {"slug": "testloven"}),
+                tool_result("tu-1", "§ 1. Formål"),
+            )
+            + '{"type":"resu'
+        )
+
+        parsed = parse_stream_json(transcript, returncode=0)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "line 4" in parsed.error
+        assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
+
     def test_flags_a_transcript_without_an_init_event(self) -> None:
         """No init event means no evidence of what was offered, and an
         absent tool list must never read as a proven empty one."""

@@ -130,17 +130,41 @@ def parse_stream_json(stdout: str, returncode: int) -> ParsedCliResult:
     still called it, and ruling #25 turns on whether a run touched a
     tool at all.
     """
+    events, load_error = _load_events(stdout)
     try:
-        events = _load_events(stdout)
         parsed = _parsed(events, _last_result_event(events))
     except ValueError as exc:
-        # ValueError, not just JSONDecodeError: syntactically valid JSON can
-        # still blow CPython's 4300-digit int-conversion limit.
-        parsed = ParsedCliResult(ok=False, error=f"unreadable stream-json transcript: {exc}")
+        parsed = _partial(events, str(exc))
+    if load_error is not None:
+        parsed = _partial(events, load_error)
     if returncode == 0:
         return parsed
     return parsed.model_copy(
         update={"ok": False, "error": f"claude exited with exit code {returncode}"}
+    )
+
+
+def _partial(events: list[dict[str, Any]], message: str) -> ParsedCliResult:
+    """A failed case, still carrying whatever the transcript did prove.
+
+    A process killed mid-write leaves a valid prefix, and the calls in
+    that prefix were really made. Throwing them away to report a clean
+    failure would understate tool use, which is the one thing this
+    parser must never do.
+    """
+    try:
+        calls = _tool_calls(events)
+    except ValueError:
+        calls = []
+    try:
+        harness: HarnessTrace | None = _harness(events, {})
+    except ValueError:
+        harness = None
+    return ParsedCliResult(
+        ok=False,
+        error=f"unreadable stream-json transcript: {message}",
+        tool_calls=calls,
+        harness=harness,
     )
 
 
@@ -155,7 +179,13 @@ def _parsed(events: list[dict[str, Any]], final: dict[str, Any]) -> ParsedCliRes
     )
 
 
-def _load_events(stdout: str) -> list[dict[str, Any]]:
+def _load_events(stdout: str) -> tuple[list[dict[str, Any]], str | None]:
+    """Every readable event, and the reason the rest could not be read.
+
+    Stops at the first unreadable line and keeps the prefix: a truncated
+    final line is what a killed process leaves behind, and the events
+    before it are still evidence.
+    """
     events: list[dict[str, Any]] = []
     for number, line in enumerate(stdout.splitlines(), start=1):
         if not line.strip():
@@ -163,11 +193,13 @@ def _load_events(stdout: str) -> list[dict[str, Any]]:
         try:
             loaded = json.loads(line)
         except ValueError as exc:
-            raise ValueError(f"line {number} is not JSON: {exc}") from exc
+            # ValueError, not just JSONDecodeError: syntactically valid JSON
+            # can still blow CPython's 4300-digit int-conversion limit.
+            return events, f"line {number} is not JSON: {exc}"
         if not isinstance(loaded, dict):
-            raise ValueError(f"line {number} is not a JSON object")
+            return events, f"line {number} is not a JSON object"
         events.append(loaded)
-    return events
+    return events, None
 
 
 def _last_result_event(events: list[dict[str, Any]]) -> dict[str, Any]:
