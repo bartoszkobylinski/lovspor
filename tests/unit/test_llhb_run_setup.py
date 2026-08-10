@@ -174,6 +174,17 @@ class TestComposeRunMetadata:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
         assert store.open_run(metadata).is_dir()
 
+    def test_the_schema_refuses_a_tool_that_names_no_server(self) -> None:
+        """The declared surface is the fairness check's only source for
+        which server had to be up. A bare name carries no server, so a
+        document holding one must not be writable in the first place."""
+        spec = make_spec(condition="lovspor", tool_config={**TOOL_CONFIG, "tools": ["get_section"]})
+
+        metadata = compose_run_metadata(spec, [make_case("llhb-v1-C1-001")])
+
+        schema = load_schema(SCHEMA_DIR / "run_metadata.schema.json")
+        assert validate_case(metadata, schema) != []
+
     def test_both_conditions_share_every_field_but_the_condition(self) -> None:
         """The metadata pair is the fairness evidence: if composing the two
         arms could drift a shared field, the comparison would be unfounded."""

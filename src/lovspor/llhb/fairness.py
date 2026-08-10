@@ -41,8 +41,10 @@ _MAY_DIFFER = frozenset(
 # asserts the two never drift apart.
 _CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
 # A namespaced MCP tool is mcp__<server>__<tool>; the middle field names the
-# server whose connection the case depended on.
-_NAMESPACED_TOOL_RE = re.compile(r"^mcp__(?P<server>[^_]+(?:_[^_]+)*)__")
+# server whose connection the case depended on. Mirrors the item pattern of
+# run_metadata.schema.json's tool_config.tools — the capture group is the only
+# difference, and a test asserts the two never drift apart.
+_NAMESPACED_TOOL_RE = re.compile(r"^mcp__(?P<server>[^_]+(?:_[^_]+)*)__.+$")
 
 
 class RunArtifacts(BaseModel):
@@ -244,9 +246,27 @@ def treatment_violations(records: list[dict[str, Any]], declared_tools: Sequence
     """
     declared = tuple(str(name) for name in declared_tools)
     problems = [] if declared else ["treatment run declares no tool surface in tool_config.tools"]
+    problems.extend(_anonymous_tool_violations(declared))
     for record in records:
         problems.extend(_harness_violations(record, str(record.get("case_id")), declared))
     return problems
+
+
+def _anonymous_tool_violations(declared: tuple[str, ...]) -> list[str]:
+    """Declared tools that name no server, so no connection can be checked.
+
+    The treatment is a server, and every tool of that surface reaches it
+    through ``mcp__<server>__<tool>``. A bare name matches no server, and
+    the server check would then expect nothing and pass — a treatment run
+    with no MCP connection at all reported as a fair comparison.
+    """
+    anonymous = sorted(name for name in declared if not _NAMESPACED_TOOL_RE.match(name))
+    if anonymous:
+        return [
+            f"treatment run declares tool(s) {anonymous} that name no MCP server, "
+            "so nothing about the treatment they were supposed to provide can be checked"
+        ]
+    return []
 
 
 def _harness_violations(

@@ -423,7 +423,11 @@ Driven by the Stage 3.5 human audit (see
   server is checked by name, taken from the run's own
   `mcp__<server>__<tool>` entries: "some server connected" would pass a
   case where lovverk failed and something unrelated came up, which is a
-  case with no treatment in it. A
+  case with no treatment in it. That check reads the server out of the
+  declared tool name, so a declared tool carrying no `mcp__<server>__`
+  prefix is itself a finding, in the module and in the schema both:
+  a bare name expects no server, and the check would pass a treatment
+  run with nothing connected at all. A
   completed case with no `harness` block is itself a finding, and so is
   a treatment run declaring no surface at all. The surface comparison is
   by name, not by count: a run that offered a different tool of the same

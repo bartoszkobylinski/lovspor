@@ -637,3 +637,76 @@ class TestNamedServer:
         record = self.make([{"name": "lovverk", "status": "connected"}])
 
         assert treatment_violations([record], ["mcp__lovverk__get_section"]) == []
+
+    def test_a_declared_tool_that_names_no_server_is_a_finding(self) -> None:
+        """A bare name matches no mcp__<server>__ prefix, so the server check
+        would expect nothing and pass — a treatment run with no MCP
+        connection at all, graded as a fair comparison."""
+        record = treatment_record(
+            "llhb-v1-C1-001",
+            harness={
+                "exposed_tools": ["get_section"],
+                "mcp_servers": [],
+                "permission_denials": [],
+            },
+        )
+
+        problems = treatment_violations([record], ["get_section"])
+
+        assert problems == [
+            "treatment run declares tool(s) ['get_section'] that name no MCP server, "
+            "so nothing about the treatment they were supposed to provide can be checked"
+        ]
+
+    def test_one_anonymous_tool_among_namespaced_ones_is_a_finding(self) -> None:
+        """The check is over the whole declared surface, not over whether
+        some tool of it happens to name a server."""
+        declared = ["mcp__lovverk__get_section", "get_law"]
+        record = treatment_record(
+            "llhb-v1-C1-001",
+            harness={
+                "exposed_tools": declared,
+                "mcp_servers": [{"name": "lovverk", "status": "connected"}],
+                "permission_denials": [],
+            },
+        )
+
+        problems = treatment_violations([record], declared)
+
+        assert any("['get_law']" in problem for problem in problems)
+
+    def test_a_toolless_treatment_run_is_not_a_fair_pair(self) -> None:
+        """The whole pair, not just the arm check: a treatment declaring
+        only bare tool names, with a harness that matches it exactly and no
+        server connected, must not read as a control-treatment comparison."""
+        harness = {"exposed_tools": ["get_section"], "mcp_servers": [], "permission_denials": []}
+        control = RunArtifacts(
+            metadata=metadata(cases_total=1, cases_completed=1),
+            records=[record("llhb-v1-C1-001")],
+        )
+        treatment = RunArtifacts(
+            metadata=treatment_metadata(
+                cases_total=1,
+                cases_completed=1,
+                tool_config={**TOOL_CONFIG, "tools": ["get_section"]},
+            ),
+            records=[treatment_record("llhb-v1-C1-001", harness=harness)],
+        )
+
+        assert check_pair(control, treatment) != []
+
+    def test_the_pattern_matches_the_committed_schema(self) -> None:
+        """The constant mirrors the tool_config.tools item pattern; the
+        capture group's name is the only difference between them."""
+        schema = json.loads(
+            (
+                Path(__file__).resolve().parents[2]
+                / "benchmarks"
+                / "llhb"
+                / "schema"
+                / "run_metadata.schema.json"
+            ).read_text(encoding="utf-8")
+        )
+        committed = schema["properties"]["tool_config"]["properties"]["tools"]["items"]["pattern"]
+
+        assert fairness_module._NAMESPACED_TOOL_RE.pattern.replace("?P<server>", "") == committed

@@ -56,7 +56,14 @@
       "description": "Condition 'lovspor' only: transport (native-mcp | function-bridge), tool list, schema hash, backend (local stdio + lovverk checkout path/commit). Null for control.",
       "properties": {
         "transport": { "type": "string", "enum": ["native-mcp", "function-bridge"] },
-        "tools": { "type": "array", "items": { "type": "string" } },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^mcp__([^_]+(?:_[^_]+)*)__.+$",
+            "description": "Namespaced mcp__<server>__<tool>. The middle field names the server whose connection the fairness check verifies; a bare tool name names none, so a run declaring one could claim a treatment with no MCP server connected."
+          }
+        },
         "tool_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "backend": { "type": "string" }
       }
