@@ -47,11 +47,55 @@ def check_pair(control: RunArtifacts, treatment: RunArtifacts) -> list[str]:
     declared = (treatment.metadata.get("tool_config") or {}).get("tools") or []
     return [
         *compare_run_metadata(control.metadata, treatment.metadata),
+        *coverage_violations(control, "control"),
+        *coverage_violations(treatment, "treatment"),
+        *identity_violations(control, "control"),
+        *identity_violations(treatment, "treatment"),
         *paired_case_violations(control.records, treatment.records),
         *paired_completion_violations(control.records, treatment.records),
         *control_violations(control.records),
         *treatment_violations(treatment.records, declared),
     ]
+
+
+def coverage_violations(run: RunArtifacts, label: str) -> list[str]:
+    """Records that are missing outright, or fewer than the run claims.
+
+    Every other check here is a statement about the records present, so
+    all of them pass vacuously on a run with no records at all. Two
+    empty runs agree on everything and compare nothing.
+    """
+    if not run.records:
+        return [f"{label} run has no records, so the pair compares nothing"]
+    declared = run.metadata.get("cases_total")
+    if (
+        isinstance(declared, int)
+        and not isinstance(declared, bool)
+        and len(run.records) != declared
+    ):
+        return [
+            f"{label} run holds {len(run.records)} record(s) but its metadata "
+            f"declares {declared} case(s)"
+        ]
+    return []
+
+
+def identity_violations(run: RunArtifacts, label: str) -> list[str]:
+    """Records that do not belong to the run they are filed under.
+
+    ``ResultsStore`` enforces this when a record is written, but this
+    module reads committed files directly — a record edited or copied in
+    afterwards would otherwise be compared as if it were this run's.
+    """
+    problems = []
+    for record in run.records:
+        for field in ("run_id", "provider", "model_id", "condition"):
+            if record.get(field) != run.metadata.get(field):
+                problems.append(
+                    f"{label} record {record.get('case_id')} has {field} "
+                    f"{record.get(field)!r}, but the run declares {run.metadata.get(field)!r}"
+                )
+    return problems
 
 
 def compare_run_metadata(control: dict[str, Any], treatment: dict[str, Any]) -> list[str]:

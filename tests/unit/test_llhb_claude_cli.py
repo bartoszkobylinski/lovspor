@@ -273,6 +273,37 @@ class TestParseStreamJson:
         assert parsed.error is not None
         assert "exit code 1" in parsed.error
 
+    def test_a_nonzero_exit_does_not_discard_the_tool_trace(self) -> None:
+        """A case that crashed after calling a tool still called it. Ruling
+        #25 turns on whether a run touched a tool at all, so evidence of a
+        call must not depend on how the process happened to end."""
+        transcript = stream(
+            init_event(["mcp__lovverk__get_section"]),
+            tool_use("tu-1", "mcp__lovverk__get_section", {"slug": "testloven"}),
+            tool_result("tu-1", "§ 1. Formål"),
+            result_event(num_turns=2),
+        )
+
+        parsed = parse_stream_json(transcript, returncode=1)
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "exit code 1" in parsed.error
+        assert [call.name for call in parsed.tool_calls] == ["mcp__lovverk__get_section"]
+        assert parsed.harness is not None
+        assert parsed.harness.exposed_tools == ("mcp__lovverk__get_section",)
+
+    def test_flags_an_assistant_event_without_a_message(self) -> None:
+        """Skipping a malformed event silently is how a trace ends up
+        shorter than the conversation it describes."""
+        parsed = parse_stream_json(
+            stream(init_event(), {"type": "assistant"}, result_event()), returncode=0
+        )
+
+        assert parsed.ok is False
+        assert parsed.error is not None
+        assert "readable message" in parsed.error
+
     def test_tolerates_blank_lines_between_events(self) -> None:
         parsed = parse_stream_json(control_stream().replace("\n", "\n\n"), returncode=0)
 

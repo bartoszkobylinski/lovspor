@@ -18,31 +18,34 @@
 #     worse than reality, never better - but a survivor is worth checking
 #     against the wider suite before treating it as a real gap.
 #   * A changed file with no matching test module falls back to the whole
-#     unit suite rather than silently running nothing, which would score
-#     every one of its mutants as survived.
+#     unit suite (tests/unit/, what the runner used before this change)
+#     rather than silently running nothing, which would score every one of
+#     its mutants as survived.
 #
 # The runner calls .venv/bin/python directly. `uv run` inside a runner
 # re-resolves the environment per mutant and has produced a clean sweep
 # that was an artifact of the tooling rather than of the tests.
 #
 # Usage: scripts/mutmut-pr.sh [--list] [base_ref]
-#   --list    print the scoped file list and exit without running mutmut
-#   base_ref  diff base (default: origin/main)
+#   --list             print the scoped file list and runner, run nothing
+#   --tests-for PATH   print the test module PATH would be mutated against
+#   --runner-for PATH  print the exact runner command PATH would be mutated with
+#   base_ref           diff base (default: origin/main)
 set -euo pipefail
 
 list_only=0
+tests_for_path=""
+runner_for_path=""
 base_ref="origin/main"
-for arg in "$@"; do
-  case "$arg" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --list) list_only=1 ;;
-    *) base_ref="$arg" ;;
+    --tests-for) shift; tests_for_path="${1:-}" ;;
+    --runner-for) shift; runner_for_path="${1:-}" ;;
+    *) base_ref="$1" ;;
   esac
+  shift
 done
-
-if ! git rev-parse --verify --quiet "$base_ref" >/dev/null; then
-  echo "error: base ref '$base_ref' not found — fetch it first" >&2
-  exit 2
-fi
 
 repo_root="$(git rev-parse --show-toplevel)"
 python_bin="$repo_root/.venv/bin/python"
@@ -65,6 +68,34 @@ tests_for() {
   fi
 }
 
+# The runner is built here, not inline, so --list and --tests-for can show
+# exactly what a real run would execute.
+runner_for() {
+  # `|| exit 1`: mutmut reads "tests passed" as `returncode != 1`, so a
+  # mutant that breaks the module outright makes pytest exit 2 (collection
+  # error) and gets filed as SURVIVED. Collapsing every failure onto 1
+  # scores those as killed, which is what a suite that refuses to run
+  # actually means.
+  printf "sh -c '%s -m pytest -x -q %s || exit 1'" "$python_bin" "$(tests_for "$1")"
+}
+
+# Probes: describe what a real run would do for one path, without running it.
+if [ -n "${tests_for_path:-}" ]; then
+  tests_for "$tests_for_path"
+  echo
+  exit 0
+fi
+if [ -n "${runner_for_path:-}" ]; then
+  runner_for "$runner_for_path"
+  echo
+  exit 0
+fi
+
+if ! git rev-parse --verify --quiet "$base_ref" >/dev/null; then
+  echo "error: base ref '$base_ref' not found — fetch it first" >&2
+  exit 2
+fi
+
 # ACMR: added/copied/modified/renamed. Deleted files cannot be mutated.
 changed="$(git diff --name-only --diff-filter=ACMR "$base_ref"...HEAD -- 'src/lovspor/' | grep '\.py$' || true)"
 
@@ -82,13 +113,14 @@ while IFS= read -r file; do
 done <<<"$changed"
 
 if [ "$list_only" -eq 1 ]; then
+  echo "runner: $(runner_for "$(printf '%s\n' "$changed" | head -1)")"
   exit 0
 fi
 
 cd "$repo_root"
 status=0
-survivors_file="$(mktemp)"
-trap 'rm -f "$survivors_file"' EXIT
+unkilled_file="$(mktemp)"
+trap 'rm -f "$unkilled_file"' EXIT
 
 while IFS= read -r file; do
   tests="$(tests_for "$file")"
@@ -101,28 +133,30 @@ while IFS= read -r file; do
   # module's baseline, which files them as "suspicious" — neither killed
   # nor survived, and useless as a score.
   rm -f "$repo_root/.mutmut-cache"
-  # `|| exit 1`: mutmut reads "tests passed" as `returncode != 1`, so a
-  # mutant that breaks the module outright makes pytest exit 2 (collection
-  # error) and gets filed as SURVIVED. Collapsing every failure onto 1
-  # scores those as killed, which is what a suite that refuses to run
-  # actually means.
   "$python_bin" -m mutmut run \
     --paths-to-mutate="$file" \
-    --runner="sh -c '$python_bin -m pytest -x -q $tests || exit 1'" || status=$?
+    --runner="$(runner_for "$file")" || status=$?
   # Dumped now, while this file's cache is the live one: mutant ids are
   # per-run indices, so `mutmut show` cannot resolve an earlier file's id
-  # once the next file has replaced the cache.
-  printf '\n--- survivors in %s\n' "$file" >>"$survivors_file"
-  for id in $("$python_bin" -m mutmut result-ids survived 2>/dev/null || true); do
-    printf '  mutant %s\n' "$id" >>"$survivors_file"
-    "$python_bin" -m mutmut show "$id" 2>/dev/null |
-      grep -E '^[-+]' | grep -vE '^(---|\+\+\+)' | head -6 | sed 's/^/    /' >>"$survivors_file"
+  # once the next file has replaced the cache. Suspicious mutants are
+  # dumped alongside survived ones: neither was killed, and a summary
+  # that lists only survivors reports more certainty than the run has.
+  for bucket in survived suspicious; do
+    ids="$("$python_bin" -m mutmut result-ids "$bucket" 2>/dev/null || true)"
+    [ -z "$ids" ] && continue
+    printf '\n--- %s in %s\n' "$bucket" "$file" >>"$unkilled_file"
+    for id in $ids; do
+      printf '  mutant %s\n' "$id" >>"$unkilled_file"
+      "$python_bin" -m mutmut show "$id" 2>/dev/null |
+        grep -E '^[-+]' | grep -vE '^(---|\+\+\+)' | head -6 | sed 's/^/    /' >>"$unkilled_file"
+    done
   done
 done <<<"$changed"
 
 echo
-echo "=== survived mutants, with the change each one made"
-cat "$survivors_file"
+echo "=== mutants that were not killed, with the change each one made"
+echo "(suspicious ones were not killed either — do not count them as passes)"
+cat "$unkilled_file"
 echo
 echo "Read the per-file tallies above for the score. Each file was mutated"
 echo "against its own tests, so a mutant another module's test would kill"

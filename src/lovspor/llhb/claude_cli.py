@@ -123,17 +123,25 @@ def _check_access_matches_condition(condition: str, access: ToolAccess | None) -
 
 
 def parse_stream_json(stdout: str, returncode: int) -> ParsedCliResult:
-    """Normalize a stream-json transcript; never raises on bad output."""
-    if returncode != 0:
-        return ParsedCliResult(ok=False, error=f"claude exited with exit code {returncode}")
+    """Normalize a stream-json transcript; never raises on bad output.
+
+    A non-zero exit fails the case but does not discard what the
+    transcript already showed: a case that crashed after calling a tool
+    still called it, and ruling #25 turns on whether a run touched a
+    tool at all.
+    """
     try:
         events = _load_events(stdout)
-        final = _last_result_event(events)
-        return _parsed(events, final)
+        parsed = _parsed(events, _last_result_event(events))
     except ValueError as exc:
         # ValueError, not just JSONDecodeError: syntactically valid JSON can
         # still blow CPython's 4300-digit int-conversion limit.
-        return ParsedCliResult(ok=False, error=f"unreadable stream-json transcript: {exc}")
+        parsed = ParsedCliResult(ok=False, error=f"unreadable stream-json transcript: {exc}")
+    if returncode == 0:
+        return parsed
+    return parsed.model_copy(
+        update={"ok": False, "error": f"claude exited with exit code {returncode}"}
+    )
 
 
 def _parsed(events: list[dict[str, Any]], final: dict[str, Any]) -> ParsedCliResult:
@@ -231,13 +239,24 @@ def _tool_results(events: list[dict[str, Any]]) -> dict[str, tuple[Any, bool]]:
 def _blocks(
     events: list[dict[str, Any]], event_type: str, block_type: str
 ) -> Iterator[dict[str, Any]]:
-    """Every content block of one kind, in transcript order."""
+    """Every content block of one kind, in transcript order.
+
+    Events of another type are not this scan's business and are skipped.
+    An event of the right type that carries no readable message or
+    content is a different matter: skipping it would shorten the trace
+    without saying so, which is the failure this parser exists to
+    prevent.
+    """
     for event in events:
-        message = event.get("message")
-        if event.get("type") != event_type or not isinstance(message, dict):
+        if event.get("type") != event_type:
             continue
+        message = event.get("message")
+        if not isinstance(message, dict):
+            raise ValueError(f"{event_type} event carries no readable message")
         content = message.get("content")
-        for block in content if isinstance(content, list) else []:
+        if not isinstance(content, list):
+            raise ValueError(f"{event_type} event message carries no readable content list")
+        for block in content:
             if isinstance(block, dict) and block.get("type") == block_type:
                 yield block
 

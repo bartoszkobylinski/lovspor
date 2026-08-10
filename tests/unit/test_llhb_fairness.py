@@ -7,6 +7,8 @@ from lovspor.llhb.fairness import (
     check_pair,
     compare_run_metadata,
     control_violations,
+    coverage_violations,
+    identity_violations,
     paired_case_violations,
     paired_completion_violations,
     treatment_violations,
@@ -81,6 +83,9 @@ def record(case_id: str, **overrides: Any) -> dict[str, Any]:
 
 def treatment_record(case_id: str, **overrides: Any) -> dict[str, Any]:
     fields: dict[str, Any] = {
+        # Its own run's id, not the control's: a record carries the identity
+        # of the run it belongs to, and identity_violations checks exactly that.
+        "run_id": "llhb-v1-run-20260810-treat",
         "condition": "lovspor",
         "tool_calls": [{"index": 0, "name": "mcp__lovverk__get_section", "arguments": {}}],
         "harness": {
@@ -388,11 +393,69 @@ class TestPairedCompletion:
         assert problems == ["llhb-v1-C1-001: errored in both arms, so it compares nothing"]
 
 
+class TestCoverage:
+    def test_two_empty_runs_are_not_a_fair_comparison(self) -> None:
+        """Every other check states something about the records present, so
+        all of them pass vacuously when there are none."""
+        empty_control = RunArtifacts(metadata=metadata(cases_total=0), records=[])
+        empty_treatment = RunArtifacts(metadata=treatment_metadata(cases_total=0), records=[])
+
+        problems = check_pair(empty_control, empty_treatment)
+
+        assert "control run has no records, so the pair compares nothing" in problems
+        assert "treatment run has no records, so the pair compares nothing" in problems
+
+    def test_flags_fewer_records_than_the_run_claims(self) -> None:
+        run = RunArtifacts(metadata=metadata(cases_total=2), records=[record("llhb-v1-C1-001")])
+
+        problems = coverage_violations(run, "control")
+
+        assert problems == ["control run holds 1 record(s) but its metadata declares 2 case(s)"]
+
+    def test_a_complete_run_passes(self) -> None:
+        run = RunArtifacts(
+            metadata=metadata(cases_total=2),
+            records=[record("llhb-v1-C1-001"), record("llhb-v1-C2-001")],
+        )
+
+        assert coverage_violations(run, "control") == []
+
+
+class TestRecordIdentity:
+    def test_flags_a_record_from_another_model(self) -> None:
+        """ResultsStore checks this when a record is written; this module
+        reads committed files, where a record could have been edited or
+        copied in from a different run afterwards."""
+        run = RunArtifacts(
+            metadata=treatment_metadata(cases_total=1),
+            records=[treatment_record("llhb-v1-C1-001", model_id="claude-sonnet-5")],
+        )
+
+        problems = identity_violations(run, "treatment")
+
+        assert len(problems) == 1
+        assert "model_id 'claude-sonnet-5'" in problems[0]
+
+    def test_flags_a_record_filed_under_another_run(self) -> None:
+        run = RunArtifacts(
+            metadata=metadata(cases_total=1),
+            records=[record("llhb-v1-C1-001", run_id="llhb-v1-run-20260810-other")],
+        )
+
+        assert identity_violations(run, "control") != []
+
+    def test_a_record_matching_its_run_passes(self) -> None:
+        run = RunArtifacts(metadata=metadata(cases_total=1), records=[record("llhb-v1-C1-001")])
+
+        assert identity_violations(run, "control") == []
+
+
 class TestCheckPair:
     def test_a_clean_pilot_pair_reports_nothing(self) -> None:
-        control = RunArtifacts(metadata=metadata(), records=[record("llhb-v1-C1-001")])
+        control = RunArtifacts(metadata=metadata(cases_total=1), records=[record("llhb-v1-C1-001")])
         treatment = RunArtifacts(
-            metadata=treatment_metadata(), records=[treatment_record("llhb-v1-C1-001")]
+            metadata=treatment_metadata(cases_total=1),
+            records=[treatment_record("llhb-v1-C1-001")],
         )
 
         assert check_pair(control, treatment) == []
