@@ -41,10 +41,15 @@ _MAY_DIFFER = frozenset(
 # asserts the two never drift apart.
 _CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
 # A namespaced MCP tool is mcp__<server>__<tool>; the middle field names the
-# server whose connection the case depended on. Mirrors the item pattern of
-# run_metadata.schema.json's tool_config.tools — the capture group is the only
-# difference, and a test asserts the two never drift apart.
+# server whose connection the case depended on.
 _NAMESPACED_TOOL_RE = re.compile(r"^mcp__(?P<server>[^_]+(?:_[^_]+)*)__.+$")
+# The treatment is one named server (METHODOLOGY §5), not "an MCP server":
+# a run whose tools all name `decoy` and whose transcript shows `decoy`
+# connected is internally consistent and has no lovspor treatment in it.
+# Duplicated from mcp_surface.SERVER_NAME rather than imported — that module
+# pulls in the whole MCP server — and mirrored by run_metadata.schema.json's
+# tool_config.tools pattern; tests assert all three never drift apart.
+_SERVER_NAME = "lovverk"
 
 
 class RunArtifacts(BaseModel):
@@ -246,27 +251,38 @@ def treatment_violations(records: list[dict[str, Any]], declared_tools: Sequence
     """
     declared = tuple(str(name) for name in declared_tools)
     problems = [] if declared else ["treatment run declares no tool surface in tool_config.tools"]
-    problems.extend(_anonymous_tool_violations(declared))
+    problems.extend(_declared_surface_violations(declared))
     for record in records:
         problems.extend(_harness_violations(record, str(record.get("case_id")), declared))
     return problems
 
 
-def _anonymous_tool_violations(declared: tuple[str, ...]) -> list[str]:
-    """Declared tools that name no server, so no connection can be checked.
+def _declared_surface_violations(declared: tuple[str, ...]) -> list[str]:
+    """Declared tools that are not this benchmark's treatment.
 
-    The treatment is a server, and every tool of that surface reaches it
-    through ``mcp__<server>__<tool>``. A bare name matches no server, and
-    the server check would then expect nothing and pass — a treatment run
-    with no MCP connection at all reported as a fair comparison.
+    The server check reads its expectation out of these names, so the
+    names have to carry a server and it has to be the right one. A bare
+    name expects nothing and passes with no server connected at all; a
+    name pointing at some other server passes as soon as that other
+    server connects, which is a run with no lovspor treatment in it.
     """
-    anonymous = sorted(name for name in declared if not _NAMESPACED_TOOL_RE.match(name))
+    named = [(name, _NAMESPACED_TOOL_RE.match(name)) for name in declared]
+    anonymous = sorted(name for name, match in named if not match)
+    foreign = sorted(
+        name for name, match in named if match and match.group("server") != _SERVER_NAME
+    )
+    problems: list[str] = []
     if anonymous:
-        return [
+        problems.append(
             f"treatment run declares tool(s) {anonymous} that name no MCP server, "
             "so nothing about the treatment they were supposed to provide can be checked"
-        ]
-    return []
+        )
+    if foreign:
+        problems.append(
+            f"treatment run declares tool(s) {foreign} served by some MCP server other "
+            f"than {_SERVER_NAME!r}, which is not the treatment this benchmark measures"
+        )
+    return problems
 
 
 def _harness_violations(

@@ -17,6 +17,7 @@ from lovspor.llhb.fairness import (
     paired_completion_violations,
     treatment_violations,
 )
+from lovspor.llhb.mcp_surface import SERVER_NAME
 
 TOOL_CONFIG = {
     "transport": "native-mcp",
@@ -695,9 +696,59 @@ class TestNamedServer:
 
         assert check_pair(control, treatment) != []
 
-    def test_the_pattern_matches_the_committed_schema(self) -> None:
-        """The constant mirrors the tool_config.tools item pattern; the
-        capture group's name is the only difference between them."""
+    def test_a_declared_tool_of_another_server_is_a_finding(self) -> None:
+        """The whole surface renamed to another server, with that server
+        connected on every case, is internally consistent and has no
+        lovspor treatment in it — the server name is part of the claim."""
+        record = treatment_record(
+            "llhb-v1-C1-001",
+            harness={
+                "exposed_tools": ["mcp__decoy__get_section"],
+                "mcp_servers": [{"name": "decoy", "status": "connected"}],
+                "permission_denials": [],
+            },
+        )
+
+        problems = treatment_violations([record], ["mcp__decoy__get_section"])
+
+        assert problems == [
+            "treatment run declares tool(s) ['mcp__decoy__get_section'] served by some "
+            "MCP server other than 'lovverk', which is not the treatment this benchmark measures"
+        ]
+
+    def test_a_decoy_server_is_not_a_fair_pair(self) -> None:
+        """The whole pair: a treatment whose declared surface, exposed
+        surface and connected server all agree on some other server must
+        not read as a control-treatment comparison."""
+        harness = {
+            "exposed_tools": ["mcp__decoy__get_section"],
+            "mcp_servers": [{"name": "decoy", "status": "connected"}],
+            "permission_denials": [],
+        }
+        control = RunArtifacts(
+            metadata=metadata(cases_total=1, cases_completed=1),
+            records=[record("llhb-v1-C1-001")],
+        )
+        treatment = RunArtifacts(
+            metadata=treatment_metadata(
+                cases_total=1,
+                cases_completed=1,
+                tool_config={**TOOL_CONFIG, "tools": ["mcp__decoy__get_section"]},
+            ),
+            records=[treatment_record("llhb-v1-C1-001", harness=harness)],
+        )
+
+        assert check_pair(control, treatment) != []
+
+    def test_the_server_name_is_the_one_the_runner_serves(self) -> None:
+        """Duplicated rather than imported, because mcp_surface pulls in the
+        whole MCP server; nothing else stops the two from drifting apart."""
+        assert fairness_module._SERVER_NAME == SERVER_NAME
+
+    def test_the_schema_pins_the_same_server(self) -> None:
+        """The module refuses a foreign server at grading time, the schema
+        refuses one at write time; both name the same server or one of the
+        two layers is checking something else."""
         schema = json.loads(
             (
                 Path(__file__).resolve().parents[2]
@@ -709,4 +760,4 @@ class TestNamedServer:
         )
         committed = schema["properties"]["tool_config"]["properties"]["tools"]["items"]["pattern"]
 
-        assert fairness_module._NAMESPACED_TOOL_RE.pattern.replace("?P<server>", "") == committed
+        assert committed == f"^mcp__{fairness_module._SERVER_NAME}__.+$"

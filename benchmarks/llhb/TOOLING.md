@@ -420,14 +420,26 @@ Driven by the Stage 3.5 human audit (see
   case that issued or was offered a tool, a treatment case whose
   offered surface is not exactly `tool_config.tools` or whose MCP
   server did not connect, and any tool call the harness denied. The
-  server is checked by name, taken from the run's own
+  server is checked by name, read out of the run's own
   `mcp__<server>__<tool>` entries: "some server connected" would pass a
   case where lovverk failed and something unrelated came up, which is a
-  case with no treatment in it. That check reads the server out of the
-  declared tool name, so a declared tool carrying no `mcp__<server>__`
-  prefix is itself a finding, in the module and in the schema both:
-  a bare name expects no server, and the check would pass a treatment
-  run with nothing connected at all. A
+  case with no treatment in it. Because the expectation is read out of
+  the declared names, the declared surface is checked before it is
+  believed, in the module and in the schema both: a tool with no
+  `mcp__<server>__` prefix names no server, so the check would expect
+  nothing and pass a run with nothing connected; a tool naming a server
+  other than `lovverk` passes as soon as that other server connects,
+  which is a run with no lovspor treatment in it. `lovverk` is a
+  constant in the fairness module (duplicated from
+  `mcp_surface.SERVER_NAME`, which the module cannot import without
+  pulling in the whole MCP server) and a literal in the schema pattern;
+  tests tie all three together, and one more asserts every tool
+  `mcp_surface` actually serves satisfies that pattern. What the module
+  cannot check from artifacts alone is that the surface *behind* the
+  name was the pinned corpus: `tool_schema_sha256` is recorded, but
+  verifying it needs the server. That is checked at run time instead —
+  `verify_server_command` fails closed unless the executable is this
+  environment's entry point. A
   completed case with no `harness` block is itself a finding, and so is
   a treatment run declaring no surface at all. The surface comparison is
   by name, not by count: a run that offered a different tool of the same

@@ -60,8 +60,8 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^mcp__([^_]+(?:_[^_]+)*)__.+$",
-            "description": "Namespaced mcp__<server>__<tool>. The middle field names the server whose connection the fairness check verifies; a bare tool name names none, so a run declaring one could claim a treatment with no MCP server connected."
+            "pattern": "^mcp__lovverk__.+$",
+            "description": "Namespaced mcp__lovverk__<tool>, the surface of the pinned local lovspor server (METHODOLOGY §5). The server name is part of the claim, not decoration: a bare tool name names no server at all, and a tool named for some other server would let a run with no lovspor treatment in it pass the fairness check as soon as that other server connected."
           }
         },
         "tool_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

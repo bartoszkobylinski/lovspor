@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import sysconfig
 from pathlib import Path
 
@@ -185,6 +186,25 @@ class TestToolConfig:
         assert config["tools"] == allowed_tools(surface)
         assert config["tools"][0].startswith("mcp__lovverk__")
         assert "6ec7059d53d25ddae99d8a64bf5157a90c4c166c" in config["backend"]
+
+    def test_every_served_tool_passes_the_run_metadata_schema(self, corpus: Path) -> None:
+        """The gate refuses a declared tool that does not name the lovverk
+        server. The surface this module produces is what a real run
+        declares, so the producer has to satisfy the pattern that grades
+        it — for every tool served, not just the first."""
+        pattern = json.loads(
+            (
+                Path(__file__).resolve().parents[2]
+                / "benchmarks"
+                / "llhb"
+                / "schema"
+                / "run_metadata.schema.json"
+            ).read_text(encoding="utf-8")
+        )["properties"]["tool_config"]["properties"]["tools"]["items"]["pattern"]
+
+        names = tool_config(tool_surface(corpus), "6" * 40)["tools"]
+
+        assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_backend_names_the_commit_not_the_machine(self, corpus: Path) -> None:
         """Published metadata identifies the corpus by commit. A checkout

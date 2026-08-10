@@ -174,11 +174,13 @@ class TestComposeRunMetadata:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
         assert store.open_run(metadata).is_dir()
 
-    def test_the_schema_refuses_a_tool_that_names_no_server(self) -> None:
+    @pytest.mark.parametrize("tool", ["get_section", "mcp__decoy__get_section"])
+    def test_the_schema_refuses_a_tool_that_is_not_the_treatment(self, tool: str) -> None:
         """The declared surface is the fairness check's only source for
-        which server had to be up. A bare name carries no server, so a
-        document holding one must not be writable in the first place."""
-        spec = make_spec(condition="lovspor", tool_config={**TOOL_CONFIG, "tools": ["get_section"]})
+        which server had to be up. A bare name carries no server and a
+        foreign one carries the wrong server, so neither document may be
+        written in the first place."""
+        spec = make_spec(condition="lovspor", tool_config={**TOOL_CONFIG, "tools": [tool]})
 
         metadata = compose_run_metadata(spec, [make_case("llhb-v1-C1-001")])
 
