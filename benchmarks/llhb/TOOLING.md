@@ -296,18 +296,39 @@ Driven by the Stage 3.5 human audit (see
   `raw_response_ref`; every tool payload is written to
   `tools/<case_id>-<index>.json` and referenced via `result_ref` +
   `result_sha256`, never inlined into the record.
-* **Retention split**: `tools/` and `raw/` are gitignored, because a
-  lovverk tool answers with statutory text and legal text does not live
-  in this repo (CLAUDE.md). The line is between *corpus material* and
-  *model output*: a tool payload is lovverk's text copied verbatim and
-  stays out, while a model's answer is the thing being measured and is
-  versioned even though it quotes provisions. A benchmark that discarded
-  the answers would have nothing left to score. What is versioned — `run-metadata.json` and
-  `records.jsonl` — carries each payload's SHA-256, the tool name and
-  the exact arguments; the corpus is pinned, so (tool, arguments, pin)
-  regenerates the bytes the hash was taken over. The Stage 5 control
-  pilots predate the rule and stay tracked; they contain no tool
-  payloads.
+* **Retention split** (owner ruling #27): what a run leaves behind is
+  versioned by whether it can be regenerated, not by what it contains.
+  A tool payload is regenerable — the freeze pins lovverk, so
+  (tool, arguments, pin) reproduces the bytes and `records.jsonl` keeps
+  each payload's SHA-256 to check them against — so `tools/` is
+  gitignored; a copy in git would be a duplicate with no evidentiary
+  value. Model output is not regenerable, being non-deterministic, so
+  every final answer and the full tool trace stay in `records.jsonl`.
+  Statutory quotes inside those answers stay too: redacting them would
+  remove the citation fidelity LLHB exists to measure. `raw/` is
+  excluded because a treatment transcript embeds the payloads inline,
+  which would put regenerable corpus material back in the repo; what it
+  holds beyond `records.jsonl` — thinking blocks and stderr — is not
+  scored, and the ordering that would carry evidentiary weight is kept,
+  since `tool_calls` is ordered as issued. `tool_calls[].result` is
+  schema-constrained to null, so the rule is enforced at the gate
+  rather than by whichever writer runs next; the schema also binds
+  `result_ref` to `result_sha256` and constrains both it and
+  `raw_response_ref` to paths inside the run directory, because a
+  reference with no hash cannot be checked against the regenerated
+  payload and one that escapes the run does not point at that run's
+  evidence.
+* **Tool-call reconciliation**: after each case the orchestrator counts
+  `"type": "tool_use"` in the transcript text, without walking events,
+  and stops the whole run if that disagrees with the parsed trace.
+  Undercounting tool calls is the one error this pipeline cannot make
+  and has made three times, each in a different part of the parser (an
+  aborted generator, a discarded partial trace, a non-zero exit
+  short-circuit). A count taken by different means turns a fourth
+  occurrence into a failed run rather than a number in a published
+  result. It errs toward stopping: a literal `"type": "tool_use"`
+  inside a payload would trip it, and a failed run is cheaper than a
+  wrong one.
 * **Run setup** (`lovspor.llhb.run_setup` + `runner/run_arm.py`):
   `pilot_cases` selects drops only — every frozen case_id is excluded,
   and a limit the drop pool cannot satisfy fails closed.
