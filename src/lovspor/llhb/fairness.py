@@ -175,9 +175,12 @@ def coverage_violations(run: RunArtifacts, label: str) -> list[str]:
         return [f"{label} run has no records, so the pair compares nothing"]
     malformed = sorted(
         {
+            # A missing id str()s to "None", which fails the pattern like
+            # any other non-id — no fallback needed, and a fallback here
+            # is an unkillable mutation site.
             str(record.get("case_id"))
             for record in run.records
-            if not _CASE_ID_RE.match(str(record.get("case_id") or ""))
+            if not _CASE_ID_RE.match(str(record.get("case_id")))
         }
     )
     if malformed:
