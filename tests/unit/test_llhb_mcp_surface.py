@@ -24,6 +24,13 @@ from tests.unit.llhb_fixtures import build_corpus
 
 CORPUS_DOCS = {"testloven": ("Testloven", "### § 1. Formål\n\nLoven gjelder.\n")}
 
+# The interpreter the LLHB apparatus runs on. Lives here, not in the anchor
+# document: if the anchor's own `python` field decided when the hash guard
+# runs, editing the anchor to a version no CI leg has would switch the guard
+# off — the anchor would opt out of its own verification. The CI matrix must
+# keep a leg on this version (.github/workflows/test.yml).
+APPARATUS_PYTHON = "3.12"
+
 
 @pytest.fixture
 def corpus(tmp_path: Path) -> Path:
@@ -221,12 +228,16 @@ class TestToolConfig:
         the document is an apparatus decision to make explicitly, not a
         fixture to patch.
 
-        The hash is compared only on the anchor's own interpreter: tool
+        The hash is compared only on the apparatus interpreter: tool
         descriptions come from docstrings, and CPython 3.13 dedents
         docstrings at compile time, so each interpreter serves genuinely
         different description bytes. The names are interpreter-stable and
         checked everywhere; a run made on a different interpreter records
-        a different hash and fails the fairness gate on its own."""
+        a different hash and fails the fairness gate on its own. Which
+        interpreter is the apparatus is this test's constant, asserted
+        against the anchor on every interpreter — read from the anchor
+        alone, an anchor edited to a version no CI leg runs would switch
+        its own hash guard off."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
@@ -240,10 +251,9 @@ class TestToolConfig:
             ("first", CORPUS_DOCS),
             ("second", {"annenloven": ("Annen loven", "### § 2. Virkeområde\n\nAnnet innhold.\n")}),
         )
-        apparatus_interpreter = (
-            f"{sys.version_info[0]}.{sys.version_info[1]}" == committed["python"]
-        )
+        apparatus_interpreter = f"{sys.version_info[0]}.{sys.version_info[1]}" == APPARATUS_PYTHON
 
+        assert committed["python"] == APPARATUS_PYTHON
         assert committed["server"] == mcp_surface.SERVER_NAME
         for name, docs in corpora:
             root = tmp_path / name

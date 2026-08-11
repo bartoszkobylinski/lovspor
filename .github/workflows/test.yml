@@ -15,6 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 3.12 is the LLHB apparatus leg: it is the only leg that verifies the
+        # frozen tool-surface hash (tests/unit/test_llhb_mcp_surface.py,
+        # APPARATUS_PYTHON). Do not remove it without moving the apparatus.
         python-version: ["3.12", "3.13", "3.14"]
     env:
       UV_PYTHON: ${{ matrix.python-version }}
