@@ -49,7 +49,7 @@ def test_codex_output_is_formatted_and_linted_before_tests(
     assert normalize["if"] == condition
     assert normalize["run"].splitlines() == [
         "uv run ruff format tests/",
-        "uv run ruff check tests/",
+        "uv run ruff check --fix tests/",
     ]
 
 
