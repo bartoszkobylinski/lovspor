@@ -1,6 +1,7 @@
 {
-  "description": "Frozen LLHB v1 treatment surface: the tool names and schema hash the pinned local `lovspor mcp` server serves. The surface is a pure function of lovspor code (corpus-independent), so a unit test regenerates this document from the code on every run; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads it as the expectation the declared tool_config is compared against.",
-  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() at lovspor 4f75080bd9dec6e31e999d3014094d55d1442771",
+  "description": "Frozen LLHB v1 treatment surface: the tool names and schema hash the pinned local `lovspor mcp` server serves. The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. A run made on a different interpreter records a different hash and fails the fairness gate. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() at lovspor 1cf7d6cca1d30749f955938f6aceff55b8e06caf",
+  "python": "3.12",
   "server": "lovverk",
   "tool_schema_sha256": "74bf6f11d8695c0fe8b4d71d1910a6228f77cec0618900af581782c86460d955",
   "tools": [

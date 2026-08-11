@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+import sys
 import sysconfig
 from pathlib import Path
 
@@ -218,7 +219,14 @@ class TestToolConfig:
         the fairness gate. This test is the early warning; the gate is the
         enforcement. If this fails, the served surface changed: regenerating
         the document is an apparatus decision to make explicitly, not a
-        fixture to patch."""
+        fixture to patch.
+
+        The hash is compared only on the anchor's own interpreter: tool
+        descriptions come from docstrings, and CPython 3.13 dedents
+        docstrings at compile time, so each interpreter serves genuinely
+        different description bytes. The names are interpreter-stable and
+        checked everywhere; a run made on a different interpreter records
+        a different hash and fails the fairness gate on its own."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
@@ -232,6 +240,9 @@ class TestToolConfig:
             ("first", CORPUS_DOCS),
             ("second", {"annenloven": ("Annen loven", "### § 2. Virkeområde\n\nAnnet innhold.\n")}),
         )
+        apparatus_interpreter = (
+            f"{sys.version_info[0]}.{sys.version_info[1]}" == committed["python"]
+        )
 
         assert committed["server"] == mcp_surface.SERVER_NAME
         for name, docs in corpora:
@@ -239,7 +250,8 @@ class TestToolConfig:
             build_corpus(root, docs)
             surface = tool_surface(root)
             assert committed["tools"] == allowed_tools(surface), name
-            assert committed["tool_schema_sha256"] == surface.schema_sha256, name
+            if apparatus_interpreter:
+                assert committed["tool_schema_sha256"] == surface.schema_sha256, name
 
     def test_the_backend_names_the_commit_not_the_machine(self, corpus: Path) -> None:
         """Published metadata identifies the corpus by commit. A checkout

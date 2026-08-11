@@ -441,19 +441,28 @@ Driven by the Stage 3.5 human audit (see
   namespaced tool names and the tool-schema SHA-256 the pinned server
   serves), `check_pair` requires it, and a treatment declaration that
   is not exactly that surface — or records a different schema hash —
-  is a finding. The surface is a pure function of lovspor code
-  (corpus-independent: the schemas come from `build_server`, not the
-  documents), so a unit test regenerates the document from the code on
-  every run — against two content-disjoint corpora, since a single
-  fixture could not distinguish corpus-independence from coincidence;
-  it cannot go stale, and changing it is an explicit apparatus
-  decision. Sampling corpora cannot rule out deliberately
-  corpus-conditional registration, and does not have to: a run's
-  declared `tool_config` is computed from the pinned corpus itself
-  (`run_arm.py`), so a surface that diverged on the pinned corpus
-  would disagree with the anchor and fail the gate — the test is the
-  early warning, the gate is the enforcement. Without that anchor,
-  every per-record check read
+  is a finding. The surface is a function of lovspor code and the
+  interpreter, and of nothing else. Corpus-independent: the schemas
+  come from `build_server`, not the documents, so a unit test
+  regenerates the document from the code on every run — against two
+  content-disjoint corpora, since a single fixture could not
+  distinguish corpus-independence from coincidence; it cannot go
+  stale, and changing it is an explicit apparatus decision.
+  Interpreter-dependent, found the hard way (CI matrix, 2026-08-11):
+  tool descriptions come from docstrings, and CPython 3.13 dedents
+  docstrings at compile time, so 3.12 and 3.13 serve genuinely
+  different description bytes and hash differently. The anchor
+  therefore records the apparatus interpreter (`python: "3.12"`); the
+  regeneration test checks the names on every interpreter and the
+  hash only on the apparatus one, and a run made on a different
+  interpreter records a different hash and fails the gate on its own
+  — fail-closed, which is the point. Sampling corpora cannot rule out
+  deliberately corpus-conditional registration, and does not have to:
+  a run's declared `tool_config` is computed from the pinned corpus
+  itself (`run_arm.py`), so a surface that diverged on the pinned
+  corpus would disagree with the anchor and fail the gate — the test
+  is the early warning, the gate is the enforcement. Without that
+  anchor, every per-record check read
   its expectation out of the run's own `tool_config`, and a run
   declaring a subset of the real surface — transcripts agreeing with
   the subset — agreed only with itself and passed. Tool calls are
