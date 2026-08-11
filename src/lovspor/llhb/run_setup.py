@@ -1,10 +1,14 @@
-"""Stage 5 run setup: pilot case selection and run-metadata composition.
+"""Run setup: pilot case selection and run-metadata composition.
 
-Builds the ``run_metadata.schema.json`` document for a control-arm run
-from explicit, verifiable inputs. ``dataset_checksum`` is always the
-SHA-256 over the canonical bytes of the case set actually being run —
-for the pilot that is a slice of discarded candidates, never the frozen
-250, and the ``notes`` field must say so.
+Builds the ``run_metadata.schema.json`` document for one run of either
+condition from explicit, verifiable inputs. ``dataset_checksum`` is
+always the SHA-256 over the canonical bytes of the case set actually
+being run — for the pilot that is a slice of discarded candidates,
+never the frozen 250, and the ``notes`` field must say so.
+
+The condition and the tool configuration are checked against each
+other: a control run that carries a tool config, or a treatment run
+that does not, would describe an experiment nobody ran.
 """
 
 import hashlib
@@ -20,11 +24,12 @@ class RunSetupError(LovsporError):
     """A run cannot be composed from the given inputs."""
 
 
-class ControlRunSpec(BaseModel):
-    """Explicit inputs for one control-arm run's metadata document."""
+class RunSpec(BaseModel):
+    """Explicit inputs for one run's metadata document."""
 
     run_id: str
     model_id: str
+    condition: str
     system_prompt_text: str
     system_prompt_path: str
     lovspor_commit: str
@@ -32,6 +37,7 @@ class ControlRunSpec(BaseModel):
     runner_commit: str
     case_order_seed: int
     started_at: str
+    tool_config: dict[str, Any] | None = None
     notes: str | None = None
 
 
@@ -80,8 +86,19 @@ def verify_frozen_against_lock(frozen_cases: list[dict[str, Any]], lock: dict[st
         raise RunSetupError(f"frozen dataset checksum {checksum} does not match lock {locked}")
 
 
-def compose_control_metadata(spec: ControlRunSpec, cases: list[dict[str, Any]]) -> dict[str, Any]:
-    """A schema-valid run-metadata document for the control condition."""
+def _check_condition(spec: RunSpec) -> None:
+    """Fail closed unless the tool config matches the condition claimed."""
+    if spec.condition not in {"control", "lovspor"}:
+        raise RunSetupError(f"unknown condition {spec.condition!r}")
+    if spec.condition == "control" and spec.tool_config is not None:
+        raise RunSetupError("a control run must carry no tool_config")
+    if spec.condition == "lovspor" and not spec.tool_config:
+        raise RunSetupError("a lovspor run must carry the tool_config it ran with")
+
+
+def compose_run_metadata(spec: RunSpec, cases: list[dict[str, Any]]) -> dict[str, Any]:
+    """A schema-valid run-metadata document for one run."""
+    _check_condition(spec)
     return {
         "run_id": spec.run_id,
         "llhb_version": "1.0",
@@ -89,10 +106,10 @@ def compose_control_metadata(spec: ControlRunSpec, cases: list[dict[str, Any]]) 
         "provider": "anthropic",
         "model_id": spec.model_id,
         "api_version": None,
-        "condition": "control",
+        "condition": spec.condition,
         "system_prompt_sha256": sha256_text(spec.system_prompt_text),
         "system_prompt_path": spec.system_prompt_path,
-        "tool_config": None,
+        "tool_config": spec.tool_config,
         "sampling": {"temperature": None},
         "max_turns": None,
         "started_at": spec.started_at,

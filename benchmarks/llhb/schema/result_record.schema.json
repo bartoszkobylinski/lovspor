@@ -18,13 +18,36 @@
     "completed"
   ],
   "properties": {
-    "run_id": { "type": "string" },
-    "case_id": { "type": "string", "pattern": "^llhb-v1-C[1-8]-[0-9]{3}$" },
-    "provider": { "type": "string", "enum": ["anthropic", "openai", "google"] },
-    "model_id": { "type": "string" },
-    "condition": { "type": "string", "enum": ["control", "lovspor"] },
+    "run_id": {
+      "type": "string"
+    },
+    "case_id": {
+      "type": "string",
+      "pattern": "^llhb-v1-C[1-8]-[0-9]{3}$"
+    },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "anthropic",
+        "openai",
+        "google"
+      ]
+    },
+    "model_id": {
+      "type": "string"
+    },
+    "condition": {
+      "type": "string",
+      "enum": [
+        "control",
+        "lovspor"
+      ]
+    },
     "final_answer": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "The model's final answer text, verbatim. Null only when the case errored before an answer."
     },
     "tool_calls": {
@@ -33,41 +56,93 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["index", "name", "arguments"],
+        "required": [
+          "index",
+          "name",
+          "arguments"
+        ],
         "properties": {
-          "index": { "type": "integer", "minimum": 0 },
-          "name": { "type": "string" },
-          "arguments": { "type": "object" },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "object"
+          },
           "result": {
-            "description": "Full tool result payload when small enough to inline.",
-            "type": ["object", "array", "string", "null"]
+            "type": "null",
+            "description": "Always null. A tool result is regenerable from (tool, arguments, corpus pin), so it is never inlined here (owner ruling #27): result_ref points at the payload beside the run and result_sha256 is what an audit checks it against. The field is constrained rather than removed so records written before the rule, which carry an explicit null, stay valid."
           },
           "result_ref": {
-            "type": ["string", "null"],
-            "description": "Stable reference to the stored payload (path within the run dir) when not inlined."
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^tools/llhb-v1-C[1-8]-[0-9]{3}-[0-9]{3}\\.json$",
+            "description": "Where the payload was stored, as a path inside the run directory. The pattern is the contract: a reference that can point outside the run is not a reference to this run's evidence."
           },
           "result_sha256": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^[0-9a-f]{64}$",
-            "description": "SHA-256 of the canonical JSON payload; always present when result_ref is used."
+            "description": "SHA-256 of the canonical JSON payload. Required together with result_ref and vice versa: a reference with no hash cannot be checked against the payload regenerated from the corpus pin, and a hash with no reference names nothing."
           },
-          "is_error": { "type": "boolean" },
-          "duration_ms": { "type": ["integer", "null"], "minimum": 0 }
+          "is_error": {
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "dependentRequired": {
+          "result_ref": [
+            "result_sha256"
+          ],
+          "result_sha256": [
+            "result_ref"
+          ]
         }
       }
     },
-    "turns": { "type": ["integer", "null"], "minimum": 1 },
+    "turns": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
     "timing": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["started_at", "total_ms"],
+      "required": [
+        "started_at",
+        "total_ms"
+      ],
       "properties": {
-        "started_at": { "type": "string", "format": "date-time" },
-        "total_ms": { "type": "integer", "minimum": 0 }
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "total_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "usage": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "description": "Provider-reported token usage, verbatim shape."
     },
     "truncated": {
@@ -79,11 +154,30 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["stage", "message"],
+        "required": [
+          "stage",
+          "message"
+        ],
         "properties": {
-          "stage": { "type": "string", "enum": ["request", "tool", "parse", "other"] },
-          "message": { "type": "string" },
-          "at": { "type": ["string", "null"], "format": "date-time" }
+          "stage": {
+            "type": "string",
+            "enum": [
+              "request",
+              "tool",
+              "parse",
+              "other"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
         }
       }
     },
@@ -91,12 +185,67 @@
       "type": "boolean",
       "description": "True when a final answer was captured without a fatal error."
     },
+    "harness": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "exposed_tools",
+        "mcp_servers",
+        "permission_denials"
+      ],
+      "description": "The CLI's own account of this case's tool environment, read back from its transcript: what the model was offered, whether the tool backend was up, and what the harness refused. Makes 'the control arm had no tools' checkable instead of asserted (ruling #25). Null for records captured before Stage 6.",
+      "properties": {
+        "exposed_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool names offered to the model. Empty for a valid control case."
+        },
+        "mcp_servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "status"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Condition 'lovspor': every declared server and its connection status. A case whose server was not connected ran without the treatment."
+        },
+        "permission_denials": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "description": "Tool calls the harness blocked. Non-empty means the model was denied a tool it asked for; the case is not a clean measurement of either condition."
+        }
+      }
+    },
     "raw_response_ref": {
-      "type": ["string", "null"],
-      "description": "Path within the run dir to the full raw provider response stream, when retained separately."
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^raw/llhb-v1-C[1-8]-[0-9]{3}\\.json$",
+      "description": "Path within the run dir to the full raw provider response stream, when retained separately. Constrained for the same reason as result_ref: a reference that escapes the run directory does not point at this run."
     },
     "repeat_index": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 1,
       "description": "Set only for stability-subset repeats (METHODOLOGY §5); null for the primary pass."
     }

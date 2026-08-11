@@ -56,7 +56,14 @@
       "description": "Condition 'lovspor' only: transport (native-mcp | function-bridge), tool list, schema hash, backend (local stdio + lovverk checkout path/commit). Null for control.",
       "properties": {
         "transport": { "type": "string", "enum": ["native-mcp", "function-bridge"] },
-        "tools": { "type": "array", "items": { "type": "string" } },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^mcp__lovverk__.+$",
+            "description": "Namespaced mcp__lovverk__<tool>, the surface of the pinned local lovspor server (METHODOLOGY §5). The server name is part of the claim, not decoration: a bare tool name names no server at all, and a tool named for some other server would let a run with no lovspor treatment in it pass the fairness check as soon as that other server connected."
+          }
+        },
         "tool_schema_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "backend": { "type": "string" }
       }

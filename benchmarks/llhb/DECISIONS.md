@@ -195,6 +195,112 @@ Labels follow the notebook convention: every item below is [OWNER-DECISION].
     evidence-driven decision once a real delta and its confidence
     interval exist. Supersedes the 30×3 figure in PROPOSAL §11.
 
+## Open for owner decision — Stage 6 harness findings (2026-08-09)
+
+Not rulings. Two facts measured while building the treatment arm, each
+with a decision attached that is the owner's to make.
+
+**F1 — the Stage 5 pilots ran with development instructions in
+context.** The CLI discovers `CLAUDE.md` upward from its working
+directory, and the sandboxed `HOME` does not stop it (on macOS the
+user-level file is resolved from the real home regardless of `$HOME`).
+Asked directly, a run spawned in the repository answered JA and named
+both `~/.claude/CLAUDE.md` and the project file; the same question from
+an empty sandbox directory answered that it had received only the
+system prompt. Fixed for all future runs by spawning the child inside
+the per-run sandbox. Ruling #26's evidence is about run-to-run variance
+between two runs contaminated identically, so it is unaffected; no
+*answer content* from pilots 1–3 is comparable to a fixed run.
+*Decision needed:* whether the pilot control arm is re-run under the
+fixed harness before the treatment comparison is reported.
+
+**F2 — both arms now use `--output-format stream-json`.** Ruling #25
+says the two conditions run the identical harness with MCP availability
+as the only difference; the previous single-JSON format left the
+control arm's `"tool_calls": []` as an assertion rather than an
+observation. The streaming transcript carries the offered tool list,
+every call and every permission denial, which is what makes "a control
+run showing any tool activity is invalid" checkable. Pilots 1–3 were
+captured under the old format and keep it. *Decision needed:* whether
+this is accepted as the recorded harness for v1, or whether the owner
+wants the format difference itself recorded as a superseding ruling.
+
+**F3 — treatment tool payloads are statutory text, and this repo holds
+none.** Every lovverk tool answers with corpus text, so a committed
+treatment run would move rendered legal text into the engine repo,
+against `CLAUDE.md`. Applied for now: payloads are never inlined into
+`records.jsonl`; each is written to `tools/<case_id>-<index>.json` and
+referenced by `result_ref` + `result_sha256`, and `tools/` and `raw/`
+are gitignored. What stays versioned is the tool name, the exact
+arguments and the payload hash — and because the corpus is pinned,
+(tool, arguments, pin) regenerates the bytes the hash was taken over,
+so the evidence is checkable without duplicating the corpus. The rule
+separates corpus material from model output: a tool payload is
+lovverk's text copied verbatim and is excluded, while a model answer is
+the measurement itself and is versioned even though it quotes
+provisions — a benchmark that dropped the answers would have nothing to
+score.
+*Resolved by ruling #27:* ratified with the rationale changed from
+licensing to regenerability. *Superseded question:* whether treatment
+transcripts are
+benchmark evidence rather than corpus material and may be versioned
+here (which also decides roughly 80–120 MB of artifacts for the full
+matrix, extrapolated from the pilot at ~876 KB per 10 treatment cases).
+
+**F4 — `semantic_search` was unavailable for the first treatment
+pilot.** No `OPENAI_API_KEY` exists on the build machine (both `.env`
+files carry an empty value), so the MCP server serves the tool but
+every call would fail. The runner refuses a treatment run in that state
+unless `--without-semantic-search` is passed, which records the weaker
+surface in `notes`. The pilot ran with 15 of 16 tools usable and the
+model never invoked the sixteenth. *Decision needed:* whether the full
+matrix requires the key (METHODOLOGY §5 assumes embedding-based
+retrieval is available and already records it as an external
+dependency), or whether v1 runs on the deterministic 15.
+
+## Addendum — Stage 6 retention ruling (2026-08-10)
+
+27. **Artifacts are kept by regenerability, not by content.** The
+    earlier framing — "legal text does not live in this repo" — is not
+    defensible as stated: lovverk is public NLOD 2.0 material, and read
+    literally the rule would deny the corpus repo's existence. The
+    constraint in `CLAUDE.md` concerns Lovdata's raw XML and its
+    editorial markup, not statutory text as such. The test that governs
+    LLHB artifacts is instead:
+    **regenerable from `corpus_pin` → not stored; not regenerable →
+    must be stored.** A tool payload is regenerable, since the freeze
+    pins lovverk at `6ec7059d` and (tool, arguments, pin) reproduces
+    the bytes; keeping it in the repo is a duplicate with no
+    evidentiary value. Model output is non-deterministic, so an answer
+    nobody kept is an answer nobody — including us — can re-score
+    later, which would defeat the pre-registration this stage exists to
+    support. Statutory quotes inside model answers therefore stay:
+    redacting them would remove the citation-fidelity measurement,
+    which is one of the things LLHB measures. Applied: `tools/` and
+    `raw/` gitignored, `records.jsonl` and `run-metadata.json`
+    versioned, and the 30 previously tracked `raw/` files from pilots
+    1-3 removed from the index so the rule and the repository agree. The
+    schema gates the rule rather than the writer: `tool_calls[].result`
+    is constrained to null, so no future writer can inline a payload
+    into a versioned record. It is constrained rather than deleted
+    because records already written carry an explicit null and stay
+    valid; deleting the field would have required re-running the pilot
+    a third time to satisfy a stricter shape of the same rule.
+
+28. **The measuring apparatus is frozen until the v1 runs finish.**
+    After the parser hardening, no further change to the runner,
+    driver, orchestrator or fairness gate until the v1 matrix has run.
+    Same discipline as the dataset freeze and for the same reason:
+    anything that changes what is being measured, between the freeze
+    and the measurement, invalidates the description of the experiment.
+    Defects that would make a run produce a wrong number are the only
+    admissible exception, and each is an owner call rather than a
+    judgement made while fixing something else. Improvements that only
+    make the apparatus nicer wait for v2 — including the transcript
+    rewrite considered and declined under #27, which if it ever happens
+    is runner-native at write time, never post-hoc, and lands on the
+    v1→v2 boundary.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,
