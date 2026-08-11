@@ -90,6 +90,14 @@ jobs:
         if: steps.antiloop.outputs.skip != 'true'
         run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
 
+      # Codex output is not always ruff-clean (issue #66): normalize before the
+      # pipeline's own lint gate sees it, and hard-fail on unfixable lint.
+      - name: Normalize and lint Codex output
+        if: steps.antiloop.outputs.skip != 'true'
+        run: |
+          uv run ruff format tests/
+          uv run ruff check tests/
+
       - name: Run tests on Codex additions
         if: steps.antiloop.outputs.skip != 'true'
         run: uv run pytest tests/unit/
