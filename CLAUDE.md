@@ -60,6 +60,21 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 7. **Only the user merges.** Never merge yourself.
 8. After merge: provide deploy + log commands.
 
+### Finding = issue (mandatory)
+
+Any defect found in the pipeline, tooling, or process while working —
+an agent misbehaving, a gate not firing, a workflow gap, a contract not
+honored — is filed as a GitHub issue IMMEDIATELY, in the same session
+it was found: `gh issue create`, evidence inline (run id, commit, exact
+log line), label `agentic-ci` for pipeline defects. A finding reported
+only in chat is a finding lost. The fix PR references the issue; the
+issue is closed by the fix, never by forgetting. This is separate from
+fixing: file first, even when the workaround is already pushed.
+Origin (2026-08-11, PR #64): two pipeline defects — codex-tests pushing
+unformatted commits (#66) and the remediation path not firing on a
+mutation failure (#67) — existed only in a chat transcript until the
+owner mandated this rule.
+
 ## Testing strategy
 
 - `tests/unit/` — fast, isolated, one module at a time. Every public function covered.
