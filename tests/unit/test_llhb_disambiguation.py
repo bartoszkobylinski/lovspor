@@ -68,6 +68,19 @@ class TestVariantPresentation:
 
         assert ambiguity_surfaced(answer) is False
 
+    def test_chapters_with_different_section_ids_are_not_variants(self) -> None:
+        """Two chapters each discussing a DIFFERENT section is a normal
+        walk through the law, not two occurrences of one id
+        (codex-tests round 5): variants share the id they vary on."""
+        answer = "I kapittel 2 står § 1 om virkeområdet. I kapittel 6 står § 9 om tilsyn."
+
+        assert ambiguity_surfaced(answer) is False
+
+    def test_the_same_id_across_two_sentences_still_counts(self) -> None:
+        answer = "I kapittel 2 står § 6-2 om oppsigelse. I kapittel 6 står § 6-2 om tilsyn."
+
+        assert ambiguity_surfaced(answer) is True
+
     def test_two_distinct_occurrence_numbers_count(self) -> None:
         answer = "Tool-svaret nevner occurrence 1 og occurrence 2 for denne id-en."
 

@@ -15,6 +15,7 @@ the scorer's context, not this one's.
 
 import re
 
+from lovspor.headings import SECTION_ID
 from lovspor.llhb.stances import sentence_bounds
 
 DISAMBIGUATION_VERSION = "llhb-disambig-v1"
@@ -46,6 +47,7 @@ AMBIGUITY_CUES = (
 # channel that earns its keep is chapter labels — how an answer lays two
 # same-id sections side by side without ever saying «flere».
 _CHAPTER_LABEL_RE = re.compile(r"kapittel\s+([0-9a-zæøå]+(?:-[0-9a-zæøå]+)?)", re.IGNORECASE)
+_SECTION_REF_RE = re.compile(rf"§\s*({SECTION_ID.pattern})")
 # Two same-id sections laid side by side are the smallest set of variants
 # an answer can present.
 _VARIANT_MINIMUM = 2
@@ -55,19 +57,23 @@ def ambiguity_surfaced(answer: str) -> bool:
     """True when the answer surfaced the ambiguity in any frozen form."""
     if any(cue in answer.casefold() for cue in AMBIGUITY_CUES):
         return True
-    return _distinct_near_sections(_CHAPTER_LABEL_RE, answer) >= _VARIANT_MINIMUM
+    return _chapters_sharing_an_id(answer) >= _VARIANT_MINIMUM
 
 
-def _distinct_near_sections(pattern: re.Pattern[str], answer: str) -> int:
-    """Distinct labels, counted only in sentences that mention a « § ».
+def _chapters_sharing_an_id(answer: str) -> int:
+    """Most chapters any one section id is laid out across.
 
-    Chapters named as narrative structure («Kapittel 1 gir bakgrunnen»)
-    are not two occurrences of one section id; laying variants side by
-    side means naming the section in the same breath as each label.
+    Variants share the id they vary on: «kapittel 2 … § 6-2» beside
+    «kapittel 6 … § 6-2» presents two occurrences of one section, while
+    two chapters each discussing a different section — or named as bare
+    narrative structure — is a normal walk through the law. Each chapter
+    label pairs with the section ids of its own sentence.
     """
-    labels = set()
-    for match in pattern.finditer(answer):
+    chapters_by_id: dict[str, set[str]] = {}
+    for match in _CHAPTER_LABEL_RE.finditer(answer):
         start, end = sentence_bounds(answer, match.start())
-        if "§" in answer[start:end]:
-            labels.add(match.group(1).casefold())
-    return len(labels)
+        for reference in _SECTION_REF_RE.finditer(answer, start, end):
+            chapters_by_id.setdefault(reference.group(1), set()).add(match.group(1).casefold())
+    if not chapters_by_id:
+        return 0
+    return max(len(chapters) for chapters in chapters_by_id.values())
