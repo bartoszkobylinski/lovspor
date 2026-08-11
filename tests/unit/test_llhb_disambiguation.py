@@ -83,3 +83,11 @@ class TestContract:
 
     def test_an_empty_answer_is_not_surfaced(self) -> None:
         assert ambiguity_surfaced("") is False
+
+
+class TestEveryCueIsLive:
+    @pytest.mark.parametrize("cue", AMBIGUITY_CUES)
+    def test_each_frozen_cue_detects_on_its_own(self, cue: str) -> None:
+        """The list is frozen evaluator surface: a cue nobody exercises is
+        a cue a mutation can corrupt without a test noticing."""
+        assert ambiguity_surfaced(f"Svaret nevner {cue} i denne sammenhengen.") is True

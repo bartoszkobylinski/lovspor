@@ -6,6 +6,8 @@ verbatim-marker cue. Detection is pure text work — verification against
 the pinned corpus happens in the scorer, not here.
 """
 
+import pytest
+
 from lovspor.llhb.citations import ExtractedCitation
 from lovspor.llhb.quote_detection import (
     QUOTE_DETECTION_VERSION,
@@ -155,3 +157,15 @@ class TestContract:
 
     def test_an_empty_answer_detects_nothing(self) -> None:
         assert detect_quotes("", []) == []
+
+
+class TestEveryCueIsLive:
+    @pytest.mark.parametrize("cue", VERBATIM_CUES)
+    def test_each_frozen_cue_introduces_a_quote(self, cue: str) -> None:
+        """Same reason as the ambiguity-cue sweep: frozen evaluator
+        surface, every entry exercised on its own."""
+        answer = f"Testloven § 1 {cue}: Slik tekst star her. Neste setning."
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.via_cue for quote in quotes] == [cue]
+        assert quotes[0].text == "Slik tekst star her."
