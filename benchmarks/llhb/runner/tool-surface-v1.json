@@ -1,0 +1,24 @@
+{
+  "description": "Frozen LLHB v1 treatment surface: the tool names and schema hash the pinned local `lovspor mcp` server serves. The surface is a pure function of lovspor code (corpus-independent), so a unit test regenerates this document from the code on every run; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads it as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() at lovspor 4f75080bd9dec6e31e999d3014094d55d1442771",
+  "server": "lovverk",
+  "tool_schema_sha256": "74bf6f11d8695c0fe8b4d71d1910a6228f77cec0618900af581782c86460d955",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

@@ -59,11 +59,27 @@ class RunArtifacts(BaseModel):
     records: list[dict[str, Any]]
 
 
-def check_pair(control: RunArtifacts, treatment: RunArtifacts) -> list[str]:
+class ExpectedSurface(BaseModel, frozen=True):
+    """The apparatus surface this benchmark version froze.
+
+    Loaded from a committed document (``runner/tool-surface-v1.json``)
+    that a test regenerates from the code on every run, never from the
+    run under judgment: the one thing the previous checks still trusted
+    was the run's own account of what it offered.
+    """
+
+    tools: tuple[str, ...]
+    tool_schema_sha256: str
+
+
+def check_pair(
+    control: RunArtifacts, treatment: RunArtifacts, expected: ExpectedSurface
+) -> list[str]:
     """Every way this pair fails to be a fair control-treatment comparison."""
     declared = (treatment.metadata.get("tool_config") or {}).get("tools") or []
     return [
         *compare_run_metadata(control.metadata, treatment.metadata),
+        *frozen_surface_violations(treatment.metadata, expected),
         *coverage_violations(control, "control"),
         *coverage_violations(treatment, "treatment"),
         *identity_violations(control, "control"),
@@ -253,8 +269,58 @@ def treatment_violations(records: list[dict[str, Any]], declared_tools: Sequence
     problems = [] if declared else ["treatment run declares no tool surface in tool_config.tools"]
     problems.extend(_declared_surface_violations(declared))
     for record in records:
-        problems.extend(_harness_violations(record, str(record.get("case_id")), declared))
+        case_id = str(record.get("case_id"))
+        problems.extend(_harness_violations(record, case_id, declared))
+        problems.extend(_undeclared_call_violations(record, case_id, declared))
     return problems
+
+
+def frozen_surface_violations(
+    treatment_metadata: dict[str, Any], expected: ExpectedSurface
+) -> list[str]:
+    """The declared surface, checked against the frozen apparatus.
+
+    Every per-record check reads its expectation out of the run's own
+    ``tool_config``, so a run that declared a subset of the real surface
+    — and whose transcripts agree with that subset — agreed only with
+    itself. The frozen surface is the first fact in this module that the
+    run being judged had no hand in.
+    """
+    config = treatment_metadata.get("tool_config") or {}
+    declared = sorted(str(name) for name in config.get("tools") or [])
+    problems = []
+    if declared != sorted(expected.tools):
+        missing = sorted(set(expected.tools) - set(declared))
+        extra = sorted(set(declared) - set(expected.tools))
+        problems.append(
+            "treatment run declares a surface that is not the frozen apparatus "
+            f"surface (missing {missing}, unexpected {extra})"
+        )
+    recorded = config.get("tool_schema_sha256")
+    if recorded != expected.tool_schema_sha256:
+        problems.append(
+            f"treatment run records tool_schema_sha256 {recorded!r}, but the frozen "
+            f"apparatus surface hashes to {expected.tool_schema_sha256!r}"
+        )
+    return problems
+
+
+def _undeclared_call_violations(
+    record: dict[str, Any], case_id: str, declared: tuple[str, ...]
+) -> list[str]:
+    """Calls the transcript shows to tools the run never declared.
+
+    The offered-surface comparison sees what the harness listed, not
+    what the model reached: a record whose calls name tools outside the
+    declared surface is evidence the surface description is false,
+    whichever of the two documents is lying.
+    """
+    calls = record.get("tool_calls") or []
+    named = {str(call.get("name")) for call in calls if isinstance(call, dict)}
+    undeclared = sorted(named - set(declared))
+    if undeclared:
+        return [f"{case_id}: called tool(s) {undeclared} outside the declared surface"]
+    return []
 
 
 def _declared_surface_violations(declared: tuple[str, ...]) -> list[str]:

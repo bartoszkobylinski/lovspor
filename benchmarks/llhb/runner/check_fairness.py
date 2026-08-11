@@ -16,13 +16,16 @@ import json
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from lovspor.errors import LovsporError
-from lovspor.llhb.fairness import RunArtifacts, check_pair
+from lovspor.llhb.fairness import ExpectedSurface, RunArtifacts, check_pair
 from lovspor.llhb.schema import load_schema, validate_case
 
 LLHB_DIR = Path(__file__).resolve().parents[1]
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
 SCHEMA_DIR = LLHB_DIR / "schema"
+SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v1.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -63,11 +66,27 @@ def _check(label: str, document: dict[str, object], schema_name: str) -> None:
         raise LovsporError(f"{label} is not schema-valid: " + "; ".join(errors))
 
 
+def load_expected_surface(path: Path) -> ExpectedSurface:
+    """The frozen apparatus surface: what a treatment run must declare.
+
+    A unit test regenerates this document from the code, so reading it
+    here is reading the code's own account, not the run's.
+    """
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        return ExpectedSurface(
+            tools=tuple(document["tools"]),
+            tool_schema_sha256=document["tool_schema_sha256"],
+        )
+    except (OSError, ValueError, KeyError, TypeError, ValidationError) as exc:
+        raise LovsporError(f"cannot read the frozen tool surface at {path}: {exc}") from exc
+
+
 def main() -> int:
     args = parse_args()
     control = load_run(args.runs_root, args.control)
     treatment = load_run(args.runs_root, args.treatment)
-    problems = check_pair(control, treatment)
+    problems = check_pair(control, treatment, load_expected_surface(SURFACE_PATH))
     cases = f"{len(control.records)} control / {len(treatment.records)} treatment records"
     if not problems:
         print(f"fair: {args.control} vs {args.treatment} ({cases})")

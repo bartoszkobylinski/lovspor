@@ -8,12 +8,14 @@ import pytest
 
 from lovspor.llhb import fairness as fairness_module
 from lovspor.llhb.fairness import (
+    ExpectedSurface,
     RunArtifacts,
     bookkeeping_violations,
     check_pair,
     compare_run_metadata,
     control_violations,
     coverage_violations,
+    frozen_surface_violations,
     identity_violations,
     paired_case_violations,
     paired_completion_violations,
@@ -27,6 +29,9 @@ TOOL_CONFIG = {
     "tool_schema_sha256": "c" * 64,
     "backend": "local stdio",
 }
+# The frozen apparatus surface the fixtures agree with; tests that need a
+# disagreement override one side or the other.
+EXPECTED = ExpectedSurface(tools=("mcp__lovverk__get_section",), tool_schema_sha256="c" * 64)
 
 
 def metadata(**overrides: Any) -> dict[str, Any]:
@@ -306,7 +311,7 @@ class TestDeclaredSurface:
         empty = {"exposed_tools": [], "mcp_servers": [], "permission_denials": []}
 
         problems = treatment_violations(
-            [treatment_record("llhb-v1-C1-001", harness=empty)], declared_tools=[]
+            [treatment_record("llhb-v1-C1-001", harness=empty, tool_calls=[])], declared_tools=[]
         )
 
         # With nothing declared there is no server to name, so the missing
@@ -326,7 +331,7 @@ class TestDeclaredSurface:
             ],
         )
 
-        assert check_pair(control, treatment) != []
+        assert check_pair(control, treatment, EXPECTED) != []
 
 
 class TestPairedCompletion:
@@ -408,7 +413,7 @@ class TestCoverage:
         empty_control = RunArtifacts(metadata=metadata(cases_total=0), records=[])
         empty_treatment = RunArtifacts(metadata=treatment_metadata(cases_total=0), records=[])
 
-        problems = check_pair(empty_control, empty_treatment)
+        problems = check_pair(empty_control, empty_treatment, EXPECTED)
 
         assert "control run has no records, so the pair compares nothing" in problems
         assert "treatment run has no records, so the pair compares nothing" in problems
@@ -517,7 +522,7 @@ class TestCheckPair:
             records=[treatment_record("llhb-v1-C1-001")],
         )
 
-        assert check_pair(control, treatment) == []
+        assert check_pair(control, treatment, EXPECTED) == []
 
     def test_collects_findings_from_every_layer(self) -> None:
         control = RunArtifacts(
@@ -531,7 +536,7 @@ class TestCheckPair:
             records=[treatment_record("llhb-v1-C9-999")],
         )
 
-        problems = check_pair(control, treatment)
+        problems = check_pair(control, treatment, EXPECTED)
 
         assert any("case_order_seed differs" in problem for problem in problems)
         assert any("never ran case(s)" in problem for problem in problems)
@@ -627,7 +632,7 @@ class TestBookkeeping:
             records=[treatment_record("llhb-v1-C1-001")],
         )
 
-        assert check_pair(control, treatment) != []
+        assert check_pair(control, treatment, EXPECTED) != []
 
 
 class TestNamedServer:
@@ -671,6 +676,7 @@ class TestNamedServer:
         connection at all, graded as a fair comparison."""
         record = treatment_record(
             "llhb-v1-C1-001",
+            tool_calls=[],
             harness={
                 "exposed_tools": ["get_section"],
                 "mcp_servers": [],
@@ -720,7 +726,7 @@ class TestNamedServer:
             records=[treatment_record("llhb-v1-C1-001", harness=harness)],
         )
 
-        assert check_pair(control, treatment) != []
+        assert check_pair(control, treatment, EXPECTED) != []
 
     def test_a_declared_tool_of_another_server_is_a_finding(self) -> None:
         """The whole surface renamed to another server, with that server
@@ -728,6 +734,7 @@ class TestNamedServer:
         lovspor treatment in it — the server name is part of the claim."""
         record = treatment_record(
             "llhb-v1-C1-001",
+            tool_calls=[],
             harness={
                 "exposed_tools": ["mcp__decoy__get_section"],
                 "mcp_servers": [{"name": "decoy", "status": "connected"}],
@@ -764,7 +771,7 @@ class TestNamedServer:
             records=[treatment_record("llhb-v1-C1-001", harness=harness)],
         )
 
-        assert check_pair(control, treatment) != []
+        assert check_pair(control, treatment, EXPECTED) != []
 
     def test_the_server_name_is_the_one_the_runner_serves(self) -> None:
         """Duplicated rather than imported, because mcp_surface pulls in the
@@ -787,3 +794,95 @@ class TestNamedServer:
         committed = schema["properties"]["tool_config"]["properties"]["tools"]["items"]["pattern"]
 
         assert committed == f"^mcp__{fairness_module._SERVER_NAME}__.+$"
+
+
+class TestFrozenSurface:
+    """The declaration is compared against the frozen apparatus, not
+    believed. Every per-record check reads its expectation out of the
+    run's own tool_config, so before this check a run declaring a subset
+    of the real surface — transcripts agreeing with the subset — agreed
+    only with itself and passed."""
+
+    WIDE = ExpectedSurface(
+        tools=("mcp__lovverk__get_section", "mcp__lovverk__search_laws"),
+        tool_schema_sha256="c" * 64,
+    )
+
+    def test_a_declared_subset_of_the_apparatus_is_a_finding(self) -> None:
+        problems = frozen_surface_violations(treatment_metadata(), self.WIDE)
+
+        assert problems == [
+            "treatment run declares a surface that is not the frozen apparatus "
+            "surface (missing ['mcp__lovverk__search_laws'], unexpected [])"
+        ]
+
+    def test_a_declared_superset_is_the_same_finding(self) -> None:
+        config = {**TOOL_CONFIG, "tools": [*TOOL_CONFIG["tools"], "mcp__lovverk__get_law"]}
+
+        problems = frozen_surface_violations(treatment_metadata(tool_config=config), EXPECTED)
+
+        assert any("unexpected ['mcp__lovverk__get_law']" in problem for problem in problems)
+
+    def test_a_recorded_hash_that_is_not_the_apparatus_hash_is_a_finding(self) -> None:
+        config = {**TOOL_CONFIG, "tool_schema_sha256": "d" * 64}
+
+        problems = frozen_surface_violations(treatment_metadata(tool_config=config), EXPECTED)
+
+        assert len(problems) == 1
+        assert "tool_schema_sha256" in problems[0]
+
+    def test_the_declared_apparatus_surface_passes(self) -> None:
+        assert frozen_surface_violations(treatment_metadata(), EXPECTED) == []
+
+    def test_a_subset_pair_that_agrees_with_itself_is_not_fair(self) -> None:
+        """The Codex repro: metadata narrowed to one tool, every harness
+        narrowed to the same one, server connected. Internally consistent,
+        and not the treatment the benchmark froze."""
+        control = RunArtifacts(
+            metadata=metadata(cases_total=1, cases_completed=1),
+            records=[record("llhb-v1-C1-001")],
+        )
+        treatment = RunArtifacts(
+            metadata=treatment_metadata(cases_total=1, cases_completed=1),
+            records=[treatment_record("llhb-v1-C1-001")],
+        )
+
+        assert check_pair(control, treatment, self.WIDE) != []
+
+
+class TestUndeclaredCalls:
+    def test_a_call_outside_the_declared_surface_is_a_finding(self) -> None:
+        """The offered-surface check sees what the harness listed, not what
+        the model reached; the calls themselves are the other witness."""
+        stray = treatment_record(
+            "llhb-v1-C1-001",
+            tool_calls=[{"index": 0, "name": "mcp__lovverk__search_laws", "arguments": {}}],
+        )
+
+        problems = treatment_violations([stray], TOOL_CONFIG["tools"])
+
+        assert problems == [
+            "llhb-v1-C1-001: called tool(s) ['mcp__lovverk__search_laws'] "
+            "outside the declared surface"
+        ]
+
+    def test_calls_within_the_declared_surface_pass(self) -> None:
+        assert (
+            treatment_violations([treatment_record("llhb-v1-C1-001")], TOOL_CONFIG["tools"]) == []
+        )
+
+    def test_an_errored_case_with_stray_calls_is_still_a_finding(self) -> None:
+        """A case that errored is exempt from harness evidence, not from
+        this: the calls it made were still made."""
+        stray = treatment_record(
+            "llhb-v1-C1-001",
+            completed=False,
+            harness=None,
+            tool_calls=[{"index": 0, "name": "mcp__lovverk__get_law", "arguments": {}}],
+        )
+
+        problems = treatment_violations([stray], TOOL_CONFIG["tools"])
+
+        assert problems == [
+            "llhb-v1-C1-001: called tool(s) ['mcp__lovverk__get_law'] outside the declared surface"
+        ]

@@ -26,6 +26,7 @@ freeze datasets, call models, or score runs.
 | `claude_cli.py` | Claude Code CLI driver for both conditions: exact `claude -p` argv, stream-json transcript parsing (tool trace + harness evidence), schema-valid record assembly. Contract below. |
 | `orchestrator.py` | Run orchestrator for both conditions: hermetic whitelist env (API key banned, HOME sandbox) and sandbox working directory, seeded case order, per-case CLI execution with timeout-as-result, raw transcript retention, tool-payload spill, ResultsStore integration. Contract below. |
 | `mcp_surface.py` | Stage 6 treatment surface: `--mcp-config` document for the pinned lovverk stdio server, tool names + tool-schema SHA-256 read from the server itself, run-metadata `tool_config`. Contract below. |
+| `tool-surface-v1.json` | Frozen LLHB v1 apparatus surface: the tool names + schema hash the server serves, committed as the expectation `check_fairness.py` compares a run's declared `tool_config` against. Regenerated from the code by a unit test on every run, so it cannot drift; a deliberate change to the served surface means regenerating it as an explicit apparatus decision. |
 | `fairness.py` | Stage 6 fairness checks over committed artifacts: metadata diff against an explicit may-differ list, paired case sets, per-record control/treatment violations. Contract below. |
 
 ## Extractor syntax (closed contract)
@@ -434,12 +435,26 @@ Driven by the Stage 3.5 human audit (see
   `mcp_surface.SERVER_NAME`, which the module cannot import without
   pulling in the whole MCP server) and a literal in the schema pattern;
   tests tie all three together, and one more asserts every tool
-  `mcp_surface` actually serves satisfies that pattern. What the module
-  cannot check from artifacts alone is that the surface *behind* the
-  name was the pinned corpus: `tool_schema_sha256` is recorded, but
-  verifying it needs the server. That is checked at run time instead —
-  `verify_server_command` fails closed unless the executable is this
-  environment's entry point. A
+  `mcp_surface` actually serves satisfies that pattern. The declared
+  surface itself is compared against a fact the run had no hand in:
+  `runner/tool-surface-v1.json` freezes the apparatus surface (the 16
+  namespaced tool names and the tool-schema SHA-256 the pinned server
+  serves), `check_pair` requires it, and a treatment declaration that
+  is not exactly that surface — or records a different schema hash —
+  is a finding. The surface is a pure function of lovspor code
+  (corpus-independent: the schemas come from `build_server`, not the
+  documents), so a unit test regenerates the document from the code on
+  every run; it cannot go stale, and changing it is an explicit
+  apparatus decision. Without that anchor, every per-record check read
+  its expectation out of the run's own `tool_config`, and a run
+  declaring a subset of the real surface — transcripts agreeing with
+  the subset — agreed only with itself and passed. Tool calls are
+  checked against the declaration too: a record that called a tool the
+  run never declared is a finding, whichever of the two documents is
+  lying. What the module still cannot check from artifacts alone is
+  that the executable *behind* the name served that surface at run
+  time; `verify_server_command` fails closed on that when the run is
+  made, not when it is judged. A
   completed case with no `harness` block is itself a finding, and so is
   a treatment run declaring no surface at all. The surface comparison is
   by name, not by count: a run that offered a different tool of the same
