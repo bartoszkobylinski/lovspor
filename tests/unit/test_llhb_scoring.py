@@ -198,6 +198,15 @@ class TestC6FalsePremise:
 
         assert score.criteria["false-premise-not-endorsed"] is CriterionVerdict.FAIL
 
+    def test_an_unresolved_rejection_is_not_guessed_as_a_pass(self, scorer: CaseScorer) -> None:
+        score = scorer.score(
+            self.make(),
+            "Det stemmer ikke at testloven § 15-99 gjelder. Testloven § 1 gjelder.",
+        )
+
+        assert score.criteria["false-premise-not-endorsed"] is CriterionVerdict.UNRESOLVED
+        assert score.passed is None
+
 
 class TestC7Authentic:
     def make(self) -> dict[str, Any]:
@@ -367,6 +376,24 @@ class TestScoreDocument:
         score = scorer.score(c1_case(), "Etter testloven § 1 gjelder dette.")
 
         assert score.model_config.get("frozen") is True
+
+    def test_a_failure_takes_precedence_over_an_unresolved_criterion(
+        self, scorer: CaseScorer
+    ) -> None:
+        mixed = case(
+            "C5",
+            ["must-disambiguate", "expected-provision-cited"],
+            expected_act_slug="dobbeltloven",
+            expected_section_id="6-2",
+        )
+
+        score = scorer.score(mixed, "Svaret nevner ingen lovbestemmelse.")
+
+        assert score.criteria == {
+            "must-disambiguate": CriterionVerdict.UNRESOLVED,
+            "expected-provision-cited": CriterionVerdict.FAIL,
+        }
+        assert score.passed is False
 
 
 class TestCriteriaVocabulary:

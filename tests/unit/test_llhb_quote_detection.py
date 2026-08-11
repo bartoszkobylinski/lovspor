@@ -147,6 +147,18 @@ class TestVerbatimCues:
 
         assert detect_quotes(answer, [citation(answer, "§ 1")]) == []
 
+    def test_a_cue_with_no_text_after_the_colon_detects_nothing(self) -> None:
+        answer = "Testloven § 1 lyder:   "
+
+        assert detect_quotes(answer, [citation(answer, "§ 1")]) == []
+
+    def test_cue_detection_is_case_insensitive(self) -> None:
+        answer = "Testloven § 1 LYDER: Loven gjelder. Neste setning."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [(quote.text, quote.via_cue) for quote in quotes] == [("Loven gjelder.", "lyder")]
+
     def test_the_cue_list_is_the_frozen_one(self) -> None:
         assert VERBATIM_CUES == ("lyder", "ordlyd", "heter det")
 
