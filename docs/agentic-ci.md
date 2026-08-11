@@ -58,6 +58,12 @@ raw log) uploads on PASS and FAIL.
   production code. Label `needs-implementation-fix`; human relays to local Claude.
 - Ambiguous/equivalent mutants → `needs-human:mutation`. BLOCKED is a valid end state,
   never to be silenced by weakening tests or thresholds.
+- Codex output is normalized (`ruff format` + `ruff check` on `tests/`) before commit in
+  both workflows, so the agent can never trip the pipeline's own lint gate (issue #66).
+- If the PR branch advances while remediation is running, its rejected push is abandoned
+  as superseded — the new head's own pipeline owns mutation from there. Any other
+  remediation failure escalates itself: `needs-human:mutation` + a comment linking the
+  failed run. A remediation run never dies silently (issue #67).
 
 ## Infrastructure
 

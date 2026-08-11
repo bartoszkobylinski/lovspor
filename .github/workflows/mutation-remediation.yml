@@ -129,6 +129,14 @@ jobs:
         if: steps.cycle.outputs.run == 'true'
         run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
 
+      # Codex output is not always ruff-clean (issue #66): normalize before the
+      # pipeline's own lint gate sees it, and hard-fail on unfixable lint.
+      - name: Normalize and lint Codex output
+        if: steps.cycle.outputs.run == 'true'
+        run: |
+          uv run ruff format tests/
+          uv run ruff check tests/
+
       - name: Run tests on Codex additions
         if: steps.cycle.outputs.run == 'true'
         run: uv run pytest tests/unit/
@@ -148,6 +156,25 @@ jobs:
           git config user.email "codex-ci@users.noreply.github.com"
           git add -A
           git commit -m "test: kill mutation survivors for PR #${{ steps.cycle.outputs.pr }} [agent:codex-mutation]"
-          git push origin "HEAD:$HEAD_BRANCH"
+          # Issue #67: the branch can advance during a long Codex run. A rejected
+          # push for a superseded head is benign — the new head's own pipeline
+          # owns mutation now. Any other push failure is a real error.
+          if ! git push origin "HEAD:$HEAD_BRANCH"; then
+            git fetch -q origin "$HEAD_BRANCH"
+            if [ "$(git rev-parse "origin/$HEAD_BRANCH")" != "$HEAD_SHA" ]; then
+              echo "branch advanced past $HEAD_SHA while remediating — abandoning superseded result"
+              exit 0
+            fi
+            exit 1
+          fi
           gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
             "Mutation gate failed; remediation cycle $(( ${{ steps.cycle.outputs.count }} + 1 ))/2 pushed test-only changes; pipeline rerunning."
+
+      # Issue #67: a remediation job that dies mid-run must never fail silently —
+      # the escalation contract (label + comment) applies to the failure itself.
+      - name: Escalate on remediation failure
+        if: failure() && steps.cycle.outputs.pr != ''
+        run: |
+          gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
+          gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
+            "Mutation remediation run FAILED before completing its escalation path. Human review required: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
