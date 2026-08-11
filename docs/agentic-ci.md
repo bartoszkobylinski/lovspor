@@ -30,10 +30,13 @@ PR opened/synchronize
 No numeric score threshold exists or was added. The gate in `mutation-result.json`:
 
 - `mutation not applicable` (no `src/lovspor/` changes) → **PASS**, reason `not_applicable`
-- zero survivors → **PASS**
-- any survivor → **FAIL** → Codex remediation (≤ 2 `[agent:codex-mutation]` cycles) →
-  then `needs-human:mutation` + BLOCKED. This automates the previous manual practice of
-  Codex investigating survivors and proposing killer tests.
+- everything killed → **PASS**
+- survived / timed-out / suspicious mutants each → **FAIL** (reasons `surviving_mutants`,
+  `timeout_mutants`, `suspicious_mutants`) — mirrors mutmut's own exit-code bits
+  (2/4/8 in `mutmut.compute_exit_code`); the score counts only 🎉 killed, so timeout and
+  suspicious never inflate it. Gate FAIL → Codex remediation (≤ 2 `[agent:codex-mutation]`
+  cycles) → then `needs-human:mutation` + BLOCKED. This automates the previous manual
+  practice of Codex investigating survivors and proposing killer tests.
 
 `mutation-result.json` (schema_version 1) is bound to the exact PR head SHA; a stale
 result is ignored by the remediation workflow. Artifact `mutation-result-<SHA>` (JSON +

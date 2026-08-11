@@ -6,9 +6,12 @@ policy. `mutation_gate.py` just reads the result. Policy mirrors the existing
 lovspor practice (no numeric threshold was ever set, decisions.md §9c):
 
 - "mutation not applicable" (release/packaging/docs PRs) is a valid PASS outcome;
-- any surviving mutant fails the gate, which routes the PR to Codex remediation
-  and, after two cycles, to a human — the automated form of "investigate
-  survived mutants in critical paths" from AGENTS.md.
+- surviving, timed-out, and suspicious mutants each fail the gate, mirroring
+  mutmut's own exit-code bits (2 survived / 4 timeout / 8 suspicious — see
+  mutmut.compute_exit_code); survivors route the PR to Codex remediation and,
+  after two cycles, to a human — the automated form of "investigate survived
+  mutants in critical paths" from AGENTS.md. Suspicious mutants are never
+  folded into the killed count (CLAUDE.md testing strategy).
 """
 
 from __future__ import annotations
@@ -65,12 +68,16 @@ def compute_gate(
 ) -> dict[str, object]:
     if not_applicable:
         return {"passed": True, "reason": "not_applicable"}
-    if not baseline_ok:
-        return {"passed": False, "reason": "baseline_tests_failed"}
-    if not completed:
-        return {"passed": False, "reason": "run_incomplete"}
-    if counts["survived"] > 0:
-        return {"passed": False, "reason": "surviving_mutants"}
+    failures = (
+        (not baseline_ok, "baseline_tests_failed"),
+        (not completed, "run_incomplete"),
+        (counts["survived"] > 0, "surviving_mutants"),
+        (counts["timeout"] > 0, "timeout_mutants"),
+        (counts["invalid"] > 0, "suspicious_mutants"),
+    )
+    for failed, reason in failures:
+        if failed:
+            return {"passed": False, "reason": reason}
     return {"passed": True, "reason": "ok"}
 
 
@@ -92,8 +99,9 @@ def main() -> int:
     baseline_ok = BASELINE_FAILED not in raw.lower()
     counts, run_finished = parse_counts(raw)
     completed = not_applicable or run_finished
-    killed_like = counts["killed"] + counts["timeout"]
-    score = round(100.0 * killed_like / counts["total"], 2) if counts["total"] else 100.0
+    # Pessimistic score: only 🎉 counts as killed. Timeout and suspicious fail
+    # the gate anyway (mutmut exit bits 4 and 8), so they never inflate the score.
+    score = round(100.0 * counts["killed"] / counts["total"], 2) if counts["total"] else 100.0
 
     result = {
         "schema_version": SCHEMA_VERSION,
