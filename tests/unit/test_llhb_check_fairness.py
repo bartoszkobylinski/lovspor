@@ -154,9 +154,9 @@ def test_frozen_finding_fails_the_gate_even_when_the_pair_itself_is_fair(
     monkeypatch.setattr(
         check_fairness,
         "frozen_violations",
-        lambda _run, label, _expected: [f"{label} is off the frozen pin"]
-        if label == "treatment"
-        else [],
+        lambda _run, label, _expected: (
+            [f"{label} is off the frozen pin"] if label == "treatment" else []
+        ),
     )
 
     assert check_fairness.main() == 1
