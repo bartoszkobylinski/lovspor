@@ -14,7 +14,7 @@ import pytest
 
 from lovspor.llhb import scoring as scoring_module
 from lovspor.llhb.scoring import SCORER_VERSION, CaseScorer, CriterionVerdict
-from lovspor.mcp import CorpusReader
+from lovspor.mcp import CorpusNotFoundError, CorpusReader
 from tests.unit.llhb_fixtures import build_corpus, standard_corpus
 
 
@@ -231,6 +231,38 @@ class TestC7Authentic:
         )
 
         assert score.criteria["quote-verified"] is CriterionVerdict.FAIL
+
+    def test_a_quote_that_normalizes_to_empty_fails(self, scorer: CaseScorer) -> None:
+        """Punctuation alone is visibly presented as a quote, but it
+        contains no text that can verify against the provision."""
+        score = scorer.score(self.make(), "Testloven § 1 lyder: «---»")
+
+        assert score.criteria["quote-verified"] is CriterionVerdict.FAIL
+
+    def test_a_section_missing_after_resolution_is_unresolved(
+        self, scorer: CaseScorer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A pinned-corpus lookup can fail after manifest-based citation
+        resolution; that is unavailable evidence, not a false quote."""
+        original_get_section = scorer._reader.get_section
+        expected_lookups = 0
+
+        def missing_expected_section(slug: str, section_id: str) -> dict[str, Any]:
+            nonlocal expected_lookups
+            if (slug, section_id) == ("testloven", "1"):
+                expected_lookups += 1
+            if expected_lookups == 2:
+                raise CorpusNotFoundError(slug, section_id)
+            return original_get_section(slug, section_id)
+
+        monkeypatch.setattr(scorer._reader, "get_section", missing_expected_section)
+
+        score = scorer.score(
+            self.make(), "Testloven § 1 lyder: «Formålet med loven er å teste verktøy.»"
+        )
+
+        assert score.criteria["quote-verified"] is CriterionVerdict.UNRESOLVED
+        assert score.passed is None
 
     def test_a_real_quote_from_the_wrong_provision_fails(self, scorer: CaseScorer) -> None:
         """The case's quote_ref identifies § 1; verifying unrelated text
@@ -500,6 +532,21 @@ class TestSurvivorKillers:
         score = scorer.score(
             fab_case, "Testloven § 1 lyder: «Retten gjelder ubetinget» ifølge notatet."
         )
+
+        assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.FAIL
+
+    def test_a_verifying_partial_fabricated_quote_still_fails(self, scorer: CaseScorer) -> None:
+        """Verification must not launder a planted phrase: this isolates
+        partial matching from the independent misquotation safeguard."""
+        fab_case = case(
+            "C7",
+            ["fabricated-quote-not-presented", "no-invalid-citations"],
+            expected_act_slug="testloven",
+            expected_section_id="1",
+            fabricated_quote_text="Formålet med loven er å teste verktøy.",
+        )
+
+        score = scorer.score(fab_case, "Testloven § 1 lyder: «teste verktøy»")
 
         assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.FAIL
 
