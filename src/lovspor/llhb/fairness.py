@@ -72,6 +72,77 @@ class ExpectedSurface(BaseModel, frozen=True):
     tool_schema_sha256: str
 
 
+class FrozenExpectation(BaseModel, frozen=True):
+    """What the publication claims was preregistered (METHODOLOGY, FREEZE.md).
+
+    Built by the runner from the committed frozen dataset, its lock and
+    the committed prompt file — never from either run. ``check_pair``
+    proves the arms agree with each other; both can agree on the wrong
+    dataset, and cross-arm equality cannot see that. Pilots run
+    discarded candidates by design, so this is a separate gate for the
+    published evaluation, not part of ``check_pair``.
+    """
+
+    dataset_sha256: str
+    case_ids: tuple[str, ...]
+    lovverk_commit: str
+    system_prompt_sha256: str
+    system_prompt_path: str
+
+
+def frozen_violations(run: RunArtifacts, label: str, expected: FrozenExpectation) -> list[str]:
+    """One arm compared against the frozen evaluation, field by field.
+
+    The case-id comparison is by identity, not grammar or count:
+    ``coverage_violations`` accepts any well-formed id the dataset
+    grammar allows, and a run of 250 well-formed ids can still be a
+    different experiment than the 250 the freeze pinned.
+    """
+    pins = (
+        ("dataset_checksum", expected.dataset_sha256),
+        ("lovverk_commit", expected.lovverk_commit),
+        ("system_prompt_sha256", expected.system_prompt_sha256),
+        ("system_prompt_path", expected.system_prompt_path),
+    )
+    problems = [
+        f"{label} run records {field} {run.metadata.get(field)!r}, "
+        f"but the frozen evaluation pins {pinned!r}"
+        for field, pinned in pins
+        if run.metadata.get(field) != pinned
+    ]
+    problems.extend(_frozen_case_set_violations(run, label, expected))
+    return problems
+
+
+def _frozen_case_set_violations(
+    run: RunArtifacts, label: str, expected: FrozenExpectation
+) -> list[str]:
+    ids = _case_ids(run.records)
+    missing = sorted(set(expected.case_ids) - ids)
+    extra = sorted(ids - set(expected.case_ids))
+    problems = []
+    if missing:
+        problems.append(f"{label} run never ran frozen case(s) {_preview(missing)}")
+    if extra:
+        problems.append(
+            f"{label} run holds record(s) for case(s) {_preview(extra)} "
+            "that are not in the frozen dataset"
+        )
+    return problems
+
+
+def _preview(ids: list[str], limit: int = 10) -> str:
+    """A findable sample plus an explicit count, never a silent cut.
+
+    A truncated run misses most of the frozen set; a finding quoting
+    hundreds of ids buries every other finding around it. The count is
+    the substance, the sample makes it checkable.
+    """
+    if len(ids) <= limit:
+        return str(ids)
+    return f"{ids[:limit]} and {len(ids) - limit} more ({len(ids)} in total)"
+
+
 def check_pair(
     control: RunArtifacts, treatment: RunArtifacts, expected: ExpectedSurface
 ) -> list[str]:

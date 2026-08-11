@@ -9,6 +9,7 @@ import pytest
 from lovspor.llhb import fairness as fairness_module
 from lovspor.llhb.fairness import (
     ExpectedSurface,
+    FrozenExpectation,
     RunArtifacts,
     bookkeeping_violations,
     check_pair,
@@ -16,6 +17,7 @@ from lovspor.llhb.fairness import (
     control_violations,
     coverage_violations,
     frozen_surface_violations,
+    frozen_violations,
     identity_violations,
     paired_case_violations,
     paired_completion_violations,
@@ -886,3 +888,107 @@ class TestUndeclaredCalls:
         assert problems == [
             "llhb-v1-C1-001: called tool(s) ['mcp__lovverk__get_law'] outside the declared surface"
         ]
+
+
+class TestFrozenEvaluation:
+    """Stage 7: the published pair is anchored to the frozen dataset, not
+    to itself. check_pair proves the two arms agree with each other; both
+    can agree on the wrong dataset, a truncated case set, an unpinned
+    corpus or an edited prompt, and every one of those is invisible to a
+    cross-arm comparison. These checks compare each arm against what the
+    publication claims was preregistered."""
+
+    FROZEN = FrozenExpectation(
+        dataset_sha256="a" * 64,
+        case_ids=("llhb-v1-C1-001", "llhb-v1-C2-001"),
+        lovverk_commit="6" * 40,
+        system_prompt_sha256="b" * 64,
+        system_prompt_path="benchmarks/llhb/runner/system-prompt-v1.txt",
+    )
+
+    def full_run(self) -> RunArtifacts:
+        return RunArtifacts(
+            metadata=metadata(),
+            records=[record("llhb-v1-C1-001"), record("llhb-v1-C2-001")],
+        )
+
+    def test_a_run_matching_the_frozen_evaluation_passes(self) -> None:
+        assert frozen_violations(self.full_run(), "control", self.FROZEN) == []
+
+    @pytest.mark.parametrize(
+        ("field", "wrong"),
+        [
+            ("dataset_checksum", "d" * 64),
+            ("lovverk_commit", "f" * 40),
+            ("system_prompt_sha256", "e" * 64),
+            ("system_prompt_path", "benchmarks/llhb/runner/system-prompt-v2.txt"),
+        ],
+    )
+    def test_a_metadata_value_off_the_frozen_pin_is_a_finding(self, field: str, wrong: str) -> None:
+        """Cross-arm equality cannot see these: both arms carrying the same
+        wrong value is exactly the failure mode."""
+        run = RunArtifacts(
+            metadata=metadata(**{field: wrong}),
+            records=[record("llhb-v1-C1-001"), record("llhb-v1-C2-001")],
+        )
+
+        problems = frozen_violations(run, "control", self.FROZEN)
+
+        assert len(problems) == 1
+        assert field in problems[0]
+        assert repr(wrong) in problems[0]
+
+    def test_a_frozen_case_the_run_never_ran_is_a_finding(self) -> None:
+        run = RunArtifacts(metadata=metadata(), records=[record("llhb-v1-C1-001")])
+
+        problems = frozen_violations(run, "treatment", self.FROZEN)
+
+        assert problems == ["treatment run never ran frozen case(s) ['llhb-v1-C2-001']"]
+
+    def test_a_record_outside_the_frozen_dataset_is_a_finding(self) -> None:
+        """Grammar and count are coverage_violations' business; identity is
+        this check's. A record whose id parses fine but is not one of the
+        250 frozen cases is a different experiment."""
+        run = RunArtifacts(
+            metadata=metadata(),
+            records=[
+                record("llhb-v1-C1-001"),
+                record("llhb-v1-C2-001"),
+                record("llhb-v1-C3-001"),
+            ],
+        )
+
+        problems = frozen_violations(run, "control", self.FROZEN)
+
+        assert problems == [
+            "control run holds record(s) for case(s) ['llhb-v1-C3-001'] "
+            "that are not in the frozen dataset"
+        ]
+
+    def test_the_label_names_the_arm(self) -> None:
+        run = RunArtifacts(metadata=metadata(dataset_checksum="d" * 64), records=[])
+
+        problems = frozen_violations(run, "treatment", self.FROZEN)
+
+        assert all(problem.startswith("treatment run") for problem in problems)
+
+    def test_a_long_id_list_is_sampled_with_an_explicit_count(self) -> None:
+        """Hundreds of quoted ids bury every finding around them; a bare
+        count hides which cases. The finding carries both: a checkable
+        sample and the full count, never a silent cut."""
+        many = tuple(f"llhb-v1-C1-{n:03d}" for n in range(1, 31))
+        frozen = FrozenExpectation(
+            dataset_sha256="a" * 64,
+            case_ids=many,
+            lovverk_commit="6" * 40,
+            system_prompt_sha256="b" * 64,
+            system_prompt_path="benchmarks/llhb/runner/system-prompt-v1.txt",
+        )
+        run = RunArtifacts(metadata=metadata(), records=[])
+
+        problems = frozen_violations(run, "control", frozen)
+
+        assert len(problems) == 1
+        assert "and 20 more (30 in total)" in problems[0]
+        assert "llhb-v1-C1-010" in problems[0]
+        assert "llhb-v1-C1-011" not in problems[0]
