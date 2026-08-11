@@ -31,7 +31,7 @@ dependencies = [
     # is built on, so an unbounded spec breaks `import lovspor.mcp` on any
     # fresh install (caught in the 0.4.0 clean-wheel smoke). Lift only with
     # a deliberate 2.x migration.
-    "mcp>=1.28.1,<2",
+    "mcp>=1.28.1,<3",
     "numpy>=1.26.0",
     # tiktoken is required by the OpenAI embedder for token-aware
     # truncation under the 8191-token API limit. It's tiny (~3 MB
