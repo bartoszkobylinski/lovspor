@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -30,6 +31,7 @@ mutation_to_json = _load("mutation_to_json")
 mutation_gate = _load("mutation_gate")
 
 FULL_SHA = "a" * 40
+SCOPE_GUARD = _SCRIPTS / "assert_codex_scope.sh"
 
 
 def _progress_line(
@@ -53,6 +55,63 @@ def _run(tmp_path: Path, raw: str, survivors: str | None = None) -> dict[str, ob
         mp.setattr("sys.argv", ["mutation_to_json.py", *argv])
         assert mutation_to_json.main() == 0
     return json.loads(out.read_text())  # type: ignore[no-any-return]
+
+
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["git", *args], cwd=repo, check=True, text=True, capture_output=True)
+
+
+def _scope_repo(tmp_path: Path) -> tuple[Path, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--quiet")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.invalid")
+    (repo / "README.md").write_text("base\n")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "--quiet", "-m", "base")
+    return repo, _git(repo, "rev-parse", "HEAD").stdout.strip()
+
+
+def _run_scope_guard(repo: Path, base: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(SCOPE_GUARD), base], cwd=repo, check=False, text=True, capture_output=True
+    )
+
+
+def test_scope_guard_allows_nested_test_changes(tmp_path: Path) -> None:
+    repo, base = _scope_repo(tmp_path)
+    test_file = repo / "tests" / "unit" / "test_new.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("def test_new():\n    assert True\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0
+    assert "scope guard OK (1 changed file(s), all allowed)" in result.stdout
+
+
+@pytest.mark.parametrize("state", ["committed", "staged", "unstaged", "untracked"])
+def test_scope_guard_rejects_non_test_changes(tmp_path: Path, state: str) -> None:
+    repo, base = _scope_repo(tmp_path)
+    forbidden = repo / "src" / "lovspor" / "forbidden.py"
+    forbidden.parent.mkdir(parents=True)
+    forbidden.write_text("changed = True\n")
+    if state in {"committed", "staged"}:
+        _git(repo, "add", str(forbidden.relative_to(repo)))
+    if state == "committed":
+        _git(repo, "commit", "--quiet", "-m", "forbidden")
+    elif state == "unstaged":
+        _git(repo, "add", str(forbidden.relative_to(repo)))
+        _git(repo, "commit", "--quiet", "-m", "tracked")
+        base = _git(repo, "rev-parse", "HEAD").stdout.strip()
+        forbidden.write_text("changed = False\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert "SCOPE VIOLATION" in result.stderr
+    assert "src/lovspor/forbidden.py" in result.stderr
 
 
 def test_all_killed_passes(tmp_path: Path) -> None:
