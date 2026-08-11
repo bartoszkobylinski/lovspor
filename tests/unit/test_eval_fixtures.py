@@ -1516,7 +1516,7 @@ def test_embeddings_extra_is_not_forced_on_installers() -> None:
 
 
 def test_pyyaml_is_not_forced_on_installers() -> None:
-    """pyyaml is imported by evals/ only, never by src/lovspor.
+    """pyyaml is imported by evals/ and tests/ only, never by src/lovspor.
 
     With evals out of the wheel, keeping pyyaml as a runtime dependency would
     force it on every ``pip install lovspor`` for code the wheel no longer
