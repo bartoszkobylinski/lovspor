@@ -8,6 +8,7 @@ import sysconfig
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from lovspor.llhb import mcp_surface
@@ -36,6 +37,24 @@ APPARATUS_PYTHON = "3.12"
 def corpus(tmp_path: Path) -> Path:
     build_corpus(tmp_path, CORPUS_DOCS)
     return tmp_path
+
+
+class TestApparatusCiLeg:
+    def test_the_ci_matrix_keeps_the_apparatus_interpreter(self) -> None:
+        """The hash guard runs only on APPARATUS_PYTHON, so a matrix that
+        drops that leg stays green on every remaining leg while no leg
+        checks the hash. The comment in test.yml is advice; this is the
+        enforcement, and it fails on whatever legs remain."""
+        workflow = yaml.safe_load(
+            (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "test.yml").read_text(
+                encoding="utf-8"
+            )
+        )
+        versions = workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"]
+
+        # str() guards the YAML float trap: an unquoted 3.12 loads as a
+        # number, and the leg would count as missing on a quoting change.
+        assert APPARATUS_PYTHON in [str(version) for version in versions]
 
 
 class TestToolSurface:
