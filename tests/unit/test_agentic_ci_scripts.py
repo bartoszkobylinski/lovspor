@@ -153,6 +153,53 @@ def test_gate_rejects_malformed_result_without_traceback(
     assert "malformed mutation result" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("passed", ["true", "false", 1, 0, None, [True]])
+def test_gate_rejects_non_boolean_passed_value(
+    tmp_path: Path, passed: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result = {
+        "schema_version": 1,
+        "commit": FULL_SHA,
+        "score": 100.0,
+        "mutants": {"total": 1, "killed": 1, "survived": 0, "timeout": 0},
+        "gate": {"passed": passed, "reason": "ok"},
+        "survivors": [],
+    }
+    out = tmp_path / "typed.json"
+    out.write_text(json.dumps(result))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("sys.argv", ["mutation_gate.py", str(out)])
+        assert mutation_gate.main() == 1
+    assert "malformed mutation result" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("commit", 42), ("score", "high"), ("score", True), ("mutants", {"total": "5"})],
+)
+def test_gate_rejects_wrong_field_types(
+    tmp_path: Path, field: str, value: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    result: dict[str, object] = {
+        "schema_version": 1,
+        "commit": FULL_SHA,
+        "score": 100.0,
+        "mutants": {"total": 1, "killed": 1, "survived": 0, "timeout": 0},
+        "gate": {"passed": True, "reason": "ok"},
+        "survivors": [],
+    }
+    if field == "mutants":
+        result["mutants"] = {"total": "5", "killed": 1, "survived": 0, "timeout": 0}
+    else:
+        result[field] = value
+    out = tmp_path / "typed.json"
+    out.write_text(json.dumps(result))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("sys.argv", ["mutation_gate.py", str(out)])
+        assert mutation_gate.main() == 1
+    assert "malformed mutation result" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("payload", [[], ["x"], "text", 42, None, True])
 def test_gate_rejects_non_object_result_without_traceback(
     tmp_path: Path, payload: object, capsys: pytest.CaptureFixture[str]

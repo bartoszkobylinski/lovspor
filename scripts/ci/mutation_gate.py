@@ -35,6 +35,32 @@ def _load_result(path: Path) -> dict[str, object] | str:
     return r
 
 
+def _is_count(v: object) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _extract(r: dict[str, object]) -> tuple[str, float, bool, str, tuple[int, ...]] | str:
+    """Return (commit, score, passed, reason, counts) or an error message.
+
+    JSON truthiness is not enough: a string "false" in gate.passed must be
+    rejected, never treated as a passing gate.
+    """
+    try:
+        m, gate = r["mutants"], r["gate"]
+        commit, score = r["commit"], r["score"]
+        passed, reason = gate["passed"], gate["reason"]  # type: ignore[index]
+        counts = tuple(m[k] for k in ("total", "killed", "survived", "timeout"))  # type: ignore[index]
+    except (KeyError, TypeError) as e:
+        return f"malformed mutation result: {e!r}"
+    if not isinstance(passed, bool) or not isinstance(reason, str):
+        return "malformed mutation result: gate.passed must be a boolean, gate.reason a string"
+    if not isinstance(commit, str) or not all(_is_count(c) for c in counts):
+        return "malformed mutation result: commit must be a string, mutant counts integers"
+    if not isinstance(score, (int, float)) or isinstance(score, bool):
+        return "malformed mutation result: score must be a number"
+    return commit, float(score), passed, reason, counts
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--summary", action="store_true")
@@ -46,19 +72,11 @@ def main() -> int:
         print(r, file=sys.stderr)
         return 1
 
-    try:
-        m = r["mutants"]
-        commit, score = r["commit"], r["score"]
-        passed, reason = r["gate"]["passed"], r["gate"]["reason"]  # type: ignore[index]
-        total, killed, survived, timeout = (
-            m["total"],  # type: ignore[index]
-            m["killed"],  # type: ignore[index]
-            m["survived"],  # type: ignore[index]
-            m["timeout"],  # type: ignore[index]
-        )
-    except (KeyError, TypeError) as e:
-        print(f"malformed mutation result: {e!r}", file=sys.stderr)
+    extracted = _extract(r)
+    if isinstance(extracted, str):
+        print(extracted, file=sys.stderr)
         return 1
+    commit, score, passed, reason, (total, killed, survived, timeout) = extracted
 
     if args.summary:
         print("## Mutation testing")
