@@ -132,6 +132,26 @@ def test_gate_rejects_unknown_schema(tmp_path: Path) -> None:
         assert mutation_gate.main() == 1
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"schema_version": 1},
+        {"schema_version": 1, "mutants": {"total": 1}},
+        {"schema_version": 1, "mutants": None, "gate": None, "commit": "x", "score": 0},
+        {"schema_version": 1, "mutants": {}, "gate": {"passed": True}, "commit": "x", "score": 0},
+    ],
+)
+def test_gate_rejects_malformed_result_without_traceback(
+    tmp_path: Path, payload: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "mangled.json"
+    out.write_text(json.dumps(payload))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("sys.argv", ["mutation_gate.py", str(out)])
+        assert mutation_gate.main() == 1
+    assert "malformed mutation result" in capsys.readouterr().err
+
+
 def test_gate_summary_reports_sha_and_verdict(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

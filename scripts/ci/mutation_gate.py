@@ -34,22 +34,33 @@ def main() -> int:
         print(f"unsupported schema_version: {r.get('schema_version')}", file=sys.stderr)
         return 1
 
-    m = r["mutants"]
+    # The artifact is untrusted data: a truncated or hand-mangled file must
+    # produce a clean failure, never a traceback.
+    try:
+        m = r["mutants"]
+        commit, score = r["commit"], r["score"]
+        passed, reason = r["gate"]["passed"], r["gate"]["reason"]
+        counts = (m["total"], m["killed"], m["survived"], m["timeout"])
+    except (KeyError, TypeError) as e:
+        print(f"malformed mutation result: {e!r}", file=sys.stderr)
+        return 1
+
     if args.summary:
+        total, killed, survived, timeout = counts
         print("## Mutation testing")
-        print(f"- SHA: `{r['commit']}`")
+        print(f"- SHA: `{commit}`")
         print(
-            f"- Total: {m['total']} · Killed: {m['killed']} · Survived: {m['survived']}"
-            f" · Timeout: {m['timeout']} · Score: {r['score']}"
+            f"- Total: {total} · Killed: {killed} · Survived: {survived}"
+            f" · Timeout: {timeout} · Score: {score}"
         )
-        print(f"- Gate: {'PASS' if r['gate']['passed'] else 'FAIL'} ({r['gate']['reason']})")
-        print(f"- Artifact: `mutation-result-{r['commit']}`")
+        print(f"- Gate: {'PASS' if passed else 'FAIL'} ({reason})")
+        print(f"- Artifact: `mutation-result-{commit}`")
         return 0
 
-    if r["gate"]["passed"]:
-        print(f"mutation gate PASS ({r['gate']['reason']})")
+    if passed:
+        print(f"mutation gate PASS ({reason})")
         return 0
-    print(f"mutation gate FAIL ({r['gate']['reason']}); survivors: {m['survived']}")
+    print(f"mutation gate FAIL ({reason}); survivors: {m['survived']}")
     return 1
 
 
