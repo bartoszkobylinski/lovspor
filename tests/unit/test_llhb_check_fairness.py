@@ -103,3 +103,63 @@ def test_plain_mode_does_not_load_or_apply_the_frozen_gate(
 
     assert check_fairness.main() == 0
     assert capsys.readouterr().out.startswith("fair pair:")
+
+
+def test_frozen_mode_applies_the_expectation_to_both_arms(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = check_fairness.argparse.Namespace(
+        control="control-run", treatment="treatment-run", runs_root=Path("unused"), frozen=True
+    )
+    monkeypatch.setattr(check_fairness, "parse_args", lambda: args)
+    control = RunArtifacts(metadata={"arm": "control"}, records=[])
+    treatment = RunArtifacts(metadata={"arm": "treatment"}, records=[])
+    monkeypatch.setattr(
+        check_fairness,
+        "load_run",
+        lambda _root, run_id: control if run_id == "control-run" else treatment,
+    )
+    monkeypatch.setattr(check_fairness, "load_expected_surface", lambda *_: object())
+    monkeypatch.setattr(check_fairness, "check_pair", lambda *_: [])
+    expectation = object()
+    monkeypatch.setattr(check_fairness, "load_frozen_expectation", lambda: expectation)
+    calls: list[tuple[RunArtifacts, str, object]] = []
+
+    def violations(run: RunArtifacts, label: str, expected: object) -> list[str]:
+        calls.append((run, label, expected))
+        return []
+
+    monkeypatch.setattr(check_fairness, "frozen_violations", violations)
+
+    assert check_fairness.main() == 0
+    assert calls == [
+        (control, "control", expectation),
+        (treatment, "treatment", expectation),
+    ]
+    assert capsys.readouterr().out.startswith("fair frozen evaluation:")
+
+
+def test_frozen_finding_fails_the_gate_even_when_the_pair_itself_is_fair(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = check_fairness.argparse.Namespace(
+        control="control-run", treatment="treatment-run", runs_root=Path("unused"), frozen=True
+    )
+    monkeypatch.setattr(check_fairness, "parse_args", lambda: args)
+    empty_run = RunArtifacts(metadata={}, records=[])
+    monkeypatch.setattr(check_fairness, "load_run", lambda *_: empty_run)
+    monkeypatch.setattr(check_fairness, "load_expected_surface", lambda *_: object())
+    monkeypatch.setattr(check_fairness, "check_pair", lambda *_: [])
+    monkeypatch.setattr(check_fairness, "load_frozen_expectation", object)
+    monkeypatch.setattr(
+        check_fairness,
+        "frozen_violations",
+        lambda _run, label, _expected: [f"{label} is off the frozen pin"]
+        if label == "treatment"
+        else [],
+    )
+
+    assert check_fairness.main() == 1
+    output = capsys.readouterr().out
+    assert "UNFAIR: 1 finding(s)" in output
+    assert "treatment is off the frozen pin" in output
