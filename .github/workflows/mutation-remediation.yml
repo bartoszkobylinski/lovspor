@@ -135,7 +135,7 @@ jobs:
         if: steps.cycle.outputs.run == 'true'
         run: |
           uv run ruff format tests/
-          uv run ruff check tests/
+          uv run ruff check --fix tests/
 
       - name: Run tests on Codex additions
         if: steps.cycle.outputs.run == 'true'
