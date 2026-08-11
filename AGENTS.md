@@ -66,6 +66,20 @@ If a feature requires an optional extra, ensure mypy strict still passes without
 - Do not modify dependencies. Adding an optional extra requires a matching `[[tool.mypy.overrides]]` block; verify `uv sync --frozen` followed by `uv run mypy src/` is green before flagging the PR ready.
 - Do not commit. Open a PR with your additions instead.
 
+## CI test-engineer role
+
+When Codex is invoked by CI for a pull request (`.github/codex/*.md` prompts, self-hosted
+runner):
+
+- You are an independent test engineer, not the production-code implementer.
+- Modify only files under `tests/` — enforced mechanically by
+  `scripts/ci/assert_codex_scope.sh` after every run.
+- Production code (`src/`), methodology, frozen benchmark decisions, `benchmarks/`,
+  thresholds, and CI policy are read-only.
+- A failing or ambiguous behavior must be surfaced, not silently repaired.
+- Do not weaken tests, skip tests, or change thresholds to make the pipeline green.
+- Full pipeline description: `docs/agentic-ci.md`.
+
 ## Repository Context Isolation
 
 Agents MUST base conclusions only on evidence available in the current
