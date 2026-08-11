@@ -6,6 +6,7 @@ import re
 import sys
 import sysconfig
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -44,17 +45,36 @@ class TestApparatusCiLeg:
         """The hash guard runs only on APPARATUS_PYTHON, so a matrix that
         drops that leg stays green on every remaining leg while no leg
         checks the hash. The comment in test.yml is advice; this is the
-        enforcement, and it fails on whatever legs remain."""
+        enforcement, and it fails on whatever legs remain. The check is
+        on the legs GitHub will actually run — an axis entry cancelled by
+        ``exclude`` is not a leg, so listing "3.12" while excluding it
+        must fail here too."""
         workflow = yaml.safe_load(
             (Path(__file__).resolve().parents[2] / ".github" / "workflows" / "test.yml").read_text(
                 encoding="utf-8"
             )
         )
-        versions = workflow["jobs"]["test"]["strategy"]["matrix"]["python-version"]
 
-        # str() guards the YAML float trap: an unquoted 3.12 loads as a
-        # number, and the leg would count as missing on a quoting change.
-        assert APPARATUS_PYTHON in [str(version) for version in versions]
+        legs = _effective_matrix_versions(workflow["jobs"]["test"]["strategy"]["matrix"])
+
+        assert APPARATUS_PYTHON in legs
+
+
+def _effective_matrix_versions(matrix: dict[str, Any]) -> set[str]:
+    """The python versions GitHub will actually spawn jobs for.
+
+    Axis entries minus ``exclude`` matches plus ``include`` additions —
+    the three ways test.yml can decide the set of legs. str() guards the
+    YAML float trap: an unquoted 3.12 loads as a number, and the leg
+    would count as missing on a quoting change.
+    """
+    versions = {str(version) for version in matrix["python-version"]}
+    for entry in matrix.get("exclude") or []:
+        versions.discard(str(entry.get("python-version")))
+    for entry in matrix.get("include") or []:
+        if "python-version" in entry:
+            versions.add(str(entry["python-version"]))
+    return versions
 
 
 class TestToolSurface:
