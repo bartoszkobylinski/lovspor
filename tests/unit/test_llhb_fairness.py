@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.llhb import fairness as fairness_module
 from lovspor.llhb.fairness import (
     ExpectedSurface,
+    FrozenExpectation,
     RunArtifacts,
     bookkeeping_violations,
     check_pair,
@@ -16,6 +18,7 @@ from lovspor.llhb.fairness import (
     control_violations,
     coverage_violations,
     frozen_surface_violations,
+    frozen_violations,
     identity_violations,
     paired_case_violations,
     paired_completion_violations,
@@ -117,8 +120,9 @@ class TestCompareRunMetadata:
     def test_flags_a_different_dataset(self) -> None:
         problems = compare_run_metadata(metadata(), treatment_metadata(dataset_checksum="d" * 64))
 
-        assert len(problems) == 1
-        assert "dataset_checksum differs" in problems[0]
+        assert problems == [
+            "dataset_checksum differs: control " + repr("a" * 64) + ", treatment " + repr("d" * 64)
+        ]
 
     def test_flags_a_different_system_prompt(self) -> None:
         problems = compare_run_metadata(
@@ -156,19 +160,19 @@ class TestCompareRunMetadata:
     def test_flags_a_field_recorded_in_only_one_run(self) -> None:
         problems = compare_run_metadata(metadata(), treatment_metadata(api_version="2026-08-01"))
 
-        assert any("recorded in only one" in problem for problem in problems)
+        assert problems == ["api_version is recorded in only one of the two runs"]
 
     def test_flags_mislabelled_conditions(self) -> None:
         problems = compare_run_metadata(
             metadata(condition="lovspor", tool_config=TOOL_CONFIG), treatment_metadata()
         )
 
-        assert any("control run is labelled" in problem for problem in problems)
+        assert "control run is labelled 'lovspor'" in problems
 
     def test_flags_a_treatment_labelled_control(self) -> None:
         problems = compare_run_metadata(metadata(), treatment_metadata(condition="control"))
 
-        assert any("treatment run is labelled" in problem for problem in problems)
+        assert "treatment run is labelled 'control'" in problems
 
 
 class TestPairedCases:
@@ -204,7 +208,7 @@ class TestControlViolations:
             [record("llhb-v1-C1-001", tool_calls=[{"index": 0, "name": "x", "arguments": {}}])]
         )
 
-        assert "issued 1 tool call(s)" in problems[0]
+        assert problems == ["llhb-v1-C1-001: control case issued 1 tool call(s)"]
 
     def test_flags_a_control_case_that_was_offered_tools(self) -> None:
         offered = {"exposed_tools": ["Bash"], "mcp_servers": [], "permission_denials": []}
@@ -266,7 +270,7 @@ class TestTreatmentViolations:
             [treatment_record("llhb-v1-C1-001", harness=denied)], TOOL_CONFIG["tools"]
         )
 
-        assert "denied 1 tool call(s)" in problems[0]
+        assert problems == ["llhb-v1-C1-001: the harness denied 1 tool call(s)"]
 
 
 class TestDeclaredSurface:
@@ -303,7 +307,7 @@ class TestDeclaredSurface:
 
         problems = control_violations([record("llhb-v1-C1-001", harness=offered)])
 
-        assert len(problems) == 1
+        assert problems == ["llhb-v1-C1-001: control case was offered 1 tool(s)"]
 
     def test_flags_a_treatment_run_that_declares_no_surface(self) -> None:
         """An empty tool_config must never read as 'this is the control
@@ -502,8 +506,10 @@ class TestRecordIdentity:
 
         problems = identity_violations(run, "treatment")
 
-        assert len(problems) == 1
-        assert f"{field} {wrong!r}" in problems[0]
+        assert problems == [
+            f"treatment record llhb-v1-C1-001 has {field} {wrong!r}, "
+            f"but the run declares {treatment_metadata()[field]!r}"
+        ]
 
     def test_a_record_matching_its_run_passes(self) -> None:
         run = RunArtifacts(metadata=metadata(cases_total=1), records=[record("llhb-v1-C1-001")])
@@ -828,8 +834,10 @@ class TestFrozenSurface:
 
         problems = frozen_surface_violations(treatment_metadata(tool_config=config), EXPECTED)
 
-        assert len(problems) == 1
-        assert "tool_schema_sha256" in problems[0]
+        assert problems == [
+            "treatment run records tool_schema_sha256 " + repr("d" * 64) + ", "
+            "but the frozen apparatus surface hashes to " + repr("c" * 64)
+        ]
 
     def test_the_declared_apparatus_surface_passes(self) -> None:
         assert frozen_surface_violations(treatment_metadata(), EXPECTED) == []
@@ -886,3 +894,173 @@ class TestUndeclaredCalls:
         assert problems == [
             "llhb-v1-C1-001: called tool(s) ['mcp__lovverk__get_law'] outside the declared surface"
         ]
+
+
+class TestFrozenEvaluation:
+    """Stage 7: the published pair is anchored to the frozen dataset, not
+    to itself. check_pair proves the two arms agree with each other; both
+    can agree on the wrong dataset, a truncated case set, an unpinned
+    corpus or an edited prompt, and every one of those is invisible to a
+    cross-arm comparison. These checks compare each arm against what the
+    publication claims was preregistered."""
+
+    FROZEN = FrozenExpectation(
+        dataset_sha256="a" * 64,
+        case_ids=("llhb-v1-C1-001", "llhb-v1-C2-001"),
+        lovverk_commit="6" * 40,
+        system_prompt_sha256="b" * 64,
+        system_prompt_path="benchmarks/llhb/runner/system-prompt-v1.txt",
+    )
+
+    def full_run(self) -> RunArtifacts:
+        return RunArtifacts(
+            metadata=metadata(),
+            records=[record("llhb-v1-C1-001"), record("llhb-v1-C2-001")],
+        )
+
+    def test_a_run_matching_the_frozen_evaluation_passes(self) -> None:
+        assert frozen_violations(self.full_run(), "control", self.FROZEN) == []
+
+    @pytest.mark.parametrize(
+        ("field", "wrong"),
+        [
+            ("dataset_checksum", "d" * 64),
+            ("lovverk_commit", "f" * 40),
+            ("system_prompt_sha256", "e" * 64),
+            ("system_prompt_path", "benchmarks/llhb/runner/system-prompt-v2.txt"),
+        ],
+    )
+    def test_a_metadata_value_off_the_frozen_pin_is_a_finding(self, field: str, wrong: str) -> None:
+        """Cross-arm equality cannot see these: both arms carrying the same
+        wrong value is exactly the failure mode."""
+        run = RunArtifacts(
+            metadata=metadata(**{field: wrong}),
+            records=[record("llhb-v1-C1-001"), record("llhb-v1-C2-001")],
+        )
+
+        problems = frozen_violations(run, "control", self.FROZEN)
+
+        pinned = getattr(
+            self.FROZEN,
+            {"dataset_checksum": "dataset_sha256"}.get(field, field),
+        )
+        assert problems == [
+            f"control run records {field} {wrong!r}, but the frozen evaluation pins {pinned!r}"
+        ]
+
+    def test_a_frozen_case_the_run_never_ran_is_a_finding(self) -> None:
+        run = RunArtifacts(metadata=metadata(), records=[record("llhb-v1-C1-001")])
+
+        problems = frozen_violations(run, "treatment", self.FROZEN)
+
+        assert problems == ["treatment run never ran frozen case(s) ['llhb-v1-C2-001']"]
+
+    def test_a_record_outside_the_frozen_dataset_is_a_finding(self) -> None:
+        """Grammar and count are coverage_violations' business; identity is
+        this check's. A record whose id parses fine but is not one of the
+        250 frozen cases is a different experiment."""
+        run = RunArtifacts(
+            metadata=metadata(),
+            records=[
+                record("llhb-v1-C1-001"),
+                record("llhb-v1-C2-001"),
+                record("llhb-v1-C3-001"),
+            ],
+        )
+
+        problems = frozen_violations(run, "control", self.FROZEN)
+
+        assert problems == [
+            "control run holds record(s) for case(s) ['llhb-v1-C3-001'] "
+            "that are not in the frozen dataset"
+        ]
+
+    def test_the_label_names_the_arm(self) -> None:
+        run = RunArtifacts(metadata=metadata(dataset_checksum="d" * 64), records=[])
+
+        problems = frozen_violations(run, "treatment", self.FROZEN)
+
+        assert all(problem.startswith("treatment run") for problem in problems)
+
+    def test_a_long_id_list_is_sampled_with_an_explicit_count(self) -> None:
+        """Hundreds of quoted ids bury every finding around them; a bare
+        count hides which cases. The finding carries both: a checkable
+        sample and the full count, never a silent cut."""
+        many = tuple(f"llhb-v1-C1-{n:03d}" for n in range(1, 31))
+        frozen = FrozenExpectation(
+            dataset_sha256="a" * 64,
+            case_ids=many,
+            lovverk_commit="6" * 40,
+            system_prompt_sha256="b" * 64,
+            system_prompt_path="benchmarks/llhb/runner/system-prompt-v1.txt",
+        )
+        run = RunArtifacts(metadata=metadata(), records=[])
+
+        problems = frozen_violations(run, "control", frozen)
+
+        sample = [f"llhb-v1-C1-{n:03d}" for n in range(1, 11)]
+        assert problems == [
+            f"control run never ran frozen case(s) {sample} and 20 more (30 in total)"
+        ]
+
+    def test_a_list_at_the_sample_limit_is_printed_whole(self) -> None:
+        """Ten ids is the boundary: sampled output for exactly the limit
+        would claim 'and 0 more', which reads as truncation that never
+        happened."""
+        ten = tuple(f"llhb-v1-C1-{n:03d}" for n in range(1, 11))
+        frozen = FrozenExpectation(
+            dataset_sha256="a" * 64,
+            case_ids=ten,
+            lovverk_commit="6" * 40,
+            system_prompt_sha256="b" * 64,
+            system_prompt_path="benchmarks/llhb/runner/system-prompt-v1.txt",
+        )
+        run = RunArtifacts(metadata=metadata(), records=[])
+
+        problems = frozen_violations(run, "control", frozen)
+
+        assert problems == [f"control run never ran frozen case(s) {sorted(ten)}"]
+
+    def test_the_expectation_cannot_be_edited_after_it_is_built(self) -> None:
+        """Both expectation models are evidence carriers: a caller must not
+        be able to adjust one between loading it and judging with it."""
+        with pytest.raises(ValidationError):
+            self.FROZEN.dataset_sha256 = "0" * 64  # type: ignore[misc]
+        with pytest.raises(ValidationError):
+            EXPECTED.tool_schema_sha256 = "0" * 64  # type: ignore[misc]
+
+
+class TestCheckPairLabels:
+    """check_pair names the arm in every finding it forwards; a finding
+    that says which run is at fault is the difference between a gate
+    and a puzzle."""
+
+    def test_identity_findings_name_the_arm(self) -> None:
+        control = RunArtifacts(
+            metadata=metadata(cases_total=1),
+            records=[record("llhb-v1-C1-001", provider="openai")],
+        )
+        treatment = RunArtifacts(
+            metadata=treatment_metadata(cases_total=1),
+            records=[treatment_record("llhb-v1-C1-001", provider="openai")],
+        )
+
+        problems = check_pair(control, treatment, EXPECTED)
+
+        assert any(problem.startswith("control record ") for problem in problems)
+        assert any(problem.startswith("treatment record ") for problem in problems)
+
+    def test_bookkeeping_findings_name_the_arm(self) -> None:
+        control = RunArtifacts(
+            metadata=metadata(cases_total=1, cases_completed=0, errors_total=1),
+            records=[record("llhb-v1-C1-001")],
+        )
+        treatment = RunArtifacts(
+            metadata=treatment_metadata(cases_total=1, cases_completed=0, errors_total=1),
+            records=[treatment_record("llhb-v1-C1-001")],
+        )
+
+        problems = check_pair(control, treatment, EXPECTED)
+
+        assert "control run declares cases_completed 0, but its records show 1" in problems
+        assert "treatment run declares cases_completed 0, but its records show 1" in problems

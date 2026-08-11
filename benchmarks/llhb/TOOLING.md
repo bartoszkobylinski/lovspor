@@ -479,19 +479,27 @@ Driven by the Stage 3.5 human audit (see
   always the caller's claim, never inferred from the declared surface
   being empty — otherwise a treatment run with an empty `tool_config`
   would be graded as a control run and pass. Exits non-zero, so it can
-  gate a report. **Known limit, deliberate until Stage 7:** the dataset
-  itself has no frozen anchor in this gate. `dataset_checksum` is
-  compared cross-arm and verified against the lock at run time
-  (`verify_frozen_against_lock`), but `check_fairness.py` does not
-  compare it to `dataset/frozen/llhb-v1.lock.json`, because pilots run
-  discarded candidates by design and would fail such a gate. Before
-  any published number, Stage 7 reporting must add a frozen mode that
-  anchors the pair externally: metadata `dataset_checksum` against the
-  lock's `dataset_sha256`, the exact record case-id set against the
-  frozen JSONL (grammar and count are checked today, identity is not),
-  and `lovverk_commit` against the lock's pin — plus whatever other
-  preregistered values the publication claims (prompt hash, model,
-  seed), which today are checked only for cross-arm equality.
+  gate a report. **`--frozen` (Stage 7, mandatory before any published
+  number):** anchors both arms to the frozen evaluation itself, because
+  cross-arm equality cannot see a pair that agrees on the wrong
+  dataset. Per arm: metadata `dataset_checksum` against the lock's
+  `dataset_sha256`, `lovverk_commit` against the lock's pin, the
+  prompt hash and repo-relative path against the committed
+  `system-prompt-v1.txt`, and the exact record case-id set against the
+  frozen JSONL — identity, not grammar or count, since 250 well-formed
+  ids can still be a different experiment than the 250 the freeze
+  pinned. The expectation is built from committed artifacts only, and
+  the frozen JSONL is verified against its lock
+  (`verify_frozen_against_lock`) before anything is read out of it —
+  an expectation built from a tampered dataset would anchor both arms
+  to the tampering. Long id lists in findings are sampled with an
+  explicit count, never cut silently. Pilots run discarded candidates
+  by design: they use the plain mode and genuinely fail `--frozen`
+  (verified — the committed pilot pair yields 6 findings under it).
+  Not pinned by `--frozen` because nothing committed preregisters
+  them: `model_id` and `case_order_seed`, still checked cross-arm
+  only; a publication claiming them as preregistered must add its own
+  anchor first.
 * **First treatment pilot (2026-08-10)**: `llhb-v1-run-20260810-pilot6`
   (control) and `llhb-v1-run-20260810-treat3` (lovspor), same 10
   discarded candidates, same seed, same prompt hash, same
