@@ -14,7 +14,7 @@ MCP client) tools to search it, quote it, and verify citations against the real 
 Once connected, your assistant answers from the live corpus instead of stale training data:
 
 - *"What changed in skatteloven this year?"*
-- *"What did husleieloven § 9-6 say in March 2023?"* — full version history, diffable between any two dates
+- *"What did husleieloven § 9-6 say in May 2026?"* — full version history since April 2026, diffable between any two tracked dates
 - *"Does this paragraph exist?"* — `validate_citation` answers instead of guessing
 - *"Is this quote verbatim?"* — `verify_quote` checks it against the actual text
 
