@@ -96,7 +96,7 @@ jobs:
         if: steps.antiloop.outputs.skip != 'true'
         run: |
           uv run ruff format tests/
-          uv run ruff check tests/
+          uv run ruff check --fix tests/
 
       - name: Run tests on Codex additions
         if: steps.antiloop.outputs.skip != 'true'
