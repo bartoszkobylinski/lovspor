@@ -211,15 +211,30 @@ def _must_disambiguate(case: Mapping[str, Any], evidence: _Evidence) -> Criterio
 
 
 def _quote_verified(case: Mapping[str, Any], evidence: _Evidence) -> CriterionVerdict:
-    """§5.7 authentic: pass = a quote is presented and verifies."""
-    if not evidence.quotes:
-        return CriterionVerdict.FAIL
-    verdicts = [q.verified for q in evidence.quotes]
-    if any(verdict is True for verdict in verdicts):
+    """§5.7 authentic: a quote of THE provision, presented and verified.
+
+    Only quotes attached to the case's expected provision can answer
+    the case — real words from some other provision verify fine and
+    prove nothing about this one. An unattached quote might be the
+    expected one, which is undecidable, so its presence makes the case
+    unresolved rather than guessed in either direction.
+    """
+    expected = _expected_pair(case)
+    relevant = [q for q in evidence.quotes if _attached_pair(q, evidence) == expected]
+    if any(q.verified is True for q in relevant):
         return CriterionVerdict.PASS
-    if any(verdict is False for verdict in verdicts):
-        return CriterionVerdict.FAIL
-    return CriterionVerdict.UNRESOLVED
+    if any(q.quote.attached is None for q in evidence.quotes):
+        return CriterionVerdict.UNRESOLVED
+    return CriterionVerdict.FAIL
+
+
+def _attached_pair(quote: _Quote, evidence: _Evidence) -> tuple[str, str] | None:
+    if quote.quote.attached is None:
+        return None
+    for resolved in evidence.resolved:
+        if resolved.citation is quote.quote.attached:
+            return _pair(resolved)
+    return None
 
 
 def _fabricated_not_presented(case: Mapping[str, Any], evidence: _Evidence) -> CriterionVerdict:

@@ -70,16 +70,23 @@ def _marked_spans(answer: str) -> list[tuple[int, int]]:
 def _paired_spans(answer: str, opening: str, closing: str) -> list[tuple[int, int]]:
     """Alternating open/close scan; an unclosed opening detects nothing.
 
-    For marks whose opening and closing glyph is the same character, the
-    word-boundary rule keeps apostrophes inside words («Ola's») from
-    opening a quote that swallows the rest of the sentence.
+    For marks whose opening and closing glyph is the same character, a
+    word-boundary rule applies at both ends: an apostrophe inside a word
+    neither opens a quote («Kari's» outside one) nor closes one
+    («'Ola's rettigheter gjelder.'» stays a single span).
     """
     spans = []
+    symmetric = opening == closing
     open_at: int | None = None
     for index, char in enumerate(answer):
-        if open_at is None and char == opening and _opens_here(answer, index, opening == closing):
+        if open_at is None and char == opening and _opens_here(answer, index, symmetric):
             open_at = index
-        elif open_at is not None and char == closing and (index > open_at):
+        elif (
+            open_at is not None
+            and char == closing
+            and index > open_at
+            and _closes_here(answer, index, symmetric)
+        ):
             spans.append((open_at + 1, index))
             open_at = None
     return spans
@@ -89,6 +96,12 @@ def _opens_here(answer: str, index: int, symmetric: bool) -> bool:
     if not symmetric:
         return True
     return index == 0 or not answer[index - 1].isalnum()
+
+
+def _closes_here(answer: str, index: int, symmetric: bool) -> bool:
+    if not symmetric:
+        return True
+    return index + 1 == len(answer) or not answer[index + 1].isalnum()
 
 
 def _cue_spans(answer: str, marked_starts: list[int]) -> list[tuple[int, int, str | None]]:

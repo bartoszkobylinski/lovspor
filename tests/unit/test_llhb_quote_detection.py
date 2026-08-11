@@ -63,6 +63,13 @@ class TestQuoteMarks:
 
         assert detect_quotes(answer, [citation(answer, "§ 1")]) == []
 
+    def test_an_apostrophe_inside_a_single_quoted_span_does_not_close_it(self) -> None:
+        answer = "Testloven § 1 sier 'Ola's rettigheter gjelder.' om dette."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Ola's rettigheter gjelder."]
+
     def test_an_unclosed_mark_detects_nothing(self) -> None:
         answer = "Testloven § 1 sier «Loven gjelder for alle."
 

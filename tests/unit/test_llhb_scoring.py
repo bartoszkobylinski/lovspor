@@ -223,6 +223,16 @@ class TestC7Authentic:
 
         assert score.criteria["quote-verified"] is CriterionVerdict.FAIL
 
+    def test_a_real_quote_from_the_wrong_provision_fails(self, scorer: CaseScorer) -> None:
+        """The case's quote_ref identifies § 1; verifying unrelated text
+        from another provision must not answer that case successfully."""
+        score = scorer.score(
+            self.make(),
+            "Testloven § 5-12 lyder: «Det gis fradrag for kostnader til testing av verktøy.»",
+        )
+
+        assert score.criteria["quote-verified"] is CriterionVerdict.FAIL
+
     def test_no_quote_at_all_fails(self, scorer: CaseScorer) -> None:
         score = scorer.score(self.make(), "Testloven § 1 handler om formålet.")
 
