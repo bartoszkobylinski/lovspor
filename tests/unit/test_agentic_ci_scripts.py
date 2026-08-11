@@ -101,11 +101,12 @@ def test_baseline_failure_fails_the_gate(tmp_path: Path) -> None:
     assert result["gate"] == {"passed": False, "reason": "baseline_tests_failed"}
 
 
-def test_short_sha_is_refused(tmp_path: Path) -> None:
+@pytest.mark.parametrize("sha", ["abc123", "z" * 40, "A" * 40, "a" * 39, "a" * 41, ""])
+def test_non_full_hex_sha_is_refused(tmp_path: Path, sha: str) -> None:
     raw_file = tmp_path / "raw.log"
     raw_file.write_text("")
     out = tmp_path / "result.json"
-    argv = ["--commit", "abc123", "--raw", str(raw_file), "--tool-exit-code", "0"]
+    argv = ["--commit", sha, "--raw", str(raw_file), "--tool-exit-code", "0"]
     argv += ["--out", str(out)]
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("sys.argv", ["mutation_to_json.py", *argv])
@@ -145,6 +146,18 @@ def test_gate_rejects_malformed_result_without_traceback(
     tmp_path: Path, payload: dict[str, object], capsys: pytest.CaptureFixture[str]
 ) -> None:
     out = tmp_path / "mangled.json"
+    out.write_text(json.dumps(payload))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("sys.argv", ["mutation_gate.py", str(out)])
+        assert mutation_gate.main() == 1
+    assert "malformed mutation result" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("payload", [[], ["x"], "text", 42, None, True])
+def test_gate_rejects_non_object_result_without_traceback(
+    tmp_path: Path, payload: object, capsys: pytest.CaptureFixture[str]
+) -> None:
+    out = tmp_path / "non-object.json"
     out.write_text(json.dumps(payload))
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr("sys.argv", ["mutation_gate.py", str(out)])

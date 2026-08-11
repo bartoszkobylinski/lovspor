@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 
 SCHEMA_VERSION = 1
-FULL_SHA_LEN = 40
+FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 TOOL = "mutmut 2.5.1 (PR-scoped via scripts/mutmut-pr.sh)"
 
 # mutmut 2.x progress line, e.g.:  12/12  🎉 10  ⏰ 0  🤔 0  🙁 2  🔇 0
@@ -90,7 +90,7 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
 
-    if len(args.commit) != FULL_SHA_LEN:
+    if not FULL_SHA_RE.fullmatch(args.commit):
         print(f"refusing to write result for non-full SHA: {args.commit!r}", file=sys.stderr)
         return 2
 

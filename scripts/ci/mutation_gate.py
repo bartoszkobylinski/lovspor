@@ -18,35 +18,49 @@ import sys
 from pathlib import Path
 
 
+def _load_result(path: Path) -> dict[str, object] | str:
+    """Return the parsed result object, or an error message string.
+
+    The artifact is untrusted data: a truncated or hand-mangled file must
+    produce a clean failure, never a traceback.
+    """
+    try:
+        r = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        return f"cannot read mutation result: {e}"
+    if not isinstance(r, dict):
+        return f"malformed mutation result: not a JSON object ({type(r).__name__})"
+    if r.get("schema_version") != 1:
+        return f"unsupported schema_version: {r.get('schema_version')}"
+    return r
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("result", type=Path)
     args = ap.parse_args()
 
-    try:
-        r = json.loads(args.result.read_text())
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"cannot read mutation result: {e}", file=sys.stderr)
+    r = _load_result(args.result)
+    if isinstance(r, str):
+        print(r, file=sys.stderr)
         return 1
 
-    if r.get("schema_version") != 1:
-        print(f"unsupported schema_version: {r.get('schema_version')}", file=sys.stderr)
-        return 1
-
-    # The artifact is untrusted data: a truncated or hand-mangled file must
-    # produce a clean failure, never a traceback.
     try:
         m = r["mutants"]
         commit, score = r["commit"], r["score"]
-        passed, reason = r["gate"]["passed"], r["gate"]["reason"]
-        counts = (m["total"], m["killed"], m["survived"], m["timeout"])
+        passed, reason = r["gate"]["passed"], r["gate"]["reason"]  # type: ignore[index]
+        total, killed, survived, timeout = (
+            m["total"],  # type: ignore[index]
+            m["killed"],  # type: ignore[index]
+            m["survived"],  # type: ignore[index]
+            m["timeout"],  # type: ignore[index]
+        )
     except (KeyError, TypeError) as e:
         print(f"malformed mutation result: {e!r}", file=sys.stderr)
         return 1
 
     if args.summary:
-        total, killed, survived, timeout = counts
         print("## Mutation testing")
         print(f"- SHA: `{commit}`")
         print(
@@ -60,7 +74,7 @@ def main() -> int:
     if passed:
         print(f"mutation gate PASS ({reason})")
         return 0
-    print(f"mutation gate FAIL ({reason}); survivors: {m['survived']}")
+    print(f"mutation gate FAIL ({reason}); survivors: {survived}")
     return 1
 
 
