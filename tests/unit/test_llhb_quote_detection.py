@@ -188,3 +188,129 @@ class TestEveryCueIsLive:
 
         assert [quote.via_cue for quote in quotes] == [cue]
         assert quotes[0].text == "Slik tekst star her."
+
+
+class TestMarkBoundaries:
+    """Survivor-killers for the paired-span scan: every boundary in the
+    open/close rules is reachable, and each mark glyph is live."""
+
+    def test_a_guillemet_at_the_very_start_opens(self) -> None:
+        answer = "«Loven gjelder.» sier testloven § 1 om dette."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder."]
+
+    def test_a_single_quote_at_the_very_start_opens(self) -> None:
+        # The answer deliberately ends with a letter: the index-0 branch
+        # of the opening rule must not fall back to peeking at answer[-1].
+        answer = "'Loven gjelder.' står i testloven § 1 slik"
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder."]
+
+    def test_a_closing_quote_as_the_last_character_closes(self) -> None:
+        answer = "Testloven § 1 sier 'Loven gjelder'"
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder"]
+
+    def test_a_span_ending_in_a_letter_still_closes(self) -> None:
+        """The closing rule looks at the character AFTER the mark, never
+        at the letter inside the span before it."""
+        answer = "Testloven § 1 sier 'Loven gjelder' om dette."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder"]
+
+    def test_a_guillemet_directly_after_a_letter_still_opens(self) -> None:
+        """Asymmetric marks take no word-boundary rule — «...» after a
+        missing space is still a quote."""
+        answer = "Testloven § 1 sier«Loven gjelder.» her."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder."]
+
+    def test_a_stray_closer_with_no_opening_detects_nothing(self) -> None:
+        answer = "Ingen sitater i testloven § 1 her » slutt."
+
+        assert detect_quotes(answer, [citation(answer, "§ 1")]) == []
+
+    def test_defaults_are_none_not_empty(self) -> None:
+        quote = DetectedQuote(text="x", start=0, end=1)
+
+        assert quote.attached is None
+        assert quote.via_cue is None
+
+
+class TestCueWindowHandoff:
+    """The cue channel hands any window containing a quotation mark to
+    the mark channel — killers for the window-scan boundaries."""
+
+    def test_a_mark_directly_after_the_colon_is_one_quote(self) -> None:
+        answer = "Testloven § 1 lyder:«Loven gjelder for alle.» Neste."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder for alle."]
+
+    def test_a_double_quote_after_a_cue_is_one_quote(self) -> None:
+        answer = 'Testloven § 1 lyder: "Loven gjelder for alle." Neste.'
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder for alle."]
+
+    def test_a_single_quote_after_a_cue_is_one_quote(self) -> None:
+        answer = "Testloven § 1 lyder: 'Loven gjelder for alle.' Neste."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Loven gjelder for alle."]
+
+    def test_a_second_cue_still_captures_after_a_marked_first(self) -> None:
+        """One cue handing off to the mark channel must not end the scan
+        for every later cue."""
+        answer = "Testloven § 1 lyder: «Første tekst.» Loven ordlyd: Andre tekst her."
+
+        quotes = detect_quotes(answer, [citation(answer, "§ 1")])
+
+        assert [quote.text for quote in quotes] == ["Første tekst.", "Andre tekst her."]
+
+    def test_a_cue_colon_at_the_answer_end_detects_nothing(self) -> None:
+        answer = "Testloven § 1 lyder:"
+
+        assert detect_quotes(answer, [citation(answer, "§ 1")]) == []
+
+
+class TestAttachmentBoundaries:
+    def test_a_citation_at_the_sentence_start_attaches(self) -> None:
+        answer = "Noe annet står der. § 1 i testloven sier «Loven gjelder.» her."
+        cited = citation(answer, "§ 1")
+
+        quotes = detect_quotes(answer, [cited])
+
+        assert quotes[0].attached == cited
+
+    def test_a_citation_at_the_quote_start_is_preceding(self) -> None:
+        """A citation opening the quote's inner text sits AT quote_start
+        and binds as preceding, not following."""
+        answer = "Se «§ 1 i testloven» som nevnt her."
+        cited = citation(answer, "§ 1")
+
+        quotes = detect_quotes(answer, [cited])
+
+        assert quotes[0].attached == cited
+
+    def test_following_attachment_picks_the_nearest_regardless_of_input_order(self) -> None:
+        answer = "Det står «Loven gjelder.» i testloven § 1 og § 2 her."
+        near = citation(answer, "§ 1")
+        far = citation(answer, "§ 2", section_id="2")
+
+        quotes = detect_quotes(answer, [far, near])
+
+        assert quotes[0].attached == near

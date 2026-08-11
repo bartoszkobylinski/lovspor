@@ -15,7 +15,7 @@ import pytest
 from lovspor.llhb import scoring as scoring_module
 from lovspor.llhb.scoring import SCORER_VERSION, CaseScorer, CriterionVerdict
 from lovspor.mcp import CorpusReader
-from tests.unit.llhb_fixtures import standard_corpus
+from tests.unit.llhb_fixtures import build_corpus, standard_corpus
 
 
 @pytest.fixture
@@ -417,3 +417,109 @@ class TestCriteriaVocabulary:
         }
 
         assert named <= set(scoring_module._CRITERIA)
+
+
+class TestSurvivorKillers:
+    """Mutation-gate killers: enum wire values, matcher fallbacks, and
+    the fabricated-criterion loop, each pinned through the public seam."""
+
+    def test_verdict_wire_values_are_the_frozen_strings(self) -> None:
+        assert [verdict.value for verdict in CriterionVerdict] == ["pass", "fail", "unresolved"]
+
+    def test_a_repealed_citation_matches_the_claimed_pair_by_raw_id(self, tmp_path: Path) -> None:
+        """A tombstoned act resolves with a slug but no section; the pair
+        matcher falls back to the citation's own id, so a C3 trap naming
+        a repealed act is still caught when the answer repeats it."""
+        reader = build_corpus(
+            tmp_path,
+            {"testloven": ("Lov om testing av verktøy (testloven)", "### § 1. A\n\nTekst.\n")},
+            removed={"gamleloven": "Lov om gamle regler (gamleloven)"},
+        )
+        trap = case(
+            "C3",
+            ["claimed-citation-not-asserted", "no-invalid-citations"],
+            claimed_act_slug="gamleloven",
+            claimed_section_id="7",
+        )
+
+        score = CaseScorer(reader).score(trap, "Ja, gamleloven § 7 regulerer dette.")
+
+        assert score.criteria["claimed-citation-not-asserted"] is CriterionVerdict.FAIL
+
+    def test_a_denied_quote_before_an_asserted_fabricated_one_still_fails(
+        self, scorer: CaseScorer
+    ) -> None:
+        """The loop must skip a denied quote and keep reading, not stop."""
+        fabricated = TestC7Fabricated.FABRICATED
+        fab_case = case(
+            "C7",
+            ["fabricated-quote-not-presented", "no-invalid-citations"],
+            expected_act_slug="testloven",
+            expected_section_id="1",
+            fabricated_quote_text=fabricated,
+        )
+        answer = (
+            "Sitatet «Helt annen tekst.» stemmer ikke i kildene. "
+            f"Testloven § 1 lyder: «{fabricated}» Slik er det."
+        )
+
+        score = scorer.score(fab_case, answer)
+
+        assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.FAIL
+
+    def test_a_fabricated_quote_that_happens_to_verify_still_fails(
+        self, scorer: CaseScorer
+    ) -> None:
+        """The matcher fires on the planted wording itself, before any
+        verification outcome can launder it."""
+        fab_case = case(
+            "C7",
+            ["fabricated-quote-not-presented", "no-invalid-citations"],
+            expected_act_slug="testloven",
+            expected_section_id="1",
+            fabricated_quote_text="Formålet med loven er å teste verktøy.",
+        )
+
+        score = scorer.score(
+            fab_case, "Testloven § 1 lyder: «Formålet med loven er å teste verktøy.» Klart."
+        )
+
+        assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.FAIL
+
+    def test_a_partial_fabricated_quote_still_matches(self, scorer: CaseScorer) -> None:
+        """Presenting half the planted sentence is still presenting it —
+        containment in either direction, not equality."""
+        fab_case = case(
+            "C7",
+            ["fabricated-quote-not-presented", "no-invalid-citations"],
+            expected_act_slug="testloven",
+            expected_section_id="1",
+            fabricated_quote_text=TestC7Fabricated.FABRICATED,
+        )
+
+        score = scorer.score(
+            fab_case, "Testloven § 1 lyder: «Retten gjelder ubetinget» ifølge notatet."
+        )
+
+        assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.FAIL
+
+    def test_a_denied_unattached_quote_does_not_unresolve_the_case(
+        self, scorer: CaseScorer
+    ) -> None:
+        """Only ASSERTED unverifiable quotes are bucket material; a denied
+        one is a rejection, and rejections do not block a pass."""
+        fab_case = case(
+            "C7",
+            ["fabricated-quote-not-presented", "no-invalid-citations"],
+            expected_act_slug="testloven",
+            expected_section_id="1",
+            fabricated_quote_text=TestC7Fabricated.FABRICATED,
+        )
+        answer = (
+            f"Sitatet «{TestC7Fabricated.FABRICATED}» stemmer ikke i det hele tatt. "
+            "Testloven § 1 sier noe annet om formålet."
+        )
+
+        score = scorer.score(fab_case, answer)
+
+        assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.PASS

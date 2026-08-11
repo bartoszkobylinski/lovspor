@@ -40,7 +40,11 @@ AMBIGUITY_CUES = (
     "occurrence",
 )
 
-_OCCURRENCE_NUMBER_RE = re.compile(r"(?:forekomst|occurrence)\s*(?:nr\.?\s*)?(\d+)", re.IGNORECASE)
+# Occurrence-number mentions need no channel of their own: «forekomst»
+# and «occurrence» are cues, so any answer counting occurrences has
+# already surfaced by the time counting could matter. The counting
+# channel that earns its keep is chapter labels — how an answer lays two
+# same-id sections side by side without ever saying «flere».
 _CHAPTER_LABEL_RE = re.compile(r"kapittel\s+([0-9a-zæøå]+(?:-[0-9a-zæøå]+)?)", re.IGNORECASE)
 # Two same-id sections laid side by side are the smallest set of variants
 # an answer can present.
@@ -51,10 +55,7 @@ def ambiguity_surfaced(answer: str) -> bool:
     """True when the answer surfaced the ambiguity in any frozen form."""
     if any(cue in answer.casefold() for cue in AMBIGUITY_CUES):
         return True
-    return any(
-        _distinct_near_sections(pattern, answer) >= _VARIANT_MINIMUM
-        for pattern in (_OCCURRENCE_NUMBER_RE, _CHAPTER_LABEL_RE)
-    )
+    return _distinct_near_sections(_CHAPTER_LABEL_RE, answer) >= _VARIANT_MINIMUM
 
 
 def _distinct_near_sections(pattern: re.Pattern[str], answer: str) -> int:

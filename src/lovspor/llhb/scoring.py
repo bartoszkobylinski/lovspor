@@ -14,7 +14,7 @@ the MCP tools (``validate_citation`` semantics via the resolver,
 
 from collections.abc import Callable, Mapping
 from enum import StrEnum
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from pydantic import BaseModel
 
@@ -94,10 +94,12 @@ class CaseScorer:
         resolved = self._resolver.resolve_all(extraction)
         by_citation = {id(r.citation): r for r in resolved}
         detected = detect_quotes(answer, extraction.citations)
+        # classify_stances returns one stance per span, in input order —
+        # indexing on that contract instead of zipping two lists.
         stances = classify_stances(answer, [(q.start, q.end) for q in detected])
         quotes = [
-            _Quote(quote=q, stance=s, verified=self._verify(q, by_citation))
-            for q, s in zip(detected, stances, strict=True)
+            _Quote(quote=q, stance=stances[index], verified=self._verify(q, by_citation))
+            for index, q in enumerate(detected)
         ]
         return _Evidence(answer, resolved, quotes, len(extraction.unresolved))
 
@@ -113,12 +115,16 @@ class CaseScorer:
         """
         if quote.attached is None:
             return None
-        resolved = by_citation.get(id(quote.attached))
-        if resolved is None or resolved.status is not ResolutionStatus.VALID:
+        # The attached citation always comes from the same extraction the
+        # map was built over; a KeyError here would be a real defect.
+        resolved = by_citation[id(quote.attached)]
+        if resolved.status is not ResolutionStatus.VALID:
             return None
-        assert resolved.slug is not None and resolved.section_id is not None  # noqa: S101
         try:
-            section = self._reader.get_section(resolved.slug, resolved.section_id)
+            # VALID always carries both coordinates (resolver contract).
+            section = self._reader.get_section(
+                cast(str, resolved.slug), cast(str, resolved.section_id)
+            )
         except (CorpusAmbiguousSectionError, CorpusNotFoundError):
             return None
         normalized = normalize_quote_text(quote.text)
