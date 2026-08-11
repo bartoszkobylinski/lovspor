@@ -59,6 +59,15 @@ class TestVariantPresentation:
 
         assert ambiguity_surfaced(answer) is False
 
+    def test_two_unrelated_chapters_are_not_section_variants(self) -> None:
+        """Chapters mentioned as narrative structure, with no « § » in
+        their sentences, are not two occurrences of one section id
+        (codex-tests round 3): counting them surfaced ambiguity on
+        answers that never discussed a duplicate at all."""
+        answer = "Kapittel 1 gir bakgrunnen, mens kapittel 2 beskriver tilsynet."
+
+        assert ambiguity_surfaced(answer) is False
+
     def test_two_distinct_occurrence_numbers_count(self) -> None:
         answer = "Tool-svaret nevner occurrence 1 og occurrence 2 for denne id-en."
 

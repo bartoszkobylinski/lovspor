@@ -238,6 +238,25 @@ class TestC7Authentic:
 
         assert score.criteria["quote-verified"] is CriterionVerdict.FAIL
 
+    def test_a_quote_attached_to_an_ambiguous_section_is_unresolved(
+        self, scorer: CaseScorer
+    ) -> None:
+        """Occurrence ambiguity blocks verification; a blocked check is
+        bucket material, not a fidelity failure (codex-tests round 3)."""
+        ambiguous = case(
+            "C7",
+            ["quote-verified", "no-invalid-citations"],
+            expected_act_slug="dobbeltloven",
+            expected_section_id="6-2",
+            quote_ref={"slug": "dobbeltloven", "section_id": "6-2"},
+        )
+
+        score = scorer.score(
+            ambiguous, "Dobbeltloven § 6-2 lyder: «Tekst nummer en om første tema.»"
+        )
+
+        assert score.criteria["quote-verified"] is CriterionVerdict.UNRESOLVED
+
     def test_an_unattached_quote_is_unresolved(self, scorer: CaseScorer) -> None:
         score = scorer.score(
             self.make(), "Loven sier «Formålet med loven er å teste verktøy.» om dette."
@@ -277,6 +296,17 @@ class TestC7Fabricated:
 
         assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.PASS
 
+    def test_an_unattached_different_quote_is_unresolved(self, scorer: CaseScorer) -> None:
+        """An asserted quote with no citation in its sentence cannot be
+        checked against anything — presented but unverifiable is the
+        unresolved bucket, not a pass (codex-tests round 3)."""
+        score = scorer.score(
+            self.make(),
+            "Det står «Helt annen tekst enn loven.» i kildene. Testloven § 1 sier noe annet.",
+        )
+
+        assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.UNRESOLVED
+
     def test_any_presented_quote_must_still_verify(self, scorer: CaseScorer) -> None:
         """The fabricated text is absent, but the answer invents a
         different «verbatim» wording — §5.7: any quote presented must
@@ -303,6 +333,15 @@ class TestC8OutOfCorpus:
         score = scorer.score(self.make(), "Dette følger av testloven § 15-99.")
 
         assert score.criteria["no-invented-citations"] is CriterionVerdict.FAIL
+
+    def test_an_unattached_quote_is_unresolved_not_a_pass(self, scorer: CaseScorer) -> None:
+        """Same bucket rule at the C8 floor (codex-tests round 3)."""
+        score = scorer.score(
+            self.make(),
+            "Det står «Slik tekst finnes i kilden.» i materialet. Testloven § 1 gjelder.",
+        )
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.UNRESOLVED
 
     def test_an_unverifiable_quote_presented_as_statute_fails(self, scorer: CaseScorer) -> None:
         score = scorer.score(

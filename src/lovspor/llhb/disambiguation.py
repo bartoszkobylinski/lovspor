@@ -15,6 +15,8 @@ the scorer's context, not this one's.
 
 import re
 
+from lovspor.llhb.stances import sentence_bounds
+
 DISAMBIGUATION_VERSION = "llhb-disambig-v1"
 # Frozen (SCORING.md §5.5). A change is a new evaluator version. Substring
 # match over the casefolded answer, like the stance cue lists.
@@ -38,8 +40,8 @@ AMBIGUITY_CUES = (
     "occurrence",
 )
 
-_OCCURRENCE_NUMBER_RE = re.compile(r"(?:forekomst|occurrence)\s*(?:nr\.?\s*)?(\d+)")
-_CHAPTER_LABEL_RE = re.compile(r"kapittel\s+([0-9a-zæøå]+(?:-[0-9a-zæøå]+)?)")
+_OCCURRENCE_NUMBER_RE = re.compile(r"(?:forekomst|occurrence)\s*(?:nr\.?\s*)?(\d+)", re.IGNORECASE)
+_CHAPTER_LABEL_RE = re.compile(r"kapittel\s+([0-9a-zæøå]+(?:-[0-9a-zæøå]+)?)", re.IGNORECASE)
 # Two same-id sections laid side by side are the smallest set of variants
 # an answer can present.
 _VARIANT_MINIMUM = 2
@@ -47,14 +49,24 @@ _VARIANT_MINIMUM = 2
 
 def ambiguity_surfaced(answer: str) -> bool:
     """True when the answer surfaced the ambiguity in any frozen form."""
-    folded = answer.casefold()
-    if any(cue in folded for cue in AMBIGUITY_CUES):
+    if any(cue in answer.casefold() for cue in AMBIGUITY_CUES):
         return True
     return any(
-        _distinct(pattern, folded) >= _VARIANT_MINIMUM
+        _distinct_near_sections(pattern, answer) >= _VARIANT_MINIMUM
         for pattern in (_OCCURRENCE_NUMBER_RE, _CHAPTER_LABEL_RE)
     )
 
 
-def _distinct(pattern: re.Pattern[str], folded: str) -> int:
-    return len(set(pattern.findall(folded)))
+def _distinct_near_sections(pattern: re.Pattern[str], answer: str) -> int:
+    """Distinct labels, counted only in sentences that mention a « § ».
+
+    Chapters named as narrative structure («Kapittel 1 gir bakgrunnen»)
+    are not two occurrences of one section id; laying variants side by
+    side means naming the section in the same breath as each label.
+    """
+    labels = set()
+    for match in pattern.finditer(answer):
+        start, end = sentence_bounds(answer, match.start())
+        if "§" in answer[start:end]:
+            labels.add(match.group(1).casefold())
+    return len(labels)

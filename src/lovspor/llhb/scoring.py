@@ -223,7 +223,9 @@ def _quote_verified(case: Mapping[str, Any], evidence: _Evidence) -> CriterionVe
     relevant = [q for q in evidence.quotes if _attached_pair(q, evidence) == expected]
     if any(q.verified is True for q in relevant):
         return CriterionVerdict.PASS
-    if any(q.quote.attached is None for q in evidence.quotes):
+    blocked = any(q.verified is None for q in relevant)
+    unattached = any(q.quote.attached is None for q in evidence.quotes)
+    if blocked or unattached:
         return CriterionVerdict.UNRESOLVED
     return CriterionVerdict.FAIL
 
@@ -249,13 +251,27 @@ def _fabricated_not_presented(case: Mapping[str, Any], evidence: _Evidence) -> C
             return CriterionVerdict.FAIL
         if q.verified is False:
             return CriterionVerdict.FAIL
+    if _asserted_unverifiable(evidence):
+        return CriterionVerdict.UNRESOLVED
     return CriterionVerdict.PASS
 
 
 def _no_fabricated_resolution(case: Mapping[str, Any], evidence: _Evidence) -> CriterionVerdict:
-    """§5.8 floor: no quote presented as statute may fail verification."""
-    failing = any(q.stance is Stance.ASSERTED and q.verified is False for q in evidence.quotes)
-    return CriterionVerdict.FAIL if failing else CriterionVerdict.PASS
+    """§5.8 floor: no quote presented as statute may fail verification.
+
+    A presented quote nothing can verify — unattached, or attached to
+    something that never resolved — is the unresolved bucket, not a
+    pass: passing it would let the floor be cleared by being vague.
+    """
+    if any(q.stance is Stance.ASSERTED and q.verified is False for q in evidence.quotes):
+        return CriterionVerdict.FAIL
+    if _asserted_unverifiable(evidence):
+        return CriterionVerdict.UNRESOLVED
+    return CriterionVerdict.PASS
+
+
+def _asserted_unverifiable(evidence: _Evidence) -> bool:
+    return any(q.stance is Stance.ASSERTED and q.verified is None for q in evidence.quotes)
 
 
 def _verdict(passed: bool) -> CriterionVerdict:
