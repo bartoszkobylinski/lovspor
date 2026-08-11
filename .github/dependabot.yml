@@ -22,3 +22,12 @@ updates:
     ignore:
       - dependency-name: "mutmut"
         update-types: ["version-update:semver-major"]
+      # mcp 2.x is a major SDK rewrite that breaks src/lovspor/mcp.py
+      # (PR #55's own CI was red on every leg) and changes the served
+      # tool schemas — which changes the frozen LLHB apparatus surface
+      # hash the benchmark's fairness gate enforces. Migration is a
+      # deliberate post-benchmark project, tracked in issue #70; until
+      # then this rule stops Dependabot from re-proposing the major
+      # bump weekly. v1.x remains in maintenance mode upstream.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
