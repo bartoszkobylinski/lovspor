@@ -206,14 +206,19 @@ class TestToolConfig:
 
         assert names and all(re.match(pattern, name) for name in names)
 
-    def test_the_frozen_surface_document_is_what_the_code_serves(self, corpus: Path) -> None:
+    def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
         """tool-surface-v1.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
-        re-derived here on every run. The surface is corpus-independent (the
-        schemas come from build_server, not the documents), which is what
-        makes a fixture corpus a valid witness. If this fails, the served
-        surface changed: regenerating the document is an apparatus decision
-        to make explicitly, not a fixture to patch."""
+        re-derived here on every run. Two corpora with disjoint content are
+        the witness that the surface comes from build_server, not from the
+        documents. Sampling cannot rule out deliberately corpus-conditional
+        tool registration — but it does not have to: a real run's declared
+        tool_config is computed from the pinned corpus (run_arm.py), so a
+        surface that diverged there would disagree with this anchor and fail
+        the fairness gate. This test is the early warning; the gate is the
+        enforcement. If this fails, the served surface changed: regenerating
+        the document is an apparatus decision to make explicitly, not a
+        fixture to patch."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
@@ -223,12 +228,18 @@ class TestToolConfig:
                 / "tool-surface-v1.json"
             ).read_text(encoding="utf-8")
         )
-
-        surface = tool_surface(corpus)
+        corpora = (
+            ("first", CORPUS_DOCS),
+            ("second", {"annenloven": ("Annen loven", "### § 2. Virkeområde\n\nAnnet innhold.\n")}),
+        )
 
         assert committed["server"] == mcp_surface.SERVER_NAME
-        assert committed["tools"] == allowed_tools(surface)
-        assert committed["tool_schema_sha256"] == surface.schema_sha256
+        for name, docs in corpora:
+            root = tmp_path / name
+            build_corpus(root, docs)
+            surface = tool_surface(root)
+            assert committed["tools"] == allowed_tools(surface), name
+            assert committed["tool_schema_sha256"] == surface.schema_sha256, name
 
     def test_the_backend_names_the_commit_not_the_machine(self, corpus: Path) -> None:
         """Published metadata identifies the corpus by commit. A checkout

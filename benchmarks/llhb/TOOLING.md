@@ -444,8 +444,16 @@ Driven by the Stage 3.5 human audit (see
   is a finding. The surface is a pure function of lovspor code
   (corpus-independent: the schemas come from `build_server`, not the
   documents), so a unit test regenerates the document from the code on
-  every run; it cannot go stale, and changing it is an explicit
-  apparatus decision. Without that anchor, every per-record check read
+  every run — against two content-disjoint corpora, since a single
+  fixture could not distinguish corpus-independence from coincidence;
+  it cannot go stale, and changing it is an explicit apparatus
+  decision. Sampling corpora cannot rule out deliberately
+  corpus-conditional registration, and does not have to: a run's
+  declared `tool_config` is computed from the pinned corpus itself
+  (`run_arm.py`), so a surface that diverged on the pinned corpus
+  would disagree with the anchor and fail the gate — the test is the
+  early warning, the gate is the enforcement. Without that anchor,
+  every per-record check read
   its expectation out of the run's own `tool_config`, and a run
   declaring a subset of the real surface — transcripts agreeing with
   the subset — agreed only with itself and passed. Tool calls are
@@ -462,7 +470,19 @@ Driven by the Stage 3.5 human audit (see
   always the caller's claim, never inferred from the declared surface
   being empty — otherwise a treatment run with an empty `tool_config`
   would be graded as a control run and pass. Exits non-zero, so it can
-  gate a report.
+  gate a report. **Known limit, deliberate until Stage 7:** the dataset
+  itself has no frozen anchor in this gate. `dataset_checksum` is
+  compared cross-arm and verified against the lock at run time
+  (`verify_frozen_against_lock`), but `check_fairness.py` does not
+  compare it to `dataset/frozen/llhb-v1.lock.json`, because pilots run
+  discarded candidates by design and would fail such a gate. Before
+  any published number, Stage 7 reporting must add a frozen mode that
+  anchors the pair externally: metadata `dataset_checksum` against the
+  lock's `dataset_sha256`, the exact record case-id set against the
+  frozen JSONL (grammar and count are checked today, identity is not),
+  and `lovverk_commit` against the lock's pin — plus whatever other
+  preregistered values the publication claims (prompt hash, model,
+  seed), which today are checked only for cross-arm equality.
 * **First treatment pilot (2026-08-10)**: `llhb-v1-run-20260810-pilot6`
   (control) and `llhb-v1-run-20260810-treat3` (lovspor), same 10
   discarded candidates, same seed, same prompt hash, same
