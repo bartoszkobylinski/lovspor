@@ -47,12 +47,16 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - Never commit to `main` directly. The single exception is the bootstrap commit `chore: initialize repository`.
 
 ### PR workflow (mandatory)
-1. Feature complete on branch → push.
-2. Open PR via web UI (or `gh pr create` if installed).
-3. Fill the PR template, especially the **Codex review prompt** section.
-4. **STOP.** Hand back to user: *"PR opened: <link>. Run Codex."*
-5. User runs Codex, returns with report.
-6. If Codex finds bugs: fix on the same branch, push. Hand back to user again.
+1. Feature complete on branch → push → open PR (`gh pr create`), fill the PR template.
+2. From PR open, **GitHub Actions owns the handoff** (`docs/agentic-ci.md`): fast-ci,
+   the existing Test matrix, an independent Codex test author on the self-hosted runner,
+   and the PR-scoped mutation gate run automatically.
+3. Do not manually invoke Codex for PR testing. Do not wait locally for mutation results.
+4. The pipeline ends READY TO MERGE (all checks green) or BLOCKED with a label:
+   `needs-human:mutation` or `needs-implementation-fix` + a short PR comment.
+5. On `needs-implementation-fix`: read the failing test, fix the implementation on the
+   same branch; change the test only if it provably contradicts the spec.
+6. A BLOCKED result is a required escalation, not permission to guess.
 7. **Only the user merges.** Never merge yourself.
 8. After merge: provide deploy + log commands.
 
@@ -61,7 +65,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - `tests/unit/` — fast, isolated, one module at a time. Every public function covered.
 - `tests/integration/` — pipeline end-to-end on real fixture tarballs and XML samples.
 - `tests/fixtures/` — real XML/JSON samples from Lovdata, captured once, committed, never regenerated unless source schema changes.
-- Mutation testing: **Codex runs `./scripts/mutmut-pr.sh` on every PR review** and reports the result. The script scopes mutation to the `src/lovspor/` files the PR changed (full-repo runs don't terminate in reviewable time — issue #4, decisions.md §9c) and prints an explicit `mutation not applicable` notice for PRs with no engine-logic changes; that notice is a valid review outcome, not a skipped step. Each file is mutated against **its own test module**, falling back to `tests/unit/` when there is none: the configured runner used to run all of `tests/unit/` per mutant (~32 s each), which is why reviews kept abandoning the run part-way. The trade is that a mutant only another module's test would kill reads as survived — the score errs pessimistic, never optimistic. **Suspicious mutants were not killed either** — never fold them into the killed count. Full-repo `uv run mutmut run` only when explicitly asked (baseline runs, §9a). Claude does not run mutmut locally before opening a PR — it would be duplicate work and slow the push cycle (`./scripts/mutmut-pr.sh --list` to preview scope is fine). If a Codex round flags a critical-path survivor, fix it on the same branch and ask Codex to re-run. **mutmut 2.x only** — mutmut 3 has open bugs around editable installs and dataclasses. Consequence: **no PEP 695 type parameter syntax** (`def foo[T](...)`), because mutmut 2's parser predates PEP 695 and crashes. Use `TypeVar` from `typing` instead. Ruff rule `UP047` is globally disabled to prevent accidental reintroduction.
+- Mutation testing: **the CI `mutation` job runs `./scripts/mutmut-pr.sh` on every PR** (no LLM involved) and publishes `mutation-result.json`; surviving mutants route to the Codex remediation workflow (max 2 cycles, then `needs-human:mutation`). The script scopes mutation to the `src/lovspor/` files the PR changed (full-repo runs don't terminate in reviewable time — issue #4, decisions.md §9c) and prints an explicit `mutation not applicable` notice for PRs with no engine-logic changes; that notice is a valid review outcome, not a skipped step. Each file is mutated against **its own test module**, falling back to `tests/unit/` when there is none: the configured runner used to run all of `tests/unit/` per mutant (~32 s each), which is why reviews kept abandoning the run part-way. The trade is that a mutant only another module's test would kill reads as survived — the score errs pessimistic, never optimistic. **Suspicious mutants were not killed either** — never fold them into the killed count. Full-repo `uv run mutmut run` only when explicitly asked (baseline runs, §9a). Claude does not run mutmut locally before opening a PR — it would be duplicate work and slow the push cycle (`./scripts/mutmut-pr.sh --list` to preview scope is fine). If a Codex round flags a critical-path survivor, fix it on the same branch and ask Codex to re-run. **mutmut 2.x only** — mutmut 3 has open bugs around editable installs and dataclasses. Consequence: **no PEP 695 type parameter syntax** (`def foo[T](...)`), because mutmut 2's parser predates PEP 695 and crashes. Use `TypeVar` from `typing` instead. Ruff rule `UP047` is globally disabled to prevent accidental reintroduction.
 - HTTP transport mocked with `pytest-httpx` only. Logic is never mocked.
 
 ## Forbidden
@@ -72,7 +76,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - `subprocess.run(..., shell=True)`.
 - Tar/zip extraction without `tarfile.data_filter` (CVE-2007-4559).
 - `lxml.etree.parse()` without `resolve_entities=False`, `huge_tree=False` (XXE / billion laughs).
-- Merge a PR before Codex review pass.
+- Merge a PR before the PR Pipeline (fast-ci, codex-tests, mutation) is green or its BLOCKED state is explicitly resolved by the user.
 - Commit without `/security-check` pass.
 - Commit message with AI/Claude attribution.
 
@@ -100,8 +104,8 @@ uv run pytest                         # all tests
 uv run pytest tests/unit/             # fast loop
 uv run ruff check && uv run ruff format --check
 uv run mypy src/
-# Mutation testing is Codex's job on PR review, not Claude's pre-push step.
-# ./scripts/mutmut-pr.sh              # PR-scoped run (Codex); --list previews scope
+# Mutation testing is the CI mutation job's work, not Claude's pre-push step.
+# ./scripts/mutmut-pr.sh              # PR-scoped run (CI); --list previews scope
 # uv run mutmut run                   # full-repo baseline — only if explicitly asked
 ```
 
@@ -110,8 +114,7 @@ uv run mypy src/
 - All commits atomic and bisectable
 - All tests pass: unit + integration
 - Coverage ≥ 90% on changed files
-- Mutation score reviewed by Codex (not by Claude pre-push)
 - `/security-check` clean
-- PR description filled with Codex prompt
-- Codex review pass
+- PR description filled per template
+- PR Pipeline green: fast-ci, codex-tests, mutation (or BLOCKED explicitly resolved by the user)
 - No commit to main without PR

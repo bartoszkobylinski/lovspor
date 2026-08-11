@@ -6,22 +6,9 @@
 
 <!-- list of important files / functions -->
 
-## Codex review prompt
+## What to verify
 
-<!-- Paste this when running Codex on this PR -->
-
-```
-What changed:
-- (files, functions)
-
-What to verify:
-- (behaviors, invariants, edge cases)
-
-What NOT to do:
-- Do not refactor existing code
-- Do not change feature behavior
-- Only write tests and report bugs
-```
+<!-- behaviors, invariants, edge cases — read by the Codex CI test author -->
 
 ## Definition of Done
 
@@ -31,6 +18,5 @@ What NOT to do:
 - [ ] `uv run mypy src/` green
 - [ ] `uv run pytest` green
 - [ ] Coverage ≥ 90% on changed files
-- [ ] Mutation reviewed by Codex via `./scripts/mutmut-pr.sh` (a `mutation not applicable` notice is a valid outcome for PRs with no `src/` changes)
 - [ ] `/security-check` clean
-- [ ] Codex review pass
+- [ ] PR Pipeline green: fast-ci, codex-tests, mutation (a `not_applicable` mutation gate is a valid outcome for PRs with no `src/` changes)

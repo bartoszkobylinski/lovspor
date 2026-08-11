@@ -1,0 +1,153 @@
+# Codex remediation of surviving mutants — tests only, max 2 cycles, then BLOCKED.
+# workflow_run is a PRIVILEGED trigger: same-repo runs only, the artifact is DATA
+# (schema-validated, never sourced), and the SHA must match before Codex runs.
+name: Mutation Remediation
+
+on:
+  workflow_run:
+    workflows: ["PR Pipeline"]
+    types: [completed]
+
+# One Codex auth.json — never used in parallel.
+concurrency:
+  group: lovspor-codex-subscription
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  remediate:
+    runs-on: [self-hosted, linux, codex]
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
+      issues: write
+    env:
+      CODEX_HOME: /home/runner/.codex-lovspor
+      UV_PYTHON: "3.12"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - name: Download mutation artifact for this SHA
+        id: artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: mutation-result-${{ github.event.workflow_run.head_sha }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ${{ runner.temp }}/mutation
+
+      - name: Validate result as data; decide whether remediation applies
+        id: gate
+        run: |
+          f="${{ runner.temp }}/mutation/mutation-result.json"
+          if [ "${{ steps.artifact.outcome }}" != "success" ] || [ ! -f "$f" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0   # not a mutation failure
+          fi
+          jq -e '
+            .schema_version == 1 and
+            (.commit | type == "string" and length == 40) and
+            (.gate.passed | type == "boolean") and
+            (.survivors | type == "array")
+          ' "$f" >/dev/null || { echo "invalid mutation-result.json" >&2; exit 1; }
+          # Stale results are ignored, never acted on.
+          if [ "$(jq -r .commit "$f")" != "$HEAD_SHA" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$(jq -r .gate.passed "$f")" = "false" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.gate.outputs.run == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.LOVSPOR_CI_PUSH_TOKEN }}
+
+      - name: Resolve PR number and remediation cycle
+        id: cycle
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          # The branch must still be at the SHA the result was computed for.
+          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
+          [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          # Count [agent:codex-mutation] commits in the trailing agent-authored block;
+          # any human/Claude commit on top resets the count.
+          count=0
+          while IFS= read -r subj; do
+            case "$subj" in
+              *"[agent:codex-mutation]"*) count=$((count+1)) ;;
+              *"[agent:codex-tests]"*)    ;;
+              *) break ;;
+            esac
+          done < <(git log --pretty=%s)
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" -ge 2 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "blocked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"; echo "blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: BLOCKED — remediation limit reached
+        if: steps.gate.outputs.run == 'true' && steps.cycle.outputs.blocked == 'true'
+        run: |
+          gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
+          gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
+            "Mutation remediation BLOCKED after 2 cycles. Human decision required. Artifact: mutation-result-$HEAD_SHA (run: ${{ github.event.workflow_run.html_url }})."
+
+      - name: Sync dependencies
+        if: steps.cycle.outputs.run == 'true'
+        run: uv sync --frozen
+
+      - name: Codex — mutation remediation (tests only)
+        if: steps.cycle.outputs.run == 'true'
+        run: |
+          echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          codex exec \
+            --sandbox workspace-write \
+            "$(cat .github/codex/mutation-remediation.md)
+
+          mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+
+      - name: Scope guard
+        if: steps.cycle.outputs.run == 'true'
+        run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
+
+      - name: Run tests on Codex additions
+        if: steps.cycle.outputs.run == 'true'
+        run: uv run pytest tests/unit/
+
+      - name: Commit and push, or report BLOCKED
+        if: steps.cycle.outputs.run == 'true'
+        run: |
+          if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
+            gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
+            gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
+              "Mutation remediation made no safe test-only change (survivors classified non-killable). Human review required. Artifact: mutation-result-$HEAD_SHA."
+            exit 0
+          fi
+          # One marker commit, even if Codex committed on its own.
+          git reset --soft "$BEFORE_SHA"
+          git config user.name "codex-ci"
+          git config user.email "codex-ci@users.noreply.github.com"
+          git add -A
+          git commit -m "test: kill mutation survivors for PR #${{ steps.cycle.outputs.pr }} [agent:codex-mutation]"
+          git push origin "HEAD:$HEAD_BRANCH"
+          gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
+            "Mutation gate failed; remediation cycle $(( ${{ steps.cycle.outputs.count }} + 1 ))/2 pushed test-only changes; pipeline rerunning."
