@@ -28,6 +28,11 @@ freeze datasets, call models, or score runs.
 | `mcp_surface.py` | Stage 6 treatment surface: `--mcp-config` document for the pinned lovverk stdio server, tool names + tool-schema SHA-256 read from the server itself, run-metadata `tool_config`. Contract below. |
 | `tool-surface-v1.json` | Frozen LLHB v1 apparatus surface: the tool names + schema hash the server serves, committed as the expectation `check_fairness.py` compares a run's declared `tool_config` against. A unit test re-derives the names from the code on every interpreter and the hash on the apparatus interpreter (3.12, the CI leg pinned for it), so it cannot drift; a deliberate change to the served surface means regenerating it as an explicit apparatus decision. |
 | `fairness.py` | Stage 6 fairness checks over committed artifacts: metadata diff against an explicit may-differ list, paired case sets, per-record control/treatment violations. Contract below. |
+| `quote_detection.py` | Stage 8: purported-verbatim spans in an answer (SCORING.md §4) — quotation-mark channel + verbatim-cue channel («lyder: …»), sentence attachment; a mark anywhere in a cue window hands the material to the mark channel. Frozen `llhb-quote-detect-v1`. |
+| `disambiguation.py` | Stage 8 C5 detection (§5.5): frozen ambiguity-cue list + variant counting — chapters sharing one section id, each label paired with the § ids of its own sentence. Frozen `llhb-disambig-v1`. |
+| `scoring.py` | Stage 8 per-case scorer: criteria C1-C8 in the dataset's own vocabulary, PASS/FAIL/UNRESOLVED per criterion, §6 denominators as counts on the score. Runs at the pinned corpus through the production tool code paths. Frozen `llhb-score-v1`. |
+| `metrics.py` | Stage 8 aggregation (§6): eight metrics as numerator/denominator/rate per arm, control-treatment delta, deterministic bootstrap CIs (fixed recorded seed, paired resampling for the delta), unresolved buckets beside the metrics. Empty denominator = no rate. `retrieved_correct` counts only a successful `get_section` of the expected pair (payloads are not committed, F3). Frozen `llhb-metrics-v1`. |
+| `reporting.py` | Stage 8 composition: committed records paired with their cases and scored; refuses unknown cases, incomplete records, missing answers — the gate rejects such pairs first, this layer refuses to quietly score what slipped past. |
 
 ## Extractor syntax (closed contract)
 
@@ -500,6 +505,13 @@ Driven by the Stage 3.5 human audit (see
   them: `model_id` and `case_order_seed`, still checked cross-arm
   only; a publication claiming them as preregistered must add its own
   anchor first.
+* **Scoring a pair** (`runner/score_run.py`): scores every case of a
+  committed pair at the pinned corpus and writes the §6 report
+  (`results/reports/<control>-vs-<treatment>.json`). The checkout is
+  verified against the cases' own corpus pin before an answer is read,
+  and a cases file carrying more than one pin refuses to score. Run
+  the fairness gate first — `--frozen` for the published evaluation;
+  this script does not re-check fairness.
 * **First treatment pilot (2026-08-10)**: `llhb-v1-run-20260810-pilot6`
   (control) and `llhb-v1-run-20260810-treat3` (lovspor), same 10
   discarded candidates, same seed, same prompt hash, same
