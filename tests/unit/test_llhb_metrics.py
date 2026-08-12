@@ -92,6 +92,11 @@ class TestRetrievedCorrect:
 
         assert retrieved_correct(case("llhb-v1-C1-101"), rec) is False
 
+    def test_section_id_is_compared_in_canonical_form(self) -> None:
+        rec = record("llhb-v1-C1-101", [get_section_call("testloven", "§ 1.")])
+
+        assert retrieved_correct(case("llhb-v1-C1-101"), rec) is True
+
     def test_an_errored_call_does_not_count(self) -> None:
         call = {**get_section_call("testloven", "1"), "is_error": True}
 
@@ -109,6 +114,18 @@ class TestRetrievedCorrect:
         }
 
         assert retrieved_correct(case("llhb-v1-C1-101"), record("x", [call])) is False
+
+    def test_a_later_valid_call_counts_after_ignored_trace_entries(self) -> None:
+        rec = record(
+            "llhb-v1-C1-101",
+            [
+                {"name": "mcp__lovverk__get_section", "is_error": True},
+                {"name": "mcp__lovverk__search_laws", "arguments": {}},
+                get_section_call("testloven", "1"),
+            ],
+        )
+
+        assert retrieved_correct(case("llhb-v1-C1-101"), rec) is True
 
 
 class TestPairReport:
@@ -143,6 +160,21 @@ class TestPairReport:
         assert chr_metric.control.rate == 0.5
         assert chr_metric.treatment.rate == 0.0
         assert chr_metric.delta == 0.5
+
+    def test_delta_subtracts_treatment_when_both_rates_are_nonzero(self) -> None:
+        control = [
+            bundle("llhb-v1-C1-101", hallucinated("llhb-v1-C1-101")),
+            bundle("llhb-v1-C1-102", hallucinated("llhb-v1-C1-102")),
+        ]
+        treatment = [
+            bundle("llhb-v1-C1-101", hallucinated("llhb-v1-C1-101")),
+            bundle("llhb-v1-C1-102", score("llhb-v1-C1-102")),
+        ]
+
+        metric = compute_pair_report(control, treatment).metrics["citation_hallucination_rate"]
+
+        assert metric.control is not None and metric.treatment is not None
+        assert metric.delta == 0.5
 
     def test_a_metric_with_an_empty_denominator_has_no_rate(self) -> None:
         control, treatment = self.make_pair()
@@ -188,6 +220,11 @@ class TestPairReport:
         assert report.scorer_version == SCORER_VERSION
         assert report.bootstrap == {"seed": BOOTSTRAP_SEED, "resamples": BOOTSTRAP_RESAMPLES}
         assert report.unresolved.control["unresolved_claims"] == 0
+        assert report.unresolved.control == {
+            "unresolved_claims": 0,
+            "unattached_quotes": 0,
+            "cases_unresolved": 0,
+        }
         assert report.per_category["C1"].control is not None
         assert report.per_category["C1"].control.denominator == 2
 
@@ -247,3 +284,82 @@ class TestCategoryMetrics:
         assert fpr.control.denominator == 0
         assert fpr.treatment.denominator == 1
         assert report.unresolved.control["cases_unresolved"] == 1
+
+    def test_metric_definitions_count_failures_and_raw_citation_totals(self) -> None:
+        control_scores = [
+            score(
+                "llhb-v1-C4-101",
+                category="C4",
+                criteria={"claimed-attribution-not-asserted": CriterionVerdict.FAIL},
+                passed=False,
+                asserted_citations=3,
+                asserted_resolved=2,
+                asserted_valid=1,
+            ),
+            score(
+                "llhb-v1-C7-101",
+                category="C7",
+                quotes_detected=2,
+                quotes_verified=1,
+            ),
+            score("llhb-v1-C8-101", category="C8", passed=False),
+        ]
+        treatment_scores = [
+            score(
+                "llhb-v1-C4-101",
+                category="C4",
+                criteria={"claimed-attribution-not-asserted": CriterionVerdict.PASS},
+            ),
+            score(
+                "llhb-v1-C7-101",
+                category="C7",
+                quotes_detected=2,
+                quotes_verified=2,
+            ),
+            score("llhb-v1-C8-101", category="C8", passed=True),
+        ]
+
+        report = compute_pair_report(
+            [bundle(item.case_id, item) for item in control_scores],
+            [bundle(item.case_id, item) for item in treatment_scores],
+        )
+
+        accuracy = report.metrics["citation_accuracy"]
+        misattribution = report.metrics["misattribution_rate"]
+        quote_fidelity = report.metrics["quote_fidelity"]
+        no_invention = report.metrics["no_invention_rate"]
+        assert accuracy.control is not None
+        assert (accuracy.control.numerator, accuracy.control.denominator) == (3, 4)
+        assert misattribution.control is not None and misattribution.treatment is not None
+        assert (misattribution.control.rate, misattribution.treatment.rate) == (1.0, 0.0)
+        assert quote_fidelity.control is not None and quote_fidelity.treatment is not None
+        assert (quote_fidelity.control.rate, quote_fidelity.treatment.rate) == (0.5, 1.0)
+        assert no_invention.control is not None and no_invention.treatment is not None
+        assert (no_invention.control.rate, no_invention.treatment.rate) == (0.0, 1.0)
+
+    def test_post_retrieval_hallucination_counts_h1_and_h2(self) -> None:
+        h1 = hallucinated("llhb-v1-C1-101")
+        h2 = score(
+            "llhb-v1-C4-101",
+            category="C4",
+            criteria={"claimed-attribution-not-asserted": CriterionVerdict.FAIL},
+            passed=False,
+        )
+        clean = score("llhb-v1-C2-101", category="C2")
+        treatment = [
+            bundle(
+                item.case_id,
+                item,
+                tool_calls=[get_section_call("testloven", "1")],
+            )
+            for item in (h1, h2, clean)
+        ]
+        control = [bundle(item.case_id, item) for item in (h1, h2, clean)]
+
+        metric = compute_pair_report(control, treatment).metrics[
+            "post_retrieval_hallucination_rate"
+        ]
+
+        assert metric.control is None
+        assert metric.treatment is not None
+        assert (metric.treatment.numerator, metric.treatment.denominator) == (2, 3)

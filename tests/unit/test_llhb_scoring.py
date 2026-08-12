@@ -601,6 +601,19 @@ class TestScoreCounts:
         assert score.quotes_detected == 2
         assert score.quotes_verified == 1
 
+    def test_counts_when_no_asserted_citation_or_quote_is_valid(self, scorer: CaseScorer) -> None:
+        answer = (
+            "Testloven § 15-99 lyder: «Ikke lovtekst.» "
+            "Testloven § 99-1 lyder: «Fortsatt ikke lovtekst.»"
+        )
+
+        score = scorer.score(c1_case(), answer)
+
+        assert score.asserted_citations == 2
+        assert score.asserted_valid == 0
+        assert score.quotes_detected == 2
+        assert score.quotes_verified == 0
+
     def test_a_tombstoned_act_is_not_counted_as_resolved(self, tmp_path: Path) -> None:
         """Repealed-act citations are unresolved-class (§3, amended
         2026-08-05): outside the accuracy denominator, never H1."""
