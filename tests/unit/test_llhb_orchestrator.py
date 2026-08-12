@@ -172,6 +172,11 @@ class TestRunConfig:
         assert config.tool_access is None
         assert config.case_attempts == 3
 
+    def test_cli_invocation_defaults_to_not_timed_out(self) -> None:
+        invocation = orchestrator.CliInvocation(stdout="", stderr="", returncode=0, duration_ms=1)
+
+        assert invocation.timed_out is False
+
 
 class TestCaseOrder:
     def test_deterministic_for_seed(self) -> None:
@@ -186,7 +191,7 @@ class TestCaseOrder:
         assert len(orders) > 1
 
     def test_rejects_duplicate_ids(self) -> None:
-        with pytest.raises(OrchestratorError, match="duplicate"):
+        with pytest.raises(OrchestratorError, match=r"^duplicate case ids: \['llhb-v1-C1-001'\]$"):
             case_order(["llhb-v1-C1-001", "llhb-v1-C1-001"], 42)
 
 
@@ -202,8 +207,21 @@ class TestHermeticEnv:
         assert env["HOME"] == str(tmp_path)
 
     def test_rejects_api_key_in_extra_env(self, tmp_path: Path) -> None:
-        with pytest.raises(OrchestratorError, match="ANTHROPIC_API_KEY"):
+        with pytest.raises(
+            OrchestratorError,
+            match=(
+                r"^extra_env keys \['ANTHROPIC_API_KEY'\] are banned: credentials flip the run "
+                r"onto per-token billing, HOME/CLAUDE_CONFIG_DIR would defeat the sandbox$"
+            ),
+        ):
             hermetic_env(tmp_path, {"ANTHROPIC_API_KEY": "sk-explicit"})
+
+    def test_path_has_a_safe_default_when_parent_path_is_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PATH", raising=False)
+
+        assert hermetic_env(tmp_path, {})["PATH"] == "/usr/bin:/bin"
 
     def test_extra_env_overrides_path(self, tmp_path: Path) -> None:
         env = hermetic_env(tmp_path, {"PATH": "/fake/bin"})
@@ -270,7 +288,8 @@ class TestExecuteArgv:
 
         assert result.timed_out is False
         assert result.returncode == 127
-        assert "cannot execute claude" in result.stderr
+        assert result.stdout == ""
+        assert result.stderr.startswith("cannot execute claude: ")
 
 
 class TestRunArm:
@@ -589,10 +608,19 @@ class TestRunArm:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
         cases = [make_case("../../outside")]
 
-        with pytest.raises(OrchestratorError, match="invalid case ids"):
+        with pytest.raises(OrchestratorError, match=r"^invalid case ids: \['\.\./\.\./outside'\]$"):
             run_arm(make_config(tmp_path, bin_dir), cases, make_metadata(), store)
         assert not (tmp_path / "runs").exists()
         assert not (tmp_path / "outside.json").exists()
+
+    def test_reports_a_missing_case_id_as_empty_before_any_write(self, tmp_path: Path) -> None:
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        with pytest.raises(OrchestratorError, match=r"^invalid case ids: \[''\]$"):
+            run_arm(
+                make_config(tmp_path, tmp_path), [{"question": "Uten id"}], make_metadata(), store
+            )
+        assert not (tmp_path / "runs").exists()
 
     def test_non_utf8_stdout_becomes_error_record(self, tmp_path: Path) -> None:
         bin_dir = fake_claude(tmp_path, "printf '\\377\\376 not utf8'")
@@ -690,7 +718,12 @@ class TestToolCallReconciliation:
 
         monkeypatch.setattr(orchestrator, "parse_stream_json", blinded)
 
-        with pytest.raises(OrchestratorError, match="the transcript contains 1"):
+        expected = (
+            "case llhb-v1-C1-001: the parser found 0 tool call(s) but the transcript contains 1; "
+            "the run is stopped rather than reported, because a miscounted trace is the one "
+            "result this benchmark must not publish"
+        )
+        with pytest.raises(OrchestratorError, match=f"^{re.escape(expected)}$"):
             run_arm(
                 treatment_config(tmp_path, bin_dir),
                 [make_case("llhb-v1-C1-001")],
@@ -818,7 +851,10 @@ class TestCaseRetry:
         assert record["completed"] is True
         [note] = record["errors"]
         assert note["stage"] == "other"
-        assert "attempt 1" in note["message"] and "retried" in note["message"]
+        assert note["message"] == (
+            "attempt 1 failed and was retried: claude exited with exit code 1"
+        )
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", note["at"])
         attempt_raw = tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.attempt1.json"
         assert "529 Overloaded" in attempt_raw.read_text(encoding="utf-8")
 
@@ -903,6 +939,9 @@ class TestCaseRetry:
         record = store.read_records(RUN_ID)[0]
         assert record["completed"] is True
         assert "timed out" in record["errors"][0]["message"]
+        assert record["errors"][0]["message"] == (
+            "attempt 1 failed and was retried: CLI timed out before completing the case"
+        )
         attempt_raw = tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.attempt1.json"
         assert json.loads(attempt_raw.read_text(encoding="utf-8"))["timed_out"] is True
 
@@ -926,3 +965,20 @@ class TestCaseRetry:
     def test_attempts_below_one_are_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="case_attempts"):
             make_config(tmp_path, tmp_path, case_attempts=0)
+
+    def test_retry_note_handles_a_failed_record_without_parser_errors(self) -> None:
+        note = orchestrator._retry_note(2, {"errors": []})
+
+        assert note["message"] == "attempt 2 failed and was retried: no error captured"
+
+
+def test_artifact_retention_rejects_an_invalid_case_id(tmp_path: Path) -> None:
+    with pytest.raises(
+        OrchestratorError,
+        match=r"^invalid case id '\.\./outside' for artifact retention$",
+    ):
+        orchestrator._checked_dir(tmp_path, "../outside", "raw")
+
+
+def test_text_converts_absent_process_output_to_empty_text() -> None:
+    assert orchestrator._text(None) == ""
