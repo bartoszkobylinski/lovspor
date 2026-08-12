@@ -14,8 +14,10 @@ fields, and the treatment path opens the pinned corpus locally to read
 its tool surface) and nothing lands on disk.
 
 Pilot scope (ruling #25): cases come from a candidates pool minus the
-frozen 250 (the drops) — the frozen dataset is never run before
-Stage 9.
+frozen 250 (the drops). The frozen dataset runs only through the one
+explicit door: ``--frozen`` (Stage 9) selects the whole verified frozen
+set, refuses the pilot-only knobs (``--limit``, ``--candidates``), and
+labels the run as the frozen evaluation.
 
 Auth: macOS keychain credentials do NOT survive the sandboxed HOME
 (verified 2026-08-09, pilot1: 10/10 "Not logged in"), so ``--execute``
@@ -35,6 +37,11 @@ Usage:
     uv run python benchmarks/llhb/runner/run_arm.py \
         --condition lovspor --suffix treat1 --limit 10 \
         --model claude-opus-5 --corpus-path <pinned lovverk> [--execute]
+
+    # Stage 9, the frozen evaluation:
+    uv run python benchmarks/llhb/runner/run_arm.py \
+        --condition control --suffix frozen1 --frozen \
+        --model claude-opus-5 [--execute]
 """
 
 import argparse
@@ -77,13 +84,18 @@ DEFAULT_SERVER_COMMAND = REPO_ROOT / ".venv" / "bin" / "lovspor"
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--condition", required=True, choices=["control", "lovspor"])
     parser.add_argument("--suffix", required=True, help="run-id suffix, [a-z0-9]{4,12}")
-    parser.add_argument("--limit", type=int, required=True, help="number of pilot cases")
+    parser.add_argument(
+        "--frozen",
+        action="store_true",
+        help="run the whole frozen llhb-v1 dataset (Stage 9); excludes --limit/--candidates",
+    )
+    parser.add_argument("--limit", type=int, help="number of pilot cases (pilot runs only)")
     parser.add_argument("--model", required=True, help="exact model id for the CLI")
-    parser.add_argument("--candidates", type=Path, default=DEFAULT_CANDIDATES)
+    parser.add_argument("--candidates", type=Path, default=None)
     parser.add_argument("--corpus-path", type=Path, help="pinned lovverk checkout (lovspor arm)")
     parser.add_argument("--server-command", type=Path, default=DEFAULT_SERVER_COMMAND)
     parser.add_argument("--seed", type=int, default=42)
@@ -94,7 +106,14 @@ def parse_args() -> argparse.Namespace:
         help="run the lovspor arm with no OPENAI_API_KEY, recording the weaker surface",
     )
     parser.add_argument("--execute", action="store_true", help="actually spawn the CLI")
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.frozen and (args.limit is not None or args.candidates is not None):
+        parser.error("--frozen runs the whole frozen dataset; --limit/--candidates are pilot-only")
+    if not args.frozen and args.limit is None:
+        parser.error("--limit is required for a pilot run (or pass --frozen for Stage 9)")
+    if args.candidates is None:
+        args.candidates = DEFAULT_CANDIDATES
+    return args
 
 
 def git_head(repo: Path) -> str:
@@ -125,6 +144,8 @@ def load_inputs(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[st
     frozen_cases = load_cases_jsonl(FROZEN_JSONL)
     lock = json.loads(FROZEN_LOCK.read_text(encoding="utf-8"))
     verify_frozen_against_lock(frozen_cases, lock)
+    if args.frozen:
+        return sorted(frozen_cases, key=lambda case: str(case["case_id"])), lock
     frozen_ids = {str(case["case_id"]) for case in frozen_cases}
     candidates = load_cases_jsonl(args.candidates)
     return pilot_cases(candidates, frozen_ids, args.limit), lock
@@ -194,6 +215,12 @@ def _notes(args: argparse.Namespace) -> str:
         if args.condition == "lovspor" and args.without_semantic_search
         else ""
     )
+    if args.frozen:
+        return (
+            f"FROZEN dataset llhb-v1 (Stage 9 evaluation); cli={cli}; the CLI "
+            f"exposes no temperature or max-turn control, so both are recorded "
+            f"as unset{degraded}"
+        )
     return (
         f"pilot on discarded candidates from {args.candidates.name}; "
         f"NOT the frozen dataset; cli={cli}; the CLI exposes no temperature "
@@ -283,7 +310,8 @@ def main() -> int:
     access = tool_access(args, config) if config is not None else None
     metadata = compose(args, cases, lock, config)
     print(json.dumps(metadata, indent=2, ensure_ascii=False))
-    print(f"\ncases: {len(cases)} (drops only), runs root: {RUNS_ROOT}", flush=True)
+    pool = "frozen llhb-v1" if args.frozen else "drops only"
+    print(f"\ncases: {len(cases)} ({pool}), runs root: {RUNS_ROOT}", flush=True)
     if not args.execute:
         _report_dry_run(metadata, cases[0], access)
         return 0
