@@ -12,6 +12,7 @@ composition — never the CLI spawn.
 """
 
 import importlib.util
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -93,3 +94,27 @@ class TestFrozenMetadata:
         metadata = run_arm_script.compose(args, cases, lock, None)
 
         assert "NOT the frozen dataset" in metadata["notes"]
+
+
+class TestDryRunSummary:
+    def test_the_frozen_summary_names_the_frozen_pool(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """codex-tests: the human-facing summary must not describe the
+        frozen evaluation's cases as pilot drops."""
+        monkeypatch.setattr(sys, "argv", ["run_arm.py", *FROZEN_ARGS, "--frozen"])
+
+        run_arm_script.main()
+
+        out = capsys.readouterr().out
+        assert "drops only" not in out
+        assert "(frozen llhb-v1)" in out
+
+    def test_the_pilot_summary_still_says_drops(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["run_arm.py", *FROZEN_ARGS, "--limit", "3"])
+
+        run_arm_script.main()
+
+        assert "(drops only)" in capsys.readouterr().out

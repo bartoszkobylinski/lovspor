@@ -310,7 +310,8 @@ def main() -> int:
     access = tool_access(args, config) if config is not None else None
     metadata = compose(args, cases, lock, config)
     print(json.dumps(metadata, indent=2, ensure_ascii=False))
-    print(f"\ncases: {len(cases)} (drops only), runs root: {RUNS_ROOT}", flush=True)
+    pool = "frozen llhb-v1" if args.frozen else "drops only"
+    print(f"\ncases: {len(cases)} ({pool}), runs root: {RUNS_ROOT}", flush=True)
     if not args.execute:
         _report_dry_run(metadata, cases[0], access)
         return 0
