@@ -56,6 +56,36 @@ class TestArgumentContract:
         with pytest.raises(SystemExit):
             args_for(*FROZEN_ARGS, "--frozen", "--candidates", "somewhere.jsonl")
 
+    def test_frozen_never_reads_the_default_candidate_pool(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Stage 9 input path is limited to the locked dataset."""
+        args = args_for(*FROZEN_ARGS, "--frozen")
+        original_load = run_arm_script.load_cases_jsonl
+
+        def load_unless_candidates(path: Path) -> list[dict[str, object]]:
+            assert path != run_arm_script.DEFAULT_CANDIDATES
+            return original_load(path)
+
+        monkeypatch.setattr(run_arm_script, "load_cases_jsonl", load_unless_candidates)
+
+        cases, _ = run_arm_script.load_inputs(args)
+
+        assert len(cases) == 250
+
+    def test_frozen_fails_closed_when_lock_verification_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        args = args_for(*FROZEN_ARGS, "--frozen")
+
+        def reject_dataset(cases: object, lock: object) -> None:
+            raise ValueError("frozen lock mismatch")
+
+        monkeypatch.setattr(run_arm_script, "verify_frozen_against_lock", reject_dataset)
+
+        with pytest.raises(ValueError, match="frozen lock mismatch"):
+            run_arm_script.load_inputs(args)
+
     def test_a_pilot_still_requires_a_limit(self) -> None:
         with pytest.raises(SystemExit):
             args_for(*FROZEN_ARGS)
