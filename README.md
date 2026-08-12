@@ -118,7 +118,7 @@ Data is licensed under [Norsk lisens for offentlige data (NLOD) 2.0](https://dat
 
 ## License
 
-The engine code in this repository is licensed under MIT. See [LICENSE](LICENSE).
+The engine code in this repository is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE). Versions up to and including commit `632dae8` were published under MIT; everything after is AGPL-3.0. The corpus data in [lovverk](https://github.com/bartoszkobylinski/lovverk) remains NLOD 2.0 and is unaffected.
 
 The legal text produced by this engine is published in the
 [`lovverk`](https://github.com/bartoszkobylinski/lovverk) repository under NLOD 2.0,
