@@ -6,6 +6,8 @@ import os
 import re
 import stat
 from pathlib import Path
+from time import monotonic
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -142,6 +144,11 @@ def make_config(tmp_path: Path, bin_dir: Path, timeout_s: int = 30, **overrides:
     return RunConfig(**fields)
 
 
+def stub_retry_sleep(monkeypatch: pytest.MonkeyPatch, sleep: Any) -> None:
+    """Replace orchestrator's time reference without patching subprocess.time."""
+    monkeypatch.setattr(orchestrator, "time", SimpleNamespace(monotonic=monotonic, sleep=sleep))
+
+
 def treatment_config(tmp_path: Path, bin_dir: Path) -> RunConfig:
     return make_config(
         tmp_path,
@@ -163,6 +170,7 @@ class TestRunConfig:
         assert config.timeout_s == 600
         assert config.extra_env == {}
         assert config.tool_access is None
+        assert config.case_attempts == 3
 
 
 class TestCaseOrder:
@@ -779,7 +787,7 @@ class TestCaseRetry:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         sleeps: list[float] = []
-        monkeypatch.setattr(orchestrator.time, "sleep", sleeps.append)
+        stub_retry_sleep(monkeypatch, sleeps.append)
         bin_dir = self.fail_once_then_succeed(tmp_path)
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
@@ -798,7 +806,7 @@ class TestCaseRetry:
     ) -> None:
         """A retried case must say so in its record: silent self-repair is
         the same provenance failure as silent loss, just inverted."""
-        monkeypatch.setattr(orchestrator.time, "sleep", lambda _s: None)
+        stub_retry_sleep(monkeypatch, lambda _s: None)
         bin_dir = self.fail_once_then_succeed(tmp_path)
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
@@ -815,7 +823,7 @@ class TestCaseRetry:
         assert "529 Overloaded" in attempt_raw.read_text(encoding="utf-8")
 
     def test_retries_are_bounded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(orchestrator.time, "sleep", lambda _s: None)
+        stub_retry_sleep(monkeypatch, lambda _s: None)
         calls = tmp_path / "calls"
         bin_dir = fake_claude(tmp_path, f'echo x >> "{calls}"; echo boom >&2; exit 1')
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
@@ -834,12 +842,76 @@ class TestCaseRetry:
         stages = [error["stage"] for error in record["errors"]]
         assert stages == ["other", "request"]
 
+    def test_default_budget_retains_every_failed_attempt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sleeps: list[float] = []
+        stub_retry_sleep(monkeypatch, sleeps.append)
+        calls = tmp_path / "calls"
+        bin_dir = fake_claude(tmp_path, f'echo attempt >> "{calls}"; echo boom >&2; exit 1')
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            make_config(tmp_path, bin_dir),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
+        )
+
+        assert len(calls.read_text(encoding="utf-8").splitlines()) == 3
+        assert sleeps == [30.0, 60.0]
+        raw_dir = tmp_path / "runs" / RUN_ID / "raw"
+        assert sorted(path.name for path in raw_dir.iterdir()) == [
+            "llhb-v1-C1-001.attempt1.json",
+            "llhb-v1-C1-001.attempt2.json",
+            "llhb-v1-C1-001.json",
+        ]
+        record = store.read_records(RUN_ID)[0]
+        assert [error["stage"] for error in record["errors"]] == [
+            "other",
+            "other",
+            "request",
+        ]
+
+    def test_timeout_is_retried_to_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        invocations = iter(
+            [
+                orchestrator.CliInvocation(
+                    stdout="", stderr="", returncode=-1, duration_ms=1, timed_out=True
+                ),
+                orchestrator.CliInvocation(
+                    stdout="\n".join(json.dumps(event) for event in (init_event(), result_event())),
+                    stderr="",
+                    returncode=0,
+                    duration_ms=1,
+                ),
+            ]
+        )
+        monkeypatch.setattr(orchestrator, "execute_argv", lambda *_args: next(invocations))
+        stub_retry_sleep(monkeypatch, lambda _seconds: None)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            make_config(tmp_path, tmp_path),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is True
+        assert "timed out" in record["errors"][0]["message"]
+        attempt_raw = tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.attempt1.json"
+        assert json.loads(attempt_raw.read_text(encoding="utf-8"))["timed_out"] is True
+
     def test_cannot_execute_is_not_retried(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Exit 127 (missing CLI) is permanent; retrying it only burns time."""
         sleeps: list[float] = []
-        monkeypatch.setattr(orchestrator.time, "sleep", sleeps.append)
+        stub_retry_sleep(monkeypatch, sleeps.append)
         empty_bin = tmp_path / "empty-bin"
         empty_bin.mkdir()
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
