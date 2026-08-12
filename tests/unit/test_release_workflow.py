@@ -20,6 +20,7 @@ import yaml  # type: ignore[import-untyped]
 _ROOT = Path(__file__).resolve().parents[2]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "release.yml"
 _README = _ROOT / "README.md"
+_LICENSE = _ROOT / "LICENSE"
 _MCP_DOC = _ROOT / "docs" / "mcp.md"
 _RELEASING_DOC = _ROOT / "docs" / "releasing.md"
 
@@ -204,6 +205,28 @@ def test_project_version_and_mcp_cap_are_pinned() -> None:
 
     assert project["version"] == _EXPECTED_VERSION
     assert runtime_mcp == ["mcp>=1.28.1,<2"]
+
+
+def test_package_license_metadata_and_readme_agree_on_agpl_v3() -> None:
+    """A release must not advertise terms different from its bundled license."""
+    project = _pyproject()["project"]
+    readme = _README.read_text(encoding="utf-8")
+    license_text = _LICENSE.read_text(encoding="utf-8")
+
+    assert project["license"] == {"file": "LICENSE"}
+    assert (
+        project["classifiers"].count(
+            "License :: OSI Approved :: GNU Affero General Public License v3"
+        )
+        == 1
+    )
+    assert not [classifier for classifier in project["classifiers"] if "MIT License" in classifier]
+    assert license_text.startswith(
+        "                    GNU AFFERO GENERAL PUBLIC LICENSE\n"
+        "                       Version 3, 19 November 2007\n"
+    )
+    assert "GNU Affero General Public License v3.0 (AGPL-3.0)" in readme
+    assert "corpus data" in readme and "remains NLOD 2.0" in readme
 
 
 def test_lockfile_matches_the_declared_mcp_cap_and_resolves_to_a_1x_release() -> None:
