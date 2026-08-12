@@ -634,3 +634,42 @@ class TestScoreCounts:
         assert score.asserted_resolved == 1
         assert score.asserted_valid == 1
         assert score.asserted_h1 == ()
+
+    def test_an_unknown_act_name_binds_by_the_frozen_paragraph_precedence(
+        self, scorer: CaseScorer
+    ) -> None:
+        """codex-tests round 2 expected «fantasiloven § 7» to land in the
+        unresolved bucket. The Stage 2 extractor is a closed, frozen
+        contract (TOOLING.md, golden-tested at dataset freeze): only
+        index-known act names exist for it, so the bare « § 7 » binds to
+        the nearest known act in the paragraph — testloven — and resolves
+        as its nonexistent section. Changing that binding is a new LLHB
+        version, not a scoring-layer fix; this test documents the frozen
+        behavior on the exact disputed input."""
+        score = scorer.score(
+            c1_case(), "Etter testloven § 1 gjelder dette. Se også fantasiloven § 7."
+        )
+
+        assert score.asserted_citations == 2
+        assert score.asserted_resolved == 2
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ("testloven § 7",)
+        assert score.unresolved_claims == 0
+
+    def test_a_duplicate_id_section_counts_as_resolved_and_valid(self, scorer: CaseScorer) -> None:
+        """SCORING.md §3: an ambiguous occurrence still exists — the
+        occurrence is unresolved, the provision is not invented."""
+        duplicate_case = case(
+            "C5",
+            ["must-disambiguate", "no-invalid-citations"],
+            expected_act_slug="dobbeltloven",
+            expected_section_id="6-2",
+            valid_occurrences=[1, 2],
+        )
+
+        score = scorer.score(duplicate_case, "Dobbeltloven § 6-2 regulerer dette.")
+
+        assert score.asserted_citations == 1
+        assert score.asserted_resolved == 1
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ()
