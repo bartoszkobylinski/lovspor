@@ -522,8 +522,13 @@ class TestRunArm:
         bin_dir = fake_claude(tmp_path, "echo boom >&2; exit 2")
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
+        # case_attempts=1: this test is about the error record's shape, not
+        # the retry path (TestCaseRetry), and must not sleep through backoff.
         summary = run_arm(
-            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+            make_config(tmp_path, bin_dir, case_attempts=1),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
         )
 
         record = store.read_records(RUN_ID)[0]
@@ -536,7 +541,10 @@ class TestRunArm:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
         summary = run_arm(
-            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+            make_config(tmp_path, bin_dir, case_attempts=1),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
         )
 
         record = store.read_records(RUN_ID)[0]
@@ -583,7 +591,10 @@ class TestRunArm:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
         summary = run_arm(
-            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+            make_config(tmp_path, bin_dir, case_attempts=1),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
         )
 
         record = store.read_records(RUN_ID)[0]
@@ -595,7 +606,7 @@ class TestRunArm:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
         summary = run_arm(
-            make_config(tmp_path, bin_dir, timeout_s=1),
+            make_config(tmp_path, bin_dir, timeout_s=1, case_attempts=1),
             [make_case("llhb-v1-C1-001")],
             make_metadata(),
             store,
@@ -742,3 +753,104 @@ class TestPayloadNeverInlined:
         assert "result" not in call
         assert len(call["result_sha256"]) == 64
         assert "§" not in json.dumps(call, ensure_ascii=False)
+
+
+class TestCaseRetry:
+    """Issue #80: one transient CLI failure must not burn a whole arm.
+
+    The 2026-08-12 frozen evaluation lost two full treatment runs to
+    single `529 Overloaded` exits; scoring is fail-closed on incomplete
+    records, so an unretried transient turns 3.5 hours of run into an
+    unscoreable artifact.
+    """
+
+    def fail_once_then_succeed(self, tmp_path: Path) -> Path:
+        """A fake CLI that fails its first invocation and succeeds after."""
+        marker = tmp_path / "first-attempt-done"
+        # `: >` not `touch`: the hermetic PATH holds only the fake CLI's bin
+        # dir, so the script can use shell builtins and nothing else.
+        body = (
+            f'if [ -f "{marker}" ]; then {SUCCESS_STREAM}; '
+            f'else : > "{marker}"; echo "API Error: 529 Overloaded" >&2; exit 1; fi'
+        )
+        return fake_claude(tmp_path, body)
+
+    def test_transient_failure_is_retried_to_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sleeps: list[float] = []
+        monkeypatch.setattr(orchestrator.time, "sleep", sleeps.append)
+        bin_dir = self.fail_once_then_succeed(tmp_path)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is True
+        assert summary["cases_completed"] == 1
+        assert summary["errors_total"] == 0
+        assert sleeps == [orchestrator._RETRY_BACKOFF_S[0]]
+
+    def test_retry_is_recorded_not_hidden(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A retried case must say so in its record: silent self-repair is
+        the same provenance failure as silent loss, just inverted."""
+        monkeypatch.setattr(orchestrator.time, "sleep", lambda _s: None)
+        bin_dir = self.fail_once_then_succeed(tmp_path)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is True
+        [note] = record["errors"]
+        assert note["stage"] == "other"
+        assert "attempt 1" in note["message"] and "retried" in note["message"]
+        attempt_raw = tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.attempt1.json"
+        assert "529 Overloaded" in attempt_raw.read_text(encoding="utf-8")
+
+    def test_retries_are_bounded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(orchestrator.time, "sleep", lambda _s: None)
+        calls = tmp_path / "calls"
+        bin_dir = fake_claude(tmp_path, f'echo x >> "{calls}"; echo boom >&2; exit 1')
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_arm(
+            make_config(tmp_path, bin_dir, case_attempts=2),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
+        )
+
+        assert len(calls.read_text(encoding="utf-8").splitlines()) == 2
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is False
+        assert summary["errors_total"] == 1
+        stages = [error["stage"] for error in record["errors"]]
+        assert stages == ["other", "request"]
+
+    def test_cannot_execute_is_not_retried(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exit 127 (missing CLI) is permanent; retrying it only burns time."""
+        sleeps: list[float] = []
+        monkeypatch.setattr(orchestrator.time, "sleep", sleeps.append)
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_arm(
+            make_config(tmp_path, empty_bin), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        assert summary["errors_total"] == 1
+        assert sleeps == []
+
+    def test_attempts_below_one_are_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="case_attempts"):
+            make_config(tmp_path, tmp_path, case_attempts=0)

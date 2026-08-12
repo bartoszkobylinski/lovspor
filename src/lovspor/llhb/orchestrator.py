@@ -27,7 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lovspor.errors import LovsporError
 from lovspor.llhb.claude_cli import (
@@ -46,6 +46,13 @@ from lovspor.llhb.results import ResultsStore
 # at all. Deliberately dumber than the parser: every undercount so far came
 # from the block-walking logic, so the cross-check must not share it.
 _TOOL_USE_RE = re.compile(r'"type"\s*:\s*"tool_use"')
+# Seconds before retry N of a case (the last value repeats). Long enough
+# to ride out a transient `529 Overloaded`, short enough that a full-arm
+# run is not visibly slowed by a handful of retries (issue #80).
+_RETRY_BACKOFF_S: tuple[float, ...] = (30.0, 60.0)
+# `sh -c 'command not found'` and execute_argv's OSError path both mean the
+# CLI binary itself is absent or broken — no retry can change that.
+_CANNOT_EXECUTE = 127
 _RAW_DIR = "raw"
 _TOOLS_DIR = "tools"
 _CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
@@ -72,6 +79,8 @@ class RunConfig(BaseModel):
     sandbox_home: Path
     tool_access: ToolAccess | None = None
     extra_env: dict[str, str] = {}
+    # Total invocations allowed per case, first try included (issue #80).
+    case_attempts: int = Field(default=3, ge=1)
 
 
 class CliInvocation(BaseModel):
@@ -198,20 +207,71 @@ def _reconcile_tool_calls(record: dict[str, Any], invocation: CliInvocation) -> 
 
 
 def _run_case(config: RunConfig, case: dict[str, Any], run_dir: Path) -> dict[str, Any]:
+    """One case within a bounded retry budget (issue #80).
+
+    A transient CLI failure (a `529 Overloaded` exit, a timeout) is
+    retried after a backoff instead of burning the whole arm: scoring is
+    fail-closed on incomplete records, so one unretried transient makes
+    250 cases unscoreable. Every retry is recorded in the final record
+    and the failed attempt's transcript is retained beside the run —
+    silent self-repair would be silent loss, inverted.
+    """
+    case_id = str(case["case_id"])
+    failures: list[dict[str, Any]] = []
+    for attempt in range(1, config.case_attempts + 1):
+        record, invocation, parsed = _attempt_case(config, case)
+        if record["completed"] or not _retryable(invocation, attempt, config.case_attempts):
+            record["errors"] = failures + record["errors"]
+            record["tool_calls"] = _stored_tool_calls(run_dir, case_id, parsed.tool_calls)
+            record["raw_response_ref"] = _write_raw(run_dir, case_id, invocation)
+            return record
+        failures.append(_retry_note(attempt, record))
+        _retain_attempt(run_dir, case_id, invocation, attempt)
+        time.sleep(_backoff_s(attempt))
+    raise OrchestratorError(f"case {case_id}: retry loop exited without a record")
+
+
+def _attempt_case(
+    config: RunConfig, case: dict[str, Any]
+) -> tuple[dict[str, Any], CliInvocation, ParsedCliResult]:
     argv = build_argv(
         config.identity, str(case["question"]), config.system_prompt, config.tool_access
     )
     started_at = _utc_now()
     env = hermetic_env(config.sandbox_home, config.extra_env)
     invocation = execute_argv(argv, env, config.timeout_s, config.sandbox_home)
-    case_id = str(case["case_id"])
     timing = CaseTiming(started_at=started_at, total_ms=invocation.duration_ms)
     parsed = _parse(invocation)
-    record = build_result_record(config.identity, case_id, parsed, timing)
+    record = build_result_record(config.identity, str(case["case_id"]), parsed, timing)
     _reconcile_tool_calls(record, invocation)
-    record["tool_calls"] = _stored_tool_calls(run_dir, case_id, parsed.tool_calls)
-    record["raw_response_ref"] = _write_raw(run_dir, case_id, invocation)
-    return record
+    return record, invocation, parsed
+
+
+def _retryable(invocation: CliInvocation, attempt: int, budget: int) -> bool:
+    """A missing/non-executable CLI (127) is permanent; anything else that
+    failed — a nonzero exit, a timeout — is worth the bounded budget."""
+    return attempt < budget and invocation.returncode != _CANNOT_EXECUTE
+
+
+def _retry_note(attempt: int, record: dict[str, Any]) -> dict[str, Any]:
+    first = record["errors"][0]["message"] if record["errors"] else "no error captured"
+    return {
+        "stage": "other",
+        "message": f"attempt {attempt} failed and was retried: {first}",
+        "at": _utc_now(),
+    }
+
+
+def _retain_attempt(run_dir: Path, case_id: str, invocation: CliInvocation, attempt: int) -> None:
+    """Failed attempt's raw transcript, kept beside the final one."""
+    raw_dir = _checked_dir(run_dir, case_id, _RAW_DIR)
+    (raw_dir / f"{case_id}.attempt{attempt}.json").write_text(
+        _raw_payload(invocation), encoding="utf-8"
+    )
+
+
+def _backoff_s(attempt: int) -> float:
+    return _RETRY_BACKOFF_S[min(attempt, len(_RETRY_BACKOFF_S)) - 1]
 
 
 def _parse(invocation: CliInvocation) -> ParsedCliResult:
@@ -251,9 +311,12 @@ def _write_tool_payload(run_dir: Path, case_id: str, index: int, canonical: str)
 
 def _write_raw(run_dir: Path, case_id: str, invocation: CliInvocation) -> str:
     raw_dir = _checked_dir(run_dir, case_id, _RAW_DIR)
-    payload = json.dumps(invocation.model_dump(), sort_keys=True, ensure_ascii=False, indent=2)
-    (raw_dir / f"{case_id}.json").write_text(payload + "\n", encoding="utf-8")
+    (raw_dir / f"{case_id}.json").write_text(_raw_payload(invocation), encoding="utf-8")
     return f"{_RAW_DIR}/{case_id}.json"
+
+
+def _raw_payload(invocation: CliInvocation) -> str:
+    return json.dumps(invocation.model_dump(), sort_keys=True, ensure_ascii=False, indent=2) + "\n"
 
 
 def _checked_dir(run_dir: Path, case_id: str, name: str) -> Path:
