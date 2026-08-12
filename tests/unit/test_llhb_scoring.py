@@ -570,3 +570,106 @@ class TestSurvivorKillers:
         score = scorer.score(fab_case, answer)
 
         assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.PASS
+
+
+class TestScoreCounts:
+    """§6 metric denominators live on the score: per-case counts of
+    asserted, resolved, valid citations and detected/verified quotes."""
+
+    def test_counts_on_a_mixed_answer(self, scorer: CaseScorer) -> None:
+        answer = (
+            "Etter testloven § 1 gjelder dette. Se også testloven § 15-99. "
+            "Testloven § 99-1 finnes ikke."
+        )
+
+        score = scorer.score(c1_case(), answer)
+
+        # § 1 valid+asserted, § 15-99 invalid+asserted, § 99-1 denied.
+        assert score.asserted_citations == 2
+        assert score.asserted_resolved == 2
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ("testloven § 15-99",)
+
+    def test_quote_counts(self, scorer: CaseScorer) -> None:
+        """Asymmetric on purpose: two verified against one failed, so a
+        counter counting the wrong verdict cannot produce the same sum."""
+        answer = (
+            "Testloven § 1 lyder: «Formålet med loven er å teste verktøy.» "
+            "Testloven § 1 nevner også «å teste verktøy» direkte. "
+            "Testloven § 5-12 lyder: «Helt feil tekst her.» Slutt."
+        )
+
+        score = scorer.score(c1_case(), answer)
+
+        assert score.quotes_detected == 3
+        assert score.quotes_verified == 2
+
+    def test_counts_when_no_asserted_citation_or_quote_is_valid(self, scorer: CaseScorer) -> None:
+        answer = (
+            "Testloven § 15-99 lyder: «Ikke lovtekst.» "
+            "Testloven § 99-1 lyder: «Fortsatt ikke lovtekst.»"
+        )
+
+        score = scorer.score(c1_case(), answer)
+
+        assert score.asserted_citations == 2
+        assert score.asserted_valid == 0
+        assert score.quotes_detected == 2
+        assert score.quotes_verified == 0
+
+    def test_a_tombstoned_act_is_not_counted_as_resolved(self, tmp_path: Path) -> None:
+        """Repealed-act citations are unresolved-class (§3, amended
+        2026-08-05): outside the accuracy denominator, never H1."""
+        reader = build_corpus(
+            tmp_path,
+            {"testloven": ("Lov om testing av verktøy (testloven)", "### § 1. A\n\nTekst.\n")},
+            removed={"gamleloven": "Lov om gamle regler (gamleloven)"},
+        )
+
+        score = CaseScorer(reader).score(
+            c1_case(), "Etter testloven § 1 gjelder dette. Se også gamleloven § 7."
+        )
+
+        assert score.asserted_citations == 2
+        assert score.asserted_resolved == 1
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ()
+
+    def test_an_unknown_act_name_binds_by_the_frozen_paragraph_precedence(
+        self, scorer: CaseScorer
+    ) -> None:
+        """codex-tests round 2 expected «fantasiloven § 7» to land in the
+        unresolved bucket. The Stage 2 extractor is a closed, frozen
+        contract (TOOLING.md, golden-tested at dataset freeze): only
+        index-known act names exist for it, so the bare « § 7 » binds to
+        the nearest known act in the paragraph — testloven — and resolves
+        as its nonexistent section. Changing that binding is a new LLHB
+        version, not a scoring-layer fix; this test documents the frozen
+        behavior on the exact disputed input."""
+        score = scorer.score(
+            c1_case(), "Etter testloven § 1 gjelder dette. Se også fantasiloven § 7."
+        )
+
+        assert score.asserted_citations == 2
+        assert score.asserted_resolved == 2
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ("testloven § 7",)
+        assert score.unresolved_claims == 0
+
+    def test_a_duplicate_id_section_counts_as_resolved_and_valid(self, scorer: CaseScorer) -> None:
+        """SCORING.md §3: an ambiguous occurrence still exists — the
+        occurrence is unresolved, the provision is not invented."""
+        duplicate_case = case(
+            "C5",
+            ["must-disambiguate", "no-invalid-citations"],
+            expected_act_slug="dobbeltloven",
+            expected_section_id="6-2",
+            valid_occurrences=[1, 2],
+        )
+
+        score = scorer.score(duplicate_case, "Dobbeltloven § 6-2 regulerer dette.")
+
+        assert score.asserted_citations == 1
+        assert score.asserted_resolved == 1
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ()

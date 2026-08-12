@@ -37,16 +37,43 @@ class CriterionVerdict(StrEnum):
 
 
 class CaseScore(BaseModel, frozen=True):
-    """One case-run judged: per-criterion verdicts plus the counted rest."""
+    """One case-run judged: per-criterion verdicts plus the counted rest.
+
+    The counts are the §6 metric denominators, computed here so the
+    aggregation layer never re-derives them from the answer: asserted =
+    stance ASSERTED; resolved = the oracle reached a verdict about the
+    section (exists / nonexistent / duplicate-id); valid = the verdict
+    was «exists» (duplicate-id included, per §3). Unresolved-class
+    citations — unknown act, missing act, tombstones — sit outside the
+    accuracy denominator and are reported through the buckets instead.
+    """
 
     case_id: str
     category: str
     criteria: dict[str, CriterionVerdict]
     passed: bool | None
     asserted_h1: tuple[str, ...]
+    asserted_citations: int
+    asserted_resolved: int
+    asserted_valid: int
+    quotes_detected: int
+    quotes_verified: int
     unresolved_claims: int
     unattached_quotes: int
     scorer_version: str = SCORER_VERSION
+
+
+# The oracle reached a section verdict (SCORING.md §3): exists,
+# nonexistent, or exists-with-duplicate-id. Everything else is
+# unresolved-class and excluded from the accuracy denominator.
+_RESOLVED_STATUSES = frozenset(
+    {
+        ResolutionStatus.VALID,
+        ResolutionStatus.NONEXISTENT_SECTION,
+        ResolutionStatus.AMBIGUOUS_OCCURRENCE,
+    }
+)
+_EXISTS_STATUSES = frozenset({ResolutionStatus.VALID, ResolutionStatus.AMBIGUOUS_OCCURRENCE})
 
 
 class _Quote(NamedTuple):
@@ -79,12 +106,18 @@ class CaseScorer:
         criteria = {
             name: _CRITERIA[name](case, evidence) for name in case["deterministic_criteria"]
         }
+        asserted = _asserted(evidence)
         return CaseScore(
             case_id=str(case["case_id"]),
             category=str(case["category"]),
             criteria=criteria,
             passed=_passed(criteria),
             asserted_h1=_h1_labels(evidence),
+            asserted_citations=len(asserted),
+            asserted_resolved=sum(1 for r in asserted if r.status in _RESOLVED_STATUSES),
+            asserted_valid=sum(1 for r in asserted if r.status in _EXISTS_STATUSES),
+            quotes_detected=len(evidence.quotes),
+            quotes_verified=sum(1 for q in evidence.quotes if q.verified is True),
             unresolved_claims=evidence.unresolved_claims,
             unattached_quotes=sum(1 for q in evidence.quotes if q.quote.attached is None),
         )
