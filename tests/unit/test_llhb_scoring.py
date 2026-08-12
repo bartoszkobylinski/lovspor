@@ -591,15 +591,18 @@ class TestScoreCounts:
         assert score.asserted_h1 == ("testloven § 15-99",)
 
     def test_quote_counts(self, scorer: CaseScorer) -> None:
+        """Asymmetric on purpose: two verified against one failed, so a
+        counter counting the wrong verdict cannot produce the same sum."""
         answer = (
             "Testloven § 1 lyder: «Formålet med loven er å teste verktøy.» "
+            "Testloven § 1 nevner også «å teste verktøy» direkte. "
             "Testloven § 5-12 lyder: «Helt feil tekst her.» Slutt."
         )
 
         score = scorer.score(c1_case(), answer)
 
-        assert score.quotes_detected == 2
-        assert score.quotes_verified == 1
+        assert score.quotes_detected == 3
+        assert score.quotes_verified == 2
 
     def test_counts_when_no_asserted_citation_or_quote_is_valid(self, scorer: CaseScorer) -> None:
         answer = (

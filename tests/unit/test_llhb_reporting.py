@@ -51,17 +51,25 @@ class TestScoreArm:
         assert bundles[1][2].passed is False
 
     def test_a_record_for_an_unknown_case_is_refused(self, scorer: CaseScorer) -> None:
-        with pytest.raises(ReportingError, match="llhb-v1-C1-999"):
+        with pytest.raises(
+            ReportingError, match=r"^record for llhb-v1-C1-999 has no case in the dataset$"
+        ):
             score_arm(scorer, {}, [record("llhb-v1-C1-999")])
 
     def test_an_incomplete_record_is_refused(self, scorer: CaseScorer) -> None:
         broken = {**record("llhb-v1-C1-101"), "completed": False, "final_answer": None}
 
-        with pytest.raises(ReportingError, match="incomplete"):
+        with pytest.raises(
+            ReportingError,
+            match=r"^llhb-v1-C1-101 is incomplete; an unscored error is not a scoreable answer$",
+        ):
             score_arm(scorer, {"llhb-v1-C1-101": case("llhb-v1-C1-101")}, [broken])
 
     def test_a_completed_record_without_an_answer_is_refused(self, scorer: CaseScorer) -> None:
         broken = {**record("llhb-v1-C1-101"), "final_answer": None}
 
-        with pytest.raises(ReportingError, match="final_answer"):
+        with pytest.raises(
+            ReportingError,
+            match=r"^llhb-v1-C1-101 is completed but carries no final_answer string$",
+        ):
             score_arm(scorer, {"llhb-v1-C1-101": case("llhb-v1-C1-101")}, [broken])

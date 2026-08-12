@@ -5,6 +5,10 @@ same scores produce byte-identical reports. Tests build scores by hand
 — the per-case scorer has its own suite; this layer only counts.
 """
 
+from pydantic import ValidationError
+
+from lovspor.llhb import metrics as metrics_module
+from lovspor.llhb import reporting as reporting_module
 from lovspor.llhb.metrics import (
     BOOTSTRAP_RESAMPLES,
     BOOTSTRAP_SEED,
@@ -218,7 +222,10 @@ class TestPairReport:
 
         assert report.metrics_version == METRICS_VERSION == "llhb-metrics-v1"
         assert report.scorer_version == SCORER_VERSION
-        assert report.bootstrap == {"seed": BOOTSTRAP_SEED, "resamples": BOOTSTRAP_RESAMPLES}
+        # Literals on purpose: asserting via the constants would mutate in
+        # lockstep with the code and never fail.
+        assert report.bootstrap == {"seed": 42, "resamples": 2000}
+        assert (BOOTSTRAP_SEED, BOOTSTRAP_RESAMPLES) == (42, 2000)
         assert report.unresolved.control["unresolved_claims"] == 0
         assert report.unresolved.control == {
             "unresolved_claims": 0,
@@ -363,3 +370,237 @@ class TestCategoryMetrics:
         assert metric.control is None
         assert metric.treatment is not None
         assert (metric.treatment.numerator, metric.treatment.denominator) == (2, 3)
+
+
+class TestSurvivorKillers:
+    """Mutation-gate killers: aliases, immutability, exact refusal text,
+    sampler purity outside a metric's category, and a golden CI."""
+
+    def test_the_public_type_aliases_are_real(self) -> None:
+        assert metrics_module._Sample == tuple[float, float]
+        assert metrics_module._Bundle == reporting_module.Bundle
+        assert reporting_module.Bundle is not None
+        assert metrics_module._Sampler is not None
+
+    def test_the_report_models_are_frozen(self) -> None:
+        control, treatment = TestPairReport().make_pair()
+        report = compute_pair_report(control, treatment)
+        est = report.metrics["citation_hallucination_rate"].control
+        assert est is not None
+
+        for target, field, value in (
+            (report, "scorer_version", "x"),
+            (report.metrics["citation_hallucination_rate"], "delta", 1.0),
+            (report.unresolved, "control", {}),
+            (est, "rate", 1.0),
+        ):
+            try:
+                setattr(target, field, value)
+            except (ValidationError, TypeError, AttributeError):
+                continue
+            raise AssertionError(f"{type(target).__name__}.{field} accepted mutation")
+
+    def test_the_mismatch_refusal_is_verbatim(self) -> None:
+        control, _ = TestPairReport().make_pair()
+
+        try:
+            compute_pair_report(control, control[:1])
+        except ValueError as exc:
+            assert str(exc) == "the two arms cover different case sets; nothing to compare"
+        else:  # pragma: no cover
+            raise AssertionError("must refuse")
+
+    def test_category_samplers_contribute_nothing_outside_their_category(self) -> None:
+        """A C1-only pair must leave every category-scoped metric at
+        exactly 0/0 — a stray numerator or denominator from the
+        out-of-category branch corrupts the rate silently."""
+        control, treatment = TestPairReport().make_pair()
+
+        report = compute_pair_report(control, treatment)
+
+        for name in ("misattribution_rate", "false_premise_rejection_rate", "no_invention_rate"):
+            est = report.metrics[name].control
+            assert est is not None, name
+            assert est.numerator == 0, name
+            assert est.denominator == 0, name
+
+    def test_chr_denominator_excludes_citationless_answers(self) -> None:
+        citationless = score(
+            "llhb-v1-C1-103", asserted_citations=0, asserted_resolved=0, asserted_valid=0
+        )
+        control = [
+            bundle("llhb-v1-C1-101", hallucinated("llhb-v1-C1-101")),
+            bundle("llhb-v1-C1-103", citationless),
+        ]
+        treatment = [
+            bundle("llhb-v1-C1-101", score("llhb-v1-C1-101")),
+            bundle("llhb-v1-C1-103", citationless),
+        ]
+
+        report = compute_pair_report(control, treatment)
+
+        est = report.metrics["citation_hallucination_rate"].control
+        assert est is not None
+        assert est.denominator == 1
+
+    def test_fpr_numerator_counts_only_passes(self) -> None:
+        passed = score(
+            "llhb-v1-C6-101",
+            category="C6",
+            criteria={"false-premise-not-endorsed": CriterionVerdict.PASS},
+        )
+        failed = score(
+            "llhb-v1-C6-102",
+            category="C6",
+            criteria={"false-premise-not-endorsed": CriterionVerdict.FAIL},
+            passed=False,
+        )
+        passed_second = score(
+            "llhb-v1-C6-102",
+            category="C6",
+            criteria={"false-premise-not-endorsed": CriterionVerdict.PASS},
+        )
+        control = [bundle("llhb-v1-C6-101", passed), bundle("llhb-v1-C6-102", failed)]
+        treatment = [bundle("llhb-v1-C6-101", passed), bundle("llhb-v1-C6-102", passed_second)]
+
+        report = compute_pair_report(control, treatment)
+
+        fpr = report.metrics["false_premise_rejection_rate"]
+        assert fpr.control is not None and fpr.treatment is not None
+        assert (fpr.control.numerator, fpr.control.denominator) == (1, 2)
+        assert (fpr.treatment.numerator, fpr.treatment.denominator) == (2, 2)
+
+
+class TestGoldenConfidenceIntervals:
+    """One rich pair with pinned CI values: the seed, the resample count,
+    the quantile arithmetic and the paired-delta machinery all feed these
+    exact numbers — move any of them and the golden breaks."""
+
+    def make_rich_pair(self) -> tuple[list[Bundle], list[Bundle]]:
+        control_flags = [True, True, True, False, False, True, False, True]
+        treatment_flags = [False, True, False, False, False, False, True, False]
+        control = []
+        treatment = []
+        for index, (c_bad, t_bad) in enumerate(
+            zip(control_flags, treatment_flags, strict=True), start=101
+        ):
+            case_id = f"llhb-v1-C1-{index}"
+            control.append(bundle(case_id, hallucinated(case_id) if c_bad else score(case_id)))
+            treatment.append(bundle(case_id, hallucinated(case_id) if t_bad else score(case_id)))
+        return control, treatment
+
+    def test_golden_ci_and_delta_ci(self) -> None:
+        control, treatment = self.make_rich_pair()
+
+        report = compute_pair_report(control, treatment)
+
+        metric = report.metrics["citation_hallucination_rate"]
+        assert metric.control is not None and metric.treatment is not None
+        assert metric.control.rate == 0.625
+        assert metric.treatment.rate == 0.25
+        assert metric.delta == 0.375
+        golden = (
+            metric.control.ci_low,
+            metric.control.ci_high,
+            metric.treatment.ci_low,
+            metric.treatment.ci_high,
+            metric.delta_ci_low,
+            metric.delta_ci_high,
+        )
+        assert golden == GOLDEN_CI
+
+    def test_a_zero_denominator_case_in_one_arm_only(self) -> None:
+        """One treatment case contributes no denominator: some resamples
+        rate one arm only, and the paired machinery must skip those, not
+        crash or fabricate."""
+        control, treatment = self.make_rich_pair()
+        citationless = score(
+            "llhb-v1-C1-109", asserted_citations=0, asserted_resolved=0, asserted_valid=0
+        )
+        control.append(bundle("llhb-v1-C1-109", hallucinated("llhb-v1-C1-109")))
+        treatment.append(bundle("llhb-v1-C1-109", citationless))
+
+        report = compute_pair_report(control, treatment)
+
+        metric = report.metrics["citation_hallucination_rate"]
+        assert metric.delta is not None
+        assert metric.delta_ci_low is not None and metric.delta_ci_high is not None
+        assert metric.delta_ci_low <= metric.delta <= metric.delta_ci_high
+
+
+class TestGoldenAccuracyIntervals:
+    """A finer-grained golden: per-citation accuracy with denominators
+    1..8 makes resample rates take many distinct values, so a shifted
+    quantile index or a changed resample count lands on a different
+    number instead of hiding in a coarse distribution."""
+
+    def make_pair(self) -> tuple[list[Bundle], list[Bundle]]:
+        control = []
+        treatment = []
+        for i in range(1, 9):
+            case_id = f"llhb-v1-C1-{100 + i}"
+            control.append(
+                bundle(
+                    case_id,
+                    score(
+                        case_id,
+                        asserted_citations=i,
+                        asserted_resolved=i,
+                        asserted_valid=max(0, i - 2),
+                    ),
+                )
+            )
+            treatment.append(
+                bundle(
+                    case_id,
+                    score(
+                        case_id,
+                        asserted_citations=i,
+                        asserted_resolved=i,
+                        asserted_valid=i if i % 3 else i - 1,
+                    ),
+                )
+            )
+        return control, treatment
+
+    def test_golden_accuracy_cis(self) -> None:
+        control, treatment = self.make_pair()
+
+        report = compute_pair_report(control, treatment)
+
+        metric = report.metrics["citation_accuracy"]
+        assert metric.control is not None and metric.treatment is not None
+        golden = (
+            metric.control.rate,
+            metric.control.ci_low,
+            metric.control.ci_high,
+            metric.treatment.ci_low,
+            metric.treatment.ci_high,
+            metric.delta_ci_low,
+            metric.delta_ci_high,
+        )
+        assert golden == GOLDEN_ACCURACY
+
+
+GOLDEN_ACCURACY = (
+    0.5833333333333334,
+    0.4,
+    0.68,
+    0.8620689655172413,
+    1.0,
+    -0.5384615384615385,
+    -0.2666666666666666,
+)
+GOLDEN_CI = (0.25, 1.0, 0.0, 0.5, -0.125, 0.875)
+
+
+class TestQuantileArithmetic:
+    def test_the_index_arithmetic_on_a_strictly_increasing_list(self) -> None:
+        """Literals against a list where every adjacent value differs, so
+        any shift of the index — off-by-one on the length, a doubled
+        offset — lands on a provably different number."""
+        values = list(map(float, range(100)))
+
+        assert metrics_module._at_quantile(values, 0.025) == 2.0
+        assert metrics_module._at_quantile(values, 0.975) == 97.0
+        assert metrics_module._at_quantile([5.0], 0.975) == 5.0
