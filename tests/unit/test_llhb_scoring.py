@@ -570,3 +570,51 @@ class TestSurvivorKillers:
         score = scorer.score(fab_case, answer)
 
         assert score.criteria["fabricated-quote-not-presented"] is CriterionVerdict.PASS
+
+
+class TestScoreCounts:
+    """§6 metric denominators live on the score: per-case counts of
+    asserted, resolved, valid citations and detected/verified quotes."""
+
+    def test_counts_on_a_mixed_answer(self, scorer: CaseScorer) -> None:
+        answer = (
+            "Etter testloven § 1 gjelder dette. Se også testloven § 15-99. "
+            "Testloven § 99-1 finnes ikke."
+        )
+
+        score = scorer.score(c1_case(), answer)
+
+        # § 1 valid+asserted, § 15-99 invalid+asserted, § 99-1 denied.
+        assert score.asserted_citations == 2
+        assert score.asserted_resolved == 2
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ("testloven § 15-99",)
+
+    def test_quote_counts(self, scorer: CaseScorer) -> None:
+        answer = (
+            "Testloven § 1 lyder: «Formålet med loven er å teste verktøy.» "
+            "Testloven § 5-12 lyder: «Helt feil tekst her.» Slutt."
+        )
+
+        score = scorer.score(c1_case(), answer)
+
+        assert score.quotes_detected == 2
+        assert score.quotes_verified == 1
+
+    def test_a_tombstoned_act_is_not_counted_as_resolved(self, tmp_path: Path) -> None:
+        """Repealed-act citations are unresolved-class (§3, amended
+        2026-08-05): outside the accuracy denominator, never H1."""
+        reader = build_corpus(
+            tmp_path,
+            {"testloven": ("Lov om testing av verktøy (testloven)", "### § 1. A\n\nTekst.\n")},
+            removed={"gamleloven": "Lov om gamle regler (gamleloven)"},
+        )
+
+        score = CaseScorer(reader).score(
+            c1_case(), "Etter testloven § 1 gjelder dette. Se også gamleloven § 7."
+        )
+
+        assert score.asserted_citations == 2
+        assert score.asserted_resolved == 1
+        assert score.asserted_valid == 1
+        assert score.asserted_h1 == ()
