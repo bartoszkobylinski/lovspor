@@ -346,7 +346,13 @@ Driven by the Stage 3.5 human audit (see
   250). `runner/run_arm.py` runs either condition (`--condition
   control|lovspor`) and is dry-run by default (prints metadata +
   first-case argv, zero disk writes); `--execute` spawns the CLI and
-  writes `results/runs/<run-id>/`. One driver on purpose: two scripts
+  writes `results/runs/<run-id>/`. The frozen dataset runs only
+  through the one explicit door: `--frozen` (Stage 9) selects the
+  whole verified frozen set (lock-checked before anything is read),
+  refuses the pilot-only knobs (`--limit`, `--candidates`), and labels
+  the run `FROZEN dataset llhb-v1` in `notes` — so a frozen run's
+  metadata passes `check_fairness --frozen` by construction: its
+  checksum is the lock's checksum and its pin is the lock's pin. One driver on purpose: two scripts
   would be two places for the arms to drift apart. The system prompt
   lives at `runner/system-prompt-v1.txt` (bokmål, honesty + abstention,
   no Lovspor mention) and must stay byte-identical across both
