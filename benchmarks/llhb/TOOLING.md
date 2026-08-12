@@ -24,7 +24,7 @@ freeze datasets, call models, or score runs.
 | `validation.py` | `CandidateValidator`: schema layer then per-category C1-C8 deterministic checks; dataset-level duplicate-id and provision-cap checks. |
 | `results.py` | Stage 5 `ResultsStore`: validated, append-only run storage (`run-metadata.json` + `records.jsonl` under `results/runs/<run-id>/`). Contract below. |
 | `claude_cli.py` | Claude Code CLI driver for both conditions: exact `claude -p` argv, stream-json transcript parsing (tool trace + harness evidence), schema-valid record assembly. Contract below. |
-| `orchestrator.py` | Run orchestrator for both conditions: hermetic whitelist env (API key banned, HOME sandbox) and sandbox working directory, seeded case order, per-case CLI execution with timeout-as-result, raw transcript retention, tool-payload spill, ResultsStore integration. Contract below. |
+| `orchestrator.py` | Run orchestrator for both conditions: hermetic whitelist env (API key banned, HOME sandbox) and sandbox working directory, seeded case order, per-case CLI execution with timeout-as-result and bounded transient retry (issue #80), raw transcript retention, tool-payload spill, ResultsStore integration. Contract below. |
 | `mcp_surface.py` | Stage 6 treatment surface: `--mcp-config` document for the pinned lovverk stdio server, tool names + tool-schema SHA-256 read from the server itself, run-metadata `tool_config`. Contract below. |
 | `tool-surface-v1.json` | Frozen LLHB v1 apparatus surface: the tool names + schema hash the server serves, committed as the expectation `check_fairness.py` compares a run's declared `tool_config` against. A unit test re-derives the names from the code on every interpreter and the hash on the apparatus interpreter (3.12, the CI leg pinned for it), so it cannot drift; a deliberate change to the served surface means regenerating it as an explicit apparatus decision. |
 | `fairness.py` | Stage 6 fairness checks over committed artifacts: metadata diff against an explicit may-differ list, paired case sets, per-record control/treatment violations. Contract below. |
@@ -297,7 +297,15 @@ Driven by the Stage 3.5 human audit (see
   see the contamination finding below. Case order is a seeded shuffle
   over sorted ids (`case_order_seed` in run metadata), fail-closed on
   duplicate ids. A CLI timeout or crash becomes an error record, never
-  an aborted run. The raw transcript/stderr/exit of every invocation is
+  an aborted run — after a bounded per-case retry (issue #80,
+  `case_attempts`, default 3 invocations with 30/60 s backoff): scoring
+  is fail-closed on incomplete records, so one unretried transient
+  `529 Overloaded` would make a whole arm unscoreable. A missing CLI
+  (exit 127) is never retried. Every retry is visible: the final record
+  carries a `stage: "other"` error entry per failed attempt and the
+  failed attempt's transcript is retained at
+  `raw/<case_id>.attempt<N>.json`. The raw transcript/stderr/exit of
+  the recorded invocation is
   retained at `raw/<case_id>.json` and referenced via
   `raw_response_ref`; every tool payload is written to
   `tools/<case_id>-<index>.json` and referenced via `result_ref` +

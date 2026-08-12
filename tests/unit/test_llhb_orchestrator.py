@@ -6,6 +6,8 @@ import os
 import re
 import stat
 from pathlib import Path
+from time import monotonic
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -142,6 +144,11 @@ def make_config(tmp_path: Path, bin_dir: Path, timeout_s: int = 30, **overrides:
     return RunConfig(**fields)
 
 
+def stub_retry_sleep(monkeypatch: pytest.MonkeyPatch, sleep: Any) -> None:
+    """Replace orchestrator's time reference without patching subprocess.time."""
+    monkeypatch.setattr(orchestrator, "time", SimpleNamespace(monotonic=monotonic, sleep=sleep))
+
+
 def treatment_config(tmp_path: Path, bin_dir: Path) -> RunConfig:
     return make_config(
         tmp_path,
@@ -163,6 +170,12 @@ class TestRunConfig:
         assert config.timeout_s == 600
         assert config.extra_env == {}
         assert config.tool_access is None
+        assert config.case_attempts == 3
+
+    def test_cli_invocation_defaults_to_not_timed_out(self) -> None:
+        invocation = orchestrator.CliInvocation(stdout="", stderr="", returncode=0, duration_ms=1)
+
+        assert invocation.timed_out is False
 
 
 class TestCaseOrder:
@@ -178,7 +191,7 @@ class TestCaseOrder:
         assert len(orders) > 1
 
     def test_rejects_duplicate_ids(self) -> None:
-        with pytest.raises(OrchestratorError, match="duplicate"):
+        with pytest.raises(OrchestratorError, match=r"^duplicate case ids: \['llhb-v1-C1-001'\]$"):
             case_order(["llhb-v1-C1-001", "llhb-v1-C1-001"], 42)
 
 
@@ -194,8 +207,21 @@ class TestHermeticEnv:
         assert env["HOME"] == str(tmp_path)
 
     def test_rejects_api_key_in_extra_env(self, tmp_path: Path) -> None:
-        with pytest.raises(OrchestratorError, match="ANTHROPIC_API_KEY"):
+        with pytest.raises(
+            OrchestratorError,
+            match=(
+                r"^extra_env keys \['ANTHROPIC_API_KEY'\] are banned: credentials flip the run "
+                r"onto per-token billing, HOME/CLAUDE_CONFIG_DIR would defeat the sandbox$"
+            ),
+        ):
             hermetic_env(tmp_path, {"ANTHROPIC_API_KEY": "sk-explicit"})
+
+    def test_path_has_a_safe_default_when_parent_path_is_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PATH", raising=False)
+
+        assert hermetic_env(tmp_path, {})["PATH"] == "/usr/bin:/bin"
 
     def test_extra_env_overrides_path(self, tmp_path: Path) -> None:
         env = hermetic_env(tmp_path, {"PATH": "/fake/bin"})
@@ -262,7 +288,8 @@ class TestExecuteArgv:
 
         assert result.timed_out is False
         assert result.returncode == 127
-        assert "cannot execute claude" in result.stderr
+        assert result.stdout == ""
+        assert result.stderr.startswith("cannot execute claude: ")
 
 
 class TestRunArm:
@@ -522,8 +549,13 @@ class TestRunArm:
         bin_dir = fake_claude(tmp_path, "echo boom >&2; exit 2")
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
+        # case_attempts=1: this test is about the error record's shape, not
+        # the retry path (TestCaseRetry), and must not sleep through backoff.
         summary = run_arm(
-            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+            make_config(tmp_path, bin_dir, case_attempts=1),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
         )
 
         record = store.read_records(RUN_ID)[0]
@@ -536,7 +568,10 @@ class TestRunArm:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
         summary = run_arm(
-            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+            make_config(tmp_path, bin_dir, case_attempts=1),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
         )
 
         record = store.read_records(RUN_ID)[0]
@@ -573,17 +608,29 @@ class TestRunArm:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
         cases = [make_case("../../outside")]
 
-        with pytest.raises(OrchestratorError, match="invalid case ids"):
+        with pytest.raises(OrchestratorError, match=r"^invalid case ids: \['\.\./\.\./outside'\]$"):
             run_arm(make_config(tmp_path, bin_dir), cases, make_metadata(), store)
         assert not (tmp_path / "runs").exists()
         assert not (tmp_path / "outside.json").exists()
+
+    def test_reports_a_missing_case_id_as_empty_before_any_write(self, tmp_path: Path) -> None:
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        with pytest.raises(OrchestratorError, match=r"^invalid case ids: \[''\]$"):
+            run_arm(
+                make_config(tmp_path, tmp_path), [{"question": "Uten id"}], make_metadata(), store
+            )
+        assert not (tmp_path / "runs").exists()
 
     def test_non_utf8_stdout_becomes_error_record(self, tmp_path: Path) -> None:
         bin_dir = fake_claude(tmp_path, "printf '\\377\\376 not utf8'")
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
         summary = run_arm(
-            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+            make_config(tmp_path, bin_dir, case_attempts=1),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
         )
 
         record = store.read_records(RUN_ID)[0]
@@ -595,7 +642,7 @@ class TestRunArm:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
         summary = run_arm(
-            make_config(tmp_path, bin_dir, timeout_s=1),
+            make_config(tmp_path, bin_dir, timeout_s=1, case_attempts=1),
             [make_case("llhb-v1-C1-001")],
             make_metadata(),
             store,
@@ -671,7 +718,12 @@ class TestToolCallReconciliation:
 
         monkeypatch.setattr(orchestrator, "parse_stream_json", blinded)
 
-        with pytest.raises(OrchestratorError, match="the transcript contains 1"):
+        expected = (
+            "case llhb-v1-C1-001: the parser found 0 tool call(s) but the transcript contains 1; "
+            "the run is stopped rather than reported, because a miscounted trace is the one "
+            "result this benchmark must not publish"
+        )
+        with pytest.raises(OrchestratorError, match=f"^{re.escape(expected)}$"):
             run_arm(
                 treatment_config(tmp_path, bin_dir),
                 [make_case("llhb-v1-C1-001")],
@@ -742,3 +794,191 @@ class TestPayloadNeverInlined:
         assert "result" not in call
         assert len(call["result_sha256"]) == 64
         assert "§" not in json.dumps(call, ensure_ascii=False)
+
+
+class TestCaseRetry:
+    """Issue #80: one transient CLI failure must not burn a whole arm.
+
+    The 2026-08-12 frozen evaluation lost two full treatment runs to
+    single `529 Overloaded` exits; scoring is fail-closed on incomplete
+    records, so an unretried transient turns 3.5 hours of run into an
+    unscoreable artifact.
+    """
+
+    def fail_once_then_succeed(self, tmp_path: Path) -> Path:
+        """A fake CLI that fails its first invocation and succeeds after."""
+        marker = tmp_path / "first-attempt-done"
+        # `: >` not `touch`: the hermetic PATH holds only the fake CLI's bin
+        # dir, so the script can use shell builtins and nothing else.
+        body = (
+            f'if [ -f "{marker}" ]; then {SUCCESS_STREAM}; '
+            f'else : > "{marker}"; echo "API Error: 529 Overloaded" >&2; exit 1; fi'
+        )
+        return fake_claude(tmp_path, body)
+
+    def test_transient_failure_is_retried_to_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sleeps: list[float] = []
+        stub_retry_sleep(monkeypatch, sleeps.append)
+        bin_dir = self.fail_once_then_succeed(tmp_path)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is True
+        assert summary["cases_completed"] == 1
+        assert summary["errors_total"] == 0
+        assert sleeps == [orchestrator._RETRY_BACKOFF_S[0]]
+
+    def test_retry_is_recorded_not_hidden(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A retried case must say so in its record: silent self-repair is
+        the same provenance failure as silent loss, just inverted."""
+        stub_retry_sleep(monkeypatch, lambda _s: None)
+        bin_dir = self.fail_once_then_succeed(tmp_path)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            make_config(tmp_path, bin_dir), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is True
+        [note] = record["errors"]
+        assert note["stage"] == "other"
+        assert note["message"] == (
+            "attempt 1 failed and was retried: claude exited with exit code 1"
+        )
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", note["at"])
+        attempt_raw = tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.attempt1.json"
+        assert "529 Overloaded" in attempt_raw.read_text(encoding="utf-8")
+
+    def test_retries_are_bounded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        stub_retry_sleep(monkeypatch, lambda _s: None)
+        calls = tmp_path / "calls"
+        bin_dir = fake_claude(tmp_path, f'echo x >> "{calls}"; echo boom >&2; exit 1')
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_arm(
+            make_config(tmp_path, bin_dir, case_attempts=2),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
+        )
+
+        assert len(calls.read_text(encoding="utf-8").splitlines()) == 2
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is False
+        assert summary["errors_total"] == 1
+        stages = [error["stage"] for error in record["errors"]]
+        assert stages == ["other", "request"]
+
+    def test_default_budget_retains_every_failed_attempt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sleeps: list[float] = []
+        stub_retry_sleep(monkeypatch, sleeps.append)
+        calls = tmp_path / "calls"
+        bin_dir = fake_claude(tmp_path, f'echo attempt >> "{calls}"; echo boom >&2; exit 1')
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            make_config(tmp_path, bin_dir),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
+        )
+
+        assert len(calls.read_text(encoding="utf-8").splitlines()) == 3
+        assert sleeps == [30.0, 60.0]
+        raw_dir = tmp_path / "runs" / RUN_ID / "raw"
+        assert sorted(path.name for path in raw_dir.iterdir()) == [
+            "llhb-v1-C1-001.attempt1.json",
+            "llhb-v1-C1-001.attempt2.json",
+            "llhb-v1-C1-001.json",
+        ]
+        record = store.read_records(RUN_ID)[0]
+        assert [error["stage"] for error in record["errors"]] == [
+            "other",
+            "other",
+            "request",
+        ]
+
+    def test_timeout_is_retried_to_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        invocations = iter(
+            [
+                orchestrator.CliInvocation(
+                    stdout="", stderr="", returncode=-1, duration_ms=1, timed_out=True
+                ),
+                orchestrator.CliInvocation(
+                    stdout="\n".join(json.dumps(event) for event in (init_event(), result_event())),
+                    stderr="",
+                    returncode=0,
+                    duration_ms=1,
+                ),
+            ]
+        )
+        monkeypatch.setattr(orchestrator, "execute_argv", lambda *_args: next(invocations))
+        stub_retry_sleep(monkeypatch, lambda _seconds: None)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            make_config(tmp_path, tmp_path),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(),
+            store,
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is True
+        assert "timed out" in record["errors"][0]["message"]
+        assert record["errors"][0]["message"] == (
+            "attempt 1 failed and was retried: CLI timed out before completing the case"
+        )
+        attempt_raw = tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.attempt1.json"
+        assert json.loads(attempt_raw.read_text(encoding="utf-8"))["timed_out"] is True
+
+    def test_cannot_execute_is_not_retried(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exit 127 (missing CLI) is permanent; retrying it only burns time."""
+        sleeps: list[float] = []
+        stub_retry_sleep(monkeypatch, sleeps.append)
+        empty_bin = tmp_path / "empty-bin"
+        empty_bin.mkdir()
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        summary = run_arm(
+            make_config(tmp_path, empty_bin), [make_case("llhb-v1-C1-001")], make_metadata(), store
+        )
+
+        assert summary["errors_total"] == 1
+        assert sleeps == []
+
+    def test_attempts_below_one_are_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="case_attempts"):
+            make_config(tmp_path, tmp_path, case_attempts=0)
+
+    def test_retry_note_handles_a_failed_record_without_parser_errors(self) -> None:
+        note = orchestrator._retry_note(2, {"errors": []})
+
+        assert note["message"] == "attempt 2 failed and was retried: no error captured"
+
+
+def test_artifact_retention_rejects_an_invalid_case_id(tmp_path: Path) -> None:
+    with pytest.raises(
+        OrchestratorError,
+        match=r"^invalid case id '\.\./outside' for artifact retention$",
+    ):
+        orchestrator._checked_dir(tmp_path, "../outside", "raw")
+
+
+def test_text_converts_absent_process_output_to_empty_text() -> None:
+    assert orchestrator._text(None) == ""
