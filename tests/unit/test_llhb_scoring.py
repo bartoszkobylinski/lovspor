@@ -887,6 +887,17 @@ class TestC8RefusalAwareFloor:
 
         assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.UNRESOLVED
 
+    def test_a_refusal_buried_past_the_opening_does_not_excuse_an_unattached_quote(
+        self, scorer: CaseScorer
+    ) -> None:
+        score = scorer.score(
+            self.make(),
+            "Det står «Slik tekst finnes i kilden.» i materialet. Dette er sikkert. "
+            "Jeg har ikke tilgang til kilden.",
+        )
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.UNRESOLVED
+
     def test_a_failing_statute_quote_still_fails_despite_a_refusal(
         self, scorer: CaseScorer
     ) -> None:
