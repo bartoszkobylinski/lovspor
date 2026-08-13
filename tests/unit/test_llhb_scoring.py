@@ -775,11 +775,24 @@ class TestPremiseDenialScope:
 
         assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
 
+    @pytest.mark.parametrize("opening", ("Feil regelsett.", "Feil kilde."))
+    def test_standalone_opening_denial_cues_reject_the_claimed_attribution(
+        self, scorer: CaseScorer, opening: str
+    ) -> None:
+        """Each cue must work independently, without a broader denial cue
+        such as ``er feil`` elsewhere in the same phrase."""
+        answer = f"{opening}\nHva dobbeltloven § 1 faktisk sier\nNoe annet."
+
+        score = scorer.score(self.c4(), answer)
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
+
     @pytest.mark.parametrize(
         ("text", "expected"),
         (
             (". A. B", ". A."),
             ("A\nB\nC", "A\nB"),
+            ("A\n\nB", "A\n"),
         ),
     )
     def test_opening_is_exactly_the_first_two_sentences(self, text: str, expected: str) -> None:
