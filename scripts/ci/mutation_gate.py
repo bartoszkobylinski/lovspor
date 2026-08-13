@@ -77,6 +77,9 @@ def main() -> int:
         print(extracted, file=sys.stderr)
         return 1
     commit, score, passed, reason, (total, killed, survived, timeout) = extracted
+    # Diagnostics, not policy: absent in pre-hint artifacts, shown when present.
+    hint = r.get("failure_hint")
+    hint = hint if isinstance(hint, str) and hint else None
 
     if args.summary:
         print("## Mutation testing")
@@ -86,6 +89,8 @@ def main() -> int:
             f" · Timeout: {timeout} · Score: {score}"
         )
         print(f"- Gate: {'PASS' if passed else 'FAIL'} ({reason})")
+        if hint:
+            print(f"- Hint: `{hint}`")
         print(f"- Artifact: `mutation-result-{commit}`")
         return 0
 
@@ -93,6 +98,8 @@ def main() -> int:
         print(f"mutation gate PASS ({reason})")
         return 0
     print(f"mutation gate FAIL ({reason}); survivors: {survived}")
+    if hint:
+        print(f"hint: {hint}")
     return 1
 
 

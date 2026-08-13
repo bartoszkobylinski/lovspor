@@ -341,3 +341,88 @@ class TestToolExitAuthority:
 
         assert result["tool_exit_code"] == code
         assert result["gate"] == {"passed": False, "reason": "tool_failed"}
+
+
+class TestFailureHint:
+    """A failing gate must carry the decisive raw-log line: three blocked
+    runs in a row required digging job logs for one FAILED test line the
+    artifact already contained."""
+
+    def test_first_failed_line_lands_in_the_result(self, tmp_path: Path) -> None:
+        raw = (
+            _progress_line(killed=1)
+            + "FAILED tests/unit/test_x.py::test_y - AssertionError: boom\n"
+            + "FAILED tests/unit/test_x.py::test_z - later, ignored\n"
+        )
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["failure_hint"] == (
+            "FAILED tests/unit/test_x.py::test_y - AssertionError: boom"
+        )
+
+    def test_tool_error_line_is_a_hint_too(self, tmp_path: Path) -> None:
+        raw = "error: mutmut run failed on a later file (exit 1)\n"
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["failure_hint"] == "error: mutmut run failed on a later file (exit 1)"
+
+    def test_pytest_error_line_is_a_hint_too(self, tmp_path: Path) -> None:
+        raw = "ERROR tests/unit/test_x.py - RuntimeError: collection failed\n"
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["failure_hint"] == (
+            "ERROR tests/unit/test_x.py - RuntimeError: collection failed"
+        )
+
+    def test_hint_is_single_line_and_capped_at_300_characters(self, tmp_path: Path) -> None:
+        decisive_line = "FAILED " + "x" * 400
+        raw = decisive_line + "\ncontinuation that must not be included\n"
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["failure_hint"] == decisive_line[:300]
+        assert len(result["failure_hint"]) == 300  # type: ignore[arg-type]
+
+    def test_a_clean_run_has_no_hint(self, tmp_path: Path) -> None:
+        result = _run(tmp_path, _progress_line(killed=2))
+
+        assert result["failure_hint"] is None
+
+    def test_gate_reader_prints_the_hint_on_fail(self, tmp_path: Path, capsys: object) -> None:
+        raw = _progress_line(killed=1) + "FAILED tests/unit/test_x.py::test_y - boom\n"
+        _run(tmp_path, raw, tool_exit_code=3)
+        out_file = tmp_path / "result.json"
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", str(out_file)])
+            assert mutation_gate.main() == 1
+        captured = capsys.readouterr()  # type: ignore[attr-defined]
+        assert "FAILED tests/unit/test_x.py::test_y - boom" in captured.out
+
+    def test_summary_includes_the_hint(self, tmp_path: Path, capsys: object) -> None:
+        raw = _progress_line(killed=1) + "FAILED tests/unit/test_x.py::test_y - boom\n"
+        _run(tmp_path, raw, tool_exit_code=3)
+        out_file = tmp_path / "result.json"
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out_file)])
+            assert mutation_gate.main() == 0
+        captured = capsys.readouterr()  # type: ignore[attr-defined]
+        assert "Hint:" in captured.out
+
+    @pytest.mark.parametrize("failure_hint", [None, "", 42, ["FAILED fake"]])
+    def test_gate_accepts_artifacts_without_a_valid_hint(
+        self, tmp_path: Path, capsys: object, failure_hint: object
+    ) -> None:
+        result = _run(tmp_path, _progress_line(killed=1))
+        if failure_hint is None:
+            result.pop("failure_hint")
+        else:
+            result["failure_hint"] = failure_hint
+        out_file = tmp_path / "result.json"
+        out_file.write_text(json.dumps(result))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out_file)])
+            assert mutation_gate.main() == 0
+        captured = capsys.readouterr()  # type: ignore[attr-defined]
+        assert "Hint:" not in captured.out
