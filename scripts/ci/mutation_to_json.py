@@ -53,6 +53,10 @@ MUTMUT_LINE = re.compile(
 )
 NOT_APPLICABLE = "mutation not applicable:"
 BASELINE_FAILED = "failed when run without mutation"
+# The decisive raw-log line for a failing run: pytest's FAILED/ERROR or
+# mutmut-pr.sh's own `error:`. Three blocked runs in a row required digging
+# the job logs for exactly this line — the artifact already contains it.
+FAILURE_LINE = re.compile(r"^(?:FAILED |ERROR |error: ).*", re.MULTILINE)
 
 
 def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
@@ -72,6 +76,12 @@ def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
         "skipped": last["skipped"],
     }
     return counts, last["done"] == last["total"] and last["total"] > 0
+
+
+def parse_failure_hint(raw: str) -> str | None:
+    """First FAILED/ERROR/error: line of the raw log, single line, capped."""
+    m = FAILURE_LINE.search(raw)
+    return m.group(0)[:300].rstrip() if m else None
 
 
 def parse_survivors(survivors_file: Path | None) -> list[dict[str, object]]:
@@ -151,6 +161,7 @@ def main() -> int:
                 tool_exit_code=args.tool_exit_code,
             ),
         ),
+        "failure_hint": parse_failure_hint(raw),
         "survivors": parse_survivors(args.survivors_file),
     }
     args.out.write_text(json.dumps(result, indent=2) + "\n")
