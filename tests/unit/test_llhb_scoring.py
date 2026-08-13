@@ -751,6 +751,18 @@ class TestPremiseDenialScope:
                 opening
             )
 
+    def test_passive_cannot_confirm_cue_rejects_an_otherwise_asserted_claim(
+        self, scorer: CaseScorer
+    ) -> None:
+        """The passive cue must do real criterion work: the later sentence
+        otherwise classifies the claimed attribution as asserted."""
+        score = scorer.score(
+            self.c4(),
+            "Dette kan ikke bekreftes. Dobbeltloven § 1 gjelder her.",
+        )
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
+
     @pytest.mark.parametrize(
         "opening",
         (
