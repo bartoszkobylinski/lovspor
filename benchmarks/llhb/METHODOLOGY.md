@@ -146,6 +146,16 @@ subset × **5** repeats per provider×condition to estimate run-to-run variance.
 Aggregates are reported with bootstrap confidence intervals over cases,
 absolute per condition plus the control−treatment delta.
 
+The subset is drawn once, before any result exists — never from run output:
+proportional largest-remainder allocation over the frozen category counts
+(C1 6, C2 5, C3 4, C4 4, C5 2, C6 4, C7 3, C8 2), then a seeded
+within-category sample over id-sorted rows (`lovspor.llhb.stability`, seed
+recorded). The draw is committed as `dataset/frozen/llhb-v1-stability30.json`
+with the frozen dataset checksum and its own subset checksum;
+`runner/select_stability_subset.py` regenerates it byte-identically.
+`run_arm.py --stability --repeat N` runs exactly that file and fails closed if
+the subset no longer matches the frozen dataset it was drawn from.
+
 Repeats reduce sampling noise as 1/√R and do not correct harness differences,
 metric bias or scorer error, so the primary pass buys breadth (250 draws)
 while the subset buys a measured variance estimate. If an observed delta turns
