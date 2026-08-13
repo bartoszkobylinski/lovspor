@@ -41,11 +41,13 @@ def _progress_line(
     return f"{total}/{total}  🎉 {killed}  ⏰ {timeout}  🤔 {suspicious}  🙁 {survived}  🔇 0\n"
 
 
-def _run(tmp_path: Path, raw: str, survivors: str | None = None) -> dict[str, object]:
+def _run(
+    tmp_path: Path, raw: str, survivors: str | None = None, tool_exit_code: int = 0
+) -> dict[str, object]:
     raw_file = tmp_path / "raw.log"
     raw_file.write_text(raw)
     out = tmp_path / "result.json"
-    argv = ["--commit", FULL_SHA, "--raw", str(raw_file), "--tool-exit-code", "0"]
+    argv = ["--commit", FULL_SHA, "--raw", str(raw_file), "--tool-exit-code", str(tool_exit_code)]
     argv += ["--out", str(out)]
     if survivors is not None:
         surv = tmp_path / "survivors.txt"
@@ -283,3 +285,36 @@ def test_gate_summary_reports_sha_and_verdict(
     captured = capsys.readouterr().out
     assert FULL_SHA in captured
     assert "PASS" in captured
+
+
+class TestToolExitAuthority:
+    """Issue #72: the tool's own exit code outranks whatever the raw log
+    says. A fatal mutmut-pr.sh exit (1, 3) after an EARLIER file's completed
+    progress line must never read as PASS, and the exit bits are the
+    authoritative cross-file aggregate."""
+
+    def test_fatal_tool_exit_cannot_pass_from_stale_completed_progress(
+        self, tmp_path: Path
+    ) -> None:
+        raw = _progress_line(killed=1) + "error: mutmut run failed on a later file (exit 1)\n"
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["gate"] == {"passed": False, "reason": "tool_failed"}
+
+    def test_tool_health_outranks_not_applicable(self, tmp_path: Path) -> None:
+        raw = "mutation not applicable for this PR\n"
+        result = _run(tmp_path, raw, tool_exit_code=1)
+
+        assert result["gate"] == {"passed": False, "reason": "tool_failed"}
+
+    def test_exit_bits_fail_the_gate_even_when_the_last_line_is_clean(self, tmp_path: Path) -> None:
+        """Counts come from the LAST progress line; an earlier file's
+        survivors live only in the exit bits (mutmut OR-combines 2/4/8)."""
+        result = _run(tmp_path, _progress_line(killed=3), tool_exit_code=2)
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+
+    def test_allowed_verdict_codes_do_not_trip_the_health_check(self, tmp_path: Path) -> None:
+        for code in (0, 2, 4, 6, 8, 10, 12, 14):
+            result = _run(tmp_path, _progress_line(killed=2), tool_exit_code=code)
+            assert result["gate"]["reason"] != "tool_failed", code
