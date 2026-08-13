@@ -205,3 +205,11 @@ def test_deliberate_spaced_i_longest_read_survives_the_suffix_guard() -> None:
     an æ/ø/å letter."""
     (citation,) = _extract("Dette følger av § 12 i skatteloven.").citations
     assert citation.section_id_raw == "12 i"
+
+
+def test_norwegian_word_after_multi_section_is_not_a_letter_suffix() -> None:
+    """The suffix guard also applies to the second id parsed by _MULTI_JOIN."""
+    citations = _extract("Se arbeidsmiljøloven §§ 8 og 9 første ledd.").citations
+
+    assert [citation.section_id for citation in citations] == ["8", "9"]
+    assert [citation.section_id_raw for citation in citations] == ["8", "9"]

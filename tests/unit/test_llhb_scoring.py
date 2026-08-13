@@ -620,7 +620,15 @@ class TestScoreCounts:
         score = scorer.score(c1_case(), answer)
 
         assert score.quotes_detected == 3
+        assert score.quotes_checkable == 3
         assert score.quotes_verified == 2
+
+    def test_unattached_quote_is_detected_but_not_checkable(self, scorer: CaseScorer) -> None:
+        score = scorer.score(c1_case(), "Begrepet «ukjent ordlyd» brukes i spørsmålet.")
+
+        assert score.quotes_detected == 1
+        assert score.quotes_checkable == 0
+        assert score.quotes_verified == 0
 
     def test_counts_when_no_asserted_citation_or_quote_is_valid(self, scorer: CaseScorer) -> None:
         answer = (
