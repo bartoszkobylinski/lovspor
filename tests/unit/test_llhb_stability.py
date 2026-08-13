@@ -100,3 +100,11 @@ def test_select_fails_closed_when_a_category_cannot_fill_its_seats() -> None:
 def test_allocation_rejects_size_above_pool() -> None:
     with pytest.raises(StabilityShortfallError):
         subset_allocation({"C1": 2}, 3)
+
+
+def test_explicit_allocation_must_match_declared_subset_size() -> None:
+    """Returned metadata must never claim a size different from the selected IDs."""
+    pool = _pool({"C1": 3})
+
+    with pytest.raises(StabilityShortfallError, match=r"allocation|size"):
+        select_stability_subset(pool, size=2, allocation={"C1": 1})

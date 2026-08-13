@@ -78,6 +78,10 @@ def select_stability_subset(
         by_category.setdefault(str(case["category"]), []).append(case)
     if allocation is None:
         allocation = subset_allocation({cat: len(rows) for cat, rows in by_category.items()}, size)
+    if sum(allocation.values()) != size:
+        raise StabilityShortfallError(
+            f"allocation grants {sum(allocation.values())} seats but the subset size is {size}"
+        )
     rng = random.Random(seed)  # noqa: S311 — reproducible sampling, not crypto
     case_ids: list[str] = []
     for category in sorted(allocation):
