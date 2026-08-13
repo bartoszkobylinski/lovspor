@@ -21,10 +21,30 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 SCHEMA_VERSION = 1
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 TOOL = "mutmut 2.5.1 (PR-scoped via scripts/mutmut-pr.sh)"
+
+# mutmut's verdict bitfield (0 clean; 2 survived / 4 timeout / 8 suspicious,
+# OR-combined) — exactly the codes mutmut-pr.sh itself treats as legal
+# verdicts. Anything else (1 fatal, 3 "no score — do not report one") means
+# the tool itself failed and NO score exists — but a progress line from an
+# EARLIER file may still sit completed in the raw log, so without this check
+# a fatal run could read as PASS off stale output (issue #72; found again
+# independently by a Codex CI test on the milamber port's first flight).
+ALLOWED_TOOL_EXIT_CODES = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
+
+
+class RunHealth(NamedTuple):
+    """Everything the gate needs to know beyond the mutant counts."""
+
+    not_applicable: bool
+    completed: bool
+    baseline_ok: bool
+    tool_exit_code: int
+
 
 # mutmut 2.x progress line, e.g.:  12/12  🎉 10  ⏰ 0  🤔 0  🙁 2  🔇 0
 MUTMUT_LINE = re.compile(
@@ -63,17 +83,27 @@ def parse_survivors(survivors_file: Path | None) -> list[dict[str, object]]:
     ]
 
 
-def compute_gate(
-    counts: dict[str, int], *, not_applicable: bool, completed: bool, baseline_ok: bool
-) -> dict[str, object]:
-    if not_applicable:
+def compute_gate(counts: dict[str, int], health: RunHealth) -> dict[str, object]:
+    # Tool health outranks EVERYTHING, including not_applicable: the marker
+    # line is data read out of the raw log, and a run that died after
+    # printing it still produced no trustworthy verdict.
+    if health.tool_exit_code not in ALLOWED_TOOL_EXIT_CODES:
+        return {"passed": False, "reason": "tool_failed"}
+    if health.not_applicable:
         return {"passed": True, "reason": "not_applicable"}
+    # The counts come from the LAST mutmut progress line, which on a
+    # multi-file run describes only the last file — an earlier file's
+    # survivors are invisible there. mutmut-pr.sh recomputes its exit code
+    # from the ACROSS-FILES totals, so the exit bits (2 survived / 4 timeout
+    # / 8 suspicious) are the authoritative aggregate and must fail the gate
+    # even when the parsed counts look clean.
+    bits = health.tool_exit_code
     failures = (
-        (not baseline_ok, "baseline_tests_failed"),
-        (not completed, "run_incomplete"),
-        (counts["survived"] > 0, "surviving_mutants"),
-        (counts["timeout"] > 0, "timeout_mutants"),
-        (counts["invalid"] > 0, "suspicious_mutants"),
+        (not health.baseline_ok, "baseline_tests_failed"),
+        (not health.completed, "run_incomplete"),
+        (counts["survived"] > 0 or bool(bits & 2), "surviving_mutants"),
+        (counts["timeout"] > 0 or bool(bits & 4), "timeout_mutants"),
+        (counts["invalid"] > 0 or bool(bits & 8), "suspicious_mutants"),
     )
     for failed, reason in failures:
         if failed:
@@ -114,9 +144,12 @@ def main() -> int:
         "score": score,
         "gate": compute_gate(
             counts,
-            not_applicable=not_applicable,
-            completed=completed,
-            baseline_ok=baseline_ok,
+            RunHealth(
+                not_applicable=not_applicable,
+                completed=completed,
+                baseline_ok=baseline_ok,
+                tool_exit_code=args.tool_exit_code,
+            ),
         ),
         "survivors": parse_survivors(args.survivors_file),
     }
