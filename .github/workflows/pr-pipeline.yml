@@ -47,6 +47,10 @@ jobs:
     runs-on: [self-hosted, linux, codex]
     # The runner holding Codex auth never executes fork code.
     if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     env:
       CODEX_HOME: /home/runner/.codex-lovspor
       UV_PYTHON: "3.12"
@@ -99,8 +103,46 @@ jobs:
           uv run ruff check --fix tests/
 
       - name: Run tests on Codex additions
+        id: codex-pytest
         if: steps.antiloop.outputs.skip != 'true'
-        run: uv run pytest tests/unit/
+        run: |
+          set +e
+          uv run pytest tests/unit/ 2>&1 | tee codex-pytest.log
+          exit "${PIPESTATUS[0]}"
+
+      # Contract (docs/agentic-ci.md, Failure escalation): a Codex test failing
+      # against this head must label the PR, comment, and preserve the tests —
+      # a bare red check buries the evidence in an expiring log (issue #95).
+      # git add -N: Codex's new test files are untracked, a plain diff misses them.
+      - name: Preserve Codex tests on failure
+        if: failure() && steps.codex-pytest.outcome == 'failure'
+        run: |
+          git add -N tests/
+          git diff "$BEFORE_SHA" -- tests/ > codex-tests.patch
+
+      - name: Upload Codex tests and log
+        if: failure() && steps.codex-pytest.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-tests-${{ github.event.pull_request.head.sha }}
+          path: |
+            codex-tests.patch
+            codex-pytest.log
+
+      - name: Escalate — Codex test exposed an implementation defect
+        if: failure() && steps.codex-pytest.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" --add-label "needs-implementation-fix"
+          {
+            echo "codex-tests BLOCKED: Codex-authored tests fail against this head."
+            echo ""
+            grep -E '^FAILED ' codex-pytest.log | head -10
+            echo ""
+            echo "Tests + log: artifact \`codex-tests-${{ github.event.pull_request.head.sha }}\` (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } > escalation.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file escalation.md
 
       - name: Commit and push test additions
         id: push

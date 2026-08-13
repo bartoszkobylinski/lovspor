@@ -17,6 +17,9 @@ Hard constraints:
 - never modify frozen methodology or benchmark decisions;
 - never silently drop, weaken, skip, xfail, or broaden an assertion merely to make tests pass;
 - do not lower coverage or mutation thresholds;
+- never run mutation tooling (mutmut or any in-place mutation of src/) — mutation is the
+  deterministic `mutation` job's work, and an interrupted mutant leaves a silently
+  mutated implementation in the tree (issues #77, #82);
 - keep additions scoped to this PR.
 
 If a correct new test exposes a production bug or requires a methodological decision,

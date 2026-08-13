@@ -55,7 +55,11 @@ raw log) uploads on PASS and FAIL.
 ## Failure escalation
 
 - Codex's correct new test exposes a production bug → Codex reports it, does NOT fix
-  production code. Label `needs-implementation-fix`; human relays to local Claude.
+  production code. The `codex-tests` job itself applies `needs-implementation-fix`,
+  comments on the PR with the failing tests, and preserves the test patch + pytest log
+  as artifact `codex-tests-<head-sha>` (issue #95 — before this, a failing round died
+  as a bare red check and the tests survived only in the run log); human relays to
+  local Claude.
 - Ambiguous/equivalent mutants → `needs-human:mutation`. BLOCKED is a valid end state,
   never to be silenced by weakening tests or thresholds.
 - Codex output is normalized (`ruff format` + `ruff check` on `tests/`) before commit in
