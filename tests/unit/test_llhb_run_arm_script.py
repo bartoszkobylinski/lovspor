@@ -231,6 +231,33 @@ class TestStabilityMode:
         with pytest.raises(run_arm_script.LovsporError, match=r"duplicate|30"):
             run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
 
+    def test_stability_fails_closed_on_declared_size_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The artifact must not claim a different sample size than its IDs."""
+        broken = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        broken["size"] = 29
+        broken_path = tmp_path / "llhb-v1-stability30.json"
+        broken_path.write_text(json.dumps(broken), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", broken_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"size|30"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_fails_closed_on_declared_allocation_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The ruled category allocation must describe the cases actually run."""
+        broken = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        broken["allocation"]["C1"] -= 1
+        broken["allocation"]["C2"] += 1
+        broken_path = tmp_path / "llhb-v1-stability30.json"
+        broken_path.write_text(json.dumps(broken), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", broken_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"allocation|categor"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
     def test_stability_notes_name_the_subset_and_the_repeat(self) -> None:
         args = args_for(*STABILITY_ARGS)
         cases, lock = run_arm_script.load_inputs(args)

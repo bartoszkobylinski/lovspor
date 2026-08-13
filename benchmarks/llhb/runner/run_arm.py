@@ -204,10 +204,28 @@ def _check_subset_ids(subset: dict[str, Any], lock: dict[str, Any]) -> None:
             f"duplicate case ids in the stability subset: {len(set(ids))} unique "
             f"of {len(ids)} listed"
         )
+    if int(subset["size"]) != len(ids):
+        raise LovsporError(
+            f"stability subset declares size {subset['size']} but lists {len(ids)} case ids"
+        )
+    _check_subset_allocation(subset, ids)
     if subset["dataset_sha256"] != lock["dataset_sha256"]:
         raise LovsporError(
             "stability subset was drawn from a different frozen dataset; "
             "re-run select_stability_subset.py and review the diff"
+        )
+
+
+def _check_subset_allocation(subset: dict[str, Any], ids: list[str]) -> None:
+    """The committed allocation must describe the ids actually listed."""
+    counted: dict[str, int] = {}
+    for case_id in ids:
+        category = case_id.split("-")[2]
+        counted[category] = counted.get(category, 0) + 1
+    declared = {str(cat): int(n) for cat, n in subset["allocation"].items()}
+    if counted != declared:
+        raise LovsporError(
+            "stability subset allocation does not match the categories of the listed case ids"
         )
 
 
