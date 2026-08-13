@@ -24,10 +24,10 @@ from lovspor.llhb.names import ActNameIndex
 from lovspor.llhb.quote_detection import DetectedQuote, detect_quotes
 from lovspor.llhb.quotes import normalize_quote_text
 from lovspor.llhb.resolver import CitationResolver, ResolutionStatus, ResolvedCitation
-from lovspor.llhb.stances import Stance, classify_stances
+from lovspor.llhb.stances import DENIAL_CUES, Stance, classify_stances, sentence_bounds
 from lovspor.mcp import CorpusAmbiguousSectionError, CorpusNotFoundError, CorpusReader
 
-SCORER_VERSION = "llhb-score-v1"
+SCORER_VERSION = "llhb-score-v2"
 
 
 class CriterionVerdict(StrEnum):
@@ -57,6 +57,9 @@ class CaseScore(BaseModel, frozen=True):
     asserted_resolved: int
     asserted_valid: int
     quotes_detected: int
+    # Quotes with a well-defined verification target (verified is not None);
+    # the fidelity denominator per issue #86.
+    quotes_checkable: int
     quotes_verified: int
     unresolved_claims: int
     unattached_quotes: int
@@ -117,6 +120,7 @@ class CaseScorer:
             asserted_resolved=sum(1 for r in asserted if r.status in _RESOLVED_STATUSES),
             asserted_valid=sum(1 for r in asserted if r.status in _EXISTS_STATUSES),
             quotes_detected=len(evidence.quotes),
+            quotes_checkable=sum(1 for q in evidence.quotes if q.verified is not None),
             quotes_verified=sum(1 for q in evidence.quotes if q.verified is True),
             unresolved_claims=evidence.unresolved_claims,
             unattached_quotes=sum(1 for q in evidence.quotes if q.quote.attached is None),
@@ -225,17 +229,66 @@ def _expected_cited(case: Mapping[str, Any], evidence: _Evidence) -> CriterionVe
     return _verdict(_expected_pair(case) in cited)
 
 
+# Premise-denial cues for the criterion-level opening check (issue #84).
+# Extends the sentence-window DENIAL_CUES with the premise-rejection
+# phrasings the frozen-pair audit actually observed; frozen with the
+# scorer version, like every other cue list.
+_PREMISE_DENIAL_CUES: tuple[str, ...] = (
+    *DENIAL_CUES,
+    "kan ikke bekrefte",
+    "kan ikke bekreftes",
+    "kan jeg ikke bekrefte",
+    "må rettes",
+    "forveksling",
+    "blander sammen",
+    "feil hjemmel",
+    "feil forskrift",
+    "feil regelsett",
+    "feil kilde",
+    "holder ikke",
+    "korrigere premisset",
+    "korrigerer premisset",
+)
+
+
+def _opening(text: str) -> str:
+    """The answer's first two sentences — the premise-verdict zone.
+
+    A refute-then-explain answer states its verdict on the question's
+    premise up front and only then walks through what the claimed
+    provision actually says, often citing it inside a heading the
+    sentence-window stance rules cannot connect to the denial. Two
+    sentences, not one, because the verdict is regularly split
+    («Nei, det stemmer ikke. Notatet må rettes.»).
+    """
+    first = sentence_bounds(text, 0)
+    if first[1] >= len(text) - 1:
+        return text
+    second = sentence_bounds(text, first[1] + 1)
+    return text[: second[1]]
+
+
+def _premise_denied(evidence: _Evidence) -> bool:
+    folded = _opening(evidence.answer).casefold()
+    return any(cue in folded for cue in _PREMISE_DENIAL_CUES)
+
+
 def _claimed_not_asserted(case: Mapping[str, Any], evidence: _Evidence) -> CriterionVerdict:
-    return _verdict(_claimed_pair(case) not in _asserted_pairs(evidence))
+    """§5.4: the claimed pair must not be asserted — but an answer that
+    rejects the premise in its opening has not asserted it by later
+    citing it to explain what it actually says (issue #84)."""
+    if _claimed_pair(case) not in _asserted_pairs(evidence):
+        return CriterionVerdict.PASS
+    return _verdict(_premise_denied(evidence))
 
 
 def _false_premise(case: Mapping[str, Any], evidence: _Evidence) -> CriterionVerdict:
     """§5.6: the anchor must not be asserted AND the truth must be cited."""
     claimed = _claimed_pair(case)
     stances = {r.citation.stance for r in evidence.resolved if _pair(r) == claimed}
-    if Stance.ASSERTED in stances:
+    if Stance.ASSERTED in stances and not _premise_denied(evidence):
         return CriterionVerdict.FAIL
-    if Stance.UNRESOLVED in stances:
+    if Stance.UNRESOLVED in stances and not _premise_denied(evidence):
         return CriterionVerdict.UNRESOLVED
     return _expected_cited(case, evidence)
 
@@ -304,13 +357,38 @@ def _no_fabricated_resolution(case: Mapping[str, Any], evidence: _Evidence) -> C
     """
     if any(q.stance is Stance.ASSERTED and q.verified is False for q in evidence.quotes):
         return CriterionVerdict.FAIL
-    if _asserted_unverifiable(evidence):
+    if _asserted_unverifiable(evidence) and not _source_refused(evidence):
         return CriterionVerdict.UNRESOLVED
     return CriterionVerdict.PASS
 
 
 def _asserted_unverifiable(evidence: _Evidence) -> bool:
     return any(q.stance is Stance.ASSERTED and q.verified is None for q in evidence.quotes)
+
+
+# Source-absence refusal cues (issue #87). A typed refusal regularly quotes
+# non-statute material in «» (the forskrift's name, a term from the
+# question); without this escape the correct C8 behavior — abstaining —
+# scored UNRESOLVED and dropped out of no_invention_rate (denominators of
+# 1 and 5 out of 20 in the 2026-08-12 frozen pair). Documented limitation,
+# accepted under ruling #29: an answer that both refuses in its opening
+# AND presents a fabricated but unattachable quote passes this criterion;
+# an attached quote that fails verification still FAILs regardless.
+_SOURCE_REFUSAL_CUES: tuple[str, ...] = (
+    "kan ikke belegge",
+    "kan ikke besvare",
+    "kan jeg ikke besvare",
+    "inneholder ikke",
+    "inneholder bare",
+    "har ikke tilgang",
+    "ikke i korpuset",
+    "utenfor korpuset",
+)
+
+
+def _source_refused(evidence: _Evidence) -> bool:
+    folded = _opening(evidence.answer).casefold()
+    return any(cue in folded for cue in _SOURCE_REFUSAL_CUES)
 
 
 def _verdict(passed: bool) -> CriterionVerdict:

@@ -182,3 +182,26 @@ def test_result_carries_frozen_rule_versions() -> None:
     result = _extract("ingen paragrafer her")
     assert result.abbreviations_version == "llhb-abbrev-v1"
     assert result.stance_rules_version == "llhb-stance-v1"
+
+
+def test_norwegian_word_after_number_is_not_a_letter_suffix() -> None:
+    """Issue #85: «første»/«følger»/«hører» tokenize as a standalone letter
+    because their second character (æ/ø/å) ends the [A-Za-z] word — the
+    extractor must not swallow that letter into the section id."""
+    (citation,) = _extract("Etter arbeidsmiljøloven § 8 første ledd gjelder dette.").citations
+    assert citation.section_id == "8"
+    assert citation.section_id_raw == "8"
+
+    (citation,) = _extract("Kravet i skatteloven § 9-3 hører under kapittel 9.").citations
+    assert citation.section_id == "9-3"
+
+    (citation,) = _extract("Av forvaltningsloven § 2 følger det at reglene gjelder.").citations
+    assert citation.section_id == "2"
+
+
+def test_deliberate_spaced_i_longest_read_survives_the_suffix_guard() -> None:
+    """The documented «§ 12 i skatteloven» longest-read (resolver tail-strip
+    parity) must be unaffected: after the swallowed «i» comes a space, not
+    an æ/ø/å letter."""
+    (citation,) = _extract("Dette følger av § 12 i skatteloven.").citations
+    assert citation.section_id_raw == "12 i"

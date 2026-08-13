@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from lovspor.headings import canonical_section_id
 from lovspor.llhb.scoring import SCORER_VERSION, CaseScore, CriterionVerdict
 
-METRICS_VERSION = "llhb-metrics-v1"
+METRICS_VERSION = "llhb-metrics-v2"
 BOOTSTRAP_SEED = 42
 BOOTSTRAP_RESAMPLES = 2000
 _CI_LOW_Q = 0.025
@@ -218,6 +218,7 @@ def _buckets(bundles: Sequence[_Bundle]) -> dict[str, int]:
     return {
         "unresolved_claims": sum(b[2].unresolved_claims for b in bundles),
         "unattached_quotes": sum(b[2].unattached_quotes for b in bundles),
+        "unverifiable_quotes": sum(b[2].quotes_detected - b[2].quotes_checkable for b in bundles),
         "cases_unresolved": sum(1 for b in bundles if b[2].passed is None),
     }
 
@@ -266,8 +267,11 @@ def _cpi_sample(bundle: _Bundle) -> _Sample:
 
 
 def _quote_fidelity_sample(bundle: _Bundle) -> _Sample:
+    # Checkable, not detected: a quote with verified=None has no defined
+    # target and belongs to the unverifiable bucket, not the denominator
+    # (issue #86).
     score = bundle[2]
-    return (float(score.quotes_verified), float(score.quotes_detected))
+    return (float(score.quotes_verified), float(score.quotes_checkable))
 
 
 def _fpr_sample(bundle: _Bundle) -> _Sample:

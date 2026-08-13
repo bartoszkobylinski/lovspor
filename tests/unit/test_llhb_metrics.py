@@ -35,6 +35,7 @@ def score(case_id: str, category: str = "C1", **overrides: object) -> CaseScore:
         "asserted_resolved": 1,
         "asserted_valid": 1,
         "quotes_detected": 0,
+        "quotes_checkable": 0,
         "quotes_verified": 0,
         "unresolved_claims": 0,
         "unattached_quotes": 0,
@@ -220,7 +221,7 @@ class TestPairReport:
 
         report = compute_pair_report(control, treatment)
 
-        assert report.metrics_version == METRICS_VERSION == "llhb-metrics-v1"
+        assert report.metrics_version == METRICS_VERSION == "llhb-metrics-v2"
         assert report.scorer_version == SCORER_VERSION
         # Literals on purpose: asserting via the constants would mutate in
         # lockstep with the code and never fail.
@@ -230,6 +231,7 @@ class TestPairReport:
         assert report.unresolved.control == {
             "unresolved_claims": 0,
             "unattached_quotes": 0,
+            "unverifiable_quotes": 0,
             "cases_unresolved": 0,
         }
         assert report.per_category["C1"].control is not None
@@ -307,6 +309,7 @@ class TestCategoryMetrics:
                 "llhb-v1-C7-101",
                 category="C7",
                 quotes_detected=2,
+                quotes_checkable=2,
                 quotes_verified=1,
             ),
             score("llhb-v1-C8-101", category="C8", passed=False),
@@ -321,6 +324,7 @@ class TestCategoryMetrics:
                 "llhb-v1-C7-101",
                 category="C7",
                 quotes_detected=2,
+                quotes_checkable=2,
                 quotes_verified=2,
             ),
             score("llhb-v1-C8-101", category="C8", passed=True),
@@ -604,3 +608,54 @@ class TestQuantileArithmetic:
         assert metrics_module._at_quantile(values, 0.025) == 2.0
         assert metrics_module._at_quantile(values, 0.975) == 97.0
         assert metrics_module._at_quantile([5.0], 0.975) == 5.0
+
+
+class TestQuoteFidelityDenominator:
+    """Issue #86: fidelity divides by CHECKABLE quotes; a quote nothing can
+    verify (verified=None) is bucket material, never a silent failure."""
+
+    def test_denominator_is_checkable_not_detected(self) -> None:
+        control = [
+            bundle(
+                "llhb-v1-C7-101",
+                score(
+                    "llhb-v1-C7-101",
+                    category="C7",
+                    quotes_detected=5,
+                    quotes_checkable=2,
+                    quotes_verified=1,
+                ),
+            )
+        ]
+        treatment = [
+            bundle(
+                "llhb-v1-C7-101",
+                score(
+                    "llhb-v1-C7-101",
+                    category="C7",
+                    quotes_detected=4,
+                    quotes_checkable=4,
+                    quotes_verified=3,
+                ),
+            )
+        ]
+        report = compute_pair_report(control, treatment)
+        fidelity = report.metrics["quote_fidelity"]
+        assert (fidelity.control.numerator, fidelity.control.denominator) == (1, 2)
+        assert (fidelity.treatment.numerator, fidelity.treatment.denominator) == (3, 4)
+
+    def test_unverifiable_mass_lands_in_the_bucket(self) -> None:
+        control = [
+            bundle(
+                "llhb-v1-C7-101",
+                score(
+                    "llhb-v1-C7-101",
+                    category="C7",
+                    quotes_detected=5,
+                    quotes_checkable=2,
+                    quotes_verified=1,
+                ),
+            )
+        ]
+        report = compute_pair_report(control, control)
+        assert report.unresolved.control["unverifiable_quotes"] == 3
