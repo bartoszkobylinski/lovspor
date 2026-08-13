@@ -42,6 +42,11 @@ Usage:
     uv run python benchmarks/llhb/runner/run_arm.py \
         --condition control --suffix frozen1 --frozen \
         --model claude-opus-5 [--execute]
+
+    # Stability subset (ruling #26): the committed 30 cases, one of 5 repeats:
+    uv run python benchmarks/llhb/runner/run_arm.py \
+        --condition control --suffix stabc1 --stability --repeat 1 \
+        --model claude-opus-5 [--execute]
 """
 
 import argparse
@@ -72,13 +77,14 @@ from lovspor.llhb.run_setup import (
     pilot_cases,
     verify_frozen_against_lock,
 )
-from lovspor.llhb.schema import load_cases_jsonl
+from lovspor.llhb.schema import canonical_jsonl, dataset_checksum, load_cases_jsonl
 
 LLHB_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = LLHB_DIR.parents[1]
 PROMPT_PATH = LLHB_DIR / "runner" / "system-prompt-v1.txt"
 FROZEN_JSONL = LLHB_DIR / "dataset" / "frozen" / "llhb-v1.jsonl"
 FROZEN_LOCK = LLHB_DIR / "dataset" / "frozen" / "llhb-v1.lock.json"
+STABILITY_SUBSET = LLHB_DIR / "dataset" / "frozen" / "llhb-v1-stability30.json"
 DEFAULT_CANDIDATES = LLHB_DIR / "dataset" / "candidates" / "regen-v5" / "candidates.jsonl"
 DEFAULT_SERVER_COMMAND = REPO_ROOT / ".venv" / "bin" / "lovspor"
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
@@ -94,6 +100,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="run the whole frozen llhb-v1 dataset (Stage 9); excludes --limit/--candidates",
     )
     parser.add_argument("--limit", type=int, help="number of pilot cases (pilot runs only)")
+    parser.add_argument(
+        "--stability",
+        action="store_true",
+        help="run the committed 30-case stability subset (ruling #26); requires --repeat",
+    )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        choices=range(1, 6),
+        help="stability repeat index, 1..5; recorded in the run notes",
+    )
     parser.add_argument("--model", required=True, help="exact model id for the CLI")
     parser.add_argument("--candidates", type=Path, default=None)
     parser.add_argument("--corpus-path", type=Path, help="pinned lovverk checkout (lovspor arm)")
@@ -107,10 +124,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--execute", action="store_true", help="actually spawn the CLI")
     args = parser.parse_args(argv)
+    pilot_knobs = args.limit is not None or args.candidates is not None
+    if args.stability and (args.frozen or pilot_knobs):
+        parser.error("--stability runs the committed subset; no --frozen/--limit/--candidates")
+    if args.stability != (args.repeat is not None):
+        parser.error("--stability and --repeat go together (repeat index 1..5, ruling #26)")
     if args.frozen and (args.limit is not None or args.candidates is not None):
         parser.error("--frozen runs the whole frozen dataset; --limit/--candidates are pilot-only")
-    if not args.frozen and args.limit is None:
-        parser.error("--limit is required for a pilot run (or pass --frozen for Stage 9)")
+    if not args.frozen and not args.stability and args.limit is None:
+        parser.error("--limit is required for a pilot run (or pass --frozen / --stability)")
     if args.candidates is None:
         args.candidates = DEFAULT_CANDIDATES
     return args
@@ -146,9 +168,65 @@ def load_inputs(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[st
     verify_frozen_against_lock(frozen_cases, lock)
     if args.frozen:
         return sorted(frozen_cases, key=lambda case: str(case["case_id"])), lock
+    if args.stability:
+        return stability_cases(frozen_cases, lock), lock
     frozen_ids = {str(case["case_id"]) for case in frozen_cases}
     candidates = load_cases_jsonl(args.candidates)
     return pilot_cases(candidates, frozen_ids, args.limit), lock
+
+
+def stability_cases(
+    frozen_cases: list[dict[str, Any]], lock: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The committed 30-case subset, fail-closed against any drift."""
+    subset = json.loads(STABILITY_SUBSET.read_text(encoding="utf-8"))
+    _check_subset_ids(subset, lock)
+    wanted = {str(case_id) for case_id in subset["case_ids"]}
+    picked = [case for case in frozen_cases if str(case["case_id"]) in wanted]
+    if len(picked) != len(wanted):
+        raise LovsporError(
+            f"{len(wanted) - len(picked)} stability subset ids missing from the frozen dataset"
+        )
+    if dataset_checksum(canonical_jsonl(picked)) != subset["subset_sha256"]:
+        raise LovsporError(
+            "stability subset checksum does not match the cases it names; "
+            "re-run select_stability_subset.py and review the diff"
+        )
+    return sorted(picked, key=lambda case: str(case["case_id"]))
+
+
+def _check_subset_ids(subset: dict[str, Any], lock: dict[str, Any]) -> None:
+    """The subset document must be internally consistent and drawn from
+    the locked frozen dataset before any id is even looked up."""
+    ids = [str(case_id) for case_id in subset["case_ids"]]
+    if len(ids) != len(set(ids)):
+        raise LovsporError(
+            f"duplicate case ids in the stability subset: {len(set(ids))} unique "
+            f"of {len(ids)} listed"
+        )
+    if int(subset["size"]) != len(ids):
+        raise LovsporError(
+            f"stability subset declares size {subset['size']} but lists {len(ids)} case ids"
+        )
+    _check_subset_allocation(subset, ids)
+    if subset["dataset_sha256"] != lock["dataset_sha256"]:
+        raise LovsporError(
+            "stability subset was drawn from a different frozen dataset; "
+            "re-run select_stability_subset.py and review the diff"
+        )
+
+
+def _check_subset_allocation(subset: dict[str, Any], ids: list[str]) -> None:
+    """The committed allocation must describe the ids actually listed."""
+    counted: dict[str, int] = {}
+    for case_id in ids:
+        category = case_id.split("-")[2]
+        counted[category] = counted.get(category, 0) + 1
+    declared = {str(cat): int(n) for cat, n in subset["allocation"].items()}
+    if counted != declared:
+        raise LovsporError(
+            "stability subset allocation does not match the categories of the listed case ids"
+        )
 
 
 def treatment_config(args: argparse.Namespace, lock: dict[str, Any]) -> dict[str, Any]:
@@ -215,6 +293,13 @@ def _notes(args: argparse.Namespace) -> str:
         if args.condition == "lovspor" and args.without_semantic_search
         else ""
     )
+    if args.stability:
+        return (
+            f"STABILITY subset 30x5 (ruling #26), repeat {args.repeat}/5 for this "
+            f"provider-condition arm; cases drawn from the frozen llhb-v1 dataset "
+            f"({STABILITY_SUBSET.name}); cli={cli}; the CLI exposes no temperature "
+            f"or max-turn control, so both are recorded as unset{degraded}"
+        )
     if args.frozen:
         return (
             f"FROZEN dataset llhb-v1 (Stage 9 evaluation); cli={cli}; the CLI "
@@ -310,7 +395,12 @@ def main() -> int:
     access = tool_access(args, config) if config is not None else None
     metadata = compose(args, cases, lock, config)
     print(json.dumps(metadata, indent=2, ensure_ascii=False))
-    pool = "frozen llhb-v1" if args.frozen else "drops only"
+    if args.frozen:
+        pool = "frozen llhb-v1"
+    elif args.stability:
+        pool = "stability-30 of frozen llhb-v1"
+    else:
+        pool = "drops only"
     print(f"\ncases: {len(cases)} ({pool}), runs root: {RUNS_ROOT}", flush=True)
     if not args.execute:
         _report_dry_run(metadata, cases[0], access)

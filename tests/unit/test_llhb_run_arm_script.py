@@ -12,6 +12,7 @@ composition — never the CLI spawn.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -148,3 +149,142 @@ class TestDryRunSummary:
         run_arm_script.main()
 
         assert "(drops only)" in capsys.readouterr().out
+
+
+STABILITY_ARGS = (*FROZEN_ARGS, "--stability", "--repeat", "2")
+
+
+class TestStabilityMode:
+    def test_stability_selects_exactly_the_committed_subset(self) -> None:
+        args = args_for(*STABILITY_ARGS)
+
+        cases, _ = run_arm_script.load_inputs(args)
+
+        committed = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        assert [c["case_id"] for c in cases] == sorted(committed["case_ids"])
+        assert len(cases) == 30
+
+    def test_stability_refuses_every_pilot_knob_and_frozen(self) -> None:
+        for extra in (("--limit", "10"), ("--candidates", "x.jsonl"), ("--frozen",)):
+            with pytest.raises(SystemExit):
+                args_for(*STABILITY_ARGS, *extra)
+
+    def test_stability_and_repeat_go_together(self) -> None:
+        with pytest.raises(SystemExit):
+            args_for(*FROZEN_ARGS, "--stability")
+        with pytest.raises(SystemExit):
+            args_for(*FROZEN_ARGS, "--repeat", "1")
+
+    def test_repeat_index_is_bounded_to_the_ruled_five(self) -> None:
+        for bad in ("0", "6"):
+            with pytest.raises(SystemExit):
+                args_for(*FROZEN_ARGS, "--stability", "--repeat", bad)
+
+    def test_stability_fails_closed_on_subset_dataset_drift(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A subset drawn from a different frozen dataset must never run."""
+        stale = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        stale["dataset_sha256"] = "0" * 64
+        stale_path = tmp_path / "llhb-v1-stability30.json"
+        stale_path.write_text(json.dumps(stale), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", stale_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match="different frozen dataset"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_fails_closed_on_missing_subset_ids(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        broken = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        broken["case_ids"][0] = "llhb-v1-C1-999999"
+        broken_path = tmp_path / "llhb-v1-stability30.json"
+        broken_path.write_text(json.dumps(broken), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", broken_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match="missing from the frozen dataset"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_fails_closed_on_subset_checksum_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The checksum must authenticate the exact cases passed to the runner."""
+        tampered = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        tampered["case_ids"][0] = "llhb-v1-C1-101"
+        tampered_path = tmp_path / "llhb-v1-stability30.json"
+        tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", tampered_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"subset.*checksum|checksum.*subset"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_fails_closed_on_duplicate_subset_ids(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Duplicate IDs must not silently turn the ruled 30 cases into 29."""
+        duplicated = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        duplicated["case_ids"][0] = duplicated["case_ids"][1]
+        duplicated_path = tmp_path / "llhb-v1-stability30.json"
+        duplicated_path.write_text(json.dumps(duplicated), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", duplicated_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"duplicate|30"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_fails_closed_on_declared_size_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The artifact must not claim a different sample size than its IDs."""
+        broken = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        broken["size"] = 29
+        broken_path = tmp_path / "llhb-v1-stability30.json"
+        broken_path.write_text(json.dumps(broken), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", broken_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"size|30"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_fails_closed_on_declared_allocation_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The ruled category allocation must describe the cases actually run."""
+        broken = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        broken["allocation"]["C1"] -= 1
+        broken["allocation"]["C2"] += 1
+        broken_path = tmp_path / "llhb-v1-stability30.json"
+        broken_path.write_text(json.dumps(broken), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", broken_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"allocation|categor"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_notes_name_the_subset_and_the_repeat(self) -> None:
+        args = args_for(*STABILITY_ARGS)
+        cases, lock = run_arm_script.load_inputs(args)
+
+        metadata = run_arm_script.compose(args, cases, lock, None)
+
+        assert "STABILITY subset 30x5 (ruling #26), repeat 2/5" in metadata["notes"]
+        assert "NOT the frozen dataset" not in metadata["notes"]
+
+    def test_stability_checksum_is_over_the_subset_actually_run(self) -> None:
+        """dataset_checksum stays honest: the 30 cases run, not the 250."""
+        args = args_for(*STABILITY_ARGS)
+        cases, lock = run_arm_script.load_inputs(args)
+
+        metadata = run_arm_script.compose(args, cases, lock, None)
+
+        committed = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        assert metadata["dataset_checksum"] == committed["subset_sha256"]
+        assert metadata["dataset_checksum"] != lock["dataset_sha256"]
+
+    def test_the_stability_summary_names_the_subset_pool(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["run_arm.py", *STABILITY_ARGS])
+
+        run_arm_script.main()
+
+        out = capsys.readouterr().out
+        assert "(stability-30 of frozen llhb-v1)" in out
+        assert "drops only" not in out
