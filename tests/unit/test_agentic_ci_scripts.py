@@ -314,7 +314,30 @@ class TestToolExitAuthority:
 
         assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
 
-    def test_allowed_verdict_codes_do_not_trip_the_health_check(self, tmp_path: Path) -> None:
-        for code in (0, 2, 4, 6, 8, 10, 12, 14):
-            result = _run(tmp_path, _progress_line(killed=2), tool_exit_code=code)
-            assert result["gate"]["reason"] != "tool_failed", code
+    @pytest.mark.parametrize(
+        ("code", "reason"),
+        [
+            (0, "ok"),
+            (2, "surviving_mutants"),
+            (4, "timeout_mutants"),
+            (6, "surviving_mutants"),
+            (8, "suspicious_mutants"),
+            (10, "surviving_mutants"),
+            (12, "timeout_mutants"),
+            (14, "surviving_mutants"),
+        ],
+    )
+    def test_allowed_verdict_codes_apply_each_aggregate_bit(
+        self, tmp_path: Path, code: int, reason: str
+    ) -> None:
+        result = _run(tmp_path, _progress_line(killed=2), tool_exit_code=code)
+
+        assert result["gate"]["reason"] == reason
+        assert result["gate"]["passed"] is (code == 0)
+
+    @pytest.mark.parametrize("code", [-1, 1, 3, 15, 127])
+    def test_non_verdict_tool_exit_codes_fail_closed(self, tmp_path: Path, code: int) -> None:
+        result = _run(tmp_path, _progress_line(killed=2), tool_exit_code=code)
+
+        assert result["tool_exit_code"] == code
+        assert result["gate"] == {"passed": False, "reason": "tool_failed"}
