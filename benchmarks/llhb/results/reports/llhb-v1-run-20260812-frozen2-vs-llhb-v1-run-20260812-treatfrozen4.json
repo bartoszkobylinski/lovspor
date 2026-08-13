@@ -1,0 +1,325 @@
+{
+  "bootstrap": {
+    "resamples": 2000,
+    "seed": 42
+  },
+  "cases_scored": 250,
+  "control_run": "llhb-v1-run-20260812-frozen2",
+  "metrics": {
+    "citation_accuracy": {
+      "control": {
+        "ci_high": 0.746606334841629,
+        "ci_low": 0.562874251497006,
+        "denominator": 189.0,
+        "numerator": 124.0,
+        "rate": 0.656084656084656
+      },
+      "delta": -0.17792344108133584,
+      "delta_ci_high": -0.08347791513048508,
+      "delta_ci_low": -0.2819455082612977,
+      "treatment": {
+        "ci_high": 0.8819047619047619,
+        "ci_low": 0.781981981981982,
+        "denominator": 494.0,
+        "numerator": 412.0,
+        "rate": 0.8340080971659919
+      }
+    },
+    "citation_hallucination_rate": {
+      "control": {
+        "ci_high": 0.270935960591133,
+        "ci_low": 0.1588785046728972,
+        "denominator": 215.0,
+        "numerator": 46.0,
+        "rate": 0.21395348837209302
+      },
+      "delta": 0.041262725319884175,
+      "delta_ci_high": 0.11080601475670122,
+      "delta_ci_low": -0.02977949533984997,
+      "treatment": {
+        "ci_high": 0.22,
+        "ci_low": 0.125,
+        "denominator": 249.0,
+        "numerator": 43.0,
+        "rate": 0.17269076305220885
+      }
+    },
+    "correct_provision_identification": {
+      "control": {
+        "ci_high": 0.14942528735632185,
+        "ci_low": 0.03614457831325301,
+        "denominator": 90.0,
+        "numerator": 8.0,
+        "rate": 0.08888888888888889
+      },
+      "delta": -0.2222222222222222,
+      "delta_ci_high": -0.11999999999999998,
+      "delta_ci_low": -0.32631578947368417,
+      "treatment": {
+        "ci_high": 0.4044943820224719,
+        "ci_low": 0.2159090909090909,
+        "denominator": 90.0,
+        "numerator": 28.0,
+        "rate": 0.3111111111111111
+      }
+    },
+    "false_premise_rejection_rate": {
+      "control": {
+        "ci_high": 0.0,
+        "ci_low": 0.0,
+        "denominator": 35.0,
+        "numerator": 0.0,
+        "rate": 0.0
+      },
+      "delta": -0.125,
+      "delta_ci_high": -0.027777777777777776,
+      "delta_ci_low": -0.25806451612903225,
+      "treatment": {
+        "ci_high": 0.25806451612903225,
+        "ci_low": 0.027777777777777776,
+        "denominator": 32.0,
+        "numerator": 4.0,
+        "rate": 0.125
+      }
+    },
+    "misattribution_rate": {
+      "control": {
+        "ci_high": 0.27586206896551724,
+        "ci_low": 0.030303030303030304,
+        "denominator": 30.0,
+        "numerator": 4.0,
+        "rate": 0.13333333333333333
+      },
+      "delta": -0.3666666666666667,
+      "delta_ci_high": -0.19444444444444442,
+      "delta_ci_low": -0.5517241379310345,
+      "treatment": {
+        "ci_high": 0.6785714285714286,
+        "ci_low": 0.32,
+        "denominator": 30.0,
+        "numerator": 15.0,
+        "rate": 0.5
+      }
+    },
+    "no_invention_rate": {
+      "control": {
+        "ci_high": 1.0,
+        "ci_low": 1.0,
+        "denominator": 1.0,
+        "numerator": 1.0,
+        "rate": 1.0
+      },
+      "delta": 1.0,
+      "delta_ci_high": 1.0,
+      "delta_ci_low": 1.0,
+      "treatment": {
+        "ci_high": 0.0,
+        "ci_low": 0.0,
+        "denominator": 5.0,
+        "numerator": 0.0,
+        "rate": 0.0
+      }
+    },
+    "post_retrieval_hallucination_rate": {
+      "control": null,
+      "delta": null,
+      "delta_ci_high": null,
+      "delta_ci_low": null,
+      "treatment": {
+        "ci_high": 0.25595238095238093,
+        "ci_low": 0.1337579617834395,
+        "denominator": 160.0,
+        "numerator": 31.0,
+        "rate": 0.19375
+      }
+    },
+    "quote_fidelity": {
+      "control": {
+        "ci_high": 0.009541984732824428,
+        "ci_low": 0.0,
+        "denominator": 535.0,
+        "numerator": 2.0,
+        "rate": 0.003738317757009346
+      },
+      "delta": -0.023325281701718666,
+      "delta_ci_high": -0.009431970830934562,
+      "delta_ci_low": -0.03718459495351926,
+      "treatment": {
+        "ci_high": 0.03994490358126722,
+        "ci_low": 0.015089163237311385,
+        "denominator": 739.0,
+        "numerator": 20.0,
+        "rate": 0.02706359945872801
+      }
+    }
+  },
+  "metrics_version": "llhb-metrics-v1",
+  "per_category": {
+    "C1": {
+      "control": {
+        "ci_high": 0.07692307692307693,
+        "ci_low": 0.0,
+        "denominator": 41.0,
+        "numerator": 1.0,
+        "rate": 0.024390243902439025
+      },
+      "delta": -0.09560975609756098,
+      "delta_ci_high": 0.005714285714285713,
+      "delta_ci_low": -0.2,
+      "treatment": {
+        "ci_high": 0.2,
+        "ci_low": 0.04,
+        "denominator": 50.0,
+        "numerator": 6.0,
+        "rate": 0.12
+      }
+    },
+    "C2": {
+      "control": {
+        "ci_high": 0.17857142857142858,
+        "ci_low": 0.0,
+        "denominator": 28.0,
+        "numerator": 2.0,
+        "rate": 0.07142857142857142
+      },
+      "delta": -0.2035714285714286,
+      "delta_ci_high": -0.03888888888888889,
+      "delta_ci_low": -0.36000000000000004,
+      "treatment": {
+        "ci_high": 0.425,
+        "ci_low": 0.15,
+        "denominator": 40.0,
+        "numerator": 11.0,
+        "rate": 0.275
+      }
+    },
+    "C3": {
+      "control": {
+        "ci_high": 0.7142857142857143,
+        "ci_low": 0.37142857142857144,
+        "denominator": 35.0,
+        "numerator": 19.0,
+        "rate": 0.5428571428571428
+      },
+      "delta": 0.2571428571428571,
+      "delta_ci_high": 0.48571428571428577,
+      "delta_ci_low": 0.0,
+      "treatment": {
+        "ci_high": 0.42857142857142855,
+        "ci_low": 0.14285714285714285,
+        "denominator": 35.0,
+        "numerator": 10.0,
+        "rate": 0.2857142857142857
+      }
+    },
+    "C4": {
+      "control": {
+        "ci_high": 0.3333333333333333,
+        "ci_low": 0.041666666666666664,
+        "denominator": 27.0,
+        "numerator": 5.0,
+        "rate": 0.18518518518518517
+      },
+      "delta": 0.08518518518518517,
+      "delta_ci_high": 0.27586206896551724,
+      "delta_ci_low": -0.11481481481481481,
+      "treatment": {
+        "ci_high": 0.23333333333333334,
+        "ci_low": 0.0,
+        "denominator": 30.0,
+        "numerator": 3.0,
+        "rate": 0.1
+      }
+    },
+    "C5": {
+      "control": {
+        "ci_high": 0.5333333333333333,
+        "ci_low": 0.06666666666666667,
+        "denominator": 15.0,
+        "numerator": 4.0,
+        "rate": 0.26666666666666666
+      },
+      "delta": 0.2,
+      "delta_ci_high": 0.4666666666666667,
+      "delta_ci_low": -0.06666666666666668,
+      "treatment": {
+        "ci_high": 0.2,
+        "ci_low": 0.0,
+        "denominator": 15.0,
+        "numerator": 1.0,
+        "rate": 0.06666666666666667
+      }
+    },
+    "C6": {
+      "control": {
+        "ci_high": 0.6,
+        "ci_low": 0.2571428571428571,
+        "denominator": 35.0,
+        "numerator": 15.0,
+        "rate": 0.42857142857142855
+      },
+      "delta": 0.17142857142857143,
+      "delta_ci_high": 0.3714285714285714,
+      "delta_ci_low": -0.02857142857142858,
+      "treatment": {
+        "ci_high": 0.4,
+        "ci_low": 0.11428571428571428,
+        "denominator": 35.0,
+        "numerator": 9.0,
+        "rate": 0.2571428571428571
+      }
+    },
+    "C7": {
+      "control": {
+        "ci_high": 0.0,
+        "ci_low": 0.0,
+        "denominator": 23.0,
+        "numerator": 0.0,
+        "rate": 0.0
+      },
+      "delta": -0.08,
+      "delta_ci_high": 0.0,
+      "delta_ci_low": -0.2,
+      "treatment": {
+        "ci_high": 0.2,
+        "ci_low": 0.0,
+        "denominator": 25.0,
+        "numerator": 2.0,
+        "rate": 0.08
+      }
+    },
+    "C8": {
+      "control": {
+        "ci_high": 0.0,
+        "ci_low": 0.0,
+        "denominator": 11.0,
+        "numerator": 0.0,
+        "rate": 0.0
+      },
+      "delta": -0.05263157894736842,
+      "delta_ci_high": 0.0,
+      "delta_ci_low": -0.17647058823529413,
+      "treatment": {
+        "ci_high": 0.17647058823529413,
+        "ci_low": 0.0,
+        "denominator": 19.0,
+        "numerator": 1.0,
+        "rate": 0.05263157894736842
+      }
+    }
+  },
+  "scorer_version": "llhb-score-v1",
+  "treatment_run": "llhb-v1-run-20260812-treatfrozen4",
+  "unresolved": {
+    "control": {
+      "cases_unresolved": 33,
+      "unattached_quotes": 405,
+      "unresolved_claims": 6
+    },
+    "treatment": {
+      "cases_unresolved": 31,
+      "unattached_quotes": 338,
+      "unresolved_claims": 18
+    }
+  }
+}

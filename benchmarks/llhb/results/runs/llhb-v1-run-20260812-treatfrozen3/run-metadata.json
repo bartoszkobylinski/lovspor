@@ -1,0 +1,46 @@
+{
+  "api_version": null,
+  "case_order_seed": 42,
+  "condition": "lovspor",
+  "dataset_checksum": "118eec543609442693643b3bdf29b3ec9aac30f0bee889afd6f47eefe07a4cc5",
+  "evaluator_version": null,
+  "finished_at": null,
+  "llhb_version": "1.0",
+  "lovspor_commit": "23acb3da126c757601b241f7310cda5fca9649af",
+  "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+  "max_turns": null,
+  "model_id": "claude-opus-5",
+  "notes": "FROZEN dataset llhb-v1 (Stage 9 evaluation); cli=2.1.228 (Claude Code); the CLI exposes no temperature or max-turn control, so both are recorded as unset",
+  "provider": "anthropic",
+  "run_id": "llhb-v1-run-20260812-treatfrozen3",
+  "runner_commit": "23acb3da126c757601b241f7310cda5fca9649af",
+  "sampling": {
+    "temperature": null
+  },
+  "started_at": "2026-08-12T13:35:52Z",
+  "system_prompt_path": "benchmarks/llhb/runner/system-prompt-v1.txt",
+  "system_prompt_sha256": "1e984ac1bdb481be7dda5a20b84c1b84edf608e9b4739b346aef59017ef890ec",
+  "tool_config": {
+    "backend": "local stdio `lovspor mcp` on lovverk 6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+    "tool_schema_sha256": "74bf6f11d8695c0fe8b4d71d1910a6228f77cec0618900af581782c86460d955",
+    "tools": [
+      "mcp__lovverk__corpus_status",
+      "mcp__lovverk__diff_law_versions",
+      "mcp__lovverk__get_eu_basis",
+      "mcp__lovverk__get_law",
+      "mcp__lovverk__get_law_at",
+      "mcp__lovverk__get_law_history",
+      "mcp__lovverk__get_section",
+      "mcp__lovverk__list_law_versions",
+      "mcp__lovverk__list_recent_changes",
+      "mcp__lovverk__list_sections",
+      "mcp__lovverk__search_body",
+      "mcp__lovverk__search_eu_implementations",
+      "mcp__lovverk__search_laws",
+      "mcp__lovverk__semantic_search",
+      "mcp__lovverk__validate_citation",
+      "mcp__lovverk__verify_quote"
+    ],
+    "transport": "native-mcp"
+  }
+}
