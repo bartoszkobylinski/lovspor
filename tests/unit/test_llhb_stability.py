@@ -94,13 +94,15 @@ def test_select_fails_closed_when_a_category_cannot_fill_its_seats() -> None:
     counts = dict(FROZEN_TARGETS)
     counts["C5"] = 1  # allocation wants 2 seats from a 15-case stratum
     pool = _pool(counts)
-    with pytest.raises(StabilityShortfallError, match="C5"):
+    with pytest.raises(StabilityShortfallError, match="C5") as exc_info:
         select_stability_subset(pool, allocation=subset_allocation(FROZEN_TARGETS, 30))
+    assert str(exc_info.value) == "C5: 1 cases for 2 seats — cannot fill"
 
 
 def test_allocation_rejects_size_above_pool() -> None:
-    with pytest.raises(StabilityShortfallError):
+    with pytest.raises(StabilityShortfallError) as exc_info:
         subset_allocation({"C1": 2}, 3)
+    assert str(exc_info.value) == "subset size 3 exceeds pool of 2"
 
 
 def test_allocation_can_select_the_entire_pool() -> None:
@@ -119,5 +121,6 @@ def test_explicit_allocation_must_match_declared_subset_size() -> None:
     """Returned metadata must never claim a size different from the selected IDs."""
     pool = _pool({"C1": 3})
 
-    with pytest.raises(StabilityShortfallError, match=r"allocation|size"):
+    with pytest.raises(StabilityShortfallError, match=r"allocation|size") as exc_info:
         select_stability_subset(pool, size=2, allocation={"C1": 1})
+    assert str(exc_info.value) == "allocation grants 1 seats but the subset size is 2"
