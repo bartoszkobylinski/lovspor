@@ -301,6 +301,41 @@ dependency), or whether v1 runs on the deterministic 15.
     is runner-native at write time, never post-hoc, and lands on the
     v1→v2 boundary.
 
+## Addendum — post-run scoring audit ruling (2026-08-13)
+
+29. **Scorer v2: the four audited scoring-layer defects are the #28
+    exception, and the fix is a re-score, never a re-run.** The
+    2026-08-13 audit of the completed frozen pair (frozen2 /
+    treatfrozen4) found four defect classes, each producing a wrong
+    published number: #84 — the sentence-window stance rules read a
+    refute-then-explain answer (denial up front, the claimed provision
+    cited later inside a heading to explain what it actually says) as
+    asserting the claim: all 19 C4 "misattribution" fails opened with
+    an explicit denial, and the same layer contaminated C6 and the H1
+    numerator; #85 — the extractor swallowed the first letter of
+    æ/ø/å-second-letter words («første», «følger», «hører») into the
+    section id, planting 83 (control) / 214 (treatment) phantom
+    citations; #86 — quote_fidelity divided by unverifiable quotes
+    against the scorer's own None semantics (true fidelity 2/17 and
+    20/99, published as 2/535 and 20/739); #87 — correct C8 refusals
+    that quote non-statute material in «» landed UNRESOLVED and
+    degenerated no_invention_rate to denominators of 1 and 5. The
+    runs, dataset, fairness gate and harness evidence are untouched by
+    all four — scoring is a deterministic post-hoc layer, separated
+    for exactly this contingency. Ruling: fix all four as scorer v2
+    (`llhb-score-v2`, `llhb-metrics-v2`; the stance window rules
+    themselves stay `llhb-stance-v1` — the premise-denial and
+    source-refusal cue lists are criterion-level and frozen with the
+    scorer), apply the same v2 to BOTH arms, publish the v1→v2 metric
+    diff as part of the changelog, and never edit or re-execute the
+    runs. Accepted, documented limitation of the #87 escape: an answer
+    that both refuses in its opening and presents a fabricated but
+    unattachable quote passes `no-fabricated-resolution`; an attached
+    quote failing verification still fails it regardless. Audit
+    evidence is reproducible from the committed artifacts at `981dbdb`;
+    the audit note is `analysis/llhb-scoring-audit-2026-08-13.md`
+    (gitignored analysis/, referenced for provenance).
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,

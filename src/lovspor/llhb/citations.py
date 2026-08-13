@@ -46,8 +46,16 @@ from lovspor.llhb.stances import (
     sentence_bounds,
 )
 
-_SECTION_REF = re.compile(rf"§(?P<double>§)?\s*(?P<sid>{SECTION_ID.pattern})")
-_MULTI_JOIN = re.compile(rf"\s*(?P<join>,|og|til)\s+(?P<sid>{SECTION_ID.pattern})")
+# The trailing guard closes issue #85: SECTION_ID's spaced-letter branch
+# checks "not followed by [A-Za-z]", so a word whose SECOND letter is
+# æ/ø/å («første», «følger», «hører») tokenizes as a standalone letter
+# and gets swallowed into the id («§ 8 første» → «8 f»). Refusing a
+# match that ends flush against æ/ø/å makes the regex backtrack to the
+# bare number; the documented «§ 12 i skatteloven» longest-read is
+# untouched because its swallowed «i» is followed by a space.
+_NO_SPLIT_WORD = r"(?![æøåÆØÅ])"
+_SECTION_REF = re.compile(rf"§(?P<double>§)?\s*(?P<sid>{SECTION_ID.pattern}){_NO_SPLIT_WORD}")
+_MULTI_JOIN = re.compile(rf"\s*(?P<join>,|og|til)\s+(?P<sid>{SECTION_ID.pattern}){_NO_SPLIT_WORD}")
 _AFTER_ACT_GAP = re.compile(r"^[\s,]*(?:i|etter)?\s*$")
 _ADJACENT_GAP = re.compile(r"^\s*$")
 _ABBREV_TOKEN = re.compile(

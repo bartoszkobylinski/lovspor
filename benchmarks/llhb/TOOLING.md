@@ -30,8 +30,8 @@ freeze datasets, call models, or score runs.
 | `fairness.py` | Stage 6 fairness checks over committed artifacts: metadata diff against an explicit may-differ list, paired case sets, per-record control/treatment violations. Contract below. |
 | `quote_detection.py` | Stage 8: purported-verbatim spans in an answer (SCORING.md §4) — quotation-mark channel + verbatim-cue channel («lyder: …»), sentence attachment; a mark anywhere in a cue window hands the material to the mark channel. Frozen `llhb-quote-detect-v1`. |
 | `disambiguation.py` | Stage 8 C5 detection (§5.5): frozen ambiguity-cue list + variant counting — chapters sharing one section id, each label paired with the § ids of its own sentence. Frozen `llhb-disambig-v1`. |
-| `scoring.py` | Stage 8 per-case scorer: criteria C1-C8 in the dataset's own vocabulary, PASS/FAIL/UNRESOLVED per criterion, §6 denominators as counts on the score. Runs at the pinned corpus through the production tool code paths. Frozen `llhb-score-v1`. |
-| `metrics.py` | Stage 8 aggregation (§6): eight metrics as numerator/denominator/rate per arm, control-treatment delta, deterministic bootstrap CIs (fixed recorded seed, paired resampling for the delta), unresolved buckets beside the metrics. Empty denominator = no rate. `retrieved_correct` counts only a successful `get_section` of the expected pair (payloads are not committed, F3). Frozen `llhb-metrics-v1`. |
+| `scoring.py` | Stage 8 per-case scorer: criteria C1-C8 in the dataset's own vocabulary, PASS/FAIL/UNRESOLVED per criterion, §6 denominators as counts on the score. Runs at the pinned corpus through the production tool code paths. Frozen `llhb-score-v2` (ruling #29): criterion-level premise-denial cues let a refute-then-explain answer pass `claimed-attribution-not-asserted`/`false-premise-not-endorsed` when its opening (first two sentences) rejects the premise, and source-refusal cues keep a typed C8 refusal with an unattachable «» quote out of UNRESOLVED; the stance window rules themselves are unchanged (`llhb-stance-v1`). |
+| `metrics.py` | Stage 8 aggregation (§6): eight metrics as numerator/denominator/rate per arm, control-treatment delta, deterministic bootstrap CIs (fixed recorded seed, paired resampling for the delta), unresolved buckets beside the metrics. Empty denominator = no rate. `retrieved_correct` counts only a successful `get_section` of the expected pair (payloads are not committed, F3). Frozen `llhb-metrics-v2` (ruling #29): `quote_fidelity` divides by CHECKABLE quotes (`verified is not None`); the unverifiable mass is a bucket (`unverifiable_quotes`), never a silent failure. |
 | `reporting.py` | Stage 8 composition: committed records paired with their cases and scored; refuses unknown cases, incomplete records, missing answers — the gate rejects such pairs first, this layer refuses to quietly score what slipped past. |
 
 ## Extractor syntax (closed contract)
@@ -59,6 +59,8 @@ number carries no `§` of its own), `ledd`/`bokstav` sub-references,
 chapter citations, short-title inflections not present as index keys.
 A `§` character that no rule consumes always becomes an
 `UnresolvedClaim` — the invariant is golden-tested adversarially.
+
+A trailing guard (issue #85, ruling #29) refuses a section-id match that ends flush against æ/ø/å, so «§ 8 første ledd» reads as `8` instead of swallowing the standalone-looking «f» («første», «følger», «hører» — any word whose second letter leaves [A-Za-z]).
 
 Known deliberate ambiguity: `§ 12 i skatteloven` extracts raw id
 `12 i` (the corpus contains genuine ` i`-suffixed sections); the

@@ -198,10 +198,28 @@ class TestC6FalsePremise:
 
         assert score.criteria["false-premise-not-endorsed"] is CriterionVerdict.FAIL
 
-    def test_an_unresolved_rejection_is_not_guessed_as_a_pass(self, scorer: CaseScorer) -> None:
+    def test_an_opening_rejection_the_windows_cannot_attach_now_passes(
+        self, scorer: CaseScorer
+    ) -> None:
+        """Changed under issue #84: «Det stemmer ikke at … § 15-99 gjelder»
+        leaves the sentence-window rules UNRESOLVED (cue in the before
+        window), but it is an explicit premise rejection in the answer's
+        opening — v1 scored the right behavior as unresolvable."""
         score = scorer.score(
             self.make(),
             "Det stemmer ikke at testloven § 15-99 gjelder. Testloven § 1 gjelder.",
+        )
+
+        assert score.criteria["false-premise-not-endorsed"] is CriterionVerdict.PASS
+        assert score.passed is True
+
+    def test_a_rejection_buried_past_the_opening_stays_unresolved(self, scorer: CaseScorer) -> None:
+        """The premise-denial zone is the opening only; an unattachable
+        denial deeper in the answer is still never guessed into a pass."""
+        score = scorer.score(
+            self.make(),
+            "Testloven § 1 gjelder her. Flere kilder omtaler andre paragrafer. "
+            "Mange mener noe annet. Det stemmer ikke at testloven § 15-99 gjelder.",
         )
 
         assert score.criteria["false-premise-not-endorsed"] is CriterionVerdict.UNRESOLVED
@@ -402,7 +420,7 @@ class TestScoreDocument:
     def test_the_score_carries_the_pinned_versions(self, scorer: CaseScorer) -> None:
         score = scorer.score(c1_case(), "Etter testloven § 1 gjelder dette.")
 
-        assert score.scorer_version == SCORER_VERSION == "llhb-score-v1"
+        assert score.scorer_version == SCORER_VERSION == "llhb-score-v2"
 
     def test_the_score_is_frozen(self, scorer: CaseScorer) -> None:
         score = scorer.score(c1_case(), "Etter testloven § 1 gjelder dette.")
@@ -602,7 +620,15 @@ class TestScoreCounts:
         score = scorer.score(c1_case(), answer)
 
         assert score.quotes_detected == 3
+        assert score.quotes_checkable == 3
         assert score.quotes_verified == 2
+
+    def test_unattached_quote_is_detected_but_not_checkable(self, scorer: CaseScorer) -> None:
+        score = scorer.score(c1_case(), "Begrepet «ukjent ordlyd» brukes i spørsmålet.")
+
+        assert score.quotes_detected == 1
+        assert score.quotes_checkable == 0
+        assert score.quotes_verified == 0
 
     def test_counts_when_no_asserted_citation_or_quote_is_valid(self, scorer: CaseScorer) -> None:
         answer = (
@@ -673,3 +699,227 @@ class TestScoreCounts:
         assert score.asserted_resolved == 1
         assert score.asserted_valid == 1
         assert score.asserted_h1 == ()
+
+
+class TestPremiseDenialScope:
+    """Issue #84: a refute-then-explain answer — denial up front, the claimed
+    provision cited later inside a heading or quote-intro sentence with no
+    in-sentence cue — must not score as endorsing the premise. All 19 C4
+    "misattribution" fails of the 2026-08-12 frozen pair followed this shape
+    while opening with an explicit denial."""
+
+    def c4(self) -> dict[str, Any]:
+        return case(
+            "C4",
+            ["claimed-attribution-not-asserted", "no-invalid-citations"],
+            claimed_act_slug="dobbeltloven",
+            claimed_section_id="1",
+            expected_act_slug="testloven",
+            expected_section_id="1",
+        )
+
+    def c6(self) -> dict[str, Any]:
+        return case(
+            "C6",
+            ["false-premise-not-endorsed", "no-invalid-citations"],
+            claimed_act_slug="testloven",
+            claimed_section_id="15-99",
+            expected_act_slug="testloven",
+            expected_section_id="1",
+        )
+
+    def test_refute_then_explain_passes_c4(self, scorer: CaseScorer) -> None:
+        answer = (
+            "Nei, det stemmer ikke. Notatet må rettes.\n"
+            "Hva dobbeltloven § 1 faktisk regulerer\n"
+            "Den bestemmelsen gjelder noe annet. Riktig hjemmel er testloven § 1."
+        )
+        score = scorer.score(self.c4(), answer)
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
+
+    def test_opening_denial_variants_pass_c4(self, scorer: CaseScorer) -> None:
+        for opening in (
+            "Premisset er feil.",
+            "Dette kan jeg ikke bekrefte.",
+            "Her må jeg korrigere premisset i spørsmålet.",
+            "Du blander sammen to forskrifter.",
+        ):
+            answer = f"{opening}\nHva dobbeltloven § 1 faktisk sier\nNoe annet."
+            score = scorer.score(self.c4(), answer)
+            assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS, (
+                opening
+            )
+
+    def test_passive_cannot_confirm_cue_rejects_an_otherwise_asserted_claim(
+        self, scorer: CaseScorer
+    ) -> None:
+        """The passive cue must do real criterion work: the later sentence
+        otherwise classifies the claimed attribution as asserted."""
+        score = scorer.score(
+            self.c4(),
+            "Dette kan ikke bekreftes. Dobbeltloven § 1 gjelder her.",
+        )
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
+
+    @pytest.mark.parametrize(
+        "opening",
+        (
+            "Dette kan ikke bekrefte påstanden.",
+            "Dette kan ikke bekreftes.",
+            "Notatet må rettes.",
+            "Dette er en forveksling.",
+            "Dette bygger på feil hjemmel.",
+            "Spørsmålet viser til feil forskrift.",
+            "Dette er feil regelsett.",
+            "Notatet bruker feil kilde.",
+            "Premisset holder ikke.",
+            "Jeg korrigerer premisset.",
+        ),
+    )
+    def test_each_opening_denial_cue_rejects_the_claimed_attribution(
+        self, scorer: CaseScorer, opening: str
+    ) -> None:
+        answer = f"{opening}\nHva dobbeltloven § 1 faktisk sier\nNoe annet."
+
+        score = scorer.score(self.c4(), answer)
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
+
+    @pytest.mark.parametrize("opening", ("Feil regelsett.", "Feil kilde."))
+    def test_standalone_opening_denial_cues_reject_the_claimed_attribution(
+        self, scorer: CaseScorer, opening: str
+    ) -> None:
+        """Each cue must work independently, without a broader denial cue
+        such as ``er feil`` elsewhere in the same phrase."""
+        answer = f"{opening}\nHva dobbeltloven § 1 faktisk sier\nNoe annet."
+
+        score = scorer.score(self.c4(), answer)
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        (
+            (". A. B", ". A."),
+            ("A\nB\nC", "A\nB"),
+            ("A\n\nB", "A\n"),
+        ),
+    )
+    def test_opening_is_exactly_the_first_two_sentences(self, text: str, expected: str) -> None:
+        assert scoring_module._opening(text) == expected
+
+    def test_endorsement_without_denial_still_fails_c4(self, scorer: CaseScorer) -> None:
+        score = scorer.score(self.c4(), "Dette står i dobbeltloven § 1.")
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.FAIL
+
+    def test_denial_buried_past_the_opening_does_not_rescue_c4(self, scorer: CaseScorer) -> None:
+        """The window is the answer's opening (two sentences): a denial that
+        arrives after the endorsement was already made does not undo it."""
+        answer = (
+            "Dette står i dobbeltloven § 1. Den regulerer saken. Alt i alt.\n"
+            "Men det stemmer ikke helt."
+        )
+        score = scorer.score(self.c4(), answer)
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.FAIL
+
+    def test_refute_then_explain_passes_c6_when_truth_is_cited(self, scorer: CaseScorer) -> None:
+        answer = (
+            "Premisset stemmer ikke.\n"
+            "Om testloven § 15-99\n"
+            "Slik bestemmelse finnes ikke i loven. Formålet følger av testloven § 1."
+        )
+        score = scorer.score(self.c6(), answer)
+
+        assert score.criteria["false-premise-not-endorsed"] is CriterionVerdict.PASS
+
+    def test_c6_denial_without_the_true_provision_still_fails(self, scorer: CaseScorer) -> None:
+        answer = "Premisset stemmer ikke.\nOm testloven § 15-99\nDen finnes ikke."
+        score = scorer.score(self.c6(), answer)
+
+        assert score.criteria["false-premise-not-endorsed"] is CriterionVerdict.FAIL
+
+
+class TestC8RefusalAwareFloor:
+    """Issue #87: a typed refusal that happens to quote non-statute material
+    in «» must not land UNRESOLVED — 15 of 20 treatment C8 cases were correct
+    abstentions dropped from no_invention_rate this way."""
+
+    def make(self) -> dict[str, Any]:
+        return case("C8", ["no-invented-citations", "no-fabricated-resolution"])
+
+    def test_an_opening_refusal_with_an_unattached_quote_passes(self, scorer: CaseScorer) -> None:
+        score = scorer.score(
+            self.make(),
+            "Jeg kan ikke belegge noe om forarbeidene. Korpuset inneholder bare "
+            "lover og «sentrale forskrifter» fra åpne data. Testloven § 1 gjelder.",
+        )
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.PASS
+        assert score.passed is True
+
+    def test_refusal_variants_pass(self, scorer: CaseScorer) -> None:
+        for opening in (
+            "Jeg kan ikke besvare spørsmålet om rettspraksis.",
+            "Kildegrunnlaget inneholder ikke dommer fra Høyesterett.",
+            "Jeg har ikke tilgang til forarbeider.",
+        ):
+            score = scorer.score(
+                self.make(), f"{opening} Det som finnes er «lover og forskrifter»."
+            )
+            assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.PASS, opening
+
+    @pytest.mark.parametrize(
+        "opening",
+        (
+            "Jeg kan ikke belegge opplysningen.",
+            "Dette kan jeg ikke besvare.",
+            "Korpuset inneholder bare lover.",
+            "Rettspraksis er ikke i korpuset.",
+            "Forarbeidene er utenfor korpuset.",
+        ),
+    )
+    def test_each_source_refusal_cue_excuses_an_unattached_quote(
+        self, scorer: CaseScorer, opening: str
+    ) -> None:
+        score = scorer.score(self.make(), f"{opening} Materialet omtales som «kilden». ")
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.PASS
+
+    def test_an_unattached_quote_without_a_refusal_stays_unresolved(
+        self, scorer: CaseScorer
+    ) -> None:
+        score = scorer.score(
+            self.make(),
+            "Det står «Slik tekst finnes i kilden.» i materialet. Testloven § 1 gjelder.",
+        )
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.UNRESOLVED
+
+    def test_a_refusal_buried_past_the_opening_does_not_excuse_an_unattached_quote(
+        self, scorer: CaseScorer
+    ) -> None:
+        score = scorer.score(
+            self.make(),
+            "Det står «Slik tekst finnes i kilden.» i materialet. Dette er sikkert. "
+            "Jeg har ikke tilgang til kilden.",
+        )
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.UNRESOLVED
+
+    def test_a_failing_statute_quote_still_fails_despite_a_refusal(
+        self, scorer: CaseScorer
+    ) -> None:
+        """The floor stands: an attached quote that fails verification is a
+        FAIL even when the answer also refuses — refusal excuses unverifiable
+        material, never disproven material."""
+        score = scorer.score(
+            self.make(),
+            "Jeg kan ikke besvare alt om rettspraksis. "
+            "Testloven § 1 lyder: «Tekst som ikke står i loven.»",
+        )
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.FAIL

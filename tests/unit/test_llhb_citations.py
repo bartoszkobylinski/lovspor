@@ -4,7 +4,10 @@ Every test uses synthetic act names via ``ActNameIndex.from_pairs`` —
 no Lovdata text, no real corpus.
 """
 
-from lovspor.llhb.citations import ExtractionResult, extract_citations
+import pytest
+from pydantic import ValidationError
+
+from lovspor.llhb.citations import ActMentionRef, ExtractionResult, extract_citations
 from lovspor.llhb.names import ActNameIndex
 from lovspor.llhb.stances import Stance
 
@@ -182,3 +185,60 @@ def test_result_carries_frozen_rule_versions() -> None:
     result = _extract("ingen paragrafer her")
     assert result.abbreviations_version == "llhb-abbrev-v1"
     assert result.stance_rules_version == "llhb-stance-v1"
+
+
+def test_norwegian_word_after_number_is_not_a_letter_suffix() -> None:
+    """Issue #85: «første»/«følger»/«hører» tokenize as a standalone letter
+    because their second character (æ/ø/å) ends the [A-Za-z] word — the
+    extractor must not swallow that letter into the section id."""
+    (citation,) = _extract("Etter arbeidsmiljøloven § 8 første ledd gjelder dette.").citations
+    assert citation.section_id == "8"
+    assert citation.section_id_raw == "8"
+
+    (citation,) = _extract("Kravet i skatteloven § 9-3 hører under kapittel 9.").citations
+    assert citation.section_id == "9-3"
+
+    (citation,) = _extract("Av forvaltningsloven § 2 følger det at reglene gjelder.").citations
+    assert citation.section_id == "2"
+
+
+def test_deliberate_spaced_i_longest_read_survives_the_suffix_guard() -> None:
+    """The documented «§ 12 i skatteloven» longest-read (resolver tail-strip
+    parity) must be unaffected: after the swallowed «i» comes a space, not
+    an æ/ø/å letter."""
+    (citation,) = _extract("Dette følger av § 12 i skatteloven.").citations
+    assert citation.section_id_raw == "12 i"
+
+
+def test_norwegian_word_after_multi_section_is_not_a_letter_suffix() -> None:
+    """The suffix guard also applies to the second id parsed by _MULTI_JOIN."""
+    citations = _extract("Se arbeidsmiljøloven §§ 8 og 9 første ledd.").citations
+
+    assert [citation.section_id for citation in citations] == ["8", "9"]
+    assert [citation.section_id_raw for citation in citations] == ["8", "9"]
+
+
+class TestExtractionInvariants:
+    """Kills for the PR #88 mutation survivors: observable defaults and
+    scanner plumbing the behavioral tests never pinned directly."""
+
+    def test_a_plain_citation_is_not_a_range(self) -> None:
+        (citation,) = _extract("Etter arbeidsmiljøloven § 15-7 kreves grunn.").citations
+        assert citation.from_range is False
+
+    def test_a_citation_at_the_very_start_of_the_answer_is_extracted(self) -> None:
+        """consumed_until starts at 0: an answer that OPENS with «§ …» must
+        not lose its first citation to the initial cursor."""
+        (citation,) = _extract("§ 12 i skatteloven regulerer dette.").citations
+        assert citation.section_id_raw == "12 i"
+        assert citation.start == 0
+
+    def test_non_abbreviation_citations_carry_none_not_empty(self) -> None:
+        (citation,) = _extract("Etter arbeidsmiljøloven § 15-7 kreves grunn.").citations
+        assert citation.abbreviation is None
+
+    def test_act_mention_refs_are_immutable(self) -> None:
+        mention = ActMentionRef(start=0, end=4, key="testloven")
+        assert mention.via_abbreviation is None
+        with pytest.raises(ValidationError):
+            mention.key = "x"  # type: ignore[misc]
