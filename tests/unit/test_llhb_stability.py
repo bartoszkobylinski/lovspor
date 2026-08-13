@@ -8,8 +8,10 @@ from lovspor.llhb.stability import (
     STABILITY_SELECTION_SEED,
     STABILITY_SUBSET_SIZE,
     StabilityShortfallError,
+    flipped_cases,
     select_stability_subset,
     subset_allocation,
+    summarize_rates,
 )
 
 
@@ -124,3 +126,62 @@ def test_explicit_allocation_must_match_declared_subset_size() -> None:
     with pytest.raises(StabilityShortfallError, match=r"allocation|size") as exc_info:
         select_stability_subset(pool, size=2, allocation={"C1": 1})
     assert str(exc_info.value) == "allocation grants 1 seats but the subset size is 2"
+
+
+def test_summarize_rates_exact_statistics() -> None:
+    summary = summarize_rates([0.2, 0.4, 0.3])
+
+    assert summary.values == [0.2, 0.4, 0.3]
+    assert summary.defined == 3
+    assert summary.mean == pytest.approx(0.3)
+    assert summary.minimum == 0.2
+    assert summary.maximum == 0.4
+    assert summary.sd == pytest.approx(0.1)  # sample SD, n-1
+
+
+def test_summarize_rates_ignores_none_but_records_it() -> None:
+    summary = summarize_rates([0.5, None, 0.5])
+
+    assert summary.values == [0.5, None, 0.5]
+    assert summary.defined == 2
+    assert summary.mean == pytest.approx(0.5)
+    assert summary.sd == pytest.approx(0.0)
+
+
+def test_summarize_rates_all_none_yields_no_statistics() -> None:
+    summary = summarize_rates([None, None])
+
+    assert summary.defined == 0
+    assert summary.mean is None
+    assert summary.minimum is None
+    assert summary.maximum is None
+    assert summary.sd is None
+
+
+def test_summarize_rates_single_value_has_no_sd() -> None:
+    summary = summarize_rates([0.7])
+
+    assert summary.mean == pytest.approx(0.7)
+    assert summary.sd is None
+
+
+def test_flipped_cases_detects_outcome_changes_only() -> None:
+    repeats = [
+        {"a": True, "b": False, "c": None},
+        {"a": True, "b": True, "c": None},
+        {"a": True, "b": False, "c": True},
+    ]
+
+    assert flipped_cases(repeats) == ["b", "c"]
+
+
+def test_flipped_cases_treats_absence_as_instability() -> None:
+    repeats = [{"a": True, "b": True}, {"a": True}]
+
+    assert flipped_cases(repeats) == ["b"]
+
+
+def test_flipped_cases_stable_across_repeats_is_empty() -> None:
+    repeats = [{"a": True, "b": None}] * 5
+
+    assert flipped_cases(repeats) == []
