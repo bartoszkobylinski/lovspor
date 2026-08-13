@@ -12,6 +12,8 @@ import json
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 from lovspor.llhb.schema import canonical_jsonl, dataset_checksum, load_cases_jsonl
 from lovspor.llhb.stability import STABILITY_SELECTION_SEED
 
@@ -66,3 +68,16 @@ def test_committed_artifact_matches_a_fresh_draw() -> None:
     committed = json.loads(script.SUBSET_PATH.read_text(encoding="utf-8"))
 
     assert committed == script.draw()
+
+
+def test_main_regenerates_the_committed_artifact_byte_for_byte(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    regenerated = tmp_path / script.SUBSET_PATH.name
+    original = script.SUBSET_PATH
+    monkeypatch.setattr(script, "SUBSET_PATH", regenerated)
+    monkeypatch.setattr(script, "LLHB_DIR", tmp_path)
+
+    assert script.main() == 0
+
+    assert regenerated.read_bytes() == original.read_bytes()

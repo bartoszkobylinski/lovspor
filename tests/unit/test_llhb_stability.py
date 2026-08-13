@@ -26,6 +26,7 @@ def _pool(counts: dict[str, int]) -> list[dict]:
 def test_ruling_26_constants() -> None:
     assert STABILITY_SUBSET_SIZE == 30
     assert STABILITY_REPEATS == 5
+    assert STABILITY_SELECTION_SEED == 42
 
 
 def test_allocation_over_frozen_targets_is_the_published_split() -> None:
@@ -100,6 +101,18 @@ def test_select_fails_closed_when_a_category_cannot_fill_its_seats() -> None:
 def test_allocation_rejects_size_above_pool() -> None:
     with pytest.raises(StabilityShortfallError):
         subset_allocation({"C1": 2}, 3)
+
+
+def test_allocation_can_select_the_entire_pool() -> None:
+    assert subset_allocation({"C1": 2, "C2": 1}, 3) == {"C1": 2, "C2": 1}
+
+
+def test_select_accepts_a_category_with_exactly_enough_cases() -> None:
+    pool = _pool({"C1": 2})
+
+    subset = select_stability_subset(pool, size=2, allocation={"C1": 2})
+
+    assert subset.case_ids == ["llhb-v1-C1-101", "llhb-v1-C1-102"]
 
 
 def test_explicit_allocation_must_match_declared_subset_size() -> None:
