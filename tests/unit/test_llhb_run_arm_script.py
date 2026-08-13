@@ -205,6 +205,32 @@ class TestStabilityMode:
         with pytest.raises(run_arm_script.LovsporError, match="missing from the frozen dataset"):
             run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
 
+    def test_stability_fails_closed_on_subset_checksum_mismatch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The checksum must authenticate the exact cases passed to the runner."""
+        tampered = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        tampered["case_ids"][0] = "llhb-v1-C1-101"
+        tampered_path = tmp_path / "llhb-v1-stability30.json"
+        tampered_path.write_text(json.dumps(tampered), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", tampered_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"subset.*checksum|checksum.*subset"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
+    def test_stability_fails_closed_on_duplicate_subset_ids(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Duplicate IDs must not silently turn the ruled 30 cases into 29."""
+        duplicated = json.loads(run_arm_script.STABILITY_SUBSET.read_text(encoding="utf-8"))
+        duplicated["case_ids"][0] = duplicated["case_ids"][1]
+        duplicated_path = tmp_path / "llhb-v1-stability30.json"
+        duplicated_path.write_text(json.dumps(duplicated), encoding="utf-8")
+        monkeypatch.setattr(run_arm_script, "STABILITY_SUBSET", duplicated_path)
+
+        with pytest.raises(run_arm_script.LovsporError, match=r"duplicate|30"):
+            run_arm_script.load_inputs(args_for(*STABILITY_ARGS))
+
     def test_stability_notes_name_the_subset_and_the_repeat(self) -> None:
         args = args_for(*STABILITY_ARGS)
         cases, lock = run_arm_script.load_inputs(args)

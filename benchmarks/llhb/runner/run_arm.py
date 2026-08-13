@@ -77,7 +77,7 @@ from lovspor.llhb.run_setup import (
     pilot_cases,
     verify_frozen_against_lock,
 )
-from lovspor.llhb.schema import load_cases_jsonl
+from lovspor.llhb.schema import canonical_jsonl, dataset_checksum, load_cases_jsonl
 
 LLHB_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = LLHB_DIR.parents[1]
@@ -180,18 +180,35 @@ def stability_cases(
 ) -> list[dict[str, Any]]:
     """The committed 30-case subset, fail-closed against any drift."""
     subset = json.loads(STABILITY_SUBSET.read_text(encoding="utf-8"))
-    if subset["dataset_sha256"] != lock["dataset_sha256"]:
-        raise LovsporError(
-            "stability subset was drawn from a different frozen dataset; "
-            "re-run select_stability_subset.py and review the diff"
-        )
+    _check_subset_ids(subset, lock)
     wanted = {str(case_id) for case_id in subset["case_ids"]}
     picked = [case for case in frozen_cases if str(case["case_id"]) in wanted]
     if len(picked) != len(wanted):
         raise LovsporError(
             f"{len(wanted) - len(picked)} stability subset ids missing from the frozen dataset"
         )
+    if dataset_checksum(canonical_jsonl(picked)) != subset["subset_sha256"]:
+        raise LovsporError(
+            "stability subset checksum does not match the cases it names; "
+            "re-run select_stability_subset.py and review the diff"
+        )
     return sorted(picked, key=lambda case: str(case["case_id"]))
+
+
+def _check_subset_ids(subset: dict[str, Any], lock: dict[str, Any]) -> None:
+    """The subset document must be internally consistent and drawn from
+    the locked frozen dataset before any id is even looked up."""
+    ids = [str(case_id) for case_id in subset["case_ids"]]
+    if len(ids) != len(set(ids)):
+        raise LovsporError(
+            f"duplicate case ids in the stability subset: {len(set(ids))} unique "
+            f"of {len(ids)} listed"
+        )
+    if subset["dataset_sha256"] != lock["dataset_sha256"]:
+        raise LovsporError(
+            "stability subset was drawn from a different frozen dataset; "
+            "re-run select_stability_subset.py and review the diff"
+        )
 
 
 def treatment_config(args: argparse.Namespace, lock: dict[str, Any]) -> dict[str, Any]:
