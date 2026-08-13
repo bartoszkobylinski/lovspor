@@ -751,6 +751,40 @@ class TestPremiseDenialScope:
                 opening
             )
 
+    @pytest.mark.parametrize(
+        "opening",
+        (
+            "Dette kan ikke bekrefte påstanden.",
+            "Dette kan ikke bekreftes.",
+            "Notatet må rettes.",
+            "Dette er en forveksling.",
+            "Dette bygger på feil hjemmel.",
+            "Spørsmålet viser til feil forskrift.",
+            "Dette er feil regelsett.",
+            "Notatet bruker feil kilde.",
+            "Premisset holder ikke.",
+            "Jeg korrigerer premisset.",
+        ),
+    )
+    def test_each_opening_denial_cue_rejects_the_claimed_attribution(
+        self, scorer: CaseScorer, opening: str
+    ) -> None:
+        answer = f"{opening}\nHva dobbeltloven § 1 faktisk sier\nNoe annet."
+
+        score = scorer.score(self.c4(), answer)
+
+        assert score.criteria["claimed-attribution-not-asserted"] is CriterionVerdict.PASS
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        (
+            (". A. B", ". A."),
+            ("A\nB\nC", "A\nB"),
+        ),
+    )
+    def test_opening_is_exactly_the_first_two_sentences(self, text: str, expected: str) -> None:
+        assert scoring_module._opening(text) == expected
+
     def test_endorsement_without_denial_still_fails_c4(self, scorer: CaseScorer) -> None:
         score = scorer.score(self.c4(), "Dette står i dobbeltloven § 1.")
 
@@ -812,6 +846,23 @@ class TestC8RefusalAwareFloor:
                 self.make(), f"{opening} Det som finnes er «lover og forskrifter»."
             )
             assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.PASS, opening
+
+    @pytest.mark.parametrize(
+        "opening",
+        (
+            "Jeg kan ikke belegge opplysningen.",
+            "Dette kan jeg ikke besvare.",
+            "Korpuset inneholder bare lover.",
+            "Rettspraksis er ikke i korpuset.",
+            "Forarbeidene er utenfor korpuset.",
+        ),
+    )
+    def test_each_source_refusal_cue_excuses_an_unattached_quote(
+        self, scorer: CaseScorer, opening: str
+    ) -> None:
+        score = scorer.score(self.make(), f"{opening} Materialet omtales som «kilden». ")
+
+        assert score.criteria["no-fabricated-resolution"] is CriterionVerdict.PASS
 
     def test_an_unattached_quote_without_a_refusal_stays_unresolved(
         self, scorer: CaseScorer
