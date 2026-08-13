@@ -366,6 +366,22 @@ class TestFailureHint:
 
         assert result["failure_hint"] == "error: mutmut run failed on a later file (exit 1)"
 
+    def test_pytest_error_line_is_a_hint_too(self, tmp_path: Path) -> None:
+        raw = "ERROR tests/unit/test_x.py - RuntimeError: collection failed\n"
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["failure_hint"] == (
+            "ERROR tests/unit/test_x.py - RuntimeError: collection failed"
+        )
+
+    def test_hint_is_single_line_and_capped_at_300_characters(self, tmp_path: Path) -> None:
+        decisive_line = "FAILED " + "x" * 400
+        raw = decisive_line + "\ncontinuation that must not be included\n"
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["failure_hint"] == decisive_line[:300]
+        assert len(result["failure_hint"]) == 300  # type: ignore[arg-type]
+
     def test_a_clean_run_has_no_hint(self, tmp_path: Path) -> None:
         result = _run(tmp_path, _progress_line(killed=2))
 
@@ -392,3 +408,21 @@ class TestFailureHint:
             assert mutation_gate.main() == 0
         captured = capsys.readouterr()  # type: ignore[attr-defined]
         assert "Hint:" in captured.out
+
+    @pytest.mark.parametrize("failure_hint", [None, "", 42, ["FAILED fake"]])
+    def test_gate_accepts_artifacts_without_a_valid_hint(
+        self, tmp_path: Path, capsys: object, failure_hint: object
+    ) -> None:
+        result = _run(tmp_path, _progress_line(killed=1))
+        if failure_hint is None:
+            result.pop("failure_hint")
+        else:
+            result["failure_hint"] = failure_hint
+        out_file = tmp_path / "result.json"
+        out_file.write_text(json.dumps(result))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out_file)])
+            assert mutation_gate.main() == 0
+        captured = capsys.readouterr()  # type: ignore[attr-defined]
+        assert "Hint:" not in captured.out
