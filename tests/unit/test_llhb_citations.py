@@ -4,7 +4,10 @@ Every test uses synthetic act names via ``ActNameIndex.from_pairs`` —
 no Lovdata text, no real corpus.
 """
 
-from lovspor.llhb.citations import ExtractionResult, extract_citations
+import pytest
+from pydantic import ValidationError
+
+from lovspor.llhb.citations import ActMentionRef, ExtractionResult, extract_citations
 from lovspor.llhb.names import ActNameIndex
 from lovspor.llhb.stances import Stance
 
@@ -213,3 +216,29 @@ def test_norwegian_word_after_multi_section_is_not_a_letter_suffix() -> None:
 
     assert [citation.section_id for citation in citations] == ["8", "9"]
     assert [citation.section_id_raw for citation in citations] == ["8", "9"]
+
+
+class TestExtractionInvariants:
+    """Kills for the PR #88 mutation survivors: observable defaults and
+    scanner plumbing the behavioral tests never pinned directly."""
+
+    def test_a_plain_citation_is_not_a_range(self) -> None:
+        (citation,) = _extract("Etter arbeidsmiljøloven § 15-7 kreves grunn.").citations
+        assert citation.from_range is False
+
+    def test_a_citation_at_the_very_start_of_the_answer_is_extracted(self) -> None:
+        """consumed_until starts at 0: an answer that OPENS with «§ …» must
+        not lose its first citation to the initial cursor."""
+        (citation,) = _extract("§ 12 i skatteloven regulerer dette.").citations
+        assert citation.section_id_raw == "12 i"
+        assert citation.start == 0
+
+    def test_non_abbreviation_citations_carry_none_not_empty(self) -> None:
+        (citation,) = _extract("Etter arbeidsmiljøloven § 15-7 kreves grunn.").citations
+        assert citation.abbreviation is None
+
+    def test_act_mention_refs_are_immutable(self) -> None:
+        mention = ActMentionRef(start=0, end=4, key="testloven")
+        assert mention.via_abbreviation is None
+        with pytest.raises(ValidationError):
+            mention.key = "x"  # type: ignore[misc]
