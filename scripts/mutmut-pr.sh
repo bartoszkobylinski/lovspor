@@ -38,9 +38,18 @@
 #   --tests-for PATH   print the test module PATH would be mutated against
 #   --runner-for PATH  print the exact runner command PATH would be mutated with
 #   --check-guard      run the PATH stub and confirm it refuses to execute
-#   --exit-code-for S T X   print the exit code for those bucket counts
+#   --exit-code-for S T X [B]  print the exit code for those bucket counts
 #   --score-for K S T X SK U  print the summary for those bucket counts
 #   base_ref           diff base (default: origin/main)
+#
+# Wall-clock budget (issue #102): mutating a large module (mcp.py, ~4k
+# lines) against its own test module cannot finish in reviewable CI time,
+# and the old behaviour was a 6 h job kill with no verdict at all. Each
+# file's mutmut run is bounded by MUTMUT_PR_FILE_BUDGET_SECONDS (default
+# 1200). On budget the file's unmeasured mutants are harvested as
+# `untested` — an explicit gap, never a kill — and the final exit code
+# carries bit 16 so the gate can route the run to a human instead of to
+# Codex remediation (tests cannot kill a mutant that was never measured).
 set -euo pipefail
 
 list_only=0
@@ -56,7 +65,11 @@ while [ "$#" -gt 0 ]; do
     --tests-for) shift; tests_for_path="${1:-}" ;;
     --runner-for) shift; runner_for_path="${1:-}" ;;
     --check-guard) check_guard=1 ;;
-    --exit-code-for) shift; exit_code_probe="${1:-} ${2:-} ${3:-}"; shift 2 ;;
+    --exit-code-for)
+      shift
+      exit_code_probe="${1:-} ${2:-} ${3:-} ${4:-0}"
+      if [ "$#" -ge 4 ]; then shift 3; else shift 2; fi
+      ;;
     --score-for)
       shift
       score_probe="${1:-} ${2:-} ${3:-} ${4:-} ${5:-} ${6:-}"
@@ -155,6 +168,9 @@ exit_code_for() {
   if [ "$1" -gt 0 ]; then code=$((code | 2)); fi
   if [ "$2" -gt 0 ]; then code=$((code | 4)); fi
   if [ "$3" -gt 0 ]; then code=$((code | 8)); fi
+  # Bit 16 is OURS, not mutmut's (mutmut stops at 8): a wall-clock budget
+  # cut the run short, so the score is not over the whole surface.
+  if [ "${4:-0}" -gt 0 ]; then code=$((code | 16)); fi
   printf '%s' "$code"
 }
 
@@ -225,6 +241,12 @@ timeout_total=0
 suspicious_total=0
 skipped_total=0
 untested_total=0
+budget_exceeded=0
+file_budget="${MUTMUT_PR_FILE_BUDGET_SECONDS:-1200}"
+# GNU timeout is a given on the CI runner (ubuntu). A local machine without
+# it (stock macOS) runs unbudgeted — the gate is CI's, not the laptop's —
+# but says so instead of silently meaning something different.
+timeout_bin="$(command -v timeout || true)"
 
 while IFS= read -r file; do
   echo
@@ -234,9 +256,25 @@ while IFS= read -r file; do
   # time this file's mutants have to be measured against.
   rm -f "$repo_root/.mutmut-cache"
   run_status=0
-  "$python_bin" -m mutmut run \
-    --paths-to-mutate="$file" \
-    --runner="$(runner_for "$file")" || run_status=$?
+  if [ -n "$timeout_bin" ]; then
+    "$timeout_bin" --signal=TERM --kill-after=30 "$file_budget" \
+      "$python_bin" -m mutmut run \
+      --paths-to-mutate="$file" \
+      --runner="$(runner_for "$file")" || run_status=$?
+  else
+    echo "warning: no timeout(1) on PATH — the ${file_budget}s file budget is unenforced" >&2
+    "$python_bin" -m mutmut run \
+      --paths-to-mutate="$file" \
+      --runner="$(runner_for "$file")" || run_status=$?
+  fi
+  # 124 (TERM) / 137 (KILL) come from timeout(1), not from mutmut: the file
+  # ran out of budget. Whatever the cache measured so far is harvested
+  # below; the rest of the file's mutants surface as `untested`.
+  if [ "$run_status" -eq 124 ] || [ "$run_status" -eq 137 ]; then
+    echo "mutation budget exceeded: $file after ${file_budget}s — unmeasured mutants are untested, never killed"
+    budget_exceeded=1
+    run_status=0
+  fi
   # mutmut encodes its verdicts in the exit code as a bitfield: 2 survived,
   # 4 timed out, 8 suspicious (mutmut/__init__.py, compute_exit_code). 1 is a
   # fatal error, and swallowing it reported a clean "survived: 0" for a run
@@ -312,4 +350,4 @@ echo "optimistic."
 
 # Recomputed rather than passed through: mutmut's exit code is per-file, so
 # the last file's would silently stand in for the whole run.
-exit "$(exit_code_for "$survived_total" "$timeout_total" "$suspicious_total")"
+exit "$(exit_code_for "$survived_total" "$timeout_total" "$suspicious_total" "$budget_exceeded")"

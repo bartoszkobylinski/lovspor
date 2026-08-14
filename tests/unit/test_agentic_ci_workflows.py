@@ -83,6 +83,34 @@ def test_remediation_failure_escalates_only_after_pr_resolution() -> None:
     assert run_url in command
 
 
+def test_mutation_job_has_a_wallclock_backstop() -> None:
+    """Issue #102: without this, a budget-machinery failure means a 6 h
+    grind to GitHub's default kill with no verdict artifact."""
+    job = _workflow("pr-pipeline.yml")["jobs"]["mutation"]
+
+    assert job["timeout-minutes"] == 45
+
+
+def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
+    """A budget_exceeded gate is not remediable by tests — the surface was
+    never fully measured. It must label needs-human:mutation immediately,
+    before any checkout or Codex step, and never enter a Codex cycle."""
+    steps = _steps("mutation-remediation.yml", "remediate")
+    decide = _named_step(steps, "Validate result as data; decide whether remediation applies")
+
+    assert '"$(jq -r .gate.reason "$f")" = "budget_exceeded"' in decide["run"]
+    assert 'echo "budget=true"' in decide["run"]
+
+    blocked = _named_step(
+        steps, "BLOCKED — budget exceeded, tests cannot fix an unmeasured surface"
+    )
+    assert blocked["if"] == "steps.gate.outputs.budget == 'true'"
+    assert '--add-label "needs-human:mutation"' in blocked["run"]
+
+    names = [step.get("name") for step in steps]
+    assert names.index(blocked["name"]) < names.index("Resolve PR number and remediation cycle")
+
+
 def test_codex_test_failure_is_not_hidden_by_tee() -> None:
     steps = _steps("pr-pipeline.yml", "codex-tests")
     pytest_step = _named_step(steps, "Run tests on Codex additions")

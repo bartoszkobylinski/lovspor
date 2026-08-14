@@ -335,12 +335,63 @@ class TestToolExitAuthority:
         assert result["gate"]["reason"] == reason
         assert result["gate"]["passed"] is (code == 0)
 
-    @pytest.mark.parametrize("code", [-1, 1, 3, 15, 127])
+    @pytest.mark.parametrize("code", [-1, 1, 3, 15, 17, 127])
     def test_non_verdict_tool_exit_codes_fail_closed(self, tmp_path: Path, code: int) -> None:
         result = _run(tmp_path, _progress_line(killed=2), tool_exit_code=code)
 
         assert result["tool_exit_code"] == code
         assert result["gate"] == {"passed": False, "reason": "tool_failed"}
+
+
+class TestBudgetExceeded:
+    """Issue #102: a wall-clock budget cut is a verdict about the RUN, not
+    the code — it fails the gate under its own reason so the remediation
+    workflow knows not to hand it to Codex (tests cannot kill a mutant
+    that was never measured)."""
+
+    BUDGET_LINE = (
+        "mutation budget exceeded: src/lovspor/mcp.py after 1200s — "
+        "unmeasured mutants are untested, never killed\n"
+    )
+
+    def test_budget_marker_fails_the_gate_with_its_own_reason(self, tmp_path: Path) -> None:
+        raw = "40/4000  🎉 38  ⏰ 0  🤔 0  🙁 2  🔇 0\n" + self.BUDGET_LINE
+
+        result = _run(tmp_path, raw, tool_exit_code=18)
+
+        assert result["gate"] == {"passed": False, "reason": "budget_exceeded"}
+
+    def test_the_exit_bit_is_authoritative_without_the_marker(self, tmp_path: Path) -> None:
+        """The marker is a raw-log line; the exit bit survives even a log
+        that lost it. Either alone must be enough."""
+        result = _run(tmp_path, _progress_line(killed=5), tool_exit_code=16)
+
+        assert result["gate"] == {"passed": False, "reason": "budget_exceeded"}
+
+    def test_budget_outranks_run_incomplete(self, tmp_path: Path) -> None:
+        """The cut is the cause; the incomplete progress line is only its
+        symptom — reporting run_incomplete would hide WHY from the human
+        the PR escalates to."""
+        raw = "40/4000  🎉 40  ⏰ 0  🤔 0  🙁 0  🔇 0\n" + self.BUDGET_LINE
+
+        result = _run(tmp_path, raw, tool_exit_code=16)
+
+        assert result["gate"] == {"passed": False, "reason": "budget_exceeded"}
+
+    def test_budget_outranks_the_per_bucket_reasons(self, tmp_path: Path) -> None:
+        raw = _progress_line(killed=2, survived=3) + self.BUDGET_LINE
+
+        result = _run(tmp_path, raw, tool_exit_code=18)
+
+        assert result["gate"] == {"passed": False, "reason": "budget_exceeded"}
+
+    @pytest.mark.parametrize("code", [16, 18, 20, 24, 30])
+    def test_budget_codes_are_legal_verdicts_not_tool_failures(
+        self, tmp_path: Path, code: int
+    ) -> None:
+        result = _run(tmp_path, _progress_line(killed=2), tool_exit_code=code)
+
+        assert result["gate"]["reason"] == "budget_exceeded"
 
 
 class TestFailureHint:

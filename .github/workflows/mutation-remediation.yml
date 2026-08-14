@@ -63,11 +63,28 @@ jobs:
           if [ "$(jq -r .commit "$f")" != "$HEAD_SHA" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          # A budget-exceeded gate is not remediable by tests: the surface
+          # was never fully measured, so there is nothing for new tests to
+          # kill. Route it straight to a human instead of burning cycles.
+          if [ "$(jq -r .gate.reason "$f")" = "budget_exceeded" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "budget=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$(jq -r .gate.passed "$f")" = "false" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: BLOCKED — budget exceeded, tests cannot fix an unmeasured surface
+        if: steps.gate.outputs.budget == 'true'
+        run: |
+          pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
+          [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
+          gh pr edit "$pr" --add-label "needs-human:mutation"
+          gh pr comment "$pr" --body \
+            "Mutation gate: per-file wall-clock budget exceeded — the changed surface was not fully measured (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Human decision required."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.run == 'true'
