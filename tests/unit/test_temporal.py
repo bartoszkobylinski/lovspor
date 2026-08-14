@@ -144,8 +144,11 @@ class TestExtractEvents:
         assert events[0].valid_from is None
 
     def test_invalid_calendar_date_fails_loudly(self) -> None:
+        # CPython's ValueError wording changed in 3.14 ("day is out of range
+        # for month" -> "day 31 must be in range 1..28 for month 2 in year
+        # 2027"); match the stable substring, not one interpreter's phrasing.
         note = "> Endres ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) (i kraft 31 februar 2027).\n"
-        with pytest.raises(ValueError, match="day is out of range for month"):
+        with pytest.raises(ValueError, match=r"(?i)day.*range"):
             extract_events(_doc(note))
 
     def test_ordinary_prose_is_not_parsed_as_an_amendment_note(self) -> None:
