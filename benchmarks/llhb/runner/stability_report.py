@@ -49,6 +49,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     args.control_ids = [rid for rid in args.control.split(",") if rid]
     args.treatment_ids = [rid for rid in args.treatment.split(",") if rid]
+    if not args.control_ids or not args.treatment_ids:
+        parser.error("at least one run id is required in each arm")
     if len(args.control_ids) != len(args.treatment_ids):
         parser.error("control and treatment must list the same number of runs")
     return args
