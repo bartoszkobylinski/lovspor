@@ -83,6 +83,19 @@ def test_committed_report_summary_is_recomputed_from_repeat_reports() -> None:
     assert document["metrics"] == script.summarize_metrics(reports)
     assert document["case_stability"]["cases_per_run"] == 30
 
+    case_ids = {
+        record["case_id"] for record in _read_jsonl(RUNS_DIR / RUN_IDS[0] / "records.jsonl")
+    }
+    for arm in ("control_flipped", "treatment_flipped"):
+        flipped = document["case_stability"][arm]
+        assert flipped == sorted(set(flipped))
+        assert set(flipped) <= case_ids
+
+    for arms in document["metrics"].values():
+        for summary in arms.values():
+            assert len(summary["values"]) == document["repeats"]
+            assert summary["defined"] == sum(value is not None for value in summary["values"])
+
 
 def test_parse_args_rejects_zero_repeats(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
@@ -94,6 +107,27 @@ def test_parse_args_rejects_zero_repeats(monkeypatch: pytest.MonkeyPatch, tmp_pa
             ",",
             "--treatment",
             ",",
+            "--corpus-path",
+            str(tmp_path),
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        script.parse_args()
+
+
+def test_parse_args_rejects_unpaired_repeats(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT_PATH),
+            "--control",
+            "control-1,control-2",
+            "--treatment",
+            "treatment-1",
             "--corpus-path",
             str(tmp_path),
         ],

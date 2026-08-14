@@ -185,3 +185,9 @@ def test_flipped_cases_stable_across_repeats_is_empty() -> None:
     repeats = [{"a": True, "b": None}] * 5
 
     assert flipped_cases(repeats) == []
+
+
+def test_flipped_cases_detects_case_introduced_after_first_repeat() -> None:
+    repeats = [{"a": True}, {"a": True, "b": False}, {"a": True, "b": False}]
+
+    assert flipped_cases(repeats) == ["b"]
