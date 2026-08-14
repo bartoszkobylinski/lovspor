@@ -73,6 +73,10 @@ PAST_DATED_NOTE = "> Endret ved lov [21 juni 2002 nr. 41](lov/2002-06-21-41) (ik
 
 ABSENT_MARKER_NOTE = "> Endret ved lov [17 juni 2005 nr. 62](lov/2005-06-17-62).\n"
 
+FUTURE_DATED_PAST_TENSE_NOTE = (
+    "> Endret ved lov [12 juni 2026 nr. 22](lov/2026-06-12-22) (i kraft 15 august 2026).\n"
+)
+
 # lover/advokatloven.md:383 — footnote body line for a provision never brought
 # into force.
 NEVER_IN_FORCE_DOC = (
@@ -141,6 +145,16 @@ class TestExtractEvents:
         )
         events = extract_events(_doc(note))
         assert events[0].marker_class is MarkerClass.UNRECOGNISED
+        assert events[0].valid_from is None
+
+    def test_non_commencement_parenthetical_does_not_supply_a_date(self) -> None:
+        note = (
+            "> Endret ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
+            "(se også forskrift 2 februar 2028 nr. 3).\n"
+        )
+        events = extract_events(_doc(note))
+        assert len(events) == 1
+        assert events[0].marker_class is MarkerClass.NOT_A_COMMENCEMENT_MARKER
         assert events[0].valid_from is None
 
     def test_invalid_calendar_date_fails_loudly(self) -> None:
@@ -235,6 +249,29 @@ class TestBuildNotice:
         # Amended ADR-0009 §3b: unknown is an epistemic state, not a finding
         # of not-in-force — no banner.
         assert build_notice(_doc(ABSENT_MARKER_NOTE), EVAL) is None
+
+    def test_future_date_triggers_notice_without_announced_verb(self) -> None:
+        notice = build_notice(_doc(FUTURE_DATED_PAST_TENSE_NOTE), EVAL)
+        assert notice is not None
+        assert len(notice.events) == 1
+        assert notice.events[0].announced is False
+        assert notice.events[0].valid_from == date(2026, 8, 15)
+
+    def test_future_dated_event_stops_triggering_on_commencement_day(self) -> None:
+        assert (
+            build_notice(
+                _doc(FUTURE_DATED_PAST_TENSE_NOTE),
+                date(2026, 8, 15),
+            )
+            is None
+        )
+
+    def test_non_commencement_date_is_epistemic_and_gets_no_notice(self) -> None:
+        note = (
+            "> Endret ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
+            "(se også forskrift 2 februar 2028 nr. 3).\n"
+        )
+        assert build_notice(_doc(note), EVAL) is None
 
     def test_announced_event_triggers_notice(self) -> None:
         notice = build_notice(_doc(PERIPHRASTIC_PENDING), EVAL)
