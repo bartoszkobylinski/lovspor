@@ -1,0 +1,2026 @@
+{
+  "case_stability": {
+    "cases_per_run": 30,
+    "control_flipped": [
+      "llhb-v1-C1-115",
+      "llhb-v1-C3-103",
+      "llhb-v1-C3-128",
+      "llhb-v1-C5-101",
+      "llhb-v1-C5-109",
+      "llhb-v1-C7-109",
+      "llhb-v1-C7-115",
+      "llhb-v1-C8-101",
+      "llhb-v1-C8-106"
+    ],
+    "treatment_flipped": [
+      "llhb-v1-C1-102",
+      "llhb-v1-C1-118",
+      "llhb-v1-C1-141",
+      "llhb-v1-C2-155",
+      "llhb-v1-C3-102",
+      "llhb-v1-C3-106",
+      "llhb-v1-C3-128",
+      "llhb-v1-C4-109",
+      "llhb-v1-C4-136",
+      "llhb-v1-C4-139",
+      "llhb-v1-C5-109",
+      "llhb-v1-C6-127",
+      "llhb-v1-C6-135",
+      "llhb-v1-C7-109",
+      "llhb-v1-C7-115",
+      "llhb-v1-C8-101",
+      "llhb-v1-C8-106"
+    ]
+  },
+  "control_runs": [
+    "llhb-v1-run-20260813-stabc1",
+    "llhb-v1-run-20260813-stabc2",
+    "llhb-v1-run-20260813-stabc3",
+    "llhb-v1-run-20260813-stabc4",
+    "llhb-v1-run-20260813-stabc5"
+  ],
+  "metrics": {
+    "citation_accuracy": {
+      "control": {
+        "defined": 5,
+        "maximum": 0.8333333333333334,
+        "mean": 0.7981818181818182,
+        "minimum": 0.7666666666666667,
+        "sd": 0.02863596279982413,
+        "values": [
+          0.7666666666666667,
+          0.8181818181818182,
+          0.8333333333333334,
+          0.7727272727272727,
+          0.8
+        ]
+      },
+      "delta": {
+        "defined": 5,
+        "maximum": -0.10087719298245612,
+        "mean": -0.14147724242480614,
+        "minimum": -0.17916666666666659,
+        "sd": 0.03245703236798145,
+        "values": [
+          -0.1681159420289855,
+          -0.12084257206208415,
+          -0.10087719298245612,
+          -0.1383838383838384,
+          -0.17916666666666659
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 0.9791666666666666,
+        "mean": 0.9396590606066244,
+        "minimum": 0.9111111111111111,
+        "sd": 0.02464602134534908,
+        "values": [
+          0.9347826086956522,
+          0.9390243902439024,
+          0.9342105263157895,
+          0.9111111111111111,
+          0.9791666666666666
+        ]
+      }
+    },
+    "citation_hallucination_rate": {
+      "control": {
+        "defined": 5,
+        "maximum": 0.18518518518518517,
+        "mean": 0.13486446886446884,
+        "minimum": 0.08,
+        "sd": 0.04137490994343569,
+        "values": [
+          0.18518518518518517,
+          0.14814814814814814,
+          0.08,
+          0.15384615384615385,
+          0.10714285714285714
+        ]
+      },
+      "delta": {
+        "defined": 5,
+        "maximum": 0.08173690932311621,
+        "mean": 0.020841480358721732,
+        "minimum": -0.046153846153846156,
+        "sd": 0.056361750961443746,
+        "values": [
+          0.08173690932311621,
+          0.014814814814814808,
+          -0.020000000000000004,
+          -0.046153846153846156,
+          0.0738095238095238
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 0.2,
+        "mean": 0.11402298850574713,
+        "minimum": 0.03333333333333333,
+        "sd": 0.060382582606275846,
+        "values": [
+          0.10344827586206896,
+          0.13333333333333333,
+          0.1,
+          0.2,
+          0.03333333333333333
+        ]
+      }
+    },
+    "correct_provision_identification": {
+      "control": {
+        "defined": 5,
+        "maximum": 0.09090909090909091,
+        "mean": 0.03636363636363636,
+        "minimum": 0.0,
+        "sd": 0.04979295977319692,
+        "values": [
+          0.0,
+          0.09090909090909091,
+          0.09090909090909091,
+          0.0,
+          0.0
+        ]
+      },
+      "delta": {
+        "defined": 5,
+        "maximum": -0.45454545454545453,
+        "mean": -0.509090909090909,
+        "minimum": -0.5454545454545454,
+        "sd": 0.04979295977319691,
+        "values": [
+          -0.45454545454545453,
+          -0.5454545454545454,
+          -0.5454545454545454,
+          -0.5454545454545454,
+          -0.45454545454545453
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 0.6363636363636364,
+        "mean": 0.5454545454545454,
+        "minimum": 0.45454545454545453,
+        "sd": 0.09090909090909091,
+        "values": [
+          0.45454545454545453,
+          0.6363636363636364,
+          0.6363636363636364,
+          0.5454545454545454,
+          0.45454545454545453
+        ]
+      }
+    },
+    "false_premise_rejection_rate": {
+      "control": {
+        "defined": 5,
+        "maximum": 0.0,
+        "mean": 0.0,
+        "minimum": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "delta": {
+        "defined": 5,
+        "maximum": -0.25,
+        "mean": -0.25,
+        "minimum": -0.25,
+        "sd": 0.0,
+        "values": [
+          -0.25,
+          -0.25,
+          -0.25,
+          -0.25,
+          -0.25
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 0.25,
+        "mean": 0.25,
+        "minimum": 0.25,
+        "sd": 0.0,
+        "values": [
+          0.25,
+          0.25,
+          0.25,
+          0.25,
+          0.25
+        ]
+      }
+    },
+    "misattribution_rate": {
+      "control": {
+        "defined": 5,
+        "maximum": 0.25,
+        "mean": 0.2,
+        "minimum": 0.0,
+        "sd": 0.11180339887498948,
+        "values": [
+          0.0,
+          0.25,
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      "delta": {
+        "defined": 5,
+        "maximum": 0.25,
+        "mean": 0.2,
+        "minimum": 0.0,
+        "sd": 0.11180339887498948,
+        "values": [
+          0.0,
+          0.25,
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 0.0,
+        "mean": 0.0,
+        "minimum": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "no_invention_rate": {
+      "control": {
+        "defined": 4,
+        "maximum": 1.0,
+        "mean": 1.0,
+        "minimum": 1.0,
+        "sd": 0.0,
+        "values": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          null
+        ]
+      },
+      "delta": {
+        "defined": 4,
+        "maximum": 1.0,
+        "mean": 0.75,
+        "minimum": 0.0,
+        "sd": 0.5,
+        "values": [
+          1.0,
+          1.0,
+          0.0,
+          1.0,
+          null
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 1.0,
+        "mean": 0.4,
+        "minimum": 0.0,
+        "sd": 0.5477225575051662,
+        "values": [
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          1.0
+        ]
+      }
+    },
+    "post_retrieval_hallucination_rate": {
+      "control": {
+        "defined": 0,
+        "maximum": null,
+        "mean": null,
+        "minimum": null,
+        "sd": null,
+        "values": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "delta": {
+        "defined": 0,
+        "maximum": null,
+        "mean": null,
+        "minimum": null,
+        "sd": null,
+        "values": [
+          null,
+          null,
+          null,
+          null,
+          null
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 0.15,
+        "mean": 0.08210526315789474,
+        "minimum": 0.05,
+        "sd": 0.044480690821475315,
+        "values": [
+          0.05263157894736842,
+          0.05,
+          0.10526315789473684,
+          0.15,
+          0.05263157894736842
+        ]
+      }
+    },
+    "quote_fidelity": {
+      "control": {
+        "defined": 5,
+        "maximum": 0.0,
+        "mean": 0.0,
+        "minimum": 0.0,
+        "sd": 0.0,
+        "values": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "delta": {
+        "defined": 5,
+        "maximum": -0.1875,
+        "mean": -0.2323830409356725,
+        "minimum": -0.2916666666666667,
+        "sd": 0.040063548149047286,
+        "values": [
+          -0.2222222222222222,
+          -0.2916666666666667,
+          -0.21052631578947367,
+          -0.1875,
+          -0.25
+        ]
+      },
+      "treatment": {
+        "defined": 5,
+        "maximum": 0.2916666666666667,
+        "mean": 0.2323830409356725,
+        "minimum": 0.1875,
+        "sd": 0.040063548149047286,
+        "values": [
+          0.2222222222222222,
+          0.2916666666666667,
+          0.21052631578947367,
+          0.1875,
+          0.25
+        ]
+      }
+    }
+  },
+  "per_repeat_reports": [
+    {
+      "bootstrap": {
+        "resamples": 2000,
+        "seed": 42
+      },
+      "metrics": {
+        "citation_accuracy": {
+          "control": {
+            "ci_high": 0.9411764705882353,
+            "ci_low": 0.5151515151515151,
+            "denominator": 30.0,
+            "numerator": 23.0,
+            "rate": 0.7666666666666667
+          },
+          "delta": -0.1681159420289855,
+          "delta_ci_high": -0.026468155500413593,
+          "delta_ci_low": -0.38095238095238093,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.8387096774193549,
+            "denominator": 46.0,
+            "numerator": 43.0,
+            "rate": 0.9347826086956522
+          }
+        },
+        "citation_hallucination_rate": {
+          "control": {
+            "ci_high": 0.34615384615384615,
+            "ci_low": 0.041666666666666664,
+            "denominator": 27.0,
+            "numerator": 5.0,
+            "rate": 0.18518518518518517
+          },
+          "delta": 0.08173690932311621,
+          "delta_ci_high": 0.20296296296296296,
+          "delta_ci_low": 0.0034482758620689585,
+          "treatment": {
+            "ci_high": 0.23333333333333334,
+            "ci_low": 0.0,
+            "denominator": 29.0,
+            "numerator": 3.0,
+            "rate": 0.10344827586206896
+          }
+        },
+        "correct_provision_identification": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 11.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.45454545454545453,
+          "delta_ci_high": -0.14285714285714285,
+          "delta_ci_low": -0.7647058823529411,
+          "treatment": {
+            "ci_high": 0.7647058823529411,
+            "ci_low": 0.14285714285714285,
+            "denominator": 11.0,
+            "numerator": 5.0,
+            "rate": 0.45454545454545453
+          }
+        },
+        "false_premise_rejection_rate": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "misattribution_rate": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "no_invention_rate": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 1.0,
+            "denominator": 1.0,
+            "numerator": 1.0,
+            "rate": 1.0
+          },
+          "delta": 1.0,
+          "delta_ci_high": 1.0,
+          "delta_ci_low": 1.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 1.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "post_retrieval_hallucination_rate": {
+          "control": null,
+          "delta": null,
+          "delta_ci_high": null,
+          "delta_ci_low": null,
+          "treatment": {
+            "ci_high": 0.16666666666666666,
+            "ci_low": 0.0,
+            "denominator": 19.0,
+            "numerator": 1.0,
+            "rate": 0.05263157894736842
+          }
+        },
+        "quote_fidelity": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 1.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.2222222222222222,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.45,
+          "treatment": {
+            "ci_high": 0.45161290322580644,
+            "ci_low": 0.0,
+            "denominator": 18.0,
+            "numerator": 4.0,
+            "rate": 0.2222222222222222
+          }
+        }
+      },
+      "metrics_version": "llhb-metrics-v2",
+      "per_category": {
+        "C1": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 6.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C2": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C3": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 0.25,
+            "denominator": 4.0,
+            "numerator": 3.0,
+            "rate": 0.75
+          },
+          "delta": 0.25,
+          "delta_ci_high": 0.75,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 2.0,
+            "rate": 0.5
+          }
+        },
+        "C4": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C5": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C6": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 2.0,
+            "rate": 0.5
+          },
+          "delta": 0.25,
+          "delta_ci_high": 0.75,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "C7": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C8": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 1.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        }
+      },
+      "scorer_version": "llhb-score-v2",
+      "unresolved": {
+        "control": {
+          "cases_unresolved": 2,
+          "unattached_quotes": 54,
+          "unresolved_claims": 0,
+          "unverifiable_quotes": 65
+        },
+        "treatment": {
+          "cases_unresolved": 2,
+          "unattached_quotes": 41,
+          "unresolved_claims": 1,
+          "unverifiable_quotes": 72
+        }
+      }
+    },
+    {
+      "bootstrap": {
+        "resamples": 2000,
+        "seed": 42
+      },
+      "metrics": {
+        "citation_accuracy": {
+          "control": {
+            "ci_high": 0.9583333333333334,
+            "ci_low": 0.5882352941176471,
+            "denominator": 22.0,
+            "numerator": 18.0,
+            "rate": 0.8181818181818182
+          },
+          "delta": -0.12084257206208415,
+          "delta_ci_high": 0.03427419354838712,
+          "delta_ci_low": -0.33842105263157896,
+          "treatment": {
+            "ci_high": 0.9887640449438202,
+            "ci_low": 0.8765432098765432,
+            "denominator": 82.0,
+            "numerator": 77.0,
+            "rate": 0.9390243902439024
+          }
+        },
+        "citation_hallucination_rate": {
+          "control": {
+            "ci_high": 0.2916666666666667,
+            "ci_low": 0.03571428571428571,
+            "denominator": 27.0,
+            "numerator": 4.0,
+            "rate": 0.14814814814814814
+          },
+          "delta": 0.014814814814814808,
+          "delta_ci_high": 0.19166666666666668,
+          "delta_ci_low": -0.15925925925925927,
+          "treatment": {
+            "ci_high": 0.26666666666666666,
+            "ci_low": 0.03333333333333333,
+            "denominator": 30.0,
+            "numerator": 4.0,
+            "rate": 0.13333333333333333
+          }
+        },
+        "correct_provision_identification": {
+          "control": {
+            "ci_high": 0.3,
+            "ci_low": 0.0,
+            "denominator": 11.0,
+            "numerator": 1.0,
+            "rate": 0.09090909090909091
+          },
+          "delta": -0.5454545454545454,
+          "delta_ci_high": -0.10000000000000003,
+          "delta_ci_low": -0.9,
+          "treatment": {
+            "ci_high": 0.9090909090909091,
+            "ci_low": 0.3333333333333333,
+            "denominator": 11.0,
+            "numerator": 7.0,
+            "rate": 0.6363636363636364
+          }
+        },
+        "false_premise_rejection_rate": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "misattribution_rate": {
+          "control": {
+            "ci_high": 0.8,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.25,
+          "delta_ci_high": 0.8,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "no_invention_rate": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 1.0,
+            "denominator": 1.0,
+            "numerator": 1.0,
+            "rate": 1.0
+          },
+          "delta": 1.0,
+          "delta_ci_high": 1.0,
+          "delta_ci_low": 1.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "post_retrieval_hallucination_rate": {
+          "control": null,
+          "delta": null,
+          "delta_ci_high": null,
+          "delta_ci_low": null,
+          "treatment": {
+            "ci_high": 0.16666666666666666,
+            "ci_low": 0.0,
+            "denominator": 20.0,
+            "numerator": 1.0,
+            "rate": 0.05
+          }
+        },
+        "quote_fidelity": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.2916666666666667,
+          "delta_ci_high": -0.14285714285714285,
+          "delta_ci_low": -0.4117647058823529,
+          "treatment": {
+            "ci_high": 0.4166666666666667,
+            "ci_low": 0.14285714285714285,
+            "denominator": 24.0,
+            "numerator": 7.0,
+            "rate": 0.2916666666666667
+          }
+        }
+      },
+      "metrics_version": "llhb-metrics-v2",
+      "per_category": {
+        "C1": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 6.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C2": {
+          "control": {
+            "ci_high": 0.6,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 1.0,
+            "rate": 0.2
+          },
+          "delta": 0.2,
+          "delta_ci_high": 0.6,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C3": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 2.0,
+            "rate": 0.5
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.75,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 2.0,
+            "rate": 0.5
+          }
+        },
+        "C4": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C5": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C6": {
+          "control": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.75,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "C7": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C8": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.5,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -1.0,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 1.0,
+            "rate": 0.5
+          }
+        }
+      },
+      "scorer_version": "llhb-score-v2",
+      "unresolved": {
+        "control": {
+          "cases_unresolved": 6,
+          "unattached_quotes": 56,
+          "unresolved_claims": 0,
+          "unverifiable_quotes": 65
+        },
+        "treatment": {
+          "cases_unresolved": 3,
+          "unattached_quotes": 37,
+          "unresolved_claims": 2,
+          "unverifiable_quotes": 65
+        }
+      }
+    },
+    {
+      "bootstrap": {
+        "resamples": 2000,
+        "seed": 42
+      },
+      "metrics": {
+        "citation_accuracy": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 0.5652173913043478,
+            "denominator": 18.0,
+            "numerator": 15.0,
+            "rate": 0.8333333333333334
+          },
+          "delta": -0.10087719298245612,
+          "delta_ci_high": 0.07999999999999996,
+          "delta_ci_low": -0.3545568039950062,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.8728813559322034,
+            "denominator": 76.0,
+            "numerator": 71.0,
+            "rate": 0.9342105263157895
+          }
+        },
+        "citation_hallucination_rate": {
+          "control": {
+            "ci_high": 0.19230769230769232,
+            "ci_low": 0.0,
+            "denominator": 25.0,
+            "numerator": 2.0,
+            "rate": 0.08
+          },
+          "delta": -0.020000000000000004,
+          "delta_ci_high": 0.033333333333333326,
+          "delta_ci_low": -0.1,
+          "treatment": {
+            "ci_high": 0.23333333333333334,
+            "ci_low": 0.0,
+            "denominator": 30.0,
+            "numerator": 3.0,
+            "rate": 0.1
+          }
+        },
+        "correct_provision_identification": {
+          "control": {
+            "ci_high": 0.3,
+            "ci_low": 0.0,
+            "denominator": 11.0,
+            "numerator": 1.0,
+            "rate": 0.09090909090909091
+          },
+          "delta": -0.5454545454545454,
+          "delta_ci_high": -0.1111111111111111,
+          "delta_ci_low": -0.9,
+          "treatment": {
+            "ci_high": 0.9,
+            "ci_low": 0.3333333333333333,
+            "denominator": 11.0,
+            "numerator": 7.0,
+            "rate": 0.6363636363636364
+          }
+        },
+        "false_premise_rejection_rate": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "misattribution_rate": {
+          "control": {
+            "ci_high": 0.8,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.25,
+          "delta_ci_high": 0.8,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "no_invention_rate": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 1.0,
+            "denominator": 2.0,
+            "numerator": 2.0,
+            "rate": 1.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 1.0,
+            "denominator": 1.0,
+            "numerator": 1.0,
+            "rate": 1.0
+          }
+        },
+        "post_retrieval_hallucination_rate": {
+          "control": null,
+          "delta": null,
+          "delta_ci_high": null,
+          "delta_ci_low": null,
+          "treatment": {
+            "ci_high": 0.26666666666666666,
+            "ci_low": 0.0,
+            "denominator": 19.0,
+            "numerator": 2.0,
+            "rate": 0.10526315789473684
+          }
+        },
+        "quote_fidelity": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.21052631578947367,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.36,
+          "treatment": {
+            "ci_high": 0.36363636363636365,
+            "ci_low": 0.0,
+            "denominator": 19.0,
+            "numerator": 4.0,
+            "rate": 0.21052631578947367
+          }
+        }
+      },
+      "metrics_version": "llhb-metrics-v2",
+      "per_category": {
+        "C1": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 6.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C2": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C3": {
+          "control": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "C4": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "C5": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C6": {
+          "control": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "C7": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C8": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 1.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        }
+      },
+      "scorer_version": "llhb-score-v2",
+      "unresolved": {
+        "control": {
+          "cases_unresolved": 2,
+          "unattached_quotes": 55,
+          "unresolved_claims": 1,
+          "unverifiable_quotes": 68
+        },
+        "treatment": {
+          "cases_unresolved": 4,
+          "unattached_quotes": 40,
+          "unresolved_claims": 0,
+          "unverifiable_quotes": 65
+        }
+      }
+    },
+    {
+      "bootstrap": {
+        "resamples": 2000,
+        "seed": 42
+      },
+      "metrics": {
+        "citation_accuracy": {
+          "control": {
+            "ci_high": 0.9565217391304348,
+            "ci_low": 0.5217391304347826,
+            "denominator": 22.0,
+            "numerator": 17.0,
+            "rate": 0.7727272727272727
+          },
+          "delta": -0.1383838383838384,
+          "delta_ci_high": 0.04109589041095896,
+          "delta_ci_low": -0.37170349251603707,
+          "treatment": {
+            "ci_high": 0.967391304347826,
+            "ci_low": 0.8292682926829268,
+            "denominator": 90.0,
+            "numerator": 82.0,
+            "rate": 0.9111111111111111
+          }
+        },
+        "citation_hallucination_rate": {
+          "control": {
+            "ci_high": 0.3076923076923077,
+            "ci_low": 0.037037037037037035,
+            "denominator": 26.0,
+            "numerator": 4.0,
+            "rate": 0.15384615384615385
+          },
+          "delta": -0.046153846153846156,
+          "delta_ci_high": 0.08666666666666667,
+          "delta_ci_low": -0.1925925925925926,
+          "treatment": {
+            "ci_high": 0.36666666666666664,
+            "ci_low": 0.06666666666666667,
+            "denominator": 30.0,
+            "numerator": 6.0,
+            "rate": 0.2
+          }
+        },
+        "correct_provision_identification": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 11.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.5454545454545454,
+          "delta_ci_high": -0.23076923076923078,
+          "delta_ci_low": -0.8571428571428571,
+          "treatment": {
+            "ci_high": 0.8571428571428571,
+            "ci_low": 0.23076923076923078,
+            "denominator": 11.0,
+            "numerator": 6.0,
+            "rate": 0.5454545454545454
+          }
+        },
+        "false_premise_rejection_rate": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "misattribution_rate": {
+          "control": {
+            "ci_high": 0.8,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.25,
+          "delta_ci_high": 0.8,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "no_invention_rate": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 1.0,
+            "denominator": 1.0,
+            "numerator": 1.0,
+            "rate": 1.0
+          },
+          "delta": 1.0,
+          "delta_ci_high": 1.0,
+          "delta_ci_low": 1.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 1.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "post_retrieval_hallucination_rate": {
+          "control": null,
+          "delta": null,
+          "delta_ci_high": null,
+          "delta_ci_low": null,
+          "treatment": {
+            "ci_high": 0.3333333333333333,
+            "ci_low": 0.0,
+            "denominator": 20.0,
+            "numerator": 3.0,
+            "rate": 0.15
+          }
+        },
+        "quote_fidelity": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.1875,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.3125,
+          "treatment": {
+            "ci_high": 0.3157894736842105,
+            "ci_low": 0.0,
+            "denominator": 16.0,
+            "numerator": 3.0,
+            "rate": 0.1875
+          }
+        }
+      },
+      "metrics_version": "llhb-metrics-v2",
+      "per_category": {
+        "C1": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 6.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C2": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C3": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 0.25,
+            "denominator": 4.0,
+            "numerator": 3.0,
+            "rate": 0.75
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.75,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.25,
+            "denominator": 4.0,
+            "numerator": 3.0,
+            "rate": 0.75
+          }
+        },
+        "C4": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "C5": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C6": {
+          "control": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.75,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 2.0,
+            "rate": 0.5
+          }
+        },
+        "C7": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C8": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 1.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        }
+      },
+      "scorer_version": "llhb-score-v2",
+      "unresolved": {
+        "control": {
+          "cases_unresolved": 2,
+          "unattached_quotes": 47,
+          "unresolved_claims": 0,
+          "unverifiable_quotes": 61
+        },
+        "treatment": {
+          "cases_unresolved": 4,
+          "unattached_quotes": 39,
+          "unresolved_claims": 1,
+          "unverifiable_quotes": 71
+        }
+      }
+    },
+    {
+      "bootstrap": {
+        "resamples": 2000,
+        "seed": 42
+      },
+      "metrics": {
+        "citation_accuracy": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 0.55,
+            "denominator": 20.0,
+            "numerator": 16.0,
+            "rate": 0.8
+          },
+          "delta": -0.17916666666666659,
+          "delta_ci_high": 0.021052631578947434,
+          "delta_ci_low": -0.43437152391546163,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 0.9230769230769231,
+            "denominator": 48.0,
+            "numerator": 47.0,
+            "rate": 0.9791666666666666
+          }
+        },
+        "citation_hallucination_rate": {
+          "control": {
+            "ci_high": 0.23076923076923078,
+            "ci_low": 0.0,
+            "denominator": 28.0,
+            "numerator": 3.0,
+            "rate": 0.10714285714285714
+          },
+          "delta": 0.0738095238095238,
+          "delta_ci_high": 0.21428571428571427,
+          "delta_ci_low": -0.06190476190476191,
+          "treatment": {
+            "ci_high": 0.1,
+            "ci_low": 0.0,
+            "denominator": 30.0,
+            "numerator": 1.0,
+            "rate": 0.03333333333333333
+          }
+        },
+        "correct_provision_identification": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 11.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.45454545454545453,
+          "delta_ci_high": -0.16666666666666666,
+          "delta_ci_low": -0.7647058823529411,
+          "treatment": {
+            "ci_high": 0.7647058823529411,
+            "ci_low": 0.16666666666666666,
+            "denominator": 11.0,
+            "numerator": 5.0,
+            "rate": 0.45454545454545453
+          }
+        },
+        "false_premise_rejection_rate": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.8571428571428571,
+          "treatment": {
+            "ci_high": 0.8571428571428571,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "misattribution_rate": {
+          "control": {
+            "ci_high": 0.8,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.25,
+          "delta_ci_high": 0.8,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "no_invention_rate": {
+          "control": {
+            "ci_high": null,
+            "ci_low": null,
+            "denominator": 0.0,
+            "numerator": 0.0,
+            "rate": null
+          },
+          "delta": null,
+          "delta_ci_high": null,
+          "delta_ci_low": null,
+          "treatment": {
+            "ci_high": 1.0,
+            "ci_low": 1.0,
+            "denominator": 1.0,
+            "numerator": 1.0,
+            "rate": 1.0
+          }
+        },
+        "post_retrieval_hallucination_rate": {
+          "control": null,
+          "delta": null,
+          "delta_ci_high": null,
+          "delta_ci_low": null,
+          "treatment": {
+            "ci_high": 0.17647058823529413,
+            "ci_low": 0.0,
+            "denominator": 19.0,
+            "numerator": 1.0,
+            "rate": 0.05263157894736842
+          }
+        },
+        "quote_fidelity": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 1.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": -0.25,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": -0.4,
+          "treatment": {
+            "ci_high": 0.39285714285714285,
+            "ci_low": 0.0,
+            "denominator": 16.0,
+            "numerator": 4.0,
+            "rate": 0.25
+          }
+        }
+      },
+      "metrics_version": "llhb-metrics-v2",
+      "per_category": {
+        "C1": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 6.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C2": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 5.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C3": {
+          "control": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          },
+          "delta": 0.25,
+          "delta_ci_high": 0.75,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C4": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C5": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C6": {
+          "control": {
+            "ci_high": 1.0,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 2.0,
+            "rate": 0.5
+          },
+          "delta": 0.25,
+          "delta_ci_high": 1.0,
+          "delta_ci_low": -0.5,
+          "treatment": {
+            "ci_high": 0.75,
+            "ci_low": 0.0,
+            "denominator": 4.0,
+            "numerator": 1.0,
+            "rate": 0.25
+          }
+        },
+        "C7": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 3.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        },
+        "C8": {
+          "control": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          },
+          "delta": 0.0,
+          "delta_ci_high": 0.0,
+          "delta_ci_low": 0.0,
+          "treatment": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "denominator": 2.0,
+            "numerator": 0.0,
+            "rate": 0.0
+          }
+        }
+      },
+      "scorer_version": "llhb-score-v2",
+      "unresolved": {
+        "control": {
+          "cases_unresolved": 3,
+          "unattached_quotes": 57,
+          "unresolved_claims": 0,
+          "unverifiable_quotes": 72
+        },
+        "treatment": {
+          "cases_unresolved": 4,
+          "unattached_quotes": 40,
+          "unresolved_claims": 0,
+          "unverifiable_quotes": 71
+        }
+      }
+    }
+  ],
+  "repeats": 5,
+  "treatment_runs": [
+    "llhb-v1-run-20260813-stabt1",
+    "llhb-v1-run-20260813-stabt2",
+    "llhb-v1-run-20260813-stabt3",
+    "llhb-v1-run-20260813-stabt4",
+    "llhb-v1-run-20260813-stabt5"
+  ]
+}
