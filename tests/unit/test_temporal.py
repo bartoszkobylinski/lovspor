@@ -8,6 +8,7 @@ Fixture note lines are verbatim from the lovverk corpus at ``24ce112aa``
 from datetime import date
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.temporal import (
     AmendmentEvent,
@@ -142,6 +143,18 @@ class TestExtractEvents:
         assert events[0].marker_class is MarkerClass.UNRECOGNISED
         assert events[0].valid_from is None
 
+    def test_invalid_calendar_date_fails_loudly(self) -> None:
+        note = "> Endres ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) (i kraft 31 februar 2027).\n"
+        with pytest.raises(ValueError, match="day is out of range for month"):
+            extract_events(_doc(note))
+
+    def test_ordinary_prose_is_not_parsed_as_an_amendment_note(self) -> None:
+        markdown = (
+            "### § 1. Formål\n\n"
+            "Loven endres ved lov 1 januar 2027 nr. 1, men dette er vanlig brødtekst.\n"
+        )
+        assert extract_events(markdown) == []
+
     def test_provision_attribution_tracks_headings(self) -> None:
         markdown = (
             "### § 1. Formål\n\nTekst.\n\n### § 2. Virkeområde\n\nTekst.\n\n" + PERIPHRASTIC_PENDING
@@ -188,6 +201,16 @@ class TestInForceAt:
             valid_from = EVAL if marker_class is MarkerClass.EXPLICIT_DATE else None
             status = in_force_at(_event(marker_class, valid_from=valid_from), EVAL)
             assert isinstance(status, InForceStatus)
+
+
+class TestAmendmentEventValidation:
+    def test_explicit_date_requires_valid_from(self) -> None:
+        with pytest.raises(ValidationError, match="valid_from is set exactly"):
+            _event(MarkerClass.EXPLICIT_DATE)
+
+    def test_non_dated_marker_rejects_valid_from(self) -> None:
+        with pytest.raises(ValidationError, match="valid_from is set exactly"):
+            _event(MarkerClass.UNRECOGNISED, valid_from=EVAL)
 
 
 class TestNeverInForce:

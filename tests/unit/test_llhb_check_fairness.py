@@ -109,6 +109,33 @@ def test_plain_mode_does_not_load_or_apply_the_frozen_gate(
     assert capsys.readouterr().out.startswith("fair pair:")
 
 
+def test_main_uses_the_requested_surface_document(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    surface_path = tmp_path / "historical-surface.json"
+    args = check_fairness.argparse.Namespace(
+        control="control-run",
+        treatment="treatment-run",
+        runs_root=Path("unused"),
+        frozen=False,
+        surface_path=surface_path,
+    )
+    monkeypatch.setattr(check_fairness, "parse_args", lambda: args)
+    empty_run = RunArtifacts(metadata={}, records=[])
+    monkeypatch.setattr(check_fairness, "load_run", lambda *_: empty_run)
+    seen: list[Path] = []
+
+    def load_expected_surface(path: Path) -> object:
+        seen.append(path)
+        return object()
+
+    monkeypatch.setattr(check_fairness, "load_expected_surface", load_expected_surface)
+    monkeypatch.setattr(check_fairness, "check_pair", lambda *_: [])
+
+    assert check_fairness.main() == 0
+    assert seen == [surface_path]
+
+
 def test_frozen_mode_applies_the_expectation_to_both_arms(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
