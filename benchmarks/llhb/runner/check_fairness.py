@@ -40,7 +40,11 @@ from lovspor.llhb.schema import load_schema, validate_case
 LLHB_DIR = Path(__file__).resolve().parents[1]
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
 SCHEMA_DIR = LLHB_DIR / "schema"
-SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v1.json"
+# v2 is the post-T0 apparatus (ADR-0009 serving-side notice changed the
+# get_law/get_section descriptions). The committed LLHB v1 pair recorded the
+# v1 hash — re-verifying it needs ``--surface-path`` pointed at v1, which
+# stays committed untouched.
+SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v2.json"
 FROZEN_DIR = LLHB_DIR / "dataset" / "frozen"
 FROZEN_CASES_PATH = FROZEN_DIR / "llhb-v1.jsonl"
 FROZEN_LOCK_PATH = FROZEN_DIR / "llhb-v1.lock.json"
@@ -59,6 +63,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="also anchor both arms to the frozen dataset, lock and prompt "
         "(mandatory for a published pair; pilots must not pass this)",
+    )
+    parser.add_argument(
+        "--surface-path",
+        type=Path,
+        default=SURFACE_PATH,
+        help="apparatus surface document to compare declarations against "
+        "(default: the current apparatus; pass runner/tool-surface-v1.json "
+        "to re-verify the committed LLHB v1 pair)",
     )
     return parser.parse_args()
 
@@ -139,7 +151,7 @@ def main() -> int:
     args = parse_args()
     control = load_run(args.runs_root, args.control)
     treatment = load_run(args.runs_root, args.treatment)
-    problems = check_pair(control, treatment, load_expected_surface(SURFACE_PATH))
+    problems = check_pair(control, treatment, load_expected_surface(args.surface_path))
     if args.frozen:
         expected = load_frozen_expectation()
         problems += frozen_violations(control, "control", expected)

@@ -254,7 +254,7 @@ class TestToolConfig:
         assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
-        """tool-surface-v1.json is the expectation check_fairness compares a
+        """tool-surface-v2.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
         re-derived here on every run. Two corpora with disjoint content are
         the witness that the surface comes from build_server, not from the
@@ -276,14 +276,21 @@ class TestToolConfig:
         interpreter is the apparatus is this test's constant, asserted
         against the anchor on every interpreter — read from the anchor
         alone, an anchor edited to a version no CI leg runs would switch
-        its own hash guard off."""
+        its own hash guard off.
+
+        v1 -> v2 (2026-08-14): the ADR-0009 T0 serving notice changed the
+        get_law/get_section descriptions, an explicit apparatus decision
+        made after the LLHB v1 runs completed. tool-surface-v1.json stays
+        committed untouched so the committed v1 pair remains verifiable
+        (check_fairness --surface-path); this test guards the CURRENT
+        apparatus, which v2 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v1.json"
+                / "tool-surface-v2.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (
