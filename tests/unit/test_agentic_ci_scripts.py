@@ -385,13 +385,22 @@ class TestBudgetExceeded:
 
         assert result["gate"] == {"passed": False, "reason": "budget_exceeded"}
 
-    @pytest.mark.parametrize("code", [16, 18, 20, 24, 30])
+    @pytest.mark.parametrize("code", [16, 18, 20, 22, 24, 26, 28, 30])
     def test_budget_codes_are_legal_verdicts_not_tool_failures(
         self, tmp_path: Path, code: int
     ) -> None:
         result = _run(tmp_path, _progress_line(killed=2), tool_exit_code=code)
 
         assert result["gate"]["reason"] == "budget_exceeded"
+
+    def test_fatal_tool_exit_outranks_a_budget_marker(self, tmp_path: Path) -> None:
+        """A marker already printed before a later tool failure cannot turn
+        that fatal run into a valid budget verdict."""
+        raw = self.BUDGET_LINE + "error: mutmut result-ids failed on a later file\n"
+
+        result = _run(tmp_path, raw, tool_exit_code=17)
+
+        assert result["gate"] == {"passed": False, "reason": "tool_failed"}
 
 
 class TestFailureHint:

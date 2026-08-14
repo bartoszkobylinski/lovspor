@@ -99,6 +99,7 @@ def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
     decide = _named_step(steps, "Validate result as data; decide whether remediation applies")
 
     assert '"$(jq -r .gate.reason "$f")" = "budget_exceeded"' in decide["run"]
+    assert 'echo "run=false" >> "$GITHUB_OUTPUT"' in decide["run"]
     assert 'echo "budget=true"' in decide["run"]
 
     blocked = _named_step(
@@ -109,6 +110,11 @@ def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
 
     names = [step.get("name") for step in steps]
     assert names.index(blocked["name"]) < names.index("Resolve PR number and remediation cycle")
+
+    checkout = next(
+        step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert checkout["if"] == "steps.gate.outputs.run == 'true'"
 
 
 def test_codex_test_failure_is_not_hidden_by_tee() -> None:
