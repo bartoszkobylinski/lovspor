@@ -113,6 +113,18 @@ def test_codex_test_failure_preserves_untracked_tests_and_log() -> None:
     }
 
 
+def test_codex_failure_artifacts_are_never_written_to_the_workspace() -> None:
+    steps = _steps("pr-pipeline.yml", "codex-tests")
+    artifact_names = ("codex-pytest.log", "codex-tests.patch", "escalation.md")
+
+    for step in steps:
+        commands = str(step.get("run", "")).splitlines()
+        upload_paths = str(step.get("with", {}).get("path", "")).splitlines()
+        for line in (*commands, *upload_paths):
+            if any(name in line for name in artifact_names):
+                assert "$RUNNER_TEMP/" in line or "${{ runner.temp }}/" in line
+
+
 def test_codex_test_failure_escalates_on_the_current_pr() -> None:
     workflow = _workflow("pr-pipeline.yml")
     job = workflow["jobs"]["codex-tests"]
