@@ -90,7 +90,7 @@ def test_codex_test_failure_is_not_hidden_by_tee() -> None:
     assert pytest_step["id"] == "codex-pytest"
     assert pytest_step["run"].splitlines() == [
         "set +e",
-        "uv run pytest tests/unit/ 2>&1 | tee codex-pytest.log",
+        'uv run pytest tests/unit/ 2>&1 | tee "$RUNNER_TEMP/codex-pytest.log"',
         'exit "${PIPESTATUS[0]}"',
     ]
 
@@ -104,12 +104,12 @@ def test_codex_test_failure_preserves_untracked_tests_and_log() -> None:
     assert preserve["if"] == condition
     assert preserve["run"].splitlines() == [
         "git add -N tests/",
-        'git diff "$BEFORE_SHA" -- tests/ > codex-tests.patch',
+        'git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/codex-tests.patch"',
     ]
     assert upload["if"] == condition
     assert upload["with"] == {
         "name": "codex-tests-${{ github.event.pull_request.head.sha }}",
-        "path": "codex-tests.patch\ncodex-pytest.log\n",
+        "path": "${{ runner.temp }}/codex-tests.patch\n${{ runner.temp }}/codex-pytest.log\n",
     }
 
 
@@ -131,11 +131,11 @@ def test_codex_test_failure_escalates_on_the_current_pr() -> None:
         '--add-label "needs-implementation-fix"' in command
     )
     assert (
-        'gh pr comment "${{ github.event.pull_request.number }}" --body-file escalation.md'
-        in command
+        'gh pr comment "${{ github.event.pull_request.number }}" '
+        '--body-file "$RUNNER_TEMP/escalation.md"' in command
     )
     assert "codex-tests BLOCKED: Codex-authored tests fail against this head." in command
-    assert "grep -E '^FAILED ' codex-pytest.log | head -10" in command
+    assert "grep -E '^FAILED ' \"$RUNNER_TEMP/codex-pytest.log\" | head -10" in command
     assert "codex-tests-${{ github.event.pull_request.head.sha }}" in command
     run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
     assert run_url in command

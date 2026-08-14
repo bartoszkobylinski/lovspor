@@ -102,12 +102,15 @@ jobs:
           uv run ruff format tests/
           uv run ruff check --fix tests/
 
+      # The log lives in RUNNER_TEMP, never the workspace: the push step squashes
+      # with `git add -A`, and a self-hosted workspace persists between runs — a
+      # workspace file WILL end up committed to the branch (issue #98).
       - name: Run tests on Codex additions
         id: codex-pytest
         if: steps.antiloop.outputs.skip != 'true'
         run: |
           set +e
-          uv run pytest tests/unit/ 2>&1 | tee codex-pytest.log
+          uv run pytest tests/unit/ 2>&1 | tee "$RUNNER_TEMP/codex-pytest.log"
           exit "${PIPESTATUS[0]}"
 
       # Contract (docs/agentic-ci.md, Failure escalation): a Codex test failing
@@ -118,7 +121,7 @@ jobs:
         if: failure() && steps.codex-pytest.outcome == 'failure'
         run: |
           git add -N tests/
-          git diff "$BEFORE_SHA" -- tests/ > codex-tests.patch
+          git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/codex-tests.patch"
 
       - name: Upload Codex tests and log
         if: failure() && steps.codex-pytest.outcome == 'failure'
@@ -126,8 +129,8 @@ jobs:
         with:
           name: codex-tests-${{ github.event.pull_request.head.sha }}
           path: |
-            codex-tests.patch
-            codex-pytest.log
+            ${{ runner.temp }}/codex-tests.patch
+            ${{ runner.temp }}/codex-pytest.log
 
       - name: Escalate — Codex test exposed an implementation defect
         if: failure() && steps.codex-pytest.outcome == 'failure'
@@ -138,11 +141,11 @@ jobs:
           {
             echo "codex-tests BLOCKED: Codex-authored tests fail against this head."
             echo ""
-            grep -E '^FAILED ' codex-pytest.log | head -10
+            grep -E '^FAILED ' "$RUNNER_TEMP/codex-pytest.log" | head -10
             echo ""
             echo "Tests + log: artifact \`codex-tests-${{ github.event.pull_request.head.sha }}\` (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-          } > escalation.md
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file escalation.md
+          } > "$RUNNER_TEMP/escalation.md"
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/escalation.md"
 
       - name: Commit and push test additions
         id: push
