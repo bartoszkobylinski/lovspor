@@ -1,5 +1,10 @@
 # LLHB Confirmatory Analysis Plan — claude-fable-5 replication (v1)
 
+**Instantiates `LLHB-analysis-template-v1.md`; deviations: none.** The
+provider bindings here are: model `claude-fable-5`, the Claude Code CLI
+driver, native MCP transport. Everything else — estimand, gates,
+inference, verdicts, ceremony — is the template's, unchanged.
+
 **Status: FROZEN at commit time (2026-08-15), before any `claude-fable-5`
 model call.** This document is the preregistration for the confirmatory
 replication mandated by DECISIONS.md ruling #30. Each arm's run metadata
