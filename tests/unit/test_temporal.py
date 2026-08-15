@@ -126,6 +126,27 @@ class TestExtractEvents:
         same_act = [e for e in events if e.amending_act == "25 juni 2024 nr. 53"]
         assert {e.valid_from for e in same_act} == {date(2024, 7, 1), date(2026, 7, 1)}
 
+    def test_continued_note_keeps_all_events_and_starting_source_line(self) -> None:
+        markdown = (
+            "### § 3. Virkeområde\n\nLovtekst.\n\n"
+            "> Endret ved lov [1 januar 2020 nr. 1](lov/2020-01-01-1) "
+            "(ikr. 2 januar 2020),\n"
+            "> [3 februar 2021 nr. 2](lov/2021-02-03-2) "
+            "(i kraft 4 mars 2021).\n"
+        )
+
+        events = extract_events(markdown)
+
+        assert [event.amending_act for event in events] == [
+            "1 januar 2020 nr. 1",
+            "3 februar 2021 nr. 2",
+        ]
+        assert [event.valid_from for event in events] == [
+            date(2020, 1, 2),
+            date(2021, 3, 4),
+        ]
+        assert {event.source_line for event in events} == {5}
+
     def test_announced_with_future_date(self) -> None:
         events = extract_events(_doc(DATED_FUTURE_NOTE))
         assert events[-1].announced is True
@@ -240,6 +261,13 @@ class TestNeverInForce:
     def test_note_lines_are_not_double_counted(self) -> None:
         assert extract_never_in_force(_doc(PERIPHRASTIC_PENDING)) == []
 
+    def test_nynorsk_marker_is_detected_case_insensitively(self) -> None:
+        markdown = "### § 7. Ikraftsetjing\n\nAndre ledd er IKKJE SETT I KRAFT.\n"
+
+        markers = extract_never_in_force(markdown)
+
+        assert [(marker.provision, marker.source_line) for marker in markers] == [("§ 7", 3)]
+
 
 class TestBuildNotice:
     def test_no_events_means_no_notice(self) -> None:
@@ -249,6 +277,19 @@ class TestBuildNotice:
         # Amended ADR-0009 §3b: unknown is an epistemic state, not a finding
         # of not-in-force — no banner.
         assert build_notice(_doc(ABSENT_MARKER_NOTE), EVAL) is None
+
+    def test_announced_event_with_unknown_commencement_still_gets_notice(self) -> None:
+        note = (
+            "> Endres ved lov [1 januar 2027 nr. 1](lov/2027-01-01-1) "
+            "(i kraft når vilkårene er oppfylt).\n"
+        )
+
+        notice = build_notice(_doc(note), EVAL)
+
+        assert notice is not None
+        assert len(notice.events) == 1
+        assert notice.events[0].announced is True
+        assert notice.events[0].marker_class is MarkerClass.UNRECOGNISED
 
     def test_future_date_triggers_notice_without_announced_verb(self) -> None:
         notice = build_notice(_doc(FUTURE_DATED_PAST_TENSE_NOTE), EVAL)
