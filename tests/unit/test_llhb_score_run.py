@@ -1,7 +1,8 @@
-"""Stage 8 score-run corpus-pin integrity checks."""
+"""Stage 8 score-run corpus-pin and pair-manifest integrity checks."""
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 from pathlib import Path
 from types import ModuleType
@@ -63,3 +64,40 @@ def test_load_cases_refuses_mixed_pins_without_verifying_either_checkout(
         score_run.load_cases(tmp_path / "cases.jsonl", tmp_path / "lovverk")
 
     assert verify_calls == []
+
+
+def test_the_manifest_argument_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ruling #30(d): there is no manifest-less path into aggregate scoring."""
+    monkeypatch.setattr("sys.argv", ["score_run.py", "--corpus-path", "x"])
+
+    with pytest.raises(SystemExit):
+        score_run.parse_args()
+
+
+def test_scoring_never_runs_on_a_manifest_that_fails_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verification must gate scoring, not decorate it — a failing hash
+    stops main() before a single record is read."""
+    calls: list[str] = []
+    args = argparse.Namespace(
+        manifest=Path("m.json"), corpus_path=Path("c"), runs_root=Path("r"), out=None
+    )
+    monkeypatch.setattr(score_run, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        score_run, "load_pair_manifest", lambda _path: calls.append("load") or object()
+    )
+
+    def _refuse(_manifest: object, _repo: Path, _runs: Path) -> None:
+        calls.append("verify")
+        raise LovsporError("hash mismatch")
+
+    monkeypatch.setattr(score_run, "verify_pair_manifest", _refuse)
+    monkeypatch.setattr(
+        score_run, "score_pair", lambda *_a: pytest.fail("scored past a failing manifest")
+    )
+
+    with pytest.raises(LovsporError, match="hash mismatch"):
+        score_run.main()
+
+    assert calls == ["load", "verify"]
