@@ -175,6 +175,10 @@ jobs:
       needs.codex-tests.result == 'success' &&
       needs.codex-tests.outputs.pushed != 'true'
     runs-on: ubuntu-latest
+    # Backstop over the script's own per-file budget (issue #102): the sum
+    # of file budgets plus setup must land well under this, so hitting it
+    # means the budget machinery itself failed — fail loudly, not at 6 h.
+    timeout-minutes: 45
     env:
       UV_PYTHON: "3.12"
     steps:
