@@ -228,6 +228,59 @@ class TestExitCode:
     ) -> None:
         assert probe("--exit-code-for", str(survived), str(timed_out), str(suspicious)) == expected
 
+    @pytest.mark.parametrize(
+        ("survived", "timed_out", "suspicious", "budget", "expected"),
+        [
+            (0, 0, 0, 1, "16"),
+            (6, 0, 0, 1, "18"),
+            (0, 1, 0, 1, "20"),
+            (6, 1, 1, 1, "30"),
+            (6, 0, 0, 0, "2"),
+        ],
+    )
+    def test_a_budget_cut_sets_a_bit_of_its_own(
+        self, survived: int, timed_out: int, suspicious: int, budget: int, expected: str
+    ) -> None:
+        """Bit 16 is the script's own, above mutmut's 2/4/8 (issue #102): a
+        wall-clock budget cut the run short, so even a clean-looking bucket
+        count must not exit 0 — the score is not over the whole surface."""
+        assert (
+            probe("--exit-code-for", str(survived), str(timed_out), str(suspicious), str(budget))
+            == expected
+        )
+
+
+class TestFileBudget:
+    """Issue #102: mutating a large module (mcp.py) against its own test
+    module cannot finish in CI time, and the old behaviour was a 6 h job
+    kill with no verdict. The budget machinery must cut the file, surface
+    the gap, and keep harvesting — pinned at source level here, the
+    exit-code half through the probes above."""
+
+    def test_the_run_is_wrapped_in_a_wallclock_timeout(self) -> None:
+        text = SCRIPT.read_text()
+
+        assert "MUTMUT_PR_FILE_BUDGET_SECONDS" in text
+        assert "--signal=TERM" in text
+        assert "--kill-after=30" in text
+
+    def test_a_budget_kill_is_a_marker_not_a_fatal(self) -> None:
+        """124/137 come from timeout(1), not mutmut — routing them into the
+        fatal branch would discard the buckets the run DID measure."""
+        text = SCRIPT.read_text()
+
+        assert '[ "$run_status" -eq 124 ] || [ "$run_status" -eq 137 ]' in text
+        assert "mutation budget exceeded:" in text
+        assert "budget_exceeded=1" in text
+
+    def test_the_final_exit_carries_the_budget_flag(self) -> None:
+        text = SCRIPT.read_text()
+
+        assert (
+            'exit_code_for "$survived_total" "$timeout_total" "$suspicious_total"'
+            ' "$budget_exceeded"' in text
+        )
+
 
 class TestScoreReport:
     """AGENTS.md asks for X/Y killed. Without the killed bucket the script

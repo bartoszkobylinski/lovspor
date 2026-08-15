@@ -34,7 +34,11 @@ TOOL = "mutmut 2.5.1 (PR-scoped via scripts/mutmut-pr.sh)"
 # EARLIER file may still sit completed in the raw log, so without this check
 # a fatal run could read as PASS off stale output (issue #72; found again
 # independently by a Codex CI test on the milamber port's first flight).
-ALLOWED_TOOL_EXIT_CODES = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
+# Bit 16 is mutmut-pr.sh's own (issue #102): a per-file wall-clock budget
+# cut the run short. Still a legal verdict — the script harvested what was
+# measured — but the gate must read it as "surface not fully measured".
+_MUTMUT_VERDICTS = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
+ALLOWED_TOOL_EXIT_CODES = _MUTMUT_VERDICTS | frozenset(code | 16 for code in _MUTMUT_VERDICTS)
 
 
 class RunHealth(NamedTuple):
@@ -44,6 +48,7 @@ class RunHealth(NamedTuple):
     completed: bool
     baseline_ok: bool
     tool_exit_code: int
+    budget_exceeded: bool
 
 
 # mutmut 2.x progress line, e.g.:  12/12  🎉 10  ⏰ 0  🤔 0  🙁 2  🔇 0
@@ -53,6 +58,7 @@ MUTMUT_LINE = re.compile(
 )
 NOT_APPLICABLE = "mutation not applicable:"
 BASELINE_FAILED = "failed when run without mutation"
+BUDGET_EXCEEDED = "mutation budget exceeded:"
 # The decisive raw-log line for a failing run: pytest's FAILED/ERROR or
 # mutmut-pr.sh's own `error:`. Three blocked runs in a row required digging
 # the job logs for exactly this line — the artifact already contains it.
@@ -101,6 +107,12 @@ def compute_gate(counts: dict[str, int], health: RunHealth) -> dict[str, object]
         return {"passed": False, "reason": "tool_failed"}
     if health.not_applicable:
         return {"passed": True, "reason": "not_applicable"}
+    # Budget outranks the per-bucket reasons AND run_incomplete: the cut is
+    # the CAUSE, the incomplete progress line only its symptom — and the
+    # remediation workflow must see a reason it knows not to hand to Codex
+    # (tests cannot kill a mutant that was never measured).
+    if health.budget_exceeded:
+        return {"passed": False, "reason": "budget_exceeded"}
     # The counts come from the LAST mutmut progress line, which on a
     # multi-file run describes only the last file — an earlier file's
     # survivors are invisible there. mutmut-pr.sh recomputes its exit code
@@ -137,6 +149,7 @@ def main() -> int:
     raw = args.raw.read_text(errors="replace") if args.raw.exists() else ""
     not_applicable = NOT_APPLICABLE in raw
     baseline_ok = BASELINE_FAILED not in raw.lower()
+    budget_exceeded = BUDGET_EXCEEDED in raw or bool(args.tool_exit_code & 16)
     counts, run_finished = parse_counts(raw)
     completed = not_applicable or run_finished
     # Pessimistic score: only 🎉 counts as killed. Timeout and suspicious fail
@@ -159,6 +172,7 @@ def main() -> int:
                 completed=completed,
                 baseline_ok=baseline_ok,
                 tool_exit_code=args.tool_exit_code,
+                budget_exceeded=budget_exceeded,
             ),
         ),
         "failure_hint": parse_failure_hint(raw),
