@@ -45,6 +45,9 @@ jobs:
 
   codex-tests:
     runs-on: [self-hosted, linux, codex]
+    concurrency:
+      group: lovspor-codex-subscription
+      cancel-in-progress: false
     # The runner holding Codex auth never executes fork code.
     if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -85,9 +88,13 @@ jobs:
       - name: Codex — independent PR test author
         if: steps.antiloop.outputs.skip != 'true'
         run: |
-          codex exec \
-            --sandbox workspace-write \
-            "$(cat .github/codex/pr-tests.md)"
+          python scripts/ci/codex_account_failover.py \
+            --primary-home /home/runner/.codex-lovspor \
+            --secondary-home /home/runner/.codex-lovspor-secondary \
+            --threshold 95 \
+            -- codex exec \
+              --sandbox workspace-write \
+              "$(cat .github/codex/pr-tests.md)"
 
       # Mechanical guard after every Codex run. The prompt is not a boundary.
       - name: Scope guard

@@ -136,11 +136,15 @@ jobs:
         if: steps.cycle.outputs.run == 'true'
         run: |
           echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          codex exec \
-            --sandbox workspace-write \
-            "$(cat .github/codex/mutation-remediation.md)
+          python scripts/ci/codex_account_failover.py \
+            --primary-home /home/runner/.codex-lovspor \
+            --secondary-home /home/runner/.codex-lovspor-secondary \
+            --threshold 95 \
+            -- codex exec \
+              --sandbox workspace-write \
+              "$(cat .github/codex/mutation-remediation.md)
 
-          mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+              mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
 
       - name: Scope guard
         if: steps.cycle.outputs.run == 'true'
