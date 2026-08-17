@@ -110,6 +110,26 @@ class TestGetSectionTool:
         assert isinstance(served, dict)
         assert served["temporal_notice"] is None
 
+    def test_notice_does_not_leak_from_the_following_section(self, tmp_path: Path) -> None:
+        law = (
+            "# Testloven\n\n"
+            "## Kapittel 1. Innledning\n\n"
+            "### § 1. Clean section\n\n"
+            "Gjeldende lovtekst.\n\n"
+            "### § 2. Pending section\n\n"
+            f"Fremtidig lovtekst.\n\n{PENDING_NOTE}"
+        )
+        _corpus(tmp_path, law)
+
+        clean = _call_tool(tmp_path, "get_section", {"slug": "testloven", "section_id": "1"})
+        pending = _call_tool(tmp_path, "get_section", {"slug": "testloven", "section_id": "2"})
+
+        assert isinstance(clean, dict)
+        assert clean["temporal_notice"] is None
+        assert isinstance(pending, dict)
+        assert pending["temporal_notice"] is not None
+        assert pending["temporal_notice"]["events"][0]["provision"] == "§ 2"
+
     def test_carries_never_in_force_marker_for_headingless_section_body(
         self, tmp_path: Path
     ) -> None:
