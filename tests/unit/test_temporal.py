@@ -430,6 +430,11 @@ class TestTemporalLayer:
         with pytest.raises(TemporalDerivationError, match="malformed XML"):
             count_source_amendment_notes(b"<html><article></html>")
 
+    @pytest.mark.parametrize("xml", [b"", b"<html>\xff</html>"])
+    def test_source_note_count_rejects_empty_or_malformed_utf8(self, xml: bytes) -> None:
+        with pytest.raises(TemporalDerivationError, match="malformed XML"):
+            count_source_amendment_notes(xml)
+
     def test_source_note_count_does_not_expand_external_entities(self, tmp_path: Path) -> None:
         payload = tmp_path / "injected.xml"
         payload.write_text(
@@ -499,6 +504,12 @@ class TestTemporalLayer:
 
         with pytest.raises(TemporalDerivationError, match="unrecognised_marker"):
             derive_temporal_layer_from_source(xml, _doc(note))
+
+    def test_impossible_explicit_commencement_date_is_a_derivation_error(self) -> None:
+        note = "> Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) (i kraft 31 februar 2020).\n"
+
+        with pytest.raises(TemporalDerivationError):
+            derive_temporal_layer(_doc(note))
 
     def test_source_xml_to_rendered_layer_reconciles_end_to_end(self) -> None:
         xml = (
