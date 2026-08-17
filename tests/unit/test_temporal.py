@@ -632,6 +632,24 @@ class TestTemporalLayer:
             }
         ]
 
+    def test_distinct_unlinked_acts_are_not_reported_as_duplicates(self) -> None:
+        markdown = _doc(
+            "> Endret ved lov 1 januar 2020 nr. 1 (ikr. 3 mars 2020).\n"
+            "\n"
+            "> Endret ved lov 2 februar 2020 nr. 2 (ikr. 3 mars 2020).\n"
+        )
+
+        layer = derive_temporal_layer(markdown)
+
+        assert [event.amending_act for event in layer.events] == [
+            "1 januar 2020 nr. 1",
+            "2 februar 2020 nr. 2",
+        ]
+        assert [problem.kind for problem in layer.problems] == [
+            TemporalProblemKind.UNLINKED_ACT_REFERENCE,
+            TemporalProblemKind.UNLINKED_ACT_REFERENCE,
+        ]
+
     @pytest.mark.parametrize(
         ("head", "scope"),
         [
