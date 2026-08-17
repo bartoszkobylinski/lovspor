@@ -5,11 +5,12 @@ Fixture note lines are verbatim from the lovverk corpus at ``24ce112aa``
 — the measured shapes the ADR names, not invented ones.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime, tzinfo
 
 import pytest
 from pydantic import ValidationError
 
+from lovspor import temporal
 from lovspor.temporal import (
     AmendmentEvent,
     InForceStatus,
@@ -17,6 +18,7 @@ from lovspor.temporal import (
     TemporalNotice,
     append_notice,
     build_notice,
+    evaluation_date_today,
     extract_events,
     extract_never_in_force,
     in_force_at,
@@ -90,6 +92,23 @@ NEVER_IN_FORCE_DOC = (
 
 def _doc(note: str, heading: str = "### § 1. Formål") -> str:
     return f"{heading}\n\nLovtekst.\n\n{note}"
+
+
+def test_evaluation_date_uses_norwegian_calendar_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """UTC and Norway have different dates around midnight in winter."""
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            assert getattr(tz, "key", None) == "Europe/Oslo"
+            instant = cls(2026, 1, 1, 23, 30, tzinfo=UTC)
+            return instant.astimezone(tz)
+
+    monkeypatch.setattr(temporal, "datetime", FixedDatetime)
+
+    assert evaluation_date_today() == date(2026, 1, 2)
 
 
 class TestExtractEvents:
