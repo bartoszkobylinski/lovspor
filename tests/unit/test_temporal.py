@@ -508,8 +508,13 @@ class TestTemporalLayer:
     def test_impossible_explicit_commencement_date_is_a_derivation_error(self) -> None:
         note = "> Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) (i kraft 31 februar 2020).\n"
 
-        with pytest.raises(TemporalDerivationError):
+        with pytest.raises(
+            TemporalDerivationError,
+            match=r"invalid commencement date at line 5: .*day.*range",
+        ) as error:
             derive_temporal_layer(_doc(note))
+
+        assert isinstance(error.value.__cause__, ValueError)
 
     def test_source_xml_to_rendered_layer_reconciles_end_to_end(self) -> None:
         xml = (
