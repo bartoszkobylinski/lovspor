@@ -447,7 +447,11 @@ def _find_acts(note: str) -> tuple[list[tuple[int, str]], list[tuple[int, int]]]
     """Amending acts cited outside any marker, linked or bare, in order."""
     masked, links = _mask_links(note)
     spans = _top_level_spans(masked)
-    acts = [(pos, text) for pos, text, _ref in links if not _inside(pos, spans)]
+    acts = [
+        (pos, text)
+        for pos, text, ref in links
+        if ref.startswith("lov/") and not _inside(pos, spans)
+    ]
     # A bare citation carries no link; dropping it would silently lose the
     # event.
     acts += [
