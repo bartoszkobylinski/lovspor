@@ -109,3 +109,23 @@ class TestGetSectionTool:
         served = _call_tool(tmp_path, "get_section", {"slug": "testloven", "section_id": "4-2"})
         assert isinstance(served, dict)
         assert served["temporal_notice"] is None
+
+    def test_carries_never_in_force_marker_for_headingless_section_body(
+        self, tmp_path: Path
+    ) -> None:
+        law = (
+            "# Testloven\n\n"
+            "## Kapittel 1. Innledning\n\n"
+            "### § 4-2. Arbeidsmiljø\n\n"
+            "Første ledd gjelder.\n\n"
+            "Tredje ledd er ikke satt i kraft.\n"
+        )
+        _corpus(tmp_path, law)
+
+        served = _call_tool(tmp_path, "get_section", {"slug": "testloven", "section_id": "4-2"})
+
+        assert isinstance(served, dict)
+        notice = served["temporal_notice"]
+        assert notice is not None
+        assert notice["events"] == []
+        assert notice["never_in_force"][0]["provision"] == "§ 4-2"

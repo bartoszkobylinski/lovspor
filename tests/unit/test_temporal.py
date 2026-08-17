@@ -229,7 +229,12 @@ class TestInForceAt:
 
     @pytest.mark.parametrize(
         "marker_class",
-        [MarkerClass.RELATIVE, MarkerClass.UNRECOGNISED, MarkerClass.ABSENT],
+        [
+            MarkerClass.RELATIVE,
+            MarkerClass.UNRECOGNISED,
+            MarkerClass.NOT_A_COMMENCEMENT_MARKER,
+            MarkerClass.ABSENT,
+        ],
     )
     def test_epistemic_classes_are_indeterminate(self, marker_class: MarkerClass) -> None:
         assert in_force_at(_event(marker_class), EVAL) is InForceStatus.INDETERMINATE
@@ -307,6 +312,15 @@ class TestBuildNotice:
             is None
         )
 
+    def test_announced_event_remains_visible_after_its_commencement_date(self) -> None:
+        notice = build_notice(_doc(DATED_FUTURE_NOTE), date(2028, 7, 1))
+
+        assert notice is not None
+        assert len(notice.events) == 1
+        assert notice.events[0].announced is True
+        assert notice.events[0].valid_from == date(2028, 7, 1)
+        assert "consolidated text above may not yet reflect it" in render_notice(notice)
+
     def test_non_commencement_date_is_epistemic_and_gets_no_notice(self) -> None:
         note = (
             "> Endret ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
@@ -336,6 +350,16 @@ class TestBuildNotice:
         notice = build_notice(PERIPHRASTIC_PENDING, EVAL, default_provision="§ 4-2")
         assert notice is not None
         assert notice.events[0].provision == "§ 4-2"
+
+    def test_default_provision_labels_headingless_never_in_force_marker(self) -> None:
+        notice = build_notice(
+            "Tredje ledd er ikke satt i kraft.\n",
+            EVAL,
+            default_provision="§ 4-2",
+        )
+
+        assert notice is not None
+        assert notice.never_in_force[0].provision == "§ 4-2"
 
 
 class TestRendering:
