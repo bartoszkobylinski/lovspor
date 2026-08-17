@@ -6,6 +6,7 @@ Fixture note lines are verbatim from the lovverk corpus at ``24ce112aa``
 """
 
 from datetime import UTC, date, datetime, tzinfo
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -415,6 +416,35 @@ class TestTemporalLayer:
     def test_source_note_count_rejects_malformed_xml(self) -> None:
         with pytest.raises(TemporalDerivationError, match="malformed XML"):
             count_source_amendment_notes(b"<html><article></html>")
+
+    def test_source_note_count_does_not_expand_external_entities(self, tmp_path: Path) -> None:
+        payload = tmp_path / "injected.xml"
+        payload.write_text(
+            '<article class="changesToParent">injected note</article>',
+            encoding="utf-8",
+        )
+        xml = (
+            f'<!DOCTYPE html [<!ENTITY injected SYSTEM "{payload.as_uri()}">]>'
+            "<html><body>&injected;</body></html>"
+        ).encode()
+
+        assert count_source_amendment_notes(xml) == 0
+
+    def test_source_note_count_rejects_entity_expansion_bomb(self) -> None:
+        xml = b"""\
+<!DOCTYPE html [
+  <!ENTITY a "1234567890">
+  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+  <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+  <!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">
+  <!ENTITY e "&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;">
+  <!ENTITY f "&e;&e;&e;&e;&e;&e;&e;&e;&e;&e;">
+]>
+<html><article class="changesToParent">&f;</article></html>
+"""
+
+        with pytest.raises(TemporalDerivationError, match="malformed XML"):
+            count_source_amendment_notes(xml)
 
     def test_source_reconciled_derivation_uses_independent_xml_count(self) -> None:
         xml = b'<html><article class="changesToParent">note</article></html>'
