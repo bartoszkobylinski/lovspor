@@ -55,7 +55,8 @@ jobs:
       pull-requests: write
       issues: write
     env:
-      CODEX_HOME: /home/runner/.codex-lovspor
+      CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
+      CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
       UV_PYTHON: "3.12"
     outputs:
       pushed: ${{ steps.push.outputs.pushed }}
@@ -88,9 +89,11 @@ jobs:
       - name: Codex — independent PR test author
         if: steps.antiloop.outputs.skip != 'true'
         run: |
+          : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
+          : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
           python scripts/ci/codex_account_failover.py \
-            --primary-home /home/runner/.codex-lovspor \
-            --secondary-home /home/runner/.codex-lovspor-secondary \
+            --primary-home "$CODEX_PRIMARY_HOME" \
+            --secondary-home "$CODEX_SECONDARY_HOME" \
             --threshold 95 \
             -- codex exec \
               --sandbox workspace-write \

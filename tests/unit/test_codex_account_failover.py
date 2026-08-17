@@ -20,6 +20,7 @@ def _load_script() -> ModuleType:
 
 
 failover = _load_script()
+_WORKFLOWS = Path(__file__).parents[2] / ".github" / "workflows"
 
 
 def _fake_codex(tmp_path: Path, usages: dict[str, float]) -> Path:
@@ -110,3 +111,22 @@ class TestAccountSelection:
                 codex_command=str(codex),
                 timeout_seconds=2,
             )
+
+
+class TestWorkflowConfiguration:
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    def test_codex_homes_come_from_repository_variables(self, workflow_name: str) -> None:
+        workflow = (_WORKFLOWS / workflow_name).read_text()
+
+        assert "CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}" in workflow
+        assert "CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}" in workflow
+        assert '--primary-home "$CODEX_PRIMARY_HOME"' in workflow
+        assert '--secondary-home "$CODEX_SECONDARY_HOME"' in workflow
+        assert "/home/runner/.codex-lovspor" not in workflow
+
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    def test_missing_repository_variables_fail_before_codex_runs(self, workflow_name: str) -> None:
+        workflow = (_WORKFLOWS / workflow_name).read_text()
+
+        assert "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}" in workflow
+        assert "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}" in workflow
