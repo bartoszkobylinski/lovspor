@@ -12,6 +12,7 @@
     "provider",
     "model_id",
     "condition",
+    "analysis_plan_sha256",
     "system_prompt_sha256",
     "sampling",
     "started_at",
@@ -42,6 +43,11 @@
       "description": "Provider API version/date header where the provider exposes one."
     },
     "condition": { "type": "string", "enum": ["control", "lovspor"] },
+    "analysis_plan_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the committed confirmatory analysis plan. Must be identical across both arms. Null only for historical runs completed before ruling #30 introduced analysis plans."
+    },
     "system_prompt_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
