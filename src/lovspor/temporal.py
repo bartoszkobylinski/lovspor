@@ -330,14 +330,19 @@ def derive_temporal_layer(
 def count_source_amendment_notes(xml_bytes: bytes) -> int:
     """Count ``changesToParent`` elements independently in source XML."""
     try:
-        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser(remove_blank_text=False))
+        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
     except etree.XMLSyntaxError as exc:
         raise TemporalDerivationError(
             f"malformed XML while counting amendment notes: {exc}"
         ) from exc
-    return sum(
-        1 for element in tree.iter() if "changesToParent" in (element.get("class") or "").split()
-    )
+    count = 0
+    for element in tree.iter():
+        class_names = element.get("class")
+        if class_names is None:
+            continue
+        if "changesToParent" in class_names.split():
+            count += 1
+    return count
 
 
 def derive_temporal_layer_from_source(
@@ -352,7 +357,7 @@ def derive_temporal_layer_from_source(
         markdown,
         document_ref=document_ref,
         expected_note_count=count_source_amendment_notes(xml_bytes),
-        strict=strict,
+        strict=strict,  # pragma: no mutate - None and False are equivalent here
     )
 
 
@@ -679,7 +684,8 @@ def _problems_from_note(
 
     acts, spans = _find_acts(note)
     first_act = acts[0][0] if acts else len(note)
-    if any(start < first_act for start, _end in spans):
+    # A parenthesis span and act citation cannot begin at the same position.
+    if any(start < first_act for start, _end in spans):  # pragma: no mutate
         problems.append(_problem(TemporalProblemKind.MARKER_BEFORE_ACT, provision, line_no, note))
     if not acts:
         problems.append(_problem(TemporalProblemKind.NO_AMENDING_ACT, provision, line_no, note))

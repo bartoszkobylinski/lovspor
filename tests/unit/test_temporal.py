@@ -389,7 +389,20 @@ class TestTemporalLayer:
             TemporalProblemKind.UNRECOGNISED_NOTE,
             TemporalProblemKind.NO_AMENDING_ACT,
         ]
-        assert "Tidligere ordlyd" in (layer.problems[0].raw_value or "")
+        assert [problem.model_dump(mode="json") for problem in layer.problems] == [
+            {
+                "kind": "unrecognised_note",
+                "provision": "§ 4",
+                "source_line": 3,
+                "raw_value": "Opphevet. Paragrafen lød før oppheving:  Tidligere ordlyd.",
+            },
+            {
+                "kind": "no_amending_act",
+                "provision": "§ 4",
+                "source_line": 3,
+                "raw_value": "Opphevet. Paragrafen lød før oppheving:  Tidligere ordlyd.",
+            },
+        ]
 
     def test_unrecognised_linked_note_never_disappears_silently(self) -> None:
         markdown = "### § 4\n\n> Amended by [Protocol No. 14](lov/2005-06-10-49).\n"
@@ -477,6 +490,16 @@ class TestTemporalLayer:
         assert layer.events[0].commencement_kind is CommencementKind.AMBIGUOUS
         assert layer.problems[0].kind is TemporalProblemKind.UNRECOGNISED_MARKER
 
+    def test_source_reconciled_derivation_is_strict_by_default(self) -> None:
+        xml = b'<html><article class="changesToParent">note</article></html>'
+        note = (
+            "> Endres ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
+            "(i kraft når departementet bestemmer).\n"
+        )
+
+        with pytest.raises(TemporalDerivationError, match="unrecognised_marker"):
+            derive_temporal_layer_from_source(xml, _doc(note))
+
     def test_source_xml_to_rendered_layer_reconciles_end_to_end(self) -> None:
         xml = (
             b'<!DOCTYPE html><html lang="nb"><body><main>'
@@ -515,8 +538,13 @@ class TestTemporalLayer:
 
         assert len(layer.events) == 1
         assert layer.events[0].commencement_kind is CommencementKind.AMBIGUOUS
-        assert [problem.kind for problem in layer.problems] == [
-            TemporalProblemKind.UNRECOGNISED_MARKER
+        assert [problem.model_dump(mode="json") for problem in layer.problems] == [
+            {
+                "kind": "unrecognised_marker",
+                "provision": "§ 1",
+                "source_line": 5,
+                "raw_value": "(i kraft når departementet bestemmer)",
+            }
         ]
 
     def test_mixed_kind_note_is_reported_but_resolved_per_act(self) -> None:
@@ -529,7 +557,14 @@ class TestTemporalLayer:
         layer = derive_temporal_layer(_doc(note))
 
         assert [event.kind for event in layer.events] == ["inserted", "repealed"]
-        assert [problem.kind for problem in layer.problems] == [TemporalProblemKind.MIXED_KIND_NOTE]
+        assert [problem.model_dump(mode="json") for problem in layer.problems] == [
+            {
+                "kind": "mixed_kind_note",
+                "provision": "§ 1",
+                "source_line": 5,
+                "raw_value": note.removeprefix("> ").strip(),
+            }
+        ]
 
     def test_unlinked_act_is_preserved_and_reported(self) -> None:
         note = "> Endret ved lover 9 juni 2007 nr. 42 (ikr. 1 nov 2007).\n"
@@ -537,8 +572,13 @@ class TestTemporalLayer:
         layer = derive_temporal_layer(_doc(note))
 
         assert layer.events[0].amending_act_ref is None
-        assert [problem.kind for problem in layer.problems] == [
-            TemporalProblemKind.UNLINKED_ACT_REFERENCE
+        assert [problem.model_dump(mode="json") for problem in layer.problems] == [
+            {
+                "kind": "unlinked_act_reference",
+                "provision": "§ 1",
+                "source_line": 5,
+                "raw_value": "9 juni 2007 nr. 42",
+            }
         ]
 
     def test_marker_before_act_is_preserved_as_audit_problem(self) -> None:
@@ -548,7 +588,34 @@ class TestTemporalLayer:
 
         assert len(layer.events) == 1
         assert layer.events[0].commencement_kind is CommencementKind.UNKNOWN
-        assert TemporalProblemKind.MARKER_BEFORE_ACT in {problem.kind for problem in layer.problems}
+        marker_problem = next(
+            problem
+            for problem in layer.problems
+            if problem.kind is TemporalProblemKind.MARKER_BEFORE_ACT
+        )
+        assert marker_problem.model_dump(mode="json") == {
+            "kind": "marker_before_act",
+            "provision": "§ 1",
+            "source_line": 5,
+            "raw_value": note.removeprefix("> ").strip(),
+        }
+
+    def test_non_commencement_marker_problem_preserves_source_fields(self) -> None:
+        note = (
+            "> Endret ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
+            "(se også forskrift 2 februar 2028 nr. 3).\n"
+        )
+
+        layer = derive_temporal_layer(_doc(note))
+
+        assert [problem.model_dump(mode="json") for problem in layer.problems] == [
+            {
+                "kind": "non_commencement_marker",
+                "provision": "§ 1",
+                "source_line": 5,
+                "raw_value": "(se også forskrift 2 februar 2028 nr. 3)",
+            }
+        ]
 
     def test_duplicate_event_is_kept_and_reported(self) -> None:
         markdown = _doc(PAST_DATED_NOTE) + "\n" + PAST_DATED_NOTE
@@ -556,7 +623,14 @@ class TestTemporalLayer:
         layer = derive_temporal_layer(markdown)
 
         assert len(layer.events) == 2
-        assert [problem.kind for problem in layer.problems] == [TemporalProblemKind.DUPLICATE_EVENT]
+        assert [problem.model_dump(mode="json") for problem in layer.problems] == [
+            {
+                "kind": "duplicate_event",
+                "provision": "§ 1",
+                "source_line": 7,
+                "raw_value": "lov/2002-06-21-41",
+            }
+        ]
 
     @pytest.mark.parametrize(
         ("head", "scope"),
@@ -835,6 +909,7 @@ class TestParserHelpers:
             "first second  ignored",
         )
         assert temporal._note_block(["> first", "> second"], 0) == (2, "first second")
+        assert temporal._note_block(["> first", ">", "stop"], 0) == (2, "first ")
 
     def test_marker_and_verb_helpers_return_exact_structures(self) -> None:
         assert temporal._classify_marker("(se 1 jan 2028)") == (
