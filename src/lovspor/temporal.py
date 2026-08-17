@@ -79,7 +79,7 @@ _PENDING = re.compile(
 # Commencement expressed against another instrument; any year present
 # belongs to that instrument, never to this event (the cotif-loven fixture).
 _RELATIVE = re.compile(r"\bsamtidig\s+(som|med)\b|\bsame\s+tid\s+som\b|\bfrå\s+same\s+tid\b", re.I)
-_COMMENCEMENT_MARKER = re.compile(r"^\s*(ikr\.|i\s?kraft|iverksatt)", re.I)
+_COMMENCEMENT_MARKER = re.compile(r"(?:^|[,;]\s*)(ikr\.|i\s?kraft|iverksatt)", re.I)
 _NEVER_IN_FORCE = re.compile(r"\b(?:ikke\s+satt|ikkje\s+sett)\s+i\s+kraft\b", re.I)
 
 _KIND_MAP: dict[str, Kind] = {
@@ -384,7 +384,7 @@ def _classify_marker(marker: str) -> tuple[MarkerClass, date | None]:
     fabricated commencement date (ADR-0009 §2).
     """
     body = _LINK.sub(lambda m: m.group(1), marker).strip("() ")
-    if not _COMMENCEMENT_MARKER.match(body):
+    if not _COMMENCEMENT_MARKER.search(body):
         return MarkerClass.NOT_A_COMMENCEMENT_MARKER, None
     if _PENDING.search(body):
         return MarkerClass.PENDING_INDETERMINATE, None
