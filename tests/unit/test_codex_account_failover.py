@@ -120,6 +120,7 @@ class TestWorkflowConfiguration:
 
         assert "CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}" in workflow
         assert "CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}" in workflow
+        assert "python3 scripts/ci/codex_account_failover.py" in workflow
         assert '--primary-home "$CODEX_PRIMARY_HOME"' in workflow
         assert '--secondary-home "$CODEX_SECONDARY_HOME"' in workflow
         assert "/home/runner/.codex-lovspor" not in workflow

@@ -139,7 +139,7 @@ jobs:
           echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
           : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
-          python scripts/ci/codex_account_failover.py \
+          python3 scripts/ci/codex_account_failover.py \
             --primary-home "$CODEX_PRIMARY_HOME" \
             --secondary-home "$CODEX_SECONDARY_HOME" \
             --threshold 95 \
