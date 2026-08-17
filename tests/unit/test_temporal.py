@@ -197,6 +197,17 @@ class TestExtractEvents:
         assert events[0].marker_class is MarkerClass.NOT_A_COMMENCEMENT_MARKER
         assert events[0].valid_from is None
 
+    def test_supporting_link_is_not_an_amending_act(self) -> None:
+        note = (
+            "> Endres ved lov [1 januar 2027 nr. 1](lov/2027-01-01-1) "
+            "(i kraft 1 februar 2027), se "
+            "[Prop. 1 L](https://www.regjeringen.no/no/dokumenter/prop.-1-l/id1/).\n"
+        )
+
+        events = extract_events(_doc(note))
+
+        assert [event.amending_act for event in events] == ["1 januar 2027 nr. 1"]
+
     def test_prefixed_commencement_marker_is_pending_indeterminate(self) -> None:
         note = (
             "> Oppheves ved lov [19 juni 2009 nr. 100](lov/2009-06-19-100) "
