@@ -149,7 +149,7 @@ Local layout:
 | Security lint | ruff `S` rules + `bandit` | Overlap is fine; bandit runs via `uvx` |
 | Types | `mypy` strict mode | Wired into CI + pre-commit |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
-| Mutation | `mutmut == 2.5.1` | See §9 |
+| Mutation | `mutmut == 3.7.0` | Function-scoped per-PR runs; see §9 and §9c |
 | Hooks | `pre-commit` | Wired for gitleaks, ruff, format, mypy, pytest unit |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
@@ -172,17 +172,15 @@ Global Claude skill at `~/.claude/skills/security-check/SKILL.md`, invokable as 
 
 Baseline on scaffold (2026-04-22): all six clean.
 
-## 9. mutmut pinned to 2.x — no PEP 695
+## 9. mutmut 3.7 and PEP 695
 
-mutmut 2.5.1 pinned in `pyproject.toml`. mutmut 3.x has open bugs:
-- #486: breaks editable installs (we use them via `uv sync`)
-- #480: `@dataclass` methods produce zero mutants (we use Pydantic dataclasses)
-- #485: crashes on initial test run
-- #490: race condition in dict iteration
+Migrated from mutmut 2.5.1 to 3.7.0 on 2026-08-17 (issue #91). The migration was
+verified with a real PR-scoped mutation run: 14 mutants processed and killed at
+30.14 mutations/second. The former 2.x blockers (#480, #485, #486, #490) no longer
+justify holding the project on the legacy runner.
 
-**Consequence:** no PEP 695 generic syntax. mutmut 2.x parser predates PEP 695 and crashes on `def foo[T](...)`. Use classic `TypeVar` from `typing` instead. Ruff rule `UP047` is globally disabled to prevent accidental reintroduction.
-
-When mutmut 3.x stabilizes (track their issue tracker), revisit this constraint.
+PEP 695 generic syntax is enabled again. Ruff rule `UP047` is no longer disabled, and
+`retry_with_backoff` uses the Python 3.12 type-parameter syntax.
 
 ## 9a. Mutation testing baseline expectations
 
@@ -236,16 +234,17 @@ Added 2026-04-27 after the first scheduled migration sync crashed in production 
 
 **Cost:** `hypothesis` added to dev dependencies (`pyproject.toml`). Default 100 examples per test × 5 tests ≈ < 1 s in local CI. Negligible.
 
-## 9c. Per-PR mutation runs are scoped to changed files
+## 9c. Per-PR mutation runs are scoped to changed functions
 
 Decided 2026-08-05, closing issue #4. Codex review of PR #3 showed full-repo `mutmut run` is not operationally usable as a per-PR gate: 9 of 4338 mutants processed in over a minute on a fresh clone, no terminating run ever observed (reconfirmed across PR #3/#5/#7/#8 reviews). Release/packaging PRs additionally have zero mutation surface, so a full run there yields nothing by construction.
 
-**Mechanism:** `scripts/mutmut-pr.sh`. It diffs `base_ref...HEAD` (default `origin/main`, `--diff-filter=ACMR`) for `src/lovspor/**/*.py`, then:
+**Mechanism:** `scripts/mutmut-pr.sh`. It diffs `base_ref...HEAD` (default `origin/main`, `--diff-filter=ACMR`) for `src/lovspor/**/*.py`. `scripts/ci/mutation_scope.py` maps changed post-image lines to enclosing functions and emits mutmut 3 name patterns, then:
 
-- changed files exist → wipes `.mutmut-cache` (a cache from another scope silently skews the score — the Sprint 8 stale-cache trap in §"Carried debts") and runs `mutmut run --paths-to-mutate=<changed files>`;
+- changed functions exist → rebuilds mutmut's shadow tree and runs only those function patterns, with mutmut 3's warm baseline and parallel workers;
+- changed source exists but cannot be mapped safely to functions (for example module-level behavior or decorated definitions) → runs the affected module patterns rather than silently exempting it;
 - no changed files → prints `mutation not applicable: no src/lovspor logic changed relative to <base>` and exits 0. Codex reports that line verbatim — an explicit recorded exemption, not a skipped step and never a fabricated score.
 
-**What this does NOT change:** §9 (mutmut 2.x pin, no PEP 695) and §9a (baseline expectations, survivor policy, revisit triggers) stand. Baseline numbers still come from explicitly requested full-repo runs, not from per-PR scoped runs — a scoped score is authoritative only for the PR's own surface and must not be compared against the §9a baseline.
+**What this does NOT change:** §9a baseline expectations, survivor policy, and revisit triggers stand. Baseline numbers still come from explicitly requested full-repo runs, not from per-PR scoped runs — a scoped score is authoritative only for the PR's own surface and must not be compared against the §9a baseline.
 
 ## 10. Workflow — how Claude works here
 
