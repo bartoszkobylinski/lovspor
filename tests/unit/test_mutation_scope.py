@@ -76,15 +76,43 @@ def second():
             "lovspor.example.x_second__mutmut_*",
         ]
 
-    def test_module_level_and_invalid_source_fall_back_to_module(
+    def test_module_level_changes_without_mutants_are_ignored(
         self, mutation_scope: ModuleType
     ) -> None:
-        assert mutation_scope.patterns_for_file("src/lovspor/example.py", {1}, "SETTING = 1\n") == [
-            "lovspor.example.*"
-        ]
+        assert (
+            mutation_scope.patterns_for_file("src/lovspor/example.py", {1}, "SETTING = 1\n") == []
+        )
+
+    def test_invalid_source_falls_back_to_module(self, mutation_scope: ModuleType) -> None:
         assert mutation_scope.patterns_for_file(
             "src/lovspor/example.py", {1}, "def broken(:\n"
         ) == ["lovspor.example.*"]
+
+    def test_module_level_changes_do_not_expand_changed_function_scope(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        source = """\
+from enum import StrEnum
+
+SETTING = 2
+
+class Mode(StrEnum):
+    STRICT = "strict"
+
+def changed():
+    return 2
+
+def untouched():
+    return 1
+"""
+
+        patterns = mutation_scope.patterns_for_file(
+            "src/lovspor/example.py",
+            {1, 3, 5, 6, 9},
+            source,
+        )
+
+        assert patterns == ["lovspor.example.x_changed__mutmut_*"]
 
     def test_blank_or_comment_only_changes_do_not_expand_scope(
         self, mutation_scope: ModuleType

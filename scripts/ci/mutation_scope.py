@@ -121,21 +121,19 @@ def module_of(path: str) -> str:
 
 
 def patterns_for_file(path: str, lines: set[int], source: str) -> list[str]:
+    try:
+        ast.parse(source)
+    except SyntaxError:
+        return [f"{module_of(path)}.*"]
+
     units = keyed_units(source)
-    module_pattern = f"{module_of(path)}.*"
     if not units:
-        return [module_pattern]
+        return []
     hit: set[str] = set()
     for line in lines:
         candidates = [unit for unit in units if unit.contains(line)]
         if candidates:
             hit.add(min(candidates, key=lambda unit: unit.span).key)
-            continue
-        source_line = (
-            source.splitlines()[line - 1].strip() if line <= len(source.splitlines()) else ""
-        )
-        if source_line and not source_line.startswith("#"):
-            return [module_pattern]
     return [f"{module_of(path)}.{key}__mutmut_*" for key in sorted(hit)]
 
 
