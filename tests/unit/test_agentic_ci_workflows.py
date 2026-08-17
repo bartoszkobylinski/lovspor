@@ -118,7 +118,14 @@ def test_mutation_job_has_a_wallclock_backstop() -> None:
     grind to GitHub's default kill with no verdict artifact."""
     job = _workflow("pr-pipeline.yml")["jobs"]["mutation"]
 
-    assert job["timeout-minutes"] == 45
+    assert job["timeout-minutes"] == 60
+
+
+def test_mutation_report_treats_a_missing_tool_exit_code_as_failure() -> None:
+    steps = _steps("pr-pipeline.yml", "mutation")
+    build = _named_step(steps, "Build mutation-result.json")["run"]
+
+    assert "--tool-exit-code \"${{ steps.mut.outputs.exit_code || '3' }}\"" in build
 
 
 def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:

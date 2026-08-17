@@ -4795,6 +4795,25 @@ def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
     )
 
 
+def test_build_server_preserves_name_bind_and_embedder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    embedder = _FakeEmbedder([1.0, 0.0])
+    monkeypatch.setattr(mcp_module, "_build_embedder", lambda: embedder)
+
+    server = build_server(tmp_path, http=HttpConfig(host="127.0.0.9", port=9999))
+    semantic_tool = server._tool_manager._tools["semantic_search"]
+    reader = inspect.getclosurevars(semantic_tool.fn).nonlocals["fn"]
+    reader = inspect.getclosurevars(reader).nonlocals["reader"]
+
+    assert server.name == "lovverk"
+    assert server.settings.host == "127.0.0.9"
+    assert server.settings.port == 9999
+    assert reader._embedder is embedder
+
+
 _ADR_0002_CONTRACT_SENTENCES = (
     "the result represents the version available in the Lovspor corpus "
     "at the end of the specified UTC date.",
