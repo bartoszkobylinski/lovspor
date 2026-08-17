@@ -108,13 +108,77 @@ class TestBuild:
         loaded = load_pair_manifest(out)
 
         assert loaded == manifest
-        assert loaded.scorer_commit == _git(repo, "rev-parse", "HEAD")
+        assert loaded.model_dump(mode="json") == {
+            "schema_version": 1,
+            "benchmark": "llhb-v1",
+            "analysis_plan_path": PLAN_REL,
+            "analysis_plan_sha256": file_sha256(repo / PLAN_REL),
+            "dataset_path": DATASET_REL,
+            "dataset_sha256": file_sha256(repo / DATASET_REL),
+            "system_prompt_path": PROMPT_REL,
+            "system_prompt_sha256": file_sha256(repo / PROMPT_REL),
+            "scorer_commit": _git(repo, "rev-parse", "HEAD"),
+            "runner_commit": "b" * 40,
+            "control_run_id": RUN_IDS[0],
+            "control_run_sha256": file_sha256(_runs_root(repo) / RUN_IDS[0] / "records.jsonl"),
+            "treatment_run_id": RUN_IDS[1],
+            "treatment_run_sha256": file_sha256(_runs_root(repo) / RUN_IDS[1] / "records.jsonl"),
+            "model_requested": "claude-fable-5",
+            "corpus_snapshot": "c" * 40,
+        }
         verify_pair_manifest(loaded, repo, _runs_root(repo))
 
     def test_dirty_tree_refuses_to_build(self, repo: Path) -> None:
         (repo / PLAN_REL).write_text("# edited\n", encoding="utf-8")
-        with pytest.raises(PairManifestError, match="dirty"):
+        with pytest.raises(PairManifestError) as error:
             _build(repo)
+
+        assert str(error.value) == ("working tree is dirty; a manifest must pin committed code")
+
+    def test_missing_run_metadata_refuses_with_exact_path(self, repo: Path) -> None:
+        metadata_path = _runs_root(repo) / RUN_IDS[0] / "run-metadata.json"
+        metadata_path.unlink()
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "--quiet", "-m", "remove metadata")
+
+        with pytest.raises(PairManifestError) as error:
+            _build(repo)
+
+        assert str(error.value).startswith(f"cannot read {metadata_path}:")
+
+    def test_missing_binding_field_refuses_with_field_name(self, repo: Path) -> None:
+        metadata_path = _runs_root(repo) / RUN_IDS[0] / "run-metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        del metadata["runner_commit"]
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        _git(repo, "commit", "--quiet", "-am", "remove binding")
+
+        with pytest.raises(PairManifestError) as error:
+            _build(repo)
+
+        assert str(error.value) == (
+            f"{metadata_path} lacks field(s) ['runner_commit']; cannot bind the manifest"
+        )
+
+    def test_benchmark_version_comes_from_metadata(self, repo: Path) -> None:
+        for run_id in RUN_IDS:
+            metadata_path = _runs_root(repo) / run_id / "run-metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["llhb_version"] = "llhb-v2"
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        _git(repo, "commit", "--quiet", "-am", "set benchmark version")
+
+        assert _build(repo).benchmark == "llhb-v2"
+
+    def test_benchmark_version_defaults_to_v1(self, repo: Path) -> None:
+        for run_id in RUN_IDS:
+            metadata_path = _runs_root(repo) / run_id / "run-metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            del metadata["llhb_version"]
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        _git(repo, "commit", "--quiet", "-am", "remove benchmark version")
+
+        assert _build(repo).benchmark == "llhb-v1"
 
     def test_arms_disagreeing_on_a_binding_field_refuse(self, repo: Path) -> None:
         metadata_path = _runs_root(repo) / RUN_IDS[1] / "run-metadata.json"
@@ -168,8 +232,29 @@ class TestVerify:
         (repo / "extra.txt").write_text("x\n", encoding="utf-8")
         _git(repo, "add", "extra.txt")
 
-        with pytest.raises(PairManifestError, match="dirty"):
+        with pytest.raises(PairManifestError) as error:
             verify_pair_manifest(manifest, repo, _runs_root(repo))
+
+        assert str(error.value) == ("working tree is dirty; the scorer_commit pin is meaningless")
+
+    def test_rebound_arm_metadata_error_names_actual_and_expected(self, repo: Path) -> None:
+        manifest = _build(repo)
+        for run_id in RUN_IDS:
+            metadata_path = _runs_root(repo) / run_id / "run-metadata.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["model_id"] = "different-model"
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        _git(repo, "commit", "--quiet", "-am", "rebind model")
+        current_manifest = manifest.model_copy(
+            update={"scorer_commit": _git(repo, "rev-parse", "HEAD")}
+        )
+
+        with pytest.raises(PairManifestError) as error:
+            verify_pair_manifest(current_manifest, repo, _runs_root(repo))
+
+        assert str(error.value) == (
+            "run metadata model_id is 'different-model', manifest says 'claude-fable-5'"
+        )
 
     def test_metadata_rebound_after_build_refuses(self, repo: Path) -> None:
         manifest = _build(repo)
@@ -220,6 +305,22 @@ class TestLoad:
         path.write_text(json.dumps(document), encoding="utf-8")
         with pytest.raises(PairManifestError, match="cannot load pair manifest"):
             load_pair_manifest(path)
+
+
+class TestWrite:
+    def test_writes_canonical_json_and_creates_nested_parents(
+        self, repo: Path, tmp_path: Path
+    ) -> None:
+        manifest = _build(repo)
+        path = tmp_path / "nested" / "manifests" / "pair.json"
+
+        write_pair_manifest(manifest, path)
+
+        expected = (
+            json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True).encode("utf-8")
+            + b"\n"
+        )
+        assert path.read_bytes() == expected
 
 
 class TestRecordsPath:
