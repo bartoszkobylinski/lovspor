@@ -17,6 +17,10 @@ class ParseError(LovsporError):
     """Failed to parse upstream data (XML, JSON, or manifest)."""
 
 
+class TemporalDerivationError(ParseError):
+    """A temporal layer cannot be derived without losing or inventing facts."""
+
+
 class RenderError(LovsporError):
     """Rendering produced output that lost source content.
 

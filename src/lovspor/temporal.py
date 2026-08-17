@@ -1,4 +1,4 @@
-"""Serving-side classification of not-in-force law (ADR-0009 T0).
+"""Temporal event derivation and serving-side not-in-force notices (ADR-0009).
 
 Detects, in rendered corpus Markdown, what the source itself marks as not
 (or not necessarily) in force:
@@ -11,14 +11,18 @@ Detects, in rendered corpus Markdown, what the source itself marks as not
 * body-text ``ikke satt i kraft`` markers on provisions never brought
   into force.
 
-The rule set is ADR-0009 (lovspor-notebook, Accepted 2026-08-14, amended
-§3): the canonical fact is evaluation-time independent; in-force status is
-the result of the total function ``in_force_at`` with the evaluation time
-an explicit input; ``unknown`` is epistemic and never triggers a notice; a
-marker the parser does not recognise never falls through to a date-shaped
-guess. Classification is ported from the measured notebook prototype
-(``experiments/temporal-parser-prototype``), extended with the
-periphrastic-future and ``med``-for-``ved`` forms it left unparsed.
+T1 exposes a deterministic canonical layer with act and commencement refs,
+``commencement_kind``, provenance, source-note traceability, independent XML
+note-count reconciliation, and visible audit residue. It does not persist or
+regenerate corpus artifacts; that migration remains separate.
+
+The rule set is ADR-0009 (lovspor-notebook, Accepted 2026-08-14, amended §3):
+the canonical fact is evaluation-time independent; in-force status is the
+result of total function ``in_force_at`` with evaluation time as explicit
+input; ``unknown`` is epistemic and never triggers a notice; an unrecognised
+commencement marker never falls through to a date-shaped guess. Classification
+is ported from the measured notebook prototype, extended with corpus-observed
+periphrastic-future, nynorsk and structural-scope forms.
 """
 
 from __future__ import annotations
@@ -26,34 +30,44 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from enum import StrEnum
+from io import BytesIO
 from typing import Literal, NamedTuple
 from zoneinfo import ZoneInfo
 
+from lxml import etree
 from pydantic import BaseModel, model_validator
+
+from lovspor.errors import TemporalDerivationError
+from lovspor.parsing.xml_normalizer import safe_parser
 
 _DOCUMENT_LEVEL = "(document)"
 
 _LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
-_SCOPE_WORDS = r"Kapitlet|Kapittelet|Overskriften|Overskrift|Paragrafen|Delen"
+_SCOPE_WORDS = (
+    r"Kapitteloverskriften|Kapitteloverskrift|Kapittelnummeret|Kapitelnummeret"
+    r"|Deloverskrift|Kapitlet|Kapittelet|Kapittel|Overskriften|Overskrifta"
+    r"|Overskrift|Avsnittet|Avsnitt|Paragrafen|Delen"
+)
 # Periphrastic future is how nynorsk (and occasionally bokmål) marks an
 # amendment not yet in effect: ``**Vert endra** ved lov …``. A bare
 # participle pattern reads it as past tense — the exact misclassification
 # ADR-0009 §3b exists to prevent.
 _AUX = r"Vert|Blir|Vil\s+bli"
 _VERBS = (
-    r"Endret|Endra|Tilføyd|Tilføydd|Tilføyet|Opphevet|Oppheva"
+    r"Endret|Endra|Tilføyd|Tilføydd|Tilføyet|Føyd\s+til|Opphevet|Oppheva"
     r"|Endres|Tilføyes|Oppheves"
 )
 # ``ved`` in bokmål notes; ``med`` in the nynorsk head form ``Endra med
 # lover …`` — requiring ``ved`` alone silently drops every event in such
 # a note, announced ones included.
 _NOTE_START = re.compile(
-    rf"^> \*{{0,2}}(?:({_SCOPE_WORDS})\s+)?(?:({_AUX})\s+)?"
-    rf"({_VERBS})\*{{0,2}}\s+(?:ved|med)\b",
+    rf"^> \*{{0,2}}(?:({_SCOPE_WORDS})\s+)?\*{{0,2}}(?:({_AUX})\s+)?"
+    rf"({_VERBS})\*{{0,2}}(?:\s+i\s+sin\s+helhet)?\s+(?:ved|med)\b",
     re.I,
 )
 _VERB = re.compile(
-    rf"\*{{0,2}}(?:({_AUX})\s+)?({_VERBS})\*{{0,2}}\s+(?:ved|med)\b",
+    rf"\*{{0,2}}(?:({_AUX})\s+)?({_VERBS})\*{{0,2}}"
+    rf"(?:\s+i\s+sin\s+helhet)?\s+(?:ved|med)\b",
     re.I,
 )
 _ANNOUNCED_FORMS = {"endres", "tilføyes", "oppheves"}
@@ -85,17 +99,33 @@ _NEVER_IN_FORCE = re.compile(r"\b(?:ikke\s+satt|ikkje\s+sett)\s+i\s+kraft\b", re
 _KIND_MAP: dict[str, Kind] = {
     "endret": "amended", "endra": "amended", "endres": "amended",
     "tilføyd": "inserted", "tilføydd": "inserted", "tilføyet": "inserted",
-    "tilføyes": "inserted",
+    "tilføyes": "inserted", "føyd til": "inserted",
     "opphevet": "repealed", "oppheva": "repealed", "oppheves": "repealed",
 }  # fmt: skip
 _SCOPE_MAP: dict[str, Scope] = {
     "kapitlet": "chapter", "kapittelet": "chapter",
+    "kapittel": "chapter",
     "overskriften": "heading", "overskrift": "heading",
+    "overskrifta": "heading",
+    "kapitteloverskrift": "chapter_heading",
+    "kapitteloverskriften": "chapter_heading",
+    "deloverskrift": "part_heading",
+    "kapittelnummeret": "chapter_number", "kapitelnummeret": "chapter_number",
+    "avsnitt": "paragraph", "avsnittet": "paragraph",
     "paragrafen": "provision", "delen": "part",
 }  # fmt: skip
 
 Kind = Literal["amended", "inserted", "repealed"]
-Scope = Literal["provision", "chapter", "heading", "part"]
+Scope = Literal[
+    "provision",
+    "chapter",
+    "heading",
+    "part",
+    "paragraph",
+    "chapter_heading",
+    "chapter_number",
+    "part_heading",
+]
 
 
 class MarkerClass(StrEnum):
@@ -117,6 +147,35 @@ class InForceStatus(StrEnum):
     INDETERMINATE = "indeterminate"
 
 
+class CommencementKind(StrEnum):
+    """Evaluation-time-independent commencement fact from ADR-0009 §3."""
+
+    DATED = "dated"
+    PENDING_INDETERMINATE = "pending_indeterminate"
+    UNKNOWN = "unknown"
+    AMBIGUOUS = "ambiguous"
+
+
+class Provenance(StrEnum):
+    """Basis of a canonical temporal assertion from ADR-0009 §3."""
+
+    SOURCE_EXPLICIT = "source_explicit"
+    DETERMINISTICALLY_DERIVED = "deterministically_derived"
+
+
+class TemporalProblemKind(StrEnum):
+    """Visible residue from deriving events out of one amendment note."""
+
+    MIXED_KIND_NOTE = "mixed_kind_note"
+    UNRECOGNISED_NOTE = "unrecognised_note"
+    MARKER_BEFORE_ACT = "marker_before_act"
+    NO_AMENDING_ACT = "no_amending_act"
+    UNRECOGNISED_MARKER = "unrecognised_marker"
+    NON_COMMENCEMENT_MARKER = "non_commencement_marker"
+    UNLINKED_ACT_REFERENCE = "unlinked_act_reference"
+    DUPLICATE_EVENT = "duplicate_event"
+
+
 class AmendmentEvent(BaseModel):
     """One amending act cited in one amendment note, with its marker."""
 
@@ -125,9 +184,14 @@ class AmendmentEvent(BaseModel):
     kind: Kind
     announced: bool
     amending_act: str
+    amending_act_ref: str | None
     marker_class: MarkerClass
+    commencement_kind: CommencementKind
+    commencement_instrument: str | None
+    provenance: Provenance
     valid_from: date | None
     raw_marker: str | None
+    source_note: str
     source_line: int
 
     @model_validator(mode="after")
@@ -136,7 +200,33 @@ class AmendmentEvent(BaseModel):
         if dated != (self.valid_from is not None):
             msg = "valid_from is set exactly when marker_class is explicit_date"
             raise ValueError(msg)
+        expected_kind, expected_provenance = _canonical_classification(self.marker_class)
+        if self.commencement_kind is not expected_kind:
+            msg = "commencement_kind must match marker_class"
+            raise ValueError(msg)
+        if self.provenance is not expected_provenance:
+            msg = "provenance must match marker_class"
+            raise ValueError(msg)
         return self
+
+
+class TemporalProblem(BaseModel):
+    """One auditable parser condition that must not disappear silently."""
+
+    kind: TemporalProblemKind
+    provision: str
+    source_line: int
+    raw_value: str | None
+
+
+class TemporalLayer(BaseModel):
+    """Canonical, deterministic temporal events derived for one document."""
+
+    schema_version: Literal[1] = 1
+    document_ref: str | None
+    notes_seen: int
+    events: list[AmendmentEvent]
+    problems: list[TemporalProblem]
 
 
 class NeverInForceMarker(BaseModel):
@@ -160,6 +250,7 @@ class _NoteContext(NamedTuple):
     provision: str
     scope: Scope
     verbs: list[tuple[int, Kind, bool]]
+    source_note: str
 
 
 def evaluation_date_today() -> date:
@@ -193,6 +284,86 @@ def extract_events(markdown: str) -> list[AmendmentEvent]:
     for line_no, provision, note in _collect_notes(markdown.splitlines()):
         events.extend(_events_from_note(line_no, provision, note))
     return events
+
+
+def derive_temporal_layer(
+    markdown: str,
+    *,
+    document_ref: str | None = None,
+    expected_note_count: int | None = None,
+    strict: bool = True,
+) -> TemporalLayer:
+    """Derive canonical events and visible audit residue for one document.
+
+    ``expected_note_count`` comes from an independent source-XML count. A
+    mismatch fails closed. Strict mode rejects commencement markers whose
+    structure would require guessing a temporal interpretation.
+    """
+    notes = _collect_notes(markdown.splitlines())
+    if expected_note_count is not None and len(notes) != expected_note_count:
+        msg = f"temporal note count mismatch: source={expected_note_count}, rendered={len(notes)}"
+        raise TemporalDerivationError(msg)
+
+    events: list[AmendmentEvent] = []
+    problems: list[TemporalProblem] = []
+    for line_no, provision, note in notes:
+        try:
+            note_events = _events_from_note(line_no, provision, note)
+        except ValueError as exc:
+            raise TemporalDerivationError(
+                f"invalid commencement date at line {line_no}: {exc}"
+            ) from exc
+        events.extend(note_events)
+        problems.extend(_problems_from_note(line_no, provision, note, note_events))
+    problems.extend(_duplicate_problems(events))
+
+    fatal = {TemporalProblemKind.UNRECOGNISED_MARKER}
+    first_fatal = next((problem for problem in problems if problem.kind in fatal), None)
+    if strict and first_fatal is not None:
+        raise TemporalDerivationError(
+            f"temporal derivation failed: {first_fatal.kind.value} "
+            f"at line {first_fatal.source_line}"
+        )
+    return TemporalLayer(
+        document_ref=document_ref,
+        notes_seen=len(notes),
+        events=events,
+        problems=problems,
+    )
+
+
+def count_source_amendment_notes(xml_bytes: bytes) -> int:
+    """Count ``changesToParent`` elements independently in source XML."""
+    try:
+        tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
+    except etree.XMLSyntaxError as exc:
+        raise TemporalDerivationError(
+            f"malformed XML while counting amendment notes: {exc}"
+        ) from exc
+    count = 0
+    for element in tree.iter():
+        class_names = element.get("class")
+        if class_names is None:
+            continue
+        if "changesToParent" in class_names.split():
+            count += 1
+    return count
+
+
+def derive_temporal_layer_from_source(
+    xml_bytes: bytes,
+    markdown: str,
+    *,
+    document_ref: str | None = None,
+    strict: bool = True,
+) -> TemporalLayer:
+    """Derive a layer while reconciling rendered notes against source XML."""
+    return derive_temporal_layer(
+        markdown,
+        document_ref=document_ref,
+        expected_note_count=count_source_amendment_notes(xml_bytes),
+        strict=strict,  # pragma: no mutate - None and False are equivalent here
+    )
 
 
 def extract_never_in_force(markdown: str) -> list[NeverInForceMarker]:
@@ -319,7 +490,7 @@ def _collect_notes(lines: list[str]) -> list[tuple[int, str, str]]:
             continue
         line = raw_line
         provision = _track_provision(line, provision)
-        if _NOTE_START.match(line):
+        if line.startswith("> "):
             start = i + 1
             skip_until, note = _note_block(lines, i)
             found.append((start, provision, note))
@@ -330,10 +501,10 @@ def _note_block(lines: list[str], start: int) -> tuple[int, str]:
     """Join a ``> …`` block from ``start``; return (next index, note text)."""
     block = [lines[start]]
     for j in range(start + 1, len(lines)):
-        if not lines[j].startswith("> "):
-            return j, " ".join(b[2:] for b in block)
+        if lines[j] != ">" and not lines[j].startswith("> "):
+            return j, " ".join(b[2:] if b.startswith("> ") else "" for b in block)
         block.append(lines[j])
-    return len(lines), " ".join(b[2:] for b in block)
+    return len(lines), " ".join(b[2:] if b.startswith("> ") else "" for b in block)
 
 
 def _events_from_note(line_no: int, provision: str, note: str) -> list[AmendmentEvent]:
@@ -347,10 +518,11 @@ def _events_from_note(line_no: int, provision: str, note: str) -> list[Amendment
         provision,
         scope,
         _verbs_in(note),
+        note,
     )
     return [
-        _event_for(context, pos, act_text, marker)
-        for pos, act_text, marker in _acts_and_markers(note)
+        _event_for(context, pos, act_text, act_ref, marker)
+        for pos, act_text, act_ref, marker in _acts_and_markers(note)
     ]
 
 
@@ -358,6 +530,7 @@ def _event_for(
     context: _NoteContext,
     pos: int,
     act_text: str,
+    act_ref: str | None,
     marker: str | None,
 ) -> AmendmentEvent:
     kind, announced = _verb_for(pos, context.verbs)
@@ -365,15 +538,21 @@ def _event_for(
         marker_class, valid_from = MarkerClass.ABSENT, None
     else:
         marker_class, valid_from = _classify_marker(marker)
+    commencement_kind, provenance = _canonical_classification(marker_class)
     return AmendmentEvent(
         provision=context.provision,
         scope=context.scope,
         kind=kind,
         announced=announced,
         amending_act=act_text,
+        amending_act_ref=act_ref,
         marker_class=marker_class,
+        commencement_kind=commencement_kind,
+        commencement_instrument=_commencement_instrument(marker),
+        provenance=provenance,
         valid_from=valid_from,
         raw_marker=marker,
+        source_note=context.source_note,
         source_line=context.line_no,
     )
 
@@ -396,6 +575,25 @@ def _classify_marker(marker: str) -> tuple[MarkerClass, date | None]:
     if (parsed := _parse_date(body)) is not None:
         return MarkerClass.EXPLICIT_DATE, parsed
     return MarkerClass.UNRECOGNISED, None
+
+
+def _canonical_classification(
+    marker_class: MarkerClass,
+) -> tuple[CommencementKind, Provenance]:
+    if marker_class is MarkerClass.EXPLICIT_DATE:
+        return CommencementKind.DATED, Provenance.SOURCE_EXPLICIT
+    if marker_class is MarkerClass.PENDING_INDETERMINATE:
+        return CommencementKind.PENDING_INDETERMINATE, Provenance.SOURCE_EXPLICIT
+    if marker_class in {MarkerClass.RELATIVE, MarkerClass.UNRECOGNISED}:
+        return CommencementKind.AMBIGUOUS, Provenance.SOURCE_EXPLICIT
+    return CommencementKind.UNKNOWN, Provenance.DETERMINISTICALLY_DERIVED
+
+
+def _commencement_instrument(marker: str | None) -> str | None:
+    if marker is None:
+        return None
+    link = _LINK.search(marker)
+    return link.group(2) if link else None
 
 
 def _parse_date(text: str) -> date | None:
@@ -428,7 +626,7 @@ def _verb_for(
     return prior[-1]
 
 
-def _acts_and_markers(note: str) -> list[tuple[int, str, str | None]]:
+def _acts_and_markers(note: str) -> list[tuple[int, str, str | None, str | None]]:
     """Pair each amending-act citation with every marker following it.
 
     One act may carry several markers — partial commencement puts two
@@ -436,38 +634,129 @@ def _acts_and_markers(note: str) -> list[tuple[int, str, str | None]]:
     ADR-0009 §4 forbids.
     """
     acts, spans = _find_acts(note)
-    triples: list[tuple[int, str, str | None]] = []
-    for idx, (pos, text) in enumerate(acts):
+    triples: list[tuple[int, str, str | None, str | None]] = []
+    for idx, (pos, text, ref) in enumerate(acts):
         nxt = acts[idx + 1][0] if idx + 1 < len(acts) else len(note)
         # Span starts cannot equal an act start or the next act start: links
         # were masked before parenthesis scanning. Mutmut's <= forms are
         # therefore equivalent.
         mine = [(s, e) for s, e in spans if pos < s < nxt]  # pragma: no mutate
         if not mine:
-            triples.append((pos, text, None))
+            triples.append((pos, text, ref, None))
             continue
         for s, e in mine:
-            triples.append((pos, text, note[s:e]))
+            triples.append((pos, text, ref, note[s:e]))
     return triples
 
 
-def _find_acts(note: str) -> tuple[list[tuple[int, str]], list[tuple[int, int]]]:
+def _find_acts(note: str) -> tuple[list[tuple[int, str, str | None]], list[tuple[int, int]]]:
     """Amending acts cited outside any marker, linked or bare, in order."""
     masked, links = _mask_links(note)
     spans = _top_level_spans(masked)
-    acts = [
-        (pos, text)
+    acts: list[tuple[int, str, str | None]] = [
+        (pos, text, ref)
         for pos, text, ref in links
         if ref.startswith("lov/") and not _inside(pos, spans)
     ]
     # A bare citation carries no link; dropping it would silently lose the
     # event.
     acts += [
-        (m.start(), m.group(0)) for m in _BARE_ACT.finditer(masked) if not _inside(m.start(), spans)
+        (m.start(), m.group(0), None)
+        for m in _BARE_ACT.finditer(masked)
+        if not _inside(m.start(), spans)
     ]
     # Natural tuple order and this explicit key are equivalent because act
     # positions are unique; keep the key to state the ordering contract.
     return sorted(acts, key=lambda act: act[0]), spans  # pragma: no mutate
+
+
+def _problems_from_note(
+    line_no: int,
+    provision: str,
+    note: str,
+    events: list[AmendmentEvent],
+) -> list[TemporalProblem]:
+    problems: list[TemporalProblem] = []
+    head = _NOTE_START.match("> " + note)
+    verbs = _verbs_in(note)
+    kinds = {kind for _pos, kind, _announced in verbs}
+    if head is not None:
+        kinds.add(_KIND_MAP[head.group(3).lower()])
+    else:
+        problems.append(_problem(TemporalProblemKind.UNRECOGNISED_NOTE, provision, line_no, note))
+    if len(kinds) > 1:
+        problems.append(_problem(TemporalProblemKind.MIXED_KIND_NOTE, provision, line_no, note))
+
+    acts, spans = _find_acts(note)
+    first_act = acts[0][0] if acts else len(note)
+    # A parenthesis span and act citation cannot begin at the same position.
+    if any(start < first_act for start, _end in spans):  # pragma: no mutate
+        problems.append(_problem(TemporalProblemKind.MARKER_BEFORE_ACT, provision, line_no, note))
+    if not acts:
+        problems.append(_problem(TemporalProblemKind.NO_AMENDING_ACT, provision, line_no, note))
+
+    for event in events:
+        if event.marker_class is MarkerClass.UNRECOGNISED:
+            problems.append(
+                _problem(
+                    TemporalProblemKind.UNRECOGNISED_MARKER,
+                    provision,
+                    line_no,
+                    event.raw_marker,
+                )
+            )
+        elif event.marker_class is MarkerClass.NOT_A_COMMENCEMENT_MARKER:
+            problems.append(
+                _problem(
+                    TemporalProblemKind.NON_COMMENCEMENT_MARKER,
+                    provision,
+                    line_no,
+                    event.raw_marker,
+                )
+            )
+        if event.amending_act_ref is None:
+            problems.append(
+                _problem(
+                    TemporalProblemKind.UNLINKED_ACT_REFERENCE,
+                    provision,
+                    line_no,
+                    event.amending_act,
+                )
+            )
+    return problems
+
+
+def _duplicate_problems(events: list[AmendmentEvent]) -> list[TemporalProblem]:
+    seen: set[tuple[str, str, date | None, Kind]] = set()
+    problems: list[TemporalProblem] = []
+    for event in events:
+        act_identity = event.amending_act_ref or event.amending_act
+        identity = (event.provision, act_identity, event.valid_from, event.kind)
+        if identity in seen:
+            problems.append(
+                _problem(
+                    TemporalProblemKind.DUPLICATE_EVENT,
+                    event.provision,
+                    event.source_line,
+                    event.amending_act_ref or event.amending_act,
+                )
+            )
+        seen.add(identity)
+    return problems
+
+
+def _problem(
+    kind: TemporalProblemKind,
+    provision: str,
+    source_line: int,
+    raw_value: str | None,
+) -> TemporalProblem:
+    return TemporalProblem(
+        kind=kind,
+        provision=provision,
+        source_line=source_line,
+        raw_value=raw_value,
+    )
 
 
 def _mask_links(text: str) -> tuple[str, list[tuple[int, str, str]]]:
