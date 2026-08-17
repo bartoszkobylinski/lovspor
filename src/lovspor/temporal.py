@@ -307,7 +307,12 @@ def derive_temporal_layer(
     events: list[AmendmentEvent] = []
     problems: list[TemporalProblem] = []
     for line_no, provision, note in notes:
-        note_events = _events_from_note(line_no, provision, note)
+        try:
+            note_events = _events_from_note(line_no, provision, note)
+        except ValueError as exc:
+            raise TemporalDerivationError(
+                f"invalid commencement date at line {line_no}: {exc}"
+            ) from exc
         events.extend(note_events)
         problems.extend(_problems_from_note(line_no, provision, note, note_events))
     problems.extend(_duplicate_problems(events))
