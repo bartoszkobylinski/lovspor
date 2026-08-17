@@ -1,8 +1,7 @@
 """Gate policy tests for scripts/ci/mutation_to_json.py and mutation_gate.py.
 
-The gate mirrors mutmut 2.5's own exit-code bits (2 survived / 4 timeout /
-8 suspicious — mutmut.compute_exit_code): each class alone must fail the gate,
-and suspicious mutants must never be folded into the killed count or score.
+The gate preserves the existing 2/4/8 verdict bits over Mutmut 3's output:
+each unkilled class fails, and suspicious mutants never inflate the score.
 """
 
 from __future__ import annotations
@@ -35,10 +34,18 @@ SCOPE_GUARD = _SCRIPTS / "assert_codex_scope.sh"
 
 
 def _progress_line(
-    *, killed: int = 0, timeout: int = 0, suspicious: int = 0, survived: int = 0
+    *,
+    killed: int = 0,
+    no_tests: int = 0,
+    timeout: int = 0,
+    suspicious: int = 0,
+    survived: int = 0,
 ) -> str:
-    total = killed + timeout + suspicious + survived
-    return f"{total}/{total}  🎉 {killed}  ⏰ {timeout}  🤔 {suspicious}  🙁 {survived}  🔇 0\n"
+    total = killed + no_tests + timeout + suspicious + survived
+    return (
+        f"{total}/999  🎉 {killed} 🫥 {no_tests}  ⏰ {timeout}  "
+        f"🤔 {suspicious}  🙁 {survived}  🔇 0  🧙 0\n"
+    )
 
 
 def _run(
@@ -150,8 +157,15 @@ def test_suspicious_and_timeout_never_inflate_score(tmp_path: Path) -> None:
     assert result["score"] == 50.0
 
 
+def test_mutants_without_tests_fail_as_uncovered(tmp_path: Path) -> None:
+    result = _run(tmp_path, _progress_line(killed=4, no_tests=1))
+
+    assert result["gate"] == {"passed": False, "reason": "uncovered_mutants"}
+    assert result["mutants"]["no_tests"] == 1
+
+
 def test_incomplete_run_fails_the_gate(tmp_path: Path) -> None:
-    result = _run(tmp_path, "3/10  🎉 3  ⏰ 0  🤔 0  🙁 0  🔇 0\n")
+    result = _run(tmp_path, "mutmut crashed before producing progress\n")
     assert result["gate"] == {"passed": False, "reason": "run_incomplete"}
     assert result["completed"] is False
 
@@ -349,13 +363,10 @@ class TestBudgetExceeded:
     workflow knows not to hand it to Codex (tests cannot kill a mutant
     that was never measured)."""
 
-    BUDGET_LINE = (
-        "mutation budget exceeded: src/lovspor/mcp.py after 1200s — "
-        "unmeasured mutants are untested, never killed\n"
-    )
+    BUDGET_LINE = "mutation budget exceeded: after 1200s — unmeasured mutants are untested\n"
 
     def test_budget_marker_fails_the_gate_with_its_own_reason(self, tmp_path: Path) -> None:
-        raw = "40/4000  🎉 38  ⏰ 0  🤔 0  🙁 2  🔇 0\n" + self.BUDGET_LINE
+        raw = _progress_line(killed=38, survived=2) + self.BUDGET_LINE
 
         result = _run(tmp_path, raw, tool_exit_code=18)
 
@@ -372,7 +383,7 @@ class TestBudgetExceeded:
         """The cut is the cause; the incomplete progress line is only its
         symptom — reporting run_incomplete would hide WHY from the human
         the PR escalates to."""
-        raw = "40/4000  🎉 40  ⏰ 0  🤔 0  🙁 0  🔇 0\n" + self.BUDGET_LINE
+        raw = _progress_line(killed=40) + self.BUDGET_LINE
 
         result = _run(tmp_path, raw, tool_exit_code=16)
 
@@ -396,7 +407,7 @@ class TestBudgetExceeded:
     def test_fatal_tool_exit_outranks_a_budget_marker(self, tmp_path: Path) -> None:
         """A marker already printed before a later tool failure cannot turn
         that fatal run into a valid budget verdict."""
-        raw = self.BUDGET_LINE + "error: mutmut result-ids failed on a later file\n"
+        raw = self.BUDGET_LINE + "error: mutmut results failed after the run\n"
 
         result = _run(tmp_path, raw, tool_exit_code=17)
 

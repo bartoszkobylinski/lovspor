@@ -26,15 +26,19 @@ PR opened/synchronize
 
 ## Mutation policy (unchanged, now automated)
 
-`scripts/mutmut-pr.sh <base-sha>` runs PR-scoped mutmut 2.5.1 exactly as before.
+`scripts/mutmut-pr.sh <base-sha>` runs mutmut 3.7.0 for functions changed by the PR.
+The script rebuilds the shadow tree for each run, then uses mutmut's warm baseline and
+parallel workers. Module-level or otherwise unsafe-to-narrow changes fall back to the
+affected module instead of being exempted.
 No numeric score threshold exists or was added. The gate in `mutation-result.json`:
 
 - `mutation not applicable` (no `src/lovspor/` changes) → **PASS**, reason `not_applicable`
 - everything killed → **PASS**
-- survived / timed-out / suspicious mutants each → **FAIL** (reasons `surviving_mutants`,
-  `timeout_mutants`, `suspicious_mutants`) — mirrors mutmut's own exit-code bits
-  (2/4/8 in `mutmut.compute_exit_code`); the score counts only 🎉 killed, so timeout and
-  suspicious never inflate it. Gate FAIL → Codex remediation (≤ 2 `[agent:codex-mutation]`
+- survived / timed-out / suspicious / uncovered mutants each → **FAIL** (reasons
+  `surviving_mutants`, `timeout_mutants`, `suspicious_mutants`, `uncovered_mutants`).
+  `mutmut-pr.sh` preserves the pipeline's existing 2/4/8 compatibility bitfield for
+  aggregate survivor/timeout/suspicious state; these are not mutmut 3 process exit codes.
+  The score counts only 🎉 killed, so other outcomes never inflate it. Gate FAIL → Codex remediation (≤ 2 `[agent:codex-mutation]`
   cycles) → then `needs-human:mutation` + BLOCKED. This automates the previous manual
   practice of Codex investigating survivors and proposing killer tests.
 
