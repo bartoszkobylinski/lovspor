@@ -15,6 +15,7 @@ from lovspor.temporal import (
     AmendmentEvent,
     InForceStatus,
     MarkerClass,
+    NeverInForceMarker,
     TemporalNotice,
     append_notice,
     build_notice,
@@ -166,6 +167,21 @@ class TestExtractEvents:
         ]
         assert {event.source_line for event in events} == {5}
 
+    def test_note_after_continuation_is_not_skipped(self) -> None:
+        markdown = (
+            "### § 3. Virkeområde\n\n"
+            "> Endret ved lov [1 januar 2020 nr. 1](lov/2020-01-01-1)\n"
+            "> (ikr. 2 januar 2020).\n"
+            "Mellomtekst.\n"
+            "> Endret ved lov [3 februar 2021 nr. 2](lov/2021-02-03-2) "
+            "(ikr. 4 mars 2021).\n"
+        )
+
+        assert [event.amending_act for event in extract_events(markdown)] == [
+            "1 januar 2020 nr. 1",
+            "3 februar 2021 nr. 2",
+        ]
+
     def test_announced_with_future_date(self) -> None:
         events = extract_events(_doc(DATED_FUTURE_NOTE))
         assert events[-1].announced is True
@@ -306,7 +322,23 @@ class TestNeverInForce:
         assert "ikke satt i kraft" in markers[0].text
 
     def test_note_lines_are_not_double_counted(self) -> None:
-        assert extract_never_in_force(_doc(PERIPHRASTIC_PENDING)) == []
+        markdown = "### § 1\n\n> Tredje ledd er ikke satt i kraft.\n"
+
+        assert extract_never_in_force(markdown) == []
+
+    def test_note_before_body_marker_does_not_stop_scan(self) -> None:
+        markdown = (
+            "### § 1\n\n"
+            "> Tredje ledd er ikke satt i kraft.\n"
+            "Brødtekst.\n"
+            "Fjerde ledd er ikke satt i kraft.\n"
+        )
+
+        markers = extract_never_in_force(markdown)
+
+        assert [(marker.text, marker.source_line) for marker in markers] == [
+            ("Fjerde ledd er ikke satt i kraft.", 5)
+        ]
 
     def test_nynorsk_marker_is_detected_case_insensitively(self) -> None:
         markdown = "### § 7. Ikraftsetjing\n\nAndre ledd er IKKJE SETT I KRAFT.\n"
@@ -403,6 +435,18 @@ class TestBuildNotice:
         assert notice is not None
         assert notice.never_in_force[0].provision == "§ 4-2"
 
+    def test_default_provision_does_not_replace_explicit_heading(self) -> None:
+        notice = build_notice(_doc(PERIPHRASTIC_PENDING), EVAL, default_provision="§ 4-2")
+
+        assert notice is not None
+        assert notice.events[0].provision == "§ 1"
+
+    def test_missing_default_keeps_document_level_provision(self) -> None:
+        notice = build_notice(PERIPHRASTIC_PENDING, EVAL)
+
+        assert notice is not None
+        assert notice.events[0].provision == "(document)"
+
 
 class TestRendering:
     def test_render_is_deterministic(self) -> None:
@@ -425,20 +469,193 @@ class TestRendering:
         assert appended.startswith(markdown)
         assert "Kongen bestemmer" in appended[len(markdown) :]
 
+    def test_render_notice_exact_contract_for_every_status(self) -> None:
+        notice = TemporalNotice(
+            evaluation_date=EVAL,
+            events=[
+                _event(
+                    MarkerClass.EXPLICIT_DATE,
+                    valid_from=date(2028, 1, 1),
+                    raw_marker="(i kraft 1 jan 2028)",
+                ),
+                _event(
+                    MarkerClass.EXPLICIT_DATE,
+                    valid_from=date(2020, 1, 1),
+                    announced=True,
+                    raw_marker="(ikr. [1 jan 2020](forskrift/2020-01-01-1))",
+                ),
+                _event(MarkerClass.PENDING_INDETERMINATE, announced=True),
+                _event(MarkerClass.RELATIVE, announced=True),
+                _event(MarkerClass.UNRECOGNISED, announced=True),
+                _event(MarkerClass.ABSENT, announced=True),
+            ],
+            never_in_force=[
+                NeverInForceMarker(
+                    provision="§ 2",
+                    text="Tredje ledd er ikke satt i kraft.",
+                    source_line=9,
+                )
+            ],
+        )
+
+        assert render_notice(notice) == (
+            "---\n\n"
+            "**Temporal notice — law not in force (evaluated 2026-08-14).**\n"
+            "The source marks the following as announced amendments or provisions not in force; "
+            "announced text is not part of the consolidated law above. The evaluation date is an "
+            "explicit input of this notice (ADR-0009 T0).\n\n"
+            "- § 1: amended by 1 jan 2020 nr. 1 (i kraft 1 jan 2028) — not in force at "
+            "2026-08-14\n"
+            "- § 1: announced amended by 1 jan 2020 nr. 1 (ikr. 1 jan 2020) — commencement "
+            "date has arrived at 2026-08-14; the consolidated text above may not yet reflect it\n"
+            "- § 1: announced amended by 1 jan 2020 nr. 1 — no commencement date exists "
+            "(pending_indeterminate)\n"
+            "- § 1: announced amended by 1 jan 2020 nr. 1 — commencement relative to another "
+            "instrument; no date derived\n"
+            "- § 1: announced amended by 1 jan 2020 nr. 1 — commencement marker not recognised; "
+            "no date derived\n"
+            "- § 1: announced amended by 1 jan 2020 nr. 1 — commencement not stated\n"
+            "- § 2: never brought into force — «Tredje ledd er ikke satt i kraft.»"
+        )
+
+    def test_append_notice_strips_only_trailing_document_whitespace(self) -> None:
+        markdown = "\n" + _doc(PERIPHRASTIC_PENDING) + " \n\n"
+
+        appended = append_notice(markdown, EVAL)
+
+        assert appended == f"{markdown.rstrip()}\n\n{_render(markdown)}\n"
+
+
+class TestParserHelpers:
+    def test_track_provision_recognises_sections_chapters_and_plain_text(self) -> None:
+        assert temporal._track_provision("### § 4-2. Virkeområde", "old") == "§ 4-2"
+        assert temporal._track_provision("## Kapittel 3. Regler", "old") == "Kapittel 3. Regler"
+        assert temporal._track_provision("Vanlig tekst", "old") == "old"
+
+    def test_collect_notes_returns_exact_blocks_and_source_lines(self) -> None:
+        lines = [
+            "## Kapittel 1. Innledning",
+            "### § 1. Formål",
+            "Tekst",
+            "> Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1)",
+            "> (ikr. 2 jan 2020).",
+            "Ettertekst",
+            "> Ikke en endringsnote.",
+        ]
+
+        assert temporal._collect_notes(lines) == [
+            (
+                4,
+                "§ 1",
+                "Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) (ikr. 2 jan 2020).",
+            )
+        ]
+
+    def test_note_block_stops_at_blank_quote_and_at_end(self) -> None:
+        assert temporal._note_block(["> first", "> second", ">", "> ignored"], 0) == (
+            2,
+            "first second",
+        )
+        assert temporal._note_block(["> first", "> second"], 0) == (2, "first second")
+
+    def test_marker_and_verb_helpers_return_exact_structures(self) -> None:
+        assert temporal._classify_marker("(se 1 jan 2028)") == (
+            MarkerClass.NOT_A_COMMENCEMENT_MARKER,
+            None,
+        )
+        assert temporal._classify_marker("(i kraft når vilkårene oppfylles)") == (
+            MarkerClass.UNRECOGNISED,
+            None,
+        )
+        assert temporal._classify_marker("(ikr. [2 jan 2020](forskrift/uten-dato))") == (
+            MarkerClass.EXPLICIT_DATE,
+            date(2020, 1, 2),
+        )
+        note = (
+            "Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) "
+            "(i kraft 2 jan 2020). **Oppheves** ved lov "
+            "[3 feb 2027 nr. 2](lov/2027-02-03-2)."
+        )
+        verbs = temporal._verbs_in(note)
+        assert verbs == [(0, "amended", False), (74, "repealed", True)]
+        assert temporal._verb_for(73, verbs) == ("amended", False)
+        assert temporal._verb_for(74, verbs) == ("repealed", True)
+
+    def test_verb_inside_marker_does_not_hide_later_governing_verb(self) -> None:
+        note = (
+            "Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) "
+            "(ikr. når ordlyden 'endret ved' tas i bruk). "
+            "**Oppheves** ved lov [3 feb 2027 nr. 2](lov/2027-02-03-2)."
+        )
+
+        assert temporal._verbs_in(note) == [
+            (0, "amended", False),
+            (97, "repealed", True),
+        ]
+
+    def test_link_parenthesis_helpers_preserve_positions(self) -> None:
+        text = "a [law](lov/2020-01-01-1) (outer (inner)) z"
+        masked, links = temporal._mask_links(text)
+
+        assert links == [(2, "law", "lov/2020-01-01-1")]
+        assert len(masked) == len(text)
+        assert masked[:2] == "a "
+        assert masked[25:] == " (outer (inner)) z"
+        assert temporal._top_level_spans(masked) == [(26, 41)]
+        assert temporal._inside(26, [(26, 41)]) is True
+        assert temporal._inside(40, [(26, 41)]) is True
+        assert temporal._inside(25, [(26, 41)]) is False
+        assert temporal._inside(41, [(26, 41)]) is False
+
+    def test_act_pairing_excludes_marker_links_and_supporting_links(self) -> None:
+        note = (
+            "Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) "
+            "(ikr. 2 jan 2020 iflg. [res. 2 jan](forskrift/2020-01-02-2)), "
+            "3 feb 2021 nr. 2 (ikr. 4 mars 2021), se "
+            "[Prop. 1 L](https://example.test/prop)."
+        )
+
+        acts, spans = temporal._find_acts(note)
+
+        assert acts == [(15, "1 jan 2020 nr. 1"), (114, "3 feb 2021 nr. 2")]
+        assert spans == [(52, 112), (131, 149)]
+        assert temporal._acts_and_markers(note) == [
+            (
+                15,
+                "1 jan 2020 nr. 1",
+                "(ikr. 2 jan 2020 iflg. [res. 2 jan](forskrift/2020-01-02-2))",
+            ),
+            (114, "3 feb 2021 nr. 2", "(ikr. 4 mars 2021)"),
+        ]
+
+    def test_unmarked_act_does_not_drop_later_marked_act(self) -> None:
+        note = (
+            "Endret ved lover [1 jan 2020 nr. 1](lov/2020-01-01-1), "
+            "[3 feb 2021 nr. 2](lov/2021-02-03-2) (ikr. 4 mars 2021)."
+        )
+
+        assert temporal._acts_and_markers(note) == [
+            (17, "1 jan 2020 nr. 1", None),
+            (55, "3 feb 2021 nr. 2", "(ikr. 4 mars 2021)"),
+        ]
+
 
 def _event(
     marker_class: MarkerClass,
     valid_from: date | None = None,
+    *,
+    announced: bool = False,
+    raw_marker: str | None = None,
 ) -> AmendmentEvent:
     return AmendmentEvent(
         provision="§ 1",
         scope="provision",
         kind="amended",
-        announced=False,
+        announced=announced,
         amending_act="1 jan 2020 nr. 1",
         marker_class=marker_class,
         valid_from=valid_from,
-        raw_marker=None,
+        raw_marker=raw_marker,
         source_line=1,
     )
 

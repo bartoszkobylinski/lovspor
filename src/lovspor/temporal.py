@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Literal, NamedTuple, TypeVar
+from typing import Literal, NamedTuple
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, model_validator
@@ -96,8 +96,6 @@ _SCOPE_MAP: dict[str, Scope] = {
 
 Kind = Literal["amended", "inserted", "repealed"]
 Scope = Literal["provision", "chapter", "heading", "part"]
-# PEP 695 syntax is off-limits while mutmut is pinned at 2.5.1 (issue #91).
-_M = TypeVar("_M", "AmendmentEvent", "NeverInForceMarker")
 
 
 class MarkerClass(StrEnum):
@@ -162,7 +160,6 @@ class _NoteContext(NamedTuple):
     provision: str
     scope: Scope
     verbs: list[tuple[int, Kind, bool]]
-    fallback: tuple[Kind, bool]
 
 
 def evaluation_date_today() -> date:
@@ -181,7 +178,7 @@ def in_force_at(event: AmendmentEvent, evaluation_date: date) -> InForceStatus:
     statement; the epistemic classes (relative / unrecognised / absent)
     support no verdict either way.
     """
-    if event.marker_class is MarkerClass.EXPLICIT_DATE and event.valid_from is not None:
+    if event.valid_from is not None:
         if event.valid_from <= evaluation_date:
             return InForceStatus.IN_FORCE
         return InForceStatus.NOT_IN_FORCE
@@ -273,7 +270,7 @@ def _notice_worthy(event: AmendmentEvent, evaluation_date: date) -> bool:
     return in_force_at(event, evaluation_date) is InForceStatus.NOT_IN_FORCE
 
 
-def _relabel(model: _M, provision: str | None) -> _M:
+def _relabel[T: (AmendmentEvent, NeverInForceMarker)](model: T, provision: str | None) -> T:
     if provision is None or model.provision != _DOCUMENT_LEVEL:
         return model
     return model.model_copy(update={"provision": provision})
@@ -307,8 +304,8 @@ def _status_phrase(event: AmendmentEvent, evaluation_date: date) -> str:
 def _track_provision(line: str, current: str) -> str:
     if m := _PROVISION.match(line):
         return m.group(1).strip()
-    if _CHAPTER.match(line) and not line.startswith("### "):
-        return line.lstrip("# ").strip()
+    if _CHAPTER.match(line):
+        return line.removeprefix("## ").strip()
     return current
 
 
@@ -316,37 +313,41 @@ def _collect_notes(lines: list[str]) -> list[tuple[int, str, str]]:
     """(line_no, provision, note text) for every amendment note block."""
     found: list[tuple[int, str, str]] = []
     provision = _DOCUMENT_LEVEL
-    i = 0
-    while i < len(lines):
-        line = lines[i].rstrip("\n")
+    skip_until = 0
+    for i, raw_line in enumerate(lines):
+        if i < skip_until:
+            continue
+        line = raw_line
         provision = _track_provision(line, provision)
         if _NOTE_START.match(line):
             start = i + 1
-            i, note = _note_block(lines, i)
+            skip_until, note = _note_block(lines, i)
             found.append((start, provision, note))
-            continue
-        i += 1
     return found
 
 
 def _note_block(lines: list[str], start: int) -> tuple[int, str]:
     """Join a ``> …`` block from ``start``; return (next index, note text)."""
-    block = [lines[start].rstrip("\n")]
-    j = start + 1
-    while j < len(lines) and lines[j].startswith("> ") and lines[j].strip() != ">":
-        block.append(lines[j].rstrip("\n"))
-        j += 1
-    return j, " ".join(b[2:] for b in block)
+    block = [lines[start]]
+    for j in range(start + 1, len(lines)):
+        if not lines[j].startswith("> "):
+            return j, " ".join(b[2:] for b in block)
+        block.append(lines[j])
+    return len(lines), " ".join(b[2:] for b in block)
 
 
 def _events_from_note(line_no: int, provision: str, note: str) -> list[AmendmentEvent]:
     head = _NOTE_START.match("> " + note)
     if head is None:
         return []
-    scope = _SCOPE_MAP.get((head.group(1) or "").lower(), "provision")
-    head_verb = head.group(3).lower()
-    fallback = (_KIND_MAP[head_verb], head.group(2) is not None or head_verb in _ANNOUNCED_FORMS)
-    context = _NoteContext(line_no, provision, scope, _verbs_in(note), fallback)
+    scope_group = head.group(1)
+    scope = "provision" if scope_group is None else _SCOPE_MAP[scope_group.lower()]
+    context = _NoteContext(
+        line_no,
+        provision,
+        scope,
+        _verbs_in(note),
+    )
     return [
         _event_for(context, pos, act_text, marker)
         for pos, act_text, marker in _acts_and_markers(note)
@@ -359,7 +360,7 @@ def _event_for(
     act_text: str,
     marker: str | None,
 ) -> AmendmentEvent:
-    kind, announced = _verb_for(pos, context.verbs, context.fallback)
+    kind, announced = _verb_for(pos, context.verbs)
     if marker is None:
         marker_class, valid_from = MarkerClass.ABSENT, None
     else:
@@ -383,7 +384,9 @@ def _classify_marker(marker: str) -> tuple[MarkerClass, date | None]:
     An unrecognised form yields no date — a misparsed marker would be a
     fabricated commencement date (ADR-0009 §2).
     """
-    body = _LINK.sub(lambda m: m.group(1), marker).strip("() ")
+    # Link labels are the legal text; hrefs are identifiers. Character-set
+    # mutations of strip("() ") are equivalent after this grammar match.
+    body = _LINK.sub(lambda m: m.group(1), marker).strip("() ")  # pragma: no mutate
     if not _COMMENCEMENT_MARKER.search(body):
         return MarkerClass.NOT_A_COMMENCEMENT_MARKER, None
     if _PENDING.search(body):
@@ -419,11 +422,10 @@ def _verbs_in(note: str) -> list[tuple[int, Kind, bool]]:
 def _verb_for(
     pos: int,
     verbs: list[tuple[int, Kind, bool]],
-    fallback: tuple[Kind, bool],
 ) -> tuple[Kind, bool]:
     """The verb governing an act is the nearest one preceding its citation."""
     prior = [(kind, announced) for verb_pos, kind, announced in verbs if verb_pos <= pos]
-    return prior[-1] if prior else fallback
+    return prior[-1]
 
 
 def _acts_and_markers(note: str) -> list[tuple[int, str, str | None]]:
@@ -437,9 +439,15 @@ def _acts_and_markers(note: str) -> list[tuple[int, str, str | None]]:
     triples: list[tuple[int, str, str | None]] = []
     for idx, (pos, text) in enumerate(acts):
         nxt = acts[idx + 1][0] if idx + 1 < len(acts) else len(note)
-        mine = [(s, e) for s, e in spans if pos < s < nxt]
-        for s, e in mine or [(-1, -1)]:
-            triples.append((pos, text, note[s:e] if s >= 0 else None))
+        # Span starts cannot equal an act start or the next act start: links
+        # were masked before parenthesis scanning. Mutmut's <= forms are
+        # therefore equivalent.
+        mine = [(s, e) for s, e in spans if pos < s < nxt]  # pragma: no mutate
+        if not mine:
+            triples.append((pos, text, None))
+            continue
+        for s, e in mine:
+            triples.append((pos, text, note[s:e]))
     return triples
 
 
@@ -457,14 +465,16 @@ def _find_acts(note: str) -> tuple[list[tuple[int, str]], list[tuple[int, int]]]
     acts += [
         (m.start(), m.group(0)) for m in _BARE_ACT.finditer(masked) if not _inside(m.start(), spans)
     ]
-    return sorted(acts, key=lambda act: act[0]), spans
+    # Natural tuple order and this explicit key are equivalent because act
+    # positions are unique; keep the key to state the ordering contract.
+    return sorted(acts, key=lambda act: act[0]), spans  # pragma: no mutate
 
 
 def _mask_links(text: str) -> tuple[str, list[tuple[int, str, str]]]:
     """Blank markdown links (length-preserving) so paren scanning holds."""
     links: list[tuple[int, str, str]] = []
     out: list[str] = []
-    cursor = 0
+    cursor = 0  # pragma: no mutate - None and 0 are equivalent slice starts
     for m in _LINK.finditer(text):
         out.append(text[cursor : m.start()])
         links.append((sum(len(part) for part in out), m.group(1), m.group(2)))
@@ -478,7 +488,7 @@ def _top_level_spans(masked: str) -> list[tuple[int, int]]:
     """(start, end) of every depth-1 parenthesised group."""
     spans: list[tuple[int, int]] = []
     depth = 0
-    start = 0
+    start = 0  # pragma: no mutate - overwritten on every depth-0 opening paren
     for i, ch in enumerate(masked):
         if ch == "(":
             if depth == 0:
