@@ -11,14 +11,22 @@ import pytest
 from pydantic import ValidationError
 
 from lovspor import temporal
+from lovspor.rendering.markdown_renderer import render_markdown
 from lovspor.temporal import (
     AmendmentEvent,
+    CommencementKind,
     InForceStatus,
     MarkerClass,
     NeverInForceMarker,
+    Provenance,
+    TemporalDerivationError,
     TemporalNotice,
+    TemporalProblemKind,
     append_notice,
     build_notice,
+    count_source_amendment_notes,
+    derive_temporal_layer,
+    derive_temporal_layer_from_source,
     evaluation_date_today,
     extract_events,
     extract_never_in_force,
@@ -313,6 +321,245 @@ class TestAmendmentEventValidation:
         with pytest.raises(ValidationError, match="valid_from is set exactly"):
             _event(MarkerClass.UNRECOGNISED, valid_from=EVAL)
 
+    def test_canonical_kind_must_match_structural_marker_class(self) -> None:
+        event = _event(MarkerClass.ABSENT)
+        data = event.model_dump()
+        data["commencement_kind"] = CommencementKind.DATED
+
+        with pytest.raises(ValidationError, match="commencement_kind must match"):
+            AmendmentEvent.model_validate(data)
+
+    def test_provenance_must_match_structural_marker_class(self) -> None:
+        event = _event(MarkerClass.ABSENT)
+        data = event.model_dump()
+        data["provenance"] = Provenance.SOURCE_EXPLICIT
+
+        with pytest.raises(ValidationError, match="provenance must match"):
+            AmendmentEvent.model_validate(data)
+
+
+class TestTemporalLayer:
+    def test_linked_event_carries_canonical_fact_and_provenance(self) -> None:
+        layer = derive_temporal_layer(
+            _doc(
+                "> Endret ved lov [21 juni 2019 nr. 24](lov/2019-06-21-24) "
+                "(ikr. 1 jan 2020 iflg. "
+                "[res. 21 juni 2019 nr. 806](forskrift/2019-06-21-806)).\n"
+            ),
+            document_ref="lov/2000-01-01-1",
+            expected_note_count=1,
+        )
+
+        assert layer.document_ref == "lov/2000-01-01-1"
+        assert layer.notes_seen == 1
+        assert layer.problems == []
+        assert len(layer.events) == 1
+        event = layer.events[0]
+        assert event.amending_act_ref == "lov/2019-06-21-24"
+        assert event.commencement_instrument == "forskrift/2019-06-21-806"
+        assert event.commencement_kind is CommencementKind.DATED
+        assert event.provenance is Provenance.SOURCE_EXPLICIT
+
+    def test_absent_marker_is_canonical_unknown_with_derived_provenance(self) -> None:
+        event = derive_temporal_layer(_doc(ABSENT_MARKER_NOTE)).events[0]
+
+        assert event.commencement_kind is CommencementKind.UNKNOWN
+        assert event.provenance is Provenance.DETERMINISTICALLY_DERIVED
+
+    def test_relative_marker_is_ambiguous_not_dated(self) -> None:
+        announced = derive_temporal_layer(_doc(COTIF_RELATIVE)).events[-1]
+
+        assert announced.commencement_kind is CommencementKind.AMBIGUOUS
+        assert announced.provenance is Provenance.SOURCE_EXPLICIT
+        assert announced.valid_from is None
+
+    def test_note_count_mismatch_fails_closed(self) -> None:
+        with pytest.raises(TemporalDerivationError, match="note count mismatch"):
+            derive_temporal_layer(_doc(PAST_DATED_NOTE), expected_note_count=2)
+
+    def test_unparsed_change_note_is_counted_and_preserved_as_problem(self) -> None:
+        markdown = "### § 4\n\n> Opphevet. Paragrafen lød før oppheving:\n>\n> Tidligere ordlyd.\n"
+
+        layer = derive_temporal_layer(markdown)
+
+        assert layer.notes_seen == 1
+        assert layer.events == []
+        assert [problem.kind for problem in layer.problems] == [
+            TemporalProblemKind.UNRECOGNISED_NOTE,
+            TemporalProblemKind.NO_AMENDING_ACT,
+        ]
+        assert "Tidligere ordlyd" in (layer.problems[0].raw_value or "")
+
+    def test_unrecognised_linked_note_never_disappears_silently(self) -> None:
+        markdown = "### § 4\n\n> Amended by [Protocol No. 14](lov/2005-06-10-49).\n"
+
+        layer = derive_temporal_layer(markdown)
+
+        assert layer.events == []
+        assert [problem.kind for problem in layer.problems] == [
+            TemporalProblemKind.UNRECOGNISED_NOTE
+        ]
+        assert "Protocol No. 14" in (layer.problems[0].raw_value or "")
+
+    def test_source_note_count_uses_changes_to_parent_class_token(self) -> None:
+        xml = b"""\
+<html><body>
+  <article class="legalArticle changesToParent">First</article>
+  <article class="changesToParent">Second</article>
+  <article class="changesToDocuments">Not a parent note</article>
+</body></html>
+"""
+
+        assert count_source_amendment_notes(xml) == 2
+
+    def test_source_note_count_rejects_malformed_xml(self) -> None:
+        with pytest.raises(TemporalDerivationError, match="malformed XML"):
+            count_source_amendment_notes(b"<html><article></html>")
+
+    def test_source_reconciled_derivation_uses_independent_xml_count(self) -> None:
+        xml = b'<html><article class="changesToParent">note</article></html>'
+
+        layer = derive_temporal_layer_from_source(
+            xml,
+            _doc(PAST_DATED_NOTE),
+            document_ref="lov/2020-01-01-1",
+        )
+
+        assert layer.document_ref == "lov/2020-01-01-1"
+        assert layer.notes_seen == 1
+        assert len(layer.events) == 1
+
+    def test_source_reconciled_derivation_fails_on_note_count_mismatch(self) -> None:
+        xml = b"<html/>"
+
+        with pytest.raises(TemporalDerivationError, match="note count mismatch"):
+            derive_temporal_layer_from_source(xml, _doc(PAST_DATED_NOTE))
+
+    def test_source_reconciled_derivation_forwards_non_strict_mode(self) -> None:
+        xml = b'<html><article class="changesToParent">note</article></html>'
+        note = (
+            "> Endres ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
+            "(i kraft når departementet bestemmer).\n"
+        )
+
+        layer = derive_temporal_layer_from_source(xml, _doc(note), strict=False)
+
+        assert layer.events[0].commencement_kind is CommencementKind.AMBIGUOUS
+        assert layer.problems[0].kind is TemporalProblemKind.UNRECOGNISED_MARKER
+
+    def test_source_xml_to_rendered_layer_reconciles_end_to_end(self) -> None:
+        xml = (
+            b'<!DOCTYPE html><html lang="nb"><body><main>'
+            b'<article class="legalArticle">'
+            b'<h3 class="legalArticleHeader"><span class="legalArticleValue">'
+            b"&#167; 1</span></h3>"
+            b'<article class="changesToParent">Endret ved lov '
+            b'<a href="lov/2020-01-01-1">1 januar 2020 nr. 1</a> '
+            b"(ikr. 2 januar 2020).</article>"
+            b"</article></main></body></html>"
+        )
+
+        layer = derive_temporal_layer_from_source(xml, render_markdown(xml))
+
+        assert layer.notes_seen == 1
+        assert layer.events[0].provision == "§ 1"
+        assert layer.events[0].amending_act_ref == "lov/2020-01-01-1"
+        assert layer.events[0].valid_from == date(2020, 1, 2)
+
+    def test_unrecognised_marker_fails_in_strict_mode(self) -> None:
+        note = (
+            "> Endres ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
+            "(i kraft når departementet bestemmer).\n"
+        )
+
+        with pytest.raises(TemporalDerivationError, match="unrecognised_marker"):
+            derive_temporal_layer(_doc(note))
+
+    def test_non_strict_mode_preserves_unrecognised_event_and_problem(self) -> None:
+        note = (
+            "> Endres ved lov [1 jan 2027 nr. 1](lov/2027-01-01-1) "
+            "(i kraft når departementet bestemmer).\n"
+        )
+
+        layer = derive_temporal_layer(_doc(note), strict=False)
+
+        assert len(layer.events) == 1
+        assert layer.events[0].commencement_kind is CommencementKind.AMBIGUOUS
+        assert [problem.kind for problem in layer.problems] == [
+            TemporalProblemKind.UNRECOGNISED_MARKER
+        ]
+
+    def test_mixed_kind_note_is_reported_but_resolved_per_act(self) -> None:
+        note = (
+            "> Tilføyd ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1). "
+            "**Oppheves** ved lov [2 feb 2027 nr. 2](lov/2027-02-02-2) "
+            "(i kraft fra den tid Kongen bestemmer).\n"
+        )
+
+        layer = derive_temporal_layer(_doc(note))
+
+        assert [event.kind for event in layer.events] == ["inserted", "repealed"]
+        assert [problem.kind for problem in layer.problems] == [TemporalProblemKind.MIXED_KIND_NOTE]
+
+    def test_unlinked_act_is_preserved_and_reported(self) -> None:
+        note = "> Endret ved lover 9 juni 2007 nr. 42 (ikr. 1 nov 2007).\n"
+
+        layer = derive_temporal_layer(_doc(note))
+
+        assert layer.events[0].amending_act_ref is None
+        assert [problem.kind for problem in layer.problems] == [
+            TemporalProblemKind.UNLINKED_ACT_REFERENCE
+        ]
+
+    def test_marker_before_act_is_preserved_as_audit_problem(self) -> None:
+        note = "> Endret ved (ikr. 2 jan 2020) lov [1 jan 2020 nr. 1](lov/2020-01-01-1).\n"
+
+        layer = derive_temporal_layer(_doc(note))
+
+        assert len(layer.events) == 1
+        assert layer.events[0].commencement_kind is CommencementKind.UNKNOWN
+        assert TemporalProblemKind.MARKER_BEFORE_ACT in {problem.kind for problem in layer.problems}
+
+    def test_duplicate_event_is_kept_and_reported(self) -> None:
+        markdown = _doc(PAST_DATED_NOTE) + "\n" + PAST_DATED_NOTE
+
+        layer = derive_temporal_layer(markdown)
+
+        assert len(layer.events) == 2
+        assert [problem.kind for problem in layer.problems] == [TemporalProblemKind.DUPLICATE_EVENT]
+
+    @pytest.mark.parametrize(
+        ("head", "scope"),
+        [
+            ("Føyd til", "provision"),
+            ("Overskrifta endra", "heading"),
+            ("Kapitteloverskrift endret", "chapter_heading"),
+            ("Avsnitt tilføyd", "paragraph"),
+            ("Kapittelet **endres** i sin helhet", "chapter"),
+        ],
+    )
+    def test_observed_scope_and_nynorsk_note_heads_are_parsed(
+        self,
+        head: str,
+        scope: str,
+    ) -> None:
+        note = f"> {head} ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) (ikr. 2 jan 2020).\n"
+
+        layer = derive_temporal_layer(_doc(note))
+
+        assert len(layer.events) == 1
+        assert layer.events[0].scope == scope
+        assert TemporalProblemKind.UNRECOGNISED_NOTE not in {
+            problem.kind for problem in layer.problems
+        }
+
+    def test_same_input_has_byte_identical_json(self) -> None:
+        first = derive_temporal_layer(_doc(DATED_FUTURE_NOTE), strict=False)
+        second = derive_temporal_layer(_doc(DATED_FUTURE_NOTE), strict=False)
+
+        assert first.schema_version == 1
+        assert first.model_dump_json() == second.model_dump_json()
+
 
 class TestNeverInForce:
     def test_body_marker_detected_and_attributed(self) -> None:
@@ -548,13 +795,14 @@ class TestParserHelpers:
                 4,
                 "§ 1",
                 "Endret ved lov [1 jan 2020 nr. 1](lov/2020-01-01-1) (ikr. 2 jan 2020).",
-            )
+            ),
+            (7, "§ 1", "Ikke en endringsnote."),
         ]
 
     def test_note_block_stops_at_blank_quote_and_at_end(self) -> None:
         assert temporal._note_block(["> first", "> second", ">", "> ignored"], 0) == (
-            2,
-            "first second",
+            4,
+            "first second  ignored",
         )
         assert temporal._note_block(["> first", "> second"], 0) == (2, "first second")
 
@@ -617,15 +865,19 @@ class TestParserHelpers:
 
         acts, spans = temporal._find_acts(note)
 
-        assert acts == [(15, "1 jan 2020 nr. 1"), (114, "3 feb 2021 nr. 2")]
+        assert acts == [
+            (15, "1 jan 2020 nr. 1", "lov/2020-01-01-1"),
+            (114, "3 feb 2021 nr. 2", None),
+        ]
         assert spans == [(52, 112), (131, 149)]
         assert temporal._acts_and_markers(note) == [
             (
                 15,
                 "1 jan 2020 nr. 1",
+                "lov/2020-01-01-1",
                 "(ikr. 2 jan 2020 iflg. [res. 2 jan](forskrift/2020-01-02-2))",
             ),
-            (114, "3 feb 2021 nr. 2", "(ikr. 4 mars 2021)"),
+            (114, "3 feb 2021 nr. 2", None, "(ikr. 4 mars 2021)"),
         ]
 
     def test_unmarked_act_does_not_drop_later_marked_act(self) -> None:
@@ -635,8 +887,8 @@ class TestParserHelpers:
         )
 
         assert temporal._acts_and_markers(note) == [
-            (17, "1 jan 2020 nr. 1", None),
-            (55, "3 feb 2021 nr. 2", "(ikr. 4 mars 2021)"),
+            (17, "1 jan 2020 nr. 1", "lov/2020-01-01-1", None),
+            (55, "3 feb 2021 nr. 2", "lov/2021-02-03-2", "(ikr. 4 mars 2021)"),
         ]
 
 
@@ -647,15 +899,33 @@ def _event(
     announced: bool = False,
     raw_marker: str | None = None,
 ) -> AmendmentEvent:
+    kind = {
+        MarkerClass.EXPLICIT_DATE: CommencementKind.DATED,
+        MarkerClass.PENDING_INDETERMINATE: CommencementKind.PENDING_INDETERMINATE,
+        MarkerClass.RELATIVE: CommencementKind.AMBIGUOUS,
+        MarkerClass.UNRECOGNISED: CommencementKind.AMBIGUOUS,
+        MarkerClass.NOT_A_COMMENCEMENT_MARKER: CommencementKind.UNKNOWN,
+        MarkerClass.ABSENT: CommencementKind.UNKNOWN,
+    }[marker_class]
+    provenance = (
+        Provenance.DETERMINISTICALLY_DERIVED
+        if marker_class in {MarkerClass.NOT_A_COMMENCEMENT_MARKER, MarkerClass.ABSENT}
+        else Provenance.SOURCE_EXPLICIT
+    )
     return AmendmentEvent(
         provision="§ 1",
         scope="provision",
         kind="amended",
         announced=announced,
         amending_act="1 jan 2020 nr. 1",
+        amending_act_ref="lov/2020-01-01-1",
         marker_class=marker_class,
+        commencement_kind=kind,
+        commencement_instrument=None,
+        provenance=provenance,
         valid_from=valid_from,
         raw_marker=raw_marker,
+        source_note="Endret ved lov 1 jan 2020 nr. 1.",
         source_line=1,
     )
 
