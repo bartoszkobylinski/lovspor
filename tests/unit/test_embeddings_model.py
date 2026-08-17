@@ -1,6 +1,5 @@
 import json
 import os
-from typing import ClassVar
 
 import httpx
 import numpy as np
@@ -34,7 +33,8 @@ class FakeModel:
 
 
 class FakeEncoding:
-    encode_calls: ClassVar[list[str]] = []
+    def __init__(self) -> None:
+        self.encode_calls: list[str] = []
 
     def encode(self, text: str) -> list[int]:
         self.encode_calls.append(text)

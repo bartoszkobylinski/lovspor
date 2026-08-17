@@ -217,7 +217,9 @@ jobs:
 
       - name: Collect survivor ids
         if: always()
-        run: uv run mutmut result-ids survived > survivors.txt 2>/dev/null || true
+        run: |
+          uv run mutmut results > mutation-results.txt 2>/dev/null || true
+          sed -n 's/^    \(.*\): survived$/\1/p' mutation-results.txt > survivors.txt
 
       - name: Build mutation-result.json
         if: always()

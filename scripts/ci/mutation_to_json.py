@@ -6,9 +6,9 @@ policy. `mutation_gate.py` just reads the result. Policy mirrors the existing
 lovspor practice (no numeric threshold was ever set, decisions.md §9c):
 
 - "mutation not applicable" (release/packaging/docs PRs) is a valid PASS outcome;
-- surviving, timed-out, and suspicious mutants each fail the gate, mirroring
-  mutmut's own exit-code bits (2 survived / 4 timeout / 8 suspicious — see
-  mutmut.compute_exit_code); survivors route the PR to Codex remediation and,
+- surviving, timed-out, suspicious, and uncovered mutants each fail the gate;
+- the wrapper preserves the pipeline's 2/4/8 compatibility bitfield for aggregate
+  survived / timeout / suspicious state; survivors route the PR to Codex remediation and,
   after two cycles, to a human — the automated form of "investigate survived
   mutants in critical paths" from AGENTS.md. Suspicious mutants are never
   folded into the killed count (CLAUDE.md testing strategy).
@@ -25,10 +25,10 @@ from typing import NamedTuple
 
 SCHEMA_VERSION = 1
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
-TOOL = "mutmut 2.5.1 (PR-scoped via scripts/mutmut-pr.sh)"
+TOOL = "mutmut 3.7.0 (function-scoped via scripts/mutmut-pr.sh)"
 
-# mutmut's verdict bitfield (0 clean; 2 survived / 4 timeout / 8 suspicious,
-# OR-combined) — exactly the codes mutmut-pr.sh itself treats as legal
+# The wrapper's compatibility bitfield (0 clean; 2 survived / 4 timeout /
+# 8 suspicious, OR-combined) — exactly the codes mutmut-pr.sh treats as legal
 # verdicts. Anything else (1 fatal, 3 "no score — do not report one") means
 # the tool itself failed and NO score exists — but a progress line from an
 # EARLIER file may still sit completed in the raw log, so without this check
@@ -37,8 +37,8 @@ TOOL = "mutmut 2.5.1 (PR-scoped via scripts/mutmut-pr.sh)"
 # Bit 16 is mutmut-pr.sh's own (issue #102): a per-file wall-clock budget
 # cut the run short. Still a legal verdict — the script harvested what was
 # measured — but the gate must read it as "surface not fully measured".
-_MUTMUT_VERDICTS = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
-ALLOWED_TOOL_EXIT_CODES = _MUTMUT_VERDICTS | frozenset(code | 16 for code in _MUTMUT_VERDICTS)
+_WRAPPER_VERDICTS = frozenset({0, 2, 4, 6, 8, 10, 12, 14})
+ALLOWED_TOOL_EXIT_CODES = _WRAPPER_VERDICTS | frozenset(code | 16 for code in _WRAPPER_VERDICTS)
 
 
 class RunHealth(NamedTuple):
@@ -51,13 +51,15 @@ class RunHealth(NamedTuple):
     budget_exceeded: bool
 
 
-# mutmut 2.x progress line, e.g.:  12/12  🎉 10  ⏰ 0  🤔 0  🙁 2  🔇 0
+# Mutmut 3 progress line. Its denominator is the package-wide population;
+# the numerator is the number measured by this function-scoped run.
 MUTMUT_LINE = re.compile(
-    r"(?P<done>\d+)/(?P<total>\d+)\s+🎉\s*(?P<killed>\d+)\s+⏰\s*(?P<timeout>\d+)"
-    r"\s+🤔\s*(?P<suspicious>\d+)\s+🙁\s*(?P<survived>\d+)\s+🔇\s*(?P<skipped>\d+)"
+    r"(?P<done>\d+)/(?P<all_mutants>\d+)\s+🎉\s*(?P<killed>\d+)\s+🫥\s*(?P<no_tests>\d+)"
+    r"\s+⏰\s*(?P<timeout>\d+)\s+🤔\s*(?P<suspicious>\d+)\s+🙁\s*(?P<survived>\d+)"
+    r"\s+🔇\s*(?P<skipped>\d+)\s+🧙\s*(?P<type_checked>\d+)"
 )
 NOT_APPLICABLE = "mutation not applicable:"
-BASELINE_FAILED = "failed when run without mutation"
+BASELINE_FAILURES = ("failed when run without mutation", "failed to run clean test")
 BUDGET_EXCEEDED = "mutation budget exceeded:"
 # The decisive raw-log line for a failing run: pytest's FAILED/ERROR or
 # mutmut-pr.sh's own `error:`. Three blocked runs in a row required digging
@@ -71,17 +73,21 @@ def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
     for m in MUTMUT_LINE.finditer(raw):
         last = {k: int(v) for k, v in m.groupdict().items()}
     if last is None:
-        empty = dict.fromkeys(("total", "killed", "survived", "timeout", "invalid", "skipped"), 0)
+        empty = dict.fromkeys(
+            ("total", "killed", "survived", "timeout", "invalid", "skipped", "no_tests"),
+            0,
+        )
         return empty, False
     counts = {
-        "total": last["total"],
+        "total": last["done"],
         "killed": last["killed"],
         "survived": last["survived"],
         "timeout": last["timeout"],
         "invalid": last["suspicious"],
         "skipped": last["skipped"],
+        "no_tests": last["no_tests"],
     }
-    return counts, last["done"] == last["total"] and last["total"] > 0
+    return counts, last["done"] > 0
 
 
 def parse_failure_hint(raw: str) -> str | None:
@@ -126,6 +132,7 @@ def compute_gate(counts: dict[str, int], health: RunHealth) -> dict[str, object]
         (counts["survived"] > 0 or bool(bits & 2), "surviving_mutants"),
         (counts["timeout"] > 0 or bool(bits & 4), "timeout_mutants"),
         (counts["invalid"] > 0 or bool(bits & 8), "suspicious_mutants"),
+        (counts.get("no_tests", 0) > 0, "uncovered_mutants"),
     )
     for failed, reason in failures:
         if failed:
@@ -148,7 +155,7 @@ def main() -> int:
 
     raw = args.raw.read_text(errors="replace") if args.raw.exists() else ""
     not_applicable = NOT_APPLICABLE in raw
-    baseline_ok = BASELINE_FAILED not in raw.lower()
+    baseline_ok = not any(marker in raw.lower() for marker in BASELINE_FAILURES)
     budget_exceeded = BUDGET_EXCEEDED in raw or bool(args.tool_exit_code & 16)
     counts, run_finished = parse_counts(raw)
     completed = not_applicable or run_finished
