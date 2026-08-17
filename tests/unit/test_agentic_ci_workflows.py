@@ -27,6 +27,36 @@ def _named_step(steps: list[dict[str, Any]], name: str) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("pr-pipeline.yml", "codex-tests", "Codex — independent PR test author"),
+        (
+            "mutation-remediation.yml",
+            "remediate",
+            "Codex — mutation remediation (tests only)",
+        ),
+    ],
+)
+def test_codex_account_homes_are_explicit_repository_configuration(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    job = _workflow(workflow_name)["jobs"][job_name]
+    command = _named_step(job["steps"], step_name)["run"].splitlines()
+
+    assert "CODEX_HOME" not in job["env"]
+    assert job["env"]["CODEX_PRIMARY_HOME"] == "${{ vars.CODEX_PRIMARY_HOME }}"
+    assert job["env"]["CODEX_SECONDARY_HOME"] == "${{ vars.CODEX_SECONDARY_HOME }}"
+    assert command.index(
+        ': "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"'
+    ) < command.index("python3 scripts/ci/codex_account_failover.py \\")
+    assert command.index(
+        ': "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"'
+    ) < command.index("python3 scripts/ci/codex_account_failover.py \\")
+    assert '  --primary-home "$CODEX_PRIMARY_HOME" \\' in command
+    assert '  --secondary-home "$CODEX_SECONDARY_HOME" \\' in command
+
+
+@pytest.mark.parametrize(
     ("workflow_name", "job_name", "condition"),
     [
         (
