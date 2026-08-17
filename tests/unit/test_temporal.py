@@ -197,6 +197,18 @@ class TestExtractEvents:
         assert events[0].marker_class is MarkerClass.NOT_A_COMMENCEMENT_MARKER
         assert events[0].valid_from is None
 
+    def test_prefixed_commencement_marker_is_pending_indeterminate(self) -> None:
+        note = (
+            "> Oppheves ved lov [19 juni 2009 nr. 100](lov/2009-06-19-100) "
+            "(nr. 9 oppheves, ikr. fra den tid Kongen bestemmer).\n"
+        )
+
+        events = extract_events(_doc(note))
+
+        assert len(events) == 1
+        assert events[0].marker_class is MarkerClass.PENDING_INDETERMINATE
+        assert events[0].valid_from is None
+
     def test_invalid_calendar_date_fails_loudly(self) -> None:
         # CPython's ValueError wording changed in 3.14 ("day is out of range
         # for month" -> "day 31 must be in range 1..28 for month 2 in year
