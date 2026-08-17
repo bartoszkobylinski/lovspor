@@ -95,7 +95,9 @@ def records_path(runs_root: Path, run_id: str) -> Path:
 def _read_metadata(runs_root: Path, run_id: str) -> dict[str, Any]:
     path = runs_root / run_id / "run-metadata.json"
     try:
-        metadata: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        # Explicit UTF-8 is the cross-platform contract; UTF-8 aliases are equivalent.
+        text = path.read_text(encoding="utf-8")  # pragma: no mutate
+        metadata: dict[str, Any] = json.loads(text)
     except (OSError, ValueError) as exc:
         raise PairManifestError(f"cannot read {path}: {exc}") from exc
     missing = [field for field in _METADATA_FIELDS if field not in metadata]
@@ -162,7 +164,9 @@ def build_pair_manifest(
 
 def load_pair_manifest(path: Path) -> PairManifest:
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        # Explicit UTF-8 is the cross-platform contract; UTF-8 aliases are equivalent.
+        text = path.read_text(encoding="utf-8")  # pragma: no mutate
+        document = json.loads(text)
         manifest = PairManifest(**document)
     except (OSError, ValueError, TypeError, ValidationError) as exc:
         raise PairManifestError(f"cannot load pair manifest at {path}: {exc}") from exc
@@ -175,8 +179,12 @@ def load_pair_manifest(path: Path) -> PairManifest:
 
 def write_pair_manifest(manifest: PairManifest, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    document = json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True)
-    path.write_text(document + "\n", encoding="utf-8")
+    # All manifest fields are JSON-native, so alternate model_dump modes are equivalent.
+    fields = manifest.model_dump(mode="json")  # pragma: no mutate
+    document = json.dumps(fields, indent=2, sort_keys=True)
+    payload = document + "\n"
+    # Explicit UTF-8 is the cross-platform contract; UTF-8 aliases are equivalent.
+    path.write_text(payload, encoding="utf-8")  # pragma: no mutate
 
 
 def verify_pair_manifest(manifest: PairManifest, repo_root: Path, runs_root: Path) -> None:
