@@ -722,10 +722,11 @@ def _problems_from_note(
 
 
 def _duplicate_problems(events: list[AmendmentEvent]) -> list[TemporalProblem]:
-    seen: set[tuple[str, str | None, date | None, Kind]] = set()
+    seen: set[tuple[str, str, date | None, Kind]] = set()
     problems: list[TemporalProblem] = []
     for event in events:
-        identity = (event.provision, event.amending_act_ref, event.valid_from, event.kind)
+        act_identity = event.amending_act_ref or event.amending_act
+        identity = (event.provision, act_identity, event.valid_from, event.kind)
         if identity in seen:
             problems.append(
                 _problem(
