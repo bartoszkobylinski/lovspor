@@ -40,6 +40,7 @@ def make_spec(**overrides: Any) -> RunSpec:
         "condition": "control",
         "system_prompt_text": PROMPT,
         "system_prompt_path": "benchmarks/llhb/runner/system-prompt-v1.txt",
+        "analysis_plan_sha256": "a" * 64,
         "lovspor_commit": "0" * 40,
         "lovverk_commit": "1" * 40,
         "runner_commit": "0" * 40,
@@ -158,6 +159,7 @@ class TestComposeRunMetadata:
         metadata = compose_run_metadata(make_spec(), [make_case("llhb-v1-C1-001")])
 
         assert metadata["system_prompt_sha256"] == hashlib.sha256(PROMPT.encode()).hexdigest()
+        assert metadata["analysis_plan_sha256"] == "a" * 64
         assert metadata["condition"] == "control"
         assert metadata["tool_config"] is None
         assert metadata["sampling"] == {"temperature": None}

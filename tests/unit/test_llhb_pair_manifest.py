@@ -38,12 +38,13 @@ def _git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def _metadata(prompt_sha256: str) -> dict[str, str]:
+def _metadata(prompt_sha256: str, analysis_plan_sha256: str) -> dict[str, str]:
     return {
         "llhb_version": "llhb-v1",
         "runner_commit": "b" * 40,
         "model_id": "claude-fable-5",
         "lovverk_commit": "c" * 40,
+        "analysis_plan_sha256": analysis_plan_sha256,
         "system_prompt_path": PROMPT_REL,
         "system_prompt_sha256": prompt_sha256,
     }
@@ -62,13 +63,14 @@ def repo(tmp_path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
     prompt_sha = file_sha256(root / PROMPT_REL)
+    analysis_plan_sha = file_sha256(root / PLAN_REL)
     runs = root / "benchmarks" / "llhb" / "results" / "runs"
     for run_id in RUN_IDS:
         run_dir = runs / run_id
         run_dir.mkdir(parents=True)
         (run_dir / "records.jsonl").write_text(f'{{"run": "{run_id}"}}\n', encoding="utf-8")
         (run_dir / "run-metadata.json").write_text(
-            json.dumps(_metadata(prompt_sha)), encoding="utf-8"
+            json.dumps(_metadata(prompt_sha, analysis_plan_sha)), encoding="utf-8"
         )
     _git(root, "init", "--quiet")
     _git(root, "config", "user.name", "Test")
@@ -195,6 +197,13 @@ class TestBuild:
         _git(repo, "commit", "--quiet", "-am", "prompt drift")
 
         with pytest.raises(PairManifestError, match=r"but the runs\s+recorded"):
+            _build(repo)
+
+    def test_plan_bytes_must_match_what_the_runs_recorded(self, repo: Path) -> None:
+        (repo / PLAN_REL).write_text("# different plan\n", encoding="utf-8")
+        _git(repo, "commit", "--quiet", "-am", "plan drift")
+
+        with pytest.raises(PairManifestError, match=r"but the runs recorded"):
             _build(repo)
 
 
