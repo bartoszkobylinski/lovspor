@@ -185,10 +185,10 @@ jobs:
       needs.codex-tests.result == 'success' &&
       needs.codex-tests.outputs.pushed != 'true'
     runs-on: ubuntu-latest
-    # Backstop over the script's own per-file budget (issue #102): the sum
-    # of file budgets plus setup must land well under this, so hitting it
-    # means the budget machinery itself failed — fail loudly, not at 6 h.
-    timeout-minutes: 45
+    # Backstop over the script's own per-file budget (issue #102). Two files
+    # can consume 40 minutes of mutation time, and harvesting the resulting
+    # cache also needs room to emit the explicit budget verdict artifact.
+    timeout-minutes: 60
     env:
       UV_PYTHON: "3.12"
     steps:
@@ -226,7 +226,7 @@ jobs:
             --commit "${{ github.event.pull_request.head.sha }}" \
             --raw mutation-raw.log \
             --survivors-file survivors.txt \
-            --tool-exit-code "${{ steps.mut.outputs.exit_code }}" \
+            --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
             --out mutation-result.json
 
       - name: Upload mutation artifact (PASS and FAIL)
