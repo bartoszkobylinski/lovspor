@@ -45,6 +45,9 @@ jobs:
 
   codex-tests:
     runs-on: [self-hosted, linux, codex]
+    concurrency:
+      group: lovspor-codex-subscription
+      cancel-in-progress: false
     # The runner holding Codex auth never executes fork code.
     if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:
@@ -52,7 +55,8 @@ jobs:
       pull-requests: write
       issues: write
     env:
-      CODEX_HOME: /home/runner/.codex-lovspor
+      CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
+      CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
       UV_PYTHON: "3.12"
     outputs:
       pushed: ${{ steps.push.outputs.pushed }}
@@ -85,9 +89,15 @@ jobs:
       - name: Codex — independent PR test author
         if: steps.antiloop.outputs.skip != 'true'
         run: |
-          codex exec \
-            --sandbox workspace-write \
-            "$(cat .github/codex/pr-tests.md)"
+          : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
+          : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
+          python3 scripts/ci/codex_account_failover.py \
+            --primary-home "$CODEX_PRIMARY_HOME" \
+            --secondary-home "$CODEX_SECONDARY_HOME" \
+            --threshold 95 \
+            -- codex exec \
+              --sandbox workspace-write \
+              "$(cat .github/codex/pr-tests.md)"
 
       # Mechanical guard after every Codex run. The prompt is not a boundary.
       - name: Scope guard

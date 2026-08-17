@@ -29,7 +29,8 @@ jobs:
       pull-requests: write
       issues: write
     env:
-      CODEX_HOME: /home/runner/.codex-lovspor
+      CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
+      CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
       UV_PYTHON: "3.12"
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -136,11 +137,17 @@ jobs:
         if: steps.cycle.outputs.run == 'true'
         run: |
           echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          codex exec \
-            --sandbox workspace-write \
-            "$(cat .github/codex/mutation-remediation.md)
+          : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
+          : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
+          python3 scripts/ci/codex_account_failover.py \
+            --primary-home "$CODEX_PRIMARY_HOME" \
+            --secondary-home "$CODEX_SECONDARY_HOME" \
+            --threshold 95 \
+            -- codex exec \
+              --sandbox workspace-write \
+              "$(cat .github/codex/mutation-remediation.md)
 
-          mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+              mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
 
       - name: Scope guard
         if: steps.cycle.outputs.run == 'true'
