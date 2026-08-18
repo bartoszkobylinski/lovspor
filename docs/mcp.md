@@ -95,6 +95,11 @@ Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_
    `lovspor fetch-corpus` any time to refresh (the engine re-syncs daily at
    04:00 UTC).
 
+   The shallow clone is enough for every current-law tool, but `get_law_at`
+   and `diff_law_versions` then reach only as far back as the clone does. Add
+   `--full-history` for the point-in-time tools — `uvx lovspor fetch-corpus
+   --full-history` — which also deepens an existing shallow cache in place.
+
    **Or clone it yourself** to a custom path you then pass via `--corpus-path`:
 
    ```bash
