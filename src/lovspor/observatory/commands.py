@@ -124,8 +124,12 @@ def activate_source(
         # way on purpose: neither is evidence that this source may be fetched.
         typer.echo(f"Refused: {exc}", err=True)
         raise typer.Exit(1) from exc
-    except FileNotFoundError as exc:
-        typer.echo(f"Refused: no access-policy check at {check}", err=True)
+    except OSError as exc:
+        # Absent, a directory, unreadable — every way the filesystem can fail
+        # to hand over the document ends the same way. None of them is
+        # evidence that this source may be fetched, and a traceback would say
+        # "bug" about what is an ordinary mistyped path.
+        typer.echo(f"Refused: cannot read the access-policy check at {check}: {exc}", err=True)
         raise typer.Exit(1) from exc
     _save({**registry.sources, authority_id: activated}, path)
     policy = activated.access_policy

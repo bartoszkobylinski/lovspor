@@ -241,6 +241,29 @@ class TestActivateSource:
         assert result.exit_code == 1
         assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
 
+    def test_a_check_path_that_is_a_directory_is_refused_not_crashed(self, root: Path) -> None:
+        """Every other malformed --check input in this class — missing,
+        unreadable JSON, a check that fails validation, a verdict that
+        refuses capture — ends in a clean "Refused: ..." message and exit
+        code 1, not an unhandled exception. A directory should be refused
+        the same way."""
+        _register()
+        check_dir = root / "a-directory"
+        check_dir.mkdir(parents=True)
+
+        result = runner.invoke(
+            app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check_dir)]
+        )
+
+        # Not `result.exception is None`: under click 8.4 every non-zero exit
+        # arrives here as SystemExit, so that assertion is unsatisfiable
+        # alongside exit_code == 1. What matters is the *kind* — a clean
+        # SystemExit rather than the IsADirectoryError this used to raise.
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
+        assert "Refused" in result.output
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
+
 
 class TestListSources:
     def test_an_empty_registry_says_so(self, root: Path) -> None:
@@ -270,6 +293,31 @@ class TestListSources:
         assert "[active]" in result.output
         assert "Bartosz Kobyliński" in result.output
         assert "7.0s" in result.output
+
+    def test_sources_are_listed_sorted_by_authority_id(self, root: Path) -> None:
+        for authority_id, name, domain in [
+            ("5001", "Trondheim", "trondheim.kommune.no"),
+            (BAERUM_ID, "Bærum", BAERUM_DOMAIN),
+        ]:
+            result = runner.invoke(
+                app,
+                [
+                    "observatory",
+                    "register-source",
+                    "--id",
+                    authority_id,
+                    "--name",
+                    name,
+                    "--domain",
+                    domain,
+                ],
+            )
+            assert result.exit_code == 0, result.output
+
+        result = runner.invoke(app, ["observatory", "sources"])
+
+        assert result.exit_code == 0
+        assert result.output.index(BAERUM_ID) < result.output.index("5001")
 
 
 class TestStorageBoundary:
