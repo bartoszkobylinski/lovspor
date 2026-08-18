@@ -1209,3 +1209,77 @@ class TestEquivalentRegister:
             assert mutation_gate.main() == 0
 
         assert "⚠ Refused register entry: m.py: missing justification" in capsys.readouterr().out
+
+    def test_a_zero_registered_count_prints_no_register_line(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The common case — no register, or one that matches nothing — must
+        stay silent rather than claim "Registered equivalents: 0"."""
+        result = _run(
+            tmp_path, _progress_line(killed=1, survived=1), survivors="x\n", tool_exit_code=2
+        )
+        assert result["equivalents"] == {"registered": 0, "refused": []}
+        out = tmp_path / "gate-input.json"
+        out.write_text(json.dumps(result))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        assert "Registered equivalents" not in capsys.readouterr().out
+
+    def test_a_missing_registered_field_still_applies_the_entry(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`registered` provenance is not in EQUIVALENT_FIELDS, so an entry
+        that omits it is still a valid waiver — it just renders with no
+        stamp, instead of being refused for a field the rules never require."""
+        entry = "\n".join(
+            line for line in MODEL_ENTRY.splitlines() if not line.startswith("registered =")
+        )
+        survivors = _survivor_line("m.x_record_to_json_line__mutmut_7", MODEL_FILE, MODEL_DIFF)
+        with _register(tmp_path, entry):
+            result = _run(
+                tmp_path, _progress_line(killed=1, survived=1), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"] == {"passed": True, "reason": "equivalent_mutants_only"}
+        assert result["equivalents"] == {"registered": 1, "refused": []}
+        [survivor] = result["survivors"]  # type: ignore[misc]
+        assert survivor["equivalent"]["registered"] == ""
+
+        out = tmp_path / "gate-input.json"
+        out.write_text(json.dumps(result))
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        captured = capsys.readouterr().out
+        assert "**equivalent**" in captured
+        assert "**equivalent**," not in captured
+
+    def test_check_equivalents_exits_zero_and_lists_each_entry(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The success path of `--check-equivalents`, not just its refusal path."""
+        with (
+            _register(tmp_path, MODEL_ENTRY),
+            pytest.MonkeyPatch.context() as mp,
+        ):
+            mp.setattr("sys.argv", ["mutation_to_json.py", "--check-equivalents"])
+            assert mutation_to_json.main() == 0
+
+        out = capsys.readouterr().out
+        assert f"registered: {MODEL_FILE} record_to_json_line" in out
+        assert "1 registered, 0 refused" in out
+
+    def test_missing_required_flags_without_check_equivalents_exits_two(self) -> None:
+        """`--commit`/`--raw`/`--tool-exit-code`/`--out` became optional flags
+        so `--check-equivalents` could stand alone; without that flag they are
+        still mandatory, enforced by hand now instead of by argparse."""
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_to_json.py"])
+            with pytest.raises(SystemExit) as exc_info:
+                mutation_to_json.main()
+
+        assert exc_info.value.code == 2
