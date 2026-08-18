@@ -16,6 +16,7 @@ from types import ModuleType
 
 import pytest
 from mutmut.__main__ import Config as MutmutConfig
+from mutmut.__main__ import copy_also_copy_files
 
 _SCRIPTS = Path(__file__).parents[2] / "scripts" / "ci"
 
@@ -1281,5 +1282,69 @@ class TestEquivalentRegister:
             mp.setattr("sys.argv", ["mutation_to_json.py"])
             with pytest.raises(SystemExit) as exc_info:
                 mutation_to_json.main()
-
         assert exc_info.value.code == 2
+
+
+class TestShadowTreeCarriesTheRegister:
+    """Issue #129: mutmut's clean baseline runs
+    test_check_equivalents_accepts_the_register_this_repo_ships against the
+    *shadow* tree, not the checkout — if mutation-equivalents.toml isn't
+    also_copy'd in there, that test fails, the baseline aborts, and every PR
+    touching src/lovspor/ reports tool_failed on a missing file rather than on
+    a real mutant."""
+
+    def test_the_repos_mutmut_config_also_copies_the_register(self) -> None:
+        """Locks pyproject.toml's [tool.mutmut] also_copy list: dropping
+        "mutation-equivalents.toml" from it reproduces issue #129."""
+        repo_root = Path(__file__).parents[2]
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(repo_root)
+            MutmutConfig.reset()
+            try:
+                also_copy = MutmutConfig.get().also_copy
+            finally:
+                MutmutConfig.reset()
+
+        assert Path("mutation-equivalents.toml") in also_copy
+
+    def test_also_copy_lands_the_register_inside_mutants(self, tmp_path: Path) -> None:
+        """Exercises mutmut's own copy_also_copy_files() the way the mutation
+        run does: also_copy naming a file is only useful if that file
+        actually ends up under mutants/."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.mutmut]\nsource_paths = ["src/pkg/"]\n'
+            'also_copy = ["mutation-equivalents.toml"]\n'
+        )
+        (tmp_path / "mutation-equivalents.toml").write_text("[[equivalent]]\n")
+        (tmp_path / "mutants").mkdir()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(tmp_path)
+            MutmutConfig.reset()
+            try:
+                copy_also_copy_files()
+            finally:
+                MutmutConfig.reset()
+
+        copied = tmp_path / "mutants" / "mutation-equivalents.toml"
+        assert copied.read_text() == "[[equivalent]]\n"
+
+    def test_also_copy_skips_a_register_that_does_not_exist(self, tmp_path: Path) -> None:
+        """copy_also_copy_files() silently no-ops on a missing source path —
+        confirms the fix relies on the file being present in the checkout,
+        not on mutmut inventing it."""
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.mutmut]\nsource_paths = ["src/pkg/"]\n'
+            'also_copy = ["mutation-equivalents.toml"]\n'
+        )
+        (tmp_path / "mutants").mkdir()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(tmp_path)
+            MutmutConfig.reset()
+            try:
+                copy_also_copy_files()
+            finally:
+                MutmutConfig.reset()
+
+        assert not (tmp_path / "mutants" / "mutation-equivalents.toml").exists()
