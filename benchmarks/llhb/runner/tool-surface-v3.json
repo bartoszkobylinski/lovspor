@@ -1,0 +1,25 @@
+{
+  "description": "Apparatus surface after the eu_basis coverage limit: the tool names and schema hash the local `lovspor mcp` server serves once get_eu_basis and search_eu_implementations state that an empty result is recorded-absence rather than evidence that no EU law is implemented (126 of 126 recorded eu_basis values are `lov`; no forskrift carries one). Tool NAMES are unchanged from v2 — only two descriptions differ, and descriptions are part of the served surface because the model reads them. Supersedes tool-surface-v2.json for FUTURE runs; v1 and v2 stay committed untouched because the runs that recorded their hashes must remain verifiable (pass --surface-path for a re-check against either). The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() on branch docs/eu-basis-scope (lovspor facdee7, the commit that changed the two descriptions)",
+  "python": "3.12",
+  "server": "lovverk",
+  "tool_schema_sha256": "1730f3fc209751d72e7dbca1903044565f6ef5a075c751a56a64aac59864a18f",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

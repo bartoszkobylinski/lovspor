@@ -27,7 +27,8 @@ freeze datasets, call models, or score runs.
 | `orchestrator.py` | Run orchestrator for both conditions: hermetic whitelist env (API key banned, HOME sandbox) and sandbox working directory, seeded case order, per-case CLI execution with timeout-as-result and bounded transient retry (issue #80), raw transcript retention, tool-payload spill, ResultsStore integration. Contract below. |
 | `mcp_surface.py` | Stage 6 treatment surface: `--mcp-config` document for the pinned lovverk stdio server, tool names + tool-schema SHA-256 read from the server itself, run-metadata `tool_config`. Contract below. |
 | `tool-surface-v1.json` | Frozen LLHB v1 apparatus surface: the tool names + schema hash the server served during the v1 runs. Kept committed untouched so the committed v1 pair stays verifiable: `check_fairness.py --surface-path runner/tool-surface-v1.json`. Superseded for future runs by v2 (below) when the ADR-0009 T0 serving notice changed the `get_law`/`get_section` descriptions — an explicit apparatus decision made after the v1 runs completed. |
-| `tool-surface-v2.json` | Current apparatus surface (post-T0): the expectation `check_fairness.py` compares a run's declared `tool_config` against by default. A unit test re-derives the names from the code on every interpreter and the hash on the apparatus interpreter (3.12, the CI leg pinned for it), so it cannot drift; a deliberate change to the served surface means regenerating it as an explicit apparatus decision. |
+| `tool-surface-v2.json` | Post-T0 apparatus surface, superseded for future runs by v3 (below) when the `get_eu_basis` / `search_eu_implementations` descriptions gained the coverage limit — an explicit apparatus decision taken before the ruling-#30 confirmatory run started, so no run spans it. Kept committed untouched: pass `--surface-path runner/tool-surface-v2.json` to re-verify a pair recorded under it. |
+| `tool-surface-v3.json` | Current apparatus surface: the expectation `check_fairness.py` compares a run's declared `tool_config` against by default. A unit test re-derives the names from the code on every interpreter and the hash on the apparatus interpreter (3.12, the CI leg pinned for it), so it cannot drift; a deliberate change to the served surface means regenerating it as an explicit apparatus decision. |
 | `fairness.py` | Stage 6 fairness checks over committed artifacts: metadata diff against an explicit may-differ list, paired case sets, per-record control/treatment violations. Contract below. |
 | `quote_detection.py` | Stage 8: purported-verbatim spans in an answer (SCORING.md §4) — quotation-mark channel + verbatim-cue channel («lyder: …»), sentence attachment; a mark anywhere in a cue window hands the material to the mark channel. Frozen `llhb-quote-detect-v1`. |
 | `disambiguation.py` | Stage 8 C5 detection (§5.5): frozen ambiguity-cue list + variant counting — chapters sharing one section id, each label paired with the § ids of its own sentence. Frozen `llhb-disambig-v1`. |
@@ -459,9 +460,9 @@ Driven by the Stage 3.5 human audit (see
   tests tie all three together, and one more asserts every tool
   `mcp_surface` actually serves satisfies that pattern. The declared
   surface itself is compared against a fact the run had no hand in:
-  `runner/tool-surface-v2.json` freezes the apparatus surface (the 16
+  `runner/tool-surface-v3.json` freezes the apparatus surface (the 16
   namespaced tool names and the tool-schema SHA-256 the pinned server
-  serves; v1 is the same document for the completed v1 runs),
+  serves; v1 and v2 are the same document for runs completed under them),
   `check_pair` requires it, and a treatment declaration that
   is not exactly that surface — or records a different schema hash —
   is a finding. The surface is a function of lovspor code and the
