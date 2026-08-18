@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from lxml import etree
 from pytest_httpx import HTTPXMock
 
 from lovspor.errors import ParseError, SourceNotActivatedError
@@ -22,6 +23,7 @@ from lovspor.observatory.discovery import (
     DISCOVERY_SITEMAP_INDEX,
     Discoverer,
     DiscoverySettings,
+    _local_name,
     parse_discovery_document,
 )
 from lovspor.observatory.fetch import CaptureSettings, Fetcher
@@ -148,6 +150,33 @@ class TestParseSitemap:
 
         assert [(link.url, link.is_nested_document) for link in links] == [(NESTED_URL, True)]
 
+    def test_a_sitemapindex_entry_captures_its_lastmod_resolved_against_the_document(
+        self,
+    ) -> None:
+        """Both the lastmod capture and the relative-loc resolution use the
+        index document as their base — a wrong base would leave the URL
+        relative, and a wrong lastmod lookup would leave it None."""
+        payload = (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<sitemapindex xmlns="{SITEMAP_NS}">'
+            f"<sitemap><loc>/sitemap-forskrifter.xml</loc>"
+            f"<lastmod>2026-08-01</lastmod></sitemap>"
+            f"</sitemapindex>"
+        ).encode()
+
+        links = parse_discovery_document(payload, INDEX_URL)
+
+        assert links[0].url == NESTED_URL
+        assert links[0].site_reported_lastmod == "2026-08-01"
+
+    def test_local_name_of_a_non_element_node_is_empty(self) -> None:
+        """A comment's tag is a callable, not a string; matching it against
+        "" (not an arbitrary placeholder) is what keeps it out of every
+        reader's descendant search."""
+        comment = etree.Comment("not an element")
+
+        assert _local_name(comment) == ""
+
     def test_a_sitemapindex_entry_with_an_empty_loc_is_dropped(self) -> None:
         payload = (
             f'<?xml version="1.0" encoding="UTF-8"?>'
@@ -179,8 +208,11 @@ class TestParseSitemap:
         assert [link.url for link in parse_discovery_document(payload, SITEMAP_URL)] == [PAGE_URL]
 
     def test_malformed_xml_is_a_parse_error(self) -> None:
-        with pytest.raises(ParseError):
+        with pytest.raises(ParseError) as exc_info:
             parse_discovery_document(b"<urlset><url>", SITEMAP_URL)
+
+        assert SITEMAP_URL in str(exc_info.value)
+        assert "malformed discovery document" in str(exc_info.value)
 
     def test_an_unrecognised_root_element_is_a_parse_error(self) -> None:
         with pytest.raises(ParseError, match="unrecognised"):
@@ -224,6 +256,36 @@ class TestParseCompressedSitemap:
         with pytest.raises(ParseError, match="unreadable"):
             parse_discovery_document(payload, SITEMAP_URL)
 
+    def test_decompression_exactly_at_the_limit_is_not_refused(self) -> None:
+        """The limit means strictly "exceeds": a document whose decompressed
+        size equals the limit is not a bomb and must still be read."""
+        body = _urlset(_url_entry(PAGE_URL))
+        payload = gzip.compress(body)
+
+        links = parse_discovery_document(payload, SITEMAP_URL, max_decompressed_bytes=len(body))
+
+        assert [link.url for link in links] == [PAGE_URL]
+
+    def test_decompression_reads_at_most_one_byte_over_the_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reading exactly one byte over the limit — never the whole stream —
+        is what lets a multi-gigabyte bomb be refused without buffering it
+        first."""
+        payload = gzip.compress(_urlset(_url_entry(PAGE_URL)))
+        reads: list[int | None] = []
+        original_read = gzip.GzipFile.read
+
+        def spy_read(self: gzip.GzipFile, size: int | None = -1) -> bytes:
+            reads.append(size)
+            return original_read(self, size)
+
+        monkeypatch.setattr(gzip.GzipFile, "read", spy_read)
+
+        parse_discovery_document(payload, SITEMAP_URL, max_decompressed_bytes=1024)
+
+        assert reads == [1025]
+
 
 class TestParseFeed:
     def test_atom_entries_yield_their_alternate_link(self) -> None:
@@ -249,6 +311,21 @@ class TestParseFeed:
             '<feed xmlns="http://www.w3.org/2005/Atom">'
             '<entry><link rel="enclosure" '
             'href="https://baerum.kommune.no/attachment.pdf"/></entry>'
+            f'<entry><link rel="alternate" href="{PAGE_URL}"/></entry>'
+            "</feed>"
+        ).encode()
+
+        links = parse_discovery_document(payload, FEED_URL)
+
+        assert [link.url for link in links] == [PAGE_URL]
+
+    def test_an_atom_alternate_link_without_an_href_is_dropped(self) -> None:
+        """A blank ``href`` must resolve to no link, not to a literal
+        placeholder string that then gets treated as a real, fetchable URL."""
+        payload = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            '<entry><link rel="alternate"/></entry>'
             f'<entry><link rel="alternate" href="{PAGE_URL}"/></entry>'
             "</feed>"
         ).encode()
@@ -308,6 +385,20 @@ class TestParseFeed:
         links = parse_discovery_document(payload, FEED_URL)
 
         assert links[0].site_reported_lastmod == "Sat, 01 Aug 2026 10:00:00 GMT"
+
+    def test_an_rss_item_link_may_be_relative_and_is_not_a_nested_document(self) -> None:
+        """An RSS item points at a page, not another feed to walk, and a
+        relative link is resolved against the feed it came from."""
+        payload = (
+            b'<?xml version="1.0"?><rss version="2.0"><channel>'
+            b"<item><link>/forskrifter/renovasjon</link></item>"
+            b"</channel></rss>"
+        )
+
+        links = parse_discovery_document(payload, FEED_URL)
+
+        assert links[0].url == PAGE_URL
+        assert links[0].is_nested_document is False
 
     def test_an_rss_item_without_a_link_is_dropped(self) -> None:
         payload = (
@@ -392,6 +483,44 @@ class TestDiscovery:
         ]
         assert methods == [DISCOVERY_ENTRY_POINT, DISCOVERY_SITEMAP_INDEX]
 
+    def test_a_relative_loc_in_a_nested_sitemap_resolves_against_that_sitemap(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The base for resolving a relative ``<loc>`` is the document it was
+        read from, not the original entry point — the wrong base would leave
+        the URL relative rather than raise, so only the resolved value shows
+        which one was used."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=INDEX_URL, content=_sitemapindex(NESTED_URL))
+        httpx_mock.add_response(
+            url=NESTED_URL, content=_urlset(_url_entry("/forskrifter/renovasjon"))
+        )
+        discoverer, source = _discoverer(log)
+
+        result = discoverer.discover(source, [INDEX_URL])
+
+        assert [c.url for c in result.candidates] == [PAGE_URL]
+
+    def test_a_gzip_compressed_document_is_decompressed_within_the_runs_byte_limit(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The run's configured byte limit must reach the decompressor, not a
+        hardcoded default — otherwise a source-specific cap would be silently
+        ignored for every gzip-served sitemap."""
+        _allow_robots(httpx_mock)
+        body = _urlset(_url_entry(PAGE_URL))
+        httpx_mock.add_response(url=SITEMAP_URL, content=gzip.compress(body))
+        discoverer, source = _discoverer(
+            log, DiscoverySettings(max_decompressed_bytes=len(body) - 1)
+        )
+
+        result = discoverer.discover(source, [SITEMAP_URL])
+
+        assert result.candidates == ()
+        assert [(s.url, s.reason) for s in result.skipped] == [
+            (SITEMAP_URL, "unparseable_document")
+        ]
+
     def test_a_feed_entry_point_marks_its_candidates_as_feed_found(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
@@ -419,8 +548,8 @@ class TestDiscovery:
         result = discoverer.discover(source, [SITEMAP_URL])
 
         assert [c.url for c in result.candidates] == [PAGE_URL]
-        assert [(s.url, s.reason) for s in result.skipped] == [
-            ("https://oslo.kommune.no/forskrift", "off_source_host")
+        assert [(s.url, s.reason, s.found_in) for s in result.skipped] == [
+            ("https://oslo.kommune.no/forskrift", "off_source_host", SITEMAP_URL)
         ]
         assert "oslo.kommune.no" not in "".join(str(r.url) for r in httpx_mock.get_requests())
 
@@ -483,7 +612,9 @@ class TestDiscovery:
         result = discoverer.discover(source, [INDEX_URL])
 
         assert result.documents_read == (INDEX_URL, NESTED_URL)
-        assert [(s.url, s.reason) for s in result.skipped] == [(SITEMAP_URL, "max_depth_exceeded")]
+        assert [(s.url, s.reason, s.found_in) for s in result.skipped] == [
+            (SITEMAP_URL, "max_depth_exceeded", NESTED_URL)
+        ]
 
     def test_the_document_budget_is_bounded(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -496,8 +627,8 @@ class TestDiscovery:
         result = discoverer.discover(source, [INDEX_URL])
 
         assert result.documents_read == (INDEX_URL, NESTED_URL)
-        assert [(s.url, s.reason) for s in result.skipped] == [
-            (SITEMAP_URL, "document_budget_exhausted")
+        assert [(s.url, s.reason, s.found_in) for s in result.skipped] == [
+            (SITEMAP_URL, "document_budget_exhausted", INDEX_URL)
         ]
 
     def test_a_failed_discovery_fetch_does_not_end_the_run(
@@ -512,8 +643,8 @@ class TestDiscovery:
         result = discoverer.discover(source, [INDEX_URL])
 
         assert [c.url for c in result.candidates] == [PAGE_URL]
-        assert [(s.url, s.reason) for s in result.skipped] == [
-            (NESTED_URL, "fetch_failed: http_404")
+        assert [(s.url, s.reason, s.found_in) for s in result.skipped] == [
+            (NESTED_URL, "fetch_failed: http_404", INDEX_URL)
         ]
         assert result.documents_read == (INDEX_URL, SITEMAP_URL)
 
@@ -531,7 +662,9 @@ class TestDiscovery:
         result = discoverer.discover(source, [INDEX_URL])
 
         assert [c.url for c in result.candidates] == [PAGE_URL]
-        assert [s.reason for s in result.skipped] == ["unparseable_document"]
+        assert [(s.reason, s.found_in) for s in result.skipped] == [
+            ("unparseable_document", INDEX_URL)
+        ]
         assert result.documents_read == (INDEX_URL, NESTED_URL, SITEMAP_URL)
 
     def test_a_duplicate_candidate_is_reported_once(
