@@ -229,6 +229,38 @@ def test_package_license_metadata_and_readme_agree_on_agpl_v3() -> None:
     assert "corpus data" in readme and "remains NLOD 2.0" in readme
 
 
+def test_engine_license_docs_do_not_regress_to_stale_mit_claims() -> None:
+    """The 2026-08-12 relicense (MIT -> AGPL-3.0, decisions.md §18) must stay
+    reflected in every doc that states the engine's current license.
+
+    Found stale: docs/mcp.md and docs/roadmap.md still asserted the engine
+    was MIT-licensed as current fact, weeks after pyproject.toml, LICENSE and
+    README had already moved to AGPL-3.0 and decisions.md §18 recorded the
+    change. Historical MIT mentions may stay per decisions.md's own
+    "supersede, don't delete" convention and roadmap.md's "Superseded" notes
+    — the regression this guards is the *current-state* claim drifting back
+    to MIT, or the §18 record disappearing.
+    """
+    mcp_doc = _MCP_DOC.read_text(encoding="utf-8")
+    roadmap = (_ROOT / "docs" / "roadmap.md").read_text(encoding="utf-8")
+    decisions = (_ROOT / "docs" / "decisions.md").read_text(encoding="utf-8")
+
+    # The exact stale claims this fix removed must never reappear verbatim.
+    assert "The engine is MIT-licensed" not in mcp_doc
+    assert "engine code (this repo) is MIT-licensed" not in mcp_doc
+    assert "open infrastructure: engine public under MIT," not in roadmap
+
+    # Each active surface must name the current license, not merely drop MIT.
+    assert mcp_doc.count("AGPL-3.0") >= 2  # distribution banner + license section
+    assert "AGPL-3.0" in roadmap
+
+    # decisions.md keeps historical MIT sentences by convention, so what must
+    # not regress is the relicense record and its supersession pointers.
+    assert "## 18. Engine relicensed MIT -> AGPL-3.0" in decisions
+    assert "**Superseded in part (2026-08-12):** the engine is no longer MIT" in decisions
+    assert "**Licence superseded 2026-08-12 — the engine is AGPL-3.0" in decisions
+
+
 def test_lockfile_matches_the_declared_mcp_cap_and_resolves_to_a_1x_release() -> None:
     lock = (_ROOT / "uv.lock").read_text(encoding="utf-8")
 
