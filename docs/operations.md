@@ -126,6 +126,62 @@ OPENAI_API_KEY=sk-...        # also accepts OPENAI_APIKEY for legacy configs
 
 Required for `lovspor sync` to write per-section embedding `.bin` files (Sprint 9), and for the MCP `semantic_search` tool to embed user queries at runtime. Without a key the engine still produces Markdown and runs the rest of the sync pipeline normally — the only casualty is that `.bin` files for documents added or changed in this run will not be written, and the next sync with a key set picks them up via the Sprint 9 backfill migration. Missing key in the MCP server disables only `semantic_search` and leaves the other fifteen tools working normally. Cost is fractions of a cent per query and ~$5-15/year for the production sync cadence — see [`docs/embeddings.md`](embeddings.md) for the model choice rationale.
 
+## Observatory: registering a capture source (ADR-0010)
+
+Capture is refused until a named human has checked the source's `robots.txt`
+and terms and recorded what they concluded. That is two commands, and the gap
+between them is deliberate.
+
+The registry lives under `LOVSPOR_OBSERVATORY_ROOT`, which must point outside
+this repository and outside the `lovverk` corpus. There is no flag to override
+it — a flag would be a one-word way to write access-policy records into a
+published repository.
+
+```bash
+export LOVSPOR_OBSERVATORY_ROOT=~/lovspor-observatory
+
+# 1. Eligible: an official municipal site. Nothing may fetch it yet.
+uv run lovspor observatory register-source \
+  --id 3201 --name "Bærum" --domain baerum.kommune.no --type kommune
+```
+
+Then read the source's `robots.txt` and its terms of use, and write down what
+you concluded. The check is a document rather than a set of flags because it
+has to answer "why was this activated?" months later:
+
+```json
+{
+  "checked_at": "2026-08-18T17:00:00Z",
+  "robots_txt_url": "https://www.baerum.kommune.no/robots.txt",
+  "robots_allows": true,
+  "terms_reviewed": true,
+  "terms_permit_capture": true,
+  "terms_url": "https://www.baerum.kommune.no/personvern/",
+  "rate_limit_seconds": 7.0,
+  "user_agent": "lovspor-observatory/0.1 (+https://lovspor.no/observatory)",
+  "reviewed_by": "Your Name",
+  "note": "What you actually found, including what you could not find."
+}
+```
+
+`terms_reviewed` and `terms_permit_capture` are separate on purpose: the first
+says someone read the terms, the second says what they concluded. Collapsing
+them would let "I read the terms and they prohibit automated access" clear a
+source for crawling. A document asserting the second without the first is
+rejected.
+
+```bash
+# 2. Activated: capture is now permitted, under the recorded rate limit.
+uv run lovspor observatory activate-source --id 3201 --check ./baerum-check.json
+
+uv run lovspor observatory sources
+```
+
+Set `rate_limit_seconds` to at least the source's own `Crawl-delay` when it
+declares one. Permission to fetch is still not permission to redistribute —
+ADR-0010 §5 and §6 keep republication behind a separate per-source licensing
+basis that no command here can satisfy.
+
 ## Scheduled runs (production)
 
 `.github/workflows/sync.yml` runs daily at **04:00 UTC (~05:00–06:00 CET)** — about 2.5 hours after Lovdata's nightly tarball drop at ~01:30 UTC. Manual reruns are available via the **Actions → Sync legal corpus → Run workflow** button on GitHub.

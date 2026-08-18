@@ -29,8 +29,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from lovspor.atomic_io import atomic_write_text
 from lovspor.errors import ParseError, SourceNotActivatedError
 from lovspor.observatory.model import AuthorityType, require_utc
+from lovspor.observatory.storage import ObservatoryRoot
 
 REGISTRY_VERSION: Literal[1] = 1
+REGISTRY_FILENAME = "sources.json"
 
 # ADR-0010 §4 forbids crawling or mass-downloading lovdata.no outright: its
 # terms prohibit massenedlasting, and the canonical corpus depends on that
@@ -240,3 +242,40 @@ def write_registry(registry: SourceRegistry, path: Path) -> None:
         registry.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False
     )
     atomic_write_text(path, text + "\n")
+
+
+def registry_path(root: ObservatoryRoot) -> Path:
+    """Where the source registry lives inside a validated observatory root.
+
+    The registry holds no observed bytes, but it does hold the access-policy
+    checks, and those belong with the archive they authorise rather than in a
+    published repository. Taking an :class:`ObservatoryRoot` rather than a
+    bare path means the ADR-0010 §5 boundary has already been checked.
+    """
+    return root.path / REGISTRY_FILENAME
+
+
+def read_access_policy_check(path: Path) -> AccessPolicyCheck:
+    """Load a reviewer's access-policy check from a JSON document.
+
+    The check is a document rather than a handful of command-line flags on
+    purpose. It records a human decision about someone else's server, it has
+    to stay readable months later when the question is *why* a source was
+    activated, and a conclusion typed into a shell leaves nothing to re-read.
+
+    Validation is the model's, so a document claiming ``terms_permit_capture``
+    without ``terms_reviewed`` is refused here exactly as it would be in code.
+
+    Raises:
+        FileNotFoundError: ``path`` does not exist.
+        ParseError: the file is not valid UTF-8 JSON or does not match the
+            access-policy schema.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ParseError(f"{path}: unreadable access-policy check: {exc}") from exc
+    try:
+        return AccessPolicyCheck.model_validate(data)
+    except ValidationError as exc:
+        raise ParseError(f"{path}: invalid access-policy check: {exc}") from exc
