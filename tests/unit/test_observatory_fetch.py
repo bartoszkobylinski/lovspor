@@ -209,6 +209,23 @@ class TestRobotsGate:
         assert isinstance(result, FetchFailure)
         assert result.outcome == "robots_disallowed"
 
+    def test_an_unreachable_robots_file_is_still_cached_and_not_refetched(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The cache stores the denial itself, not just an allow: a second
+        capture against a host whose robots.txt is unreachable must not retry
+        that request, or a struggling server gets hit once per capture
+        instead of once per run."""
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=503)
+        fetcher = _fetcher(log)
+
+        first = fetcher.capture(PAGE_URL, "sitemap")
+        second = fetcher.capture(PAGE_URL, "sitemap")
+
+        assert isinstance(first, FetchFailure)
+        assert isinstance(second, FetchFailure)
+        assert [r.url for r in httpx_mock.get_requests()].count(ROBOTS_URL) == 1
+
     def test_a_rule_naming_this_crawler_binds_it_over_the_wildcard(
         self, httpx_mock: HTTPXMock
     ) -> None:
