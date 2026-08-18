@@ -14,7 +14,7 @@ import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
-from lovspor.errors import ParseError
+from lovspor.errors import ParseError, SourceNotActivatedError
 from lovspor.observatory.discovery import (
     DISCOVERY_ENTRY_POINT,
     DISCOVERY_FEED,
@@ -148,6 +148,19 @@ class TestParseSitemap:
 
         assert [(link.url, link.is_nested_document) for link in links] == [(NESTED_URL, True)]
 
+    def test_a_sitemapindex_entry_with_an_empty_loc_is_dropped(self) -> None:
+        payload = (
+            f'<?xml version="1.0" encoding="UTF-8"?>'
+            f'<sitemapindex xmlns="{SITEMAP_NS}">'
+            f"<sitemap><loc></loc></sitemap>"
+            f"<sitemap><loc>{NESTED_URL}</loc></sitemap>"
+            f"</sitemapindex>"
+        ).encode()
+
+        links = parse_discovery_document(payload, INDEX_URL)
+
+        assert [link.url for link in links] == [NESTED_URL]
+
     def test_a_sitemap_without_a_namespace_is_still_read(self) -> None:
         """Municipal CMS exports omit or misdeclare the namespace; the element
         names are the signal, not the declaration."""
@@ -202,6 +215,15 @@ class TestParseCompressedSitemap:
         with pytest.raises(ParseError, match="decompressed"):
             parse_discovery_document(bomb, SITEMAP_URL, max_decompressed_bytes=64 * 1024)
 
+    def test_a_truncated_gzip_payload_is_a_parse_error(self) -> None:
+        """The gzip magic bytes are intact but the stream ends early — a
+        different failure than malformed XML, and it must not be read as an
+        empty document."""
+        payload = gzip.compress(_urlset(_url_entry(PAGE_URL)))[:-5]
+
+        with pytest.raises(ParseError, match="unreadable"):
+            parse_discovery_document(payload, SITEMAP_URL)
+
 
 class TestParseFeed:
     def test_atom_entries_yield_their_alternate_link(self) -> None:
@@ -216,6 +238,86 @@ class TestParseFeed:
 
     def test_rss_items_yield_their_link_text(self) -> None:
         links = parse_discovery_document(_rss(PAGE_URL), FEED_URL)
+
+        assert [link.url for link in links] == [PAGE_URL]
+
+    def test_an_atom_entry_without_an_alternate_link_is_dropped(self) -> None:
+        """An enclosure is not the entry's own page; with no alternate link
+        the entry has nothing discovery can propose."""
+        payload = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            '<entry><link rel="enclosure" '
+            'href="https://baerum.kommune.no/attachment.pdf"/></entry>'
+            f'<entry><link rel="alternate" href="{PAGE_URL}"/></entry>'
+            "</feed>"
+        ).encode()
+
+        links = parse_discovery_document(payload, FEED_URL)
+
+        assert [link.url for link in links] == [PAGE_URL]
+
+    def test_an_atom_link_without_a_rel_attribute_is_treated_as_alternate(self) -> None:
+        payload = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            f'<entry><link href="{PAGE_URL}"/></entry>'
+            "</feed>"
+        ).encode()
+
+        links = parse_discovery_document(payload, FEED_URL)
+
+        assert [link.url for link in links] == [PAGE_URL]
+
+    def test_an_atom_entry_skips_a_non_alternate_link_before_the_alternate_one(self) -> None:
+        payload = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            "<entry>"
+            '<link rel="self" href="https://baerum.kommune.no/feed.atom"/>'
+            f'<link rel="alternate" href="{PAGE_URL}"/>'
+            "</entry>"
+            "</feed>"
+        ).encode()
+
+        links = parse_discovery_document(payload, FEED_URL)
+
+        assert [link.url for link in links] == [PAGE_URL]
+
+    def test_atom_entries_capture_their_updated_timestamp(self) -> None:
+        payload = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<feed xmlns="http://www.w3.org/2005/Atom">'
+            f'<entry><link rel="alternate" href="{PAGE_URL}"/>'
+            "<updated>2026-08-01T10:00:00Z</updated></entry>"
+            "</feed>"
+        ).encode()
+
+        links = parse_discovery_document(payload, FEED_URL)
+
+        assert links[0].site_reported_lastmod == "2026-08-01T10:00:00Z"
+
+    def test_rss_items_capture_their_pubdate(self) -> None:
+        payload = (
+            '<?xml version="1.0"?><rss version="2.0"><channel>'
+            f"<item><link>{PAGE_URL}</link>"
+            "<pubDate>Sat, 01 Aug 2026 10:00:00 GMT</pubDate></item>"
+            "</channel></rss>"
+        ).encode()
+
+        links = parse_discovery_document(payload, FEED_URL)
+
+        assert links[0].site_reported_lastmod == "Sat, 01 Aug 2026 10:00:00 GMT"
+
+    def test_an_rss_item_without_a_link_is_dropped(self) -> None:
+        payload = (
+            '<?xml version="1.0"?><rss version="2.0"><channel>'
+            "<item><title>no link here</title></item>"
+            f"<item><link>{PAGE_URL}</link></item>"
+            "</channel></rss>"
+        ).encode()
+
+        links = parse_discovery_document(payload, FEED_URL)
 
         assert [link.url for link in links] == [PAGE_URL]
 
@@ -445,6 +547,46 @@ class TestDiscovery:
 
         assert [c.url for c in result.candidates] == [PAGE_URL]
         assert [(s.url, s.reason) for s in result.skipped] == [(PAGE_URL, "duplicate_candidate")]
+
+    def test_an_entry_point_with_no_host_is_skipped_as_off_source(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """``https:///path`` has an allowed scheme but no host at all —
+        ``capture_host`` refuses it, and that refusal must read as an ordinary
+        off-source skip, not an unhandled exception."""
+        discoverer, source = _discoverer(log)
+
+        result = discoverer.discover(source, ["https:///no-host/sitemap.xml"])
+
+        assert result.documents_read == ()
+        assert [s.reason for s in result.skipped] == ["off_source_host"]
+        assert httpx_mock.get_requests() == []
+
+    def test_discovery_raises_when_the_source_is_not_activated(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Discovery must not swallow the fetcher's activation gate: a source
+        without a recorded access-policy check is a configuration error, and
+        nothing about it should be observed."""
+        source = SourceRecord(
+            authority_type="kommune",
+            authority_id=BAERUM_ID,
+            name="Bærum",
+            canonical_domain=BAERUM_DOMAIN,
+        )
+        fetcher = Fetcher(
+            SourceRegistry(sources={BAERUM_ID: source}),
+            log,
+            httpx.Client(),
+            CaptureSettings(now=lambda: OBSERVED_AT, sleep=lambda _: None),
+        )
+        discoverer = Discoverer(fetcher, log)
+
+        with pytest.raises(SourceNotActivatedError):
+            discoverer.discover(source, [SITEMAP_URL])
+
+        assert httpx_mock.get_requests() == []
+        assert list(log.records()) == []
 
     def test_the_same_input_discovers_the_same_thing_twice(
         self, log: ObservationLog, httpx_mock: HTTPXMock
