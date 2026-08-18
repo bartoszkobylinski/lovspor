@@ -26,3 +26,22 @@ def atomic_write_text(path: Path, text: str, *, encoding: str = "utf-8") -> None
     except OSError:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """Write ``payload`` to ``path`` atomically via a sibling temp file.
+
+    Byte counterpart of :func:`atomic_write_text`, with the same guarantees.
+    Used by the observatory blob store, where the stored object is a captured
+    HTTP body — arbitrary bytes that must never be decoded, normalised or
+    re-encoded on the way to disk (ADR-0010 §2: raw bytes exactly as
+    received).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    try:
+        tmp.write_bytes(payload)
+        tmp.replace(path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
