@@ -34,6 +34,10 @@ BAERUM_ID = "3201"
 BAERUM_DOMAIN = "baerum.kommune.no"
 PAGE_URL = f"https://{BAERUM_DOMAIN}/forskrifter/renovasjon"
 ROBOTS_URL = f"https://{BAERUM_DOMAIN}/robots.txt"
+OSLO_ID = "0301"
+OSLO_DOMAIN = "oslo.kommune.no"
+OSLO_URL = f"https://{OSLO_DOMAIN}/forskrift"
+OSLO_ROBOTS_URL = f"https://{OSLO_DOMAIN}/robots.txt"
 USER_AGENT = "lovspor-observatory/0.1 (+https://lovspor.no/observatory)"
 OBSERVED_AT = datetime(2026, 8, 18, 10, 30, tzinfo=UTC)
 PAYLOAD = "Forskrift om renovasjon, Bærum kommune. Æ Ø Å".encode()
@@ -60,6 +64,27 @@ def _registry(rate_limit_seconds: float = 2.0) -> SourceRegistry:
         canonical_domain=BAERUM_DOMAIN,
     )
     return SourceRegistry(sources={BAERUM_ID: activate(source, _policy(rate_limit_seconds))})
+
+
+def _two_host_registry(rate_limit_seconds: float = 2.0) -> SourceRegistry:
+    baerum = SourceRecord(
+        authority_type="kommune",
+        authority_id=BAERUM_ID,
+        name="Bærum",
+        canonical_domain=BAERUM_DOMAIN,
+    )
+    oslo = SourceRecord(
+        authority_type="kommune",
+        authority_id=OSLO_ID,
+        name="Oslo",
+        canonical_domain=OSLO_DOMAIN,
+    )
+    return SourceRegistry(
+        sources={
+            BAERUM_ID: activate(baerum, _policy(rate_limit_seconds)),
+            OSLO_ID: activate(oslo, _policy(rate_limit_seconds)),
+        }
+    )
 
 
 class _Clock:
@@ -199,6 +224,23 @@ class TestRobotsGate:
         assert gate.allows(PAGE_URL, USER_AGENT) is False
         assert gate.allows(PAGE_URL, "some-other-bot/1.0") is True
 
+    def test_capture_checks_robots_against_the_registered_user_agent(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The registered user agent, not some other one, is what robots.txt
+        rules are matched against: checking the wrong agent (or none at all)
+        would let a rule written for this crawler go unenforced."""
+        httpx_mock.add_response(
+            url=ROBOTS_URL,
+            text="User-agent: *\nDisallow: /forskrifter/\n\n"
+            "User-agent: lovspor-observatory\nAllow: /\n",
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+
 
 class TestPoliteness:
     def test_the_second_fetch_waits_the_registered_interval(
@@ -301,6 +343,27 @@ class TestRecordedObservation:
 
         page_request = next(r for r in httpx_mock.get_requests() if str(r.url) == PAGE_URL)
         assert page_request.headers["User-Agent"] == USER_AGENT
+
+    def test_the_user_agent_header_name_keeps_its_canonical_casing(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The header name itself, not just its value, is part of what is
+        sent on the wire."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+
+        _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        page_request = next(r for r in httpx_mock.get_requests() if str(r.url) == PAGE_URL)
+        assert (b"User-Agent", USER_AGENT.encode()) in page_request.headers.raw
+
+    def test_the_page_is_fetched_with_get(self, log: ObservationLog, httpx_mock: HTTPXMock) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, method="GET", content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
 
     def test_only_allowlisted_headers_are_recorded(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -405,14 +468,20 @@ class TestFailuresAreObservations:
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
         """Partial bytes with a hash of their own would be evidence of
-        something the source never served."""
+        something the source never served. The status and headers that came
+        back before the cap was hit are still real observations and belong
+        in the failure record, not blanked out."""
         _allow_robots(httpx_mock)
-        httpx_mock.add_response(url=PAGE_URL, content=b"x" * 5000)
+        httpx_mock.add_response(
+            url=PAGE_URL, content=b"x" * 5000, headers={"Content-Type": "text/plain"}
+        )
 
         result = _fetcher(log).capture(PAGE_URL, "sitemap", "baerum_html")
 
         assert isinstance(result, FetchFailure)
         assert result.outcome == "response_exceeded_max_bytes"
+        assert result.http_status == 200
+        assert result.http_headers.get("content-type") == "text/plain"
         assert log.stored_hashes() == frozenset()
 
     def test_a_response_exactly_at_the_cap_is_kept(
@@ -508,6 +577,21 @@ class TestRobotsStatusBoundaries:
         assert isinstance(result, FetchFailure)
         assert result.outcome == "robots_disallowed"
 
+    def test_a_robots_status_at_the_client_error_threshold_is_no_rules_published(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """At exactly 400 the body is a 4xx error page, not a rules document:
+        reading it as one would let an arbitrary directive on an error page
+        block a capture that should be allowed."""
+        httpx_mock.add_response(
+            url=ROBOTS_URL, status_code=400, text="User-agent: *\nDisallow: /\n"
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+
 
 class TestBodyCapBoundary:
     def test_a_response_one_byte_over_the_cap_is_discarded(
@@ -533,6 +617,69 @@ class TestRateLimiterBoundary:
 
         assert waited == 0.0
         assert clock.slept == []
+
+    def test_a_sub_one_second_remainder_still_triggers_a_wait(self) -> None:
+        """A remainder between 0 and 1 second is still a positive wait: a
+        fencepost of ``> 1`` instead of ``> 0`` would silently skip it."""
+        clock = _Clock()
+        limiter = RateLimiter(_settings(clock))
+
+        limiter.wait("example.invalid", 5.0)
+        clock.value += 4.5
+        waited = limiter.wait("example.invalid", 5.0)
+
+        assert waited == 0.5
+        assert clock.slept == [0.5]
+
+
+class TestRateLimiterHostKey:
+    def test_two_different_hosts_are_not_cross_rate_limited(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The limiter keys on the real hostname; collapsing every host onto
+        one shared key would make an unrelated source's rate limit bleed into
+        this one's very first request."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=OSLO_ROBOTS_URL, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        httpx_mock.add_response(url=OSLO_URL, content=PAYLOAD)
+        clock = _Clock()
+        fetcher = Fetcher(_two_host_registry(5.0), log, httpx.Client(), _settings(clock))
+
+        fetcher.capture(PAGE_URL, "sitemap")
+        fetcher.capture(OSLO_URL, "sitemap")
+
+        assert clock.slept == []
+
+
+class TestTimeoutIsHonored:
+    """A missing or ``None`` timeout would leave the crawler hanging
+    indefinitely against a stalled endpoint, so the configured value must
+    reach both the robots.txt request and the page request."""
+
+    def test_the_robots_request_uses_the_configured_timeout(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        settings = CaptureSettings(timeout_seconds=12.5, max_bytes=1024)
+
+        Fetcher(_registry(), log, httpx.Client(), settings).capture(PAGE_URL, "sitemap")
+
+        robots_request = next(r for r in httpx_mock.get_requests() if str(r.url) == ROBOTS_URL)
+        assert robots_request.extensions["timeout"] == httpx.Timeout(12.5).as_dict()
+
+    def test_the_page_request_uses_the_configured_timeout(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        settings = CaptureSettings(timeout_seconds=12.5, max_bytes=1024)
+
+        Fetcher(_registry(), log, httpx.Client(), settings).capture(PAGE_URL, "sitemap")
+
+        page_request = next(r for r in httpx_mock.get_requests() if str(r.url) == PAGE_URL)
+        assert page_request.extensions["timeout"] == httpx.Timeout(12.5).as_dict()
 
 
 class TestHeaderAllowlist:
