@@ -202,3 +202,19 @@ def test_frozen_finding_fails_the_gate_even_when_the_pair_itself_is_fair(
     output = capsys.readouterr().out
     assert "UNFAIR: 1 finding(s)" in output
     assert "treatment is off the frozen pin" in output
+
+
+def test_surface_path_default_is_the_v3_document_and_it_loads(tmp_path: Path) -> None:
+    """SURFACE_PATH moved from v2 to v3 in this change; a stale or missing
+
+    pointer would only surface at CLI runtime (--surface-path defaults to
+    it), since every other test here mocks ``load_expected_surface`` away.
+    This reads the real, unmocked default file the way `main()` does.
+    """
+    assert check_fairness.SURFACE_PATH.name == "tool-surface-v3.json"
+
+    committed = json.loads(check_fairness.SURFACE_PATH.read_text(encoding="utf-8"))
+    expected = check_fairness.load_expected_surface(check_fairness.SURFACE_PATH)
+
+    assert expected.tools == tuple(committed["tools"])
+    assert expected.tool_schema_sha256 == committed["tool_schema_sha256"]

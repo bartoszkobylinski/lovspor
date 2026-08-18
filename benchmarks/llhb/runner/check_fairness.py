@@ -44,7 +44,7 @@ SCHEMA_DIR = LLHB_DIR / "schema"
 # get_law/get_section descriptions). The committed LLHB v1 pair recorded the
 # v1 hash — re-verifying it needs ``--surface-path`` pointed at v1, which
 # stays committed untouched.
-SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v2.json"
+SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v3.json"
 FROZEN_DIR = LLHB_DIR / "dataset" / "frozen"
 FROZEN_CASES_PATH = FROZEN_DIR / "llhb-v1.jsonl"
 FROZEN_LOCK_PATH = FROZEN_DIR / "llhb-v1.lock.json"
@@ -70,7 +70,8 @@ def parse_args() -> argparse.Namespace:
         default=SURFACE_PATH,
         help="apparatus surface document to compare declarations against "
         "(default: the current apparatus; pass runner/tool-surface-v1.json "
-        "to re-verify the committed LLHB v1 pair)",
+        "or runner/tool-surface-v2.json to re-verify a pair recorded under "
+        "an earlier surface)",
     )
     return parser.parse_args()
 

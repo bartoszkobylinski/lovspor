@@ -254,7 +254,7 @@ class TestToolConfig:
         assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
-        """tool-surface-v2.json is the expectation check_fairness compares a
+        """tool-surface-v3.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
         re-derived here on every run. Two corpora with disjoint content are
         the witness that the surface comes from build_server, not from the
@@ -280,17 +280,28 @@ class TestToolConfig:
 
         v1 -> v2 (2026-08-14): the ADR-0009 T0 serving notice changed the
         get_law/get_section descriptions, an explicit apparatus decision
-        made after the LLHB v1 runs completed. tool-surface-v1.json stays
-        committed untouched so the committed v1 pair remains verifiable
-        (check_fairness --surface-path); this test guards the CURRENT
-        apparatus, which v2 describes."""
+        made after the LLHB v1 runs completed.
+
+        v2 -> v3 (2026-08-18): get_eu_basis and search_eu_implementations
+        now state that an empty result is recorded-absence, not evidence
+        that no EU law is implemented — no forskrift in the corpus carries
+        an eu_basis, so the old wording invited the model to conclude the
+        opposite about 87% of the corpus. Tool NAMES are unchanged; two
+        descriptions are, and descriptions are served surface. Taken before
+        the ruling-#30 confirmatory run starts, so no run spans the change;
+        ANALYSIS-PLAN-fable5-v1.md binds the treatment arm to "the committed
+        apparatus document current at run time", which v3 now is.
+
+        v1 and v2 stay committed untouched so the runs that recorded their
+        hashes remain verifiable (check_fairness --surface-path); this test
+        guards the CURRENT apparatus, which v3 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v2.json"
+                / "tool-surface-v3.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (

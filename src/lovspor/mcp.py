@@ -3802,6 +3802,15 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         (e.g. ``["32016R0679", "32014L0090"]``). Empty list when the
         act has no EEA references in Lovdata's source XML.
 
+        COVERAGE LIMIT — an empty ``eu_basis`` means no EU basis is
+        recorded for this document; it is never evidence that the
+        document implements no EU law. The value is extracted from the
+        ``eeaReferences`` block of the source XML, and in the current
+        corpus every document that has one is a ``lov``: no
+        ``forskrift`` carries an ``eu_basis`` at all, though many cite
+        EU documents inline in their text. For regulations, read the
+        text with ``get_law`` instead of trusting this field.
+
         CELEX format: ``3<year><type-letter><number>`` — type letter
         ``R`` for regulation, ``L`` for directive, ``D`` for decision,
         etc. Example: ``32016R0679`` is Regulation 2016/679 (GDPR);
@@ -3829,8 +3838,13 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
 
         Returns one row per implementing current act: ``slug``,
         ``doc_id``, ``title``, ``dataset``. Sorted by slug for stable
-        output. Empty list when no current act references the given
-        CELEX.
+        output. Empty list when no current act records the given CELEX.
+
+        COVERAGE LIMIT — this index is built from the same recorded
+        ``eu_basis`` values as ``get_eu_basis``, and in the current
+        corpus no ``forskrift`` has one. An empty result therefore does
+        not establish that no Norwegian regulation implements the given
+        EU document.
 
         Use the returned slugs with ``get_law`` or ``get_section`` to
         fetch the implementing text.
