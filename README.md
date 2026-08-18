@@ -14,7 +14,7 @@ MCP client) tools to search it, quote it, and verify citations against the real 
 Once connected, your assistant answers from the live corpus instead of stale training data:
 
 - *"What changed in skatteloven this year?"*
-- *"What did husleieloven § 9-6 say in May 2026?"* — full version history since April 2026, diffable between any two tracked dates
+- *"What did husleieloven § 9-6 say in May 2026?"* — full version history since April 2026, diffable between any two tracked dates (fetch the corpus with `--full-history`, see below)
 - *"Does this paragraph exist?"* — `validate_citation` answers instead of guessing
 - *"Is this quote verbatim?"* — `verify_quote` checks it against the actual text
 
@@ -45,6 +45,18 @@ Other MCP clients (Claude Desktop's `claude_desktop_config.json`, etc.):
 
 Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen tools
 work immediately — no key, and no network access beyond your local corpus clone.
+
+**The point-in-time tools need the full history.** `fetch-corpus` clones shallow
+(`--depth 1`) by default, which keeps the download small and is enough for every
+current-law tool. On a shallow clone, `get_law_at` and `diff_law_versions` reach only as
+far back as the clone does. Fetch it whole instead:
+
+```bash
+uvx lovspor fetch-corpus --full-history
+```
+
+The same flag deepens an existing shallow clone in place (`git fetch --unshallow`), so this
+is not a decision you have to get right the first time.
 
 Full setup guide, all sixteen tools with examples, troubleshooting and limitations:
 [`docs/mcp.md`](docs/mcp.md).
