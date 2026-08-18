@@ -154,6 +154,70 @@ def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
     assert checkout["if"] == "steps.gate.outputs.run == 'true'"
 
 
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("pr-pipeline.yml", "codex-tests", "Codex — independent PR test author"),
+        ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
+    ],
+)
+def test_author_falls_back_to_claude_only_when_every_codex_account_is_limited(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    """Exit 75 (EX_TEMPFAIL) is the failover script's 'no account below the
+    threshold' signal — only THAT routes to the Claude fallback; any other
+    failure stays fatal, and a successful Codex run records author=codex."""
+    job = _workflow(workflow_name)["jobs"][job_name]
+    author = _named_step(job["steps"], step_name)
+    run = author["run"]
+
+    assert author["id"] == "author"
+    assert author["env"]["CLAUDE_TESTS_OAUTH_TOKEN"] == "${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}"
+    assert author["env"]["CLAUDE_TESTS_MODEL"] == "${{ vars.CLAUDE_TESTS_MODEL }}"
+    assert 'if [ "$status" -eq 75 ]; then' in run
+    assert "scripts/ci/claude_test_author.sh" in run
+    assert 'echo "author=claude" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "author=codex" >> "$GITHUB_OUTPUT"' in run
+    assert 'exit "$status"' in run
+
+
+def test_commit_markers_name_the_actual_author() -> None:
+    """A Claude-written commit stamped [agent:codex-…] would be fabricated
+    provenance; the marker interpolates the author step's output."""
+    pr_push = _named_step(
+        _steps("pr-pipeline.yml", "codex-tests"), "Commit and push test additions"
+    )["run"]
+    rem_push = _named_step(
+        _steps("mutation-remediation.yml", "remediate"), "Commit and push, or report BLOCKED"
+    )["run"]
+
+    assert "[agent:${{ steps.author.outputs.author || 'codex' }}-tests]" in pr_push
+    assert "[agent:${{ steps.author.outputs.author || 'codex' }}-mutation]" in rem_push
+
+
+def test_antiloop_and_cycle_counting_recognise_the_claude_markers() -> None:
+    """A fallback-authored HEAD must not retrigger test generation, and a
+    Claude remediation commit must count toward the two-cycle limit —
+    otherwise the fallback author gets unlimited cycles."""
+    antiloop = _named_step(_steps("pr-pipeline.yml", "codex-tests"), "Anti-loop check")["run"]
+    cycle = _named_step(
+        _steps("mutation-remediation.yml", "remediate"), "Resolve PR number and remediation cycle"
+    )["run"]
+
+    assert r"\[agent:(codex|claude)-(tests|mutation)\]" in antiloop
+    assert '*"[agent:claude-mutation]"*' in cycle
+    assert '*"[agent:claude-tests]"*' in cycle
+
+
+def test_remediation_fallback_hands_claude_the_same_prompt_as_codex() -> None:
+    run = _named_step(
+        _steps("mutation-remediation.yml", "remediate"), "Codex — mutation remediation (tests only)"
+    )["run"]
+
+    assert "cat .github/codex/mutation-remediation.md" in run
+    assert "remediation-prompt.md" in run
+
+
 def test_codex_test_failure_is_not_hidden_by_tee() -> None:
     steps = _steps("pr-pipeline.yml", "codex-tests")
     pytest_step = _named_step(steps, "Run tests on Codex additions")

@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import IO, Any
 
 MAX_PERCENT = 100.0
+# EX_TEMPFAIL: every Codex account is at/above the threshold. Distinct from
+# the wrapped command's own exit codes so the workflow can route THIS case —
+# and only this case — to the tertiary (non-Codex) test author.
+NO_ACCOUNT_EXIT = 75
 
 
 class RateLimitError(RuntimeError):
@@ -199,7 +203,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except RateLimitError as error:
         print(error, file=sys.stderr)
-        return 1
+        return NO_ACCOUNT_EXIT
 
     environment = os.environ.copy()
     environment["CODEX_HOME"] = str(codex_home)

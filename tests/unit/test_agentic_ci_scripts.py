@@ -28,6 +28,7 @@ def _load(name: str) -> ModuleType:
 
 mutation_to_json = _load("mutation_to_json")
 mutation_gate = _load("mutation_gate")
+codex_account_failover = _load("codex_account_failover")
 
 FULL_SHA = "a" * 40
 SCOPE_GUARD = _SCRIPTS / "assert_codex_scope.sh"
@@ -497,3 +498,76 @@ class TestFailureHint:
             assert mutation_gate.main() == 0
         captured = capsys.readouterr()  # type: ignore[attr-defined]
         assert "Hint:" not in captured.out
+
+
+class TestClaudeFallback:
+    """The tertiary test author: both Codex accounts limited -> a separate,
+    non-Fable Claude writes the tests. The refusal paths run for real —
+    each one is a way the fallback could silently do the wrong thing
+    (wrong model, per-token billing, missing CLI)."""
+
+    SCRIPT = _SCRIPTS / "claude_test_author.sh"
+
+    def _run_script(self, tmp_path: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        prompt = tmp_path / "prompt.md"
+        prompt.write_text("write tests\n")
+        # PATH without the real `claude` binary, so the CLI check is testable
+        # on a developer machine that has it installed.
+        base = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+        return subprocess.run(
+            ["bash", str(self.SCRIPT), str(prompt)],
+            env=base | env,
+            check=False,
+            text=True,
+            capture_output=True,
+        )
+
+    def test_refuses_a_fable_model(self, tmp_path: Path) -> None:
+        result = self._run_script(
+            tmp_path,
+            {"CLAUDE_TESTS_MODEL": "claude-fable-5", "CLAUDE_TESTS_OAUTH_TOKEN": "sk-ant-oat-x"},
+        )
+        assert result.returncode == 2
+        assert "must not be" in result.stderr
+
+    def test_refuses_a_missing_token(self, tmp_path: Path) -> None:
+        result = self._run_script(tmp_path, {"CLAUDE_TESTS_MODEL": "claude-sonnet-5"})
+        assert result.returncode == 2
+        assert "CLAUDE_TESTS_OAUTH_TOKEN is not set" in result.stderr
+
+    def test_refuses_a_per_token_api_key(self, tmp_path: Path) -> None:
+        result = self._run_script(
+            tmp_path,
+            {"CLAUDE_TESTS_MODEL": "claude-sonnet-5", "CLAUDE_TESTS_OAUTH_TOKEN": "sk-ant-api03-x"},
+        )
+        assert result.returncode == 2
+        assert "bill per token" in result.stderr
+
+    def test_refuses_when_the_cli_is_absent(self, tmp_path: Path) -> None:
+        result = self._run_script(
+            tmp_path,
+            {"CLAUDE_TESTS_MODEL": "claude-sonnet-5", "CLAUDE_TESTS_OAUTH_TOKEN": "sk-ant-oat-x"},
+        )
+        assert result.returncode == 2
+        assert "claude CLI is not installed" in result.stderr
+
+    def test_strips_per_token_credentials_from_the_child_environment(self) -> None:
+        text = self.SCRIPT.read_text(encoding="utf-8")
+        assert "env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN" in text
+
+
+class TestFailoverExitCode:
+    def test_no_available_account_exits_75(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """75 (EX_TEMPFAIL) is the routing signal for the Claude fallback;
+        exit 1 would be indistinguishable from the wrapped command failing."""
+
+        def _exhausted(*_args: object, **_kwargs: object) -> object:
+            raise codex_account_failover.RateLimitError("all accounts at 100%")
+
+        monkeypatch.setattr(codex_account_failover, "choose_home", _exhausted)
+
+        code = codex_account_failover.main(
+            ["--primary-home", "a", "--secondary-home", "b", "--", "echo", "x"]
+        )
+
+        assert code == codex_account_failover.NO_ACCOUNT_EXIT == 75
