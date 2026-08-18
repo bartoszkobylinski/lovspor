@@ -81,3 +81,56 @@ class MassRemovalError(LovsporError):
     scheduled workflow auto-push the wipe), the sync aborts. When a large
     removal is genuinely correct, re-run with a higher removal ratio.
     """
+
+
+class ObservatoryError(LovsporError):
+    """Base for the local-law temporal observatory (ADR-0010).
+
+    A separate branch of the hierarchy because the observatory is a separate
+    collection trust domain: it may fail, retry and hold uncertain material
+    without any of that reaching the deterministic central pipeline.
+    """
+
+
+class StorageBoundaryError(ObservatoryError):
+    """Observatory storage was pointed inside a repository it must stay out of.
+
+    ADR-0010 §5 places raw observed artifacts and the observation log outside
+    the engine repository and outside the public ``lovverk`` corpus: observed
+    material is evidence that specific bytes were retrievable, not law, and
+    nothing promotes it into a published corpus by accident of where it was
+    written. Enforced with a path check rather than documented, because a
+    convention is not a boundary.
+    """
+
+
+class LogIntegrityError(ObservatoryError):
+    """The observation log or its blob store is not in an auditable state.
+
+    Raised for a torn or malformed log line, and for a payload whose bytes do
+    not hash to the SHA-256 its record claims. Both mean the append-only
+    evidence is untrustworthy at that point, which ADR-0010 §7 treats as a
+    failure to surface rather than a record to skip.
+    """
+
+
+class TombstonedArtifactError(ObservatoryError):
+    """Capture tried to re-store bytes that a tombstone retired.
+
+    A tombstone under ADR-0010 §7 records a removal made on legal, privacy or
+    comparable grounds. The source usually keeps serving the same bytes
+    afterwards, so an ordinary re-crawl would restore exactly what was
+    removed — silently, and with a fresh observation record making it look
+    routine. Capture is refused instead; putting the bytes back has to be a
+    deliberate act, not a side effect of the next crawl.
+    """
+
+
+class SourceNotActivatedError(ObservatoryError):
+    """A source was used for capture without a recorded access-policy check.
+
+    ADR-0010 §4 separates eligibility from activation: an official municipal
+    or fylkeskommune site is an eligible capture source, but fetching it
+    requires a recorded per-source check of ``robots.txt``, site terms and
+    crawl constraints.
+    """
