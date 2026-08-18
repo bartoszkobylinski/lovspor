@@ -9,6 +9,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
 
@@ -825,7 +827,9 @@ class TestSurvivorsInTheReport:
             survivors=json.dumps(detail) + "\n",
             tool_exit_code=2,
         )
-        assert result["survivors"] == [detail]
+        # The register annotates every survivor (issue #122); the detail the
+        # collector recovered must survive that pass untouched.
+        assert result["survivors"] == [{**detail, "equivalent": None}]
 
     def test_a_bare_id_list_is_still_legal_input(self, tmp_path: Path) -> None:
         result = _run(
@@ -948,3 +952,260 @@ class TestSurvivorsInTheReport:
 
         captured = capsys.readouterr().out
         assert "`totally.unknown.x_thing__mutmut_1` — file unknown" in captured
+
+
+MODEL_FILE = "src/lovspor/observatory/model.py"
+REGISTRY_FILE = "src/lovspor/observatory/registry.py"
+# The real mutation from PR #118 run 32118697389, the one issue #122 was filed on.
+MODEL_DIFF = (
+    f"--- {MODEL_FILE}\n"
+    f"+++ {MODEL_FILE}\n"
+    "@@ -1,3 +1,3 @@\n"
+    " def record_to_json_line(record):\n"
+    '-    return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))\n'
+    '+    return json.dumps(data, sort_keys=True, ensure_ascii=None, separators=(",", ":"))'
+)
+MODEL_ENTRY = f"""
+[[equivalent]]
+file = "{MODEL_FILE}"
+symbol = "record_to_json_line"
+registered = "2026-08-18, PR #127"
+mutation = '''
+-    return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
++    return json.dumps(data, sort_keys=True, ensure_ascii=None, separators=(",", ":"))
+'''
+justification = "None is falsy, so it selects the same json encoder as False."
+"""
+
+
+@contextmanager
+def _register(tmp_path: Path, toml: str) -> Iterator[None]:
+    """Point the gate at a register written for this test."""
+    path = tmp_path / "mutation-equivalents.toml"
+    path.write_text(toml)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(mutation_to_json, "EQUIVALENTS_FILE", path)
+        yield
+
+
+def _survivor_line(mutant_id: str, file: str, diff: str) -> str:
+    record = {
+        "id": mutant_id,
+        "file": file,
+        "line": None,
+        "symbol": "record_to_json_line",
+        "operator": None,
+        "diff": diff,
+        "detail_source": "mutants_shadow_tree",
+    }
+    return json.dumps(record) + "\n"
+
+
+class TestEquivalentRegister:
+    """Issue #122: a survivor no test can ever kill must be able to go green,
+    without the register becoming a way to silence real gaps."""
+
+    def test_a_registered_survivor_passes_the_gate_without_moving_the_numbers(
+        self, tmp_path: Path
+    ) -> None:
+        """decisions.md §9c: registered, not chased — the measurement stands,
+        only the verdict moves."""
+        survivors = _survivor_line("m.x_record_to_json_line__mutmut_7", MODEL_FILE, MODEL_DIFF)
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path, _progress_line(killed=297, survived=1), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"] == {"passed": True, "reason": "equivalent_mutants_only"}
+        assert result["mutants"]["survived"] == 1  # type: ignore[index]
+        assert result["score"] == 99.66
+        assert result["equivalents"] == {"registered": 1, "refused": []}
+        [survivor] = result["survivors"]  # type: ignore[misc]
+        assert survivor["equivalent"]["registered"] == "2026-08-18, PR #127"
+
+    def test_one_unregistered_survivor_keeps_the_gate_red(self, tmp_path: Path) -> None:
+        survivors = _survivor_line(
+            "m.x_record_to_json_line__mutmut_7", MODEL_FILE, MODEL_DIFF
+        ) + _survivor_line("r.x_other__mutmut_1", REGISTRY_FILE, MODEL_DIFF.replace("None", "True"))
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path, _progress_line(killed=297, survived=2), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+        assert result["equivalents"]["registered"] == 1  # type: ignore[index]
+
+    def test_the_same_mutation_in_another_file_is_not_covered(self, tmp_path: Path) -> None:
+        """A waiver written about one function is not evidence about another."""
+        survivors = _survivor_line(
+            "r.x_write_registry__mutmut_5",
+            REGISTRY_FILE,
+            MODEL_DIFF.replace(MODEL_FILE, REGISTRY_FILE),
+        )
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path, _progress_line(killed=1, survived=1), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+
+    def test_a_renumbered_id_still_matches_because_the_key_is_the_mutation(
+        self, tmp_path: Path
+    ) -> None:
+        survivors = _survivor_line("m.x_record_to_json_line__mutmut_41", MODEL_FILE, MODEL_DIFF)
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path, _progress_line(killed=1, survived=1), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"]["passed"] is True  # type: ignore[index]
+
+    def test_reindented_code_still_matches(self, tmp_path: Path) -> None:
+        """Wrapping the line in a new block changes its indentation, not the
+        mutation — re-reviewing that is busywork, so leading space is ignored."""
+        reindented = MODEL_DIFF.replace("-    return", "-        return").replace(
+            "+    return", "+        return"
+        )
+        survivors = _survivor_line("m.x_record_to_json_line__mutmut_7", MODEL_FILE, reindented)
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path, _progress_line(killed=1, survived=1), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"]["passed"] is True  # type: ignore[index]
+
+    def test_a_changed_replacement_line_does_not_match(self, tmp_path: Path) -> None:
+        """Equivalence was argued about one specific replacement. A different
+        one is a different claim and has to be argued again."""
+        other = MODEL_DIFF.replace("ensure_ascii=None", "ensure_ascii=True")
+        survivors = _survivor_line("m.x_record_to_json_line__mutmut_9", MODEL_FILE, other)
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path, _progress_line(killed=1, survived=1), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+
+    def test_a_survivor_with_no_recovered_diff_never_matches(self, tmp_path: Path) -> None:
+        """Fail closed: a waiver the gate cannot verify is not a waiver."""
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path,
+                _progress_line(killed=1, survived=1),
+                survivors="m.x_record_to_json_line__mutmut_7\n",
+                tool_exit_code=2,
+            )
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+
+    def test_the_survived_exit_bit_without_survivor_records_still_fails(
+        self, tmp_path: Path
+    ) -> None:
+        """The bit is the authoritative cross-file aggregate; with nothing to
+        check it against, there is nothing to excuse it with."""
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(tmp_path, _progress_line(killed=5), tool_exit_code=2)
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+
+    @pytest.mark.parametrize("field", ["justification", "symbol", "mutation", "file"])
+    def test_an_entry_missing_a_required_field_is_refused_not_applied(
+        self, tmp_path: Path, field: str
+    ) -> None:
+        """Silencing a survivor is a decision; an undocumented one does not count."""
+        broken = "\n".join(
+            line for line in MODEL_ENTRY.splitlines() if not line.startswith(f"{field} =")
+        )
+        if field == "mutation":
+            broken = MODEL_ENTRY.replace("-    return", "     return").replace(
+                "+    return", "     return"
+            )
+        survivors = _survivor_line("m.x_record_to_json_line__mutmut_7", MODEL_FILE, MODEL_DIFF)
+        with _register(tmp_path, broken):
+            result = _run(
+                tmp_path, _progress_line(killed=1, survived=1), survivors, tool_exit_code=2
+            )
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+        assert result["equivalents"]["registered"] == 0  # type: ignore[index]
+        assert len(result["equivalents"]["refused"]) == 1  # type: ignore[index]
+
+    def test_an_unparseable_register_costs_the_entries_not_the_run(self, tmp_path: Path) -> None:
+        with _register(tmp_path, "[[equivalent]\nfile = broken"):
+            result = _run(tmp_path, _progress_line(killed=3))
+
+        assert result["gate"] == {"passed": True, "reason": "ok"}
+        assert "unreadable register" in result["equivalents"]["refused"][0]  # type: ignore[index]
+
+    def test_no_register_file_changes_nothing(self, tmp_path: Path) -> None:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(mutation_to_json, "EQUIVALENTS_FILE", tmp_path / "absent.toml")
+            result = _run(
+                tmp_path,
+                _progress_line(killed=1, survived=1),
+                survivors="x\n",
+                tool_exit_code=2,
+            )
+
+        assert result["gate"] == {"passed": False, "reason": "surviving_mutants"}
+        assert result["equivalents"] == {"registered": 0, "refused": []}
+
+    def test_check_equivalents_exits_nonzero_on_a_refused_entry(self, tmp_path: Path) -> None:
+        with (
+            _register(tmp_path, MODEL_ENTRY.replace("justification =", "note =")),
+            pytest.MonkeyPatch.context() as mp,
+        ):
+            mp.setattr("sys.argv", ["mutation_to_json.py", "--check-equivalents"])
+            assert mutation_to_json.main() == 1
+
+    def test_check_equivalents_accepts_the_register_this_repo_ships(self) -> None:
+        """The register in the repo root must always parse — a refused entry
+        there means the gate is silently applying fewer waivers than it reads."""
+        equivalents, refused = mutation_to_json.load_equivalents(
+            Path(__file__).parents[2] / "mutation-equivalents.toml"
+        )
+
+        assert refused == []
+        assert equivalents
+
+    def test_the_summary_shows_what_the_register_did(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        survivors = _survivor_line("m.x_record_to_json_line__mutmut_7", MODEL_FILE, MODEL_DIFF)
+        with _register(tmp_path, MODEL_ENTRY):
+            result = _run(
+                tmp_path, _progress_line(killed=1, survived=1), survivors, tool_exit_code=2
+            )
+        out = tmp_path / "gate-input.json"
+        out.write_text(json.dumps(result))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        captured = capsys.readouterr().out
+        assert "- Registered equivalents: 1 (`mutation-equivalents.toml`)" in captured
+        assert "**equivalent**, 2026-08-18, PR #127" in captured
+
+    def test_the_summary_shouts_about_a_refused_entry(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        out = tmp_path / "refused.json"
+        out.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "commit": FULL_SHA,
+                    "score": 90.0,
+                    "mutants": {"total": 1, "killed": 0, "survived": 1, "timeout": 0},
+                    "gate": {"passed": False, "reason": "surviving_mutants"},
+                    "equivalents": {"registered": 0, "refused": ["m.py: missing justification"]},
+                }
+            )
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        assert "⚠ Refused register entry: m.py: missing justification" in capsys.readouterr().out

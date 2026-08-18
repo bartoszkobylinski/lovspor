@@ -42,6 +42,11 @@ No numeric score threshold exists or was added. The gate in `mutation-result.jso
 
 - `mutation not applicable` (no `src/lovspor/` changes) → **PASS**, reason `not_applicable`
 - everything killed → **PASS**
+- every surviving mutant registered in `mutation-equivalents.toml` → **PASS**, reason
+  `equivalent_mutants_only` (issue #122). An entry is keyed by file + the mutation's `-`/`+`
+  lines, never by mutant id, and needs a written justification or it is refused and reported.
+  A survivor whose mutation diff could not be recovered never matches — the gate fails closed.
+  Counts, score and the survivor list are unaffected; only the verdict moves.
 - survived / timed-out / suspicious / uncovered mutants each → **FAIL** (reasons
   `surviving_mutants`, `timeout_mutants`, `suspicious_mutants`, `uncovered_mutants`).
   `mutmut-pr.sh` preserves the pipeline's existing 2/4/8 compatibility bitfield for
