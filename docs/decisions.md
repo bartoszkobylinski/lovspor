@@ -30,6 +30,9 @@ Two repos because two audiences: engine repo is for contributors and portfolio, 
 > Re-publishing the engine is tracked in `docs/publication-plan.md`; until
 > that lands, the two-audience rationale above holds but the "both public"
 > claim is direction, not state.
+>
+> **Superseded in part (2026-08-12):** the engine is no longer MIT — see §18. The rest of
+> this note stands.
 
 ## 2. Purpose
 
@@ -674,6 +677,8 @@ Project-owner decision, reversing the closed-product direction of 2026-07-14 (pe
 The accepted direction is **open infrastructure**:
 
 - `lovspor` — engine **public under MIT**; independently runnable end to end (sync, render, MCP) without any hosted service.
+  **Licence superseded 2026-08-12 — the engine is AGPL-3.0, see §18.** "Public and independently
+  runnable" is unchanged; only the licence is.
 - `lovverk` — corpus **public** under its existing NLOD 2.0 + CC0 boundary (unchanged).
 - The hosted MCP endpoint is an **optional operated access layer**. Its authentication, quotas and rate limits are operational controls on one deployment, not a business boundary around the engine.
 - Optional paid operational services (managed hosting, support, integration) are permitted, but they must not make the open core artificially incomplete or impractical.
@@ -726,6 +731,24 @@ operator-provisioned convenience** on top of the open engine — its auth and qu
 remain operational controls on one deployment, exactly as §15 framed them, not a
 paywall. `roadmap.md` Sprint 12 item 8 is struck accordingly; the historical pivot
 records stay as history.
+
+## 18. Engine relicensed MIT -> AGPL-3.0 (decided 2026-08-12)
+
+Project-owner decision, superseding the licence clause of §15 (and the MIT mention in the
+2026-08-02 "Current state" note in §1). Everything else in §15 stands: the project is still
+open infrastructure, the corpus boundary is unchanged, the hosted endpoint is still an
+optional operated access layer.
+
+**The engine is licensed AGPL-3.0.** `LICENSE`, `pyproject.toml` and `README.md` were
+updated together in `29178b640`. Versions up to and including commit `632dae8` were
+published under MIT; everything after is AGPL-3.0. The `lovverk` corpus is unaffected — the
+legal text stays NLOD 2.0 and the corpus structure CC0.
+
+Rationale, from the relicense commit itself: *"the MIT choice at the public flip was an
+unexamined default, not a decision."*
+
+Per this file's convention the MIT sentences in §1 and §15 stay as history; this entry is
+what supersedes them.
 
 ## How to use this document
 
