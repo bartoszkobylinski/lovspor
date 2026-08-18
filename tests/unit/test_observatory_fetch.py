@@ -434,6 +434,156 @@ class TestFailuresAreObservations:
         assert clock.slept == []
 
 
+class TestStatusOutcomeBoundaries:
+    """`_read`/`_outcome_for` branch on exact status thresholds (300, 400);
+    a fencepost error there would misfile a whole class of outcomes."""
+
+    def test_a_status_just_below_the_redirect_threshold_succeeds(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=299, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.http_status == 299
+
+    def test_a_status_at_the_redirect_threshold_is_not_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=300)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+        assert result.http_status == 300
+
+    def test_a_status_just_below_client_error_is_still_a_redirect_outcome(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=399)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+
+    def test_a_status_at_the_client_error_threshold_is_named_http_400(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=400)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "http_400"
+
+
+class TestRobotsStatusBoundaries:
+    """RobotsGate treats 4xx as "no rules published" and 5xx as unreachable
+    (deny); the split sits at exactly 500, so the fencepost matters."""
+
+    def test_a_robots_status_just_below_server_error_is_no_rules_published(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=499, text="Disallow: /")
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+
+    def test_a_robots_status_at_the_server_error_threshold_denies(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=500)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "robots_disallowed"
+
+
+class TestBodyCapBoundary:
+    def test_a_response_one_byte_over_the_cap_is_discarded(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=b"x" * 1025)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "response_exceeded_max_bytes"
+
+
+class TestRateLimiterBoundary:
+    def test_time_exactly_at_the_interval_does_not_sleep(self) -> None:
+        clock = _Clock()
+        limiter = RateLimiter(_settings(clock))
+
+        limiter.wait("example.invalid", 5.0)
+        clock.value += 5.0
+        waited = limiter.wait("example.invalid", 5.0)
+
+        assert waited == 0.0
+        assert clock.slept == []
+
+
+class TestHeaderAllowlist:
+    def test_every_allowlisted_header_is_recorded_when_present(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """A silently narrowed allowlist would fail this instead of surfacing
+        only as a missing field an unrelated test happens not to check."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=PAGE_URL,
+            content=PAYLOAD,
+            headers={
+                "Content-Type": "text/html",
+                "Content-Length": str(len(PAYLOAD)),
+                "Content-Disposition": "inline",
+                "ETag": '"abc"',
+                "Last-Modified": "Tue, 18 Aug 2026 10:00:00 GMT",
+                "Date": "Tue, 18 Aug 2026 10:30:00 GMT",
+            },
+        )
+
+        record = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(record, ArtifactObservation)
+        assert record.http_headers["content-type"] == "text/html"
+        assert record.http_headers["content-length"] == str(len(PAYLOAD))
+        assert record.http_headers["content-disposition"] == "inline"
+        assert record.http_headers["etag"] == '"abc"'
+        assert record.http_headers["last-modified"] == "Tue, 18 Aug 2026 10:00:00 GMT"
+        assert record.http_headers["date"] == "Tue, 18 Aug 2026 10:30:00 GMT"
+
+
+class TestRobotsCachedByHostNotByPath:
+    def test_robots_is_cached_across_different_paths_on_the_same_host(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The cache key is the host: a mutant keying it by full URL would
+        still pass the identical-URL variant of this test."""
+        other_page = f"https://{BAERUM_DOMAIN}/forskrifter/vann"
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        httpx_mock.add_response(url=other_page, content=PAYLOAD)
+        fetcher = _fetcher(log)
+
+        fetcher.capture(PAGE_URL, "sitemap")
+        fetcher.capture(other_page, "sitemap")
+
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(ROBOTS_URL) == 1
+
+
 class TestDefaults:
     def test_the_default_clock_is_utc_aware(self) -> None:
         """observed_at is an axis: a naive default would be rejected by the
