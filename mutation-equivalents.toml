@@ -82,3 +82,19 @@ justification = """
 The same mutation one line down, on `domain`, and equivalent for the same
 reason: lowercased input cannot contain the uppercase X the mutated set adds.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/fetch.py"
+symbol = "_request"
+registered = "2026-08-18, PR #128, from run 32138706244"
+mutation = """
+-            "GET", attempt.url, headers=headers, timeout=self._settings.timeout_seconds
++            "get", attempt.url, headers=headers, timeout=self._settings.timeout_seconds
+"""
+justification = """
+httpx normalises the method before the request exists: Request.__init__ does
+`self.method = method.upper()`. So "get" and "GET" build the same request and put
+the same bytes on the wire, and a test asserting request.method only ever sees
+the normalised value. Verified against the pinned httpx: Request("get", url).method
+== Request("GET", url).method == "GET".
+"""
