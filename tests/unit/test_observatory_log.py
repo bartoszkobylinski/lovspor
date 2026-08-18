@@ -1,6 +1,7 @@
 """Tests for lovspor.observatory.log — append-only evidence and its audit."""
 
 import hashlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -545,3 +546,175 @@ class TestLogCreatesItsOwnRoot:
         log.append_artifact(observation(b"a"), b"a")
 
         assert log.log_path.exists()
+
+
+class TestCrashRecovery:
+    """A run cut short by a lost disk or lost power (ADR-0010 §5 puts the
+    archive on storage that can go away mid-write). The audit has to answer
+    "how bad is it?" precisely when the log is damaged."""
+
+    def _torn(self, tmp_path: Path, tail: bytes) -> ObservationLog:
+        """A log with one intact record and an unfinished write after it."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        with log.log_path.open("ab") as handle:
+            handle.write(tail)
+        return log
+
+    def test_an_unfinished_final_write_is_reported_not_raised(self, tmp_path: Path) -> None:
+        line = make_log(tmp_path).log_path
+        log = self._torn(tmp_path, b'{"kind":"artifact","authority_id":"99')
+        assert line == log.log_path
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is True
+        assert result.malformed_lines == ()
+        assert result.ok is False
+
+    def test_the_records_before_the_tear_are_still_counted(self, tmp_path: Path) -> None:
+        log = self._torn(tmp_path, b'{"kind":"artifact","authority_id":"99')
+
+        assert verify_snapshot(log).artifacts_checked == 1
+        assert len(log.scan().records) == 1
+
+    def test_a_write_cut_mid_character_is_still_readable_up_to_the_tear(
+        self, tmp_path: Path
+    ) -> None:
+        """Norwegian text makes this the common case, not the exotic one: a
+        tear inside 'æ' leaves bytes that are not valid UTF-8 at all, and
+        reading the file as text would lose the intact records too."""
+        log = self._torn(tmp_path, '{"name":"Bær'.encode()[:-1])
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is True
+        assert result.artifacts_checked == 1
+
+    def test_a_malformed_line_mid_file_is_not_a_torn_tail(self, tmp_path: Path) -> None:
+        """An interrupted append can only ever damage the last line. Damage
+        anywhere else is corruption, and calling it a crash would invite an
+        operator to truncate a file whose problem is elsewhere."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        log.append_artifact(observation(b"second", url="https://example.invalid/g"), b"second")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(b"\n".join([lines[0], b"{ truncated", lines[1], b""]))
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is False
+        assert result.malformed_lines == (2,)
+        assert result.ok is False
+
+    def test_a_complete_but_invalid_last_line_is_corruption_not_a_tear(
+        self, tmp_path: Path
+    ) -> None:
+        """The newline is what distinguishes them. A last line that is invalid
+        yet properly terminated was written in full — so whatever damaged it
+        was not an interrupted append, and truncating it would throw away a
+        record the operator has not been told about."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        with log.log_path.open("ab") as handle:
+            handle.write(b"{ truncated\n")
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is False
+        assert result.malformed_lines == (2,)
+
+    def test_a_tear_after_earlier_corruption_is_still_a_tear(self, tmp_path: Path) -> None:
+        """Both defects are real and they are different defects. Reporting only
+        the first would let an operator truncate the tail and believe the log
+        was whole."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        log.append_artifact(observation(b"second", url="https://example.invalid/g"), b"second")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(
+            b"\n".join([lines[0], b"{ corrupted", lines[1]]) + b'\n{"kind":"artif'
+        )
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is True
+        assert result.malformed_lines == (2,)
+
+    def test_a_corrupted_byte_never_decodes_into_a_plausible_record(self, tmp_path: Path) -> None:
+        """A lenient decode would substitute U+FFFD and hand back a record that
+        parses — one whose URL is not the URL that was observed. A refused line
+        is visible; a silently altered one reads as genuine forever."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        raw = log.log_path.read_bytes()
+        target = raw.index(b"example.invalid")
+        log.log_path.write_bytes(raw[:target] + b"\xff" + raw[target + 1 :])
+
+        scan = log.scan()
+
+        assert scan.records == ()
+        assert scan.malformed_lines == (1,)
+        assert scan.incomplete_final_record is False
+
+    def test_an_unreadable_log_suppresses_blob_findings(self, tmp_path: Path) -> None:
+        """Every blob the unread lines account for would otherwise be reported
+        as an orphan — a list of invented defects burying the real one."""
+        log = self._torn(tmp_path, b'{"kind":"artifact","authority_id":"99')
+        orphan = tmp_path / "blobs" / "aa" / ("aa" * 32)
+        orphan.parent.mkdir(parents=True, exist_ok=True)
+        orphan.write_bytes(b"unreferenced")
+
+        result = verify_snapshot(log)
+
+        assert result.orphan_blobs == ()
+        assert result.missing_blobs == ()
+        assert result.incomplete_final_record is True
+
+    def test_an_intact_log_reports_no_damage(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+
+        result = verify_snapshot(log)
+
+        assert result.ok is True
+        assert result.incomplete_final_record is False
+        assert result.malformed_lines == ()
+        assert log.scan().complete is True
+
+    def test_an_absent_log_scans_as_empty_and_intact(self, tmp_path: Path) -> None:
+        scan = make_log(tmp_path).scan()
+
+        assert scan.records == ()
+        assert scan.complete is True
+
+    def test_reading_records_stays_strict(self, tmp_path: Path) -> None:
+        """scan() is the tolerant reading, added for the audit. The evidence
+        reader itself must keep refusing to read past a line it cannot parse."""
+        log = self._torn(tmp_path, b'{"kind":"artifact","authority_id":"99')
+
+        with pytest.raises(LogIntegrityError):
+            list(log.records())
+
+
+class TestDurability:
+    def test_each_appended_record_is_fsynced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The window this closes is the one that produces a torn tail. On an
+        archive that lives on removable storage, leaving the record in the OS
+        cache is the difference between an interrupted run costing one fetch
+        and costing the readability of the whole log."""
+        synced: list[int] = []
+        original_fsync = os.fsync
+
+        def spy_fsync(fd: int) -> None:
+            synced.append(fd)
+            original_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", spy_fsync)
+        log = make_log(tmp_path)
+
+        log.append_artifact(observation(b"first"), b"first")
+
+        assert len(synced) == 1
