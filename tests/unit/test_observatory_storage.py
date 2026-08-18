@@ -7,6 +7,7 @@ import pytest
 from lovspor.errors import ConfigError, StorageBoundaryError
 from lovspor.observatory.storage import (
     ENV_OBSERVATORY_ROOT,
+    _repository_root,
     engine_root,
     observatory_root,
     resolve_root,
@@ -101,3 +102,18 @@ class TestEngineRootDetection:
         detected = engine_root()
 
         assert (detected / ".git").exists() or detected.name == "lovspor"
+
+    def test_package_without_a_repository_falls_back_to_its_parent(self, tmp_path: Path) -> None:
+        """An installed package has no .git above it; the package dir is then the forbidden tree."""
+        package = tmp_path / "site-packages" / "lovspor" / "observatory"
+        package.mkdir(parents=True)
+
+        assert _repository_root(package) == package.parent
+
+    def test_repository_marker_is_found_when_it_is_a_worktree_file(self, tmp_path: Path) -> None:
+        """A linked worktree carries .git as a file, not a directory."""
+        repo = tmp_path / "repo"
+        (repo / "src" / "lovspor").mkdir(parents=True)
+        (repo / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
+
+        assert _repository_root(repo / "src" / "lovspor") == repo

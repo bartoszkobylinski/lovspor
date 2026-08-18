@@ -82,6 +82,13 @@ class TestAppendOnly:
     def test_empty_log_reads_as_no_records(self, tmp_path: Path) -> None:
         assert list(ObservationLog(tmp_path).records()) == []
 
+    def test_snapshot_paths_hang_off_the_configured_root(self, tmp_path: Path) -> None:
+        log = ObservationLog(tmp_path)
+
+        assert log.root == tmp_path
+        assert log.log_path.parent == tmp_path
+        assert log.blob_path("ab" + "c" * 62).parent == tmp_path / "blobs" / "ab"
+
 
 class TestHashIntegrityAtTheDoor:
     def test_payload_that_contradicts_the_record_is_refused(self, tmp_path: Path) -> None:
