@@ -221,4 +221,10 @@ also_copy = [
     "scripts/",
     "LICENSE",
     "README.md",
+    # Repo state the test suite reads, so it has to exist inside the shadow
+    # tree too. Absent, the test asserting the shipped register is non-empty
+    # fails during mutmut's clean baseline, and a failed baseline aborts the
+    # whole run: the gate then reports tool_failed for every PR touching
+    # src/lovspor/, on a missing file rather than on code quality (issue #129).
+    "mutation-equivalents.toml",
 ]
