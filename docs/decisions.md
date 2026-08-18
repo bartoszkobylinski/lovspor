@@ -202,6 +202,7 @@ Decided 2026-04-23 after Sprint 3 PR #11; baseline numbers updated 2026-04-26 af
 
 - Codex flags critical-path survivors per PR; we fix those on the same branch.
 - Equivalent survivors are **registered, not chased**. We do not configure mutmut to filter them out — we want the raw signal so a future regression that adds new equivalent mutants is visible.
+- Since issue #122 "registered" is literal: `mutation-equivalents.toml` holds one entry per proven equivalent, keyed by file plus the mutation's `-`/`+` lines — never by mutant id, which renumbers whenever the file changes upstream of the mutant — each with a written justification. A registered survivor stops failing the gate and nothing else: still counted, still scored against, still listed, now carrying the justification that excused it. The register exists because the gate had become unpassable for `ensure_ascii=False` and `rstrip(".")` code, and a required check that cannot go green teaches people to ignore it; it also burned `needs-human:mutation`, which could no longer distinguish "a human must judge these survivors" from "this is arithmetically impossible". Reviewing a diff to that file is reviewing a test deletion.
 - Survivor count and kill rate are tracked in PR descriptions (Codex always reports them).
 
 **Revisit triggers** (when this decision should be reopened):
