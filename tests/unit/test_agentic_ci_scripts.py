@@ -747,6 +747,62 @@ class TestSurvivorDetail:
 
         assert record["line"] is None
 
+    def test_a_renumbered_mutant_id_is_distinguished_from_a_missing_shadow_tree(
+        self, tmp_path: Path
+    ) -> None:
+        """Mutant ids renumber when the file changes upstream of the mutant.
+
+        The shadow tree is intact and readable here — unlike the
+        no-shadow-tree case above — so the report must say the id itself
+        wasn't found, not blame a missing or unreadable shadow tree.
+        """
+        _shadow_tree(tmp_path)
+        stale_id = "pkg.mod.x_label__mutmut_99"
+
+        [record] = _survivor_records(tmp_path, f"{stale_id}\n")
+
+        assert record["id"] == stale_id
+        assert record["file"] == "src/pkg/mod.py"
+        assert record["symbol"] == "label"
+        assert record["diff"] is None
+        assert record["detail_source"] == "id_only: this mutant is not in the shadow tree"
+
+    def test_an_id_for_an_unknown_module_still_returns_a_record(self, tmp_path: Path) -> None:
+        _shadow_tree(tmp_path)
+        bogus_id = "totally.unknown.x_thing__mutmut_1"
+
+        [record] = _survivor_records(tmp_path, f"{bogus_id}\n")
+
+        assert record["id"] == bogus_id
+        assert record["file"] is None
+        assert record["symbol"] == "thing"
+        assert record["symbol_line"] is None
+        assert record["diff"] is None
+        assert str(record["detail_source"]).startswith("id_only:")
+
+    def test_a_missing_survivors_file_produces_an_empty_report(self, tmp_path: Path) -> None:
+        """No survivors file at all — e.g. a run with nothing to triage — must
+        not crash the collector; it should just write an empty artifact."""
+        _shadow_tree(tmp_path)
+        out = tmp_path / "survivors.jsonl"
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(tmp_path)
+            mp.setattr(
+                "sys.argv",
+                [
+                    "mutation_survivors.py",
+                    "--survivors-file",
+                    "does-not-exist.txt",
+                    "--out",
+                    str(out),
+                ],
+            )
+            _reset_mutmut_config()
+            assert mutation_survivors.main() == 0
+
+        assert out.read_text() == ""
+
 
 class TestSurvivorsInTheReport:
     """mutation-result.json carries the detail, and stays readable without it."""
@@ -866,3 +922,29 @@ class TestSurvivorsInTheReport:
             assert mutation_gate.main() == 0
 
         assert "Survivors:" not in capsys.readouterr().out
+
+    def test_the_summary_marks_a_survivor_with_no_known_file(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A degraded record — id resolved, source file not — still reads as
+        a triage bullet instead of a blank or a crash."""
+        out = tmp_path / "no-file.json"
+        out.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "commit": FULL_SHA,
+                    "score": 90.0,
+                    "mutants": {"total": 1, "killed": 0, "survived": 1, "timeout": 0},
+                    "gate": {"passed": False, "reason": "surviving_mutants"},
+                    "survivors": [{"id": "totally.unknown.x_thing__mutmut_1"}],
+                }
+            )
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        captured = capsys.readouterr().out
+        assert "`totally.unknown.x_thing__mutmut_1` — file unknown" in captured
