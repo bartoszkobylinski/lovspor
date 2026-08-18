@@ -500,3 +500,48 @@ class TestRootMustBeValidated:
         """The boundary reaches the log because the log will not take a raw path."""
         with pytest.raises(StorageBoundaryError):
             ObservationLog(observatory_root({ENV_OBSERVATORY_ROOT: str(engine_root() / "data")}))
+
+
+class TestReadingNeverStopsEarly:
+    """The blank-line guard is also covered in TestAppendOnly; this adds the
+    consequence a duplicate name would not: the audit must count records that
+    sit after the blank line, not stop at it."""
+
+    def test_verification_sees_records_after_a_blank_line(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first", url="https://example.invalid/1"), b"first")
+        with log.log_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+        log.append_artifact(observation(b"second", url="https://example.invalid/2"), b"second")
+
+        assert verify_snapshot(log).artifacts_checked == 2
+
+
+class TestLogCreatesItsOwnRoot:
+    def test_appending_a_record_creates_a_root_several_levels_deep(self, tmp_path: Path) -> None:
+        """The observatory root normally does not exist before the first capture.
+
+        Exercised through `append`, not `append_artifact`: the latter writes a blob
+        first, which creates the root as a side effect and hides whether `append`
+        can stand up its own directory."""
+        log = ObservationLog(ObservatoryRoot(tmp_path / "a" / "b" / "observatory", []))
+
+        log.append(
+            FetchFailure(
+                authority_id="9999",
+                url="https://example.invalid/missing",
+                observed_at=OBSERVED_AT,
+                provenance=provenance(),
+                outcome="timeout",
+            ),
+        )
+
+        assert log.log_path.exists()
+        assert len(list(log.records())) == 1
+
+    def test_first_capture_creates_a_root_several_levels_deep(self, tmp_path: Path) -> None:
+        log = ObservationLog(ObservatoryRoot(tmp_path / "c" / "d" / "observatory", []))
+
+        log.append_artifact(observation(b"a"), b"a")
+
+        assert log.log_path.exists()

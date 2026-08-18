@@ -288,3 +288,59 @@ class TestEvidenceSchemaIsClosed:
                     "reinstated": True,
                 },
             )
+
+
+class TestSerialisationIsPinnedToBytes:
+    """Golden-byte tests.
+
+    The determinism tests above compare two outputs of the *same* function, so
+    they pass no matter what that function does — a change to sort_keys,
+    separators or ensure_ascii is invisible to them. ADR-0010 §7 makes the
+    serialisation part of an evidence contract, so it is pinned here to an
+    exact string instead.
+    """
+
+    EXPECTED = (
+        '{"authority_id":"9999","content_type":"text/html","http_headers":{},'
+        '"http_status":200,"kind":"artifact","observed_at":"2026-08-18T06:30:00Z",'
+        '"provenance":{"adapter":"generic-html","channel":"http",'
+        '"discovery_method":"sitemap","rate_limit_seconds":2.0,"user_agent":"ua/0.1"},'
+        '"sha256":"' + "a" * 64 + '",'
+        '"url":"https://example.invalid/høring"}'
+    )
+
+    def line(self) -> str:
+        return record_to_json_line(
+            ArtifactObservation(
+                authority_id="9999",
+                url="https://example.invalid/høring",
+                observed_at=OBSERVED_AT,
+                provenance=RetrievalProvenance(
+                    adapter="generic-html",
+                    channel="http",
+                    discovery_method="sitemap",
+                    user_agent="ua/0.1",
+                    rate_limit_seconds=2.0,
+                ),
+                sha256=SHA,
+                content_type="text/html",
+                http_status=200,
+            ),
+        )
+
+    def test_line_matches_the_pinned_serialisation(self) -> None:
+        assert self.line() == self.EXPECTED
+
+    def test_keys_are_sorted_in_the_emitted_text(self) -> None:
+        """Read back preserving order — json.loads alone would hide the ordering."""
+        keys = [key for key, _ in json.loads(self.line(), object_pairs_hook=list)]
+
+        assert keys == sorted(keys)
+
+    def test_no_whitespace_padding_between_items(self) -> None:
+        assert ", " not in self.line()
+        assert ": " not in self.line()
+
+    def test_non_ascii_is_not_escaped(self) -> None:
+        assert "høring" in self.line()
+        assert "\\u" not in self.line()

@@ -325,3 +325,124 @@ class TestRegistrySchemaIsPinned:
 
         with pytest.raises(ParseError, match="invalid source registry"):
             read_registry(path)
+
+
+class TestRegistryFileIsPinnedToBytes:
+    """The roundtrip and determinism tests above cannot see the file's shape.
+
+    Both compare the writer against itself, so sort_keys, indent and
+    ensure_ascii are invisible to them. A registry is access-control data read
+    by humans during an audit; its layout is pinned here.
+    """
+
+    EXPECTED = """{
+  "sources": {
+    "9999": {
+      "access_policy": {
+        "checked_at": "2026-08-18T06:00:00Z",
+        "note": "",
+        "rate_limit_seconds": 2.0,
+        "reviewed_by": "project owner",
+        "robots_allows": true,
+        "robots_txt_url": "https://example.invalid/robots.txt",
+        "terms_permit_capture": true,
+        "terms_reviewed": true,
+        "terms_url": null,
+        "user_agent": "lovspor-observatory/0.1"
+      },
+      "active": true,
+      "authority_id": "9999",
+      "authority_type": "kommune",
+      "canonical_domain": "testby.example.invalid",
+      "name": "Testbø"
+    }
+  },
+  "version": 1
+}
+"""
+
+    def written(self, tmp_path: Path) -> str:
+        source = SourceRecord(
+            authority_type="kommune",
+            authority_id="9999",
+            name="Testbø",
+            canonical_domain="testby.example.invalid",
+        )
+        registry = SourceRegistry(sources={"9999": activate(source, check())})
+        path = tmp_path / "registry.json"
+        write_registry(registry, path)
+        return path.read_text(encoding="utf-8")
+
+    def test_file_matches_the_pinned_layout(self, tmp_path: Path) -> None:
+        assert self.written(tmp_path) == self.EXPECTED
+
+    def test_keys_are_sorted_at_every_level(self, tmp_path: Path) -> None:
+        def assert_sorted(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            keys = [key for key, _ in pairs]
+            assert keys == sorted(keys)
+            return dict(pairs)
+
+        json.loads(self.written(tmp_path), object_pairs_hook=assert_sorted)
+
+    def test_file_is_indented_for_human_review(self, tmp_path: Path) -> None:
+        assert '\n  "sources": {' in self.written(tmp_path)
+
+    def test_norwegian_characters_are_written_literally(self, tmp_path: Path) -> None:
+        text = self.written(tmp_path)
+
+        assert "Testbø" in text
+        assert "\\u00f8" not in text
+
+    def test_file_ends_with_exactly_one_newline(self, tmp_path: Path) -> None:
+        text = self.written(tmp_path)
+
+        assert text.endswith("}\n")
+        assert not text.endswith("\n\n")
+
+
+class TestHostMatchingNormalisation:
+    """Host comparison must not depend on how the URL happened to be spelled."""
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://TESTBY.EXAMPLE.INVALID/f",
+            "https://Testby.Example.Invalid/f",
+            "https://testby.example.invalid./f",
+            "https://WWW.TESTBY.EXAMPLE.INVALID/f",
+        ],
+    )
+    def test_case_and_trailing_dot_do_not_defeat_the_gate(self, url: str) -> None:
+        registry = SourceRegistry(sources={"9999": activate(eligible_source(), check())})
+
+        assert authorise_capture(registry, url).authority_id == "9999"
+
+    def test_uppercase_canonical_domain_still_matches(self) -> None:
+        """The registry side is normalised too, not only the URL side."""
+        source = SourceRecord(
+            authority_type="kommune",
+            authority_id="9999",
+            name="Testby",
+            canonical_domain="TESTBY.EXAMPLE.INVALID",
+        )
+        registry = SourceRegistry(sources={"9999": activate(source, check())})
+
+        assert authorise_capture(registry, "https://testby.example.invalid/f").active
+
+    def test_trailing_dot_does_not_smuggle_past_the_lovdata_deny(self) -> None:
+        with pytest.raises(SourceNotActivatedError, match="globally denied"):
+            authorise_capture(SourceRegistry(), "https://lovdata.no./register")
+
+    def test_trailing_dot_in_the_registered_domain_is_normalised_too(self) -> None:
+        """Normalisation applies to both sides; stripping only the URL side would
+        make a registry entry written with a fully-qualified trailing dot
+        silently stop matching its own authority."""
+        source = SourceRecord(
+            authority_type="kommune",
+            authority_id="9999",
+            name="Testby",
+            canonical_domain="testby.example.invalid.",
+        )
+        registry = SourceRegistry(sources={"9999": activate(source, check())})
+
+        assert authorise_capture(registry, "https://testby.example.invalid/f").active
