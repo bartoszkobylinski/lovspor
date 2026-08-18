@@ -20,6 +20,13 @@ htmlcov/
 .mutmut-cache
 .mutmut-cache/
 mutmut-stats.json
+# The mutmut 3.x shadow tree: one mutated copy per target function (~80 MB on a
+# small scope) plus the run log, rebuilt from scratch by every scripts/mutmut-pr.sh
+# run. Untracked, they make `git status` read dirty after any local run — which is
+# how an agent comes to report a clean tree mid-run, and how a `git add -A` sweeps
+# generated code into a commit.
+mutants/
+mutation-run.log
 html/
 .tox/
 .uv-cache/

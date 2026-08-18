@@ -26,6 +26,10 @@ from typing import NamedTuple
 SCHEMA_VERSION = 1
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 TOOL = "mutmut 3.7.0 (function-scoped via scripts/mutmut-pr.sh)"
+# Every survivor carries the same keys whether or not the detail step recovered
+# anything, so a consumer never has to distinguish "absent" from "unknown".
+# `detail_source` says which of the two a null means (issue #119).
+SURVIVOR_KEYS = ("id", "file", "line", "symbol", "operator", "diff", "detail_source")
 
 # The wrapper's compatibility bitfield (0 clean; 2 survived / 4 timeout /
 # 8 suspicious, OR-combined) — exactly the codes mutmut-pr.sh treats as legal
@@ -96,13 +100,39 @@ def parse_failure_hint(raw: str) -> str | None:
     return m.group(0)[:300].rstrip() if m else None
 
 
+def _id_only(mutant_id: str, detail_source: str) -> dict[str, object]:
+    entry: dict[str, object] = dict.fromkeys(SURVIVOR_KEYS, None)
+    entry["id"] = mutant_id
+    entry["detail_source"] = detail_source
+    return entry
+
+
+def _parse_detail(line: str) -> dict[str, object]:
+    # A malformed line must not lose the survivor it stands for: the survivor
+    # list is the gate's evidence, and silently dropping one understates a red
+    # run as a smaller problem than it is.
+    try:
+        entry = json.loads(line)
+    except json.JSONDecodeError:
+        entry = None
+    if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+        return _id_only(line.strip()[:200], "id_only: malformed detail line")
+    return entry
+
+
 def parse_survivors(survivors_file: Path | None) -> list[dict[str, object]]:
+    """Survivors from `mutation_survivors.py` detail, or from a bare id list.
+
+    Both are legal input: the detail file is what makes a red gate triageable
+    (issue #119), and a plain list of ids is what `mutmut results` gives on its
+    own when the detail step could not run.
+    """
     if survivors_file is None or not survivors_file.exists():
         return []
-    ids = survivors_file.read_text().split()
-    return [
-        {"id": mid, "file": None, "line": None, "symbol": None, "operator": None} for mid in ids
-    ]
+    text = survivors_file.read_text()
+    if not text.lstrip().startswith("{"):
+        return [_id_only(mid, "id_only: no detail collected") for mid in text.split()]
+    return [_parse_detail(line) for line in text.splitlines() if line.strip()]
 
 
 def compute_gate(counts: dict[str, int], health: RunHealth) -> dict[str, object]:

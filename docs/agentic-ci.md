@@ -54,6 +54,16 @@ No numeric score threshold exists or was added. The gate in `mutation-result.jso
 result is ignored by the remediation workflow. Artifact `mutation-result-<SHA>` (JSON +
 raw log) uploads on PASS and FAIL.
 
+Each survivor carries what it changed, not just its id (issue #119). Mutmut 3 names a
+mutant after the rewritten function variant and has no source position for it, so
+`scripts/ci/mutation_survivors.py` reads the shadow tree while it is still on disk and
+records `file`, `symbol`, `symbol_line` and the unified `diff`; `line` and `operator`
+stay null by construction. Without the shadow tree the record degrades to what the id
+proves and says so in `detail_source` — never a bare null that reads like missing data.
+Ids renumber whenever the file changes upstream of the mutant, so a cross-round
+comparison quotes the `diff`. The job summary lists the first ten survivors as
+`id — file:line — replacement`, so a red gate is triageable without downloading anything.
+
 ## Anti-loop invariants
 
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
