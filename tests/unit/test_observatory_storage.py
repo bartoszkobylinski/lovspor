@@ -200,3 +200,14 @@ class TestEngineRootDetection:
         package.mkdir(parents=True)
 
         assert _repository_root(package, ceiling) == package.parent
+
+    def test_no_git_anywhere_and_no_ceiling_walks_to_the_filesystem_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Production calls this with no ceiling (``engine_root``), so the walk
+        must be able to exhaust every parent up to ``/`` without hanging,
+        crashing or stopping early when nothing in the ancestry has ``.git``."""
+        deep = tmp_path / "a" / "b"
+        monkeypatch.setattr(Path, "exists", lambda self, *a, **kw: False)
+
+        assert _repository_root(deep) == deep.parent
