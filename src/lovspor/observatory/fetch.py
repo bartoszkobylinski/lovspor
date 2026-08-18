@@ -45,7 +45,7 @@ import httpx
 from lovspor.errors import SourceNotActivatedError
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, FetchFailure, RetrievalProvenance
-from lovspor.observatory.registry import SourceRegistry, authorise_capture
+from lovspor.observatory.registry import SourceRegistry, authorise_capture, capture_host
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 # Municipal PDFs are the large case; a cap keeps one oversized response from
@@ -224,7 +224,7 @@ class Fetcher:
         )
         if not self._robots.allows(url, policy.user_agent):
             return self._failure(attempt, "robots_disallowed")
-        self._limiter.wait(urlsplit(url).hostname or "", policy.rate_limit_seconds)
+        self._limiter.wait(capture_host(url), policy.rate_limit_seconds)
         return self._request(attempt)
 
     def _request(self, attempt: _Attempt) -> ArtifactObservation | FetchFailure:

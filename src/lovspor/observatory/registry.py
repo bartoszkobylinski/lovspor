@@ -169,6 +169,24 @@ def activate(source: SourceRecord, check: AccessPolicyCheck) -> SourceRecord:
     return SourceRecord.model_validate(data)
 
 
+def capture_host(url: str) -> str:
+    """The host a capture URL targets, or refuse the URL outright.
+
+    Two callers need this and both must fail the same way: the gate below, and
+    the fetcher choosing a per-host rate-limit key. A caller that substituted a
+    placeholder for a missing host would quietly pool every such URL into one
+    bucket — and the placeholder would never be exercised, because the gate has
+    already refused the URL by then.
+
+    Raises:
+        SourceNotActivatedError: the URL has no host.
+    """
+    host = urlsplit(url).hostname
+    if host is None:
+        raise SourceNotActivatedError(f"cannot authorise capture of {url!r}: no host")
+    return host
+
+
 def authorise_capture(registry: SourceRegistry, url: str) -> SourceRecord:
     """Return the activated source that covers ``url``, or refuse to fetch it.
 
@@ -181,9 +199,7 @@ def authorise_capture(registry: SourceRegistry, url: str) -> SourceRecord:
             denied, no registered source covers it, or the covering source has
             no access-policy check permitting capture.
     """
-    host = urlsplit(url).hostname
-    if host is None:
-        raise SourceNotActivatedError(f"cannot authorise capture of {url!r}: no host")
+    host = capture_host(url)
     if any(_host_matches(host, denied) for denied in GLOBALLY_DENIED_HOSTS):
         raise SourceNotActivatedError(
             f"{host} is globally denied: ADR-0010 §4 forbids crawling or mass-downloading it",

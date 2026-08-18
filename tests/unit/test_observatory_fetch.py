@@ -759,3 +759,14 @@ class TestDefaults:
 
         assert httpx_mock.get_requests() == []
         assert list(log.records()) == []
+
+    def test_a_url_without_a_host_is_refused_rather_than_pooled(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The rate-limit key is the validated host, never a placeholder: a
+        fallback string would quietly pool every hostless URL into one bucket."""
+        with pytest.raises(SourceNotActivatedError, match="no host"):
+            _fetcher(log).capture("file:///etc/passwd", "manual")
+
+        assert httpx_mock.get_requests() == []
+        assert list(log.records()) == []
