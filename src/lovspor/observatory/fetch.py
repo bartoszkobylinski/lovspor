@@ -1,0 +1,296 @@
+"""Capture one URL politely, and record what happened (ADR-0010 §2, §4, §7).
+
+This is the fetch step of the observatory and nothing else: no discovery, no
+adapters, no scheduling. It takes a URL someone already decided to observe,
+and its whole job is to reach that URL without damaging the relationship with
+the authority serving it, then write down what came back.
+
+Three gates stand in front of every request, in order:
+
+1. **Activation** — :func:`~lovspor.observatory.registry.authorise_capture`
+   decides whether this URL may be fetched at all. A URL that fails is a
+   configuration error and raises, because nothing observed it and nothing
+   should have tried.
+2. **robots.txt, read live** — the registry's ``robots_allows`` records what a
+   human concluded on the day of the check; a path added to ``robots.txt``
+   afterwards is invisible to it. So robots is fetched and consulted per host,
+   and a disallowed URL is *recorded* rather than raised: ADR-0010's validation
+   asks that crawl logs demonstrate robots compliance, and a refusal that
+   leaves no trace demonstrates nothing.
+3. **Rate limit** — the per-source ``rate_limit_seconds`` from the recorded
+   access-policy check, enforced per host by waiting. ADR-0010 calls per-source
+   limits load-bearing rather than cosmetic; this is where that is true or not.
+
+Redirects are deliberately not followed. A redirect can leave the authorised
+host entirely — including onto a host ADR-0010 §4 forbids — and following it
+would fetch a URL that never passed gate 1. The 3xx is recorded with its
+``Location`` header, so the caller can submit that target as its own capture
+and let it pass the gates on its own merits.
+
+Every outcome ends up in the append-only log, success or not: a fetch that
+timed out is evidence about the source, and Design Principle §15 keeps it
+visible instead of leaving a gap that reads like an absence of interest.
+"""
+
+import hashlib
+import time
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from urllib.parse import urlsplit, urlunsplit
+from urllib.robotparser import RobotFileParser
+
+import httpx
+
+from lovspor.errors import SourceNotActivatedError
+from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.model import ArtifactObservation, FetchFailure, RetrievalProvenance
+from lovspor.observatory.registry import SourceRegistry, authorise_capture
+
+DEFAULT_TIMEOUT_SECONDS = 30.0
+# Municipal PDFs are the large case; a cap keeps one oversized response from
+# filling the archive disk. Truncated bytes are never stored: a partial body
+# with a hash of its own would be evidence of something never served.
+DEFAULT_MAX_BYTES = 25 * 1024 * 1024
+CHANNEL_HTTP = "http"
+ROBOTS_PATH = "/robots.txt"
+DEFAULT_CONTENT_TYPE = "application/octet-stream"
+_REDIRECT_STATUS = 300
+_CLIENT_ERROR_STATUS = 400
+_SERVER_ERROR_STATUS = 500
+# Recorded response headers, by allowlist. A blanket copy would put Set-Cookie
+# and other per-session material into an append-only log that is never
+# rewritten — immutability makes over-collection permanent.
+RECORDED_HEADERS = frozenset(
+    {
+        "content-type",
+        "content-length",
+        "content-disposition",
+        "etag",
+        "last-modified",
+        "date",
+        "location",
+    }
+)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _selected_headers(headers: Iterable[tuple[str, str]]) -> dict[str, str]:
+    return {key.lower(): value for key, value in headers if key.lower() in RECORDED_HEADERS}
+
+
+@dataclass(frozen=True)
+class CaptureSettings:
+    """Knobs that are the fetcher's own, not the source's.
+
+    The politeness parameters are deliberately absent: user agent and rate
+    limit come from the source's recorded access-policy check, so no
+    deployment can widen them behind the registry's back (ADR-0010 §4).
+
+    ``now``, ``monotonic`` and ``sleep`` are injectable because time is an
+    input here, not an ambient fact: ``observed_at`` is an axis a test must be
+    able to pin, and a rate limiter testable only by waiting stops being tested.
+    """
+
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    max_bytes: int = DEFAULT_MAX_BYTES
+    now: Callable[[], datetime] = _utc_now
+    monotonic: Callable[[], float] = time.monotonic
+    sleep: Callable[[float], None] = time.sleep
+
+
+@dataclass(frozen=True)
+class _Attempt:
+    """The three fields every record of one capture attempt carries."""
+
+    authority_id: str
+    url: str
+    provenance: RetrievalProvenance
+
+
+class RateLimiter:
+    """Per-host spacing, enforced by waiting before the next request."""
+
+    def __init__(self, settings: CaptureSettings) -> None:
+        self._settings = settings
+        self._last: dict[str, float] = {}
+
+    def wait(self, host: str, minimum_interval: float) -> float:
+        """Block until ``host`` may be hit again; return how long that took."""
+        previous = self._last.get(host)
+        waited = 0.0
+        if previous is not None:
+            waited = max(0.0, minimum_interval - (self._settings.monotonic() - previous))
+            if waited > 0:
+                self._settings.sleep(waited)
+        self._last[host] = self._settings.monotonic()
+        return waited
+
+
+class RobotsGate:
+    """robots.txt for a host, fetched once and cached for the run.
+
+    An unreachable ``robots.txt`` denies. That is the uncomfortable direction —
+    it stops capture when a server is merely flaky — and it is the right one:
+    the alternative is crawling a site whose rules could not be read, the
+    politeness failure ADR-0010 names as a risk to the very relationships the
+    observatory depends on. A 4xx (including the usual 404) allows: no
+    robots.txt is how a site says it publishes no restrictions.
+
+    Rules are matched on the **product token** — the part of the User-Agent
+    before the first ``/`` — so a site writing ``User-agent: lovspor-observatory``
+    binds this crawler even though the header also carries a version and a
+    contact URL.
+    """
+
+    def __init__(self, client: httpx.Client, settings: CaptureSettings) -> None:
+        self._client = client
+        self._settings = settings
+        self._parsers: dict[str, RobotFileParser | None] = {}
+
+    def allows(self, url: str, user_agent: str) -> bool:
+        parts = urlsplit(url)
+        robots_url = urlunsplit((parts.scheme, parts.netloc, ROBOTS_PATH, "", ""))
+        if robots_url not in self._parsers:
+            self._parsers[robots_url] = self._load(robots_url)
+        parser = self._parsers[robots_url]
+        return False if parser is None else parser.can_fetch(user_agent, url)
+
+    def _load(self, robots_url: str) -> RobotFileParser | None:
+        try:
+            response = self._client.get(robots_url, timeout=self._settings.timeout_seconds)
+        except httpx.HTTPError:
+            return None
+        if response.status_code >= _SERVER_ERROR_STATUS:
+            return None
+        parser = RobotFileParser()
+        # 4xx means no rules were published, which is an empty rule set — not
+        # a document to parse. Feeding it the error page's body would let a
+        # styled 404 accidentally read as directives.
+        published = (
+            [] if response.status_code >= _CLIENT_ERROR_STATUS else response.text.splitlines()
+        )
+        parser.parse(published)
+        return parser
+
+
+class Fetcher:
+    """Capture URLs for activated sources, recording every outcome."""
+
+    def __init__(
+        self,
+        registry: SourceRegistry,
+        log: ObservationLog,
+        client: httpx.Client,
+        settings: CaptureSettings | None = None,
+    ) -> None:
+        self._registry = registry
+        self._log = log
+        self._client = client
+        self._settings = settings or CaptureSettings()
+        self._limiter = RateLimiter(self._settings)
+        self._robots = RobotsGate(client, self._settings)
+
+    def capture(
+        self, url: str, discovery_method: str, adapter: str = CHANNEL_HTTP
+    ) -> ArtifactObservation | FetchFailure:
+        """Fetch ``url`` under its source's politeness terms and log the result.
+
+        Raises:
+            SourceNotActivatedError: no activated source covers this URL, or its
+                host is globally denied. Nothing is fetched and nothing is
+                recorded — no observation happened, and a record for a request
+                never made would be fiction in an evidence log.
+        """
+        source = authorise_capture(self._registry, url)
+        policy = source.access_policy
+        if policy is None:
+            raise SourceNotActivatedError(
+                f"source {source.authority_id} is active without an access-policy check",
+            )
+        attempt = _Attempt(
+            authority_id=source.authority_id,
+            url=url,
+            provenance=RetrievalProvenance(
+                adapter=adapter,
+                channel=CHANNEL_HTTP,
+                discovery_method=discovery_method,
+                user_agent=policy.user_agent,
+                rate_limit_seconds=policy.rate_limit_seconds,
+            ),
+        )
+        if not self._robots.allows(url, policy.user_agent):
+            return self._failure(attempt, "robots_disallowed")
+        self._limiter.wait(urlsplit(url).hostname or "", policy.rate_limit_seconds)
+        return self._request(attempt)
+
+    def _request(self, attempt: _Attempt) -> ArtifactObservation | FetchFailure:
+        headers = {"User-Agent": attempt.provenance.user_agent}
+        try:
+            with self._client.stream(
+                "GET", attempt.url, headers=headers, timeout=self._settings.timeout_seconds
+            ) as response:
+                return self._read(attempt, response)
+        except httpx.TimeoutException:
+            return self._failure(attempt, "timeout")
+        except httpx.HTTPError as exc:
+            return self._failure(attempt, f"transport_error: {type(exc).__name__}")
+
+    def _read(
+        self, attempt: _Attempt, response: httpx.Response
+    ) -> ArtifactObservation | FetchFailure:
+        recorded = _selected_headers(response.headers.items())
+        status = response.status_code
+        if status >= _REDIRECT_STATUS:
+            return self._failure(attempt, _outcome_for(status), status, recorded)
+        payload = self._body(response)
+        if payload is None:
+            return self._failure(attempt, "response_exceeded_max_bytes", status, recorded)
+        record = ArtifactObservation(
+            authority_id=attempt.authority_id,
+            url=attempt.url,
+            observed_at=self._settings.now(),
+            provenance=attempt.provenance,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            content_type=recorded.get("content-type", DEFAULT_CONTENT_TYPE),
+            http_status=status,
+            http_headers=recorded,
+        )
+        self._log.append_artifact(record, payload)
+        return record
+
+    def _body(self, response: httpx.Response) -> bytes | None:
+        """The response body, or None once it passes the cap."""
+        chunks = bytearray()
+        for chunk in response.iter_bytes():
+            chunks.extend(chunk)
+            if len(chunks) > self._settings.max_bytes:
+                return None
+        return bytes(chunks)
+
+    def _failure(
+        self,
+        attempt: _Attempt,
+        outcome: str,
+        status: int | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> FetchFailure:
+        record = FetchFailure(
+            authority_id=attempt.authority_id,
+            url=attempt.url,
+            observed_at=self._settings.now(),
+            provenance=attempt.provenance,
+            outcome=outcome,
+            http_status=status,
+            http_headers=headers or {},
+        )
+        self._log.append(record)
+        return record
+
+
+def _outcome_for(status: int) -> str:
+    """Name a non-2xx status as an outcome the log can be searched by."""
+    return f"http_{status}" if status >= _CLIENT_ERROR_STATUS else "redirect_not_followed"

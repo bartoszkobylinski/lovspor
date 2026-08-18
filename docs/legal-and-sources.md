@@ -43,6 +43,34 @@ The `lovverk` repo's README contains the full attribution notice.
 - We commit only the rendered Markdown derivative + a manifest of XML hashes for verifiability.
 - We never commit raw XML to a public repo. Conservative posture: sidesteps any argument about Lovdata's editorial markup being copyrightable.
 
+## Local law: the observatory (ADR-0010)
+
+`Lokale forskrifter` are not in the free Lovdata dataset tier and no permitted bulk
+source for Lovtidend Avdeling II is known, so they are captured — not ingested —
+from the authorities that publish them. The posture is deliberately narrower than
+the canonical pipeline's:
+
+- **Eligible** sources are official kommune and fylkeskommune sites, plus the openly
+  documented bulk Lovtidend **Avdeling I** dataset on data.norge.no.
+- Eligibility is not permission. **Activating** a source requires a recorded
+  per-source access-policy check — `robots.txt`, site terms, rate limit, identifying
+  User-Agent, named reviewer — and the check records its *outcome*, not merely that
+  someone looked. `src/lovspor/observatory/registry.py` refuses an active source
+  without one.
+- `lovdata.no` stays **denied for crawling**, centrally and unconditionally: its terms
+  forbid *massenedlasting*, and registering the host cannot unlock it. The register
+  may be consulted by hand; it is never harvested.
+- Every fetch re-reads `robots.txt` live, waits out the source's own rate limit, and
+  does not follow redirects off the authorised host. A refusal is recorded, so
+  compliance is demonstrable from the log rather than asserted here.
+- **May fetch ≠ may redistribute.** Observed bytes live outside this repo and outside
+  `lovverk`, and are not published anywhere until a per-source redistribution basis
+  exists. A municipality-hosted copy of a Lovtidend document carries its own
+  provenance and is never relabelled as a Lovdata/NLOD artifact.
+- Observed material is evidence that specific bytes were retrievable at a recorded
+  time — not an assertion of law, and not even of legal publication. It reaches the
+  canonical corpus only through an explicit per-artifact promotion step.
+
 ## Verification
 
 Anyone can verify our output by:
