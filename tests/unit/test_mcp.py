@@ -741,6 +741,32 @@ def test_get_law_history_raises_for_unknown_slug(tmp_path: Path) -> None:
     )
 
 
+def test_get_law_history_is_unreachable_for_a_tombstoned_slug_even_with_the_file_on_disk(
+    tmp_path: Path,
+) -> None:
+    """docs/mcp.md's troubleshooting section (and the ADR-0009 tombstone bullet)
+    both say a tombstone's ``history/<slug>.json`` is kept on disk but ``get_law_history``
+    still raises "no current law" for it — the slug-index gate that
+    ``_find_current_by_slug`` shares with ``get_law`` filters on
+    ``status == "current"`` before the history lookup ever runs, so the file's
+    presence is irrelevant. This pins that MVP limitation so a slug-index
+    change can't silently start serving (or keep silently refusing to serve)
+    tombstone history without a test noticing."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="gone", title="Gone", status="removed")},
+        write_files=False,
+        write_history_for=["gone"],
+    )
+    assert (tmp_path / "lover" / "history" / "gone.json").exists()
+
+    with pytest.raises(CorpusNotFoundError) as excinfo:
+        CorpusReader(tmp_path).get_law_history("gone")
+    assert str(excinfo.value) == (
+        "no current law with slug 'gone'; use search_laws or list_recent_changes to discover slugs"
+    )
+
+
 def test_unknown_slug_error_offers_near_miss_suggestions(tmp_path: Path) -> None:
     """The 'did you mean' hint is the affordance that lets an AI recover from a
     kortform in one step instead of citing from memory. Nothing pinned its

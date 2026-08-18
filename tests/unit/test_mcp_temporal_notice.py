@@ -11,6 +11,8 @@ import asyncio
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from lovspor.mcp import CorpusReader, _with_section_notice, build_server
 from tests.unit.test_mcp import _record, _seed_corpus
 
@@ -91,6 +93,37 @@ class TestGetLawTool:
         raw = CorpusReader(tmp_path).get_law("testloven")
         served = _call_tool(tmp_path, "get_law", {"slug": "testloven"})
         assert served == raw
+
+
+class TestGetLawAtToolIsUntouched:
+    """docs/mcp.md is explicit that ADR-0009 T0 leaves ``get_law_at`` alone —
+    a point-in-time query already names its own date, so composing a
+    today-evaluated notice onto it would be a category error. Composition
+    only happens in the ``get_law`` / ``get_section`` wrappers; ``get_law_at``
+    calls ``reader.get_law_at`` directly."""
+
+    def test_no_temporal_notice_is_appended_to_historical_markdown(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _corpus(tmp_path, LAW_CLEAN)
+
+        def fake_get_law_at_revision(
+            repo_path: Path,
+            current_path: str,
+            target_date: date,
+        ) -> str:
+            return LAW_WITH_PENDING
+
+        monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fake_get_law_at_revision)
+
+        served = _call_tool(
+            tmp_path,
+            "get_law_at",
+            {"slug": "testloven", "target_date": "2026-08-01"},
+        )
+
+        assert served == LAW_WITH_PENDING
+        assert "Temporal notice" not in served
 
 
 class TestGetSectionTool:
