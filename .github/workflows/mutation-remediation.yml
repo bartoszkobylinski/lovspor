@@ -110,8 +110,8 @@ jobs:
           count=0
           while IFS= read -r subj; do
             case "$subj" in
-              *"[agent:codex-mutation]"*) count=$((count+1)) ;;
-              *"[agent:codex-tests]"*)    ;;
+              *"[agent:codex-mutation]"* | *"[agent:claude-mutation]"*) count=$((count+1)) ;;
+              *"[agent:codex-tests]"* | *"[agent:claude-tests]"*)    ;;
               *) break ;;
             esac
           done < <(git log --pretty=%s)
@@ -134,11 +134,16 @@ jobs:
         run: uv sync --frozen
 
       - name: Codex — mutation remediation (tests only)
+        id: author
         if: steps.cycle.outputs.run == 'true'
+        env:
+          CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
+          CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
           echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
           : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
+          set +e
           python3 scripts/ci/codex_account_failover.py \
             --primary-home "$CODEX_PRIMARY_HOME" \
             --secondary-home "$CODEX_SECONDARY_HOME" \
@@ -148,6 +153,23 @@ jobs:
               "$(cat .github/codex/mutation-remediation.md)
 
               mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+          status=$?
+          set -e
+          # 75 = every Codex account rate-limited: hand the SAME prompt to the
+          # non-Fable Claude fallback instead of stalling the remediation cycle.
+          if [ "$status" -eq 75 ]; then
+            {
+              cat .github/codex/mutation-remediation.md
+              echo
+              echo "mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+            } > "${{ runner.temp }}/remediation-prompt.md"
+            scripts/ci/claude_test_author.sh "${{ runner.temp }}/remediation-prompt.md"
+            echo "author=claude" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          else
+            echo "author=codex" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Scope guard
         if: steps.cycle.outputs.run == 'true'
@@ -179,7 +201,9 @@ jobs:
           git config user.name "codex-ci"
           git config user.email "codex-ci@users.noreply.github.com"
           git add -A
-          git commit -m "test: kill mutation survivors for PR #${{ steps.cycle.outputs.pr }} [agent:codex-mutation]"
+          # The marker names the ACTUAL author — never stamp codex on a
+          # Claude-written commit.
+          git commit -m "test: kill mutation survivors for PR #${{ steps.cycle.outputs.pr }} [agent:${{ steps.author.outputs.author || 'codex' }}-mutation]"
           # Issue #67: the branch can advance during a long Codex run. A rejected
           # push for a superseded head is benign — the new head's own pipeline
           # owns mutation now. Any other push failure is a real error.

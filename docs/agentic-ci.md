@@ -22,6 +22,14 @@ PR opened/synchronize
 - **Codex CI** — independent test engineer. May touch `tests/` only, enforced
   mechanically by `scripts/ci/assert_codex_scope.sh` after every run (the prompt is not
   the boundary). Prompts: `.github/codex/pr-tests.md`, `.github/codex/mutation-remediation.md`.
+  Two ChatGPT accounts with usage-based failover (`scripts/ci/codex_account_failover.py`,
+  threshold 95%); when BOTH are rate-limited (exit 75, and only then) the same prompt goes
+  to the tertiary author: `scripts/ci/claude_test_author.sh` runs a **non-Fable** Claude
+  model headless (`CLAUDE_TESTS_MODEL`, default `claude-sonnet-5`; Fable is refused because
+  it is the implementation author) on a subscription OAuth token
+  (`CLAUDE_TESTS_OAUTH_TOKEN`, `sk-ant-oat…` only — API keys are refused and stripped so
+  nothing bills per token). The commit marker names the actual author
+  (`[agent:claude-tests]` / `[agent:claude-mutation]`); the scope guard applies unchanged.
 - **Human** — merge, methodology changes, frozen benchmark decisions, every BLOCKED.
 
 ## Mutation policy (unchanged, now automated)
@@ -49,10 +57,12 @@ raw log) uploads on PASS and FAIL.
 ## Anti-loop invariants
 
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
-- `[agent:codex-tests]` / `[agent:codex-mutation]` HEAD markers — Codex never reprocesses
-  its own commits; all Codex work is squashed into one marker commit per run.
-- Remediation cycle count = `[agent:codex-mutation]` commits in the trailing
-  agent-authored block; any human/Claude push resets it.
+- `[agent:(codex|claude)-(tests|mutation)]` HEAD markers — an agent-authored HEAD is never
+  reprocessed, whichever author produced it; all agent work is squashed into one marker
+  commit per run.
+- Remediation cycle count = `[agent:codex-mutation]` + `[agent:claude-mutation]` commits in
+  the trailing agent-authored block; any human push resets it. The fallback author gets no
+  extra cycles.
 - Codex jobs run only for same-repo PRs (`head.repo.full_name == repository`); the
   fork-PR approval policy is set to "all outside collaborators".
 
