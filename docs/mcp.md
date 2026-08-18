@@ -612,6 +612,21 @@ CELEX format: `3<year><type-letter><number>`. Type letter `R` for regulation, `L
 
 `eu_basis` is `[]` (empty list) for acts with no EEA references, or only an `EØS-avtalen` annex link without specific directives / regulations. The tool raises `corpus predates Sprint 8 PR-D` if the manifest record carries `eu_basis: null` (legacy schema) — in that case suggest the user run the `refresh_command` from `corpus_status` to refresh.
 
+**Coverage limit — regulations are effectively absent from this index.** `eu_basis` is
+extracted from the `<dd class="eeaReferences">` block of Lovdata's source XML
+(`src/lovspor/rendering/document.py:191-215`). Measured on `lovverk 86dc2dabf`
+(2026-08-18): **126 of 5,925 documents carry a non-empty `eu_basis`, and all 126 are
+`lov`. Not one of the 5,161 `forskrift` records has one** — while 637 forskrifter do cite
+EU documents inline in their Markdown, via `](eu/3…)` links that this extractor never
+reads.
+
+The practical consequence: `search_eu_implementations("32006R1907")` returns `[]` even
+though the corpus contains `reach-forskriften`, whose own first paragraph says the REACH
+regulation *gjelder som forskrift* and links it as `](eu/32006r1907)`
+(`lovverk forskrifter/reach-forskriften.md:29`) — its manifest `eu_basis` is `[]`. So an empty result means *nothing is recorded*,
+not *nothing implements it* — for regulations, read the text with `get_law` rather than
+trusting the field. The tool descriptions served to the model say the same.
+
 ### `search_eu_implementations(eu_doc_id)`
 
 Reverse-lookup: which Norwegian acts implement a given EU document. Complement to `get_eu_basis` (Norwegian act → EU basis); this one goes EU document → Norwegian acts.

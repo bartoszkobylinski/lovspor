@@ -4850,6 +4850,34 @@ def test_time_machine_tool_descriptions_pin_adr_0002_contract(tmp_path: Path) ->
     assert "They do not establish when a provision became legally applicable" in versions
 
 
+def test_eu_tool_descriptions_state_the_coverage_limit(tmp_path: Path) -> None:
+    """An empty ``eu_basis`` is recorded-absence, not evidence of no EU basis.
+
+    No ``forskrift`` in the corpus carries an ``eu_basis`` at all, because the
+    value comes from the source XML's ``eeaReferences`` block; regulations that
+    cite EU documents inline in their text are invisible to it. A model reading
+    ``[]`` as "implements no EU law" would be wrong about 87% of the corpus, so
+    both EU tools must carry the limit in the description the model actually
+    sees. Sentences are pinned whole: a fragment check would pass against a
+    description corrupted around the fragment it searched for.
+    """
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    tools = build_server(tmp_path)._tool_manager._tools
+
+    basis = " ".join((tools["get_eu_basis"].description or "").split())
+    assert (
+        "an empty ``eu_basis`` means no EU basis is recorded for this document; "
+        "it is never evidence that the document implements no EU law." in basis
+    )
+    assert "no ``forskrift`` carries an ``eu_basis`` at all" in basis
+
+    reverse = " ".join((tools["search_eu_implementations"].description or "").split())
+    assert (
+        "An empty result therefore does not establish that no Norwegian "
+        "regulation implements the given EU document." in reverse
+    )
+
+
 def test_build_server_raises_eagerly_on_bad_corpus(tmp_path: Path) -> None:
     """Misconfigured corpus path fails at server startup, not first call."""
     with pytest.raises(CorpusNotFoundError):
