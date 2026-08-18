@@ -532,6 +532,28 @@ class TestReadAccessPolicyCheck:
         with pytest.raises(ParseError, match="unreadable access-policy check"):
             read_access_policy_check(path)
 
+    def test_the_check_document_encoding_is_explicit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The encoding must be passed explicitly, not left to the platform
+        default. A reviewer's name is routinely non-ASCII, and a check that
+        reads differently on a differently-configured machine is not the
+        record it claims to be."""
+        path = tmp_path / "check.json"
+        path.write_text(json.dumps(check_document()), encoding="utf-8")
+        captured: dict[str, object] = {}
+        original_read_text = Path.read_text
+
+        def spy_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            captured["encoding"] = kwargs.get("encoding")
+            return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", spy_read_text)
+
+        read_access_policy_check(path)
+
+        assert captured["encoding"] == "utf-8"
+
     def test_non_utf8_bytes_are_a_parse_error(self, tmp_path: Path) -> None:
         path = tmp_path / "check.json"
         path.write_bytes(json.dumps(check_document()).encode("utf-16"))

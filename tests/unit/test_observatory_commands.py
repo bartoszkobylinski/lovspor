@@ -265,6 +265,34 @@ class TestActivateSource:
         assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
 
 
+class TestNestedRoot:
+    def test_a_root_several_levels_deep_is_created(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An archive path like /Volumes/T7/lovspor/observatory is ordinary,
+        and none of its intermediate directories need exist yet."""
+        monkeypatch.delenv(ENV_CORPUS_ROOT, raising=False)
+        deep = tmp_path / "archive" / "lovspor" / "observatory"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(deep))
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                BAERUM_ID,
+                "--name",
+                "Bærum",
+                "--domain",
+                BAERUM_DOMAIN,
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert read_registry(deep / "sources.json").sources[BAERUM_ID].name == "Bærum"
+
+
 class TestListSources:
     def test_an_empty_registry_says_so(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "sources"])
@@ -329,7 +357,10 @@ class TestStorageBoundary:
         result = runner.invoke(app, ["observatory", "sources"])
 
         assert result.exit_code == 1
-        assert "Cannot locate the source registry" in result.output
+        # stderr, not the merged output: an operator piping stdout into a file
+        # must not have the failure silently land in the file instead of the
+        # terminal.
+        assert "Cannot locate the source registry" in result.stderr
 
     def test_a_root_inside_the_engine_repo_is_refused(
         self, monkeypatch: pytest.MonkeyPatch
@@ -341,4 +372,7 @@ class TestStorageBoundary:
         result = runner.invoke(app, ["observatory", "sources"])
 
         assert result.exit_code == 1
-        assert "Cannot locate the source registry" in result.output
+        # stderr, not the merged output: an operator piping stdout into a file
+        # must not have the failure silently land in the file instead of the
+        # terminal.
+        assert "Cannot locate the source registry" in result.stderr
