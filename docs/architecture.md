@@ -130,6 +130,7 @@ how to reach `lovverk`.
 | `observatory/log.py` | Append-only JSONL log + SHA-256-addressed blob store; snapshot verification, tombstone-aware. | `ObservationLog`, `verify_snapshot()` |
 | `observatory/registry.py` | Eligibility vs activation: a source is fetchable only with a recorded access-policy check. `lovdata.no` is denied centrally. | `authorise_capture()`, `activate()`, `SourceRegistry` |
 | `observatory/fetch.py` | One URL, politely: activation gate, live robots.txt, per-source rate limit, byte cap, redirects not followed. Every outcome recorded. | `Fetcher`, `CaptureSettings`, `RobotsGate`, `RateLimiter` |
+| `observatory/discovery.py` | What is there to look at: sitemaps, sitemap indexes, Atom and RSS. Fetches nothing itself — every discovery document goes through `Fetcher`, so the gates apply and the document is recorded as an observation. Proposes candidates; capturing one is a separate decision. | `Discoverer`, `DiscoverySettings`, `parse_discovery_document()`, `Candidate` |
 
 Observed material is evidence that specific bytes were retrievable from a
 recorded endpoint at a recorded time — never an assertion of law, and never

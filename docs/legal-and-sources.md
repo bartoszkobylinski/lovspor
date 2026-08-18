@@ -63,6 +63,12 @@ the canonical pipeline's:
 - Every fetch re-reads `robots.txt` live, waits out the source's own rate limit, and
   does not follow redirects off the authorised host. A refusal is recorded, so
   compliance is demonstrable from the log rather than asserted here.
+- **Discovery reads only what the authority publishes for it** — sitemaps, sitemap
+  indexes, Atom and RSS — and it fetches nothing on its own: every discovery document
+  passes the same activation, `robots.txt` and rate-limit gates, and is recorded in the
+  log like any other observation. Discovery *proposes* URLs; capturing one is a separate
+  decision, which is what keeps a sitemap of 40,000 entries from becoming a mass
+  download. Depth, document count and decompressed size are all bounded.
 - **May fetch ≠ may redistribute.** Observed bytes live outside this repo and outside
   `lovverk`, and are not published anywhere until a per-source redistribution basis
   exists. A municipality-hosted copy of a Lovtidend document carries its own
