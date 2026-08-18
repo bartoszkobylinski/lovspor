@@ -114,6 +114,18 @@ class LogIntegrityError(ObservatoryError):
     """
 
 
+class TombstonedArtifactError(ObservatoryError):
+    """Capture tried to re-store bytes that a tombstone retired.
+
+    A tombstone under ADR-0010 §7 records a removal made on legal, privacy or
+    comparable grounds. The source usually keeps serving the same bytes
+    afterwards, so an ordinary re-crawl would restore exactly what was
+    removed — silently, and with a fresh observation record making it look
+    routine. Capture is refused instead; putting the bytes back has to be a
+    deliberate act, not a side effect of the next crawl.
+    """
+
+
 class SourceNotActivatedError(ObservatoryError):
     """A source was used for capture without a recorded access-policy check.
 

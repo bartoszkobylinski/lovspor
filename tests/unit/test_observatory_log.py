@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.errors import LogIntegrityError
+from lovspor.errors import LogIntegrityError, StorageBoundaryError, TombstonedArtifactError
 from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
     ArtifactObservation,
@@ -14,13 +14,25 @@ from lovspor.observatory.model import (
     RetrievalProvenance,
     Tombstone,
 )
+from lovspor.observatory.storage import (
+    ENV_OBSERVATORY_ROOT,
+    ObservatoryRoot,
+    engine_root,
+    observatory_root,
+)
 
 OBSERVED_AT = datetime(2026, 8, 18, 6, 30, tzinfo=UTC)
+
+
+def make_log(root: Path) -> ObservationLog:
+    """A log under a validated root — the only way to construct one."""
+    return ObservationLog(ObservatoryRoot(root, []))
 
 
 def provenance() -> RetrievalProvenance:
     return RetrievalProvenance(
         adapter="generic-html",
+        channel="http",
         discovery_method="sitemap",
         user_agent="lovspor-observatory/0.1",
         rate_limit_seconds=2.0,
@@ -41,7 +53,7 @@ def observation(payload: bytes, *, url: str = "https://example.invalid/f") -> Ar
 
 class TestAppendOnly:
     def test_appending_preserves_earlier_lines_byte_for_byte(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         log.append_artifact(observation(b"first"), b"first")
         before = log.log_path.read_bytes()
 
@@ -51,7 +63,7 @@ class TestAppendOnly:
 
     def test_recrawl_of_unchanged_content_appends_a_second_record(self, tmp_path: Path) -> None:
         """A re-crawl is always an addition: two records, one deduplicated blob."""
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         payload = b"unchanged"
         log.append_artifact(observation(payload), payload)
         log.append_artifact(observation(payload), payload)
@@ -63,7 +75,7 @@ class TestAppendOnly:
         assert [path for path in blobs if path.is_file()] == [log.blob_path(records[0].sha256)]
 
     def test_records_read_back_in_append_order(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         log.append_artifact(observation(b"a", url="https://example.invalid/1"), b"a")
         log.append(
             FetchFailure(
@@ -80,10 +92,10 @@ class TestAppendOnly:
         assert kinds == ["artifact", "fetch_failure"]
 
     def test_empty_log_reads_as_no_records(self, tmp_path: Path) -> None:
-        assert list(ObservationLog(tmp_path).records()) == []
+        assert list(make_log(tmp_path).records()) == []
 
     def test_snapshot_paths_hang_off_the_configured_root(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
 
         assert log.root == tmp_path
         assert log.log_path.parent == tmp_path
@@ -92,13 +104,13 @@ class TestAppendOnly:
 
 class TestHashIntegrityAtTheDoor:
     def test_payload_that_contradicts_the_record_is_refused(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
 
         with pytest.raises(LogIntegrityError, match="hashes to"):
             log.append_artifact(observation(b"declared"), b"actual")
 
     def test_refused_payload_writes_neither_blob_nor_line(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
 
         with pytest.raises(LogIntegrityError):
             log.append_artifact(observation(b"declared"), b"actual")
@@ -107,7 +119,7 @@ class TestHashIntegrityAtTheDoor:
         assert not (tmp_path / "blobs").exists()
 
     def test_stored_bytes_are_returned_verbatim(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         payload = b"\x00\xff not text \xc3\xb8"
         record = observation(payload)
         log.append_artifact(record, payload)
@@ -117,7 +129,7 @@ class TestHashIntegrityAtTheDoor:
 
 class TestTornOrUnknownLines:
     def test_truncated_line_fails_loudly(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         log.append_artifact(observation(b"a"), b"a")
         with log.log_path.open("a", encoding="utf-8") as handle:
             handle.write('{"kind":"artifact","url":"https://exa\n')
@@ -127,7 +139,7 @@ class TestTornOrUnknownLines:
 
     def test_unrecognised_record_shape_fails_loudly(self, tmp_path: Path) -> None:
         """Skipping it would shrink the evidence silently — the one forbidden outcome."""
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         with log.log_path.open("a", encoding="utf-8") as handle:
             handle.write('{"kind":"promotion","authority_id":"9999"}\n')
 
@@ -135,7 +147,7 @@ class TestTornOrUnknownLines:
             list(log.records())
 
     def test_blank_lines_are_tolerated(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         log.append_artifact(observation(b"a"), b"a")
         with log.log_path.open("a", encoding="utf-8") as handle:
             handle.write("\n")
@@ -145,7 +157,7 @@ class TestTornOrUnknownLines:
 
 class TestSnapshotVerification:
     def test_intact_snapshot_verifies(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         log.append_artifact(observation(b"a"), b"a")
         log.append_artifact(observation(b"b", url="https://example.invalid/2"), b"b")
 
@@ -155,7 +167,7 @@ class TestSnapshotVerification:
         assert report.artifacts_checked == 2
 
     def test_blob_deleted_without_a_tombstone_is_reported(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         record = observation(b"a")
         log.append_artifact(record, b"a")
         log.blob_path(record.sha256).unlink()
@@ -166,7 +178,7 @@ class TestSnapshotVerification:
         assert report.missing_blobs == (record.sha256,)
 
     def test_tombstoned_removal_keeps_the_snapshot_valid(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         record = observation(b"a")
         log.append_artifact(record, b"a")
         log.blob_path(record.sha256).unlink()
@@ -187,7 +199,7 @@ class TestSnapshotVerification:
 
     def test_tombstone_history_is_kept_not_erased(self, tmp_path: Path) -> None:
         """The original observation stays in the log; only the bytes go."""
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         record = observation(b"a")
         log.append_artifact(record, b"a")
         log.blob_path(record.sha256).unlink()
@@ -205,7 +217,7 @@ class TestSnapshotVerification:
         assert kinds == ["artifact", "tombstone"]
 
     def test_altered_blob_is_caught_by_rehashing(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         record = observation(b"a")
         log.append_artifact(record, b"a")
         log.blob_path(record.sha256).write_bytes(b"tampered")
@@ -217,7 +229,7 @@ class TestSnapshotVerification:
 
     def test_tombstone_whose_blob_is_still_present_is_reported(self, tmp_path: Path) -> None:
         """A recorded removal that never happened is its own integrity signal."""
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         record = observation(b"a")
         log.append_artifact(record, b"a")
         log.append(
@@ -235,7 +247,7 @@ class TestSnapshotVerification:
         assert report.unremoved_tombstones == (record.sha256,)
 
     def test_fetch_failures_are_not_counted_as_artifacts(self, tmp_path: Path) -> None:
-        log = ObservationLog(tmp_path)
+        log = make_log(tmp_path)
         log.append(
             FetchFailure(
                 authority_id="9999",
@@ -251,3 +263,130 @@ class TestSnapshotVerification:
 
         assert report.ok
         assert report.artifacts_checked == 0
+
+
+class TestTombstoneIsNotSilentlyReversed:
+    def test_recapture_of_tombstoned_bytes_is_refused(self, tmp_path: Path) -> None:
+        """The source still serves them; putting them back must be deliberate."""
+        log = make_log(tmp_path)
+        record = observation(b"a")
+        log.append_artifact(record, b"a")
+        log.blob_path(record.sha256).unlink()
+        log.append(
+            Tombstone(
+                sha256=record.sha256,
+                removed_at=OBSERVED_AT,
+                basis="privacy request",
+                authorised_by="project owner",
+            ),
+        )
+
+        with pytest.raises(TombstonedArtifactError, match="sanctioned removal"):
+            log.append_artifact(observation(b"a"), b"a")
+
+    def test_refused_recapture_restores_nothing(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        record = observation(b"a")
+        log.append_artifact(record, b"a")
+        log.blob_path(record.sha256).unlink()
+        log.append(
+            Tombstone(
+                sha256=record.sha256,
+                removed_at=OBSERVED_AT,
+                basis="legal demand",
+                authorised_by="project owner",
+            ),
+        )
+        before = log.log_path.read_bytes()
+
+        with pytest.raises(TombstonedArtifactError):
+            log.append_artifact(observation(b"a"), b"a")
+
+        assert not log.blob_path(record.sha256).exists()
+        assert log.log_path.read_bytes() == before
+
+    def test_different_bytes_from_the_same_source_still_capture(self, tmp_path: Path) -> None:
+        """A tombstone retires specific bytes, not the endpoint."""
+        log = make_log(tmp_path)
+        retired = observation(b"a")
+        log.append_artifact(retired, b"a")
+        log.blob_path(retired.sha256).unlink()
+        log.append(
+            Tombstone(
+                sha256=retired.sha256,
+                removed_at=OBSERVED_AT,
+                basis="privacy request",
+                authorised_by="project owner",
+            ),
+        )
+
+        log.append_artifact(observation(b"revised"), b"revised")
+
+        assert verify_snapshot(log).ok
+
+
+class TestOrphanAndUnexplainedRecords:
+    def test_blob_with_no_log_record_fails_the_audit(self, tmp_path: Path) -> None:
+        """A crash between writing bytes and appending the record leaves raw material
+        with no provenance; walking only log-referenced hashes would never see it."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a"), b"a")
+        orphan = hashlib.sha256(b"orphan").hexdigest()
+        path = log.blob_path(orphan)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"orphan")
+
+        report = verify_snapshot(log)
+
+        assert not report.ok
+        assert report.orphan_blobs == (orphan,)
+
+    def test_tombstone_for_never_observed_bytes_fails_the_audit(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        never = hashlib.sha256(b"never seen").hexdigest()
+        log.append(
+            Tombstone(
+                sha256=never,
+                removed_at=OBSERVED_AT,
+                basis="privacy request",
+                authorised_by="project owner",
+            ),
+        )
+
+        report = verify_snapshot(log)
+
+        assert not report.ok
+        assert report.tombstones_without_observation == (never,)
+
+    def test_observation_appended_after_its_tombstone_fails_the_audit(self, tmp_path: Path) -> None:
+        """The API refuses this; a hand-edited log can still contain it."""
+        log = make_log(tmp_path)
+        record = observation(b"a")
+        log.append_artifact(record, b"a")
+        log.blob_path(record.sha256).unlink()
+        log.append(
+            Tombstone(
+                sha256=record.sha256,
+                removed_at=OBSERVED_AT,
+                basis="legal demand",
+                authorised_by="project owner",
+            ),
+        )
+        log.append(record)
+
+        report = verify_snapshot(log)
+
+        assert not report.ok
+        assert report.observations_after_tombstone == (record.sha256,)
+
+
+class TestRootMustBeValidated:
+    def test_log_rejects_an_unvalidated_path(self, tmp_path: Path) -> None:
+        """A bare Path has not passed the §5 boundary check and is not accepted."""
+        with pytest.raises(StorageBoundaryError, match="requires an ObservatoryRoot"):
+            ObservationLog(tmp_path)  # type: ignore[arg-type]
+
+    def test_log_cannot_be_pointed_inside_the_engine_repository(self) -> None:
+        """The boundary reaches the log because the log will not take a raw path."""
+        with pytest.raises(StorageBoundaryError):
+            ObservationLog(observatory_root({ENV_OBSERVATORY_ROOT: str(engine_root() / "data")}))

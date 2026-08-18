@@ -18,6 +18,14 @@ dates, relationships — are absent by design rather than nullable-and-empty.
 ADR-0010 defers classification and parsing entirely, so nothing could populate
 them honestly today; they belong to the derived layer that Design Principle
 §11 keeps separate from source capture.
+
+Every model here forbids unknown fields. These records are persisted evidence:
+dropping a field a newer writer added would silently discard part of what was
+observed, and the log's own contract is to fail on a shape it does not
+understand rather than to read past it. That is the opposite trade from the
+corpus manifest, which tolerates unknown keys so older readers keep working —
+there the reader is a third party, here it is this engine reading its own
+archive.
 """
 
 import json
@@ -54,18 +62,25 @@ class RetrievalProvenance(BaseModel):
     nobody reads later: an audit asking whether a source was fetched politely
     must be answerable from the record itself, not from the deployment that
     happened to be running that day.
+
+    ``channel`` and ``discovery_method`` are different questions and both are
+    required. The channel is *how the bytes arrived* — ``http``,
+    ``bulk_dataset``, ``file_api``; the discovery method is *how the URL was
+    found* — a sitemap, a feed, a link on a listing page. A record that
+    conflates them cannot answer either.
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     adapter: str = Field(min_length=1)
+    channel: str = Field(min_length=1)
     discovery_method: str = Field(min_length=1)
     user_agent: str = Field(min_length=1)
     rate_limit_seconds: float = Field(gt=0)
 
 
 class _ObservationBase(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     authority_id: str = Field(min_length=1)
     url: str = Field(min_length=1)
@@ -124,7 +139,7 @@ class Tombstone(BaseModel):
     implementation instead of by decision.
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["tombstone"] = "tombstone"
     sha256: str = Field(pattern=_SHA256_PATTERN)

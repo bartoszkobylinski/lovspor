@@ -6,11 +6,13 @@ import pytest
 
 from lovspor.errors import ConfigError, StorageBoundaryError
 from lovspor.observatory.storage import (
+    ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
+    ObservatoryRoot,
     _repository_root,
     engine_root,
+    forbidden_trees,
     observatory_root,
-    resolve_root,
 )
 
 
@@ -18,24 +20,33 @@ class TestConfiguredRoot:
     def test_absolute_root_outside_forbidden_trees_is_accepted(self, tmp_path: Path) -> None:
         root = tmp_path / "observatory"
 
-        assert resolve_root(str(root), [tmp_path / "engine"]) == root.resolve()
+        assert ObservatoryRoot(root, [tmp_path / "engine"]).path == root.resolve()
 
     @pytest.mark.parametrize("raw", [None, "", "   "])
     def test_unset_root_is_a_config_error(self, raw: str | None) -> None:
         with pytest.raises(ConfigError, match=ENV_OBSERVATORY_ROOT):
-            resolve_root(raw, [])
+            ObservatoryRoot(raw, [])
 
     def test_relative_root_is_refused(self) -> None:
         """A relative path resolves against the process cwd — which may be a checkout."""
         with pytest.raises(ConfigError, match="absolute"):
-            resolve_root("data/observatory", [])
+            ObservatoryRoot("data/observatory", [])
 
     def test_user_home_shorthand_is_expanded(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("HOME", str(tmp_path))
 
-        assert resolve_root("~/observatory", []) == (tmp_path / "observatory").resolve()
+        assert ObservatoryRoot("~/observatory", []).path == (tmp_path / "observatory").resolve()
+
+    def test_roots_compare_and_hash_by_path(self, tmp_path: Path) -> None:
+        first = ObservatoryRoot(tmp_path / "obs", [])
+        second = ObservatoryRoot(str(tmp_path / "obs"), [])
+
+        assert first == second
+        assert len({first, second}) == 1
+        assert first != tmp_path
+        assert "obs" in repr(first)
 
 
 class TestStorageBoundary:
@@ -44,14 +55,14 @@ class TestStorageBoundary:
         engine.mkdir()
 
         with pytest.raises(StorageBoundaryError, match="ADR-0010"):
-            resolve_root(str(engine / "data" / "observatory"), [engine])
+            ObservatoryRoot(engine / "data" / "observatory", [engine])
 
     def test_root_equal_to_a_forbidden_tree_is_refused(self, tmp_path: Path) -> None:
         engine = tmp_path / "engine"
         engine.mkdir()
 
         with pytest.raises(StorageBoundaryError):
-            resolve_root(str(engine), [engine])
+            ObservatoryRoot(engine, [engine])
 
     def test_corpus_repository_is_a_forbidden_tree_too(self, tmp_path: Path) -> None:
         """ADR-0010 §5 names two trees: the engine repo and the public corpus."""
@@ -59,7 +70,7 @@ class TestStorageBoundary:
         corpus.mkdir()
 
         with pytest.raises(StorageBoundaryError):
-            resolve_root(str(corpus / "observed"), [tmp_path / "engine", corpus])
+            ObservatoryRoot(corpus / "observed", [tmp_path / "engine", corpus])
 
     def test_sibling_directory_sharing_a_prefix_is_allowed(self, tmp_path: Path) -> None:
         """``/x/engine-data`` is not inside ``/x/engine``; a string prefix check would fail this."""
@@ -67,30 +78,46 @@ class TestStorageBoundary:
         engine.mkdir()
 
         assert (
-            resolve_root(str(tmp_path / "engine-data"), [engine])
+            ObservatoryRoot(tmp_path / "engine-data", [engine]).path
             == (tmp_path / "engine-data").resolve()
         )
+
+
+class TestForbiddenTrees:
+    def test_engine_tree_is_always_forbidden(self) -> None:
+        assert engine_root() in forbidden_trees({})
+
+    def test_corpus_tree_is_added_from_the_environment(self, tmp_path: Path) -> None:
+        """Protecting the published corpus must not depend on a caller remembering it."""
+        corpus = tmp_path / "lovverk"
+
+        assert corpus in forbidden_trees({ENV_CORPUS_ROOT: str(corpus)})
+
+    @pytest.mark.parametrize("value", ["", "   "])
+    def test_blank_corpus_setting_is_ignored(self, value: str) -> None:
+        assert forbidden_trees({ENV_CORPUS_ROOT: value}) == [engine_root()]
 
 
 class TestEnvironmentResolution:
     def test_root_is_read_from_the_environment(self, tmp_path: Path) -> None:
         root = tmp_path / "observatory"
 
-        assert observatory_root({ENV_OBSERVATORY_ROOT: str(root)}) == root.resolve()
+        assert observatory_root({ENV_OBSERVATORY_ROOT: str(root)}).path == root.resolve()
 
     def test_engine_tree_is_forbidden_by_default(self) -> None:
-        """No caller has to remember the engine repo — resolution adds it."""
         inside = engine_root() / "data" / "observatory"
 
         with pytest.raises(StorageBoundaryError):
             observatory_root({ENV_OBSERVATORY_ROOT: str(inside)})
 
-    def test_corpus_root_extends_the_boundary(self, tmp_path: Path) -> None:
+    def test_corpus_tree_is_forbidden_without_being_passed(self, tmp_path: Path) -> None:
         corpus = tmp_path / "lovverk"
         corpus.mkdir()
 
         with pytest.raises(StorageBoundaryError):
-            observatory_root({ENV_OBSERVATORY_ROOT: str(corpus / "raw")}, corpus)
+            observatory_root(
+                {ENV_OBSERVATORY_ROOT: str(corpus / "raw"), ENV_CORPUS_ROOT: str(corpus)},
+            )
 
     def test_missing_environment_variable_is_a_config_error(self) -> None:
         with pytest.raises(ConfigError):
@@ -104,11 +131,17 @@ class TestEngineRootDetection:
         assert (detected / ".git").exists() or detected.name == "lovspor"
 
     def test_package_without_a_repository_falls_back_to_its_parent(self, tmp_path: Path) -> None:
-        """An installed package has no .git above it; the package dir is then the forbidden tree."""
+        """An installed package may have no .git above it; the package dir is then the tree.
+
+        The walk is bounded by ``ceiling`` so the assertion cannot be changed by
+        a stray ``.git`` somewhere above the temporary directory — which is
+        exactly what made an earlier version of this test fail on CI but pass
+        locally.
+        """
         package = tmp_path / "site-packages" / "lovspor" / "observatory"
         package.mkdir(parents=True)
 
-        assert _repository_root(package) == package.parent
+        assert _repository_root(package, tmp_path) == package.parent
 
     def test_repository_marker_is_found_when_it_is_a_worktree_file(self, tmp_path: Path) -> None:
         """A linked worktree carries .git as a file, not a directory."""
@@ -116,4 +149,4 @@ class TestEngineRootDetection:
         (repo / "src" / "lovspor").mkdir(parents=True)
         (repo / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
 
-        assert _repository_root(repo / "src" / "lovspor") == repo
+        assert _repository_root(repo / "src" / "lovspor", tmp_path) == repo

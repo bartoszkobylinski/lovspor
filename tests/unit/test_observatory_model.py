@@ -21,6 +21,7 @@ OBSERVED_AT = datetime(2026, 8, 18, 6, 30, tzinfo=UTC)
 def provenance() -> RetrievalProvenance:
     return RetrievalProvenance(
         adapter="generic-html",
+        channel="http",
         discovery_method="sitemap",
         user_agent="lovspor-observatory/0.1 (+https://lovspor.no)",
         rate_limit_seconds=2.0,
@@ -124,6 +125,7 @@ class TestMandatoryFields:
         with pytest.raises(ValidationError):
             RetrievalProvenance(
                 adapter="generic-html",
+                channel="http",
                 discovery_method="sitemap",
                 user_agent="ua",
                 rate_limit_seconds=0,
@@ -144,28 +146,50 @@ class TestRecordsAreImmutable:
 
 
 class TestDiscriminatedUnion:
-    @pytest.mark.parametrize(
-        ("payload", "expected"),
-        [
-            ({"kind": "artifact"}, ArtifactObservation),
-            ({"kind": "fetch_failure", "outcome": "timeout"}, FetchFailure),
-        ],
-    )
-    def test_kind_selects_the_record_type(self, payload: dict[str, object], expected: type) -> None:
-        fields: dict[str, object] = {
-            "authority_id": "9999",
-            "url": "https://example.invalid/f",
-            "observed_at": OBSERVED_AT,
-            "provenance": provenance().model_dump(),
-            "sha256": SHA,
-            "content_type": "text/html",
-            "http_status": 200,
-        }
-        fields.update(payload)
+    def test_artifact_kind_selects_the_artifact_type(self) -> None:
+        parsed = TypeAdapter(ObservationRecord).validate_python(
+            {
+                "kind": "artifact",
+                "authority_id": "9999",
+                "url": "https://example.invalid/f",
+                "observed_at": OBSERVED_AT,
+                "provenance": provenance().model_dump(),
+                "sha256": SHA,
+                "content_type": "text/html",
+                "http_status": 200,
+            },
+        )
 
-        parsed = TypeAdapter(ObservationRecord).validate_python(fields)
+        assert isinstance(parsed, ArtifactObservation)
 
-        assert isinstance(parsed, expected)
+    def test_failure_kind_selects_the_failure_type(self) -> None:
+        parsed = TypeAdapter(ObservationRecord).validate_python(
+            {
+                "kind": "fetch_failure",
+                "authority_id": "9999",
+                "url": "https://example.invalid/f",
+                "observed_at": OBSERVED_AT,
+                "provenance": provenance().model_dump(),
+                "outcome": "timeout",
+            },
+        )
+
+        assert isinstance(parsed, FetchFailure)
+
+    def test_a_failure_carrying_artifact_fields_is_refused(self) -> None:
+        """The two kinds are not interchangeable shapes with optional halves."""
+        with pytest.raises(ValidationError):
+            TypeAdapter(ObservationRecord).validate_python(
+                {
+                    "kind": "fetch_failure",
+                    "authority_id": "9999",
+                    "url": "https://example.invalid/f",
+                    "observed_at": OBSERVED_AT,
+                    "provenance": provenance().model_dump(),
+                    "outcome": "timeout",
+                    "sha256": SHA,
+                },
+            )
 
     def test_unknown_kind_is_refused(self) -> None:
         with pytest.raises(ValidationError):
@@ -197,3 +221,40 @@ class TestDeterministicSerialisation:
 
         assert "\n" not in line
         assert "høring-æøå" in line
+
+
+class TestProvenanceCompleteness:
+    def test_channel_is_required_and_distinct_from_discovery_method(self) -> None:
+        """ADR-0010 §2 lists channel; how bytes arrived is not how the URL was found."""
+        with pytest.raises(ValidationError):
+            RetrievalProvenance(
+                adapter="generic-html",
+                discovery_method="sitemap",
+                user_agent="ua",
+                rate_limit_seconds=2.0,
+            )
+
+    def test_channel_and_discovery_method_are_recorded_separately(self) -> None:
+        record = artifact()
+
+        assert record.provenance.channel == "http"
+        assert record.provenance.discovery_method == "sitemap"
+
+
+class TestEvidenceSchemaIsClosed:
+    def test_unknown_field_on_an_observation_is_refused(self) -> None:
+        """Silently dropping part of an evidence record is the failure mode here."""
+        with pytest.raises(ValidationError):
+            artifact(classification="forskrift")
+
+    def test_unknown_field_on_a_tombstone_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            Tombstone.model_validate(
+                {
+                    "sha256": SHA,
+                    "removed_at": OBSERVED_AT,
+                    "basis": "privacy request",
+                    "authorised_by": "project owner",
+                    "reinstated": True,
+                },
+            )

@@ -12,8 +12,8 @@ from lovspor.observatory.registry import (
     SourceRecord,
     SourceRegistry,
     activate,
+    authorise_capture,
     read_registry,
-    require_active,
     write_registry,
 )
 
@@ -26,6 +26,7 @@ def check(**overrides: object) -> AccessPolicyCheck:
         "robots_txt_url": "https://example.invalid/robots.txt",
         "robots_allows": True,
         "terms_reviewed": True,
+        "terms_permit_capture": True,
         "rate_limit_seconds": 2.0,
         "user_agent": "lovspor-observatory/0.1",
         "reviewed_by": "project owner",
@@ -56,10 +57,6 @@ class TestEligibilityIsNotActivation:
     def test_robots_disallow_blocks_activation(self) -> None:
         with pytest.raises(SourceNotActivatedError, match="robots_allows=False"):
             activate(eligible_source(), check(robots_allows=False))
-
-    def test_unreviewed_terms_block_activation(self) -> None:
-        with pytest.raises(SourceNotActivatedError, match="terms_reviewed=False"):
-            activate(eligible_source(), check(terms_reviewed=False))
 
     def test_activation_leaves_the_original_record_untouched(self) -> None:
         source = eligible_source()
@@ -106,20 +103,68 @@ class TestActivationCannotBeForged:
 
 
 class TestCaptureGate:
-    def test_active_source_passes(self) -> None:
+    def test_activated_domain_passes(self) -> None:
         registry = SourceRegistry(sources={"9999": activate(eligible_source(), check())})
 
-        assert require_active(registry, "9999").authority_id == "9999"
+        record = authorise_capture(registry, "https://testby.example.invalid/forskrift")
+
+        assert record.authority_id == "9999"
+
+    def test_subdomain_of_an_activated_domain_passes(self) -> None:
+        registry = SourceRegistry(sources={"9999": activate(eligible_source(), check())})
+
+        assert authorise_capture(registry, "https://www.testby.example.invalid/f").active
+
+    def test_activation_does_not_extend_to_another_host(self) -> None:
+        """Clearing an authority is not a licence to fetch anything on its behalf."""
+        registry = SourceRegistry(sources={"9999": activate(eligible_source(), check())})
+
+        with pytest.raises(SourceNotActivatedError, match="no registered source covers"):
+            authorise_capture(registry, "https://elsewhere.example.invalid/f")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://lovdata.no/register/lokaleForskrifter",
+            "https://www.lovdata.no/dokument/SF/forskrift",
+            "http://LOVDATA.NO/x",
+        ],
+    )
+    def test_lovdata_is_globally_denied(self, url: str) -> None:
+        """ADR-0010 §4 forbids it outright; registering the host must not unlock it."""
+        denied = SourceRecord(
+            authority_type="kommune",
+            authority_id="9999",
+            name="Testby",
+            canonical_domain="lovdata.no",
+        )
+        registry = SourceRegistry(sources={"9999": activate(denied, check())})
+
+        with pytest.raises(SourceNotActivatedError, match="globally denied"):
+            authorise_capture(registry, url)
+
+    def test_lookalike_host_does_not_match_an_activated_domain(self) -> None:
+        """Label-wise matching: nottestby.example.invalid is not a subdomain."""
+        registry = SourceRegistry(sources={"9999": activate(eligible_source(), check())})
+
+        with pytest.raises(SourceNotActivatedError):
+            authorise_capture(registry, "https://nottestby.example.invalid/f")
+
+    def test_suffix_lookalike_does_not_match_either(self) -> None:
+        registry = SourceRegistry(sources={"9999": activate(eligible_source(), check())})
+
+        with pytest.raises(SourceNotActivatedError):
+            authorise_capture(registry, "https://testby.example.invalid.evil.example/f")
 
     def test_inactive_source_is_refused(self) -> None:
         registry = SourceRegistry(sources={"9999": eligible_source()})
 
         with pytest.raises(SourceNotActivatedError, match="no recorded access-policy check"):
-            require_active(registry, "9999")
+            authorise_capture(registry, "https://testby.example.invalid/f")
 
-    def test_unknown_authority_is_refused(self) -> None:
-        with pytest.raises(SourceNotActivatedError, match="not in the source registry"):
-            require_active(SourceRegistry(), "9999")
+    def test_url_without_a_host_is_refused(self) -> None:
+        with pytest.raises(SourceNotActivatedError, match="no host"):
+            authorise_capture(SourceRegistry(), "not-a-url")
 
     def test_active_listing_excludes_inactive_sources(self) -> None:
         other = SourceRecord(
@@ -168,3 +213,54 @@ class TestRegistryFile:
     def test_missing_file_raises_file_not_found(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             read_registry(tmp_path / "absent.json")
+
+
+class TestTermsDecisionIsNotTermsReview:
+    def test_reviewed_terms_that_prohibit_capture_block_activation(self) -> None:
+        """ "I read the terms and they forbid crawling" must not clear a source."""
+        with pytest.raises(SourceNotActivatedError, match="terms_permit_capture=False"):
+            activate(eligible_source(), check(terms_permit_capture=False))
+
+    def test_unreviewed_terms_block_activation(self) -> None:
+        with pytest.raises(SourceNotActivatedError, match="terms_reviewed=False"):
+            activate(
+                eligible_source(),
+                check(terms_reviewed=False, terms_permit_capture=False),
+            )
+
+    def test_a_verdict_without_a_review_is_incoherent(self) -> None:
+        with pytest.raises(ValidationError, match="terms_permit_capture cannot be true"):
+            check(terms_reviewed=False, terms_permit_capture=True)
+
+    def test_active_record_with_prohibiting_terms_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="ADR-0010"):
+            SourceRecord(
+                authority_type="kommune",
+                authority_id="9999",
+                name="Testby",
+                canonical_domain="testby.example.invalid",
+                access_policy=check(terms_permit_capture=False),
+                active=True,
+            )
+
+
+class TestRegistrySchemaIsPinned:
+    def test_unknown_field_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            SourceRecord.model_validate(
+                {
+                    "authority_type": "kommune",
+                    "authority_id": "9999",
+                    "name": "Testby",
+                    "canonical_domain": "testby.example.invalid",
+                    "crawl_budget": 100,
+                },
+            )
+
+    def test_future_schema_version_is_refused(self, tmp_path: Path) -> None:
+        """A v1 reader must not consume v2 semantics by ignoring the version."""
+        path = tmp_path / "registry.json"
+        path.write_text('{"version": 2, "sources": {}}', encoding="utf-8")
+
+        with pytest.raises(ParseError, match="invalid source registry"):
+            read_registry(path)

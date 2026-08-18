@@ -8,11 +8,13 @@ must be a pure function of it (``derived = f(observation_snapshot,
 derivation_version, config)``); this module owns the snapshot half of that
 contract and deliberately owns nothing else.
 
-Two consequences shape the API. The log is only ever opened for append, so
-there is no code path here that can rewrite history. And a blob is addressed
-by the hash of its own bytes, so observing unchanged content twice appends a
+Three consequences shape the API. The log is only ever opened for append, so
+there is no code path here that can rewrite history. A blob is addressed by
+the hash of its own bytes, so observing unchanged content twice appends a
 second record without duplicating the payload — a re-crawl is always an
-addition, never an edit.
+addition, never an edit. And a tombstoned hash is refused at the door:
+capture must not quietly undo a sanctioned removal just because the source
+still serves the same bytes.
 """
 
 import hashlib
@@ -22,13 +24,14 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from lovspor.atomic_io import atomic_write_bytes
-from lovspor.errors import LogIntegrityError
+from lovspor.errors import LogIntegrityError, StorageBoundaryError, TombstonedArtifactError
 from lovspor.observatory.model import (
     ArtifactObservation,
     ObservationRecord,
     Tombstone,
     record_to_json_line,
 )
+from lovspor.observatory.storage import ObservatoryRoot
 
 LOG_FILENAME = "observations.jsonl"
 BLOBS_DIRNAME = "blobs"
@@ -44,31 +47,57 @@ class SnapshotVerification(BaseModel):
     found instead of stopping at the first defect.
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     artifacts_checked: int
     missing_blobs: tuple[str, ...] = ()
     hash_mismatches: tuple[str, ...] = ()
     tombstoned: tuple[str, ...] = ()
     unremoved_tombstones: tuple[str, ...] = ()
+    orphan_blobs: tuple[str, ...] = ()
+    tombstones_without_observation: tuple[str, ...] = ()
+    observations_after_tombstone: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
-        """True when no blob is missing without a tombstone and none is altered.
+        """True when the snapshot's bytes and its log account for each other.
 
-        ``tombstoned`` does not count against a snapshot: a recorded, explained
-        removal is the sanctioned way for bytes to disappear. A blob gone with
-        no tombstone is exactly the silent mutation the log exists to make
-        impossible to hide.
+        ``tombstoned`` does not count against a snapshot: a recorded,
+        explained removal is the sanctioned way for bytes to disappear. Every
+        other list does — a blob gone with no tombstone, a blob that no longer
+        hashes to its record, a blob on disk that no record mentions, a
+        tombstone for something never observed, a removal that never happened,
+        or an observation appended after the tombstone that retired it.
         """
-        return not (self.missing_blobs or self.hash_mismatches or self.unremoved_tombstones)
+        return not (
+            self.missing_blobs
+            or self.hash_mismatches
+            or self.unremoved_tombstones
+            or self.orphan_blobs
+            or self.tombstones_without_observation
+            or self.observations_after_tombstone
+        )
 
 
 class ObservationLog:
-    """The append-only log and its blob store, rooted at one directory."""
+    """The append-only log and its blob store, under one validated root.
 
-    def __init__(self, root: Path) -> None:
-        self._root = root
+    The constructor takes an :class:`~lovspor.observatory.storage.ObservatoryRoot`
+    rather than a ``Path`` on purpose: an instance of that type cannot exist
+    without having passed the ADR-0010 §5 boundary check, so there is no way
+    to point a log inside the engine repository or the published corpus.
+    """
+
+    def __init__(self, root: ObservatoryRoot) -> None:
+        # Checked at runtime, not only by mypy: an unchecked path reaching this
+        # constructor is the storage boundary being bypassed, and it should say
+        # so rather than fail later with an incidental AttributeError.
+        if not isinstance(root, ObservatoryRoot):
+            raise StorageBoundaryError(
+                f"ObservationLog requires an ObservatoryRoot, got {type(root).__name__}; "
+                "resolve the root through observatory_root() so ADR-0010 §5 is checked",
+            )
+        self._root = root.path
 
     @property
     def root(self) -> Path:
@@ -78,9 +107,13 @@ class ObservationLog:
     def log_path(self) -> Path:
         return self._root / LOG_FILENAME
 
+    @property
+    def blobs_dir(self) -> Path:
+        return self._root / BLOBS_DIRNAME
+
     def blob_path(self, sha256: str) -> Path:
         """Locate a blob by its content hash, sharded on the first two digits."""
-        return self._root / BLOBS_DIRNAME / sha256[:2] / sha256
+        return self.blobs_dir / sha256[:2] / sha256
 
     def append(self, record: ObservationRecord) -> None:
         """Append one record. The only write path; there is no update path."""
@@ -95,21 +128,35 @@ class ObservationLog:
         claiming a hash its bytes do not have would make the whole log
         unverifiable, so it is refused at the door rather than discovered
         later by an audit. An existing blob is left untouched — identical
-        bytes are identical evidence, and rewriting it could only ever
-        replace a good copy with a worse one.
+        bytes are identical evidence.
 
         Raises:
             LogIntegrityError: ``payload`` does not hash to ``record.sha256``.
+            TombstonedArtifactError: these bytes were removed under a
+                tombstone. Re-storing them because the source still serves
+                them would silently reverse a legal or privacy removal, which
+                is precisely what the tombstone exists to prevent.
         """
         digest = hashlib.sha256(payload).hexdigest()
         if digest != record.sha256:
             raise LogIntegrityError(
                 f"payload for {record.url} hashes to {digest}, record claims {record.sha256}",
             )
+        if digest in self.tombstoned_hashes():
+            raise TombstonedArtifactError(
+                f"{digest} was removed under a tombstone; re-storing it would reverse a "
+                "sanctioned removal (ADR-0010 §7)",
+            )
         blob = self.blob_path(digest)
         if not blob.exists():
             atomic_write_bytes(blob, payload)
         self.append(record)
+
+    def tombstoned_hashes(self) -> frozenset[str]:
+        """Hashes retired by a tombstone, and therefore closed to re-capture."""
+        return frozenset(
+            record.sha256 for record in self.records() if isinstance(record, Tombstone)
+        )
 
     def records(self) -> Iterator[ObservationRecord]:
         """Read the log in append order.
@@ -134,6 +181,12 @@ class ObservationLog:
         except ValidationError as exc:
             raise LogIntegrityError(f"{self.log_path}:{number}: unreadable record: {exc}") from exc
 
+    def stored_hashes(self) -> frozenset[str]:
+        """Hashes actually present in the blob store, read from disk."""
+        if not self.blobs_dir.exists():
+            return frozenset()
+        return frozenset(path.name for path in self.blobs_dir.rglob("*") if path.is_file())
+
     def read_blob(self, sha256: str) -> bytes:
         """Return stored bytes.
 
@@ -145,42 +198,73 @@ class ObservationLog:
         return self.blob_path(sha256).read_bytes()
 
 
-def _partition(log: ObservationLog) -> tuple[list[str], set[str]]:
-    """Split the log into observed artifact hashes and tombstoned hashes."""
-    artifacts: list[str] = []
-    tombstoned: set[str] = set()
+class _Timeline(BaseModel):
+    """What the log says, in order, about each hash."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    observed: tuple[str, ...]
+    tombstoned: tuple[str, ...]
+    observed_after_tombstone: tuple[str, ...]
+
+
+def _walk(log: ObservationLog) -> _Timeline:
+    """Replay the log in append order, noting what happened after what."""
+    observed: list[str] = []
+    tombstoned: list[str] = []
+    late: list[str] = []
+    retired: set[str] = set()
     for record in log.records():
         if isinstance(record, ArtifactObservation):
-            artifacts.append(record.sha256)
+            observed.append(record.sha256)
+            if record.sha256 in retired:
+                late.append(record.sha256)
         elif isinstance(record, Tombstone):
-            tombstoned.add(record.sha256)
-    return artifacts, tombstoned
+            tombstoned.append(record.sha256)
+            retired.add(record.sha256)
+    return _Timeline(
+        observed=tuple(observed),
+        tombstoned=tuple(tombstoned),
+        observed_after_tombstone=tuple(late),
+    )
 
 
-def verify_snapshot(log: ObservationLog) -> SnapshotVerification:
-    """Audit a snapshot: every artifact's bytes present and unaltered, or tombstoned.
-
-    Implements the hash-integrity and immutability checks ADR-0010 lists under
-    Validation. Re-hashing is the point: a blob that still exists but no longer
-    matches its recorded digest is a mutated one, and nothing else in the
-    system would notice.
-    """
-    artifacts, tombstoned = _partition(log)
+def _classify_blobs(
+    log: ObservationLog, timeline: _Timeline
+) -> tuple[list[str], list[str], list[str]]:
+    """Sort observed hashes into missing, altered and sanctioned-removal buckets."""
+    retired = set(timeline.tombstoned)
     missing: list[str] = []
     mismatched: list[str] = []
     removed: list[str] = []
-    for sha256 in artifacts:
+    for sha256 in timeline.observed:
         blob = log.blob_path(sha256)
         if not blob.exists():
-            (removed if sha256 in tombstoned else missing).append(sha256)
-            continue
-        if hashlib.sha256(blob.read_bytes()).hexdigest() != sha256:
+            (removed if sha256 in retired else missing).append(sha256)
+        elif hashlib.sha256(blob.read_bytes()).hexdigest() != sha256:
             mismatched.append(sha256)
-    unremoved = [sha256 for sha256 in sorted(tombstoned) if log.blob_path(sha256).exists()]
+    return missing, mismatched, removed
+
+
+def verify_snapshot(log: ObservationLog) -> SnapshotVerification:
+    """Audit a snapshot: bytes and log must fully account for each other.
+
+    Implements the hash-integrity and immutability checks ADR-0010 lists under
+    Validation, and then some the log's own guarantees imply: an orphan blob
+    is raw material with no provenance record, and a tombstone for a hash the
+    log never observed is a removal record that explains nothing.
+    """
+    timeline = _walk(log)
+    missing, mismatched, removed = _classify_blobs(log, timeline)
+    observed = set(timeline.observed)
+    retired = set(timeline.tombstoned)
     return SnapshotVerification(
-        artifacts_checked=len(artifacts),
+        artifacts_checked=len(timeline.observed),
         missing_blobs=tuple(missing),
         hash_mismatches=tuple(mismatched),
         tombstoned=tuple(removed),
-        unremoved_tombstones=tuple(unremoved),
+        unremoved_tombstones=tuple(s for s in sorted(retired) if log.blob_path(s).exists()),
+        orphan_blobs=tuple(sorted(log.stored_hashes() - observed)),
+        tombstones_without_observation=tuple(sorted(retired - observed)),
+        observations_after_tombstone=tuple(timeline.observed_after_tombstone),
     )
