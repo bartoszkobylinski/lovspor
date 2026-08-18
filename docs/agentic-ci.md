@@ -72,6 +72,21 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
 ## Anti-loop invariants
 
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
+- `codex-tests` additionally holds the repo-wide `lovspor-codex-subscription` group with
+  `cancel-in-progress: false`: one Codex run at a time, because there is one subscription.
+
+  **A cancelled `codex-tests` is usually eviction, not failure.** GitHub keeps only ONE
+  *pending* job per concurrency group — a newer pending job evicts the older one, and
+  `cancel-in-progress: false` does not prevent that (it governs *running* jobs). Open three
+  PRs within a few minutes and two of them get a required check reading `Cancelled after 2s`.
+
+  Signature, so nobody debugs a phantom test failure: conclusion `cancelled`, duration a
+  couple of seconds, and **zero steps** in the job — it never started, so the escalation
+  path that turns a real Codex failure into a triageable comment never runs either. Verified
+  2026-08-18 on PRs #121, #124 and #125, all evicted while #123 held the lane.
+
+  Recovery is `gh run rerun <run-id> --failed`, **one PR at a time**, after the lane is
+  clear. Re-running two at once reproduces the eviction.
 - `[agent:(codex|claude)-(tests|mutation)]` HEAD markers — an agent-authored HEAD is never
   reprocessed, whichever author produced it; all agent work is squashed into one marker
   commit per run.
