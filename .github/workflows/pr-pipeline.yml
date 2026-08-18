@@ -236,11 +236,17 @@ jobs:
           scripts/mutmut-pr.sh "${{ github.event.pull_request.base.sha }}" 2>&1 | tee mutation-raw.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
-      - name: Collect survivor ids
+      - name: Collect survivors, with what each one changed
         if: always()
         run: |
           uv run mutmut results > mutation-results.txt 2>/dev/null || true
           sed -n 's/^    \(.*\): survived$/\1/p' mutation-results.txt > survivors.txt
+          # The shadow tree is still on disk here — this is the only moment the
+          # mutation diff can be recovered without a second mutmut run (#119).
+          # If it fails, the bare ids remain valid input for the report.
+          uv run python scripts/ci/mutation_survivors.py \
+            --survivors-file survivors.txt \
+            --out survivors.jsonl || cp survivors.txt survivors.jsonl
 
       - name: Build mutation-result.json
         if: always()
@@ -248,7 +254,7 @@ jobs:
           python scripts/ci/mutation_to_json.py \
             --commit "${{ github.event.pull_request.head.sha }}" \
             --raw mutation-raw.log \
-            --survivors-file survivors.txt \
+            --survivors-file survivors.jsonl \
             --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
             --out mutation-result.json
 

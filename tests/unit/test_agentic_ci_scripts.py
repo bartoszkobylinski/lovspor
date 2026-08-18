@@ -13,6 +13,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from mutmut.__main__ import Config as MutmutConfig
 
 _SCRIPTS = Path(__file__).parents[2] / "scripts" / "ci"
 
@@ -28,6 +29,7 @@ def _load(name: str) -> ModuleType:
 
 mutation_to_json = _load("mutation_to_json")
 mutation_gate = _load("mutation_gate")
+mutation_survivors = _load("mutation_survivors")
 codex_account_failover = _load("codex_account_failover")
 
 FULL_SHA = "a" * 40
@@ -571,3 +573,296 @@ class TestFailoverExitCode:
         )
 
         assert code == codex_account_failover.NO_ACCOUNT_EXIT == 75
+
+
+ORIGINAL_SOURCE = """\
+class Renderer:
+    def render(self, value):
+        return value.strip()
+
+
+def label(value):
+    return value.rstrip(".")
+"""
+
+# The shape mutmut 3 writes into mutants/: the unmutated copy beside the
+# mutant, both named after the function they were generated from.
+MUTATED_SOURCE = """\
+class Renderer:
+    def xǁRendererǁrender__mutmut_orig(self, value):
+        return value.strip()
+
+    def xǁRendererǁrender__mutmut_1(self, value):
+        return value.lstrip()
+
+
+def x_label__mutmut_orig(value):
+    return value.rstrip(".")
+
+
+def x_label__mutmut_1(value):
+    return value.rstrip("XX.XX")
+"""
+
+RENDER_MUTANT = "pkg.mod.xǁRendererǁrender__mutmut_1"
+LABEL_MUTANT = "pkg.mod.x_label__mutmut_1"
+
+
+def _shadow_tree(tmp_path: Path) -> Path:
+    """A minimal repo carrying a real mutmut 3 shadow tree, mutants/ and all."""
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["src/pkg/"]\n')
+    source = tmp_path / "src" / "pkg"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("")
+    (source / "mod.py").write_text(ORIGINAL_SOURCE)
+    mutants = tmp_path / "mutants" / "src" / "pkg"
+    mutants.mkdir(parents=True)
+    (mutants / "__init__.py").write_text("")
+    (mutants / "mod.py").write_text(MUTATED_SOURCE)
+    meta = {
+        "exit_code_by_key": {RENDER_MUTANT: 0, LABEL_MUTANT: 0},
+        "durations_by_key": {},
+        "estimated_durations_by_key": {},
+    }
+    (mutants / "mod.py.meta").write_text(json.dumps(meta))
+    return tmp_path
+
+
+def _survivor_records(tmp_path: Path, ids: str) -> list[dict[str, object]]:
+    """Run the collector the way the workflow does, from the repo root."""
+    (tmp_path / "survivors.txt").write_text(ids)
+    out = tmp_path / "survivors.jsonl"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.chdir(tmp_path)
+        mp.setattr(
+            "sys.argv",
+            [
+                "mutation_survivors.py",
+                "--survivors-file",
+                "survivors.txt",
+                "--out",
+                str(out),
+            ],
+        )
+        _reset_mutmut_config()
+        assert mutation_survivors.main() == 0
+    return [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+
+
+def _reset_mutmut_config() -> None:
+    """mutmut caches its config globally; a second tmp repo must not inherit it."""
+    MutmutConfig.reset()
+
+
+class TestSurvivorIdentity:
+    """Issue #119: what a mutant id proves on its own, with no shadow tree."""
+
+    def test_a_plain_function_id_splits_into_module_and_symbol(self) -> None:
+        assert mutation_survivors.split_id(LABEL_MUTANT) == ("pkg.mod", "label", None)
+
+    def test_a_method_id_carries_its_class(self) -> None:
+        assert mutation_survivors.split_id(RENDER_MUTANT) == ("pkg.mod", "render", "Renderer")
+
+    def test_a_module_file_is_only_reported_when_it_is_on_disk(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "mod.py").write_text(ORIGINAL_SOURCE)
+        root = tmp_path / "src"
+        assert mutation_survivors.module_file("pkg.mod", root) == root / "pkg" / "mod.py"
+        assert mutation_survivors.module_file("pkg.absent", root) is None
+
+    def test_a_package_resolves_to_its_init(self, tmp_path: Path) -> None:
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "__init__.py").write_text("")
+        root = tmp_path / "src"
+        assert mutation_survivors.module_file("pkg", root) == root / "pkg" / "__init__.py"
+
+    def test_a_method_line_is_found_inside_its_class(self, tmp_path: Path) -> None:
+        path = tmp_path / "mod.py"
+        path.write_text(ORIGINAL_SOURCE)
+        assert mutation_survivors.symbol_line(path, "render", "Renderer") == 2
+        assert mutation_survivors.symbol_line(path, "label", None) == 6
+        assert mutation_survivors.symbol_line(path, "absent", None) is None
+
+
+class TestSurvivorDetail:
+    """The artifact must answer 'what changed' without a second mutmut run."""
+
+    def test_the_mutation_diff_is_recovered_from_the_shadow_tree(self, tmp_path: Path) -> None:
+        _shadow_tree(tmp_path)
+
+        [record] = _survivor_records(tmp_path, f"{LABEL_MUTANT}\n")
+
+        assert record["file"] == "src/pkg/mod.py"
+        assert record["symbol"] == "label"
+        assert record["symbol_line"] == 6
+        assert record["detail_source"] == "mutants_shadow_tree"
+        assert '-    return value.rstrip(".")' in record["diff"]
+        assert '+    return value.rstrip("XX.XX")' in record["diff"]
+
+    def test_a_method_mutant_reports_its_class(self, tmp_path: Path) -> None:
+        _shadow_tree(tmp_path)
+
+        [record] = _survivor_records(tmp_path, f"{RENDER_MUTANT}\n")
+
+        assert record["class"] == "Renderer"
+        assert record["symbol_line"] == 2
+        # mutmut renders the method standalone, so the diff arrives dedented.
+        assert "+    return value.lstrip()" in record["diff"]
+        assert "def render(self, value):" in record["diff"]
+
+    def test_without_a_shadow_tree_the_id_is_still_resolved_and_labelled(
+        self, tmp_path: Path
+    ) -> None:
+        """A downloaded artifact or a fresh checkout: no mutants/, so no diff.
+
+        Emitting bare nulls there is what made the old report unreadable — a
+        null must say whether it means 'absent' or 'never recovered'.
+        """
+        _shadow_tree(tmp_path)
+        for leftover in (tmp_path / "mutants").rglob("*"):
+            if leftover.is_file():
+                leftover.unlink()
+
+        [record] = _survivor_records(tmp_path, f"{LABEL_MUTANT}\n")
+
+        assert record["id"] == LABEL_MUTANT
+        assert record["file"] == "src/pkg/mod.py"
+        assert record["symbol"] == "label"
+        assert record["diff"] is None
+        assert str(record["detail_source"]).startswith("id_only:")
+
+    def test_every_survivor_gets_a_record(self, tmp_path: Path) -> None:
+        _shadow_tree(tmp_path)
+
+        records = _survivor_records(tmp_path, f"{LABEL_MUTANT}\n{RENDER_MUTANT}\n")
+
+        assert [r["id"] for r in records] == [LABEL_MUTANT, RENDER_MUTANT]
+
+    def test_the_line_field_stays_null_because_mutmut_3_has_no_position(
+        self, tmp_path: Path
+    ) -> None:
+        _shadow_tree(tmp_path)
+
+        [record] = _survivor_records(tmp_path, f"{LABEL_MUTANT}\n")
+
+        assert record["line"] is None
+
+
+class TestSurvivorsInTheReport:
+    """mutation-result.json carries the detail, and stays readable without it."""
+
+    def test_detail_lines_reach_the_report(self, tmp_path: Path) -> None:
+        detail = {
+            "id": LABEL_MUTANT,
+            "file": "src/pkg/mod.py",
+            "line": None,
+            "symbol": "label",
+            "class": None,
+            "symbol_line": 6,
+            "operator": None,
+            "diff": '-    return value.rstrip(".")\n+    return value.rstrip("XX.XX")',
+            "detail_source": "mutants_shadow_tree",
+        }
+        result = _run(
+            tmp_path,
+            _progress_line(survived=1),
+            survivors=json.dumps(detail) + "\n",
+            tool_exit_code=2,
+        )
+        assert result["survivors"] == [detail]
+
+    def test_a_bare_id_list_is_still_legal_input(self, tmp_path: Path) -> None:
+        result = _run(
+            tmp_path, _progress_line(survived=1), survivors=f"{LABEL_MUTANT}\n", tool_exit_code=2
+        )
+        [survivor] = result["survivors"]  # type: ignore[misc]
+        assert survivor["id"] == LABEL_MUTANT
+        assert survivor["diff"] is None
+        assert survivor["detail_source"] == "id_only: no detail collected"
+
+    def test_a_malformed_detail_line_never_loses_the_survivor(self, tmp_path: Path) -> None:
+        """The survivor list is the gate's evidence; a parse slip must not
+        quietly shrink a red run."""
+        broken = '{"id": "' + LABEL_MUTANT + '", "diff": \n'
+        result = _run(tmp_path, _progress_line(survived=1), survivors=broken, tool_exit_code=2)
+        [survivor] = result["survivors"]  # type: ignore[misc]
+        assert survivor["detail_source"] == "id_only: malformed detail line"
+
+    def test_the_summary_points_at_the_file_and_the_replacement(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        detail = {
+            "id": LABEL_MUTANT,
+            "file": "src/pkg/mod.py",
+            "symbol_line": 6,
+            "diff": '--- src/pkg/mod.py\n+++ src/pkg/mod.py\n-    return value.rstrip(".")\n'
+            '+    return value.rstrip("XX.XX")',
+        }
+        result = _run(
+            tmp_path,
+            _progress_line(survived=1),
+            survivors=json.dumps(detail) + "\n",
+            tool_exit_code=2,
+        )
+        out = tmp_path / "gate-input.json"
+        out.write_text(json.dumps(result))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        captured = capsys.readouterr().out
+        assert "src/pkg/mod.py:6" in captured
+        assert 'return value.rstrip("XX.XX")' in captured
+        assert "+++" not in captured
+
+    def test_the_summary_caps_the_list_and_says_how_many_it_dropped(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        survivors = [
+            {"id": f"pkg.mod.x_f{n}__mutmut_1", "file": "src/pkg/mod.py"} for n in range(12)
+        ]
+        out = tmp_path / "many.json"
+        out.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "commit": FULL_SHA,
+                    "score": 90.0,
+                    "mutants": {"total": 12, "killed": 0, "survived": 12, "timeout": 0},
+                    "gate": {"passed": False, "reason": "surviving_mutants"},
+                    "survivors": survivors,
+                }
+            )
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        captured = capsys.readouterr().out
+        assert "… and 2 more (see the artifact)" in captured
+
+    def test_the_summary_survives_a_mangled_survivor_list(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """mutation_gate never tracebacks on artifact data — survivors included."""
+        out = tmp_path / "mangled.json"
+        out.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "commit": FULL_SHA,
+                    "score": 90.0,
+                    "mutants": {"total": 1, "killed": 0, "survived": 1, "timeout": 0},
+                    "gate": {"passed": False, "reason": "surviving_mutants"},
+                    "survivors": "not-a-list",
+                }
+            )
+        )
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        assert "Survivors:" not in capsys.readouterr().out
