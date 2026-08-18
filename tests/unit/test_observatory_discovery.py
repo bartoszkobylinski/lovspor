@@ -7,6 +7,7 @@ that stubbed the fetcher would be testing the stub.
 """
 
 import gzip
+import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,12 +24,13 @@ from lovspor.observatory.discovery import (
     DISCOVERY_SITEMAP_INDEX,
     Discoverer,
     DiscoverySettings,
+    SkippedLink,
     _local_name,
     parse_discovery_document,
 )
 from lovspor.observatory.fetch import CaptureSettings, Fetcher
 from lovspor.observatory.log import ObservationLog
-from lovspor.observatory.model import ArtifactObservation
+from lovspor.observatory.model import ArtifactObservation, Tombstone
 from lovspor.observatory.registry import (
     AccessPolicyCheck,
     SourceRecord,
@@ -720,6 +722,37 @@ class TestDiscovery:
 
         assert httpx_mock.get_requests() == []
         assert list(log.records()) == []
+
+    def test_a_tombstoned_document_is_skipped_and_the_run_continues(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """A page retired under a tombstone must not come back just because the
+        source still serves it (ADR-0010 §7) — and one retired document must
+        not hide everything else the source publishes."""
+        _allow_robots(httpx_mock)
+        retired = _urlset(_url_entry(OTHER_PAGE_URL))
+        httpx_mock.add_response(url=INDEX_URL, content=_sitemapindex(NESTED_URL, SITEMAP_URL))
+        httpx_mock.add_response(url=NESTED_URL, content=retired, is_reusable=True)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(_url_entry(PAGE_URL)))
+        discoverer, source = _discoverer(log)
+        first = discoverer.discover(source, [NESTED_URL])
+        log.append(
+            Tombstone(
+                sha256=hashlib.sha256(retired).hexdigest(),
+                removed_at=OBSERVED_AT,
+                basis="privacy request",
+                authorised_by="bartosz",
+            )
+        )
+
+        result = discoverer.discover(source, [INDEX_URL])
+
+        assert [c.url for c in first.candidates] == [OTHER_PAGE_URL]
+        assert result.skipped == (
+            SkippedLink(url=NESTED_URL, reason="blob_tombstoned", found_in=INDEX_URL),
+        )
+        assert [c.url for c in result.candidates] == [PAGE_URL]
+        assert result.documents_read == (INDEX_URL, SITEMAP_URL)
 
     def test_the_same_input_discovers_the_same_thing_twice(
         self, log: ObservationLog, httpx_mock: HTTPXMock

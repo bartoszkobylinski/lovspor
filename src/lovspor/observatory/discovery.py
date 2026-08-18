@@ -343,7 +343,15 @@ class Discoverer:
         if len(walk.documents_read) >= self._settings.max_documents:
             walk.skip(pending.url, "document_budget_exhausted", pending.found_in)
             return
-        record = self._fetcher.capture(pending.url, pending.discovery_method)
+        try:
+            record = self._fetcher.capture(pending.url, pending.discovery_method)
+        except TombstonedArtifactError:
+            # The source still serves bytes that were removed under a
+            # tombstone, so the fetcher refuses to re-store them (ADR-0010 §7).
+            # That refusal is about this one document; ending the run would let
+            # a single retired page hide everything else the source publishes.
+            walk.skip(pending.url, "blob_tombstoned", pending.found_in)
+            return
         if not isinstance(record, ArtifactObservation):
             walk.skip(pending.url, f"fetch_failed: {record.outcome}", pending.found_in)
             return
@@ -360,6 +368,10 @@ class Discoverer:
         A CMS serving an HTML error page under a sitemap URL stops that
         document, not the run: the other entry points still have something to
         say about the source.
+
+        A blob missing from the store is deliberately *not* caught here. The
+        fetcher has just written it, so its absence is the corruption
+        ``verify_snapshot`` exists to report — not an ordinary bad document.
         """
         try:
             payload = self._log.read_blob(record.sha256)
@@ -368,8 +380,6 @@ class Discoverer:
             )
         except ParseError:
             walk.skip(pending.url, "unparseable_document", pending.found_in)
-        except TombstonedArtifactError:
-            walk.skip(pending.url, "blob_tombstoned", pending.found_in)
         return ()
 
     def _accept(self, walk: _Walk, link: DiscoveredLink, parent: _Pending) -> None:
