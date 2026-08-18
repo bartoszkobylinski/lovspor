@@ -1,5 +1,6 @@
 """Tests for lovspor.observatory.registry — eligibility is not activation."""
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from lovspor.observatory.registry import (
     AccessPolicyCheck,
     SourceRecord,
     SourceRegistry,
+    _host_matches,
     activate,
     authorise_capture,
     read_registry,
@@ -169,6 +171,12 @@ class TestCaptureGate:
         with pytest.raises(SourceNotActivatedError):
             authorise_capture(registry, "https://testby.example.invalid.evil.example/f")
 
+    def test_trailing_dot_on_the_host_is_stripped_before_comparison(self) -> None:
+        assert _host_matches("baerum.no.", "baerum.no") is True
+
+    def test_trailing_dot_on_the_domain_is_stripped_before_comparison(self) -> None:
+        assert _host_matches("baerum.no", "baerum.no.") is True
+
     def test_inactive_source_is_refused(self) -> None:
         registry = SourceRegistry(sources={"9999": eligible_source()})
 
@@ -226,6 +234,46 @@ class TestRegistryFile:
     def test_missing_file_raises_file_not_found(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             read_registry(tmp_path / "absent.json")
+
+    def test_read_registry_decodes_with_explicit_utf8(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The encoding must be passed explicitly, not left to the platform
+        default — the archive must read the same on every machine."""
+        path = tmp_path / "registry.json"
+        path.write_text('{"version": 1, "sources": {}}', encoding="utf-8")
+        captured: dict[str, object] = {}
+        original_read_text = Path.read_text
+
+        def spy_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            captured["encoding"] = kwargs.get("encoding")
+            return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", spy_read_text)
+
+        read_registry(path)
+
+        assert captured["encoding"] == "utf-8"
+
+    def test_write_registry_output_is_sorted_indented_and_literal_utf8(
+        self, tmp_path: Path
+    ) -> None:
+        source = SourceRecord(
+            authority_type="kommune",
+            authority_id="9999",
+            name="Testbæ",
+            canonical_domain="testby.example.invalid",
+        )
+        registry = SourceRegistry(sources={"9999": activate(source, check())})
+        path = tmp_path / "registry.json"
+
+        write_registry(registry, path)
+        text = path.read_text(encoding="utf-8")
+
+        assert list(json.loads(text).keys()) == ["sources", "version"]
+        assert '  "sources": {' in text.splitlines()
+        assert "Testbæ" in text
+        assert "\\u00e6" not in text
 
 
 class TestTermsDecisionIsNotTermsReview:

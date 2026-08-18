@@ -101,6 +101,76 @@ class TestAppendOnly:
         assert log.log_path.parent == tmp_path
         assert log.blob_path("ab" + "c" * 62).parent == tmp_path / "blobs" / "ab"
 
+    def test_append_creates_missing_nested_parent_directories(self, tmp_path: Path) -> None:
+        """The root itself may not exist yet — only its own parents (mkdir
+        without ``parents=True`` would stop at the first missing level)."""
+        log = make_log(tmp_path / "a" / "b" / "c")
+
+        log.append(
+            FetchFailure(
+                authority_id="9999",
+                url="https://example.invalid/f",
+                observed_at=OBSERVED_AT,
+                provenance=provenance(),
+                outcome="timeout",
+            ),
+        )
+
+        assert log.log_path.exists()
+
+    def test_append_writes_with_explicit_utf8_encoding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = make_log(tmp_path)
+        captured: dict[str, object] = {}
+        original_open = Path.open
+
+        def spy_open(self: Path, *args: object, **kwargs: object) -> object:
+            captured["encoding"] = kwargs.get("encoding")
+            return original_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "open", spy_open)
+
+        log.append(
+            FetchFailure(
+                authority_id="9999",
+                url="https://example.invalid/f",
+                observed_at=OBSERVED_AT,
+                provenance=provenance(),
+                outcome="timeout",
+            ),
+        )
+
+        assert captured["encoding"] == "utf-8"
+
+    def test_blank_line_in_the_middle_does_not_truncate_the_log(self, tmp_path: Path) -> None:
+        """A blank line must be skipped, not treated as the end of the log."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a"), b"a")
+        with log.log_path.open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+        log.append_artifact(observation(b"b", url="https://example.invalid/2"), b"b")
+
+        assert len(list(log.records())) == 2
+
+    def test_records_reads_with_explicit_utf8_encoding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a"), b"a")
+        captured: dict[str, object] = {}
+        original_open = Path.open
+
+        def spy_open(self: Path, *args: object, **kwargs: object) -> object:
+            captured["encoding"] = kwargs.get("encoding")
+            return original_open(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "open", spy_open)
+
+        list(log.records())
+
+        assert captured["encoding"] == "utf-8"
+
 
 class TestHashIntegrityAtTheDoor:
     def test_payload_that_contradicts_the_record_is_refused(self, tmp_path: Path) -> None:
@@ -292,6 +362,29 @@ class TestTombstoneIsNotSilentlyReversed:
         with pytest.raises(TombstonedArtifactError, match="sanctioned removal"):
             log.append_artifact(observation(b"a"), b"a")
 
+    def test_recapture_refusal_message_is_exact(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        record = observation(b"a")
+        digest = record.sha256
+        log.append_artifact(record, b"a")
+        log.blob_path(digest).unlink()
+        log.append(
+            Tombstone(
+                sha256=digest,
+                removed_at=OBSERVED_AT,
+                basis="privacy request",
+                authorised_by="project owner",
+            ),
+        )
+
+        with pytest.raises(TombstonedArtifactError) as exc_info:
+            log.append_artifact(observation(b"a"), b"a")
+
+        assert str(exc_info.value) == (
+            f"{digest} was removed under a tombstone; re-storing it would reverse a "
+            "sanctioned removal (ADR-0010 §7)"
+        )
+
     def test_refused_recapture_restores_nothing(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         record = observation(b"a")
@@ -393,6 +486,15 @@ class TestRootMustBeValidated:
         """A bare Path has not passed the §5 boundary check and is not accepted."""
         with pytest.raises(StorageBoundaryError, match="requires an ObservatoryRoot"):
             ObservationLog(tmp_path)  # type: ignore[arg-type]
+
+    def test_unvalidated_argument_error_message_is_exact(self) -> None:
+        with pytest.raises(StorageBoundaryError) as exc_info:
+            ObservationLog(5)  # type: ignore[arg-type]
+
+        assert str(exc_info.value) == (
+            "ObservationLog requires an ObservatoryRoot, got int; "
+            "resolve the root through observatory_root() so ADR-0010 §5 is checked"
+        )
 
     def test_log_cannot_be_pointed_inside_the_engine_repository(self) -> None:
         """The boundary reaches the log because the log will not take a raw path."""

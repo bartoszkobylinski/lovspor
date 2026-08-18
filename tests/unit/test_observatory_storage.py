@@ -9,6 +9,7 @@ from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
     ObservatoryRoot,
+    _reject_forbidden,
     _repository_root,
     engine_root,
     forbidden_trees,
@@ -48,6 +49,11 @@ class TestConfiguredRoot:
         assert first != tmp_path
         assert "obs" in repr(first)
 
+    def test_hash_is_derived_from_the_path(self, tmp_path: Path) -> None:
+        root = ObservatoryRoot(tmp_path / "obs", [])
+
+        assert hash(root) == hash(root.path)
+
 
 class TestStorageBoundary:
     def test_root_inside_a_forbidden_tree_is_refused(self, tmp_path: Path) -> None:
@@ -63,6 +69,19 @@ class TestStorageBoundary:
 
         with pytest.raises(StorageBoundaryError):
             ObservatoryRoot(engine, [engine])
+
+    def test_forbidden_tree_message_is_exact(self, tmp_path: Path) -> None:
+        engine = tmp_path / "engine"
+        engine.mkdir()
+
+        with pytest.raises(StorageBoundaryError) as exc_info:
+            _reject_forbidden(engine.resolve(), [engine])
+
+        assert str(exc_info.value) == (
+            f"observatory root {engine.resolve()} is inside {engine.resolve()}; "
+            "ADR-0010 §5 keeps observed material outside the engine repository "
+            "and the lovverk corpus"
+        )
 
     def test_corpus_repository_is_a_forbidden_tree_too(self, tmp_path: Path) -> None:
         """ADR-0010 §5 names two trees: the engine repo and the public corpus."""
@@ -171,3 +190,13 @@ class TestEngineRootDetection:
         (repo / ".git").write_text("gitdir: /elsewhere\n", encoding="utf-8")
 
         assert _repository_root(repo / "src" / "lovspor", tmp_path) == repo
+
+    def test_ceiling_stops_the_walk_before_a_git_dir_above_it(self, tmp_path: Path) -> None:
+        """A ``.git`` above the ceiling must not be found — the walk must stop
+        at the ceiling, not merely use it as a fallback return value."""
+        (tmp_path / ".git").mkdir()
+        ceiling = tmp_path / "site-packages"
+        package = ceiling / "lovspor" / "observatory"
+        package.mkdir(parents=True)
+
+        assert _repository_root(package, ceiling) == package.parent

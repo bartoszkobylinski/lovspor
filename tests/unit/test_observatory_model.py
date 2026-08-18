@@ -1,5 +1,6 @@
 """Tests for lovspor.observatory.model — the ADR-0010 capture model."""
 
+import json
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
@@ -12,6 +13,7 @@ from lovspor.observatory.model import (
     RetrievalProvenance,
     Tombstone,
     record_to_json_line,
+    require_utc,
 )
 
 SHA = "a" * 64
@@ -62,6 +64,12 @@ class TestObservedAtIsAnAxis:
                     "authorised_by": "project owner",
                 },
             )
+
+    def test_naive_timestamp_message_is_exact(self) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            require_utc(datetime(2026, 8, 18, 6, 30))
+
+        assert str(exc_info.value) == "timestamp must be timezone-aware UTC, got a naive datetime"
 
 
 class TestMandatoryFields:
@@ -235,6 +243,14 @@ class TestDeterministicSerialisation:
 
         assert "\n" not in line
         assert "høring-æøå" in line
+
+    def test_line_has_sorted_keys_and_no_insignificant_whitespace(self) -> None:
+        line = record_to_json_line(artifact())
+
+        data = json.loads(line)
+        assert list(data.keys()) == sorted(data.keys())
+        assert ", " not in line
+        assert ": " not in line
 
 
 class TestProvenanceCompleteness:

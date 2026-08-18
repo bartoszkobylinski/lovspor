@@ -94,3 +94,19 @@ def test_atomic_write_bytes_preserves_original_and_cleans_tmp_on_failure(
 
     assert target.read_bytes() == b"ORIGINAL"
     assert not (tmp_path / "blob.tmp").exists()
+
+
+def test_atomic_write_bytes_reraises_the_original_error_when_tmp_was_never_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cleanup unlink must tolerate a tmp file that never got created — it
+    must not mask the real failure behind a FileNotFoundError of its own."""
+    target = tmp_path / "blob"
+
+    def boom(self: Path, _data: bytes) -> None:
+        raise OSError("write failed before any bytes landed")
+
+    monkeypatch.setattr(Path, "write_bytes", boom)
+    with pytest.raises(OSError, match="write failed before any bytes landed"):
+        atomic_write_bytes(target, b"payload")
