@@ -30,7 +30,13 @@ _SHA256_LEN = 64
 _GIT_SHA_LEN = 40
 # The metadata fields the manifest cross-checks in each arm. Binding, not
 # schema validation — check_fairness owns full schema validation.
-_METADATA_FIELDS = ("runner_commit", "model_id", "lovverk_commit", "system_prompt_sha256")
+_METADATA_FIELDS = (
+    "runner_commit",
+    "model_id",
+    "lovverk_commit",
+    "analysis_plan_sha256",
+    "system_prompt_sha256",
+)
 
 
 class PairManifestError(LovsporError):
@@ -132,6 +138,12 @@ def build_pair_manifest(
         raise PairManifestError("working tree is dirty; a manifest must pin committed code")
     metadata = _shared_metadata(runs_root, run_ids)
     dataset = repo_root / "benchmarks" / "llhb" / "dataset" / "frozen" / "llhb-v1.jsonl"
+    analysis_plan_sha256 = file_sha256(analysis_plan)
+    if analysis_plan_sha256 != str(metadata["analysis_plan_sha256"]):
+        raise PairManifestError(
+            f"committed analysis plan {analysis_plan} hashes to {analysis_plan_sha256}, "
+            f"but the runs recorded {metadata['analysis_plan_sha256']!r}"
+        )
     # The metadata path is repo-relative by contract (check_fairness
     # PROMPT_REPO_PATH). The manifest hashes the committed FILE and refuses
     # a run that recorded different prompt bytes — binding beats trust.
@@ -146,7 +158,7 @@ def build_pair_manifest(
         schema_version=SCHEMA_VERSION,
         benchmark=str(metadata.get("llhb_version", "llhb-v1")),
         analysis_plan_path=str(analysis_plan.relative_to(repo_root)),
-        analysis_plan_sha256=file_sha256(analysis_plan),
+        analysis_plan_sha256=analysis_plan_sha256,
         dataset_path=str(dataset.relative_to(repo_root)),
         dataset_sha256=file_sha256(dataset),
         system_prompt_path=prompt_path,
@@ -227,6 +239,7 @@ def _verify_arm_metadata(manifest: PairManifest, runs_root: Path) -> None:
         ("runner_commit", manifest.runner_commit),
         ("model_id", manifest.model_requested),
         ("lovverk_commit", manifest.corpus_snapshot),
+        ("analysis_plan_sha256", manifest.analysis_plan_sha256),
         ("system_prompt_sha256", manifest.system_prompt_sha256),
     )
     for field, expected in bindings:

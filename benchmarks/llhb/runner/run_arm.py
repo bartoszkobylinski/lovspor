@@ -51,6 +51,7 @@ Usage:
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import subprocess
@@ -82,6 +83,7 @@ from lovspor.llhb.schema import canonical_jsonl, dataset_checksum, load_cases_js
 LLHB_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = LLHB_DIR.parents[1]
 PROMPT_PATH = LLHB_DIR / "runner" / "system-prompt-v1.txt"
+ANALYSIS_PLAN_PATH = LLHB_DIR / "ANALYSIS-PLAN-fable5-v1.md"
 FROZEN_JSONL = LLHB_DIR / "dataset" / "frozen" / "llhb-v1.jsonl"
 FROZEN_LOCK = LLHB_DIR / "dataset" / "frozen" / "llhb-v1.lock.json"
 STABILITY_SUBSET = LLHB_DIR / "dataset" / "frozen" / "llhb-v1-stability30.json"
@@ -273,6 +275,7 @@ def compose(
         condition=args.condition,
         system_prompt_text=PROMPT_PATH.read_text(encoding="utf-8"),
         system_prompt_path=str(PROMPT_PATH.relative_to(REPO_ROOT)),
+        analysis_plan_sha256=hashlib.sha256(ANALYSIS_PLAN_PATH.read_bytes()).hexdigest(),
         lovspor_commit=head,
         lovverk_commit=str(lock["corpus_pin"]["lovverk_commit"]),
         runner_commit=head,

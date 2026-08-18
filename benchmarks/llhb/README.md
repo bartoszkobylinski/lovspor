@@ -4,9 +4,13 @@ LLHB measures whether giving a large language model access to the Lovspor
 Norwegian-law MCP reduces legal hallucinations, compared with the same model
 answering the same questions without it.
 
-Status: **v1 in design/build. No frozen dataset exists yet. No model runs have
-been executed.** See `DECISIONS.md` for the approved design decisions and
-`PROPOSAL.md` for the original design proposal.
+Status: **v1 executed on `claude-opus-5` (frozen pair, 250+250, published
+2026-08-14) — a post-hoc diagnostic result per DECISIONS.md ruling #30; a
+confirmatory `claude-fable-5` replication is preregistered in
+`ANALYSIS-PLAN-fable5-v1.md`.** The frozen dataset lives in
+`dataset/frozen/` (checksum in the lock file), scored reports in
+`results/reports/`. See `DECISIONS.md` for the rulings and `PROPOSAL.md`
+for the original design proposal.
 
 ## What LLHB is not
 

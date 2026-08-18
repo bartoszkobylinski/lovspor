@@ -103,6 +103,7 @@ def make_metadata(**overrides: Any) -> dict[str, Any]:
         "provider": "anthropic",
         "model_id": "claude-opus-5",
         "condition": "control",
+        "analysis_plan_sha256": "a" * 64,
         "system_prompt_sha256": "b" * 64,
         "sampling": {"temperature": None},
         "started_at": "2026-08-08T12:00:00Z",

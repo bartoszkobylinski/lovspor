@@ -336,6 +336,115 @@ dependency), or whether v1 runs on the deterministic 15.
     the audit note is `analysis/llhb-scoring-audit-2026-08-13.md`
     (gitignored analysis/, referenced for provenance).
 
+## Addendum — confirmatory ceremony ruling (2026-08-15)
+
+Recorded from the owner's adversarial-review discussion of 2026-08-14/15.
+The review's verdict ("major revision, potentially strong") and the owner's
+decisions below are binding on all further LLHB work.
+
+30. **Epistemic status of the Opus frozen pair; scorer v2 frozen; the
+    confirmatory ceremony for every future run.**
+
+    **(a) Status of the completed Opus pair.** The scorer-v2 cue-list
+    extensions of ruling #29 (#84 premise-denial cues, #87 source-refusal
+    rules) were informed by inspection of the frozen-pair answers. The
+    mechanical defect fixes (#85 extractor, #86 denominator) are
+    direction-neutral; the cue extensions are calibration on evaluation
+    data. Ruling: the Opus frozen pair scored with scorer v2 is a
+    **post-hoc diagnostic result, not a confirmatory one**. Its published
+    lineage keeps three layers, none deleted, none rewritten: (1) the
+    original preregistered metrics as scored at freeze, (2) the scorer-v2
+    corrected diagnostic results, (3) a clearly-labelled post-hoc
+    supplementary re-analysis (answer-level unconditional H1 rate over all
+    250 cases, citation coverage per arm, valid and invalid citation
+    instances per answer). LLHB v1 metric definitions are NOT retroactively
+    edited (FREEZE.md §5): the re-analysis is a separate, labelled artifact.
+
+    **(b) Scorer v2 is frozen, verbatim norm:** "Outputs that cannot be
+    classified by the frozen scorer are recorded as UNRESOLVED. Confirmatory
+    outputs MUST NOT be used to extend cue lists, refusal patterns, parsing
+    rules, or other semantic classification logic. Any scorer modification
+    motivated by inspection of confirmatory outputs creates a new scorer
+    version; results rescored with that version are diagnostic/post-hoc and
+    cannot retain confirmatory status." Reporting-layer changes mandated by
+    this ruling (C8 three-way aggregation, the reason-code taxonomy, the
+    answer-level metrics of the analysis plan) land BEFORE the confirmatory
+    run and are pinned by the pair manifest's scorer commit; the semantic
+    classification layer (`llhb-score-v2`, `llhb-stance-v1`, cue lists,
+    parsing) does not change.
+
+    **(c) C8 reporting semantics.** SCORING.md defines No-Invention Rate
+    over all C8 cases (n=20); the v2 aggregator silently dropped
+    `passed is None` from the denominator — a spec/implementation
+    contradiction and a complete-case analysis nobody chose. Ruling: C8 is
+    reported **three-way — PASS / FAIL / UNRESOLVED out of all 20 per arm**.
+    The existing 7/7 vs 7/11 figures are retained only under the explicit
+    label *resolved-case analysis*. Committed artifacts carry the full
+    five-way reason code per case: `PASS | FAIL | UNRESOLVED_SEMANTIC |
+    SCORER_ERROR | MODEL_ERROR` — one `None` meaning three different things
+    is exactly the defect being closed. Papers may collapse to the
+    three-way form; artifacts never do.
+
+    **(d) Confirmatory ceremony (first application: the `claude-fable-5`
+    pair).** Order, each step gated on the previous: analysis plan frozen
+    and hashed → run control → freeze/hash control → run treatment →
+    freeze/hash treatment → pair manifest → score → report. A timestamped
+    Confirmatory Analysis Plan is committed BEFORE the first model call;
+    each arm's run metadata carries `analysis_plan_sha256`. Aggregate
+    scoring is mechanically gated: **"Aggregate scoring MUST NOT execute
+    until a valid pair manifest exists and all referenced hashes verify."**
+    Re-running the scorer on identical inputs (same raw outputs, scorer
+    commit, config, plan) is a reproducibility test and is allowed; what is
+    forbidden is aggregate scoring or content inspection before both arms
+    are complete and frozen. Operational monitoring norm, verbatim:
+    "During arm execution, operational monitoring MAY inspect completion
+    status, latency, exit codes, MODEL_ERROR counts, transport errors, and
+    other content-independent health signals. Response content MUST NOT be
+    inspected before both arms are complete and cryptographically frozen.
+    Any known violation MUST be disclosed in the run report."
+
+    **(e) Frozen analysis numbers** (data-integrity eligibility gates,
+    checked before any effect interpretation — thresholds are not a licence
+    for errors):
+
+    | Element | Decision |
+    |---|---|
+    | Primary estimand | Δ = P(H1&#124;control) − P(H1&#124;treatment), answer-level asserted-H1, denominator = all 250 frozen cases |
+    | MODEL_ERROR gate | ≤ 5 affected pairs / 250 (2%); union of pairs with a terminal MODEL_ERROR in either arm; affected pairs drop pairwise from the primary; > 5 → no confirmatory verdict |
+    | SCORER_ERROR gate | ≤ 2 affected pairs / 250 (0.8%); > 2 → no confirmatory verdict (the instrument, not the provider, is broken) |
+    | Missingness bound | with m ≥ 1 dropped pairs, report the worst-case assignment of all m; *confirmed* additionally requires that the worst-case assignment does not reverse the effect sign |
+    | Bootstrap | n = 10,000; seed = 42; unit = paired case; pairs resampled with replacement; statistic = Δ; two-sided 95% percentile CI |
+    | Arm-rate CIs | 95% Wilson score intervals |
+    | Primary verdict | lower CI bound > 0 → **confirmed**; CI contains 0 → **inconclusive**; upper bound < 0 → **reversed / evidence of harm**. No other vocabulary ("trend", "directionally consistent") carries verdict weight |
+    | Secondary metrics | point estimates + CIs only; no confirmatory labels of any kind |
+
+    The bootstrap change 2,000 → 10,000 is made HERE, before the plan
+    freeze — a post-run change of inference parameters would itself be a
+    researcher degree of freedom.
+
+    **(f) Language pre-commitment.** A confirming Fable result is described
+    as *"the treatment effect replicated across two model families on the
+    same frozen challenge set"* — model generality, NOT dataset generality
+    and NOT "two independent studies": item difficulty is shared, which is
+    precisely what makes the cross-model comparison clean. Dataset
+    generality requires the future held-out/paraphrase set.
+
+    **(g) Later providers (OpenAI/Gemini).** LLHB v1 has been public since
+    2026-08-14; the procedural "unseen before run" guarantee is gone for
+    models trained after that date. Future providers run on a NEW private
+    held-out/paraphrase set under hash commitment: publish, before any run,
+    the SHA-256 over the exact UTF-8 bytes of the frozen JSONL (LF line
+    endings, final newline included) plus timestamp/commit and case count;
+    disclose the file after all runs. This proves the set existed before
+    the runs and was not changed after seeing results.
+
+    **(h) Model identity provenance.** Run metadata records the requested
+    model identifier, the returned model identifier (lifted from the
+    stream-json transcripts, per case), the CLI/provider version, and run
+    timestamps. Published claims state exactly what these prove and no
+    more; an alias with a mutable backend proves less than an immutable
+    snapshot id, and the paper says which one it has.
+
 Stage 1 scope granted: documentation structure, methodology/specification
 documents, dataset schema, freeze/versioning protocol, deterministic scoring
 rules, experiment metadata format, matching notebook research-log structure,
