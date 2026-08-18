@@ -121,15 +121,29 @@ class TestMandatoryFields:
         assert record.provenance.rate_limit_seconds == 2.0
         assert record.provenance.user_agent.startswith("lovspor-observatory/")
 
-    def test_non_positive_rate_limit_is_refused(self) -> None:
+    @pytest.mark.parametrize("value", [0, -2.0])
+    def test_non_positive_rate_limit_is_refused(self, value: float) -> None:
         with pytest.raises(ValidationError):
             RetrievalProvenance(
                 adapter="generic-html",
                 channel="http",
                 discovery_method="sitemap",
                 user_agent="ua",
-                rate_limit_seconds=0,
+                rate_limit_seconds=value,
             )
+
+    @pytest.mark.parametrize("missing", ["sha256", "removed_at", "basis", "authorised_by"])
+    def test_tombstone_requires_every_field(self, missing: str) -> None:
+        fields: dict[str, object] = {
+            "sha256": SHA,
+            "removed_at": OBSERVED_AT,
+            "basis": "privacy request",
+            "authorised_by": "project owner",
+        }
+        del fields[missing]
+
+        with pytest.raises(ValidationError):
+            Tombstone.model_validate(fields)
 
     @pytest.mark.parametrize("bad", ["", "xyz", "A" * 64, "a" * 63])
     def test_malformed_sha256_is_refused(self, bad: str) -> None:

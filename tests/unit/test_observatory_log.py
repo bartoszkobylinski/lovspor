@@ -126,6 +126,14 @@ class TestHashIntegrityAtTheDoor:
 
         assert log.read_blob(record.sha256) == payload
 
+    def test_reading_an_absent_blob_raises_file_not_found(self, tmp_path: Path) -> None:
+        """Absence may be a tombstoned removal, not corruption — the caller decides
+        what it means, but the log must not mask it as anything else."""
+        log = make_log(tmp_path)
+
+        with pytest.raises(FileNotFoundError):
+            log.read_blob("a" * 64)
+
 
 class TestTornOrUnknownLines:
     def test_truncated_line_fails_loudly(self, tmp_path: Path) -> None:

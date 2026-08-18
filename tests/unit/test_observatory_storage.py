@@ -97,6 +97,16 @@ class TestForbiddenTrees:
     def test_blank_corpus_setting_is_ignored(self, value: str) -> None:
         assert forbidden_trees({ENV_CORPUS_ROOT: value}) == [engine_root()]
 
+    def test_defaults_to_the_real_process_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Called with no ``env`` argument, this must read ``os.environ`` — the
+        production call site never passes one."""
+        corpus = tmp_path / "lovverk"
+        monkeypatch.setenv(ENV_CORPUS_ROOT, str(corpus))
+
+        assert corpus in forbidden_trees()
+
 
 class TestEnvironmentResolution:
     def test_root_is_read_from_the_environment(self, tmp_path: Path) -> None:
@@ -122,6 +132,17 @@ class TestEnvironmentResolution:
     def test_missing_environment_variable_is_a_config_error(self) -> None:
         with pytest.raises(ConfigError):
             observatory_root({})
+
+    def test_defaults_to_the_real_process_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Called with no ``env`` argument, this must read ``os.environ`` — the
+        production call site never passes one."""
+        root = tmp_path / "observatory"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(root))
+        monkeypatch.delenv(ENV_CORPUS_ROOT, raising=False)
+
+        assert observatory_root().path == root.resolve()
 
 
 class TestEngineRootDetection:

@@ -66,6 +66,19 @@ class TestEligibilityIsNotActivation:
         assert source.active is False
 
 
+class TestAccessPolicyCheckFieldConstraints:
+    @pytest.mark.parametrize("value", [0, -1.0])
+    def test_non_positive_rate_limit_is_refused(self, value: float) -> None:
+        with pytest.raises(ValidationError):
+            check(rate_limit_seconds=value)
+
+    def test_unattributed_check_is_refused(self) -> None:
+        """ "reviewed_by" is mandatory: an unattributed check is not evidence
+        that anyone looked."""
+        with pytest.raises(ValidationError):
+            check(reviewed_by="")
+
+
 class TestActivationCannotBeForged:
     def test_active_without_any_check_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="ADR-0010"):
