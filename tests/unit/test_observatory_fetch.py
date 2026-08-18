@@ -651,6 +651,24 @@ class TestRateLimiterHostKey:
 
         assert clock.slept == []
 
+    def test_two_different_paths_on_the_same_host_still_share_the_rate_limit(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """capture_host() is keyed on the host alone: two URLs that differ
+        only in path must contend for the same bucket, or a crawler could
+        dodge the registered interval by varying the path on every request."""
+        other_path_url = f"https://{BAERUM_DOMAIN}/forskrifter/en-annen-side"
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        httpx_mock.add_response(url=other_path_url, content=PAYLOAD)
+        clock = _Clock()
+        fetcher = _fetcher(log, _settings(clock), rate_limit_seconds=3.0)
+
+        fetcher.capture(PAGE_URL, "sitemap")
+        fetcher.capture(other_path_url, "sitemap")
+
+        assert clock.slept == [3.0]
+
 
 class TestTimeoutIsHonored:
     """A missing or ``None`` timeout would leave the crawler hanging

@@ -15,6 +15,7 @@ from lovspor.observatory.registry import (
     _host_matches,
     activate,
     authorise_capture,
+    capture_host,
     read_registry,
     write_registry,
 )
@@ -199,6 +200,33 @@ class TestCaptureGate:
         )
 
         assert [record.authority_id for record in registry.active()] == ["9999"]
+
+
+class TestCaptureHost:
+    """capture_host() is now the one place both authorise_capture and the
+    fetcher's rate-limit key ask for a URL's host — its own return value and
+    failure mode need direct coverage, not just through those two callers."""
+
+    def test_returns_the_hostname(self) -> None:
+        assert capture_host("https://baerum.kommune.no/forskrift") == "baerum.kommune.no"
+
+    def test_strips_the_port(self) -> None:
+        assert capture_host("https://baerum.kommune.no:8443/forskrift") == "baerum.kommune.no"
+
+    def test_lowercases_the_host(self) -> None:
+        assert capture_host("https://BAERUM.KOMMUNE.NO/forskrift") == "baerum.kommune.no"
+
+    def test_ignores_the_path_and_query(self) -> None:
+        """The rate limiter keys on this return value; if it varied with the
+        path, two URLs on the same host would never contend for the same
+        rate-limit bucket."""
+        assert capture_host("https://baerum.kommune.no/a") == capture_host(
+            "https://baerum.kommune.no/b?x=1"
+        )
+
+    def test_a_url_without_a_host_is_refused(self) -> None:
+        with pytest.raises(SourceNotActivatedError, match="no host"):
+            capture_host("not-a-url")
 
 
 class TestRegistryFile:
