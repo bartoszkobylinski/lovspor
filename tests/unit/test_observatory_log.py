@@ -671,6 +671,38 @@ class TestCrashRecovery:
         assert result.missing_blobs == ()
         assert result.incomplete_final_record is True
 
+    def test_an_unreadable_log_counts_only_artifacts_and_suppresses_tombstone_findings(
+        self, tmp_path: Path
+    ) -> None:
+        """The blob-classification short-circuit is not orphan/missing-only:
+        every field ``_classify_blobs`` and the tombstone bookkeeping would
+        otherwise populate must stay at its default, and ``artifacts_checked``
+        must count the ``ArtifactObservation`` before the tear, not the
+        ``Tombstone`` that followed it."""
+        log = make_log(tmp_path)
+        record = observation(b"first")
+        log.append_artifact(record, b"first")
+        log.append(
+            Tombstone(
+                sha256=record.sha256,
+                removed_at=OBSERVED_AT,
+                basis="privacy request from the source authority",
+                authorised_by="project owner",
+            ),
+        )
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"99')
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is True
+        assert result.artifacts_checked == 1
+        assert result.tombstoned == ()
+        assert result.hash_mismatches == ()
+        assert result.unremoved_tombstones == ()
+        assert result.tombstones_without_observation == ()
+        assert result.observations_after_tombstone == ()
+
     def test_an_intact_log_reports_no_damage(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         log.append_artifact(observation(b"first"), b"first")
