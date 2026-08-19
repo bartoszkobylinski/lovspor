@@ -156,6 +156,32 @@ class TestEligibilityGates:
         assert report.primary.verdict in ("confirmed", "inconclusive", "reversed")
 
 
+class TestVerdict:
+    def test_a_consistent_positive_effect_is_confirmed(self) -> None:
+        """Control hallucinates on every case, treatment never does: every
+        bootstrap resample sees the same per-case difference, so the delta CI
+        is degenerate at the observed value and does not touch zero."""
+        control = [score(i, asserted_h1=("testloven § 99",)) for i in ids(4)]
+        treatment = [score(i) for i in ids(4)]
+
+        report = compute_pair_report(arm(control), arm(treatment))
+
+        assert report.metrics[PRIMARY_METRIC].delta_ci_low == pytest.approx(1.0)
+        assert report.primary.verdict == "confirmed"
+
+    def test_a_consistent_negative_effect_is_reversed(self) -> None:
+        """Treatment hallucinates on every case, control never does: the
+        delta (control - treatment) is degenerate at -1, entirely below
+        zero — the opposite of what a beneficial treatment would show."""
+        control = [score(i) for i in ids(4)]
+        treatment = [score(i, asserted_h1=("testloven § 99",)) for i in ids(4)]
+
+        report = compute_pair_report(arm(control), arm(treatment))
+
+        assert report.metrics[PRIMARY_METRIC].delta_ci_high == pytest.approx(-1.0)
+        assert report.primary.verdict == "reversed"
+
+
 class TestPrimaryEstimand:
     def test_an_answer_that_cited_nothing_still_counts(self) -> None:
         """Ruling #30(a): the primary rate is over every case, not only over
@@ -213,6 +239,44 @@ class TestMissingness:
         assert report.primary.missingness.dropped_pairs == 0
         assert report.primary.missingness.sign_survives_worst_case is None
 
+    def test_a_negative_effect_can_also_survive_the_worst_case(self) -> None:
+        """The survival check is symmetric: a negative all-cases delta
+        survives only if the unfavourable shift keeps the band's high end
+        below zero, not merely its low end above it."""
+        treatment_hallucinates = [score(i) for i in ids(5)]
+        control = [score(i) for i in ids(5)]
+        treatment = [
+            score(s.case_id, asserted_h1=("testloven § 99",)) for s in treatment_hallucinates
+        ]
+        broken = [failed("llhb-v1-C1-106", CaseOutcome.MODEL_ERROR)]
+
+        report = compute_pair_report(arm(control, broken), arm(treatment, broken))
+
+        missingness = report.primary.missingness
+        assert missingness.delta_all_cases is not None and missingness.delta_all_cases < 0
+        assert missingness.worst_case_high is not None and missingness.worst_case_high < 0
+        assert missingness.sign_survives_worst_case is True
+
+    def test_an_all_cases_delta_of_exactly_zero_does_not_survive(self) -> None:
+        """Neither branch of the sign check applies to a zero delta: it is
+        not a positive effect defending its low end, nor a negative one
+        defending its high end, so it cannot survive the worst case."""
+        control = [
+            score("llhb-v1-C1-101", asserted_h1=("testloven § 99",)),
+            score("llhb-v1-C1-102"),
+        ]
+        treatment = [
+            score("llhb-v1-C1-101"),
+            score("llhb-v1-C1-102", asserted_h1=("testloven § 99",)),
+        ]
+        broken = [failed("llhb-v1-C1-103", CaseOutcome.MODEL_ERROR)]
+
+        report = compute_pair_report(arm(control, broken), arm(treatment, broken))
+
+        missingness = report.primary.missingness
+        assert missingness.delta_all_cases == 0.0
+        assert missingness.sign_survives_worst_case is False
+
 
 class TestC8Reporting:
     def test_c8_is_counted_over_all_its_cases_five_ways(self) -> None:
@@ -237,6 +301,22 @@ class TestC8Reporting:
         resolved = report.metrics["no_invention_rate_resolved_cases"].control
         assert resolved is not None
         assert (resolved.numerator, resolved.denominator) == (1.0, 2.0)
+
+    def test_outcomes_covers_every_category_not_only_c8(self) -> None:
+        """``outcomes`` and ``c8_outcomes`` are built from the same tally
+        function over different case sets — a swap between the two would
+        silently make one field a copy of the other."""
+        c1_pass = score("llhb-v1-C1-101")
+        c8_fail = score("llhb-v1-C8-102", category="C8", passed=False)
+        broken = [failed("llhb-v1-C1-103", CaseOutcome.MODEL_ERROR)]
+        scores = [c1_pass, c8_fail]
+
+        report = compute_pair_report(arm(scores, broken), arm(scores, broken))
+
+        overall = report.outcomes.control
+        assert (overall.PASS, overall.FAIL, overall.MODEL_ERROR, overall.total) == (1, 1, 1, 3)
+        c8 = report.c8_outcomes.control
+        assert (c8.PASS, c8.FAIL, c8.MODEL_ERROR, c8.total) == (0, 1, 0, 1)
 
     def test_every_case_carries_its_reason_code(self) -> None:
         good = [score("llhb-v1-C1-101")]
