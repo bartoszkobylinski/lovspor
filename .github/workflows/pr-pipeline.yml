@@ -44,10 +44,16 @@ jobs:
         run: uv run pytest tests/unit/
 
   codex-tests:
+    # Serialization is the single `codex`-labelled runner's job queue, which is a
+    # real FIFO. A shared concurrency group is not: GitHub holds ONE pending entry
+    # per group, so a second PR's job evicted the first before it ever got a
+    # runner — a red required check with zero steps, no artifact, no comment,
+    # no label, because every reporting step is downstream of one that never ran
+    # (issue #139).
     runs-on: [self-hosted, linux, codex]
-    concurrency:
-      group: lovspor-codex-subscription
-      cancel-in-progress: false
+    # A stuck agent job must not hold the lane indefinitely: the box lock alone
+    # waits 20 minutes before giving up, and GitHub's default kill is 6 h (#101).
+    timeout-minutes: 60
     # The runner holding Codex auth never executes fork code.
     if: github.event.pull_request.head.repo.full_name == github.repository
     permissions:

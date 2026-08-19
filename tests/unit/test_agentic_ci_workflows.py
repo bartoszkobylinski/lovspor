@@ -301,3 +301,70 @@ def test_codex_test_failure_escalates_on_the_current_pr() -> None:
     assert "codex-tests-${{ github.event.pull_request.head.sha }}" in command
     run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
     assert run_url in command
+
+
+def test_antiloop_matches_the_marker_only_in_the_subject_line() -> None:
+    """Issue #117: matching over the whole message (%B) let a human commit that
+    merely wrote about the marker — pipeline docs, a revert quoting a subject —
+    set skip=true, so the independent test author reported success without
+    running. The subject is where the push step appends the marker, and only
+    at the end of it."""
+    antiloop = _named_step(_steps("pr-pipeline.yml", "codex-tests"), "Anti-loop check")["run"]
+
+    assert "--pretty=%s" in antiloop
+    assert "--pretty=%B" not in antiloop
+    assert r"\[agent:(codex|claude)-(tests|mutation)\]$" in antiloop
+
+
+def test_agent_jobs_are_never_serialized_by_a_shared_concurrency_group() -> None:
+    """Issue #139: a concurrency group holds ONE pending entry, so a second PR's
+    agent job evicted the first before it got a runner — conclusion cancelled,
+    zero steps, and no escalation, because every reporting step is downstream of
+    one that never ran. The single `codex`-labelled runner queues them properly.
+    A per-branch group is still fine: there, superseding an older head is wanted."""
+    pipeline_text = (_WORKFLOWS / "pr-pipeline.yml").read_text(encoding="utf-8")
+    remediation_text = (_WORKFLOWS / "mutation-remediation.yml").read_text(encoding="utf-8")
+
+    assert "concurrency" not in _workflow("pr-pipeline.yml")["jobs"]["codex-tests"]
+    assert "lovspor-codex-subscription" not in pipeline_text
+    assert "lovspor-codex-subscription" not in remediation_text
+    assert "head_branch" in _workflow("mutation-remediation.yml")["concurrency"]["group"], (
+        "a remediation group must not span branches"
+    )
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [("pr-pipeline.yml", "codex-tests"), ("mutation-remediation.yml", "remediate")],
+)
+def test_agent_jobs_have_a_wallclock_backstop(workflow_name: str, job_name: str) -> None:
+    """Issue #101: a job that hangs holds the lane against every later PR until
+    GitHub's 6 h default kill. The box lock alone waits 20 minutes before it
+    gives up, so the job needs its own ceiling above that."""
+    job = _workflow(workflow_name)["jobs"][job_name]
+
+    assert job["timeout-minutes"] == 60
+
+
+def test_remediation_concurrency_group_is_scoped_to_head_branch() -> None:
+    """Issue #139 fix: the group must interpolate head_branch verbatim so a PR's
+    own newer remediation run supersedes only its own prior run, never a
+    different PR's pending one. cancel-in-progress stays false: a running
+    remediation is left to finish rather than being killed mid-push."""
+    concurrency = _workflow("mutation-remediation.yml")["concurrency"]
+
+    assert (
+        concurrency["group"] == "mutation-remediation-${{ github.event.workflow_run.head_branch }}"
+    )
+    assert concurrency["cancel-in-progress"] is False
+
+
+def test_pr_pipeline_workflow_scoped_concurrency_still_cancels_stale_runs() -> None:
+    """The job-level lovspor-codex-subscription group was removed from
+    codex-tests (issue #139), but the workflow-scoped pr-<PR#> group must
+    remain: it is what still cancels a stale codex-tests run when a new SHA
+    lands on the same PR, now that no other group does."""
+    concurrency = _workflow("pr-pipeline.yml")["concurrency"]
+
+    assert concurrency["group"] == "pr-${{ github.event.pull_request.number }}"
+    assert concurrency["cancel-in-progress"] is True
