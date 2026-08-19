@@ -152,12 +152,31 @@ class RobotsGate:
         self._parsers: dict[str, RobotFileParser | None] = {}
 
     def allows(self, url: str, user_agent: str) -> bool:
+        parser = self._parser_for(url)
+        return False if parser is None else parser.can_fetch(user_agent, url)
+
+    def sitemaps(self, url: str) -> tuple[str, ...]:
+        """The sitemaps the host declares in its own ``robots.txt``.
+
+        Where discovery should start is a question the source already answers
+        in public, in the same file we are obliged to read anyway. Taking the
+        answer from there rather than from a hand-copied argument keeps the
+        entry points current when the site moves them, and makes the crawl
+        follow what the site publishes rather than what someone remembered.
+
+        Empty when robots.txt declares none or could not be read — the caller
+        decides what to do about that, since "no declared sitemap" is an
+        ordinary state and not an error.
+        """
+        parser = self._parser_for(url)
+        return () if parser is None else tuple(parser.site_maps() or ())
+
+    def _parser_for(self, url: str) -> RobotFileParser | None:
         parts = urlsplit(url)
         robots_url = urlunsplit((parts.scheme, parts.netloc, ROBOTS_PATH, "", ""))
         if robots_url not in self._parsers:
             self._parsers[robots_url] = self._load(robots_url)
-        parser = self._parsers[robots_url]
-        return False if parser is None else parser.can_fetch(user_agent, url)
+        return self._parsers[robots_url]
 
     def _load(self, robots_url: str) -> RobotFileParser | None:
         try:
@@ -193,6 +212,16 @@ class Fetcher:
         self._settings = settings or CaptureSettings()
         self._limiter = RateLimiter(self._settings)
         self._robots = RobotsGate(client, self._settings)
+
+    def declared_sitemaps(self, url: str) -> tuple[str, ...]:
+        """The sitemaps the host serving ``url`` declares in its robots.txt.
+
+        Exposed because where to start looking is a question the source
+        answers in public, in the file this fetcher is obliged to read anyway.
+        Nothing is fetched here beyond that file, and nothing is recorded: a
+        declaration is not an observation.
+        """
+        return self._robots.sitemaps(url)
 
     def capture(
         self, url: str, discovery_method: str, adapter: str = CHANNEL_HTTP

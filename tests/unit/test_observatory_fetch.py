@@ -805,3 +805,73 @@ class TestDefaults:
 
         assert httpx_mock.get_requests() == []
         assert list(log.records()) == []
+
+
+class TestDeclaredSitemaps:
+    """Where to start looking is a question the source answers in public."""
+
+    def test_the_declared_sitemaps_are_returned(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        sitemap = f"https://{BAERUM_DOMAIN}/sitemap.xml"
+        _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {sitemap}\n")
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == (sitemap,)
+
+    def test_no_declaration_is_an_ordinary_answer(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Not every site publishes one, and that is not an error to raise."""
+        _allow_robots(httpx_mock)
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == ()
+
+    def test_an_unreadable_robots_file_declares_nothing(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The same failure that denies capture also yields no entry points —
+        a site whose rules could not be read is not one to start crawling."""
+        httpx_mock.add_exception(httpx.ConnectError("unreachable"), url=ROBOTS_URL)
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == ()
+
+    def test_reading_the_declaration_records_nothing(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """A declaration is not an observation: nothing was retrieved from a
+        source endpoint on anyone's behalf."""
+        _allow_robots(
+            httpx_mock, f"User-agent: *\nAllow: /\nSitemap: https://{BAERUM_DOMAIN}/s.xml\n"
+        )
+
+        _fetcher(log).declared_sitemaps(ROBOTS_URL)
+
+        assert list(log.records()) == []
+
+    def test_every_declared_sitemap_is_returned_in_file_order(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """robots.txt is not limited to one ``Sitemap:`` line, and a source
+        that lists several is declaring several starting points, not one."""
+        first = f"https://{BAERUM_DOMAIN}/sitemap-forskrifter.xml"
+        second = f"https://{BAERUM_DOMAIN}/sitemap-vedtak.xml"
+        _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {first}\nSitemap: {second}\n")
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == (first, second)
+
+    def test_the_robots_fetch_is_shared_with_the_allow_check(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """``declared_sitemaps`` and ``capture`` read the same host's
+        robots.txt through the same gate, so asking where to start must not
+        cost a second request beyond the one the politeness check already
+        makes."""
+        sitemap = f"https://{BAERUM_DOMAIN}/sitemap.xml"
+        _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {sitemap}\n")
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        fetcher = _fetcher(log)
+
+        fetcher.declared_sitemaps(ROBOTS_URL)
+        fetcher.capture(PAGE_URL, "sitemap")
+
+        assert [r.url for r in httpx_mock.get_requests()].count(ROBOTS_URL) == 1

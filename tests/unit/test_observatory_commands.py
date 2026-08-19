@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
@@ -43,7 +44,11 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _check_document(
-    *, robots_allows: bool = True, terms_reviewed: bool = True, permits: bool = True
+    *,
+    robots_allows: bool = True,
+    terms_reviewed: bool = True,
+    permits: bool = True,
+    rate_limit_seconds: float = 7.0,
 ) -> dict[str, object]:
     return {
         "checked_at": "2026-08-18T17:00:00Z",
@@ -51,7 +56,7 @@ def _check_document(
         "robots_allows": robots_allows,
         "terms_reviewed": terms_reviewed,
         "terms_permit_capture": permits,
-        "rate_limit_seconds": 7.0,
+        "rate_limit_seconds": rate_limit_seconds,
         "user_agent": USER_AGENT,
         "reviewed_by": "Bartosz Kobyliński",
         "note": "Crawl-delay: 7 declared in robots.txt.",
@@ -838,6 +843,237 @@ class TestVerify:
         assert result.exit_code == 1
         assert "line(s) 2 are corrupted" in result.output
         assert "the final record was never finished" in result.output
+
+
+# The www host, like the real source: robots.txt declares `Host: www...`, and
+# the registry's canonical_domain covers it as a subdomain.
+SITEMAP_URL = f"https://www.{BAERUM_DOMAIN}/sitemap.xml"
+NESTED_SITEMAP_URL = f"https://www.{BAERUM_DOMAIN}/sitemap-forskrifter.xml"
+PAGE_URL = f"https://www.{BAERUM_DOMAIN}/politikk-og-samfunn/ny-forskrift"
+SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
+
+
+def _urlset(*locs: str) -> bytes:
+    body = "".join(f"<url><loc>{loc}</loc></url>" for loc in locs)
+    return f'<urlset xmlns="{SITEMAP_NS}">{body}</urlset>'.encode()
+
+
+def _sitemapindex(*locs: str) -> bytes:
+    body = "".join(f"<sitemap><loc>{loc}</loc></sitemap>" for loc in locs)
+    return f'<sitemapindex xmlns="{SITEMAP_NS}">{body}</sitemapindex>'.encode()
+
+
+def _activate(root: Path, rate_limit_seconds: float = 0.001) -> None:
+    """Register and activate Bærum through the CLI, the way an operator does."""
+    _register()
+    check = _write_check(
+        root / "check.json", _check_document(rate_limit_seconds=rate_limit_seconds)
+    )
+    result = runner.invoke(
+        app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check)]
+    )
+    assert result.exit_code == 0, result.output
+
+
+def _robots(httpx_mock: HTTPXMock, body: str) -> None:
+    httpx_mock.add_response(url=ROBOTS_URL, text=body, is_reusable=True)
+
+
+class TestDiscover:
+    """Reading what a source publishes about itself. Only the HTTP transport is
+    mocked; the registry, the gates, the log and the blob store are real."""
+
+    def test_entry_points_default_to_the_sitemap_robots_declares(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The source answers "where do I start?" in the same file the reviewer
+        already checked, so nothing has to guess a host or trust a runbook."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert f"read {SITEMAP_URL}" in result.output
+        assert f"sitemap  {PAGE_URL}" in result.output
+        assert "candidates: 1" in result.output
+
+    def test_a_candidate_is_proposed_never_fetched(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """The separation that keeps a 40,000-entry sitemap from becoming a
+        mass download in one command."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert PAGE_URL not in [str(request.url) for request in httpx_mock.get_requests()]
+
+    def test_the_documents_read_are_recorded_as_observations(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """What a municipality listed on a given day is the evidence this
+        archive exists to keep."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        verify = runner.invoke(app, ["observatory", "verify"])
+        assert "records read: 1" in verify.output
+        assert verify.exit_code == 0
+
+    def test_an_explicit_entry_point_overrides_the_declaration(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=NESTED_SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        result = runner.invoke(
+            app,
+            ["observatory", "discover", "--id", BAERUM_ID, "--entry-point", NESTED_SITEMAP_URL],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert f"read {NESTED_SITEMAP_URL}" in result.output
+        assert SITEMAP_URL not in [str(request.url) for request in httpx_mock.get_requests()]
+
+    def test_repeated_entry_point_options_are_all_used(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """``--entry-point`` is repeatable; a second one must not be dropped
+        in favour of the first, and the declared sitemap must not be read at
+        all once any explicit entry point is given."""
+        second_entry = f"https://www.{BAERUM_DOMAIN}/sitemap-vedtak.xml"
+        second_page = f"https://www.{BAERUM_DOMAIN}/politikk-og-samfunn/vedtak"
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=NESTED_SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=second_entry, content=_urlset(second_page))
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "discover",
+                "--id",
+                BAERUM_ID,
+                "--entry-point",
+                NESTED_SITEMAP_URL,
+                "--entry-point",
+                second_entry,
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert f"read {NESTED_SITEMAP_URL}" in result.output
+        assert f"read {second_entry}" in result.output
+        assert "documents read: 2" in result.output
+        assert "candidates: 2" in result.output
+        assert SITEMAP_URL not in [str(request.url) for request in httpx_mock.get_requests()]
+
+    def test_a_sitemap_index_is_followed(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_sitemapindex(NESTED_SITEMAP_URL))
+        httpx_mock.add_response(url=NESTED_SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "documents read: 2" in result.output
+        assert "candidates: 1" in result.output
+
+    def test_what_was_declined_is_reported_with_its_reason(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A URL that vanished without a trace is indistinguishable from a
+        parser that failed to see it."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL, content=_urlset("https://oslo.kommune.no/forskrift", PAGE_URL)
+        )
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert "skipped: 1" in result.output
+        assert "off_source_host  https://oslo.kommune.no/forskrift" in result.output
+        assert "candidates: 1" in result.output
+
+    def test_a_source_that_declares_no_sitemap_is_refused(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "declares no sitemap" in result.stderr
+
+    def test_an_inactive_source_is_refused_before_any_request(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Nothing observed it and nothing should have tried."""
+        _register()
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "not an activated source" in result.stderr
+        assert httpx_mock.get_requests() == []
+
+    def test_an_unregistered_source_is_refused(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        result = runner.invoke(app, ["observatory", "discover", "--id", "9999"])
+
+        assert result.exit_code == 1
+        assert "not an activated source" in result.stderr
+        assert httpx_mock.get_requests() == []
+
+    def test_every_declared_sitemap_is_read_as_an_entry_point(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A robots.txt that lists several ``Sitemap:`` lines is declaring
+        several starting points, and dropping all but one would under-report
+        what the source says it publishes."""
+        second_sitemap = f"https://www.{BAERUM_DOMAIN}/sitemap-vedtak.xml"
+        second_page = f"https://www.{BAERUM_DOMAIN}/politikk-og-samfunn/vedtak"
+        _activate(root)
+        _robots(
+            httpx_mock,
+            f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\nSitemap: {second_sitemap}\n",
+        )
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=second_sitemap, content=_urlset(second_page))
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "documents read: 2" in result.output
+        assert "candidates: 2" in result.output
+        assert f"sitemap  {PAGE_URL}" in result.output
+        assert f"sitemap  {second_page}" in result.output
+
+    def test_robots_txt_is_fetched_once_for_the_whole_run(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Reading the declared entry points and checking each document
+        against the same host's rules share one cached robots.txt fetch,
+        not one per document plus one for the declaration."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_sitemapindex(NESTED_SITEMAP_URL))
+        httpx_mock.add_response(url=NESTED_SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        requested = [str(request.url) for request in httpx_mock.get_requests()]
+        assert requested.count(ROBOTS_URL) == 1
 
 
 class TestRepair:
