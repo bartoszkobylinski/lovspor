@@ -688,6 +688,59 @@ class TestCrashRecovery:
         assert scan.records == ()
         assert scan.complete is True
 
+    def test_a_present_but_empty_log_file_scans_as_empty_and_intact(self, tmp_path: Path) -> None:
+        """Distinct code path from the absent case: this exercises
+        ``read_bytes()`` on a zero-byte file rather than the existence guard."""
+        log = make_log(tmp_path)
+        log.log_path.touch()
+
+        scan = log.scan()
+
+        assert scan.records == ()
+        assert scan.complete is True
+
+    def test_a_torn_write_with_no_prior_record_reports_zero_records(self, tmp_path: Path) -> None:
+        """The crash can land on the very first append, not just a later one."""
+        log = make_log(tmp_path)
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"99')
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is True
+        assert result.malformed_lines == ()
+        assert result.artifacts_checked == 0
+
+    def test_a_complete_last_line_missing_only_its_trailing_newline_is_not_flagged(
+        self, tmp_path: Path
+    ) -> None:
+        """The write is one call of json + "\\n"; a crash could in principle
+        land between the two without touching the JSON bytes at all. Since the
+        line still parses, it is data, not damage — the newline's absence
+        alone must not trip ``incomplete_final_record``."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        raw = log.log_path.read_bytes()
+        assert raw.endswith(b"\n")
+        log.log_path.write_bytes(raw[:-1])
+
+        result = verify_snapshot(log)
+
+        assert result.incomplete_final_record is False
+        assert result.malformed_lines == ()
+        assert result.artifacts_checked == 1
+        assert result.ok is True
+
+    def test_scan_is_incomplete_when_only_malformed_lines_exist(self, tmp_path: Path) -> None:
+        """``complete`` must catch mid-file corruption too, not only a torn tail."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        log.append_artifact(observation(b"second", url="https://example.invalid/g"), b"second")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(b"\n".join([lines[0], b"{ truncated", lines[1], b""]))
+
+        assert log.scan().complete is False
+
     def test_reading_records_stays_strict(self, tmp_path: Path) -> None:
         """scan() is the tolerant reading, added for the audit. The evidence
         reader itself must keep refusing to read past a line it cannot parse."""
@@ -718,3 +771,24 @@ class TestDurability:
         log.append_artifact(observation(b"first"), b"first")
 
         assert len(synced) == 1
+
+    def test_the_write_is_flushed_before_fsync_is_called(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """fsync only pushes what the OS already holds. Without an explicit
+        flush first, the just-written bytes could still be sitting in
+        Python's own buffer, and fsync would durably persist nothing."""
+        sizes_at_fsync: list[int] = []
+        original_fsync = os.fsync
+
+        def spy_fsync(fd: int) -> None:
+            sizes_at_fsync.append(os.fstat(fd).st_size)
+            original_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", spy_fsync)
+        log = make_log(tmp_path)
+
+        log.append_artifact(observation(b"first"), b"first")
+
+        assert sizes_at_fsync == [log.log_path.stat().st_size]
+        assert sizes_at_fsync[0] > 0
