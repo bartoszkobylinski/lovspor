@@ -38,14 +38,37 @@ def test_provision_installs_the_static_site_into_var_www() -> None:
     text = _PROVISION.read_text(encoding="utf-8")
 
     assert "install -d /var/www/lovspor" in text
-    assert (
-        'install -m644 "$APP_DIR/deploy/digitalocean/site/index.html" /var/www/lovspor/index.html'
-    ) in text
+    # Every file under site/, not a named list: the landing page stopped being
+    # the only one the moment the crawler started advertising /observatory, and
+    # a deploy step that names files silently omits the next page added.
+    assert 'find "$APP_DIR/deploy/digitalocean/site" -type f -print0' in text
+    assert 'install -m644 "$page" "/var/www/lovspor/$rel"' in text
 
 
 def test_landing_page_keeps_the_bearer_token_connection_instructions() -> None:
     text = _LANDING.read_text(encoding="utf-8")
 
-    assert "https://lovspor.bartoszkobylinski.com/mcp" in text
+    # lovspor.no since the domain moved; the old alias still resolves, but a
+    # visitor copying the snippet should end up on the canonical host.
+    assert "https://lovspor.no/mcp" in text
     assert '--header "Authorization: Bearer YOUR_TOKEN"' in text
     assert "Email for a beta token" in text
+
+
+def test_the_crawler_advertises_a_page_that_exists() -> None:
+    """Every observatory request carries `+https://lovspor.no/observatory`.
+
+    A site administrator who follows it is the one reader this page has, and
+    they are following it because a robot they did not invite showed up. The
+    page has to exist, name the robot, and say how to stop it — before it
+    explains anything about the project.
+    """
+    page = _LANDING.parent / "observatory" / "index.html"
+
+    text = page.read_text(encoding="utf-8")
+
+    assert "lovspor-observatory" in text
+    assert "User-agent: lovspor-observatory" in text
+    assert "Disallow: /" in text
+    # The block instruction comes before the pitch, not after it.
+    assert text.index("Disallow: /") < text.index("Hva som lagres")
