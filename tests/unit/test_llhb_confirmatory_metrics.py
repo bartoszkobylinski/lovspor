@@ -438,6 +438,29 @@ class TestMissingnessBandDirect:
         assert result.sign_survives_worst_case is False
 
 
+class TestMetricPairDirect:
+    def test_a_treatment_only_metric_that_is_also_a_mean_metric_still_bootstraps(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``wilson`` is computed once from the metric's name and must reach
+        ``_estimate`` on every branch, including the treatment-only one: a
+        mean metric never gets a Wilson interval, whichever branch picks it
+        up. Production has no metric that is both today, so the treatment-only
+        branch is patched in here to exercise it against a real mean metric."""
+        monkeypatch.setattr(
+            metrics_module, "_TREATMENT_ONLY", frozenset({"valid_citations_per_answer"})
+        )
+        treatment = [bundle(score(i)) for i in ids(5)]
+
+        pair = metrics_module._metric_pair("valid_citations_per_answer", [], treatment)
+
+        samples = [metrics_module._valid_volume_sample(b) for b in treatment]
+        bootstrapped = metrics_module._estimate(samples, wilson=False)
+        wilson_based = metrics_module._estimate(samples, wilson=True)
+        assert pair.treatment == bootstrapped
+        assert pair.treatment != wilson_based
+
+
 class TestC8Reporting:
     def test_c8_is_counted_over_all_its_cases_five_ways(self) -> None:
         """The ratio that drops unresolved cases survives only under its own
