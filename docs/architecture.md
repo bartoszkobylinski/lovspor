@@ -50,7 +50,7 @@ facade.
 
 | Module | Responsibility | Key public API |
 |---|---|---|
-| `cli.py` | Typer CLI entry point; loads `.env` in the group callback before Typer resolves `envvar=` options. | `app`; commands `info`, `seed`, `sync`, `mcp`, `fetch-corpus`, `repair-embeddings` |
+| `cli.py` | Typer CLI entry point; loads `.env` in the group callback before Typer resolves `envvar=` options. | `app`; commands `info`, `seed`, `sync`, `mcp`, `fetch-corpus`, `repair-embeddings`; sub-apps `tokens`, `observatory` |
 | `settings.py` | Runtime config resolved from env / `.env`; frozen Pydantic model; paths resolved absolute. | `Settings.from_env()`, `load_env()` |
 | `errors.py` | Exception hierarchy so callers never catch bare `Exception`. | `LovsporError` + `NetworkError`, `ParseError`, `RenderError`, `ExtractionError`, `ConfigError`, `CorpusStateError`, `MassRemovalError` |
 | `retry.py` | Dependency-free exponential-backoff retry helper. | `retry_with_backoff(...)` |
@@ -129,6 +129,7 @@ how to reach `lovverk`.
 | `observatory/storage.py` | The ADR-0010 §5 boundary: a root inside the engine repo or the corpus is refused, by path check rather than by convention. | `observatory_root()`, `ObservatoryRoot` |
 | `observatory/log.py` | Append-only JSONL log + SHA-256-addressed blob store; snapshot verification, tombstone-aware. Records are fsynced on append, and the audit survives a log torn by an interrupted write instead of raising on it. | `ObservationLog`, `verify_snapshot()`, `LogScan` |
 | `observatory/registry.py` | Eligibility vs activation: a source is fetchable only with a recorded access-policy check. `lovdata.no` is denied centrally. | `authorise_capture()`, `activate()`, `SourceRegistry` |
+| `observatory/commands.py` | The `lovspor observatory` CLI: register a source as eligible, activate it with a reviewer's access-policy check, list what is registered. No `--registry` flag — the path resolves through `LOVSPOR_OBSERVATORY_ROOT` and the §5 boundary. | `observatory_app` |
 | `observatory/fetch.py` | One URL, politely: activation gate, live robots.txt, per-source rate limit, byte cap, redirects not followed. Every outcome recorded. | `Fetcher`, `CaptureSettings`, `RobotsGate`, `RateLimiter` |
 | `observatory/discovery.py` | What is there to look at: sitemaps, sitemap indexes, Atom and RSS. Fetches nothing itself — every discovery document goes through `Fetcher`, so the gates apply and the document is recorded as an observation. Proposes candidates; capturing one is a separate decision. | `Discoverer`, `DiscoverySettings`, `parse_discovery_document()`, `Candidate` |
 

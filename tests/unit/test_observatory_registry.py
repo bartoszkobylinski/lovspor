@@ -16,9 +16,12 @@ from lovspor.observatory.registry import (
     activate,
     authorise_capture,
     capture_host,
+    read_access_policy_check,
     read_registry,
+    registry_path,
     write_registry,
 )
+from lovspor.observatory.storage import ObservatoryRoot
 
 CHECKED_AT = datetime(2026, 8, 18, 6, 0, tzinfo=UTC)
 
@@ -36,6 +39,21 @@ def check(**overrides: object) -> AccessPolicyCheck:
     }
     fields.update(overrides)
     return AccessPolicyCheck.model_validate(fields)
+
+
+def check_document(**overrides: object) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "checked_at": "2026-08-18T06:00:00Z",
+        "robots_txt_url": "https://example.invalid/robots.txt",
+        "robots_allows": True,
+        "terms_reviewed": True,
+        "terms_permit_capture": True,
+        "rate_limit_seconds": 2.0,
+        "user_agent": "lovspor-observatory/0.1",
+        "reviewed_by": "project owner",
+    }
+    fields.update(overrides)
+    return fields
 
 
 def eligible_source() -> SourceRecord:
@@ -474,3 +492,96 @@ class TestHostMatchingNormalisation:
         registry = SourceRegistry(sources={"9999": activate(source, check())})
 
         assert authorise_capture(registry, "https://testby.example.invalid/f").active
+
+
+class TestRegistryPath:
+    """registry_path() is the one place the CLI learns the registry's
+    filename; a change here would silently move access-policy records that
+    operators expect at ``sources.json``."""
+
+    def test_returns_sources_json_under_the_root(self, tmp_path: Path) -> None:
+        root = ObservatoryRoot(str(tmp_path), forbidden=[])
+
+        path = registry_path(root)
+
+        assert path == root.path / "sources.json"
+        assert path.name == "sources.json"
+
+
+class TestReadAccessPolicyCheck:
+    """read_access_policy_check() is the CLI's only door for a reviewer's
+    check; it is exercised end-to-end via the CLI tests, but its own failure
+    modes deserve direct coverage rather than only through that caller."""
+
+    def test_loads_a_valid_check(self, tmp_path: Path) -> None:
+        path = tmp_path / "check.json"
+        path.write_text(json.dumps(check_document()), encoding="utf-8")
+
+        result = read_access_policy_check(path)
+
+        assert result == check()
+
+    def test_missing_file_raises_file_not_found(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            read_access_policy_check(tmp_path / "absent.json")
+
+    def test_malformed_json_is_a_parse_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "check.json"
+        path.write_text("{ not json", encoding="utf-8")
+
+        with pytest.raises(ParseError, match="unreadable access-policy check"):
+            read_access_policy_check(path)
+
+    def test_the_check_document_encoding_is_explicit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The encoding must be passed explicitly, not left to the platform
+        default. A reviewer's name is routinely non-ASCII, and a check that
+        reads differently on a differently-configured machine is not the
+        record it claims to be."""
+        path = tmp_path / "check.json"
+        path.write_text(json.dumps(check_document()), encoding="utf-8")
+        captured: dict[str, object] = {}
+        original_read_text = Path.read_text
+
+        def spy_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            captured["encoding"] = kwargs.get("encoding")
+            return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "read_text", spy_read_text)
+
+        read_access_policy_check(path)
+
+        assert captured["encoding"] == "utf-8"
+
+    def test_non_utf8_bytes_are_a_parse_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "check.json"
+        path.write_bytes(json.dumps(check_document()).encode("utf-16"))
+
+        with pytest.raises(ParseError, match="unreadable access-policy check"):
+            read_access_policy_check(path)
+
+    def test_schema_violation_is_a_parse_error_not_a_bare_validation_error(
+        self, tmp_path: Path
+    ) -> None:
+        """A syntactically valid document that fails the model's own rules —
+        here, a verdict recorded without the review that would justify it —
+        must surface as ParseError like any other bad input, not leak
+        pydantic's ValidationError past this boundary."""
+        path = tmp_path / "check.json"
+        path.write_text(
+            json.dumps(check_document(terms_reviewed=False, terms_permit_capture=True)),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ParseError, match="invalid access-policy check"):
+            read_access_policy_check(path)
+
+    def test_a_missing_required_field_is_a_parse_error(self, tmp_path: Path) -> None:
+        document = check_document()
+        del document["reviewed_by"]
+        path = tmp_path / "check.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+
+        with pytest.raises(ParseError, match="invalid access-policy check"):
+            read_access_policy_check(path)

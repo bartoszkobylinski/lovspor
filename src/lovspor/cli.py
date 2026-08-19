@@ -22,6 +22,7 @@ from lovspor.github_output import append_step_summary, set_output
 from lovspor.mcp import HttpConfig
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
+from lovspor.observatory.commands import observatory_app
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.storage.manifest import read_manifest
@@ -43,6 +44,7 @@ tokens_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(tokens_app)
+app.add_typer(observatory_app)
 
 _CredentialsOption = Annotated[
     Path | None,
