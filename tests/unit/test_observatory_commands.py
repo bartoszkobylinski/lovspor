@@ -495,3 +495,45 @@ class TestUnreadableRegistry:
 
         assert isinstance(result.exception, SystemExit)
         assert result.exit_code == 1
+
+    def test_register_source_refuses_a_corrupt_registry(self, root: Path) -> None:
+        """``_load`` is shared by every command, and the fix that made it
+        refuse rather than crash on a corrupt file was general, not specific
+        to ``sources``. register-source must not overwrite the corrupt file
+        with a fresh one built from an empty registry — that would silently
+        destroy whatever access-policy checks it held."""
+        root.mkdir(parents=True)
+        (root / "sources.json").write_text("{ not json", encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                BAERUM_ID,
+                "--name",
+                "Bærum",
+                "--domain",
+                BAERUM_DOMAIN,
+            ],
+        )
+
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+        assert (root / "sources.json").read_text(encoding="utf-8") == "{ not json"
+
+    def test_activate_source_refuses_a_corrupt_registry(self, root: Path) -> None:
+        root.mkdir(parents=True)
+        (root / "sources.json").write_text("{ not json", encoding="utf-8")
+        check = _write_check(root / "check.json", _check_document())
+
+        result = runner.invoke(
+            app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(check)]
+        )
+
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+        assert (root / "sources.json").read_text(encoding="utf-8") == "{ not json"
