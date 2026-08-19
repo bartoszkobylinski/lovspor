@@ -19,10 +19,13 @@ engine repository, which is the thing the boundary exists to prevent.
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 from pydantic import ValidationError
 
 from lovspor.errors import ConfigError, ParseError, SourceNotActivatedError, StorageBoundaryError
+from lovspor.observatory.discovery import Discoverer, DiscoveryResult
+from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.registry import (
     SourceRecord,
@@ -240,3 +243,81 @@ def verify() -> None:
         return
     typer.echo("snapshot NOT ok")
     raise typer.Exit(1)
+
+
+def _entry_points(
+    fetcher: Fetcher, record: SourceRecord, given: list[str] | None
+) -> tuple[str, ...]:
+    """Where discovery starts: what was asked for, or what the source declares.
+
+    The fallback reads the sitemaps out of the very ``robots.txt`` the
+    reviewer checked when the source was activated — its URL is in the
+    access-policy record, so nothing here has to guess a host. That keeps the
+    entry points current when the site moves them, and keeps the crawl
+    following what the source publishes rather than what someone once copied
+    into a runbook.
+    """
+    if given:
+        return tuple(given)
+    policy = record.access_policy
+    if policy is None:
+        return ()
+    return fetcher.declared_sitemaps(policy.robots_txt_url)
+
+
+def _report_discovery(result: DiscoveryResult) -> None:
+    """Everything found and everything declined, in full.
+
+    No truncation: a listing that quietly stopped at the first N would read as
+    "this is what the source publishes", which is the one claim the
+    observatory must never make loosely.
+    """
+    typer.echo(f"documents read: {len(result.documents_read)}")
+    for url in result.documents_read:
+        typer.echo(f"  read {url}")
+    typer.echo(f"candidates: {len(result.candidates)}")
+    for candidate in result.candidates:
+        typer.echo(f"  {candidate.discovery_method}  {candidate.url}")
+    if result.skipped:
+        typer.echo(f"skipped: {len(result.skipped)}")
+        for skipped in result.skipped:
+            typer.echo(f"  {skipped.reason}  {skipped.url}")
+
+
+@observatory_app.command("discover")
+def discover(
+    authority_id: _AuthorityIdOption,
+    entry_point: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--entry-point",
+            help="Start here instead of the sitemaps robots.txt declares. Repeatable.",
+        ),
+    ] = None,
+) -> None:
+    """Read a source's sitemaps and feeds, and report the URLs worth observing.
+
+    Discovery proposes; it never captures a candidate. That separation is what
+    keeps a sitemap of 40,000 entries from turning one command into a mass
+    download — deciding which candidates to observe is a later step, and a
+    deliberate one.
+
+    The documents discovery reads are themselves fetched through every gate
+    and recorded in the log, because what a source listed on a given day is
+    exactly the evidence this archive exists to keep.
+    """
+    registry = _load(_registry_file())
+    record = registry.sources.get(authority_id)
+    if record is None or not record.active:
+        typer.echo(f"Refused: {authority_id} is not an activated source.", err=True)
+        raise typer.Exit(1)
+    fetcher = Fetcher(registry, ObservationLog(_root()), httpx.Client())
+    starts = _entry_points(fetcher, record, entry_point)
+    if not starts:
+        typer.echo(
+            f"Refused: {authority_id} declares no sitemap in its robots.txt. "
+            "Pass --entry-point to say where to start.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    _report_discovery(Discoverer(fetcher, ObservationLog(_root())).discover(record, starts))

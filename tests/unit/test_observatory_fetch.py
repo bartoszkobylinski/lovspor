@@ -805,3 +805,45 @@ class TestDefaults:
 
         assert httpx_mock.get_requests() == []
         assert list(log.records()) == []
+
+
+class TestDeclaredSitemaps:
+    """Where to start looking is a question the source answers in public."""
+
+    def test_the_declared_sitemaps_are_returned(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        sitemap = f"https://{BAERUM_DOMAIN}/sitemap.xml"
+        _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {sitemap}\n")
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == (sitemap,)
+
+    def test_no_declaration_is_an_ordinary_answer(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Not every site publishes one, and that is not an error to raise."""
+        _allow_robots(httpx_mock)
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == ()
+
+    def test_an_unreadable_robots_file_declares_nothing(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The same failure that denies capture also yields no entry points —
+        a site whose rules could not be read is not one to start crawling."""
+        httpx_mock.add_exception(httpx.ConnectError("unreachable"), url=ROBOTS_URL)
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == ()
+
+    def test_reading_the_declaration_records_nothing(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """A declaration is not an observation: nothing was retrieved from a
+        source endpoint on anyone's behalf."""
+        _allow_robots(
+            httpx_mock, f"User-agent: *\nAllow: /\nSitemap: https://{BAERUM_DOMAIN}/s.xml\n"
+        )
+
+        _fetcher(log).declared_sitemaps(ROBOTS_URL)
+
+        assert list(log.records()) == []

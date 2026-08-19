@@ -182,6 +182,36 @@ declares one. Permission to fetch is still not permission to redistribute —
 ADR-0010 §5 and §6 keep republication behind a separate per-source licensing
 basis that no command here can satisfy.
 
+## Observatory: discovering what a source publishes
+
+Discovery reads the documents an authority publishes for exactly that purpose
+— sitemaps, sitemap indexes, Atom and RSS — and reports the URLs worth
+observing. It **proposes; it never captures a candidate**. That separation is
+what keeps a sitemap of 40,000 entries from turning one command into a mass
+download.
+
+```bash
+uv run lovspor observatory discover --id 3201
+```
+
+With no `--entry-point`, it starts from the sitemaps the source declares in
+the very `robots.txt` the reviewer checked when the source was activated —
+that URL is in the access-policy record, so nothing guesses a host. Pass
+`--entry-point URL` (repeatable) to start somewhere else.
+
+Every document discovery reads goes through the same gates as any other fetch
+— activation, live `robots.txt`, the per-source rate limit — and is recorded
+in the log. That is deliberate: what a municipality listed on a given day is
+evidence, and it is what makes a later "this page appeared between these two
+observations" claim checkable. Expect `verify` to report more records after a
+discovery run.
+
+Nothing is dropped silently. A link on another host, an unusable scheme, a
+document past the depth or budget bound comes back under `skipped:` with its
+reason, and the listing is never truncated — a partial list would read as
+"this is what the source publishes", which is the one claim the observatory
+must not make loosely.
+
 ## Observatory: after an interrupted run
 
 The archive lives on storage that can go away mid-write — an external disk, a
