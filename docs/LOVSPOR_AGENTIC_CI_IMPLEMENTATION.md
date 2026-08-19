@@ -605,15 +605,39 @@ Minimalny schema:
   },
   "survivors": [
     {
-      "id": "...",
-      "file": "...",
-      "line": 121,
+      "id": "lovspor.versioning.x_resolve_version__mutmut_3",
+      "file": "src/lovspor/versioning.py",
+      "line": null,
       "symbol": "resolve_version",
-      "operator": "..."
+      "class": null,
+      "symbol_line": 121,
+      "operator": null,
+      "diff": "--- src/lovspor/versioning.py\n+++ src/lovspor/versioning.py\n@@ ...",
+      "detail_source": "mutants_shadow_tree"
     }
   ]
 }
 ```
+
+Obok `survivors` raport niesie `equivalents`:
+
+```json
+  "equivalents": { "registered": 4, "refused": [] }
+```
+
+`registered` to liczba survivorów pokrytych wpisem w `mutation-equivalents.toml`
+(mutanty równoważne — issue #122); `refused` to wpisy, które rejestr odrzucił i
+których NIE zastosował (brak uzasadnienia, brak pola, nieparsowalny plik).
+Gdy każdy survivor jest zarejestrowany, bramka przechodzi z `reason:
+"equivalent_mutants_only"`. Liczniki i score zostają nietknięte — rejestr rusza
+werdykt, nigdy pomiar.
+
+Pod Mutmut 3 mutant nie ma pozycji w źródle — `line` i `operator` zostają `null`,
+a to, co mutacja zmieniła, niesie `diff` (`scripts/ci/mutation_survivors.py`,
+issue #119). `detail_source` mówi, skąd rekord pochodzi: `mutants_shadow_tree`
+albo `id_only: <powód>`, gdy drzewa cieni już nie ma. Implementer nie może
+zamienić tego z powrotem na gołe `null` — artefakt jest jedynym przekazaniem
+między bramką a tym, kto naprawia PR.
 
 ### Ważne
 

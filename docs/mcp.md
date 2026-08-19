@@ -2,7 +2,7 @@
 
 `lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets sixteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
-> **Distribution (updated 2026-08-03).** The engine is MIT-licensed open infrastructure, public on GitHub, and **Lovspor is distributed on PyPI** as [`lovspor`](https://pypi.org/project/lovspor/) — publishing resumed at `0.4.0`, the earlier `0.2.0`–`0.3.0` releases having been withdrawn during a July 2026 pivot. The commands below use the on-demand `uvx lovspor …` form, which resolves the latest release from PyPI — versioned and immutable, and `uvx lovspor@0.4.0 …` pins one; to run unreleased changes, use `uv run --project /path/to/lovspor lovspor …` from a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout). Local stdio is a first-class, fully supported path either way. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
+> **Distribution (updated 2026-08-03).** The engine is AGPL-3.0-licensed open infrastructure, public on GitHub, and **Lovspor is distributed on PyPI** as [`lovspor`](https://pypi.org/project/lovspor/) — publishing resumed at `0.4.0`, the earlier `0.2.0`–`0.3.0` releases having been withdrawn during a July 2026 pivot. The commands below use the on-demand `uvx lovspor …` form, which resolves the latest release from PyPI — versioned and immutable, and `uvx lovspor@0.4.0 …` pins one; to run unreleased changes, use `uv run --project /path/to/lovspor lovspor …` from a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout). Local stdio is a first-class, fully supported path either way. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
 
 Sprint 9 added a four-layer grounding-and-verification path for AI consumers: `semantic_search` finds candidates by meaning, `get_section` returns verbatim text plus validated `cross_references`, `verify_quote` confirms a verbatim quote actually appears in the cited section, and `validate_citation` is the off-ramp for ambiguous citations.
 
@@ -95,6 +95,11 @@ Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_
    `lovspor fetch-corpus` any time to refresh (the engine re-syncs daily at
    04:00 UTC).
 
+   The shallow clone is enough for every current-law tool, but `get_law_at`
+   and `diff_law_versions` then reach only as far back as the clone does. Add
+   `--full-history` for the point-in-time tools — `uvx lovspor fetch-corpus
+   --full-history` — which also deepens an existing shallow cache in place.
+
    **Or clone it yourself** to a custom path you then pass via `--corpus-path`:
 
    ```bash
@@ -149,6 +154,28 @@ All sixteen are read-only. None mutate the corpus or trigger a sync. Fifteen are
 Return the full Markdown of a Norwegian law or regulation.
 
 - **`slug`** — the human-readable kortform identifier, e.g. `skatteloven`, `opplæringslova`, `trafikkforskriften`. Use `search_laws` or `list_recent_changes` to discover valid slugs.
+
+**Temporal notice (ADR-0009 T0).** When the source marks amendments in the act as announced
+but not yet in force, pending a delegated commencement, or never brought into force, a
+**Temporal notice** block is appended after the legal text and evaluated against today's
+date on the Norwegian calendar. Real output, `get_law("advokatloven")` against
+`lovverk 24ce112aa` on 2026-08-18:
+
+```markdown
+---
+
+**Temporal notice — law not in force (evaluated 2026-08-18).**
+The source marks the following as announced amendments or provisions not in force; announced text is not part of the consolidated law above. The evaluation date is an explicit input of this notice (ADR-0009 T0).
+
+- § 73: announced amended by 20 juni 2025 nr. 82 (i kraft fra den tid Kongen bestemmer) — no commencement date exists (pending_indeterminate)
+- § 41: never brought into force — «1 Tredje ledd er ikke satt i kraft (i kraft fra den tid Kongen bestemmer).»
+- § 42: never brought into force — «1 Andre ledd andre punktum er ikke satt i kraft (i kraft fra den tid Kongen bestemmer).»
+```
+
+The block is absent when nothing in the act is marked not in force. Text listed in it is
+**not part of the law in force** — do not present it as such (ADR-0009 §3b).
+`get_section` carries the same information as a structured `temporal_notice` field; see
+below.
 
 **Sample call:** `get_law("skatteloven-sktl")`
 
@@ -206,9 +233,57 @@ Return a single ``§`` section of an act — the surgical alternative to `get_la
       "valid": true,
       "reason": null
     }
-  ]
+  ],
+  "temporal_notice": null
 }
 ```
+
+The `temporal_notice` field (ADR-0009 T0) is **always present** and usually `null` — absence of a notice is itself a statement, so the key never
+disappears. It is non-null when the source marks something in *this* section as not in
+force at the evaluation date: an announced amendment, a commencement date that has not
+arrived, a delegated commencement with no date at all (`pending_indeterminate`), or a
+provision never brought into force.
+
+**Sample non-null notice** — a real response, `get_section(slug="advokatloven", section_id="73")`
+against `lovverk 24ce112aa`, evaluated 2026-08-18:
+
+```json
+{
+  "temporal_notice": {
+    "evaluation_date": "2026-08-18",
+    "events": [
+      {
+        "provision": "§ 73",
+        "scope": "provision",
+        "kind": "amended",
+        "announced": true,
+        "amending_act": "20 juni 2025 nr. 82",
+        "amending_act_ref": "lov/2025-06-20-82",
+        "marker_class": "pending_indeterminate",
+        "commencement_kind": "pending_indeterminate",
+        "commencement_instrument": null,
+        "provenance": "source_explicit",
+        "valid_from": null,
+        "raw_marker": "(i kraft fra den tid Kongen bestemmer)",
+        "source_note": "Tilføyd ved lov [21 juni 2024 nr. 46](lov/2024-06-21-46). **Endres** ved lov [20 juni 2025 nr. 82](lov/2025-06-20-82) (i kraft fra den tid Kongen bestemmer).",
+        "source_line": 29
+      }
+    ],
+    "never_in_force": []
+  }
+}
+```
+
+`never_in_force` carries provisions the source says were never brought into force at all —
+`advokatloven` § 41 and § 42 each have one, visible when the whole act is served rather than
+this single section.
+
+Text listed under `events` or `never_in_force` is **not part of the law in force** — do not
+present it as such (ADR-0009 §3b). The evaluation is made at serving time against the
+Norwegian calendar day; the date used is stated in the payload rather than left implicit.
+`get_law` carries the same information as a **Temporal notice** block appended after the
+legal text. No other tool is affected — in particular `get_law_at` is deliberately
+untouched, because a point-in-time query already names its own date.
 
 The `cross_references` field (Sprint 9 PR-B3.5) lists every `§ N-M` reference detected in the body, deduplicated by target, with each entry already validated against the manifest. `target_slug` defaults to the current act when no other slug appears within ~80 chars of the match (a same-act ref); a different slug means the resolver picked it up as a cross-act ref. `valid` is true only when the target section actually exists in the target act, and `reason` carries a short explanation when invalid.
 
@@ -612,6 +687,21 @@ CELEX format: `3<year><type-letter><number>`. Type letter `R` for regulation, `L
 
 `eu_basis` is `[]` (empty list) for acts with no EEA references, or only an `EØS-avtalen` annex link without specific directives / regulations. The tool raises `corpus predates Sprint 8 PR-D` if the manifest record carries `eu_basis: null` (legacy schema) — in that case suggest the user run the `refresh_command` from `corpus_status` to refresh.
 
+**Coverage limit — regulations are effectively absent from this index.** `eu_basis` is
+extracted from the `<dd class="eeaReferences">` block of Lovdata's source XML
+(`src/lovspor/rendering/document.py:191-215`). Measured on `lovverk 86dc2dabf`
+(2026-08-18): **126 of 5,925 documents carry a non-empty `eu_basis`, and all 126 are
+`lov`. Not one of the 5,161 `forskrift` records has one** — while 637 forskrifter do cite
+EU documents inline in their Markdown, via `](eu/3…)` links that this extractor never
+reads.
+
+The practical consequence: `search_eu_implementations("32006R1907")` returns `[]` even
+though the corpus contains `reach-forskriften`, whose own first paragraph says the REACH
+regulation *gjelder som forskrift* and links it as `](eu/32006r1907)`
+(`lovverk forskrifter/reach-forskriften.md:29`) — its manifest `eu_basis` is `[]`. So an empty result means *nothing is recorded*,
+not *nothing implements it* — for regulations, read the text with `get_law` rather than
+trusting the field. The tool descriptions served to the model say the same.
+
 ### `search_eu_implementations(eu_doc_id)`
 
 Reverse-lookup: which Norwegian acts implement a given EU document. Complement to `get_eu_basis` (Norwegian act → EU basis); this one goes EU document → Norwegian acts.
@@ -780,7 +870,7 @@ The server also runs from a clone of this repo instead of the PyPI release — t
 - **Limited body-level analytics.** `search_body` finds substrings; `semantic_search` (Sprint 9) finds section-level cosine matches; `get_section` retrieves one `§ N-M` and lists its internal cross-references. Cross-act analytics that go beyond per-section retrieval — e.g. "find every act citing Skatteloven", topic clustering across the whole corpus — are not in scope and would need a richer index than the current per-doc binary embedding files.
 - **No paraphrase verification.** `verify_quote` confirms a verbatim string appears in a section; it does NOT verify that a paraphrase faithfully captures legal meaning. For semantic faithfulness the AI consumer must ground in `get_section` and quote the original Norwegian text directly.
 - **`get_section` cross-references resolve canonical slugs only.** Descriptive name references in section bodies (*"i lov om X"* without a canonical slug) silently fall back to same-act in the `cross_references` list and may false-positive validate. `validate_citation` is the off-ramp for ambiguous cases.
-- **History for tombstones is not generated.** A law that was once in the corpus but has since been removed has no `history/<slug>.json` file. The original commits are still in `lovverk`'s git log if you need them.
+- **A removed law keeps its history, but nothing else.** A tombstoned document (manifest `status: "removed"`) keeps its `history/<slug>.json` — that file is the audit trail that the act existed and was removed, and `lovverk` keeps it deliberately (`lovverk README.md:34`). What it no longer has is Markdown: the rendered text is deleted (checked 2026-08-18 against `lovverk 86dc2dabf` — none of the 47 tombstones has the file named by its `markdown_path`), so a tombstone is not a current, searchable legal document and its text cannot be served. The original commits are in `lovverk`'s git log either way.
 - **Corpus freshness depends on the user.** The server reads whatever is in your local `lovverk` clone. If you don't `git pull`, you'll get stale data. The `corpus_status()` tool flags this (`is_stale: true` past 7 days) and gives the AI a `refresh_command` to suggest, but the server itself never pulls — that's an explicit user action.
 - **Body-text search uses substring matching, not BM25 / stemming.** Sprint 8 PR-A added `search_body` which scans full body text — a law mentioning "klima" only in its body IS findable via `search_body("klima")`. But matching is case-insensitive substring only: `search_body("skattefradrag")` will not find docs that only say "skattefradraget" (no stemming). Word-based / stemmed indexing is a follow-up if real use shows it matters.
 
@@ -825,7 +915,7 @@ Defensive error. Should not happen with a clean `lovverk` clone — the manifest
 
 The legal text served by this MCP comes from [Lovdata](https://lovdata.no)'s public-data API and is licensed under [NLOD 2.0](https://data.norge.no/nlod/no/2.0/). Every rendered Markdown carries the attribution in its YAML front matter (`source_provider: Lovdata`, `source_license: NLOD 2.0`).
 
-The `lovspor` engine code (this repo) is MIT-licensed. The `lovverk` corpus structure is CC0; the legal text within it remains under NLOD 2.0.
+The `lovspor` engine code (this repo) is licensed **AGPL-3.0** (`LICENSE`); versions up to and including commit `632dae8` were MIT. The `lovverk` corpus structure is CC0; the legal text within it remains under NLOD 2.0.
 
 This project follows the conservative legal stance documented in [`docs/decisions.md` §4](decisions.md): only the Markdown derivative is published, never Lovdata's raw XML.
 

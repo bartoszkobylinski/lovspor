@@ -1,0 +1,100 @@
+# Register of provably-equivalent mutants (issue #122).
+#
+# An equivalent mutant is mutated code that computes exactly what the original
+# computes. No test can distinguish the two, so no test can ever kill it: a PR
+# touching such code had a permanently red required check, and a required check
+# that cannot go green teaches people to ignore it.
+#
+# An entry here moves the GATE'S VERDICT and nothing else. Counts, score and the
+# survivor list stay exactly as measured — the raw signal is the point, so a
+# future regression that adds new equivalent mutants stays visible
+# (docs/decisions.md §9c: "equivalent survivors are registered, not chased").
+#
+# Rules, all enforced by scripts/ci/mutation_to_json.py:
+#
+#   * An entry is matched by `file` + the -/+ lines of `mutation`, NEVER by
+#     mutant id. Ids renumber whenever the file changes upstream of the mutant,
+#     so an id-keyed register drifts onto a different mutation with nobody
+#     touching it. Leading whitespace is ignored; the code itself is not.
+#   * `justification` is mandatory and must be an argument, not an assertion.
+#     "Trivial" is not an argument. An entry missing any required field is
+#     refused, reported in the job summary, and has no effect.
+#   * A survivor whose mutation diff could not be recovered never matches
+#     anything: the gate fails closed rather than waive what it cannot read.
+#   * Registering a mutant that is NOT equivalent silences a real gap. That is
+#     what review of this file is for — treat a diff here as a test-deletion
+#     diff, because that is its effect.
+#
+# Check the register parses:  uv run python scripts/ci/mutation_to_json.py --check-equivalents
+
+[[equivalent]]
+file = "src/lovspor/observatory/model.py"
+symbol = "record_to_json_line"
+registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
+mutation = """
+-    return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
++    return json.dumps(data, sort_keys=True, ensure_ascii=None, separators=(",", ":"))
+"""
+justification = """
+`json.dumps` tests ensure_ascii for truth, and None is falsy, so None and False
+select the same encoder. Verified on non-ASCII input: dumps(..., ensure_ascii=False)
+and dumps(..., ensure_ascii=None) return byte-identical strings.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "write_registry"
+registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
+mutation = """
+-        registry.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=False
++        registry.model_dump(mode="json"), sort_keys=True, indent=2, ensure_ascii=None
+"""
+justification = """
+Same falsy-None equivalence as record_to_json_line, verified separately with
+indent=2 because that path takes the other encoder branch.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "_host_matches"
+registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
+mutation = """
+-    host = host.lower().rstrip(".")
++    host = host.lower().rstrip("XX.XX")
+"""
+justification = """
+The argument to rstrip is a CHARACTER SET, so "XX.XX" is the set {X, .}. The
+string was lowercased on the same line, and str.lower never yields an uppercase
+ASCII X, so the X in the set can never match a character that is there — the set
+behaves exactly like {.}. Verified exhaustively over all lowercased strings up
+to 3 characters drawn from ascii_letters + ".æøåX": zero disagreements.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "_host_matches"
+registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
+mutation = """
+-    domain = domain.lower().rstrip(".")
++    domain = domain.lower().rstrip("XX.XX")
+"""
+justification = """
+The same mutation one line down, on `domain`, and equivalent for the same
+reason: lowercased input cannot contain the uppercase X the mutated set adds.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/fetch.py"
+symbol = "_request"
+registered = "2026-08-18, PR #128, from run 32138706244"
+mutation = """
+-            "GET", attempt.url, headers=headers, timeout=self._settings.timeout_seconds
++            "get", attempt.url, headers=headers, timeout=self._settings.timeout_seconds
+"""
+justification = """
+httpx normalises the method before the request exists: Request.__init__ does
+`self.method = method.upper()`. So "get" and "GET" build the same request and put
+the same bytes on the wire, and a test asserting request.method only ever sees
+the normalised value. Verified against the pinned httpx: Request("get", url).method
+== Request("GET", url).method == "GET".
+"""

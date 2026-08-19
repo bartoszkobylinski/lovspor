@@ -14,14 +14,7 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: "development"
-    # mutmut 3.x has open upstream bugs (#480, #485, #486, #490) that
-    # break editable installs, dataclass mutants, initial test runs,
-    # and dict iteration. We pin to 2.x in pyproject.toml; this rule
-    # also stops Dependabot from re-proposing the major bump weekly.
-    # Revisit when mutmut 3.x stabilizes — see docs/decisions.md §9.
     ignore:
-      - dependency-name: "mutmut"
-        update-types: ["version-update:semver-major"]
       # mcp 2.x is a major SDK rewrite that breaks src/lovspor/mcp.py
       # (PR #55's own CI was red on every leg) and changes the served
       # tool schemas — which changes the frozen LLHB apparatus surface

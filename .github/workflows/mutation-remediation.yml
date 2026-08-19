@@ -29,7 +29,8 @@ jobs:
       pull-requests: write
       issues: write
     env:
-      CODEX_HOME: /home/runner/.codex-lovspor
+      CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
+      CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
       UV_PYTHON: "3.12"
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
@@ -63,11 +64,28 @@ jobs:
           if [ "$(jq -r .commit "$f")" != "$HEAD_SHA" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          # A budget-exceeded gate is not remediable by tests: the surface
+          # was never fully measured, so there is nothing for new tests to
+          # kill. Route it straight to a human instead of burning cycles.
+          if [ "$(jq -r .gate.reason "$f")" = "budget_exceeded" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "budget=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$(jq -r .gate.passed "$f")" = "false" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: BLOCKED — budget exceeded, tests cannot fix an unmeasured surface
+        if: steps.gate.outputs.budget == 'true'
+        run: |
+          pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
+          [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
+          gh pr edit "$pr" --add-label "needs-human:mutation"
+          gh pr comment "$pr" --body \
+            "Mutation gate: per-file wall-clock budget exceeded — the changed surface was not fully measured (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Human decision required."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.run == 'true'
@@ -92,8 +110,8 @@ jobs:
           count=0
           while IFS= read -r subj; do
             case "$subj" in
-              *"[agent:codex-mutation]"*) count=$((count+1)) ;;
-              *"[agent:codex-tests]"*)    ;;
+              *"[agent:codex-mutation]"* | *"[agent:claude-mutation]"*) count=$((count+1)) ;;
+              *"[agent:codex-tests]"* | *"[agent:claude-tests]"*)    ;;
               *) break ;;
             esac
           done < <(git log --pretty=%s)
@@ -116,17 +134,50 @@ jobs:
         run: uv sync --frozen
 
       - name: Codex — mutation remediation (tests only)
+        id: author
         if: steps.cycle.outputs.run == 'true'
+        env:
+          CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
+          CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
           echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-          # Same box lock as the PR test author — see pr-pipeline.yml.
+          # Serialize with every other agent job on the shared runner box. One
+          # unserialized agent run exhausted its 2 GB on 2026-08-18, killed
+          # tailscaled and all seven runner agents, and took five unrelated
+          # repositories' CI down until the container was rebooted. The fd stays
+          # open for the life of this step, so the lock releases even if the job
+          # is cancelled.
           exec 9>/run/lock/mikrus-agent.lock
           flock -w 3600 9 || { echo "another agent job held the box lock for an hour" >&2; exit 1; }
-          codex exec \
-            --sandbox workspace-write \
-            "$(cat .github/codex/mutation-remediation.md)
+          : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
+          : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
+          set +e
+          python3 scripts/ci/codex_account_failover.py \
+            --primary-home "$CODEX_PRIMARY_HOME" \
+            --secondary-home "$CODEX_SECONDARY_HOME" \
+            --threshold 95 \
+            -- codex exec \
+              --sandbox workspace-write \
+              "$(cat .github/codex/mutation-remediation.md)
 
-          mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+              mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+          status=$?
+          set -e
+          # 75 = every Codex account rate-limited: hand the SAME prompt to the
+          # non-Fable Claude fallback instead of stalling the remediation cycle.
+          if [ "$status" -eq 75 ]; then
+            {
+              cat .github/codex/mutation-remediation.md
+              echo
+              echo "mutation-result.json for this PR is at: ${{ runner.temp }}/mutation/mutation-result.json"
+            } > "${{ runner.temp }}/remediation-prompt.md"
+            scripts/ci/claude_test_author.sh "${{ runner.temp }}/remediation-prompt.md"
+            echo "author=claude" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          else
+            echo "author=codex" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Scope guard
         if: steps.cycle.outputs.run == 'true'
@@ -158,7 +209,9 @@ jobs:
           git config user.name "codex-ci"
           git config user.email "codex-ci@users.noreply.github.com"
           git add -A
-          git commit -m "test: kill mutation survivors for PR #${{ steps.cycle.outputs.pr }} [agent:codex-mutation]"
+          # The marker names the ACTUAL author — never stamp codex on a
+          # Claude-written commit.
+          git commit -m "test: kill mutation survivors for PR #${{ steps.cycle.outputs.pr }} [agent:${{ steps.author.outputs.author || 'codex' }}-mutation]"
           # Issue #67: the branch can advance during a long Codex run. A rejected
           # push for a superseded head is benign — the new head's own pipeline
           # owns mutation now. Any other push failure is a real error.

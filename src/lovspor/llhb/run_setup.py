@@ -32,6 +32,7 @@ class RunSpec(BaseModel):
     condition: str
     system_prompt_text: str
     system_prompt_path: str
+    analysis_plan_sha256: str
     lovspor_commit: str
     lovverk_commit: str
     runner_commit: str
@@ -107,6 +108,7 @@ def compose_run_metadata(spec: RunSpec, cases: list[dict[str, Any]]) -> dict[str
         "model_id": spec.model_id,
         "api_version": None,
         "condition": spec.condition,
+        "analysis_plan_sha256": spec.analysis_plan_sha256,
         "system_prompt_sha256": sha256_text(spec.system_prompt_text),
         "system_prompt_path": spec.system_prompt_path,
         "tool_config": spec.tool_config,

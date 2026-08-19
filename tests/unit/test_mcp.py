@@ -741,6 +741,32 @@ def test_get_law_history_raises_for_unknown_slug(tmp_path: Path) -> None:
     )
 
 
+def test_get_law_history_is_unreachable_for_a_tombstoned_slug_even_with_the_file_on_disk(
+    tmp_path: Path,
+) -> None:
+    """docs/mcp.md's troubleshooting section (and the ADR-0009 tombstone bullet)
+    both say a tombstone's ``history/<slug>.json`` is kept on disk but ``get_law_history``
+    still raises "no current law" for it — the slug-index gate that
+    ``_find_current_by_slug`` shares with ``get_law`` filters on
+    ``status == "current"`` before the history lookup ever runs, so the file's
+    presence is irrelevant. This pins that MVP limitation so a slug-index
+    change can't silently start serving (or keep silently refusing to serve)
+    tombstone history without a test noticing."""
+    _seed_corpus(
+        tmp_path,
+        {"nl-1": _record(slug="gone", title="Gone", status="removed")},
+        write_files=False,
+        write_history_for=["gone"],
+    )
+    assert (tmp_path / "lover" / "history" / "gone.json").exists()
+
+    with pytest.raises(CorpusNotFoundError) as excinfo:
+        CorpusReader(tmp_path).get_law_history("gone")
+    assert str(excinfo.value) == (
+        "no current law with slug 'gone'; use search_laws or list_recent_changes to discover slugs"
+    )
+
+
 def test_unknown_slug_error_offers_near_miss_suggestions(tmp_path: Path) -> None:
     """The 'did you mean' hint is the affordance that lets an AI recover from a
     kortform in one step instead of citing from memory. Nothing pinned its
@@ -4795,6 +4821,25 @@ def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
     )
 
 
+def test_build_server_preserves_name_bind_and_embedder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    embedder = _FakeEmbedder([1.0, 0.0])
+    monkeypatch.setattr(mcp_module, "_build_embedder", lambda: embedder)
+
+    server = build_server(tmp_path, http=HttpConfig(host="127.0.0.9", port=9999))
+    semantic_tool = server._tool_manager._tools["semantic_search"]
+    reader = inspect.getclosurevars(semantic_tool.fn).nonlocals["fn"]
+    reader = inspect.getclosurevars(reader).nonlocals["reader"]
+
+    assert server.name == "lovverk"
+    assert server.settings.host == "127.0.0.9"
+    assert server.settings.port == 9999
+    assert reader._embedder is embedder
+
+
 _ADR_0002_CONTRACT_SENTENCES = (
     "the result represents the version available in the Lovspor corpus "
     "at the end of the specified UTC date.",
@@ -4829,6 +4874,34 @@ def test_time_machine_tool_descriptions_pin_adr_0002_contract(tmp_path: Path) ->
         "recorded a content change — not entry-into-force dates." in versions
     )
     assert "They do not establish when a provision became legally applicable" in versions
+
+
+def test_eu_tool_descriptions_state_the_coverage_limit(tmp_path: Path) -> None:
+    """An empty ``eu_basis`` is recorded-absence, not evidence of no EU basis.
+
+    No ``forskrift`` in the corpus carries an ``eu_basis`` at all, because the
+    value comes from the source XML's ``eeaReferences`` block; regulations that
+    cite EU documents inline in their text are invisible to it. A model reading
+    ``[]`` as "implements no EU law" would be wrong about 87% of the corpus, so
+    both EU tools must carry the limit in the description the model actually
+    sees. Sentences are pinned whole: a fragment check would pass against a
+    description corrupted around the fragment it searched for.
+    """
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    tools = build_server(tmp_path)._tool_manager._tools
+
+    basis = " ".join((tools["get_eu_basis"].description or "").split())
+    assert (
+        "an empty ``eu_basis`` means no EU basis is recorded for this document; "
+        "it is never evidence that the document implements no EU law." in basis
+    )
+    assert "no ``forskrift`` carries an ``eu_basis`` at all" in basis
+
+    reverse = " ".join((tools["search_eu_implementations"].description or "").split())
+    assert (
+        "An empty result therefore does not establish that no Norwegian "
+        "regulation implements the given EU document." in reverse
+    )
 
 
 def test_build_server_raises_eagerly_on_bad_corpus(tmp_path: Path) -> None:

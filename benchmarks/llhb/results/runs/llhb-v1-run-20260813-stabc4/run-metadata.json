@@ -1,0 +1,28 @@
+{
+  "analysis_plan_sha256": null,
+  "api_version": null,
+  "case_order_seed": 42,
+  "cases_completed": 30,
+  "cases_total": 30,
+  "condition": "control",
+  "dataset_checksum": "c030a4bfbba46cac217d8820f5920eff635abeb623c0d799b7bc722f69da1f9e",
+  "errors_total": 0,
+  "evaluator_version": null,
+  "finished_at": "2026-08-13T18:50:39Z",
+  "llhb_version": "1.0",
+  "lovspor_commit": "d3086a59af39097968c6b49378ec9a2306d7a309",
+  "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+  "max_turns": null,
+  "model_id": "claude-opus-5",
+  "notes": "STABILITY subset 30x5 (ruling #26), repeat 4/5 for this provider-condition arm; cases drawn from the frozen llhb-v1 dataset (llhb-v1-stability30.json); cli=2.1.229 (Claude Code); the CLI exposes no temperature or max-turn control, so both are recorded as unset",
+  "provider": "anthropic",
+  "run_id": "llhb-v1-run-20260813-stabc4",
+  "runner_commit": "d3086a59af39097968c6b49378ec9a2306d7a309",
+  "sampling": {
+    "temperature": null
+  },
+  "started_at": "2026-08-13T18:35:21Z",
+  "system_prompt_path": "benchmarks/llhb/runner/system-prompt-v1.txt",
+  "system_prompt_sha256": "1e984ac1bdb481be7dda5a20b84c1b84edf608e9b4739b346aef59017ef890ec",
+  "tool_config": null
+}

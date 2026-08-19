@@ -30,6 +30,9 @@ Two repos because two audiences: engine repo is for contributors and portfolio, 
 > Re-publishing the engine is tracked in `docs/publication-plan.md`; until
 > that lands, the two-audience rationale above holds but the "both public"
 > claim is direction, not state.
+>
+> **Superseded in part (2026-08-12):** the engine is no longer MIT — see §18. The rest of
+> this note stands.
 
 ## 2. Purpose
 
@@ -149,7 +152,7 @@ Local layout:
 | Security lint | ruff `S` rules + `bandit` | Overlap is fine; bandit runs via `uvx` |
 | Types | `mypy` strict mode | Wired into CI + pre-commit |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
-| Mutation | `mutmut == 2.5.1` | See §9 |
+| Mutation | `mutmut == 3.7.0` | Function-scoped per-PR runs; see §9 and §9c |
 | Hooks | `pre-commit` | Wired for gitleaks, ruff, format, mypy, pytest unit |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
@@ -172,17 +175,15 @@ Global Claude skill at `~/.claude/skills/security-check/SKILL.md`, invokable as 
 
 Baseline on scaffold (2026-04-22): all six clean.
 
-## 9. mutmut pinned to 2.x — no PEP 695
+## 9. mutmut 3.7 and PEP 695
 
-mutmut 2.5.1 pinned in `pyproject.toml`. mutmut 3.x has open bugs:
-- #486: breaks editable installs (we use them via `uv sync`)
-- #480: `@dataclass` methods produce zero mutants (we use Pydantic dataclasses)
-- #485: crashes on initial test run
-- #490: race condition in dict iteration
+Migrated from mutmut 2.5.1 to 3.7.0 on 2026-08-17 (issue #91). The migration was
+verified with a real PR-scoped mutation run: 14 mutants processed and killed at
+30.14 mutations/second. The former 2.x blockers (#480, #485, #486, #490) no longer
+justify holding the project on the legacy runner.
 
-**Consequence:** no PEP 695 generic syntax. mutmut 2.x parser predates PEP 695 and crashes on `def foo[T](...)`. Use classic `TypeVar` from `typing` instead. Ruff rule `UP047` is globally disabled to prevent accidental reintroduction.
-
-When mutmut 3.x stabilizes (track their issue tracker), revisit this constraint.
+PEP 695 generic syntax is enabled again. Ruff rule `UP047` is no longer disabled, and
+`retry_with_backoff` uses the Python 3.12 type-parameter syntax.
 
 ## 9a. Mutation testing baseline expectations
 
@@ -204,6 +205,7 @@ Decided 2026-04-23 after Sprint 3 PR #11; baseline numbers updated 2026-04-26 af
 
 - Codex flags critical-path survivors per PR; we fix those on the same branch.
 - Equivalent survivors are **registered, not chased**. We do not configure mutmut to filter them out — we want the raw signal so a future regression that adds new equivalent mutants is visible.
+- Since issue #122 "registered" is literal: `mutation-equivalents.toml` holds one entry per proven equivalent, keyed by file plus the mutation's `-`/`+` lines — never by mutant id, which renumbers whenever the file changes upstream of the mutant — each with a written justification. A registered survivor stops failing the gate and nothing else: still counted, still scored against, still listed, now carrying the justification that excused it. The register exists because the gate had become unpassable for `ensure_ascii=False` and `rstrip(".")` code, and a required check that cannot go green teaches people to ignore it; it also burned `needs-human:mutation`, which could no longer distinguish "a human must judge these survivors" from "this is arithmetically impossible". Reviewing a diff to that file is reviewing a test deletion.
 - Survivor count and kill rate are tracked in PR descriptions (Codex always reports them).
 
 **Revisit triggers** (when this decision should be reopened):
@@ -236,16 +238,17 @@ Added 2026-04-27 after the first scheduled migration sync crashed in production 
 
 **Cost:** `hypothesis` added to dev dependencies (`pyproject.toml`). Default 100 examples per test × 5 tests ≈ < 1 s in local CI. Negligible.
 
-## 9c. Per-PR mutation runs are scoped to changed files
+## 9c. Per-PR mutation runs are scoped to changed functions
 
 Decided 2026-08-05, closing issue #4. Codex review of PR #3 showed full-repo `mutmut run` is not operationally usable as a per-PR gate: 9 of 4338 mutants processed in over a minute on a fresh clone, no terminating run ever observed (reconfirmed across PR #3/#5/#7/#8 reviews). Release/packaging PRs additionally have zero mutation surface, so a full run there yields nothing by construction.
 
-**Mechanism:** `scripts/mutmut-pr.sh`. It diffs `base_ref...HEAD` (default `origin/main`, `--diff-filter=ACMR`) for `src/lovspor/**/*.py`, then:
+**Mechanism:** `scripts/mutmut-pr.sh`. It diffs `base_ref...HEAD` (default `origin/main`, `--diff-filter=ACMR`) for `src/lovspor/**/*.py`. `scripts/ci/mutation_scope.py` maps changed post-image lines to enclosing functions and emits mutmut 3 name patterns, then:
 
-- changed files exist → wipes `.mutmut-cache` (a cache from another scope silently skews the score — the Sprint 8 stale-cache trap in §"Carried debts") and runs `mutmut run --paths-to-mutate=<changed files>`;
+- changed functions exist → rebuilds mutmut's shadow tree and runs only those function patterns, with mutmut 3's warm baseline and parallel workers;
+- changed source exists but cannot be mapped safely to functions (for example module-level behavior or decorated definitions) → runs the affected module patterns rather than silently exempting it;
 - no changed files → prints `mutation not applicable: no src/lovspor logic changed relative to <base>` and exits 0. Codex reports that line verbatim — an explicit recorded exemption, not a skipped step and never a fabricated score.
 
-**What this does NOT change:** §9 (mutmut 2.x pin, no PEP 695) and §9a (baseline expectations, survivor policy, revisit triggers) stand. Baseline numbers still come from explicitly requested full-repo runs, not from per-PR scoped runs — a scoped score is authoritative only for the PR's own surface and must not be compared against the §9a baseline.
+**What this does NOT change:** §9a baseline expectations, survivor policy, and revisit triggers stand. Baseline numbers still come from explicitly requested full-repo runs, not from per-PR scoped runs — a scoped score is authoritative only for the PR's own surface and must not be compared against the §9a baseline.
 
 ## 10. Workflow — how Claude works here
 
@@ -675,6 +678,8 @@ Project-owner decision, reversing the closed-product direction of 2026-07-14 (pe
 The accepted direction is **open infrastructure**:
 
 - `lovspor` — engine **public under MIT**; independently runnable end to end (sync, render, MCP) without any hosted service.
+  **Licence superseded 2026-08-12 — the engine is AGPL-3.0, see §18.** "Public and independently
+  runnable" is unchanged; only the licence is.
 - `lovverk` — corpus **public** under its existing NLOD 2.0 + CC0 boundary (unchanged).
 - The hosted MCP endpoint is an **optional operated access layer**. Its authentication, quotas and rate limits are operational controls on one deployment, not a business boundary around the engine.
 - Optional paid operational services (managed hosting, support, integration) are permitted, but they must not make the open core artificially incomplete or impractical.
@@ -727,6 +732,24 @@ operator-provisioned convenience** on top of the open engine — its auth and qu
 remain operational controls on one deployment, exactly as §15 framed them, not a
 paywall. `roadmap.md` Sprint 12 item 8 is struck accordingly; the historical pivot
 records stay as history.
+
+## 18. Engine relicensed MIT -> AGPL-3.0 (decided 2026-08-12)
+
+Project-owner decision, superseding the licence clause of §15 (and the MIT mention in the
+2026-08-02 "Current state" note in §1). Everything else in §15 stands: the project is still
+open infrastructure, the corpus boundary is unchanged, the hosted endpoint is still an
+optional operated access layer.
+
+**The engine is licensed AGPL-3.0.** `LICENSE`, `pyproject.toml` and `README.md` were
+updated together in `29178b640`. Versions up to and including commit `632dae8` were
+published under MIT; everything after is AGPL-3.0. The `lovverk` corpus is unaffected — the
+legal text stays NLOD 2.0 and the corpus structure CC0.
+
+Rationale, from the relicense commit itself: *"the MIT choice at the public flip was an
+unexamined default, not a decision."*
+
+Per this file's convention the MIT sentences in §1 and §15 stay as history; this entry is
+what supersedes them.
 
 ## How to use this document
 

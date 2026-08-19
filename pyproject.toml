@@ -76,7 +76,7 @@ dev = [
     "pytest-httpx>=0.32.0",
     "ruff>=0.7.0",
     "mypy>=1.13.0",
-    "mutmut==2.5.1",
+    "mutmut==3.7.0",
     "pre-commit>=4.0.0",
     "lxml-stubs>=0.5.1",
     "hypothesis>=6.115.0",
@@ -146,7 +146,6 @@ select = [
 ]
 ignore = [
     "PLR0913",  # too many args — we enforce manually via review
-    "UP047",    # PEP 695 generic syntax — disabled until mutmut 2.x parser supports it
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -210,6 +209,22 @@ show_missing = true
 
 # ---------- Mutmut ----------
 [tool.mutmut]
-paths_to_mutate = "src/lovspor/"
-runner = "uv run pytest -x -q tests/unit/"
-tests_dir = "tests/unit/"
+source_paths = ["src/lovspor/"]
+pytest_add_cli_args = ["-x", "-q"]
+pytest_add_cli_args_test_selection = ["tests/unit/"]
+also_copy = [
+    ".github/",
+    "benchmarks/",
+    "deploy/",
+    "docs/",
+    "evals/",
+    "scripts/",
+    "LICENSE",
+    "README.md",
+    # Repo state the test suite reads, so it has to exist inside the shadow
+    # tree too. Absent, the test asserting the shipped register is non-empty
+    # fails during mutmut's clean baseline, and a failed baseline aborts the
+    # whole run: the gate then reports tool_failed for every PR touching
+    # src/lovspor/, on a missing file rather than on code quality (issue #129).
+    "mutation-equivalents.toml",
+]

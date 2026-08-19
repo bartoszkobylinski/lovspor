@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.10.0"
           enable-cache: true
@@ -45,10 +45,18 @@ jobs:
 
   codex-tests:
     runs-on: [self-hosted, linux, codex]
+    concurrency:
+      group: lovspor-codex-subscription
+      cancel-in-progress: false
     # The runner holding Codex auth never executes fork code.
     if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
     env:
-      CODEX_HOME: /home/runner/.codex-lovspor
+      CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
+      CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
       UV_PYTHON: "3.12"
     outputs:
       pushed: ${{ steps.push.outputs.pushed }}
@@ -64,7 +72,7 @@ jobs:
       - name: Anti-loop check
         id: antiloop
         run: |
-          if git log -1 --pretty=%B | grep -qE '\[agent:codex-(tests|mutation)\]'; then
+          if git log -1 --pretty=%B | grep -qE '\[agent:(codex|claude)-(tests|mutation)\]'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -79,7 +87,11 @@ jobs:
         run: uv sync --frozen
 
       - name: Codex — independent PR test author
+        id: author
         if: steps.antiloop.outputs.skip != 'true'
+        env:
+          CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
+          CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
           # Serialize with every other agent job on the shared runner box. One
           # unserialized agent run exhausted its 2 GB on 2026-08-18, killed
@@ -89,9 +101,30 @@ jobs:
           # is cancelled.
           exec 9>/run/lock/mikrus-agent.lock
           flock -w 3600 9 || { echo "another agent job held the box lock for an hour" >&2; exit 1; }
-          codex exec \
-            --sandbox workspace-write \
-            "$(cat .github/codex/pr-tests.md)"
+          : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
+          : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
+          set +e
+          python3 scripts/ci/codex_account_failover.py \
+            --primary-home "$CODEX_PRIMARY_HOME" \
+            --secondary-home "$CODEX_SECONDARY_HOME" \
+            --threshold 95 \
+            -- codex exec \
+              --sandbox workspace-write \
+              "$(cat .github/codex/pr-tests.md)"
+          status=$?
+          set -e
+          # 75 = every Codex account rate-limited (EX_TEMPFAIL, and only that
+          # case): a separate non-Fable Claude writes the tests instead of the
+          # whole pipeline blocking until a limit window resets. Any other
+          # failure stays fatal. The scope guard below applies to both authors.
+          if [ "$status" -eq 75 ]; then
+            scripts/ci/claude_test_author.sh .github/codex/pr-tests.md
+            echo "author=claude" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          else
+            echo "author=codex" >> "$GITHUB_OUTPUT"
+          fi
 
       # Mechanical guard after every Codex run. The prompt is not a boundary.
       - name: Scope guard
@@ -106,9 +139,50 @@ jobs:
           uv run ruff format tests/
           uv run ruff check --fix tests/
 
+      # The log lives in RUNNER_TEMP, never the workspace: the push step squashes
+      # with `git add -A`, and a self-hosted workspace persists between runs — a
+      # workspace file WILL end up committed to the branch (issue #98).
       - name: Run tests on Codex additions
+        id: codex-pytest
         if: steps.antiloop.outputs.skip != 'true'
-        run: uv run pytest tests/unit/
+        run: |
+          set +e
+          uv run pytest tests/unit/ 2>&1 | tee "$RUNNER_TEMP/codex-pytest.log"
+          exit "${PIPESTATUS[0]}"
+
+      # Contract (docs/agentic-ci.md, Failure escalation): a Codex test failing
+      # against this head must label the PR, comment, and preserve the tests —
+      # a bare red check buries the evidence in an expiring log (issue #95).
+      # git add -N: Codex's new test files are untracked, a plain diff misses them.
+      - name: Preserve Codex tests on failure
+        if: failure() && steps.codex-pytest.outcome == 'failure'
+        run: |
+          git add -N tests/
+          git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/codex-tests.patch"
+
+      - name: Upload Codex tests and log
+        if: failure() && steps.codex-pytest.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-tests-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/codex-tests.patch
+            ${{ runner.temp }}/codex-pytest.log
+
+      - name: Escalate — Codex test exposed an implementation defect
+        if: failure() && steps.codex-pytest.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" --add-label "needs-implementation-fix"
+          {
+            echo "codex-tests BLOCKED: Codex-authored tests fail against this head."
+            echo ""
+            grep -E '^FAILED ' "$RUNNER_TEMP/codex-pytest.log" | head -10
+            echo ""
+            echo "Tests + log: artifact \`codex-tests-${{ github.event.pull_request.head.sha }}\` (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          } > "$RUNNER_TEMP/escalation.md"
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/escalation.md"
 
       - name: Commit and push test additions
         id: push
@@ -124,7 +198,9 @@ jobs:
           git config user.name "codex-ci"
           git config user.email "codex-ci@users.noreply.github.com"
           git add -A
-          git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:codex-tests]"
+          # The marker names the ACTUAL author — a Claude-written commit
+          # stamped [agent:codex-tests] would be fabricated provenance.
+          git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:${{ steps.author.outputs.author || 'codex' }}-tests]"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
@@ -138,6 +214,10 @@ jobs:
       needs.codex-tests.result == 'success' &&
       needs.codex-tests.outputs.pushed != 'true'
     runs-on: ubuntu-latest
+    # Backstop over the script's own per-file budget (issue #102). Two files
+    # can consume 40 minutes of mutation time, and harvesting the resulting
+    # cache also needs room to emit the explicit budget verdict artifact.
+    timeout-minutes: 60
     env:
       UV_PYTHON: "3.12"
     steps:
@@ -149,7 +229,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.10.0"
           enable-cache: true
@@ -164,9 +244,17 @@ jobs:
           scripts/mutmut-pr.sh "${{ github.event.pull_request.base.sha }}" 2>&1 | tee mutation-raw.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
-      - name: Collect survivor ids
+      - name: Collect survivors, with what each one changed
         if: always()
-        run: uv run mutmut result-ids survived > survivors.txt 2>/dev/null || true
+        run: |
+          uv run mutmut results > mutation-results.txt 2>/dev/null || true
+          sed -n 's/^    \(.*\): survived$/\1/p' mutation-results.txt > survivors.txt
+          # The shadow tree is still on disk here — this is the only moment the
+          # mutation diff can be recovered without a second mutmut run (#119).
+          # If it fails, the bare ids remain valid input for the report.
+          uv run python scripts/ci/mutation_survivors.py \
+            --survivors-file survivors.txt \
+            --out survivors.jsonl || cp survivors.txt survivors.jsonl
 
       - name: Build mutation-result.json
         if: always()
@@ -174,8 +262,8 @@ jobs:
           python scripts/ci/mutation_to_json.py \
             --commit "${{ github.event.pull_request.head.sha }}" \
             --raw mutation-raw.log \
-            --survivors-file survivors.txt \
-            --tool-exit-code "${{ steps.mut.outputs.exit_code }}" \
+            --survivors-file survivors.jsonl \
+            --tool-exit-code "${{ steps.mut.outputs.exit_code || '3' }}" \
             --out mutation-result.json
 
       - name: Upload mutation artifact (PASS and FAIL)

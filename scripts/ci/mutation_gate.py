@@ -61,6 +61,70 @@ def _extract(r: dict[str, object]) -> tuple[str, float, bool, str, tuple[int, ..
     return commit, float(score), passed, reason, counts
 
 
+def _added_line(diff: object) -> str | None:
+    """The mutant's replacement line — the one thing triage always needs."""
+    if not isinstance(diff, str):
+        return None
+    for line in diff.splitlines():
+        if line.startswith("+") and not line.startswith("+++"):
+            return line[1:].strip()[:120]
+    return None
+
+
+def _equivalent_note(s: dict[str, object]) -> str:
+    """A registered survivor says so, and says on whose written word."""
+    equivalent = s.get("equivalent")
+    if not isinstance(equivalent, dict):
+        return ""
+    registered = equivalent.get("registered")
+    stamp = f", {registered}" if isinstance(registered, str) and registered else ""
+    return f" — **equivalent**{stamp}"
+
+
+def _survivor_bullet(s: object) -> str | None:
+    """One survivor as `id — file:line — replacement`, skipping what is unknown."""
+    if not isinstance(s, dict) or not isinstance(s.get("id"), str):
+        return None
+    where = s.get("file") if isinstance(s.get("file"), str) else "file unknown"
+    if isinstance(s.get("symbol_line"), int):
+        where = f"{where}:{s['symbol_line']}"
+    change = _added_line(s.get("diff"))
+    bullet = f"  - `{s['id']}` — {where}" + (f" — `{change}`" if change else "")
+    return bullet + _equivalent_note(s)
+
+
+def _survivor_lines(survivors: object, limit: int = 10) -> list[str]:
+    """Triage list for the job summary; the artifact holds the full detail."""
+    if not isinstance(survivors, list):
+        return []
+    bullets = [b for b in (_survivor_bullet(s) for s in survivors) if b]
+    if not bullets:
+        return []
+    shown = bullets[:limit]
+    if len(bullets) > limit:
+        shown.append(f"  - … and {len(bullets) - limit} more (see the artifact)")
+    return ["- Survivors:", *shown]
+
+
+def _register_lines(equivalents: object) -> list[str]:
+    """What the equivalent-mutant register did to this run, if anything.
+
+    A refused entry is louder than an applied one: it means someone tried to
+    excuse a survivor and the register would not let them, so the gate is red
+    for a reason that is not in the mutants.
+    """
+    if not isinstance(equivalents, dict):
+        return []
+    registered = equivalents.get("registered")
+    refused = equivalents.get("refused")
+    lines = []
+    if isinstance(registered, int) and registered:
+        lines.append(f"- Registered equivalents: {registered} (`mutation-equivalents.toml`)")
+    if isinstance(refused, list):
+        lines += [f"- ⚠ Refused register entry: {r}" for r in refused if isinstance(r, str)]
+    return lines
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--summary", action="store_true")
@@ -91,6 +155,10 @@ def main() -> int:
         print(f"- Gate: {'PASS' if passed else 'FAIL'} ({reason})")
         if hint:
             print(f"- Hint: `{hint}`")
+        for line in _survivor_lines(r.get("survivors")):
+            print(line)
+        for line in _register_lines(r.get("equivalents")):
+            print(line)
         print(f"- Artifact: `mutation-result-{commit}`")
         return 0
 

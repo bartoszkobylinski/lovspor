@@ -18,6 +18,7 @@ from lovspor.errors import LovsporError
 STABILITY_SUBSET_SIZE: Final = 30
 STABILITY_REPEATS: Final = 5
 STABILITY_SELECTION_SEED: Final = 42
+_MIN_SAMPLES_FOR_SD: Final = 2
 
 
 class StabilityShortfallError(LovsporError):
@@ -29,6 +30,52 @@ class StabilitySubset(BaseModel):
     seed: int
     allocation: dict[str, int]
     case_ids: list[str]
+
+
+class RateSummary(BaseModel):
+    """Exact statistics of one metric's rate across the 5 repeats."""
+
+    values: list[float | None]
+    defined: int
+    mean: float | None
+    minimum: float | None
+    maximum: float | None
+    sd: float | None
+    """Sample SD (n-1); None below two defined values — never a fake 0."""
+
+
+def summarize_rates(values: list[float | None]) -> RateSummary:
+    """Mean / min / max / sample SD over the defined rates, Nones kept visible."""
+    defined = [value for value in values if value is not None]
+    n = len(defined)
+    mean = sum(defined) / n if n else None
+    sd: float | None = None
+    if mean is not None and n >= _MIN_SAMPLES_FOR_SD:
+        sd = (sum((value - mean) ** 2 for value in defined) / (n - 1)) ** 0.5
+    return RateSummary(
+        values=list(values),
+        defined=n,
+        mean=mean,
+        minimum=min(defined) if n else None,
+        maximum=max(defined) if n else None,
+        sd=sd,
+    )
+
+
+def flipped_cases(outcomes_by_repeat: list[dict[str, bool | None]]) -> list[str]:
+    """Case ids whose outcome is not identical across every repeat.
+
+    A case absent from any repeat is unstable by definition — silence
+    is not the same outcome as a verdict.
+    """
+    outcomes: dict[str, list[bool | None]] = {}
+    for repeat in outcomes_by_repeat:
+        for case_id, outcome in repeat.items():
+            outcomes.setdefault(case_id, []).append(outcome)
+    total = len(outcomes_by_repeat)
+    return sorted(
+        case_id for case_id, seen in outcomes.items() if len(seen) != total or len(set(seen)) > 1
+    )
 
 
 def subset_allocation(counts: dict[str, int], size: int) -> dict[str, int]:

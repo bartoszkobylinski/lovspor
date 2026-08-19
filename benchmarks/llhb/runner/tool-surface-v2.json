@@ -1,0 +1,25 @@
+{
+  "description": "Post-T0 apparatus surface: the tool names and schema hash the local `lovspor mcp` server serves after the ADR-0009 T0 serving-side notice (get_law appends a temporal notice block, get_section carries a temporal_notice field; both tool descriptions changed accordingly). Supersedes tool-surface-v1.json for FUTURE runs; v1 stays committed untouched because the committed LLHB v1 pair recorded its hash and must remain verifiable (pass --surface-path for v1 re-checks). The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() on branch feat/temporal-t0-serving-notice (temporal module at lovspor d1c90e6; the serving wiring lands in the same commit as this file)",
+  "python": "3.12",
+  "server": "lovverk",
+  "tool_schema_sha256": "bd27833f76bbe1474c4083e32e15870dc756ed101a04eb5454c70a169b743983",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

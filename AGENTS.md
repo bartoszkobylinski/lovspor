@@ -33,6 +33,7 @@ Run `./scripts/mutmut-pr.sh` and report the result. The script mutates only the 
 - The run shadows `claude` on `PATH` with a stub that exits non-zero, so `mutation guard: the real provider CLI is blocked` on stderr is expected. A mutant that breaks a subprocess call's env isolation otherwise inherits the runner's `PATH` and makes a live, subscription-billed model call — measured at 36 s for one mutant before the guard, 1.8 s after.
 - Consequence of the per-module scoping: a mutant that only some *other* module's test would have caught reads as survived, so the score errs pessimistic. Check a survivor against the wider suite before calling it a real gap — and never widen the runner to make a survivor disappear.
 - If the script prints `mutation not applicable: ...` (release/packaging/docs PRs), report that line verbatim as the mutation result. Never substitute a full-repo run and never fabricate a score.
+- If the script prints `mutation budget exceeded: <file> ...` (issue #102), that file ran out of its wall-clock budget (`MUTMUT_PR_FILE_BUDGET_SECONDS`, default 1200 s): the buckets it did measure are real, the rest of that file's mutants surface as `untested`, and the exit code carries bit 16. Report the line verbatim; never fold `untested` into killed and never present the partial score as covering the whole surface.
 - Otherwise report the kill score plus survivors, and investigate survived mutants in critical paths:
   - normalization
   - hashing

@@ -7,16 +7,9 @@ is preferable to taking a dependency.
 
 import time
 from collections.abc import Callable
-from typing import TypeVar
-
-# PEP 695 (`def f[T]`) would be cleaner, but mutmut 2.x cannot parse it and
-# crashes during mutation generation. We pin mutmut 2.5.1 because 3.x has
-# open bugs with editable installs and dataclasses. Keep pre-PEP 695 syntax
-# until mutmut 3.x stabilizes.
-T = TypeVar("T")
 
 
-def retry_with_backoff(
+def retry_with_backoff[T](
     func: Callable[[], T],
     *,
     attempts: int = 3,

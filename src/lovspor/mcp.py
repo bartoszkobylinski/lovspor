@@ -90,6 +90,7 @@ from lovspor.headings import (
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
+from lovspor.temporal import append_notice, build_notice, evaluation_date_today
 from lovspor.timetravel import (
     RevisionNotFoundError,
     RevisionResult,
@@ -3243,6 +3244,24 @@ def _with_quota(
     return wrapper
 
 
+def _with_section_notice(result: dict[str, Any], evaluation_date: date) -> dict[str, Any]:
+    """Attach the ADR-0009 T0 notice to one ``get_section`` response.
+
+    Serving-side composition per the owner ruling: the corpus bytes and the
+    reader stay untouched; the notice is ``g(body, evaluation_date)`` with the
+    evaluation date an explicit input. ``None`` when nothing in the section is
+    marked not-in-force — absence of the notice is itself a statement, so the
+    key is always present.
+    """
+    notice = build_notice(
+        result["body"],
+        evaluation_date,
+        default_provision=f"§ {result['section_id']}",
+    )
+    result["temporal_notice"] = None if notice is None else notice.model_dump(mode="json")
+    return result
+
+
 def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMCP:
     """Build a FastMCP server bound to ``corpus_path``.
 
@@ -3299,8 +3318,15 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
 
         Output begins with YAML frontmatter (id, title, ministry,
         dates, license, ...) followed by the legal text in Markdown.
+
+        When the source marks amendments in this act as announced (not
+        yet in force), pending a delegated commencement, or never
+        brought into force, a **Temporal notice** block is appended
+        after the legal text, evaluated against today's date (stated in
+        the block). Text listed there is not part of the law in force;
+        do not present it as such (ADR-0009 §3b).
         """
-        return reader.get_law(slug)
+        return append_notice(reader.get_law(slug), evaluation_date_today())
 
     @_tool()
     def get_section(
@@ -3358,8 +3384,19 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         message lists the act's available section ids in natural
         order so the AI can recover without a separate ``get_law``
         call.
+
+        ``temporal_notice`` (always present, usually ``null``) carries
+        what the source marks as not in force in THIS section:
+        announced amendments, commencement dates that have not arrived
+        at the stated ``evaluation_date``, delegated commencement
+        (``pending_indeterminate``), or a provision never brought into
+        force. Text listed there is not part of the law in force; do
+        not present it as such (ADR-0009 §3b).
         """
-        return reader.get_section(slug, section_id, occurrence)
+        return _with_section_notice(
+            reader.get_section(slug, section_id, occurrence),
+            evaluation_date_today(),
+        )
 
     @_tool()
     def list_sections(slug: str) -> list[dict[str, Any]]:
@@ -3765,6 +3802,15 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         (e.g. ``["32016R0679", "32014L0090"]``). Empty list when the
         act has no EEA references in Lovdata's source XML.
 
+        COVERAGE LIMIT — an empty ``eu_basis`` means no EU basis is
+        recorded for this document; it is never evidence that the
+        document implements no EU law. The value is extracted from the
+        ``eeaReferences`` block of the source XML, and in the current
+        corpus every document that has one is a ``lov``: no
+        ``forskrift`` carries an ``eu_basis`` at all, though many cite
+        EU documents inline in their text. For regulations, read the
+        text with ``get_law`` instead of trusting this field.
+
         CELEX format: ``3<year><type-letter><number>`` — type letter
         ``R`` for regulation, ``L`` for directive, ``D`` for decision,
         etc. Example: ``32016R0679`` is Regulation 2016/679 (GDPR);
@@ -3792,8 +3838,13 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
 
         Returns one row per implementing current act: ``slug``,
         ``doc_id``, ``title``, ``dataset``. Sorted by slug for stable
-        output. Empty list when no current act references the given
-        CELEX.
+        output. Empty list when no current act records the given CELEX.
+
+        COVERAGE LIMIT — this index is built from the same recorded
+        ``eu_basis`` values as ``get_eu_basis``, and in the current
+        corpus no ``forskrift`` has one. An empty result therefore does
+        not establish that no Norwegian regulation implements the given
+        EU document.
 
         Use the returned slugs with ``get_law`` or ``get_section`` to
         fetch the implementing text.

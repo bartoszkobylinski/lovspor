@@ -114,6 +114,29 @@ facade.
 The binary embedding format is documented in [`embeddings.md`](embeddings.md); the
 data models these modules exchange are in [`data-model.md`](data-model.md).
 
+### `observatory/` — local-law capture, a separate trust domain
+
+Lokale forskrifter are outside the canonical corpus: they are not in the free
+Lovdata dataset tier, and no permitted bulk source for Lovtidend Avdeling II is
+known. ADR-0010 (lovspor-notebook) answers that with an observation layer rather
+than a second ingest — it captures raw evidence from municipal sites, keeps it
+outside every repository, and asserts nothing about law. No module here knows
+how to reach `lovverk`.
+
+| Module | Responsibility | Key public API |
+|---|---|---|
+| `observatory/model.py` | Capture records: an observation is an artifact, a failure, or a tombstone. Legal fields are absent by design — classification is deferred. | `ArtifactObservation`, `FetchFailure`, `Tombstone`, `RetrievalProvenance` |
+| `observatory/storage.py` | The ADR-0010 §5 boundary: a root inside the engine repo or the corpus is refused, by path check rather than by convention. | `observatory_root()`, `ObservatoryRoot` |
+| `observatory/log.py` | Append-only JSONL log + SHA-256-addressed blob store; snapshot verification, tombstone-aware. | `ObservationLog`, `verify_snapshot()` |
+| `observatory/registry.py` | Eligibility vs activation: a source is fetchable only with a recorded access-policy check. `lovdata.no` is denied centrally. | `authorise_capture()`, `activate()`, `SourceRegistry` |
+| `observatory/fetch.py` | One URL, politely: activation gate, live robots.txt, per-source rate limit, byte cap, redirects not followed. Every outcome recorded. | `Fetcher`, `CaptureSettings`, `RobotsGate`, `RateLimiter` |
+| `observatory/discovery.py` | What is there to look at: sitemaps, sitemap indexes, Atom and RSS. Fetches nothing itself — every discovery document goes through `Fetcher`, so the gates apply and the document is recorded as an observation. Proposes candidates; capturing one is a separate decision. | `Discoverer`, `DiscoverySettings`, `parse_discovery_document()`, `Candidate` |
+
+Observed material is evidence that specific bytes were retrievable from a
+recorded endpoint at a recorded time — never an assertion of law, and never
+published until a per-source redistribution basis exists. Promotion into the
+canonical corpus is an explicit, per-artifact step that does not exist yet.
+
 ## The sync pipeline
 
 There is **one orchestrator**: `run_sync(settings)` in `sync/orchestrator.py`.

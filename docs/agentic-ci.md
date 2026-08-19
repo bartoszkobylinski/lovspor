@@ -22,19 +22,36 @@ PR opened/synchronize
 - **Codex CI** — independent test engineer. May touch `tests/` only, enforced
   mechanically by `scripts/ci/assert_codex_scope.sh` after every run (the prompt is not
   the boundary). Prompts: `.github/codex/pr-tests.md`, `.github/codex/mutation-remediation.md`.
+  Two ChatGPT accounts with usage-based failover (`scripts/ci/codex_account_failover.py`,
+  threshold 95%); when BOTH are rate-limited (exit 75, and only then) the same prompt goes
+  to the tertiary author: `scripts/ci/claude_test_author.sh` runs a **non-Fable** Claude
+  model headless (`CLAUDE_TESTS_MODEL`, default `claude-sonnet-5`; Fable is refused because
+  it is the implementation author) on a subscription OAuth token
+  (`CLAUDE_TESTS_OAUTH_TOKEN`, `sk-ant-oat…` only — API keys are refused and stripped so
+  nothing bills per token). The commit marker names the actual author
+  (`[agent:claude-tests]` / `[agent:claude-mutation]`); the scope guard applies unchanged.
 - **Human** — merge, methodology changes, frozen benchmark decisions, every BLOCKED.
 
 ## Mutation policy (unchanged, now automated)
 
-`scripts/mutmut-pr.sh <base-sha>` runs PR-scoped mutmut 2.5.1 exactly as before.
+`scripts/mutmut-pr.sh <base-sha>` runs mutmut 3.7.0 for functions changed by the PR.
+The script rebuilds the shadow tree for each run, then uses mutmut's warm baseline and
+parallel workers. Module-level or otherwise unsafe-to-narrow changes fall back to the
+affected module instead of being exempted.
 No numeric score threshold exists or was added. The gate in `mutation-result.json`:
 
 - `mutation not applicable` (no `src/lovspor/` changes) → **PASS**, reason `not_applicable`
 - everything killed → **PASS**
-- survived / timed-out / suspicious mutants each → **FAIL** (reasons `surviving_mutants`,
-  `timeout_mutants`, `suspicious_mutants`) — mirrors mutmut's own exit-code bits
-  (2/4/8 in `mutmut.compute_exit_code`); the score counts only 🎉 killed, so timeout and
-  suspicious never inflate it. Gate FAIL → Codex remediation (≤ 2 `[agent:codex-mutation]`
+- every surviving mutant registered in `mutation-equivalents.toml` → **PASS**, reason
+  `equivalent_mutants_only` (issue #122). An entry is keyed by file + the mutation's `-`/`+`
+  lines, never by mutant id, and needs a written justification or it is refused and reported.
+  A survivor whose mutation diff could not be recovered never matches — the gate fails closed.
+  Counts, score and the survivor list are unaffected; only the verdict moves.
+- survived / timed-out / suspicious / uncovered mutants each → **FAIL** (reasons
+  `surviving_mutants`, `timeout_mutants`, `suspicious_mutants`, `uncovered_mutants`).
+  `mutmut-pr.sh` preserves the pipeline's existing 2/4/8 compatibility bitfield for
+  aggregate survivor/timeout/suspicious state; these are not mutmut 3 process exit codes.
+  The score counts only 🎉 killed, so other outcomes never inflate it. Gate FAIL → Codex remediation (≤ 2 `[agent:codex-mutation]`
   cycles) → then `needs-human:mutation` + BLOCKED. This automates the previous manual
   practice of Codex investigating survivors and proposing killer tests.
 
@@ -42,20 +59,51 @@ No numeric score threshold exists or was added. The gate in `mutation-result.jso
 result is ignored by the remediation workflow. Artifact `mutation-result-<SHA>` (JSON +
 raw log) uploads on PASS and FAIL.
 
+Each survivor carries what it changed, not just its id (issue #119). Mutmut 3 names a
+mutant after the rewritten function variant and has no source position for it, so
+`scripts/ci/mutation_survivors.py` reads the shadow tree while it is still on disk and
+records `file`, `symbol`, `symbol_line` and the unified `diff`; `line` and `operator`
+stay null by construction. Without the shadow tree the record degrades to what the id
+proves and says so in `detail_source` — never a bare null that reads like missing data.
+Ids renumber whenever the file changes upstream of the mutant, so a cross-round
+comparison quotes the `diff`. The job summary lists the first ten survivors as
+`id — file:line — replacement`, so a red gate is triageable without downloading anything.
+
 ## Anti-loop invariants
 
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
-- `[agent:codex-tests]` / `[agent:codex-mutation]` HEAD markers — Codex never reprocesses
-  its own commits; all Codex work is squashed into one marker commit per run.
-- Remediation cycle count = `[agent:codex-mutation]` commits in the trailing
-  agent-authored block; any human/Claude push resets it.
+- `codex-tests` additionally holds the repo-wide `lovspor-codex-subscription` group with
+  `cancel-in-progress: false`: one Codex run at a time, because there is one subscription.
+
+  **A cancelled `codex-tests` is usually eviction, not failure.** GitHub keeps only ONE
+  *pending* job per concurrency group — a newer pending job evicts the older one, and
+  `cancel-in-progress: false` does not prevent that (it governs *running* jobs). Open three
+  PRs within a few minutes and two of them get a required check reading `Cancelled after 2s`.
+
+  Signature, so nobody debugs a phantom test failure: conclusion `cancelled`, duration a
+  couple of seconds, and **zero steps** in the job — it never started, so the escalation
+  path that turns a real Codex failure into a triageable comment never runs either. Verified
+  2026-08-18 on PRs #121, #124 and #125, all evicted while #123 held the lane.
+
+  Recovery is `gh run rerun <run-id> --failed`, **one PR at a time**, after the lane is
+  clear. Re-running two at once reproduces the eviction.
+- `[agent:(codex|claude)-(tests|mutation)]` HEAD markers — an agent-authored HEAD is never
+  reprocessed, whichever author produced it; all agent work is squashed into one marker
+  commit per run.
+- Remediation cycle count = `[agent:codex-mutation]` + `[agent:claude-mutation]` commits in
+  the trailing agent-authored block; any human push resets it. The fallback author gets no
+  extra cycles.
 - Codex jobs run only for same-repo PRs (`head.repo.full_name == repository`); the
   fork-PR approval policy is set to "all outside collaborators".
 
 ## Failure escalation
 
 - Codex's correct new test exposes a production bug → Codex reports it, does NOT fix
-  production code. Label `needs-implementation-fix`; human relays to local Claude.
+  production code. The `codex-tests` job itself applies `needs-implementation-fix`,
+  comments on the PR with the failing tests, and preserves the test patch + pytest log
+  as artifact `codex-tests-<head-sha>` (issue #95 — before this, a failing round died
+  as a bare red check and the tests survived only in the run log); human relays to
+  local Claude.
 - Ambiguous/equivalent mutants → `needs-human:mutation`. BLOCKED is a valid end state,
   never to be silenced by weakening tests or thresholds.
 - Codex output is normalized (`ruff format` + `ruff check` on `tests/`) before commit in
