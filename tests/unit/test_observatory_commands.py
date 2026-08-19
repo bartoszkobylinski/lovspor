@@ -767,3 +767,74 @@ class TestVerify:
 
         assert result.exit_code == 1
         assert "Cannot locate the observatory archive" in result.stderr
+
+    def test_several_orphan_blobs_are_all_counted(self, root: Path) -> None:
+        """A single orphan always yields a list of length one; this is the
+        only case in the suite where the printed count must track more than
+        one item, so it is the only case that can catch a `len(found)` that
+        got mutated into a constant."""
+        log = _archive(root)
+        for digest, payload in (("bb" * 32, b"orphan-one"), ("cc" * 32, b"orphan-two")):
+            orphan = log.blob_path(digest)
+            orphan.parent.mkdir(parents=True, exist_ok=True)
+            orphan.write_bytes(payload)
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "2 blobs no record mentions" in result.output
+
+    def test_distinct_defects_are_all_reported_together_and_in_order(self, root: Path) -> None:
+        """`_defects` walks a fixed list of (values, label) pairs and must not
+        stop at the first non-empty one — an operator triaging a damaged
+        archive needs every defect in one run, not one per invocation. The
+        order asserted here is the order the pairs are declared in, which is
+        also the order most-structural-first that the module's own comment
+        says the report must not drift from."""
+        payload_one, payload_two = b"first", b"second"
+        log = _archive(root, payload_one)
+        log.append_artifact(_observation(payload_two, "https://baerum.kommune.no/g"), payload_two)
+        log.blob_path(hashlib.sha256(payload_one).hexdigest()).unlink()
+        orphan = log.blob_path("dd" * 32)
+        orphan.parent.mkdir(parents=True, exist_ok=True)
+        orphan.write_bytes(b"unreferenced")
+        log.append(
+            Tombstone(
+                sha256=hashlib.sha256(payload_two).hexdigest(),
+                removed_at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+                basis="privacy request",
+                authorised_by="Bartosz Kobyliński",
+            )
+        )
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "snapshot NOT ok" in result.output
+        out = result.output
+        assert "1 blobs gone with no tombstone" in out
+        assert "1 blobs no record mentions" in out
+        assert "1 tombstoned blobs still on disk" in out
+        assert (
+            out.index("blobs gone with no tombstone")
+            < out.index("blobs no record mentions")
+            < out.index("tombstoned blobs still on disk")
+        )
+
+    def test_incomplete_final_record_and_a_malformed_line_are_both_reported(
+        self, root: Path
+    ) -> None:
+        """The two log defects are detected independently by `_scan_lines`;
+        nothing about surfacing one should suppress the other when a single
+        damaged log has both at once."""
+        log = _archive(root)
+        log.append_artifact(_observation(b"second", "https://baerum.kommune.no/g"), b"second")
+        log.append_artifact(_observation(b"third", "https://baerum.kommune.no/h"), b"third")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(b"\n".join([lines[0], b"{ corrupted", lines[2][:20]]))
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "line(s) 2 are corrupted" in result.output
+        assert "the final record was never finished" in result.output
