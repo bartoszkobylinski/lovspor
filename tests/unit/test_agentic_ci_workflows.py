@@ -314,3 +314,33 @@ def test_antiloop_matches_the_marker_only_in_the_subject_line() -> None:
     assert "--pretty=%s" in antiloop
     assert "--pretty=%B" not in antiloop
     assert r"\[agent:(codex|claude)-(tests|mutation)\]$" in antiloop
+
+
+def test_agent_jobs_are_never_serialized_by_a_shared_concurrency_group() -> None:
+    """Issue #139: a concurrency group holds ONE pending entry, so a second PR's
+    agent job evicted the first before it got a runner — conclusion cancelled,
+    zero steps, and no escalation, because every reporting step is downstream of
+    one that never ran. The single `codex`-labelled runner queues them properly.
+    A per-branch group is still fine: there, superseding an older head is wanted."""
+    pipeline_text = (_WORKFLOWS / "pr-pipeline.yml").read_text(encoding="utf-8")
+    remediation_text = (_WORKFLOWS / "mutation-remediation.yml").read_text(encoding="utf-8")
+
+    assert "concurrency" not in _workflow("pr-pipeline.yml")["jobs"]["codex-tests"]
+    assert "lovspor-codex-subscription" not in pipeline_text
+    assert "lovspor-codex-subscription" not in remediation_text
+    assert "head_branch" in _workflow("mutation-remediation.yml")["concurrency"]["group"], (
+        "a remediation group must not span branches"
+    )
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [("pr-pipeline.yml", "codex-tests"), ("mutation-remediation.yml", "remediate")],
+)
+def test_agent_jobs_have_a_wallclock_backstop(workflow_name: str, job_name: str) -> None:
+    """Issue #101: a job that hangs holds the lane against every later PR until
+    GitHub's 6 h default kill. The box lock alone waits 20 minutes before it
+    gives up, so the job needs its own ceiling above that."""
+    job = _workflow(workflow_name)["jobs"][job_name]
+
+    assert job["timeout-minutes"] == 60

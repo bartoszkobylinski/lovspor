@@ -8,9 +8,13 @@ on:
     workflows: ["PR Pipeline"]
     types: [completed]
 
-# One Codex auth.json — never used in parallel.
+# One Codex auth.json — never used in parallel. That serialization is the single
+# `codex`-labelled runner's queue, not a concurrency group: a repo-wide group kept
+# one pending entry and evicted the rest (issue #139), and an evicted remediation
+# is invisible — no cycle, no comment, no label, the PR just stays red. Per branch,
+# where superseding an older head is exactly what should happen.
 concurrency:
-  group: lovspor-codex-subscription
+  group: mutation-remediation-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 permissions:
@@ -19,6 +23,7 @@ permissions:
 jobs:
   remediate:
     runs-on: [self-hosted, linux, codex]
+    timeout-minutes: 60
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&

@@ -72,21 +72,27 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
 ## Anti-loop invariants
 
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
-- `codex-tests` additionally holds the repo-wide `lovspor-codex-subscription` group with
-  `cancel-in-progress: false`: one Codex run at a time, because there is one subscription.
+- **One Codex run at a time is the runner's job, not a concurrency group's.** There is one
+  `codex`-labelled runner and one Codex subscription behind it, and GitHub queues jobs for a
+  busy runner in a real FIFO. `codex-tests` and `remediate` therefore declare no shared group;
+  the box-wide `flock` in the agent step still guards the other repositories' agents on the
+  same machine.
 
-  **A cancelled `codex-tests` is usually eviction, not failure.** GitHub keeps only ONE
-  *pending* job per concurrency group — a newer pending job evicts the older one, and
-  `cancel-in-progress: false` does not prevent that (it governs *running* jobs). Open three
-  PRs within a few minutes and two of them get a required check reading `Cancelled after 2s`.
+  A repo-wide group used to do this and could not: GitHub keeps only ONE *pending* job per
+  concurrency group, so a newer pending job **evicted** the older one, and
+  `cancel-in-progress: false` did not prevent it (it governs *running* jobs). Signature of an
+  evicted job, in case one ever reappears: conclusion `cancelled`, a couple of seconds,
+  **zero steps** — it never started, so the escalation path that turns a real Codex failure
+  into a triageable comment never ran either, and the PR went red with no comment and no
+  label. Observed 2026-08-18/19 on PRs #121, #124, #125, #134 and #136 (issue #139); the
+  recovery then was `gh run rerun <run-id> --failed`, one PR at a time.
 
-  Signature, so nobody debugs a phantom test failure: conclusion `cancelled`, duration a
-  couple of seconds, and **zero steps** in the job — it never started, so the escalation
-  path that turns a real Codex failure into a triageable comment never runs either. Verified
-  2026-08-18 on PRs #121, #124 and #125, all evicted while #123 held the lane.
+  Remediation keeps a group **per head branch** (`mutation-remediation-<branch>`), where
+  superseding an older head is the wanted behaviour and cannot starve another PR.
 
-  Recovery is `gh run rerun <run-id> --failed`, **one PR at a time**, after the lane is
-  clear. Re-running two at once reproduces the eviction.
+- Both agent jobs carry `timeout-minutes: 60` (issue #101). A hung job holds the runner
+  against every later PR, and GitHub's default ceiling is 6 h; the box lock alone waits 20
+  minutes before giving up, so the job ceiling sits above that and well under the default.
 - `[agent:(codex|claude)-(tests|mutation)]` HEAD markers — an agent-authored HEAD is never
   reprocessed, whichever author produced it; all agent work is squashed into one marker
   commit per run.
