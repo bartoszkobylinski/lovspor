@@ -83,6 +83,35 @@ def test_neither_landing_page_claims_a_particular_profession() -> None:
             assert claim not in text, f"{page}: {claim}"
 
 
+def test_html_lang_attribute_matches_the_actual_page_language() -> None:
+    """A crawler or screen reader trusts this attribute over the visible text;
+    a mismatch here is invisible to a human skimming the page but wrong for
+    every tool that reads it."""
+    assert '<html lang="no">' in _LANDING.read_text(encoding="utf-8")
+    assert '<html lang="en">' in _LANDING_EN.read_text(encoding="utf-8")
+
+
+def test_hreflang_alternate_links_point_reciprocally_at_each_other() -> None:
+    """Both pages must advertise both language variants, and each must point
+    the *other* page's hreflang at itself — a one-sided or self-pointing
+    hreflang pair is a silent SEO regression that no visible rendering catches."""
+    no_text = _LANDING.read_text(encoding="utf-8")
+    en_text = _LANDING_EN.read_text(encoding="utf-8")
+
+    assert '<link rel="alternate" hreflang="no" href="https://lovspor.no/">' in no_text
+    assert '<link rel="alternate" hreflang="en" href="https://lovspor.no/en/">' in no_text
+    assert '<link rel="alternate" hreflang="no" href="https://lovspor.no/">' in en_text
+    assert '<link rel="alternate" hreflang="en" href="https://lovspor.no/en/">' in en_text
+
+
+def test_footer_nlod_link_matches_each_pages_own_language() -> None:
+    """The footer attribution link is localized independently of the running
+    text; drop the locale segment on one side and the two pages point at
+    different NLOD document variants without any other test catching it."""
+    assert 'href="https://data.norge.no/nlod/2.0"' in _LANDING.read_text(encoding="utf-8")
+    assert 'href="https://data.norge.no/nlod/en/2.0"' in _LANDING_EN.read_text(encoding="utf-8")
+
+
 def test_the_crawler_advertises_a_page_that_exists() -> None:
     """Every observatory request carries `+https://lovspor.no/observatory`.
 
