@@ -96,7 +96,7 @@ unaffected. Details: [`docs/embeddings.md`](docs/embeddings.md).
 ## Optional: hosted endpoint
 
 Don't want to self-host? A hosted MCP endpoint runs at
-`https://lovspor.bartoszkobylinski.com/mcp` — ask for access, or see
+`https://lovspor.no/mcp` — ask for access, or see
 [`docs/mcp.md`](docs/mcp.md) to run the same thing yourself.
 
 ## How it works
