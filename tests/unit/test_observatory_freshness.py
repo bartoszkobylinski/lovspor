@@ -103,6 +103,11 @@ class TestParseSiteLastmod:
 
         assert parsed == datetime(2026, 8, 18, 8, 0, tzinfo=UTC)
 
+    def test_a_negative_offset_is_respected(self) -> None:
+        parsed = parse_site_lastmod("2026-08-18T10:00:00-05:00")
+
+        assert parsed == datetime(2026, 8, 18, 15, 0, tzinfo=UTC)
+
     def test_a_timestamp_without_a_zone_is_read_as_utc(self) -> None:
         parsed = parse_site_lastmod("2026-08-18T10:00:00")
 
@@ -118,6 +123,13 @@ class TestParseSiteLastmod:
     def test_an_unreadable_stamp_is_none(self) -> None:
         assert parse_site_lastmod("last tuesday") is None
         assert parse_site_lastmod("") is None
+
+    def test_a_non_iso_stamp_like_rss_pubdate_is_unreadable(self) -> None:
+        """RSS `pubDate` is RFC 822 (`Wed, 02 Oct 2024 15:00:00 GMT`), not ISO
+        8601 — this parser only understands ISO. An RSS-sourced lastmod is
+        therefore always unreadable, which means (via worth_capturing) RSS
+        candidates are always fetched, never skipped on freshness alone."""
+        assert parse_site_lastmod("Wed, 02 Oct 2024 15:00:00 GMT") is None
 
 
 class TestWorthCapturing:

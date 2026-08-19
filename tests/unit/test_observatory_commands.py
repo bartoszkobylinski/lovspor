@@ -1266,6 +1266,7 @@ class TestRepair:
 
 
 OTHER_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-avfallssug"
+THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
 
 
 class TestCapture:
@@ -1348,6 +1349,70 @@ class TestCapture:
         assert "captured: 1" in result.output
         assert OTHER_PAGE_URL not in [str(r.url) for r in httpx_mock.get_requests()]
 
+    def test_a_limit_equal_to_the_candidate_count_does_not_stop_early(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>one</html>")
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>two</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "2"])
+
+        assert "stopping" not in result.output
+        assert "captured: 2 | failed: 0 | unchanged since last seen: 0" in result.output
+
+    def test_a_failed_fetch_counts_toward_the_limit(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The limit bounds *attempts*, not just successes — a run against a
+        source returning errors should still stop on schedule."""
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "1"])
+
+        assert "stopping at --limit 1" in result.output
+        assert "captured: 0 | failed: 1" in result.output
+        assert OTHER_PAGE_URL not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_skipped_candidate_does_not_count_against_the_limit(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Declining to fetch an unchanged page is not the budget --limit
+        exists to spend; only an actual fetch attempt should count."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, lastmod="2020-01-01"))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        httpx_mock.add_response(
+            url=SITEMAP_URL,
+            content=_urlset(PAGE_URL, OTHER_PAGE_URL, THIRD_PAGE_URL, lastmod="2020-01-01"),
+        )
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>other</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "1"])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 1" in result.output
+        assert "stopping at --limit 1" in result.output
+        assert THIRD_PAGE_URL not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_source_that_declares_no_sitemap_reports_zero_candidates(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Unlike `discover`, `capture` takes no --entry-point and does not
+        refuse when robots.txt declares nothing to walk — it reports zero
+        candidates instead of erroring. Pinned here as current behavior."""
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "candidates: 0" in result.output
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 0" in result.output
+
     def test_a_damaged_log_is_refused_before_anything_is_fetched(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
@@ -1367,6 +1432,13 @@ class TestCapture:
         _register()
 
         result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "not an activated source" in result.stderr
+        assert httpx_mock.get_requests() == []
+
+    def test_an_unregistered_source_is_refused(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        result = runner.invoke(app, ["observatory", "capture", "--id", "9999"])
 
         assert result.exit_code == 1
         assert "not an activated source" in result.stderr
