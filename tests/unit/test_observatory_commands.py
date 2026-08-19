@@ -941,6 +941,40 @@ class TestDiscover:
         assert f"read {NESTED_SITEMAP_URL}" in result.output
         assert SITEMAP_URL not in [str(request.url) for request in httpx_mock.get_requests()]
 
+    def test_repeated_entry_point_options_are_all_used(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """``--entry-point`` is repeatable; a second one must not be dropped
+        in favour of the first, and the declared sitemap must not be read at
+        all once any explicit entry point is given."""
+        second_entry = f"https://www.{BAERUM_DOMAIN}/sitemap-vedtak.xml"
+        second_page = f"https://www.{BAERUM_DOMAIN}/politikk-og-samfunn/vedtak"
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=NESTED_SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=second_entry, content=_urlset(second_page))
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "discover",
+                "--id",
+                BAERUM_ID,
+                "--entry-point",
+                NESTED_SITEMAP_URL,
+                "--entry-point",
+                second_entry,
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert f"read {NESTED_SITEMAP_URL}" in result.output
+        assert f"read {second_entry}" in result.output
+        assert "documents read: 2" in result.output
+        assert "candidates: 2" in result.output
+        assert SITEMAP_URL not in [str(request.url) for request in httpx_mock.get_requests()]
+
     def test_a_sitemap_index_is_followed(self, root: Path, httpx_mock: HTTPXMock) -> None:
         _activate(root)
         _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
