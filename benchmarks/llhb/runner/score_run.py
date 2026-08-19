@@ -86,7 +86,7 @@ def score_pair(
     scorer = CaseScorer(CorpusReader(corpus_path))
     control = score_arm(scorer, cases_by_id, store.read_records(manifest.control_run_id))
     treatment = score_arm(scorer, cases_by_id, store.read_records(manifest.treatment_run_id))
-    return compute_pair_report(control, treatment), len(control)
+    return compute_pair_report(control, treatment), len(control.cases)
 
 
 def main() -> int:

@@ -11,6 +11,7 @@ import pytest
 
 from lovspor.errors import LovsporError
 from lovspor.llhb.pair_manifest import PairManifest
+from lovspor.llhb.reporting import ArmScoring
 
 _SCRIPT = Path(__file__).parents[2] / "benchmarks" / "llhb" / "runner" / "score_run.py"
 
@@ -159,7 +160,8 @@ def test_score_pair_uses_only_manifest_bound_dataset_and_runs(
         score_run,
         "score_arm",
         lambda scorer, loaded_cases, records: (
-            observed.append((scorer, loaded_cases, records)) or records
+            observed.append((scorer, loaded_cases, records))
+            or ArmScoring(bundles=[], cases=list(records))
         ),
     )
     monkeypatch.setattr(score_run, "compute_pair_report", lambda control, treatment: "report")
