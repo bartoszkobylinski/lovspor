@@ -99,7 +99,7 @@ jobs:
           # repositories' CI down until the container was rebooted. The fd stays
           # open for the life of this step, so the lock releases even if the job
           # is cancelled.
-          exec 9>/run/lock/mikrus-agent.lock
+          exec 9>/home/runner/.mikrus-agent.lock
           flock -w 3600 9 || { echo "another agent job held the box lock for an hour" >&2; exit 1; }
           : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
           : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
