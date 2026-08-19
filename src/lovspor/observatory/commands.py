@@ -321,6 +321,8 @@ def discover(
         )
         raise typer.Exit(1)
     _report_discovery(Discoverer(fetcher, ObservationLog(_root())).discover(record, starts))
+
+
 def _remove_unfinished_record(log: ObservationLog, raw: bytes) -> None:
     """Back the log up, then drop its unfinished final record.
 
