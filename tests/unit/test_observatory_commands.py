@@ -600,8 +600,14 @@ class TestVerify:
         result = runner.invoke(app, ["observatory", "verify"])
 
         assert result.exit_code == 1
-        assert "never finished" in result.output
-        assert "Dropping that one line" in result.output
+        # Verbatim, not a fragment: this sentence is what tells someone whether
+        # they may cut a line out of an evidence file. Its wording is the
+        # deliverable, not decoration around it.
+        assert (
+            "the final record was never finished — an interrupted run leaves exactly this, "
+            "and the fetch it describes was never recorded. Dropping that one line recovers "
+            "the log; back it up first, it is evidence." in result.output
+        )
         assert "snapshot NOT ok" in result.output
 
     def test_a_corrupted_line_says_do_not_truncate(self, root: Path) -> None:
@@ -616,8 +622,30 @@ class TestVerify:
         result = runner.invoke(app, ["observatory", "verify"])
 
         assert result.exit_code == 1
-        assert "line(s) 2 are corrupted" in result.output
-        assert "Do not truncate" in result.output
+        assert (
+            "line(s) 2 are corrupted — an interrupted append cannot produce this, "
+            "so the storage itself is suspect. Do not truncate: restore from backup."
+            in result.output
+        )
+
+    def test_several_corrupted_lines_are_all_named(self, root: Path) -> None:
+        """An operator restoring from backup needs to know how far the damage
+        goes, not merely that it exists."""
+        log = _archive(root)
+        for index, path in enumerate(("g", "h"), start=2):
+            log.append_artifact(
+                _observation(f"body{index}".encode(), f"https://baerum.kommune.no/{path}"),
+                f"body{index}".encode(),
+            )
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(
+            b"\n".join([lines[0], b"{ corrupted", lines[2], b"{ also corrupted", b""])
+        )
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "line(s) 2, 4 are corrupted" in result.output
 
     def test_a_blob_no_record_mentions_is_reported(self, root: Path) -> None:
         log = _archive(root)
