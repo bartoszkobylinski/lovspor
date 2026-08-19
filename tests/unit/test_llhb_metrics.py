@@ -13,6 +13,7 @@ from lovspor.llhb.metrics import (
     BOOTSTRAP_RESAMPLES,
     BOOTSTRAP_SEED,
     METRICS_VERSION,
+    PRIMARY_METRIC,
     compute_pair_report,
     retrieved_directly,
 )
@@ -472,6 +473,30 @@ class TestSurvivorKillers:
         assert est is not None
         assert est.denominator == 1
 
+    def test_repeated_outcomes_accumulate_instead_of_overwriting(self) -> None:
+        """Each case must add one to its outcome's tally, not stomp it back
+        to one — two PASS cases counted as one PASS would silently halve
+        every consistent run."""
+        cases = [
+            ScoredCase(
+                case_id="llhb-v1-C1-101",
+                category="C1",
+                outcome=outcome_of(score("llhb-v1-C1-101")),
+                score=score("llhb-v1-C1-101"),
+            ),
+            ScoredCase(
+                case_id="llhb-v1-C1-102",
+                category="C1",
+                outcome=outcome_of(score("llhb-v1-C1-102")),
+                score=score("llhb-v1-C1-102"),
+            ),
+        ]
+
+        counts = metrics_module._counts(cases)
+
+        assert counts.PASS == 2
+        assert counts.total == 2
+
     def test_fpr_numerator_counts_only_passes(self) -> None:
         passed = score(
             "llhb-v1-C6-101",
@@ -695,3 +720,142 @@ class TestQuoteFidelityDenominator:
         ]
         report = pair_report(control, control)
         assert report.unresolved.control["unverifiable_quotes"] == 3
+
+
+class TestWilsonVsBootstrapSelection:
+    """§4/§5.4: proportions get a Wilson interval, per-answer volumes keep
+    the case-level bootstrap regardless of where their numerator happens to
+    fall. These pin the CI *machinery* chosen, not just its numeric result —
+    a mean metric whose numerator lands inside [0, denominator] must still
+    take the bootstrap branch, the one case a numerator/denominator range
+    check alone would not catch."""
+
+    def test_mean_metrics_use_bootstrap_ci_even_when_within_unit_range(self) -> None:
+        control = [
+            bundle("llhb-v1-C1-101", score("llhb-v1-C1-101", asserted_valid=0)),
+            bundle("llhb-v1-C1-102", score("llhb-v1-C1-102", asserted_valid=1)),
+        ]
+        treatment = [
+            bundle("llhb-v1-C1-101", score("llhb-v1-C1-101", asserted_valid=1)),
+            bundle("llhb-v1-C1-102", score("llhb-v1-C1-102", asserted_valid=1)),
+        ]
+
+        report = pair_report(control, treatment)
+
+        metric = report.metrics["valid_citations_per_answer"]
+        control_samples = [metrics_module._valid_volume_sample(b) for b in control]
+        treatment_samples = [metrics_module._valid_volume_sample(b) for b in treatment]
+        assert metric.control is not None and metric.treatment is not None
+        assert (metric.control.ci_low, metric.control.ci_high) == metrics_module._bootstrap_ci(
+            control_samples
+        )
+        assert (
+            metric.treatment.ci_low,
+            metric.treatment.ci_high,
+        ) == metrics_module._bootstrap_ci(treatment_samples)
+
+    def test_per_category_ci_is_a_wilson_interval(self) -> None:
+        """``_per_category`` calls ``_two_arm_pair`` without an explicit
+        wilson flag, relying on its default — citation_hallucination_rate
+        is a proportion, so that default must be True."""
+        control, treatment = TestPairReport().make_pair()
+
+        report = pair_report(control, treatment)
+
+        metric = report.per_category["C1"]
+        samples = [metrics_module._chr_sample(b) for b in control]
+        numerator = sum(s[0] for s in samples)
+        denominator = sum(s[1] for s in samples)
+        expected = metrics_module._wilson_interval(numerator, denominator)
+        assert metric.control is not None
+        assert (metric.control.ci_low, metric.control.ci_high) == expected
+
+    def test_pdrh_uses_a_wilson_interval_not_bootstrap(self) -> None:
+        h1 = hallucinated("llhb-v1-C1-101")
+        clean = score("llhb-v1-C2-101", category="C2")
+        treatment = [
+            bundle(item.case_id, item, tool_calls=[get_section_call("testloven", "1")])
+            for item in (h1, clean)
+        ]
+        control = [bundle(item.case_id, item) for item in (h1, clean)]
+
+        report = pair_report(control, treatment)
+
+        metric = report.metrics["post_direct_retrieval_hallucination_rate"]
+        samples = [metrics_module._pdrh_sample(b) for b in treatment]
+        numerator = sum(s[0] for s in samples)
+        denominator = sum(s[1] for s in samples)
+        expected = metrics_module._wilson_interval(numerator, denominator)
+        assert metric.treatment is not None
+        assert (metric.treatment.ci_low, metric.treatment.ci_high) == expected
+
+
+class TestEstimateBoundaries:
+    """``_estimate``'s proportion check spans the whole [0, denominator]
+    range inclusive at both ends — these pin each end and the function's
+    own default wilson flag, none of which the golden-CI tests (which never
+    land exactly at 0%, 100%, or call the function directly) exercise."""
+
+    def test_the_default_wilson_flag_is_true(self) -> None:
+        estimate = metrics_module._estimate([(1.0, 4.0), (0.0, 4.0)])
+
+        expected = metrics_module._wilson_interval(1.0, 8.0)
+        assert (estimate.ci_low, estimate.ci_high) == expected
+
+    def test_a_zero_numerator_proportion_still_uses_wilson(self) -> None:
+        control = [bundle(f"llhb-v1-C1-{i}", score(f"llhb-v1-C1-{i}")) for i in range(101, 104)]
+
+        report = pair_report(control, control)
+
+        metric = report.metrics[PRIMARY_METRIC]
+        assert metric.control is not None
+        assert metric.control.numerator == 0.0
+        expected = metrics_module._wilson_interval(0.0, 3.0)
+        assert (metric.control.ci_low, metric.control.ci_high) == expected
+
+    def test_a_full_rate_proportion_still_uses_wilson(self) -> None:
+        control = [
+            bundle(f"llhb-v1-C1-{i}", hallucinated(f"llhb-v1-C1-{i}")) for i in range(101, 105)
+        ]
+        treatment = [bundle(f"llhb-v1-C1-{i}", score(f"llhb-v1-C1-{i}")) for i in range(101, 105)]
+
+        report = pair_report(control, treatment)
+
+        metric = report.metrics[PRIMARY_METRIC]
+        assert metric.control is not None
+        assert metric.control.numerator == metric.control.denominator == 4.0
+        expected = metrics_module._wilson_interval(4.0, 4.0)
+        assert (metric.control.ci_low, metric.control.ci_high) == expected
+
+
+class TestWilsonIntervalClamp:
+    def test_the_upper_bound_clamps_a_floating_point_overshoot(self) -> None:
+        """At rate=1.0 with 11 trials the raw Wilson high end is
+        1.0000000000000002 — a genuine floating-point overshoot past the
+        formula's mathematical ceiling of 1.0, which the clamp exists to
+        catch."""
+        _, high = metrics_module._wilson_interval(11.0, 11.0)
+
+        assert high == 1.0
+
+
+class TestVolumeSamplers:
+    def test_invalid_volume_is_resolved_minus_valid_with_a_unit_denominator(self) -> None:
+        item = bundle(
+            "llhb-v1-C1-101",
+            score("llhb-v1-C1-101", asserted_resolved=5, asserted_valid=2),
+        )
+
+        numerator, denominator = metrics_module._invalid_volume_sample(item)
+
+        assert numerator == 3.0
+        assert denominator == 1.0
+
+
+class TestPdrhSampler:
+    def test_not_retrieved_directly_contributes_nothing(self) -> None:
+        item = bundle("llhb-v1-C1-101", hallucinated("llhb-v1-C1-101"))
+
+        numerator, denominator = metrics_module._pdrh_sample(item)
+
+        assert (numerator, denominator) == (0.0, 0.0)

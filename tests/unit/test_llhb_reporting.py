@@ -51,6 +51,12 @@ class TestScoreArm:
         assert arm.bundles[0][2].passed is True
         assert arm.bundles[1][2].passed is False
         assert [c.outcome for c in arm.cases] == [CaseOutcome.PASS, CaseOutcome.FAIL]
+        # The scored case carries the record's own case_id and the case's own
+        # category — not a stand-in for either (e.g. a stringified None).
+        assert [c.case_id for c in arm.cases] == ["llhb-v1-C1-101", "llhb-v1-C1-102"]
+        assert [c.category for c in arm.cases] == ["C1", "C1"]
+        assert arm.cases[0].score == arm.bundles[0][2]
+        assert arm.cases[1].score == arm.bundles[1][2]
 
     def test_a_record_for_an_unknown_case_is_refused(self, scorer: CaseScorer) -> None:
         with pytest.raises(

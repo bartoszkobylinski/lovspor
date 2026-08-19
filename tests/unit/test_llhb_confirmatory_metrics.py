@@ -11,10 +11,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from lovspor.llhb import metrics as metrics_module
 from lovspor.llhb.metrics import (
     MODEL_ERROR_MAX_PAIRS,
     PRIMARY_METRIC,
     SCORER_ERROR_MAX_PAIRS,
+    Eligibility,
+    MetricPair,
+    Missingness,
     PairReport,
     compute_pair_report,
 )
@@ -122,8 +126,44 @@ class TestPairwiseDrop:
         assert report.eligibility.model_error_pairs == ("llhb-v1-C1-101",)
         assert report.eligibility.scorer_error_pairs == ()
 
+    def test_pairs_scored_subtracts_both_error_kinds_at_once(self) -> None:
+        """With a model error and a scorer error both present, the scored
+        count must drop each once — adding one in instead of subtracting it
+        would overcount the pairs left to measure."""
+        good = [score(i) for i in ids(3, start=300)]
+        broken = [
+            failed("llhb-v1-C1-101", CaseOutcome.MODEL_ERROR),
+            failed("llhb-v1-C1-102", CaseOutcome.SCORER_ERROR),
+        ]
+
+        report = compute_pair_report(arm(good, broken), arm(good, broken))
+
+        assert report.eligibility.pairs_total == 5
+        assert report.eligibility.pairs_scored == 3
+
 
 class TestEligibilityGates:
+    def test_exactly_the_model_error_ceiling_still_passes(self) -> None:
+        """The gate is <=, not <: the ceiling itself is still eligible."""
+        at_ceiling = ids(MODEL_ERROR_MAX_PAIRS)
+        good = [score(i) for i in ids(4, start=200)]
+        broken = [failed(i, CaseOutcome.MODEL_ERROR) for i in at_ceiling]
+
+        report = compute_pair_report(arm(good, broken), arm(good, broken))
+
+        assert report.eligibility.model_error_gate_passed is True
+        assert report.eligibility.confirmatory_eligible is True
+
+    def test_exactly_the_scorer_error_ceiling_still_passes(self) -> None:
+        at_ceiling = ids(SCORER_ERROR_MAX_PAIRS)
+        good = [score(i) for i in ids(4, start=200)]
+        broken = [failed(i, CaseOutcome.SCORER_ERROR) for i in at_ceiling]
+
+        report = compute_pair_report(arm(good, broken), arm(good, broken))
+
+        assert report.eligibility.scorer_error_gate_passed is True
+        assert report.eligibility.confirmatory_eligible is True
+
     def test_too_many_model_errors_forfeit_the_verdict(self) -> None:
         over = MODEL_ERROR_MAX_PAIRS + 1
         broken_ids = ids(over)
@@ -181,6 +221,96 @@ class TestVerdict:
         assert report.metrics[PRIMARY_METRIC].delta_ci_high == pytest.approx(-1.0)
         assert report.primary.verdict == "reversed"
 
+    def test_primary_result_carries_the_pair_metric_verbatim(self) -> None:
+        """``_primary`` reads its delta/ci_low/ci_high off the primary
+        metric's own MetricPair — a hand-built PrimaryResult substituting
+        None for any of them would go undetected by verdict-only checks."""
+        control = [score(i, asserted_h1=("testloven § 99",)) for i in ids(4)]
+        treatment = [score(i) for i in ids(4)]
+
+        report = compute_pair_report(arm(control), arm(treatment))
+
+        metric = report.metrics[PRIMARY_METRIC]
+        assert report.primary.delta == metric.delta
+        assert report.primary.ci_low == metric.delta_ci_low
+        assert report.primary.ci_high == metric.delta_ci_high
+        assert report.primary.delta is not None
+        assert report.primary.ci_low is not None
+        assert report.primary.ci_high is not None
+
+
+def _eligible(confirmatory: bool = True) -> Eligibility:
+    return Eligibility(
+        pairs_total=10,
+        pairs_scored=10,
+        model_error_pairs=(),
+        scorer_error_pairs=(),
+        model_error_gate_passed=True,
+        scorer_error_gate_passed=True,
+        confirmatory_eligible=confirmatory,
+    )
+
+
+def _missingness_stub(survives: bool | None = None) -> Missingness:
+    return Missingness(
+        dropped_pairs=0,
+        delta_all_cases=None,
+        worst_case_low=None,
+        worst_case_high=None,
+        sign_survives_worst_case=survives,
+    )
+
+
+def _pair(delta: float | None, low: float | None, high: float | None) -> MetricPair:
+    return MetricPair(
+        control=None, treatment=None, delta=delta, delta_ci_low=low, delta_ci_high=high
+    )
+
+
+class TestVerdictDirect:
+    """Direct calls to ``_verdict`` pin edges the report-level scenarios
+    cannot reach — the delta CI bounds it receives from ``_two_arm_pair``
+    are always both-None or both-not-None together, so a real report can
+    never exercise the one-sided-None branch, and hitting the exact
+    boundary values (a CI edge of precisely 0) is not practical through
+    the bootstrap."""
+
+    def test_one_sided_none_ci_is_inconclusive(self) -> None:
+        verdict = metrics_module._verdict(_pair(0.5, None, 0.9), _eligible(), _missingness_stub())
+
+        assert verdict == "inconclusive"
+
+    def test_ci_high_of_exactly_zero_is_not_reversed(self) -> None:
+        verdict = metrics_module._verdict(_pair(-0.1, -0.5, 0.0), _eligible(), _missingness_stub())
+
+        assert verdict != "reversed"
+
+    def test_a_ci_high_short_of_one_is_not_reversed(self) -> None:
+        verdict = metrics_module._verdict(_pair(0.3, -0.1, 0.5), _eligible(), _missingness_stub())
+
+        assert verdict != "reversed"
+
+    def test_a_non_positive_ci_low_does_not_confirm_even_if_worst_case_survives(self) -> None:
+        verdict = metrics_module._verdict(
+            _pair(0.0, -0.1, 0.5), _eligible(), _missingness_stub(survives=True)
+        )
+
+        assert verdict != "confirmed"
+
+    def test_ci_low_of_exactly_zero_does_not_confirm(self) -> None:
+        verdict = metrics_module._verdict(
+            _pair(0.3, 0.0, 0.6), _eligible(), _missingness_stub(survives=True)
+        )
+
+        assert verdict != "confirmed"
+
+    def test_a_positive_ci_low_with_worst_case_surviving_is_confirmed(self) -> None:
+        verdict = metrics_module._verdict(
+            _pair(0.3, 0.1, 0.6), _eligible(), _missingness_stub(survives=True)
+        )
+
+        assert verdict == "confirmed"
+
 
 class TestPrimaryEstimand:
     def test_an_answer_that_cited_nothing_still_counts(self) -> None:
@@ -203,6 +333,19 @@ class TestPrimaryEstimand:
 
 
 class TestMissingness:
+    def test_zero_total_pairs_produces_an_all_none_missingness(self) -> None:
+        """With no shared cases at all, every derived field must come back
+        None rather than a stand-in value or a crash from a required field
+        quietly dropped off the model."""
+        report = compute_pair_report(arm([]), arm([]))
+
+        missingness = report.primary.missingness
+        assert missingness.dropped_pairs == 0
+        assert missingness.delta_all_cases is None
+        assert missingness.worst_case_low is None
+        assert missingness.worst_case_high is None
+        assert missingness.sign_survives_worst_case is None
+
     def test_the_band_widens_by_one_pair_each(self) -> None:
         good = [score(i) for i in ids(9)]
         rest = good[:-1]
@@ -276,6 +419,23 @@ class TestMissingness:
         missingness = report.primary.missingness
         assert missingness.delta_all_cases == 0.0
         assert missingness.sign_survives_worst_case is False
+
+
+class TestMissingnessBandDirect:
+    """Direct calls to ``_missingness_band`` pin the band arithmetic and the
+    branch it picks at boundary values a bootstrap-driven report cannot
+    reliably land on."""
+
+    def test_a_positive_band_within_the_unit_interval_survives(self) -> None:
+        result = metrics_module._missingness_band(5.0, 1, 10)
+
+        assert result.delta_all_cases == 0.5
+        assert result.sign_survives_worst_case is True
+
+    def test_a_negative_band_whose_high_end_is_non_negative_does_not_survive(self) -> None:
+        result = metrics_module._missingness_band(-2.0, 2, 10)
+
+        assert result.sign_survives_worst_case is False
 
 
 class TestC8Reporting:
