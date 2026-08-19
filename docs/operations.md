@@ -126,6 +126,52 @@ OPENAI_API_KEY=sk-...        # also accepts OPENAI_APIKEY for legacy configs
 
 Required for `lovspor sync` to write per-section embedding `.bin` files (Sprint 9), and for the MCP `semantic_search` tool to embed user queries at runtime. Without a key the engine still produces Markdown and runs the rest of the sync pipeline normally — the only casualty is that `.bin` files for documents added or changed in this run will not be written, and the next sync with a key set picks them up via the Sprint 9 backfill migration. Missing key in the MCP server disables only `semantic_search` and leaves the other fifteen tools working normally. Cost is fractions of a cent per query and ~$5-15/year for the production sync cadence — see [`docs/embeddings.md`](embeddings.md) for the model choice rationale.
 
+## Observatory: after an interrupted run
+
+The archive lives on storage that can go away mid-write — an external disk, a
+machine that lost power. Three things can happen, and only one of them needs
+you.
+
+**A blob written but its record lost.** `verify_snapshot()` reports it as an
+orphan blob. Harmless: a re-run fetches again and appends the record, and the
+orphan is unreferenced bytes. No action.
+
+**A record cut off mid-write.** Records are fsynced on append, so this needs
+the disk or the machine to disappear inside a single write — but it is still
+the failure this archive is exposed to. The audit reports it rather than
+raising:
+
+```bash
+uv run python -c "
+from lovspor.observatory.log import ObservationLog, verify_snapshot
+from lovspor.observatory.storage import observatory_root
+result = verify_snapshot(ObservationLog(observatory_root()))
+print('ok:', result.ok, '| records read:', result.artifacts_checked)
+print('unfinished final write:', result.incomplete_final_record)
+print('corrupted lines:', result.malformed_lines)
+"
+```
+
+`incomplete_final_record: True` with an empty `malformed_lines` is the crash
+signature: everything before the last line is intact, and the unfinished line
+is a fetch that was never recorded. Recovery is to drop that one line — back
+the log up first, because this is an edit to evidence:
+
+```bash
+cp "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl" "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl.bak"
+sed -i '' -e '$d' "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl"
+```
+
+**A corrupted line anywhere else** (`malformed_lines` non-empty) is not a
+crash. An interrupted append can only ever damage the last line, so damage
+elsewhere means the storage itself is failing. Do not truncate; restore from
+backup and check the disk.
+
+While the log cannot be read to the end, blob findings are suppressed rather
+than reported — every blob the unread lines account for would otherwise show
+up as an orphan, burying the real defect under invented ones. Re-run the audit
+after recovery to get the full picture.
+
 ## Scheduled runs (production)
 
 `.github/workflows/sync.yml` runs daily at **04:00 UTC (~05:00–06:00 CET)** — about 2.5 hours after Lovdata's nightly tarball drop at ~01:30 UTC. Manual reruns are available via the **Actions → Sync legal corpus → Run workflow** button on GitHub.

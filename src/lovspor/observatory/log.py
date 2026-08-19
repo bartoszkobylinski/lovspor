@@ -18,6 +18,7 @@ still serves the same bytes.
 """
 
 import hashlib
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -39,6 +40,34 @@ BLOBS_DIRNAME = "blobs"
 _RECORD_ADAPTER: TypeAdapter[ObservationRecord] = TypeAdapter(ObservationRecord)
 
 
+class LogScan(BaseModel):
+    """As much of the log as parses, plus exactly where it stopped parsing.
+
+    :meth:`ObservationLog.records` is strict on purpose — an append-only log
+    that silently skips a line it cannot read has already lost the property it
+    exists for. But strictness leaves an operator whose disk vanished mid-write
+    unable to even *audit* the archive, because one torn tail raises before
+    anything can be reported. This is the reading that answers "how bad is it?"
+    without pretending the damage is not there.
+
+    ``incomplete_final_record`` is the crash signature: a last line that does
+    not parse and does not end in a newline is a write that never finished.
+    ``malformed_lines`` is the other thing entirely — a line that fails
+    anywhere else, which no interrupted append can produce.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    records: tuple[ObservationRecord, ...] = ()
+    incomplete_final_record: bool = False
+    malformed_lines: tuple[int, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        """True when every line in the log was read."""
+        return not (self.incomplete_final_record or self.malformed_lines)
+
+
 class SnapshotVerification(BaseModel):
     """Result of auditing a snapshot's internal consistency.
 
@@ -57,6 +86,8 @@ class SnapshotVerification(BaseModel):
     orphan_blobs: tuple[str, ...] = ()
     tombstones_without_observation: tuple[str, ...] = ()
     observations_after_tombstone: tuple[str, ...] = ()
+    incomplete_final_record: bool = False
+    malformed_lines: tuple[int, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -67,7 +98,8 @@ class SnapshotVerification(BaseModel):
         other list does — a blob gone with no tombstone, a blob that no longer
         hashes to its record, a blob on disk that no record mentions, a
         tombstone for something never observed, a removal that never happened,
-        or an observation appended after the tombstone that retired it.
+        an observation appended after the tombstone that retired it, or a log
+        that could not be read to the end.
         """
         return not (
             self.missing_blobs
@@ -76,6 +108,8 @@ class SnapshotVerification(BaseModel):
             or self.orphan_blobs
             or self.tombstones_without_observation
             or self.observations_after_tombstone
+            or self.incomplete_final_record
+            or self.malformed_lines
         )
 
 
@@ -116,10 +150,25 @@ class ObservationLog:
         return self.blobs_dir / sha256[:2] / sha256
 
     def append(self, record: ObservationRecord) -> None:
-        """Append one record. The only write path; there is no update path."""
+        """Append one record durably. The only write path; there is no update path.
+
+        The write is flushed and fsynced before returning. The archive lives
+        on external storage by design (ADR-0010 §5), where losing power or the
+        disk mid-run is an expected event rather than an exotic one, and a
+        record left half-written is the one failure this log cannot absorb:
+        :meth:`records` refuses to skip a malformed line, so a torn tail would
+        make the whole snapshot unreadable.
+
+        The cost is not a trade-off worth agonising over. Capture waits out a
+        per-source rate limit measured in seconds between requests, so an
+        fsync per record is unmeasurable against the waiting the crawler is
+        already doing.
+        """
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(record_to_json_line(record) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def append_artifact(self, record: ArtifactObservation, payload: bytes) -> None:
         """Store captured bytes, then append the record that describes them.
@@ -181,6 +230,36 @@ class ObservationLog:
         except ValidationError as exc:
             raise LogIntegrityError(f"{self.log_path}:{number}: unreadable record: {exc}") from exc
 
+    def scan(self) -> LogScan:
+        """Read every line the log will give up, and report what it will not.
+
+        Split on bytes and validated as bytes, never decoded first. An append
+        cut mid-character leaves a line that is not valid UTF-8 at all, so
+        reading the file as text would fail before a single intact record
+        could be recovered — and decoding leniently to get past that would
+        substitute replacement characters into what is meant to be evidence,
+        handing back a record that parses but whose contents are not what was
+        observed. A refused line is visible; a silently altered one reads as
+        genuine forever after.
+
+        The terminating newline is what tells the two damage modes apart, and
+        splitting on bytes carries that for free: a file that ends with one
+        yields a trailing empty element, which is skipped and can therefore
+        never be the malformed line. So "the final element failed to parse"
+        means exactly "the write never finished" — no separate check for the
+        newline, and no way for the two to disagree.
+        """
+        if not self.log_path.exists():
+            return LogScan()
+        lines = self.log_path.read_bytes().split(b"\n")
+        records, malformed = _scan_lines(lines)
+        torn_tail = bool(malformed) and malformed[-1] == len(lines)
+        return LogScan(
+            records=tuple(records),
+            incomplete_final_record=torn_tail,
+            malformed_lines=tuple(malformed[:-1] if torn_tail else malformed),
+        )
+
     def stored_hashes(self) -> frozenset[str]:
         """Hashes actually present in the blob store, read from disk."""
         if not self.blobs_dir.exists():
@@ -198,6 +277,20 @@ class ObservationLog:
         return self.blob_path(sha256).read_bytes()
 
 
+def _scan_lines(lines: list[bytes]) -> tuple[list[ObservationRecord], list[int]]:
+    """Parse what parses; return the 1-based numbers of the lines that do not."""
+    records: list[ObservationRecord] = []
+    malformed: list[int] = []
+    for number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            records.append(_RECORD_ADAPTER.validate_json(line))
+        except ValidationError:
+            malformed.append(number)
+    return records, malformed
+
+
 class _Timeline(BaseModel):
     """What the log says, in order, about each hash."""
 
@@ -208,13 +301,13 @@ class _Timeline(BaseModel):
     observed_after_tombstone: tuple[str, ...]
 
 
-def _walk(log: ObservationLog) -> _Timeline:
+def _walk(records: tuple[ObservationRecord, ...]) -> _Timeline:
     """Replay the log in append order, noting what happened after what."""
     observed: list[str] = []
     tombstoned: list[str] = []
     late: list[str] = []
     retired: set[str] = set()
-    for record in log.records():
+    for record in records:
         if isinstance(record, ArtifactObservation):
             observed.append(record.sha256)
             if record.sha256 in retired:
@@ -253,8 +346,24 @@ def verify_snapshot(log: ObservationLog) -> SnapshotVerification:
     Validation, and then some the log's own guarantees imply: an orphan blob
     is raw material with no provenance record, and a tombstone for a hash the
     log never observed is a removal record that explains nothing.
+
+    A log that cannot be read to the end is reported rather than raised. The
+    audit exists to answer "how bad is it?", and an operator whose disk
+    vanished mid-write needs that answer most precisely when the log is
+    damaged — which is exactly when a raising audit gives nothing at all.
     """
-    timeline = _walk(log)
+    scan = log.scan()
+    timeline = _walk(scan.records)
+    if not scan.complete:
+        # Classifying blobs against a log that could not be read to the end
+        # would report every blob the unread lines account for as an orphan.
+        # That is fiction, not a finding, and it would bury the one defect
+        # that actually needs attention under a list of invented ones.
+        return SnapshotVerification(
+            artifacts_checked=len(timeline.observed),
+            incomplete_final_record=scan.incomplete_final_record,
+            malformed_lines=scan.malformed_lines,
+        )
     missing, mismatched, removed = _classify_blobs(log, timeline)
     observed = set(timeline.observed)
     retired = set(timeline.tombstoned)
