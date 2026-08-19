@@ -888,6 +888,32 @@ class TestRepair:
         assert len(log.scan().records) == 1
         assert runner.invoke(app, ["observatory", "verify"]).exit_code == 0
 
+    def test_applying_with_two_intact_records_keeps_both(self, root: Path) -> None:
+        """Splitting on the *first* newline instead of the last would drop
+        every intact record but the one immediately before the torn tail —
+        silent data loss, not the crash-tail cleanup this command claims to
+        be. A single-record fixture can't tell that mutation apart from a
+        correct implementation; this one can."""
+        log = _archive(root, b"first")
+        log.append_artifact(_observation(b"second", "https://baerum.kommune.no/g"), b"second")
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"32')
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 0, result.output
+        assert "unfinished final record: 37 bytes, 2 intact" in result.output
+        backup = log.log_path.with_name("observations.jsonl.bak")
+        assert backup.read_bytes() == before
+        scan = log.scan()
+        assert scan.complete is True
+        assert [record.url for record in scan.records] == [
+            "https://baerum.kommune.no/f",
+            "https://baerum.kommune.no/g",
+        ]
+        assert runner.invoke(app, ["observatory", "verify"]).exit_code == 0
+
     def test_the_repaired_log_can_still_be_appended_to(self, root: Path) -> None:
         """The repaired log has to be usable, not merely readable. Losing the
         terminating newline would leave the next append concatenating onto the
