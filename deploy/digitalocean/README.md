@@ -91,6 +91,26 @@ sudo systemctl restart caddy lovspor-mcp
 curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
 ```
 
+## Update the landing pages
+
+`deploy/digitalocean/site/` is the source for everything Caddy serves outside
+`/mcp`. Provisioning copies the whole tree, so adding a page is a matter of
+adding a file — no config change.
+
+Between provisions, copy the changed pages straight over:
+
+```bash
+# from your Mac, in the repo root:
+rsync -av --delete deploy/digitalocean/site/ root@<DROPLET_IP>:/var/www/lovspor/
+```
+
+Caddy serves from disk, so the change is live immediately — nothing to reload.
+
+`/observatory/` is not decoration: the crawler's User-Agent advertises that
+address to every site it visits, so it has to answer. A site administrator who
+finds `lovspor-observatory` in their logs should land on a page telling them
+what it does and how to block it.
+
 ## Connect a client
 
 ```

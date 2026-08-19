@@ -182,8 +182,15 @@ install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.service" /etc/s
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.timer" /etc/systemd/system/
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
+# Every file under site/, not just the landing page. The crawler's User-Agent
+# advertises /observatory as its contact address, so a deploy that ships only
+# index.html leaves that promise pointing at a 404 on every site we visit.
 install -d /var/www/lovspor
-install -m644 "$APP_DIR/deploy/digitalocean/site/index.html" /var/www/lovspor/index.html
+while IFS= read -r -d "" page; do
+	rel="${page#"$APP_DIR/deploy/digitalocean/site/"}"
+	install -d "/var/www/lovspor/$(dirname "$rel")"
+	install -m644 "$page" "/var/www/lovspor/$rel"
+done < <(find "$APP_DIR/deploy/digitalocean/site" -type f -print0)
 systemctl daemon-reload
 # mcp stays enable-only (it refuses to start until a credential is issued at go-live);
 # the timer is enabled AND started now (enable alone won't activate it this boot).
