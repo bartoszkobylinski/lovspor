@@ -43,7 +43,7 @@ uv run python benchmarks/embedding_comparison/run.py \
     --lovverk-path /path/to/lovverk --skip-nbailab     # API-only
 ```
 
-Embeddings are cached to `benchmarks/embedding_comparison/.cache/<model>.pkl` (gitignored). Re-runs of the report reuse cached embeddings; delete the cache dir to force re-indexing.
+Embeddings are cached to `benchmarks/embedding_comparison/.cache/<model>-<corpus-hash>.pkl` (gitignored). The hash covers every `(slug, section_id, text)` that gets embedded, in order, so a changed corpus is a cache miss rather than a silent hit against a matrix built from a corpus that no longer exists (issue #108). Re-runs over an unchanged corpus reuse cached embeddings; delete the cache dir to force re-indexing.
 
 ## Estimated runtime (M1 16 GB)
 

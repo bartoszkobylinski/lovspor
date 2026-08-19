@@ -28,8 +28,9 @@ Usage::
         --skip-openai
 
 Embeddings are cached to ``benchmarks/embedding_comparison/.cache/``
-so re-runs of the report (or model subset) reuse prior compute.
-The cache is gitignored.
+so re-runs of the report (or model subset) reuse prior compute. The cache
+key carries a hash of the embedded corpus, so a changed corpus re-indexes
+instead of scoring a stale matrix. The cache is gitignored.
 
 Total runtime estimate on M1 16GB:
 
@@ -43,6 +44,7 @@ Total runtime estimate on M1 16GB:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import pickle
 import re
@@ -360,21 +362,51 @@ class OpenAIBackend:
 # -------------------------------------------------------------------- caching
 
 
+def corpus_fingerprint(sections: list[Section]) -> str:
+    """Hash exactly what gets embedded, in order.
+
+    Keyed by backend name alone, the cache silently served the previous
+    matrix after a corpus change, and the reported Recall@5 then described
+    a corpus state that no longer existed (issue #108). Model *revision* is
+    still uncovered: the backend protocol exposes a display name, not the
+    upstream weights it resolves to.
+    """
+    digest = hashlib.sha256()
+    for section in sections:
+        for part in (section.slug, section.section_id, section.text):
+            digest.update(part.encode("utf-8"))
+            digest.update(b"\x00")
+    return digest.hexdigest()
+
+
+def _load_cached_matrix(cache_path: Path, fingerprint: str) -> np.ndarray | None:
+    """Return the cached matrix only if it was built from this exact corpus."""
+    if not cache_path.exists():
+        return None
+    with cache_path.open("rb") as f:
+        cached = pickle.load(f)  # noqa: S301 — own-controlled cache, not untrusted input
+    if cached.get("fingerprint") != fingerprint:
+        print(f"  cache ignored, corpus changed: {cache_path}", flush=True)
+        return None
+    print(f"  cache hit: {cache_path}", flush=True)
+    matrix: np.ndarray = cached["matrix"]
+    return matrix
+
+
 def embed_corpus_cached(
     backend: EmbeddingBackend,
     sections: list[Section],
     cache_dir: Path,
 ) -> tuple[np.ndarray, float]:
-    """Embed the whole corpus, caching to disk under ``cache_dir/<name>.pkl``.
+    """Embed the whole corpus, caching under ``cache_dir/<name>-<corpus>.pkl``.
 
     Returns (matrix, indexing_seconds). Matrix shape: (N, dim).
     """
-    cache_path = cache_dir / f"{_safe_filename(backend.name)}.pkl"
-    if cache_path.exists():
-        print(f"  cache hit: {cache_path}", flush=True)
-        with cache_path.open("rb") as f:
-            cached = pickle.load(f)  # noqa: S301 — own-controlled cache, not untrusted input
-        return cached["matrix"], 0.0
+    fingerprint = corpus_fingerprint(sections)
+    cache_path = cache_dir / f"{_safe_filename(backend.name)}-{fingerprint[:16]}.pkl"
+    cached_matrix = _load_cached_matrix(cache_path, fingerprint)
+    if cached_matrix is not None:
+        return cached_matrix, 0.0
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"  indexing {len(sections):,} sections with {backend.name} ...", flush=True)
@@ -386,7 +418,11 @@ def embed_corpus_cached(
     print(f"  done in {elapsed:.1f}s ({rate:.1f} sec/sec)", flush=True)
 
     with cache_path.open("wb") as f:
-        pickle.dump({"matrix": matrix, "name": backend.name}, f, protocol=4)
+        pickle.dump(
+            {"matrix": matrix, "name": backend.name, "fingerprint": fingerprint},
+            f,
+            protocol=4,
+        )
     return matrix, elapsed
 
 
