@@ -72,7 +72,10 @@ jobs:
       - name: Anti-loop check
         id: antiloop
         run: |
-          if git log -1 --pretty=%B | grep -qE '\[agent:(codex|claude)-(tests|mutation)\]'; then
+          # Subject line only, anchored: scanning the whole message meant a
+          # commit that merely wrote about the marker silently disabled the test
+          # author while the job still reported success.
+          if git log -1 --pretty=%s | grep -qE '\[agent:(codex|claude)-(tests|mutation)\]$'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -93,6 +96,14 @@ jobs:
           CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
           CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
+          # Serialize with every other agent job on the shared runner box. One
+          # unserialized agent run exhausted its 2 GB on 2026-08-18, killed
+          # tailscaled and all seven runner agents, and took five unrelated
+          # repositories' CI down until the container was rebooted. The fd stays
+          # open for the life of this step, so the lock releases even if the job
+          # is cancelled.
+          exec 9>/home/runner/.mikrus-agent.lock
+          flock -w 1200 9 || { echo "another agent job held the box lock for 20 minutes" >&2; exit 1; }
           : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
           : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
           set +e
@@ -187,8 +198,13 @@ jobs:
           # Squash everything since BEFORE_SHA into ONE marker commit — the anti-loop
           # check reads the HEAD message, even if Codex committed on its own without it.
           git reset --soft "$BEFORE_SHA"
-          git config user.name "codex-ci"
-          git config user.email "codex-ci@users.noreply.github.com"
+          # The committer identity names the author that actually ran, like the
+          # marker does. Hardcoding codex-ci attributed the Claude fallback's work
+          # to Codex in git blame and `git log --author` — fabricated provenance,
+          # caught on a real commit in milamber_assistant.
+          author="${{ steps.author.outputs.author || 'codex' }}"
+          git config user.name "${author}-ci"
+          git config user.email "${author}-ci@users.noreply.github.com"
           git add -A
           # The marker names the ACTUAL author — a Claude-written commit
           # stamped [agent:codex-tests] would be fabricated provenance.
