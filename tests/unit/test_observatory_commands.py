@@ -884,6 +884,7 @@ class TestRepair:
         assert log.scan().complete is True
         assert len(log.scan().records) == 1
         assert runner.invoke(app, ["observatory", "verify"]).exit_code == 0
+        assert f"removed. The log as it stood is kept at {backup}" in result.output
 
     def test_the_repaired_log_can_still_be_appended_to(self, root: Path) -> None:
         """The repaired log has to be usable, not merely readable. Losing the
