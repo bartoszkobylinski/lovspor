@@ -46,6 +46,10 @@ No numeric score threshold exists or was added. The gate in `mutation-result.jso
   `equivalent_mutants_only` (issue #122). An entry is keyed by file + the mutation's `-`/`+`
   lines, never by mutant id, and needs a written justification or it is refused and reported.
   A survivor whose mutation diff could not be recovered never matches — the gate fails closed.
+  An entry that argues from a **dependency's** behaviour rather than Python's own semantics
+  names the test pinning that behaviour in `assumption_test` (issue #132); dependencies move,
+  and a justification that quietly became false would keep waiving a survivor that is by then
+  a real defect.
   Counts, score and the survivor list are unaffected; only the verdict moves.
 - survived / timed-out / suspicious / uncovered mutants each → **FAIL** (reasons
   `surviving_mutants`, `timeout_mutants`, `suspicious_mutants`, `uncovered_mutants`).

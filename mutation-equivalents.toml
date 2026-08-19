@@ -21,6 +21,14 @@
 #     refused, reported in the job summary, and has no effect.
 #   * A survivor whose mutation diff could not be recovered never matches
 #     anything: the gate fails closed rather than waive what it cannot read.
+#   * An entry arguing from a DEPENDENCY's behaviour, rather than from Python's
+#     own semantics, must name the test that pins that behaviour in
+#     `assumption_test` (issue #132). Dependencies move; a justification that
+#     quietly became false would keep waiving a survivor that is now a real
+#     defect, and nothing else re-reads these arguments. The field is a pytest
+#     node id, checked by tests/unit/test_mutation_equivalents_assumptions.py.
+#     The parser ignores it — it costs the entry nothing and buys a red test the
+#     day the assumption stops holding.
 #   * Registering a mutant that is NOT equivalent silences a real gap. That is
 #     what review of this file is for — treat a diff here as a test-deletion
 #     diff, because that is its effect.
@@ -91,6 +99,7 @@ mutation = """
 -            "GET", attempt.url, headers=headers, timeout=self._settings.timeout_seconds
 +            "get", attempt.url, headers=headers, timeout=self._settings.timeout_seconds
 """
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
 justification = """
 httpx normalises the method before the request exists: Request.__init__ does
 `self.method = method.upper()`. So "get" and "GET" build the same request and put
