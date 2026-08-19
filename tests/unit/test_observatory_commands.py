@@ -999,6 +999,49 @@ class TestDiscover:
         assert result.exit_code == 1
         assert "not an activated source" in result.stderr
         assert httpx_mock.get_requests() == []
+
+    def test_every_declared_sitemap_is_read_as_an_entry_point(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A robots.txt that lists several ``Sitemap:`` lines is declaring
+        several starting points, and dropping all but one would under-report
+        what the source says it publishes."""
+        second_sitemap = f"https://www.{BAERUM_DOMAIN}/sitemap-vedtak.xml"
+        second_page = f"https://www.{BAERUM_DOMAIN}/politikk-og-samfunn/vedtak"
+        _activate(root)
+        _robots(
+            httpx_mock,
+            f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\nSitemap: {second_sitemap}\n",
+        )
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=second_sitemap, content=_urlset(second_page))
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "documents read: 2" in result.output
+        assert "candidates: 2" in result.output
+        assert f"sitemap  {PAGE_URL}" in result.output
+        assert f"sitemap  {second_page}" in result.output
+
+    def test_robots_txt_is_fetched_once_for_the_whole_run(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Reading the declared entry points and checking each document
+        against the same host's rules share one cached robots.txt fetch,
+        not one per document plus one for the declaration."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_sitemapindex(NESTED_SITEMAP_URL))
+        httpx_mock.add_response(url=NESTED_SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        requested = [str(request.url) for request in httpx_mock.get_requests()]
+        assert requested.count(ROBOTS_URL) == 1
+
+
 class TestRepair:
     """Removing an unfinished final record. This edits evidence, so what it
     refuses matters more than what it does."""

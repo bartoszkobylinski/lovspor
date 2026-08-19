@@ -847,3 +847,31 @@ class TestDeclaredSitemaps:
         _fetcher(log).declared_sitemaps(ROBOTS_URL)
 
         assert list(log.records()) == []
+
+    def test_every_declared_sitemap_is_returned_in_file_order(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """robots.txt is not limited to one ``Sitemap:`` line, and a source
+        that lists several is declaring several starting points, not one."""
+        first = f"https://{BAERUM_DOMAIN}/sitemap-forskrifter.xml"
+        second = f"https://{BAERUM_DOMAIN}/sitemap-vedtak.xml"
+        _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {first}\nSitemap: {second}\n")
+
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == (first, second)
+
+    def test_the_robots_fetch_is_shared_with_the_allow_check(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """``declared_sitemaps`` and ``capture`` read the same host's
+        robots.txt through the same gate, so asking where to start must not
+        cost a second request beyond the one the politeness check already
+        makes."""
+        sitemap = f"https://{BAERUM_DOMAIN}/sitemap.xml"
+        _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {sitemap}\n")
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        fetcher = _fetcher(log)
+
+        fetcher.declared_sitemaps(ROBOTS_URL)
+        fetcher.capture(PAGE_URL, "sitemap")
+
+        assert [r.url for r in httpx_mock.get_requests()].count(ROBOTS_URL) == 1
