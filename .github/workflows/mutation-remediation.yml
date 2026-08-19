@@ -119,6 +119,9 @@ jobs:
         if: steps.cycle.outputs.run == 'true'
         run: |
           echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          # Same box lock as the PR test author — see pr-pipeline.yml.
+          exec 9>/run/lock/mikrus-agent.lock
+          flock -w 3600 9 || { echo "another agent job held the box lock for an hour" >&2; exit 1; }
           codex exec \
             --sandbox workspace-write \
             "$(cat .github/codex/mutation-remediation.md)
