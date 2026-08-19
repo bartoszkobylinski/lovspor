@@ -195,6 +195,21 @@ def test_commit_markers_name_the_actual_author() -> None:
     assert "[agent:${{ steps.author.outputs.author || 'codex' }}-mutation]" in rem_push
 
 
+def test_committer_identity_names_the_actual_author() -> None:
+    """The committer identity must track the author step's output, like the
+    marker does — hardcoding codex-ci attributed Claude fallback commits to
+    Codex in git blame and `git log --author` (fabricated provenance)."""
+    push = _named_step(_steps("pr-pipeline.yml", "codex-tests"), "Commit and push test additions")[
+        "run"
+    ]
+
+    assert "author=\"${{ steps.author.outputs.author || 'codex' }}\"" in push
+    assert 'git config user.name "${author}-ci"' in push
+    assert 'git config user.email "${author}-ci@users.noreply.github.com"' in push
+    assert 'git config user.name "codex-ci"' not in push
+    assert 'git config user.email "codex-ci@users.noreply.github.com"' not in push
+
+
 def test_antiloop_and_cycle_counting_recognise_the_claude_markers() -> None:
     """A fallback-authored HEAD must not retrigger test generation, and a
     Claude remediation commit must count toward the two-cycle limit —
