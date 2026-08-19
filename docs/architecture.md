@@ -127,7 +127,7 @@ how to reach `lovverk`.
 |---|---|---|
 | `observatory/model.py` | Capture records: an observation is an artifact, a failure, or a tombstone. Legal fields are absent by design — classification is deferred. | `ArtifactObservation`, `FetchFailure`, `Tombstone`, `RetrievalProvenance` |
 | `observatory/storage.py` | The ADR-0010 §5 boundary: a root inside the engine repo or the corpus is refused, by path check rather than by convention. | `observatory_root()`, `ObservatoryRoot` |
-| `observatory/log.py` | Append-only JSONL log + SHA-256-addressed blob store; snapshot verification, tombstone-aware. | `ObservationLog`, `verify_snapshot()` |
+| `observatory/log.py` | Append-only JSONL log + SHA-256-addressed blob store; snapshot verification, tombstone-aware. Records are fsynced on append, and the audit survives a log torn by an interrupted write instead of raising on it. | `ObservationLog`, `verify_snapshot()`, `LogScan` |
 | `observatory/registry.py` | Eligibility vs activation: a source is fetchable only with a recorded access-policy check. `lovdata.no` is denied centrally. | `authorise_capture()`, `activate()`, `SourceRegistry` |
 | `observatory/commands.py` | The `lovspor observatory` CLI: register a source as eligible, activate it with a reviewer's access-policy check, list what is registered. No `--registry` flag — the path resolves through `LOVSPOR_OBSERVATORY_ROOT` and the §5 boundary. | `observatory_app` |
 | `observatory/fetch.py` | One URL, politely: activation gate, live robots.txt, per-source rate limit, byte cap, redirects not followed. Every outcome recorded. | `Fetcher`, `CaptureSettings`, `RobotsGate`, `RateLimiter` |
