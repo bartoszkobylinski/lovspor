@@ -198,28 +198,22 @@ the failure this archive is exposed to. The audit reports it rather than
 raising:
 
 ```bash
-uv run python -c "
-from lovspor.observatory.log import ObservationLog, verify_snapshot
-from lovspor.observatory.storage import observatory_root
-result = verify_snapshot(ObservationLog(observatory_root()))
-print('ok:', result.ok, '| records read:', result.artifacts_checked)
-print('unfinished final write:', result.incomplete_final_record)
-print('corrupted lines:', result.malformed_lines)
-"
+uv run lovspor observatory verify
 ```
 
-`incomplete_final_record: True` with an empty `malformed_lines` is the crash
-signature: everything before the last line is intact, and the unfinished line
-is a fetch that was never recorded. Recovery is to drop that one line — back
-the log up first, because this is an edit to evidence:
+It exits non-zero when the snapshot does not hold together, so a scheduled run
+can act on it. "The final record was never finished" is the crash signature:
+everything before the last line is intact, and the unfinished line is a fetch
+that was never recorded. Recovery is to drop that one line — back the log up
+first, because this is an edit to evidence:
 
 ```bash
 cp "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl" "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl.bak"
 sed -i '' -e '$d' "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl"
 ```
 
-**A corrupted line anywhere else** (`malformed_lines` non-empty) is not a
-crash. An interrupted append can only ever damage the last line, so damage
+**A corrupted line anywhere else** — the audit names the line numbers and says
+`Do not truncate` — is not a crash. An interrupted append can only ever damage the last line, so damage
 elsewhere means the storage itself is failing. Do not truncate; restore from
 backup and check the disk.
 

@@ -7,15 +7,24 @@ a registry path handed in by a fixture would prove nothing about where the
 real one lands.
 """
 
+import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import read_registry
-from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, engine_root
+from lovspor.observatory.storage import (
+    ENV_CORPUS_ROOT,
+    ENV_OBSERVATORY_ROOT,
+    ObservatoryRoot,
+    engine_root,
+)
 
 runner = CliRunner()
 
@@ -462,7 +471,7 @@ class TestStorageBoundary:
         # stderr, not the merged output: an operator piping stdout into a file
         # must not have the failure silently land in the file instead of the
         # terminal.
-        assert "Cannot locate the source registry" in result.stderr
+        assert "Cannot locate the observatory archive" in result.stderr
 
     def test_a_root_inside_the_engine_repo_is_refused(
         self, monkeypatch: pytest.MonkeyPatch
@@ -477,7 +486,7 @@ class TestStorageBoundary:
         # stderr, not the merged output: an operator piping stdout into a file
         # must not have the failure silently land in the file instead of the
         # terminal.
-        assert "Cannot locate the source registry" in result.stderr
+        assert "Cannot locate the observatory archive" in result.stderr
 
 
 class TestUnreadableRegistry:
@@ -537,3 +546,117 @@ class TestUnreadableRegistry:
         assert result.exit_code == 1
         assert "Refused" in result.stderr
         assert (root / "sources.json").read_text(encoding="utf-8") == "{ not json"
+
+
+def _observation(payload: bytes, url: str = "https://baerum.kommune.no/f") -> ArtifactObservation:
+    return ArtifactObservation(
+        authority_id=BAERUM_ID,
+        url=url,
+        observed_at=datetime(2026, 8, 18, 10, 30, tzinfo=UTC),
+        provenance=RetrievalProvenance(
+            adapter="http",
+            channel="http",
+            discovery_method="sitemap",
+            user_agent=USER_AGENT,
+            rate_limit_seconds=7.0,
+        ),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        content_type="text/html",
+        http_status=200,
+    )
+
+
+def _archive(root: Path, payload: bytes = b"first") -> ObservationLog:
+    """A real archive with one stored observation, under the configured root."""
+    log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
+    log.append_artifact(_observation(payload), payload)
+    return log
+
+
+class TestVerify:
+    """The audit an operator runs after an interrupted run. Its whole value is
+    that it answers "how bad is it?" precisely when the archive is damaged."""
+
+    def test_an_intact_archive_passes(self, root: Path) -> None:
+        _archive(root)
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 0, result.output
+        assert "records read: 1" in result.output
+        assert "snapshot ok" in result.output
+
+    def test_an_empty_archive_passes(self, root: Path) -> None:
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 0, result.output
+        assert "records read: 0" in result.output
+
+    def test_an_unfinished_final_write_is_named_and_recoverable(self, root: Path) -> None:
+        log = _archive(root)
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"32')
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "never finished" in result.output
+        assert "Dropping that one line" in result.output
+        assert "snapshot NOT ok" in result.output
+
+    def test_a_corrupted_line_says_do_not_truncate(self, root: Path) -> None:
+        """The opposite action from the case above, which is why the audit
+        separates them: truncating here would destroy a record nobody has
+        been told about."""
+        log = _archive(root)
+        log.append_artifact(_observation(b"second", "https://baerum.kommune.no/g"), b"second")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(b"\n".join([lines[0], b"{ corrupted", lines[1], b""]))
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "line(s) 2 are corrupted" in result.output
+        assert "Do not truncate" in result.output
+
+    def test_a_blob_no_record_mentions_is_reported(self, root: Path) -> None:
+        log = _archive(root)
+        orphan = log.blob_path("bb" * 32)
+        orphan.parent.mkdir(parents=True, exist_ok=True)
+        orphan.write_bytes(b"unreferenced")
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 blobs no record mentions" in result.output
+
+    def test_a_sanctioned_removal_is_not_a_defect(self, root: Path) -> None:
+        """ADR-0010 §7: a recorded, explained removal is how bytes are allowed
+        to disappear. Reporting it as damage would train an operator to ignore
+        the report."""
+        payload = b"first"
+        log = _archive(root, payload)
+        digest = hashlib.sha256(payload).hexdigest()
+        log.append(
+            Tombstone(
+                sha256=digest,
+                removed_at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+                basis="privacy request",
+                authorised_by="Bartosz Kobyliński",
+            )
+        )
+        log.blob_path(digest).unlink()
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 0, result.output
+        assert "removed under a tombstone: 1 (sanctioned)" in result.output
+        assert "snapshot ok" in result.output
+
+    def test_an_unset_root_is_an_ordinary_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(ENV_OBSERVATORY_ROOT, raising=False)
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "Cannot locate the observatory archive" in result.stderr

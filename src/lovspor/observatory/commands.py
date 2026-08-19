@@ -23,6 +23,7 @@ import typer
 from pydantic import ValidationError
 
 from lovspor.errors import ConfigError, ParseError, SourceNotActivatedError, StorageBoundaryError
+from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.registry import (
     SourceRecord,
     SourceRegistry,
@@ -32,7 +33,7 @@ from lovspor.observatory.registry import (
     registry_path,
     write_registry,
 )
-from lovspor.observatory.storage import observatory_root
+from lovspor.observatory.storage import ObservatoryRoot, observatory_root
 
 observatory_app = typer.Typer(
     name="observatory",
@@ -49,18 +50,22 @@ _AuthorityIdOption = Annotated[
 ]
 
 
-def _registry_file() -> Path:
-    """Resolve the registry path, or explain why the environment cannot.
+def _root() -> ObservatoryRoot:
+    """Resolve the archive root, or explain why the environment cannot.
 
     A missing ``LOVSPOR_OBSERVATORY_ROOT`` and a root inside the engine repo
     or the corpus are both ordinary operator mistakes, not bugs, so they read
     as a message rather than a traceback.
     """
     try:
-        return registry_path(observatory_root())
+        return observatory_root()
     except (ConfigError, StorageBoundaryError) as exc:
-        typer.echo(f"Cannot locate the source registry: {exc}", err=True)
+        typer.echo(f"Cannot locate the observatory archive: {exc}", err=True)
         raise typer.Exit(1) from exc
+
+
+def _registry_file() -> Path:
+    return registry_path(_root())
 
 
 def _load(path: Path) -> SourceRegistry:
@@ -175,3 +180,63 @@ def list_sources() -> None:
                 f"    checked {policy.checked_at.date().isoformat()} by {policy.reviewed_by}; "
                 f"rate limit {policy.rate_limit_seconds}s; UA {policy.user_agent}"
             )
+
+
+# Each pairs a defect list with what its presence means. Kept together so the
+# report cannot drift from the model: a field added to SnapshotVerification and
+# not added here would be counted by `ok` and never explained to anyone.
+def _defects(result: SnapshotVerification) -> list[str]:
+    counted = (
+        (result.missing_blobs, "blobs gone with no tombstone"),
+        (result.hash_mismatches, "blobs that no longer hash to their record"),
+        (result.orphan_blobs, "blobs no record mentions"),
+        (result.unremoved_tombstones, "tombstoned blobs still on disk"),
+        (result.tombstones_without_observation, "tombstones for hashes never observed"),
+        (result.observations_after_tombstone, "observations appended after their tombstone"),
+    )
+    return [f"{len(found)} {label}" for found, label in counted if found]
+
+
+def _log_damage(result: SnapshotVerification) -> list[str]:
+    """The two log defects, each with the action it calls for.
+
+    They call for opposite actions, which is the whole reason the audit
+    separates them: one line may be dropped, the other must not be touched.
+    """
+    damage = []
+    if result.incomplete_final_record:
+        damage.append(
+            "the final record was never finished — an interrupted run leaves exactly this, "
+            "and the fetch it describes was never recorded. Dropping that one line recovers "
+            "the log; back it up first, it is evidence."
+        )
+    if result.malformed_lines:
+        numbers = ", ".join(str(number) for number in result.malformed_lines)
+        damage.append(
+            f"line(s) {numbers} are corrupted — an interrupted append cannot produce this, "
+            "so the storage itself is suspect. Do not truncate: restore from backup."
+        )
+    return damage
+
+
+@observatory_app.command("verify")
+def verify() -> None:
+    """Audit the snapshot: the log and the stored bytes must account for each other.
+
+    Exits non-zero when they do not, so a scheduled run can act on it. A
+    tombstoned blob is not a defect — a recorded, explained removal is the
+    sanctioned way for bytes to disappear.
+    """
+    result = verify_snapshot(ObservationLog(_root()))
+    typer.echo(f"records read: {result.artifacts_checked}")
+    if result.tombstoned:
+        typer.echo(f"removed under a tombstone: {len(result.tombstoned)} (sanctioned)")
+    for line in _log_damage(result):
+        typer.echo(f"  {line}")
+    for line in _defects(result):
+        typer.echo(f"  {line}")
+    if result.ok:
+        typer.echo("snapshot ok")
+        return
+    typer.echo("snapshot NOT ok")
+    raise typer.Exit(1)
