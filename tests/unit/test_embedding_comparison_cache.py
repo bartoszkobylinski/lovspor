@@ -80,6 +80,10 @@ def test_a_changed_corpus_is_never_served_from_cache(run: ModuleType, tmp_path: 
             lambda run, texts: run.Section(slug="lov", **{**texts, "section_id": "§9"}),
             id="section-id",
         ),
+        pytest.param(
+            lambda run, texts: run.Section(slug="lov", **{**texts, "text": "endret tekst"}),
+            id="text",
+        ),
     ],
 )
 def test_the_fingerprint_covers_every_embedded_field(run: ModuleType, mutate: object) -> None:
@@ -87,6 +91,19 @@ def test_the_fingerprint_covers_every_embedded_field(run: ModuleType, mutate: ob
     changed = mutate(run, {"section_id": base.section_id, "text": base.text})  # type: ignore[operator]
 
     assert run.corpus_fingerprint([base]) != run.corpus_fingerprint([changed])
+
+
+def test_fingerprint_does_not_collide_across_a_field_boundary(run: ModuleType) -> None:
+    """Without a separator between fields, ("ab", "c") and ("a", "bc") would hash
+    identically once concatenated — the null-byte separator must prevent that."""
+    left = run.Section(slug="ab", section_id="c", text="x")
+    right = run.Section(slug="a", section_id="bc", text="x")
+
+    assert run.corpus_fingerprint([left]) != run.corpus_fingerprint([right])
+
+
+def test_empty_corpus_fingerprint_is_deterministic(run: ModuleType) -> None:
+    assert run.corpus_fingerprint([]) == run.corpus_fingerprint([])
 
 
 def test_section_order_is_part_of_the_key(run: ModuleType) -> None:
