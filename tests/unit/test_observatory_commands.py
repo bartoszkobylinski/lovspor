@@ -90,6 +90,46 @@ class TestRegisterSource:
 
         assert (root / "sources.json").exists()
 
+    def test_registering_reports_the_authority_as_inactive(self, root: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                BAERUM_ID,
+                "--name",
+                "Bærum",
+                "--domain",
+                BAERUM_DOMAIN,
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert f"Registered {BAERUM_ID} (Bærum) -> {BAERUM_DOMAIN} [inactive]" in result.output
+        assert "Capture stays refused until an access-policy check is recorded." in result.output
+
+    def test_a_fylkeskommune_can_be_registered(self, root: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                "42",
+                "--name",
+                "Agder",
+                "--domain",
+                "agderfk.no",
+                "--type",
+                "fylkeskommune",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        record = read_registry(root / "sources.json").sources["42"]
+        assert record.authority_type == "fylkeskommune"
+
     def test_a_second_registration_cannot_overwrite_the_first(self, root: Path) -> None:
         """Re-registering an id would silently drop its access-policy check —
         the one record that says a human authorised traffic to that host."""
@@ -183,6 +223,8 @@ class TestActivateSource:
         assert record.access_policy.reviewed_by == "Bartosz Kobyliński"
         assert record.access_policy.rate_limit_seconds == 7.0
         assert "Bartosz Kobyliński" in result.output
+        assert f"Activated {BAERUM_ID} (Bærum) [{BAERUM_DOMAIN}]" in result.output
+        assert "Reviewed by Bartosz Kobyliński; rate limit 7.0s" in result.output
 
     def test_a_check_that_refuses_capture_leaves_the_source_inactive(self, root: Path) -> None:
         _register()
@@ -376,6 +418,11 @@ class TestListSources:
         assert "[active]" in result.output
         assert "Bartosz Kobyliński" in result.output
         assert "7.0s" in result.output
+        assert f"{BAERUM_ID}  Bærum  {BAERUM_DOMAIN}  [active]" in result.output
+        assert (
+            "checked 2026-08-18 by Bartosz Kobyliński; rate limit 7.0s; "
+            f"UA {USER_AGENT}" in result.output
+        )
 
     def test_sources_are_listed_sorted_by_authority_id(self, root: Path) -> None:
         for authority_id, name, domain in [
