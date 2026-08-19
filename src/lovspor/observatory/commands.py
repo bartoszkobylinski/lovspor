@@ -16,6 +16,7 @@ check; a flag would be a one-word way to write access-policy records into the
 engine repository, which is the thing the boundary exists to prevent.
 """
 
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -24,9 +25,11 @@ import typer
 from pydantic import ValidationError
 
 from lovspor.errors import ConfigError, ParseError, SourceNotActivatedError, StorageBoundaryError
-from lovspor.observatory.discovery import Discoverer, DiscoveryResult
+from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
 from lovspor.observatory.fetch import Fetcher
+from lovspor.observatory.freshness import latest_observations, worth_capturing
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
+from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import (
     SourceRecord,
     SourceRegistry,
@@ -265,6 +268,20 @@ def _entry_points(
     return fetcher.declared_sitemaps(policy.robots_txt_url)
 
 
+def _activated_source(authority_id: str) -> SourceRecord:
+    """The source, if it is cleared for capture. Refuse before any request.
+
+    Unregistered and registered-but-not-activated end the same way on purpose:
+    neither is permission to send traffic to someone else's server, and the
+    difference is a detail of our bookkeeping, not of what we are allowed to do.
+    """
+    record = _load(_registry_file()).sources.get(authority_id)
+    if record is None or not record.active:
+        typer.echo(f"Refused: {authority_id} is not an activated source.", err=True)
+        raise typer.Exit(1)
+    return record
+
+
 def _report_discovery(result: DiscoveryResult) -> None:
     """Everything found and everything declined, in full.
 
@@ -306,12 +323,8 @@ def discover(
     and recorded in the log, because what a source listed on a given day is
     exactly the evidence this archive exists to keep.
     """
-    registry = _load(_registry_file())
-    record = registry.sources.get(authority_id)
-    if record is None or not record.active:
-        typer.echo(f"Refused: {authority_id} is not an activated source.", err=True)
-        raise typer.Exit(1)
-    fetcher = Fetcher(registry, ObservationLog(_root()), httpx.Client())
+    record = _activated_source(authority_id)
+    fetcher = Fetcher(_load(_registry_file()), ObservationLog(_root()), httpx.Client())
     starts = _entry_points(fetcher, record, entry_point)
     if not starts:
         typer.echo(
@@ -381,3 +394,67 @@ def repair(
         typer.echo("dry run — nothing written. Re-run with --apply to remove it.")
         return
     _remove_unfinished_record(log, raw)
+
+
+def _capture_candidates(
+    fetcher: Fetcher, candidates: tuple[Candidate, ...], observed: dict[str, datetime], limit: int
+) -> tuple[int, int, int]:
+    """Fetch what has changed, in order, and report each outcome as it happens.
+
+    A run over a municipal site is hours of politely-spaced requests, so the
+    per-URL line is not noise: it is the only way an operator can tell a slow
+    run from a stuck one.
+    """
+    captured = failed = skipped = 0
+    for candidate in candidates:
+        if not worth_capturing(candidate, observed):
+            skipped += 1
+            continue
+        if limit and captured + failed >= limit:
+            typer.echo(f"stopping at --limit {limit}")
+            break
+        record = fetcher.capture(candidate.url, candidate.discovery_method)
+        if isinstance(record, ArtifactObservation):
+            captured += 1
+            typer.echo(f"  {record.http_status}  {candidate.url}")
+        else:
+            failed += 1
+            typer.echo(f"  {record.outcome}  {candidate.url}")
+    return captured, failed, skipped
+
+
+@observatory_app.command("capture")
+def capture(
+    authority_id: _AuthorityIdOption,
+    limit: Annotated[
+        int, typer.Option("--limit", help="Stop after this many fetches. 0 means no bound.")
+    ] = 0,
+) -> None:
+    """Observe what discovery proposes, skipping what has not changed since.
+
+    Discovery runs first, every time, so the candidate list is the one the
+    source publishes now rather than one cached from an earlier day.
+
+    A candidate is skipped only when the site's own ``lastmod`` predates an
+    observation we already hold of that URL. Every other case is fetched:
+    declining to look is the one mistake this archive cannot undo later.
+
+    An interrupted run needs no resuming. Each observation is appended as it
+    happens, so running the command again picks up where it stopped — the
+    pages already captured now fail that same freshness test.
+    """
+    record = _activated_source(authority_id)
+    log = ObservationLog(_root())
+    scan = log.scan()
+    if not scan.complete:
+        typer.echo(
+            "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
+        )
+        raise typer.Exit(1)
+    fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
+    result = Discoverer(fetcher, log).discover(record, _entry_points(fetcher, record, None))
+    typer.echo(f"candidates: {len(result.candidates)}")
+    captured, failed, skipped = _capture_candidates(
+        fetcher, result.candidates, latest_observations(scan.records), limit
+    )
+    typer.echo(f"captured: {captured} | failed: {failed} | unchanged since last seen: {skipped}")
