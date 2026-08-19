@@ -204,18 +204,27 @@ uv run lovspor observatory verify
 It exits non-zero when the snapshot does not hold together, so a scheduled run
 can act on it. "The final record was never finished" is the crash signature:
 everything before the last line is intact, and the unfinished line is a fetch
-that was never recorded. Recovery is to drop that one line — back the log up
-first, because this is an edit to evidence:
+that was never recorded. Recovery is to drop that one line:
 
 ```bash
-cp "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl" "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl.bak"
-sed -i '' -e '$d' "$LOVSPOR_OBSERVATORY_ROOT/observations.jsonl"
+uv run lovspor observatory repair            # reports what it would remove
+uv run lovspor observatory repair --apply    # removes it, keeping the original
 ```
+
+`repair` writes nothing without `--apply` — this edits evidence, so it takes
+two deliberate steps, and a dry run has to be possible on a machine where the
+answer turns out to be "do not touch this". With `--apply` it copies the log to
+`observations.jsonl.bak` before truncating, and refuses if that backup already
+exists rather than clobbering the evidence an earlier repair kept.
+
+It also refuses any damage that is *not* an unfinished append. That is the
+point of it: only that one kind is safe to fix by deleting.
 
 **A corrupted line anywhere else** — the audit names the line numbers and says
 `Do not truncate` — is not a crash. An interrupted append can only ever damage the last line, so damage
-elsewhere means the storage itself is failing. Do not truncate; restore from
-backup and check the disk.
+elsewhere means the storage itself is failing. Restore from backup and check
+the disk; `repair` refuses this case for you, but the judgement is still
+yours.
 
 While the log cannot be read to the end, blob findings are suppressed rather
 than reported — every blob the unread lines account for would otherwise show

@@ -605,8 +605,8 @@ class TestVerify:
         # deliverable, not decoration around it.
         assert (
             "the final record was never finished — an interrupted run leaves exactly this, "
-            "and the fetch it describes was never recorded. Dropping that one line recovers "
-            "the log; back it up first, it is evidence." in result.output
+            "and the fetch it describes was never recorded. `observatory repair` removes that "
+            "one line and keeps the log as it stood." in result.output
         )
         assert "snapshot NOT ok" in result.output
 
@@ -838,3 +838,132 @@ class TestVerify:
         assert result.exit_code == 1
         assert "line(s) 2 are corrupted" in result.output
         assert "the final record was never finished" in result.output
+
+
+class TestRepair:
+    """Removing an unfinished final record. This edits evidence, so what it
+    refuses matters more than what it does."""
+
+    def _torn(self, root: Path) -> ObservationLog:
+        log = _archive(root)
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"32')
+        return log
+
+    def test_an_intact_log_needs_no_repair(self, root: Path) -> None:
+        log = _archive(root)
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 0
+        assert "nothing to repair" in result.output
+        assert log.log_path.read_bytes() == before
+
+    def test_a_dry_run_writes_nothing(self, root: Path) -> None:
+        log = self._torn(root)
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair"])
+
+        assert result.exit_code == 0
+        assert "unfinished final record: 37 bytes, 1 intact" in result.output
+        assert "dry run — nothing written" in result.output
+        assert log.log_path.read_bytes() == before
+        assert not log.log_path.with_name("observations.jsonl.bak").exists()
+
+    def test_applying_removes_the_line_and_keeps_the_original(self, root: Path) -> None:
+        log = self._torn(root)
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 0, result.output
+        backup = log.log_path.with_name("observations.jsonl.bak")
+        assert backup.read_bytes() == before
+        assert log.scan().complete is True
+        assert len(log.scan().records) == 1
+        assert runner.invoke(app, ["observatory", "verify"]).exit_code == 0
+
+    def test_the_repaired_log_can_still_be_appended_to(self, root: Path) -> None:
+        """The repaired log has to be usable, not merely readable. Losing the
+        terminating newline would leave the next append concatenating onto the
+        last record — one corrupted line, written by the repair itself."""
+        log = self._torn(root)
+
+        assert runner.invoke(app, ["observatory", "repair", "--apply"]).exit_code == 0
+        log.append_artifact(_observation(b"later", "https://baerum.kommune.no/later"), b"later")
+
+        scan = log.scan()
+        assert scan.complete is True
+        assert len(scan.records) == 2
+        assert runner.invoke(app, ["observatory", "verify"]).exit_code == 0
+
+    def test_corruption_elsewhere_is_refused(self, root: Path) -> None:
+        """Only an unfinished append is safe to fix by deleting. A line that
+        was written in full and then damaged carries a record nobody has been
+        told about."""
+        log = _archive(root)
+        log.append_artifact(_observation(b"second", "https://baerum.kommune.no/g"), b"second")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(b"\n".join([lines[0], b"{ corrupted", lines[1], b""]))
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 1
+        assert "line(s) 2 are corrupted" in result.stderr
+        assert "restore from backup rather than truncating" in result.stderr
+        assert log.log_path.read_bytes() == before
+
+    def test_corruption_alongside_a_torn_tail_is_still_refused(self, root: Path) -> None:
+        """Truncating here would clear the symptom the operator can see and
+        leave the one that means the disk is failing."""
+        log = _archive(root)
+        log.append_artifact(_observation(b"second", "https://baerum.kommune.no/g"), b"second")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(
+            b"\n".join([lines[0], b"{ corrupted", lines[1]]) + b'\n{"kind":"art'
+        )
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 1
+        assert log.log_path.read_bytes() == before
+
+    def test_an_existing_backup_is_never_overwritten(self, root: Path) -> None:
+        """A second repair clobbering the first repair's evidence is exactly
+        the loss this command exists to prevent."""
+        log = self._torn(root)
+        backup = log.log_path.with_name("observations.jsonl.bak")
+        backup.write_bytes(b"an earlier repair kept this")
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 1
+        assert "already exists" in result.stderr
+        assert backup.read_bytes() == b"an earlier repair kept this"
+        assert log.log_path.read_bytes() == before
+
+    def test_a_log_that_is_only_an_unfinished_record_becomes_empty(self, root: Path) -> None:
+        """No stray newline left behind: the repaired log must scan as empty,
+        not as one blank line."""
+        root.mkdir(parents=True, exist_ok=True)
+        log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
+        log.log_path.write_bytes(b'{"kind":"artifact","authority_id":"32')
+
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 0, result.output
+        assert log.log_path.read_bytes() == b""
+        assert log.scan().complete is True
+
+    def test_an_unset_root_is_an_ordinary_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(ENV_OBSERVATORY_ROOT, raising=False)
+
+        result = runner.invoke(app, ["observatory", "repair"])
+
+        assert result.exit_code == 1
+        assert "Cannot locate the observatory archive" in result.stderr
