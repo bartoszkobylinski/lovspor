@@ -233,40 +233,32 @@ class ObservationLog:
     def scan(self) -> LogScan:
         """Read every line the log will give up, and report what it will not.
 
-        Split on bytes rather than decoded text: an append cut mid-character
-        leaves a line that is not valid UTF-8 at all, and reading the file as
-        text would fail before a single intact record could be recovered.
+        Split on bytes and validated as bytes, never decoded first. An append
+        cut mid-character leaves a line that is not valid UTF-8 at all, so
+        reading the file as text would fail before a single intact record
+        could be recovered — and decoding leniently to get past that would
+        substitute replacement characters into what is meant to be evidence,
+        handing back a record that parses but whose contents are not what was
+        observed. A refused line is visible; a silently altered one reads as
+        genuine forever after.
 
-        Lines are decoded strictly. A lenient decode would substitute
-        replacement characters into what is meant to be evidence, which is a
-        worse outcome than refusing the line — a silently altered record reads
-        as genuine forever after.
+        The terminating newline is what tells the two damage modes apart, and
+        splitting on bytes carries that for free: a file that ends with one
+        yields a trailing empty element, which is skipped and can therefore
+        never be the malformed line. So "the final element failed to parse"
+        means exactly "the write never finished" — no separate check for the
+        newline, and no way for the two to disagree.
         """
         if not self.log_path.exists():
             return LogScan()
-        raw = self.log_path.read_bytes()
-        lines = raw.split(b"\n")
-        if lines and lines[-1] == b"":
-            lines.pop()
-        records, malformed = self._scan_lines(lines)
-        torn_tail = bool(malformed) and malformed[-1] == len(lines) and not raw.endswith(b"\n")
+        lines = self.log_path.read_bytes().split(b"\n")
+        records, malformed = _scan_lines(lines)
+        torn_tail = bool(malformed) and malformed[-1] == len(lines)
         return LogScan(
             records=tuple(records),
             incomplete_final_record=torn_tail,
             malformed_lines=tuple(malformed[:-1] if torn_tail else malformed),
         )
-
-    def _scan_lines(self, lines: list[bytes]) -> tuple[list[ObservationRecord], list[int]]:
-        records: list[ObservationRecord] = []
-        malformed: list[int] = []
-        for number, line in enumerate(lines, start=1):
-            if not line.strip():
-                continue
-            try:
-                records.append(self._parse_line(line.decode("utf-8"), number))
-            except (UnicodeDecodeError, LogIntegrityError):
-                malformed.append(number)
-        return records, malformed
 
     def stored_hashes(self) -> frozenset[str]:
         """Hashes actually present in the blob store, read from disk."""
@@ -283,6 +275,20 @@ class ObservationLog:
                 not this method, decides what it means.
         """
         return self.blob_path(sha256).read_bytes()
+
+
+def _scan_lines(lines: list[bytes]) -> tuple[list[ObservationRecord], list[int]]:
+    """Parse what parses; return the 1-based numbers of the lines that do not."""
+    records: list[ObservationRecord] = []
+    malformed: list[int] = []
+    for number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            records.append(_RECORD_ADAPTER.validate_json(line))
+        except ValidationError:
+            malformed.append(number)
+    return records, malformed
 
 
 class _Timeline(BaseModel):
