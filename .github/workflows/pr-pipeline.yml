@@ -72,7 +72,10 @@ jobs:
       - name: Anti-loop check
         id: antiloop
         run: |
-          if git log -1 --pretty=%B | grep -qE '\[agent:(codex|claude)-(tests|mutation)\]'; then
+          # Subject line only, anchored: scanning the whole message meant a
+          # commit that merely wrote about the marker silently disabled the test
+          # author while the job still reported success.
+          if git log -1 --pretty=%s | grep -qE '\[agent:(codex|claude)-(tests|mutation)\]$'; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
