@@ -630,6 +630,85 @@ class TestVerify:
         assert result.exit_code == 1
         assert "1 blobs no record mentions" in result.output
 
+    def test_a_blob_gone_with_no_tombstone_is_reported(self, root: Path) -> None:
+        payload = b"first"
+        log = _archive(root, payload)
+        log.blob_path(hashlib.sha256(payload).hexdigest()).unlink()
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 blobs gone with no tombstone" in result.output
+
+    def test_a_tampered_blob_is_reported(self, root: Path) -> None:
+        log = _archive(root, b"first")
+        log.blob_path(hashlib.sha256(b"first").hexdigest()).write_bytes(b"tampered")
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 blobs that no longer hash to their record" in result.output
+
+    def test_a_tombstone_whose_blob_is_still_present_is_reported(self, root: Path) -> None:
+        """A recorded removal that never happened is its own integrity signal:
+        the blob was never deleted, so the tombstone lies about the archive."""
+        payload = b"first"
+        log = _archive(root, payload)
+        log.append(
+            Tombstone(
+                sha256=hashlib.sha256(payload).hexdigest(),
+                removed_at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+                basis="privacy request",
+                authorised_by="Bartosz Kobyliński",
+            )
+        )
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 tombstoned blobs still on disk" in result.output
+
+    def test_a_tombstone_for_never_observed_bytes_is_reported(self, root: Path) -> None:
+        _archive(root)
+        log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
+        log.append(
+            Tombstone(
+                sha256=hashlib.sha256(b"never seen").hexdigest(),
+                removed_at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+                basis="privacy request",
+                authorised_by="Bartosz Kobyliński",
+            )
+        )
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 tombstones for hashes never observed" in result.output
+
+    def test_an_observation_after_its_tombstone_is_reported(self, root: Path) -> None:
+        """The public API refuses to write this; only a hand-edited log can
+        produce it, which is exactly the sort of tampering the audit exists
+        to surface."""
+        payload = b"first"
+        log = _archive(root, payload)
+        digest = hashlib.sha256(payload).hexdigest()
+        log.blob_path(digest).unlink()
+        observation = _observation(payload)
+        log.append(
+            Tombstone(
+                sha256=digest,
+                removed_at=datetime(2026, 8, 18, 12, 0, tzinfo=UTC),
+                basis="legal demand",
+                authorised_by="Bartosz Kobyliński",
+            )
+        )
+        log.append(observation)
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 observations appended after their tombstone" in result.output
+
     def test_a_sanctioned_removal_is_not_a_defect(self, root: Path) -> None:
         """ADR-0010 §7: a recorded, explained removal is how bytes are allowed
         to disappear. Reporting it as damage would train an operator to ignore
