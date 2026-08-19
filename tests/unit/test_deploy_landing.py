@@ -4,7 +4,8 @@ from pathlib import Path
 
 _CADDYFILE = Path("deploy/digitalocean/Caddyfile")
 _PROVISION = Path("deploy/digitalocean/provision.sh")
-_LANDING = Path("deploy/digitalocean/site/index.html")
+_LANDING = Path("deploy/digitalocean/site/index.html")  # Norwegian, canonical
+_LANDING_EN = Path("deploy/digitalocean/site/en/index.html")
 _README = Path("deploy/digitalocean/README.md")
 
 
@@ -47,14 +48,68 @@ def test_provision_installs_the_static_site_into_var_www() -> None:
     assert 'install -m644 "$page" "/var/www/lovspor/$rel"' in text
 
 
-def test_landing_page_keeps_the_bearer_token_connection_instructions() -> None:
-    text = _LANDING.read_text(encoding="utf-8")
+def test_both_languages_keep_the_bearer_token_connection_instructions() -> None:
+    """The snippet is the one thing a visitor copies, so it must survive
+    translation intact — and identically, since a host or header that differs
+    between the two pages sends half the readers somewhere wrong."""
+    for page in (_LANDING, _LANDING_EN):
+        text = page.read_text(encoding="utf-8")
 
-    # lovspor.no since the domain moved; the old alias still resolves, but a
-    # visitor copying the snippet should end up on the canonical host.
-    assert "https://lovspor.no/mcp" in text
-    assert '--header "Authorization: Bearer YOUR_TOKEN"' in text
-    assert "Email for a beta token" in text
+        # lovspor.no since the domain moved; the old alias still resolves, but
+        # a visitor copying the snippet should end up on the canonical host.
+        assert "https://lovspor.no/mcp" in text, page
+        assert '--header "Authorization: Bearer YOUR_TOKEN"' in text, page
+
+    assert "Be om et beta-token" in _LANDING.read_text(encoding="utf-8")
+    assert "Email for a beta token" in _LANDING_EN.read_text(encoding="utf-8")
+
+
+def test_the_language_switch_leads_somewhere_on_both_pages() -> None:
+    """A toggle that dead-ends is worse than no toggle: the reader has already
+    decided the page is in the wrong language before they click it."""
+    assert '<a href="/en/">EN</a>' in _LANDING.read_text(encoding="utf-8")
+    assert '<a href="/">NO</a>' in _LANDING_EN.read_text(encoding="utf-8")
+    assert _LANDING_EN.is_file()
+
+
+def test_neither_landing_page_claims_a_particular_profession() -> None:
+    """The engine is open source and the corpus is public data. Naming an
+    audience the project has not earned reads as a claim about who vouches
+    for it."""
+    for page in (_LANDING, _LANDING_EN):
+        text = page.read_text(encoding="utf-8").lower()
+
+        for claim in ("accountant", "payroll", "in-house legal", "compliance", "revisor"):
+            assert claim not in text, f"{page}: {claim}"
+
+
+def test_html_lang_attribute_matches_the_actual_page_language() -> None:
+    """A crawler or screen reader trusts this attribute over the visible text;
+    a mismatch here is invisible to a human skimming the page but wrong for
+    every tool that reads it."""
+    assert '<html lang="no">' in _LANDING.read_text(encoding="utf-8")
+    assert '<html lang="en">' in _LANDING_EN.read_text(encoding="utf-8")
+
+
+def test_hreflang_alternate_links_point_reciprocally_at_each_other() -> None:
+    """Both pages must advertise both language variants, and each must point
+    the *other* page's hreflang at itself — a one-sided or self-pointing
+    hreflang pair is a silent SEO regression that no visible rendering catches."""
+    no_text = _LANDING.read_text(encoding="utf-8")
+    en_text = _LANDING_EN.read_text(encoding="utf-8")
+
+    assert '<link rel="alternate" hreflang="no" href="https://lovspor.no/">' in no_text
+    assert '<link rel="alternate" hreflang="en" href="https://lovspor.no/en/">' in no_text
+    assert '<link rel="alternate" hreflang="no" href="https://lovspor.no/">' in en_text
+    assert '<link rel="alternate" hreflang="en" href="https://lovspor.no/en/">' in en_text
+
+
+def test_footer_nlod_link_matches_each_pages_own_language() -> None:
+    """The footer attribution link is localized independently of the running
+    text; drop the locale segment on one side and the two pages point at
+    different NLOD document variants without any other test catching it."""
+    assert 'href="https://data.norge.no/nlod/2.0"' in _LANDING.read_text(encoding="utf-8")
+    assert 'href="https://data.norge.no/nlod/en/2.0"' in _LANDING_EN.read_text(encoding="utf-8")
 
 
 def test_the_crawler_advertises_a_page_that_exists() -> None:
@@ -119,23 +174,24 @@ def test_provision_sync_loop_mirrors_the_full_site_tree_including_nested_dirs(
     assert (dest / "assets" / "img" / "logo.svg").read_text(encoding="utf-8") == "<svg/>"
 
 
-def test_landing_page_links_to_an_observatory_page_that_exists_on_disk() -> None:
-    text = _LANDING.read_text(encoding="utf-8")
+def test_both_landing_pages_link_to_an_observatory_page_that_exists_on_disk() -> None:
+    for page in (_LANDING, _LANDING_EN):
+        assert '<a href="/observatory/">' in page.read_text(encoding="utf-8"), page
 
-    assert '<a href="/observatory/">About our crawler</a>' in text
     assert (_LANDING.parent / "observatory" / "index.html").is_file()
 
 
 def test_landing_and_observatory_pages_agree_on_contact_and_source_link() -> None:
-    landing = _LANDING.read_text(encoding="utf-8")
-    observatory = (_LANDING.parent / "observatory" / "index.html").read_text(encoding="utf-8")
+    observatory = _LANDING.parent / "observatory" / "index.html"
 
-    # A visitor bounced between the two pages by the "About our crawler" link;
-    # a mismatched contact address or source link between them is a trust bug.
-    assert "bartosz.kobylinski@gmail.com" in landing
-    assert "bartosz.kobylinski@gmail.com" in observatory
-    assert "https://github.com/bartoszkobylinski/lovspor" in landing
-    assert "https://github.com/bartoszkobylinski/lovspor" in observatory
+    # A visitor is bounced between these pages by the crawler link and the
+    # language switch; a contact address or source link that differs between
+    # them is a trust bug, whichever page they happened to land on.
+    for page in (_LANDING, _LANDING_EN, observatory):
+        text = page.read_text(encoding="utf-8")
+
+        assert "bartosz.kobylinski@gmail.com" in text, page
+        assert "https://github.com/bartoszkobylinski/lovspor" in text, page
 
 
 def test_readme_documents_the_landing_page_update_workflow_to_the_real_destination() -> None:
@@ -145,5 +201,9 @@ def test_readme_documents_the_landing_page_update_workflow_to_the_real_destinati
     # (checked in test_provision_installs_the_static_site_into_var_www) —
     # otherwise the documented shortcut writes to a path Caddy never serves.
     assert "rsync -av --delete deploy/digitalocean/site/ root@" in text
+    # Public SSH is firewalled off the droplet; documenting the public IPv4
+    # here sends the reader into a port-22 timeout, which is exactly how this
+    # deploy step failed the first time it was run.
+    assert "TAILSCALE" in text
     assert "/var/www/lovspor/" in text
     assert "lovspor-observatory" in text

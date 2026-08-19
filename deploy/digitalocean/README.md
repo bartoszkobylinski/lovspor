@@ -100,9 +100,12 @@ adding a file — no config change.
 Between provisions, copy the changed pages straight over:
 
 ```bash
-# from your Mac, in the repo root:
-rsync -av --delete deploy/digitalocean/site/ root@<DROPLET_IP>:/var/www/lovspor/
+# from your Mac, in the repo root — over the tailnet, not the public IP:
+rsync -av --delete deploy/digitalocean/site/ root@<DROPLET_TAILSCALE_IP>:/var/www/lovspor/
 ```
+
+Public SSH is firewalled off the droplet by design, so the public IPv4 that
+serves the site will time out on port 22. Use the Tailscale address.
 
 Caddy serves from disk, so the change is live immediately — nothing to reload.
 

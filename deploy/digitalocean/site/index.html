@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="no">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>lovspor — grounded Norwegian law for AI</title>
-<meta name="description" content="lovspor gives AI assistants the verified text of Norwegian statutes and regulations — exact citations you can check, not hallucinated paragraph numbers.">
+<title>lovspor — norsk lovtekst KI-en kan etterprøve</title>
+<meta name="description" content="lovspor gir KI-verktøy den faktiske teksten i norske lover og forskrifter — med henvisninger du kan etterprøve, ikke paragrafnumre modellen har funnet på.">
+<link rel="alternate" hreflang="en" href="https://lovspor.no/en/">
+<link rel="alternate" hreflang="no" href="https://lovspor.no/">
 <style>
   :root {
     --ink: #14181f; --muted: #5b6672; --line: #e4e7ec;
@@ -20,7 +22,10 @@
     -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: var(--max); margin: 0 auto; padding: 0 22px; }
-  header { padding: 30px 0 8px; }
+  header { padding: 30px 0 8px; display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+  .lang { font-size: 14px; color: var(--muted); white-space: nowrap; }
+  .lang a { color: var(--muted); }
+  .lang strong { color: var(--ink); }
   .brand { font-weight: 700; letter-spacing: -0.02em; font-size: 20px; }
   .brand span { color: var(--accent); }
   main { padding: 22px 0 8px; }
@@ -58,63 +63,68 @@
 </head>
 <body>
 <div class="wrap">
-  <header><div class="brand">lov<span>spor</span></div></header>
+  <header>
+    <div class="brand">lov<span>spor</span></div>
+    <nav class="lang"><strong>NO</strong> · <a href="/en/">EN</a></nav>
+  </header>
 
   <main>
-    <span class="tag">Private beta</span>
-    <h1>Norwegian law your AI won't hallucinate.</h1>
-    <p class="lede">lovspor gives ChatGPT, Claude and the AI tools you already use the <strong>actual text</strong> of Norwegian statutes and regulations — with exact citations you can verify, not invented paragraph numbers.</p>
+    <span class="tag">Privat beta</span>
+    <h1>Norsk lovtekst KI-en ikke dikter opp.</h1>
+    <p class="lede">lovspor gir ChatGPT, Claude og de KI-verktøyene du allerede bruker <strong>den faktiske teksten</strong> i norske lover og forskrifter — med henvisninger du kan etterprøve, ikke paragrafnumre modellen har funnet på.</p>
 
     <div class="panel">
-      Ask a general AI about <code>folketrygdloven § 8-18</code> and it answers confidently — and often cites paragraphs that don't exist. <span class="accent">For law, a plausible answer is a dangerous answer.</span> lovspor makes the AI quote the real provision, or say it doesn't know.
+      Spør en vanlig KI om <code>folketrygdloven § 8-18</code>, og den svarer med selvtillit — ofte med henvisning til paragrafer som ikke finnes. <span class="accent">I juss er et sannsynlig svar et farlig svar.</span> lovspor gjør at modellen siterer den virkelige bestemmelsen, eller sier at den ikke vet.
     </div>
 
-    <h2>What it is</h2>
-    <p>An <a href="https://modelcontextprotocol.io">MCP</a> server over a continuously-refreshed, hash-verified corpus of Norwegian national law — <strong>~5,900 acts and central regulations</strong> currently in force. Sixteen tools: semantic search, exact citation &amp; quote verification, section lookup, law history and diffs. Every answer traces back to the verbatim source text.</p>
+    <h2>Hva det er</h2>
+    <p>En <a href="https://modelcontextprotocol.io">MCP</a>-server over et løpende oppdatert, hash-verifisert korpus av norsk rett — <strong>~5 900 lover og sentrale forskrifter</strong> som gjelder i dag. Seksten verktøy: semantisk søk, etterprøving av henvisninger og sitater, oppslag i enkeltbestemmelser, endringshistorikk og diff. Hvert svar kan spores tilbake til ordlyden i kilden.</p>
 
-    <h2>Who it's for</h2>
-    <p>Professionals whose work runs on Norwegian rules — <strong>accountants, payroll &amp; HR, advisors, compliance and in-house legal</strong>, and the companies that rely on them. If answering questions about Norwegian law is part of your job, lovspor makes the AI's answer one you can stand behind.</p>
-    <p class="muted">Example: a construction firm's questions — HMS duties, <em>allmenngjøring</em> (binding minimum wage for byggeplasser), employment, holiday and tax rules — grounded and cited, not guessed.</p>
+    <h2>Hvem det er for</h2>
+    <p><strong>Alle.</strong> Motoren er åpen kildekode under AGPL-3.0, og korpuset bygges fra Lovdatas åpne data. Trenger du norsk lovtekst i et KI-verktøy, kan du kjøre hele greia selv — uten å spørre noen, og uten å betale for det.</p>
+    <p>Den driftede tjenesten er i privat beta fordi jeg drifter den alene. <span class="accent">Koden er det ikke.</span></p>
 
-    <h2>What it covers — honestly</h2>
-    <div class="panel">
-      <div class="cover">
-        <div>
-          <p style="margin:0 0 6px"><strong>Covered</strong></p>
-          <p class="yes" style="margin:2px 0">National laws (<em>lover</em>)</p>
-          <p class="yes" style="margin:2px 0">Central regulations (<em>forskrifter</em>)</p>
-          <p class="yes" style="margin:2px 0">In force, with change history</p>
-        </div>
-        <div>
-          <p style="margin:0 0 6px"><strong>Not covered</strong></p>
-          <p class="no" style="margin:2px 0">Court case law</p>
-          <p class="no" style="margin:2px 0">Municipal zoning plans</p>
-          <p class="no" style="margin:2px 0">Proprietary standards (NS contracts)</p>
-        </div>
+    <h2>Hva det dekker — ærlig</h2>
+    <div class="cover">
+      <div>
+        <p><strong>Dekket</strong></p>
+        <ul>
+          <li class="yes">Lover</li>
+          <li class="yes">Sentrale forskrifter</li>
+          <li class="yes">Gjeldende rett, med endringshistorikk</li>
+        </ul>
       </div>
-      <p class="muted" style="margin:8px 0 0; font-size:14px">Source: Lovdata open data (NLOD 2.0). lovspor is a research tool that surfaces the law — it is not legal advice.</p>
+      <div>
+        <p><strong>Ikke dekket</strong></p>
+        <ul>
+          <li class="no">Rettspraksis</li>
+          <li class="no">Kommunale arealplaner</li>
+          <li class="no">Lukkede standarder (NS-kontrakter)</li>
+        </ul>
+      </div>
     </div>
+    <p class="muted">Kilde: Lovdatas åpne data (NLOD 2.0). lovspor er et oppslagsverktøy som viser lovteksten — det er ikke juridisk rådgivning.</p>
 
-    <h2>How you use it</h2>
-    <p>Inside the AI you already work in — no new app to learn.</p>
+    <h2>Slik bruker du det</h2>
+    <p>Inne i KI-verktøyet du allerede jobber i — ingen ny app å lære.</p>
     <ul>
-      <li><strong>As a connector in ChatGPT &amp; Claude</strong> — one click, nothing to configure. <em>Coming shortly — the way most people will use it.</em></li>
-      <li><strong>In Claude Code, Codex or Cursor</strong> — works today; add your token in one line:</li>
+      <li><strong>Som connector i ChatGPT og Claude</strong> — ett klikk, ingenting å konfigurere. <em>Kommer snart — slik de fleste vil bruke det.</em></li>
+      <li><strong>I Claude Code, Codex eller Cursor</strong> — virker i dag; legg inn tokenet på én linje:</li>
     </ul>
     <pre>claude mcp add --transport http lovverk \
   https://lovspor.no/mcp \
   --header "Authorization: Bearer YOUR_TOKEN"</pre>
 
-    <h2>Get access</h2>
-    <p>Private beta. Email me for a token.</p>
-    <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20access">Email for a beta token →</a></p>
-    <p class="muted">Or run it yourself — the engine is open source under AGPL-3.0: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+    <h2>Få tilgang</h2>
+    <p>Privat beta. Send meg en e-post for et token.</p>
+    <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20tilgang">Be om et beta-token →</a></p>
+    <p class="muted">Eller kjør det selv — motoren er åpen kildekode under AGPL-3.0: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
   </main>
 
   <footer>
-    Contains data under <a href="https://data.norge.no/nlod/en/2.0">NLOD 2.0</a> from Lovdata. Not affiliated with or endorsed by Lovdata.
-    lovspor provides the text of law for reference; it does not provide legal advice. Built by Bartosz Kobyliński.
-    <br><a href="/observatory/">About our crawler</a> — for site administrators who found <code>lovspor-observatory</code> in their logs.
+    Inneholder data under <a href="https://data.norge.no/nlod/2.0">NLOD 2.0</a> fra Lovdata. Ikke tilknyttet eller godkjent av Lovdata.
+    lovspor viser lovtekst til oppslag; det er ikke juridisk rådgivning. Bygget av Bartosz Kobyliński.
+    <br><a href="/observatory/">Om roboten vår</a> — for nettstedsansvarlige som fant <code>lovspor-observatory</code> i loggene sine.
   </footer>
 </div>
 </body>
