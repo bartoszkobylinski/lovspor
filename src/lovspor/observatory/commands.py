@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic import ValidationError
 
 from lovspor.errors import ConfigError, ParseError, SourceNotActivatedError, StorageBoundaryError
 from lovspor.observatory.registry import (
@@ -63,8 +64,20 @@ def _registry_file() -> Path:
 
 
 def _load(path: Path) -> SourceRegistry:
-    """The registry, or an empty one the first time."""
-    return read_registry(path) if path.exists() else SourceRegistry()
+    """The registry, or an empty one the first time.
+
+    A registry that exists but does not parse is refused rather than treated
+    as absent. Falling back to an empty registry would silently drop every
+    recorded access-policy check and let the next `register-source` write a
+    fresh file over the evidence that a human cleared those sources.
+    """
+    if not path.exists():
+        return SourceRegistry()
+    try:
+        return read_registry(path)
+    except ParseError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 def _save(sources: dict[str, SourceRecord], path: Path) -> None:
@@ -89,14 +102,22 @@ def register_source(
     if authority_id in registry.sources:
         typer.echo(f"{authority_id} is already registered; refusing to overwrite it.", err=True)
         raise typer.Exit(1)
-    record = SourceRecord.model_validate(
-        {
-            "authority_type": authority_type,
-            "authority_id": authority_id,
-            "name": name,
-            "canonical_domain": domain,
-        }
-    )
+    try:
+        record = SourceRecord.model_validate(
+            {
+                "authority_type": authority_type,
+                "authority_id": authority_id,
+                "name": name,
+                "canonical_domain": domain,
+            }
+        )
+    except ValidationError as exc:
+        # A blank name or an authority type the model does not know are
+        # mistyped arguments, not bugs. The model stays the single place that
+        # decides what a source record may look like; this only keeps its
+        # verdict from reaching the operator as a traceback.
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
     _save({**registry.sources, authority_id: record}, path)
     typer.echo(f"Registered {authority_id} ({name}) -> {domain} [inactive]")
     typer.echo("Capture stays refused until an access-policy check is recorded.")

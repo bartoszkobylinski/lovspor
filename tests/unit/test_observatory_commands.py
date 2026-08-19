@@ -143,6 +143,29 @@ class TestRegisterSource:
         assert result.exit_code != 0
         assert not (root / "sources.json").exists()
 
+    def test_an_empty_name_is_refused_not_crashed(self, root: Path) -> None:
+        """Every other malformed register-source input in this class — an
+        unknown --type, a duplicate --id — ends in a clean refusal and exit
+        code 1, not an unhandled exception. A blank --name fails the same
+        SourceRecord validation and should be refused the same way."""
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                BAERUM_ID,
+                "--name",
+                "",
+                "--domain",
+                BAERUM_DOMAIN,
+            ],
+        )
+
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
+        assert not (root / "sources.json").exists()
+
 
 class TestActivateSource:
     def test_a_permitting_check_activates_the_source(self, root: Path) -> None:
@@ -265,6 +288,38 @@ class TestActivateSource:
         assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
 
 
+class TestRefusalsReachStderr:
+    """A refusal that lands on stdout is invisible to an operator piping the
+    command's output into a file, which is how these run unattended."""
+
+    def test_a_corrupt_registry_refusal_goes_to_stderr(self, root: Path) -> None:
+        root.mkdir(parents=True)
+        (root / "sources.json").write_text("{ not json", encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "sources"])
+
+        assert "Refused" in result.stderr
+        assert result.stdout == ""
+
+    def test_a_rejected_source_record_refusal_goes_to_stderr(self, root: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                BAERUM_ID,
+                "--name",
+                "",
+                "--domain",
+                BAERUM_DOMAIN,
+            ],
+        )
+
+        assert "Refused" in result.stderr
+        assert result.stdout == ""
+
+
 class TestNestedRoot:
     def test_a_root_several_levels_deep_is_created(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -376,3 +431,20 @@ class TestStorageBoundary:
         # must not have the failure silently land in the file instead of the
         # terminal.
         assert "Cannot locate the source registry" in result.stderr
+
+
+class TestUnreadableRegistry:
+    def test_a_corrupt_registry_file_is_refused_not_crashed(self, root: Path) -> None:
+        """Every malformed input this module handles elsewhere — an
+        unreadable --check path, an unknown --type, a duplicate --id — is
+        refused with a clean message and exit code 1, not an unhandled
+        exception. A registry file that fails to parse should be refused the
+        same way rather than propagating read_registry's ParseError past the
+        CLI boundary."""
+        root.mkdir(parents=True)
+        (root / "sources.json").write_text("{ not json", encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "sources"])
+
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
