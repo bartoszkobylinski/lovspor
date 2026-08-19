@@ -880,11 +880,13 @@ class TestRepair:
 
         assert result.exit_code == 0, result.output
         backup = log.log_path.with_name("observations.jsonl.bak")
+        # The path is the point of the message: without it the operator has no
+        # way to know a backup was taken, let alone where it went.
+        assert f"removed. The log as it stood is kept at {backup}" in result.output
         assert backup.read_bytes() == before
         assert log.scan().complete is True
         assert len(log.scan().records) == 1
         assert runner.invoke(app, ["observatory", "verify"]).exit_code == 0
-        assert f"removed. The log as it stood is kept at {backup}" in result.output
 
     def test_the_repaired_log_can_still_be_appended_to(self, root: Path) -> None:
         """The repaired log has to be usable, not merely readable. Losing the
