@@ -344,3 +344,27 @@ def test_agent_jobs_have_a_wallclock_backstop(workflow_name: str, job_name: str)
     job = _workflow(workflow_name)["jobs"][job_name]
 
     assert job["timeout-minutes"] == 60
+
+
+def test_remediation_concurrency_group_is_scoped_to_head_branch() -> None:
+    """Issue #139 fix: the group must interpolate head_branch verbatim so a PR's
+    own newer remediation run supersedes only its own prior run, never a
+    different PR's pending one. cancel-in-progress stays false: a running
+    remediation is left to finish rather than being killed mid-push."""
+    concurrency = _workflow("mutation-remediation.yml")["concurrency"]
+
+    assert (
+        concurrency["group"] == "mutation-remediation-${{ github.event.workflow_run.head_branch }}"
+    )
+    assert concurrency["cancel-in-progress"] is False
+
+
+def test_pr_pipeline_workflow_scoped_concurrency_still_cancels_stale_runs() -> None:
+    """The job-level lovspor-codex-subscription group was removed from
+    codex-tests (issue #139), but the workflow-scoped pr-<PR#> group must
+    remain: it is what still cancels a stale codex-tests run when a new SHA
+    lands on the same PR, now that no other group does."""
+    concurrency = _workflow("pr-pipeline.yml")["concurrency"]
+
+    assert concurrency["group"] == "pr-${{ github.event.pull_request.number }}"
+    assert concurrency["cancel-in-progress"] is True
