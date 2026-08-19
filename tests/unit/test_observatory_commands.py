@@ -967,3 +967,33 @@ class TestRepair:
 
         assert result.exit_code == 1
         assert "Cannot locate the observatory archive" in result.stderr
+
+    def test_a_dry_run_still_refuses_corruption(self, root: Path) -> None:
+        """The malformed-lines refusal is not gated on --apply: a dry run must
+        not report a clean bill of health, or a torn tail, when a line
+        elsewhere was written in full and then damaged."""
+        log = _archive(root)
+        log.append_artifact(_observation(b"second", "https://baerum.kommune.no/g"), b"second")
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(b"\n".join([lines[0], b"{ corrupted", lines[1], b""]))
+        before = log.log_path.read_bytes()
+
+        result = runner.invoke(app, ["observatory", "repair"])
+
+        assert result.exit_code == 1
+        assert "line(s) 2 are corrupted" in result.stderr
+        assert "restore from backup rather than truncating" in result.stderr
+        assert "dry run" not in result.output
+        assert log.log_path.read_bytes() == before
+
+    def test_an_empty_archive_needs_no_repair(self, root: Path) -> None:
+        """No log file has ever been written yet. `scan()` treats that as
+        trivially complete, and repair must agree rather than trying to read
+        or back up a file that does not exist."""
+        result = runner.invoke(app, ["observatory", "repair", "--apply"])
+
+        assert result.exit_code == 0, result.output
+        assert "nothing to repair" in result.output
+        log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
+        assert not log.log_path.exists()
+        assert not log.log_path.with_name("observations.jsonl.bak").exists()
