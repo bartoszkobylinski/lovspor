@@ -141,6 +141,14 @@ jobs:
           CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
           echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          # Serialize with every other agent job on the shared runner box. One
+          # unserialized agent run exhausted its 2 GB on 2026-08-18, killed
+          # tailscaled and all seven runner agents, and took five unrelated
+          # repositories' CI down until the container was rebooted. The fd stays
+          # open for the life of this step, so the lock releases even if the job
+          # is cancelled.
+          exec 9>/home/runner/.mikrus-agent.lock
+          flock -w 1200 9 || { echo "another agent job held the box lock for 20 minutes" >&2; exit 1; }
           : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
           : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
           set +e
