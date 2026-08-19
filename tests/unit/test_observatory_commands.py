@@ -853,8 +853,9 @@ PAGE_URL = f"https://www.{BAERUM_DOMAIN}/politikk-og-samfunn/ny-forskrift"
 SITEMAP_NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 
 
-def _urlset(*locs: str) -> bytes:
-    body = "".join(f"<url><loc>{loc}</loc></url>" for loc in locs)
+def _urlset(*locs: str, lastmod: str | None = None) -> bytes:
+    stamp = f"<lastmod>{lastmod}</lastmod>" if lastmod else ""
+    body = "".join(f"<url><loc>{loc}</loc>{stamp}</url>" for loc in locs)
     return f'<urlset xmlns="{SITEMAP_NS}">{body}</urlset>'.encode()
 
 
@@ -1262,3 +1263,223 @@ class TestRepair:
         log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
         assert not log.log_path.exists()
         assert not log.log_path.with_name("observations.jsonl.bak").exists()
+
+
+OTHER_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-avfallssug"
+THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
+
+
+class TestCapture:
+    """Observing what discovery proposes. Hours of politely-spaced requests in
+    production, so what it declines to fetch matters as much as what it does."""
+
+    def _ready(self, httpx_mock: HTTPXMock, root: Path, sitemap: bytes) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=sitemap)
+
+    def test_candidates_are_fetched_and_recorded(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        self._ready(httpx_mock, root, _urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert f"200  {PAGE_URL}" in result.output
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+        # The sitemap and the page: discovery's own document is evidence too.
+        assert "records read: 2" in runner.invoke(app, ["observatory", "verify"]).output
+
+    def test_a_page_unchanged_since_the_last_run_is_not_fetched_again(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The whole point of reading lastmod: a second pass over a site that
+        did not change costs two requests, not thousands."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL, content=_urlset(PAGE_URL, lastmod="2020-01-01"), is_reusable=True
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in first.output
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 1" in second.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(PAGE_URL) == 1
+
+    def test_a_page_changed_since_the_last_run_is_fetched_again(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL, content=_urlset(PAGE_URL, lastmod="2099-01-01"), is_reusable=True
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>v1</html>", is_reusable=True)
+
+        runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in second.output
+
+    def test_a_failed_fetch_is_counted_and_does_not_end_the_run(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>ok</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert f"http_404  {PAGE_URL}" in result.output
+        assert "captured: 1 | failed: 1" in result.output
+
+    def test_every_capture_is_counted(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """The tally is the run's only summary of how much of the source was
+        actually observed."""
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>one</html>")
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>two</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 2 | failed: 0" in result.output
+
+    def test_every_unchanged_page_is_counted(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """The tally is what tells an operator a second pass did nothing
+        because nothing changed, rather than because it stopped early."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL,
+            content=_urlset(PAGE_URL, OTHER_PAGE_URL, lastmod="2020-01-01"),
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>one</html>")
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>two</html>")
+
+        runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 2" in second.output
+
+    def test_every_failure_is_counted(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A run reporting one failure when two pages were unreachable would
+        understate how much of the source went unobserved."""
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(url=OTHER_PAGE_URL, status_code=500)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 0 | failed: 2" in result.output
+
+    def test_the_limit_bounds_a_run(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A first pass over an unfamiliar source should be stoppable without
+        waiting hours to find out what it does."""
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>one</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "1"])
+
+        assert "stopping at --limit 1" in result.output
+        assert "captured: 1" in result.output
+        assert OTHER_PAGE_URL not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_limit_equal_to_the_candidate_count_does_not_stop_early(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>one</html>")
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>two</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "2"])
+
+        assert "stopping" not in result.output
+        assert "captured: 2 | failed: 0 | unchanged since last seen: 0" in result.output
+
+    def test_a_failed_fetch_counts_toward_the_limit(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The limit bounds *attempts*, not just successes — a run against a
+        source returning errors should still stop on schedule."""
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "1"])
+
+        assert "stopping at --limit 1" in result.output
+        assert "captured: 0 | failed: 1" in result.output
+        assert OTHER_PAGE_URL not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_skipped_candidate_does_not_count_against_the_limit(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Declining to fetch an unchanged page is not the budget --limit
+        exists to spend; only an actual fetch attempt should count."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, lastmod="2020-01-01"))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        httpx_mock.add_response(
+            url=SITEMAP_URL,
+            content=_urlset(PAGE_URL, OTHER_PAGE_URL, THIRD_PAGE_URL, lastmod="2020-01-01"),
+        )
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>other</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "1"])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 1" in result.output
+        assert "stopping at --limit 1" in result.output
+        assert THIRD_PAGE_URL not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_source_that_declares_no_sitemap_reports_zero_candidates(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Unlike `discover`, `capture` takes no --entry-point and does not
+        refuse when robots.txt declares nothing to walk — it reports zero
+        candidates instead of erroring. Pinned here as current behavior."""
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "candidates: 0" in result.output
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 0" in result.output
+
+    def test_a_damaged_log_is_refused_before_anything_is_fetched(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Appending to a log that cannot be read would bury the damage under
+        thousands of new records."""
+        _activate(root)
+        log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
+        log.log_path.write_bytes(b'{"kind":"artifact","authority_id":"32')
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "log is damaged" in result.stderr
+        assert httpx_mock.get_requests() == []
+
+    def test_an_inactive_source_is_refused(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        _register()
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "not an activated source" in result.stderr
+        assert httpx_mock.get_requests() == []
+
+    def test_an_unregistered_source_is_refused(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        result = runner.invoke(app, ["observatory", "capture", "--id", "9999"])
+
+        assert result.exit_code == 1
+        assert "not an activated source" in result.stderr
+        assert httpx_mock.get_requests() == []

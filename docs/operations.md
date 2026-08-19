@@ -212,6 +212,34 @@ reason, and the listing is never truncated — a partial list would read as
 "this is what the source publishes", which is the one claim the observatory
 must not make loosely.
 
+## Observatory: capturing what discovery found
+
+```bash
+uv run lovspor observatory capture --id 3201
+uv run lovspor observatory capture --id 3201 --limit 50   # bound a first pass
+```
+
+Discovery runs first every time, so the candidate list is what the source
+publishes now rather than one cached from an earlier day. Then each candidate
+is fetched under the source's own rate limit — a full first pass over a
+municipal site is hours, and the per-URL line is how you tell a slow run from
+a stuck one.
+
+**A candidate is skipped only when the site's `lastmod` predates an
+observation already in the log.** Everything less certain than that is
+fetched: no `lastmod`, an unreadable one, a URL never seen, a timestamp that
+ties exactly. Re-fetching costs one request; skipping wrongly costs an
+observation window that cannot be recovered.
+
+That rule is also what makes an interrupted run need no resuming. Each
+observation is appended as it happens, so running the command again picks up
+where it stopped — the pages already captured now fail the freshness test. And
+a second pass over a site that has not changed costs two requests rather than
+thousands.
+
+A damaged log is refused before anything is fetched: appending thousands of
+records would bury the damage. Run `observatory verify` first.
+
 ## Observatory: after an interrupted run
 
 The archive lives on storage that can go away mid-write — an external disk, a
