@@ -301,3 +301,16 @@ def test_codex_test_failure_escalates_on_the_current_pr() -> None:
     assert "codex-tests-${{ github.event.pull_request.head.sha }}" in command
     run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
     assert run_url in command
+
+
+def test_antiloop_matches_the_marker_only_in_the_subject_line() -> None:
+    """Issue #117: matching over the whole message (%B) let a human commit that
+    merely wrote about the marker — pipeline docs, a revert quoting a subject —
+    set skip=true, so the independent test author reported success without
+    running. The subject is where the push step appends the marker, and only
+    at the end of it."""
+    antiloop = _named_step(_steps("pr-pipeline.yml", "codex-tests"), "Anti-loop check")["run"]
+
+    assert "--pretty=%s" in antiloop
+    assert "--pretty=%B" not in antiloop
+    assert r"\[agent:(codex|claude)-(tests|mutation)\]$" in antiloop
