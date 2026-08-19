@@ -37,8 +37,7 @@ def latest_observations(records: Iterable[ObservationRecord]) -> dict[str, datet
         if not isinstance(record, ArtifactObservation):
             continue
         seen = latest.get(record.url)
-        if seen is None or record.observed_at > seen:
-            latest[record.url] = record.observed_at
+        latest[record.url] = record.observed_at if seen is None else max(seen, record.observed_at)
     return latest
 
 

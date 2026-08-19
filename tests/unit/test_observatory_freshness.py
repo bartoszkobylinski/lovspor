@@ -77,6 +77,18 @@ class TestLatestObservations:
 
         assert result == {URL: seen}
 
+    def test_a_failure_does_not_stop_the_scan(self) -> None:
+        """Real logs interleave failures with successes. A reader that stopped
+        at the first failure would treat everything after it as never seen, and
+        re-fetch a whole site on the strength of one timeout."""
+        seen = datetime(2026, 8, 5, tzinfo=UTC)
+
+        result = latest_observations(
+            [_failure(datetime(2026, 8, 1, tzinfo=UTC)), _observation(seen)]
+        )
+
+        assert result == {URL: seen}
+
     def test_urls_are_tracked_apart(self) -> None:
         other = "https://www.baerum.kommune.no/other"
         first = datetime(2026, 8, 1, tzinfo=UTC)

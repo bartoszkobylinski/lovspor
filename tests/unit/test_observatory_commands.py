@@ -1337,6 +1337,46 @@ class TestCapture:
         assert f"http_404  {PAGE_URL}" in result.output
         assert "captured: 1 | failed: 1" in result.output
 
+    def test_every_capture_is_counted(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """The tally is the run's only summary of how much of the source was
+        actually observed."""
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>one</html>")
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>two</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 2 | failed: 0" in result.output
+
+    def test_every_unchanged_page_is_counted(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """The tally is what tells an operator a second pass did nothing
+        because nothing changed, rather than because it stopped early."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL,
+            content=_urlset(PAGE_URL, OTHER_PAGE_URL, lastmod="2020-01-01"),
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>one</html>")
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>two</html>")
+
+        runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 2" in second.output
+
+    def test_every_failure_is_counted(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A run reporting one failure when two pages were unreachable would
+        understate how much of the source went unobserved."""
+        self._ready(httpx_mock, root, _urlset(PAGE_URL, OTHER_PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(url=OTHER_PAGE_URL, status_code=500)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 0 | failed: 2" in result.output
+
     def test_the_limit_bounds_a_run(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """A first pass over an unfamiliar source should be stoppable without
         waiting hours to find out what it does."""
