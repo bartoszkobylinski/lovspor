@@ -1278,6 +1278,22 @@ class TestCapture:
         _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
         httpx_mock.add_response(url=SITEMAP_URL, content=sitemap)
 
+    def test_a_source_without_a_sitemap_is_a_refusal_not_a_silent_zero(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #151: this used to end `captured: 0` with exit code 0 — in a
+        cron job indistinguishable from a healthy no-change run. Nothing was
+        captured because nothing COULD be: discovery had no entry points."""
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "declares no sitemap" in result.stderr
+        assert "nothing to capture" in result.stderr
+        assert "captured:" not in result.output
+
     def test_candidates_are_fetched_and_recorded(self, root: Path, httpx_mock: HTTPXMock) -> None:
         self._ready(httpx_mock, root, _urlset(PAGE_URL))
         httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
@@ -1437,21 +1453,6 @@ class TestCapture:
         assert "captured: 1 | failed: 0 | unchanged since last seen: 1" in result.output
         assert "stopping at --limit 1" in result.output
         assert THIRD_PAGE_URL not in [str(r.url) for r in httpx_mock.get_requests()]
-
-    def test_a_source_that_declares_no_sitemap_reports_zero_candidates(
-        self, root: Path, httpx_mock: HTTPXMock
-    ) -> None:
-        """Unlike `discover`, `capture` takes no --entry-point and does not
-        refuse when robots.txt declares nothing to walk — it reports zero
-        candidates instead of erroring. Pinned here as current behavior."""
-        _activate(root)
-        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
-
-        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
-
-        assert result.exit_code == 0, result.output
-        assert "candidates: 0" in result.output
-        assert "captured: 0 | failed: 0 | unchanged since last seen: 0" in result.output
 
     def test_a_damaged_log_is_refused_before_anything_is_fetched(
         self, root: Path, httpx_mock: HTTPXMock
