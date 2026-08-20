@@ -17,6 +17,7 @@ capture must not quietly undo a sanctioned removal just because the source
 still serves the same bytes.
 """
 
+import fcntl
 import hashlib
 import os
 from collections.abc import Iterator
@@ -166,6 +167,12 @@ class ObservationLog:
         """
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         with self.log_path.open("a", encoding="utf-8") as handle:
+            # One archive serves several capture processes — one per source —
+            # and O_APPEND only keeps their lines whole while a record fits in
+            # one write() call. That held by arithmetic, not by contract, and
+            # a torn interleaved line costs the whole snapshot (issue #152).
+            # The lock is held through fsync and released by close.
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             handle.write(record_to_json_line(record) + "\n")
             handle.flush()
             os.fsync(handle.fileno())

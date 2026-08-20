@@ -1,7 +1,9 @@
 """Tests for lovspor.observatory.log — append-only evidence and its audit."""
 
+import fcntl
 import hashlib
 import os
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -824,3 +826,50 @@ class TestDurability:
 
         assert sizes_at_fsync == [log.log_path.stat().st_size]
         assert sizes_at_fsync[0] > 0
+
+
+class TestWriterExclusion:
+    """Issue #152: several capture processes share one archive — one per
+    source — and nothing stopped their appends from interleaving. A torn line
+    is the one failure this log cannot absorb: records() refuses to skip it,
+    so an interleaved write costs the whole snapshot, not one record. The
+    append path must therefore hold a real lock, not an assumption about
+    stdio buffer sizes."""
+
+    def test_append_takes_an_exclusive_lock_on_the_log_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """LOCK_EX specifically: a shared lock would let two writers in."""
+        calls: list[int] = []
+        real_flock = fcntl.flock
+
+        def spy(fd: int, operation: int) -> None:
+            calls.append(operation)
+            real_flock(fd, operation)
+
+        monkeypatch.setattr(fcntl, "flock", spy)
+        log = make_log(tmp_path)
+
+        log.append(observation(b"payload"))
+
+        assert fcntl.LOCK_EX in calls
+
+    def test_append_blocks_while_another_writer_holds_the_lock(self, tmp_path: Path) -> None:
+        """Held from another open file description, the lock must make a
+        concurrent append wait — that waiting IS the guarantee that two
+        processes' lines cannot interleave."""
+        log = make_log(tmp_path)
+        log.append(observation(b"first"))
+
+        with log.log_path.open("a") as holder:
+            fcntl.flock(holder.fileno(), fcntl.LOCK_EX)
+            writer = threading.Thread(target=log.append, args=(observation(b"second"),))
+            writer.start()
+            writer.join(timeout=0.3)
+            still_waiting = writer.is_alive()
+            fcntl.flock(holder.fileno(), fcntl.LOCK_UN)
+            writer.join(timeout=5)
+
+        assert still_waiting, "append proceeded although another writer held the lock"
+        assert not writer.is_alive()
+        assert len(list(log.records())) == 2
