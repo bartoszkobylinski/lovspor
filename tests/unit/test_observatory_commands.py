@@ -1353,6 +1353,132 @@ class TestRepair:
         assert not log.log_path.with_name("observations.jsonl.bak").exists()
 
 
+ASKER_ID = "3203"
+ASKER_DOMAIN = "asker.kommune.no"
+ASKER_ROBOTS_URL = f"https://www.{ASKER_DOMAIN}/robots.txt"
+ASKER_SITEMAP_URL = f"https://www.{ASKER_DOMAIN}/sitemap.xml"
+ASKER_PAGE_URL = f"https://www.{ASKER_DOMAIN}/forskrift-om-baatplasser"
+
+
+def _activate_asker(root: Path) -> None:
+    """A second activated source, so a sweep has more than one lane."""
+    result = runner.invoke(
+        app,
+        [
+            "observatory",
+            "register-source",
+            "--id",
+            ASKER_ID,
+            "--name",
+            "Asker",
+            "--domain",
+            ASKER_DOMAIN,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    document = {**_check_document(rate_limit_seconds=0.001), "robots_txt_url": ASKER_ROBOTS_URL}
+    check = _write_check(root / "asker-check.json", document)
+    result = runner.invoke(
+        app, ["observatory", "activate-source", "--id", ASKER_ID, "--check", str(check)]
+    )
+    assert result.exit_code == 0, result.output
+
+
+class TestCaptureAll:
+    """One politely-paced sweep over every activated source — the steady-state
+    delta cycle. One municipality's defect must not cost the other two hundred
+    their day's observations, but a defect must still move the exit code."""
+
+    def _two_sources(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        _activate(root)
+        _activate_asker(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=ASKER_ROBOTS_URL,
+            text=f"User-agent: *\nAllow: /\nSitemap: {ASKER_SITEMAP_URL}\n",
+            is_reusable=True,
+        )
+
+    def test_every_activated_source_is_swept_in_id_order(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.index(f"== {BAERUM_ID}") < result.output.index(f"== {ASKER_ID}")
+        assert result.output.count("captured: 1 | failed: 0 | unchanged since last seen: 0") == 2
+
+    def test_one_refusing_source_does_not_stop_the_sweep(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Bærum's sitemap vanishes; Asker still gets observed. The refusal
+        stays loud and the sweep's exit code says the day was not clean."""
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert f"refused: {BAERUM_ID}" in result.stderr
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+        assert "sources refused: 1" in result.stderr
+
+    def test_an_inactive_source_is_not_swept(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """Registration is not permission; the sweep must not widen it."""
+        _activate(root)
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                ASKER_ID,
+                "--name",
+                "Asker",
+                "--domain",
+                ASKER_DOMAIN,
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert f"== {ASKER_ID}" not in result.output
+        assert all(ASKER_DOMAIN not in str(r.url) for r in httpx_mock.get_requests())
+
+    def test_no_activated_sources_is_a_refusal(self, root: Path) -> None:
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert "no activated sources" in result.stderr
+
+    def test_a_damaged_log_refuses_before_any_request(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
+        log.log_path.parent.mkdir(parents=True, exist_ok=True)
+        log.log_path.write_text('{"torn', encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert "log is damaged" in result.stderr
+        assert httpx_mock.get_requests() == []
+
+
 OTHER_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-avfallssug"
 THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
 
