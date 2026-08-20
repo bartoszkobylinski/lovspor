@@ -18,7 +18,7 @@ engine repository, which is the thing the boundary exists to prevent.
 
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 import httpx
 import typer
@@ -248,9 +248,38 @@ def verify() -> None:
     raise typer.Exit(1)
 
 
-def _entry_points(
-    fetcher: Fetcher, record: SourceRecord, given: list[str] | None
-) -> tuple[str, ...]:
+class _Starts(NamedTuple):
+    """Where discovery starts, and whether that is a guess or a declaration."""
+
+    urls: tuple[str, ...]
+    probed: bool
+
+
+def _require_documents(record: SourceRecord, result: DiscoveryResult, probed: bool) -> None:
+    """Refuse loudly when discovery read nothing — a verdict, not a result.
+
+    Zero documents means zero candidates, and `captured: 0` with exit code 0
+    is indistinguishable from a healthy no-change run in a cron job
+    (issue #151). The message says which thing failed: a probe that found
+    nothing, or a declaration that could not be read.
+    """
+    if result.documents_read:
+        return
+    reason = (
+        "declares no sitemap in its robots.txt, and nothing readable answered "
+        "at the conventional /sitemap.xml"
+        if probed
+        else "declares sitemaps that could not be read"
+    )
+    typer.echo(
+        f"Refused: {record.authority_id} {reason}. "
+        "Discovery read no documents, so there is nothing to capture.",
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
+def _entry_points(fetcher: Fetcher, record: SourceRecord, given: list[str] | None) -> _Starts:
     """Where discovery starts: what was asked for, or what the source declares.
 
     The fallback reads the sitemaps out of the very ``robots.txt`` the
@@ -261,11 +290,18 @@ def _entry_points(
     into a runbook.
     """
     if given:
-        return tuple(given)
+        return _Starts(tuple(given), probed=False)
     policy = record.access_policy
     if policy is None:
-        return ()
-    return fetcher.declared_sitemaps(policy.robots_txt_url)
+        return _Starts((), probed=False)
+    declared = fetcher.declared_sitemaps(policy.robots_txt_url)
+    if declared:
+        return _Starts(declared, probed=False)
+    # A declaration is the exception, not the rule: 190 of 358 municipalities
+    # serve a sitemap at the conventional path without declaring it (Phase A
+    # sweep, 2026-08-20). The probe is an ordinary gated fetch against the
+    # same root the reviewer checked, recorded like any other.
+    return _Starts((policy.robots_txt_url.removesuffix("robots.txt") + "sitemap.xml",), probed=True)
 
 
 def _activated_source(authority_id: str) -> SourceRecord:
@@ -326,14 +362,10 @@ def discover(
     record = _activated_source(authority_id)
     fetcher = Fetcher(_load(_registry_file()), ObservationLog(_root()), httpx.Client())
     starts = _entry_points(fetcher, record, entry_point)
-    if not starts:
-        typer.echo(
-            f"Refused: {authority_id} declares no sitemap in its robots.txt. "
-            "Pass --entry-point to say where to start.",
-            err=True,
-        )
-        raise typer.Exit(1)
-    _report_discovery(Discoverer(fetcher, ObservationLog(_root())).discover(record, starts))
+    result = Discoverer(fetcher, ObservationLog(_root())).discover(record, starts.urls)
+    if not entry_point:
+        _require_documents(record, result, starts.probed)
+    _report_discovery(result)
 
 
 def _remove_unfinished_record(log: ObservationLog, raw: bytes) -> None:
@@ -396,25 +428,6 @@ def repair(
     _remove_unfinished_record(log, raw)
 
 
-def _capture_starts(fetcher: Fetcher, record: SourceRecord) -> tuple[str, ...]:
-    """Entry points for capture, or a refusal automation can tell from success.
-
-    A sitemap-less source used to fall through to ``captured: 0`` with exit
-    code 0 — in a cron job indistinguishable from a healthy no-change run
-    (issue #151). Nothing was captured because nothing could be, and that is
-    a verdict, not a result.
-    """
-    starts = _entry_points(fetcher, record, None)
-    if starts:
-        return starts
-    typer.echo(
-        f"Refused: {record.authority_id} declares no sitemap in its robots.txt. "
-        "Discovery has no entry points, so there is nothing to capture.",
-        err=True,
-    )
-    raise typer.Exit(1)
-
-
 def _capture_candidates(
     fetcher: Fetcher, candidates: tuple[Candidate, ...], observed: dict[str, datetime], limit: int
 ) -> tuple[int, int, int]:
@@ -471,7 +484,9 @@ def capture(
         )
         raise typer.Exit(1)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
-    result = Discoverer(fetcher, log).discover(record, _capture_starts(fetcher, record))
+    starts = _entry_points(fetcher, record, None)
+    result = Discoverer(fetcher, log).discover(record, starts.urls)
+    _require_documents(record, result, starts.probed)
     typer.echo(f"candidates: {len(result.candidates)}")
     captured, failed, skipped = _capture_candidates(
         fetcher, result.candidates, latest_observations(scan.records), limit
