@@ -873,3 +873,30 @@ class TestWriterExclusion:
         assert still_waiting, "append proceeded although another writer held the lock"
         assert not writer.is_alive()
         assert len(list(log.records())) == 2
+
+    def test_append_holds_the_lock_through_fsync(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A writer entering after write but before fsync could make the first
+        append return without both records being durable. The lock therefore
+        covers the complete write, flush, and fsync durability boundary."""
+        log = make_log(tmp_path)
+        real_fsync = os.fsync
+        lock_was_held_at_fsync: list[bool] = []
+
+        def spy_fsync(fd: int) -> None:
+            with log.log_path.open("a") as contender:
+                try:
+                    fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    lock_was_held_at_fsync.append(True)
+                else:
+                    lock_was_held_at_fsync.append(False)
+                    fcntl.flock(contender.fileno(), fcntl.LOCK_UN)
+            real_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", spy_fsync)
+
+        log.append(observation(b"payload"))
+
+        assert lock_was_held_at_fsync == [True]
