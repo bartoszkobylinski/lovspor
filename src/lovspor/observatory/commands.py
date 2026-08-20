@@ -396,6 +396,25 @@ def repair(
     _remove_unfinished_record(log, raw)
 
 
+def _capture_starts(fetcher: Fetcher, record: SourceRecord) -> tuple[str, ...]:
+    """Entry points for capture, or a refusal automation can tell from success.
+
+    A sitemap-less source used to fall through to ``captured: 0`` with exit
+    code 0 — in a cron job indistinguishable from a healthy no-change run
+    (issue #151). Nothing was captured because nothing could be, and that is
+    a verdict, not a result.
+    """
+    starts = _entry_points(fetcher, record, None)
+    if starts:
+        return starts
+    typer.echo(
+        f"Refused: {record.authority_id} declares no sitemap in its robots.txt. "
+        "Discovery has no entry points, so there is nothing to capture.",
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
 def _capture_candidates(
     fetcher: Fetcher, candidates: tuple[Candidate, ...], observed: dict[str, datetime], limit: int
 ) -> tuple[int, int, int]:
@@ -452,7 +471,7 @@ def capture(
         )
         raise typer.Exit(1)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
-    result = Discoverer(fetcher, log).discover(record, _entry_points(fetcher, record, None))
+    result = Discoverer(fetcher, log).discover(record, _capture_starts(fetcher, record))
     typer.echo(f"candidates: {len(result.candidates)}")
     captured, failed, skipped = _capture_candidates(
         fetcher, result.candidates, latest_observations(scan.records), limit
