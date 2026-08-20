@@ -12,6 +12,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
@@ -1292,6 +1293,21 @@ class TestCapture:
         assert result.exit_code == 1
         assert "declares no sitemap" in result.stderr
         assert "nothing to capture" in result.stderr
+        assert "captured:" not in result.output
+
+    def test_an_unreachable_robots_file_cannot_report_a_successful_zero_capture(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A failed robots lookup also yields no discovery entry points; the
+        capture command must preserve the new non-zero automation verdict."""
+        _activate(root)
+        httpx_mock.add_exception(httpx.ConnectError("unreachable"), url=ROBOTS_URL)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "nothing to capture" in result.stderr
+        assert "candidates:" not in result.output
         assert "captured:" not in result.output
 
     def test_candidates_are_fetched_and_recorded(self, root: Path, httpx_mock: HTTPXMock) -> None:
