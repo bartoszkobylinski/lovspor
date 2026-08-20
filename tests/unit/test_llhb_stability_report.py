@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 
 from lovspor.llhb.metrics import PairReport
+from lovspor.llhb.outcomes import CaseOutcome, ScoredCase
+from lovspor.llhb.reporting import ArmScoring
 from lovspor.llhb.schema import load_schema, validate_case
 
 LLHB_DIR = Path(__file__).parents[2] / "benchmarks" / "llhb"
@@ -32,6 +34,22 @@ def _load_script() -> ModuleType:
 
 
 script = _load_script()
+
+
+def test_outcomes_preserves_the_five_way_reason_code() -> None:
+    arm = ArmScoring(
+        bundles=[],
+        cases=[
+            ScoredCase(
+                case_id="llhb-v1-C1-101",
+                category="C1",
+                outcome=CaseOutcome.SCORER_ERROR,
+                detail="synthetic",
+            )
+        ],
+    )
+
+    assert script._outcomes(arm) == {"llhb-v1-C1-101": "SCORER_ERROR"}
 
 
 def _read_json(path: Path) -> dict[str, Any]:

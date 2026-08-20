@@ -191,3 +191,12 @@ def test_flipped_cases_detects_case_introduced_after_first_repeat() -> None:
     repeats = [{"a": True}, {"a": True, "b": False}, {"a": True, "b": False}]
 
     assert flipped_cases(repeats) == ["b"]
+
+
+def test_flipped_cases_distinguishes_five_way_reason_codes() -> None:
+    repeats = [
+        {"a": "PASS", "b": "UNRESOLVED_SEMANTIC"},
+        {"a": "PASS", "b": "MODEL_ERROR"},
+    ]
+
+    assert flipped_cases(repeats) == ["b"]

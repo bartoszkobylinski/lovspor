@@ -14,7 +14,7 @@ import pytest
 
 from lovspor.llhb.outcomes import CaseOutcome
 from lovspor.llhb.reporting import ReportingError, score_arm
-from lovspor.llhb.scoring import CaseScorer
+from lovspor.llhb.scoring import CaseScore, CaseScorer, CriterionVerdict
 from tests.unit.llhb_fixtures import standard_corpus
 
 
@@ -116,6 +116,39 @@ class TestScoreArm:
         assert arm.bundles == []
         assert [c.outcome for c in arm.cases] == [CaseOutcome.SCORER_ERROR]
         assert arm.cases[0].detail == "ValueError: cue table missing"
+
+    def test_a_semantically_unresolved_answer_remains_scored(self) -> None:
+        """A scorer that runs but cannot decide is distinct from both error
+        paths and must remain available to metric unresolved buckets."""
+
+        class Unresolved:
+            def score(self, case: object, answer: str) -> CaseScore:
+                return CaseScore(
+                    case_id="llhb-v1-C1-101",
+                    category="C1",
+                    criteria={"expected-provision-cited": CriterionVerdict.UNRESOLVED},
+                    passed=None,
+                    asserted_h1=(),
+                    asserted_citations=0,
+                    asserted_resolved=0,
+                    asserted_valid=0,
+                    quotes_detected=0,
+                    quotes_checkable=0,
+                    quotes_verified=0,
+                    unresolved_claims=1,
+                    unattached_quotes=0,
+                )
+
+        arm = score_arm(
+            Unresolved(),  # type: ignore[arg-type]
+            {"llhb-v1-C1-101": case("llhb-v1-C1-101")},
+            [record("llhb-v1-C1-101")],
+        )
+
+        assert len(arm.bundles) == 1
+        assert [c.outcome for c in arm.cases] == [CaseOutcome.UNRESOLVED_SEMANTIC]
+        assert arm.cases[0].score is arm.bundles[0][2]
+        assert arm.cases[0].detail is None
 
     def test_a_case_the_dataset_does_not_hold_is_still_a_refusal(self, scorer: CaseScorer) -> None:
         """Classification is for cases that failed. A record with no case is a
