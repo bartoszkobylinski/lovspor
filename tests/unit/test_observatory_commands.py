@@ -1291,8 +1291,10 @@ class TestCapture:
         result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
 
         assert result.exit_code == 1
-        assert "declares no sitemap" in result.stderr
-        assert "nothing to capture" in result.stderr
+        assert result.stderr == (
+            f"Refused: {BAERUM_ID} declares no sitemap in its robots.txt. "
+            "Discovery has no entry points, so there is nothing to capture.\n"
+        )
         assert "captured:" not in result.output
 
     def test_an_unreachable_robots_file_cannot_report_a_successful_zero_capture(
