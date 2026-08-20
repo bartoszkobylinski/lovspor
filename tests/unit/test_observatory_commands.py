@@ -11,6 +11,8 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -18,6 +20,7 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.observatory.commands import _entry_points
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import read_registry
@@ -879,6 +882,37 @@ def _activate(root: Path, rate_limit_seconds: float = 0.001) -> None:
 
 def _robots(httpx_mock: HTTPXMock, body: str) -> None:
     httpx_mock.add_response(url=ROBOTS_URL, text=body, is_reusable=True)
+
+
+class TestEntryPoints:
+    def test_explicit_entry_points_are_not_marked_as_a_conventional_probe(self) -> None:
+        fetcher = Mock()
+
+        starts = _entry_points(fetcher, SimpleNamespace(access_policy=None), ["one", "two"])
+
+        assert starts.urls == ("one", "two")
+        assert starts.probed is False
+        fetcher.declared_sitemaps.assert_not_called()
+
+    def test_a_source_without_an_access_policy_has_no_entry_points_or_probe(self) -> None:
+        fetcher = Mock()
+
+        starts = _entry_points(fetcher, SimpleNamespace(access_policy=None), None)
+
+        assert starts.urls == ()
+        assert starts.probed is False
+        fetcher.declared_sitemaps.assert_not_called()
+
+    def test_declared_entry_points_are_not_marked_as_a_conventional_probe(self) -> None:
+        fetcher = Mock()
+        fetcher.declared_sitemaps.return_value = (SITEMAP_URL, NESTED_SITEMAP_URL)
+        record = SimpleNamespace(access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL))
+
+        starts = _entry_points(fetcher, record, None)
+
+        assert starts.urls == (SITEMAP_URL, NESTED_SITEMAP_URL)
+        assert starts.probed is False
+        fetcher.declared_sitemaps.assert_called_once_with(ROBOTS_URL)
 
 
 class TestDiscover:
