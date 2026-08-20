@@ -1031,6 +1031,45 @@ class TestDiscover:
         assert result.exit_code == 1
         assert "declares no sitemap" in result.stderr
 
+    def test_declared_sitemaps_that_cannot_be_read_are_refused_as_declarations(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            f"Refused: {BAERUM_ID} declares sitemaps that could not be read. "
+            "Discovery read no documents, so there is nothing to capture.\n"
+        )
+
+    def test_an_unreadable_explicit_entry_point_is_reported_not_refused(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "discover",
+                "--id",
+                BAERUM_ID,
+                "--entry-point",
+                SITEMAP_URL,
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "documents read: 0" in result.output
+        assert f"fetch_failed: http_404  {SITEMAP_URL}" in result.output
+        assert "Refused:" not in result.stderr
+
     def test_an_inactive_source_is_refused_before_any_request(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
@@ -1330,6 +1369,23 @@ class TestCapture:
             "nothing readable answered at the conventional /sitemap.xml. "
             "Discovery read no documents, so there is nothing to capture.\n"
         )
+        assert "captured:" not in result.output
+
+    def test_declared_sitemaps_that_cannot_be_read_refuse_capture(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            f"Refused: {BAERUM_ID} declares sitemaps that could not be read. "
+            "Discovery read no documents, so there is nothing to capture.\n"
+        )
+        assert "candidates:" not in result.output
         assert "captured:" not in result.output
 
     def test_an_unreachable_robots_file_cannot_report_a_successful_zero_capture(
