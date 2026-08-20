@@ -1431,6 +1431,52 @@ class TestCaptureAll:
         assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
         assert "sources refused: 1" in result.stderr
 
+    def test_limit_is_applied_independently_to_each_source(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._two_sources(root, httpx_mock)
+        baerum_second = f"https://www.{BAERUM_DOMAIN}/forskrift-2"
+        asker_second = f"https://www.{ASKER_DOMAIN}/forskrift-2"
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, baerum_second))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(
+            url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL, asker_second)
+        )
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all", "--limit", "1"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("stopping at --limit 1") == 2
+        assert result.output.count("captured: 1 | failed: 0 | unchanged since last seen: 0") == 2
+        requested = [str(request.url) for request in httpx_mock.get_requests()]
+        assert baerum_second not in requested
+        assert asker_second not in requested
+
+    def test_conventional_sitemap_refusal_is_loud_but_does_not_stop_the_sweep(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _activate_asker(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+        httpx_mock.add_response(
+            url=ASKER_ROBOTS_URL,
+            text=f"User-agent: *\nAllow: /\nSitemap: {ASKER_SITEMAP_URL}\n",
+        )
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert (
+            f"refused: {BAERUM_ID} declares no sitemap in its robots.txt, and nothing "
+            "readable answered at the conventional /sitemap.xml"
+        ) in result.stderr
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+        assert "sources refused: 1 of 2" in result.stderr
+
     def test_an_inactive_source_is_not_swept(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """Registration is not permission; the sweep must not widen it."""
         _activate(root)
