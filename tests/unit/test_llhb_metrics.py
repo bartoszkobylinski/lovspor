@@ -13,9 +13,12 @@ from lovspor.llhb.metrics import (
     BOOTSTRAP_RESAMPLES,
     BOOTSTRAP_SEED,
     METRICS_VERSION,
+    PRIMARY_METRIC,
     compute_pair_report,
-    retrieved_correct,
+    retrieved_directly,
 )
+from lovspor.llhb.outcomes import ScoredCase, outcome_of
+from lovspor.llhb.reporting import ArmScoring
 from lovspor.llhb.scoring import SCORER_VERSION, CaseScore, CriterionVerdict
 
 Bundle = tuple[dict[str, object], dict[str, object], CaseScore]
@@ -86,26 +89,46 @@ def bundle(case_id: str, arm_score: CaseScore, **record_kwargs: object) -> Bundl
     return (case(case_id, arm_score.category), record(case_id, **record_kwargs), arm_score)
 
 
-class TestRetrievedCorrect:
+def arm(bundles: list[Bundle]) -> ArmScoring:
+    """An arm where every case was scored — the errors have their own tests."""
+    return ArmScoring(
+        bundles=list(bundles),
+        cases=[
+            ScoredCase(
+                case_id=str(b[2].case_id),
+                category=str(b[2].category),
+                outcome=outcome_of(b[2]),
+                score=b[2],
+            )
+            for b in bundles
+        ],
+    )
+
+
+def pair_report(control: list[Bundle], treatment: list[Bundle]) -> object:
+    return compute_pair_report(arm(control), arm(treatment))
+
+
+class TestRetrievedDirectly:
     def test_a_successful_get_section_of_the_expected_pair_counts(self) -> None:
         rec = record("llhb-v1-C1-101", [get_section_call("testloven", "1")])
 
-        assert retrieved_correct(case("llhb-v1-C1-101"), rec) is True
+        assert retrieved_directly(case("llhb-v1-C1-101"), rec) is True
 
     def test_another_section_does_not_count(self) -> None:
         rec = record("llhb-v1-C1-101", [get_section_call("testloven", "5-12")])
 
-        assert retrieved_correct(case("llhb-v1-C1-101"), rec) is False
+        assert retrieved_directly(case("llhb-v1-C1-101"), rec) is False
 
     def test_section_id_is_compared_in_canonical_form(self) -> None:
         rec = record("llhb-v1-C1-101", [get_section_call("testloven", "§ 1.")])
 
-        assert retrieved_correct(case("llhb-v1-C1-101"), rec) is True
+        assert retrieved_directly(case("llhb-v1-C1-101"), rec) is True
 
     def test_an_errored_call_does_not_count(self) -> None:
         call = {**get_section_call("testloven", "1"), "is_error": True}
 
-        assert retrieved_correct(case("llhb-v1-C1-101"), record("x", [call])) is False
+        assert retrieved_directly(case("llhb-v1-C1-101"), record("x", [call])) is False
 
     def test_a_search_hit_does_not_count(self) -> None:
         """Conservative by design: only a successful get_section of the
@@ -118,7 +141,7 @@ class TestRetrievedCorrect:
             "is_error": False,
         }
 
-        assert retrieved_correct(case("llhb-v1-C1-101"), record("x", [call])) is False
+        assert retrieved_directly(case("llhb-v1-C1-101"), record("x", [call])) is False
 
     def test_a_later_valid_call_counts_after_ignored_trace_entries(self) -> None:
         rec = record(
@@ -130,7 +153,7 @@ class TestRetrievedCorrect:
             ],
         )
 
-        assert retrieved_correct(case("llhb-v1-C1-101"), rec) is True
+        assert retrieved_directly(case("llhb-v1-C1-101"), rec) is True
 
 
 class TestPairReport:
@@ -156,7 +179,7 @@ class TestPairReport:
     def test_hallucination_rate_absolute_and_delta(self) -> None:
         control, treatment = self.make_pair()
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         chr_metric = report.metrics["citation_hallucination_rate"]
         assert chr_metric.control is not None and chr_metric.treatment is not None
@@ -176,7 +199,7 @@ class TestPairReport:
             bundle("llhb-v1-C1-102", score("llhb-v1-C1-102")),
         ]
 
-        metric = compute_pair_report(control, treatment).metrics["citation_hallucination_rate"]
+        metric = pair_report(control, treatment).metrics["citation_hallucination_rate"]
 
         assert metric.control is not None and metric.treatment is not None
         assert metric.delta == 0.5
@@ -184,7 +207,7 @@ class TestPairReport:
     def test_a_metric_with_an_empty_denominator_has_no_rate(self) -> None:
         control, treatment = self.make_pair()
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         quote = report.metrics["quote_fidelity"]
         assert quote.control is not None
@@ -192,12 +215,12 @@ class TestPairReport:
         assert quote.control.rate is None
         assert quote.delta is None
 
-    def test_post_retrieval_hallucination_is_treatment_only(self) -> None:
+    def test_post_direct_retrieval_hallucination_is_treatment_only(self) -> None:
         control, treatment = self.make_pair()
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
-        prh = report.metrics["post_retrieval_hallucination_rate"]
+        prh = report.metrics["post_direct_retrieval_hallucination_rate"]
         assert prh.control is None
         assert prh.treatment is not None
         assert prh.treatment.denominator == 2
@@ -206,8 +229,8 @@ class TestPairReport:
     def test_confidence_intervals_are_deterministic_and_ordered(self) -> None:
         control, treatment = self.make_pair()
 
-        first = compute_pair_report(control, treatment)
-        second = compute_pair_report(control, treatment)
+        first = pair_report(control, treatment)
+        second = pair_report(control, treatment)
 
         est = first.metrics["citation_hallucination_rate"].control
         assert est is not None
@@ -219,14 +242,15 @@ class TestPairReport:
     def test_the_report_carries_the_versions_and_buckets(self) -> None:
         control, treatment = self.make_pair()
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
-        assert report.metrics_version == METRICS_VERSION == "llhb-metrics-v2"
+        assert report.metrics_version == METRICS_VERSION == "llhb-metrics-v3"
         assert report.scorer_version == SCORER_VERSION
         # Literals on purpose: asserting via the constants would mutate in
         # lockstep with the code and never fail.
-        assert report.bootstrap == {"seed": 42, "resamples": 2000}
-        assert (BOOTSTRAP_SEED, BOOTSTRAP_RESAMPLES) == (42, 2000)
+        assert report.bootstrap == {"seed": 42, "resamples": 10_000}
+        # n raised from 2,000 by ruling #30(e), before the confirmatory freeze.
+        assert (BOOTSTRAP_SEED, BOOTSTRAP_RESAMPLES) == (42, 10_000)
         assert report.unresolved.control["unresolved_claims"] == 0
         assert report.unresolved.control == {
             "unresolved_claims": 0,
@@ -241,7 +265,7 @@ class TestPairReport:
         control, _ = self.make_pair()
 
         try:
-            compute_pair_report(control, control[:1])
+            pair_report(control, control[:1])
         except ValueError as exc:
             assert "case" in str(exc)
         else:  # pragma: no cover
@@ -261,7 +285,7 @@ class TestCategoryMetrics:
             bundle("llhb-v1-C3-101", score("llhb-v1-C3-101", category="C3")),
         ]
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         cpi = report.metrics["correct_provision_identification"]
         assert cpi.control is not None and cpi.treatment is not None
@@ -286,7 +310,7 @@ class TestCategoryMetrics:
         control = [bundle("llhb-v1-C6-101", unresolved)]
         treatment = [bundle("llhb-v1-C6-101", rejected)]
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         fpr = report.metrics["false_premise_rejection_rate"]
         assert fpr.control is not None and fpr.treatment is not None
@@ -330,7 +354,7 @@ class TestCategoryMetrics:
             score("llhb-v1-C8-101", category="C8", passed=True),
         ]
 
-        report = compute_pair_report(
+        report = pair_report(
             [bundle(item.case_id, item) for item in control_scores],
             [bundle(item.case_id, item) for item in treatment_scores],
         )
@@ -338,7 +362,7 @@ class TestCategoryMetrics:
         accuracy = report.metrics["citation_accuracy"]
         misattribution = report.metrics["misattribution_rate"]
         quote_fidelity = report.metrics["quote_fidelity"]
-        no_invention = report.metrics["no_invention_rate"]
+        no_invention = report.metrics["no_invention_rate_resolved_cases"]
         assert accuracy.control is not None
         assert (accuracy.control.numerator, accuracy.control.denominator) == (3, 4)
         assert misattribution.control is not None and misattribution.treatment is not None
@@ -348,7 +372,7 @@ class TestCategoryMetrics:
         assert no_invention.control is not None and no_invention.treatment is not None
         assert (no_invention.control.rate, no_invention.treatment.rate) == (0.0, 1.0)
 
-    def test_post_retrieval_hallucination_counts_h1_and_h2(self) -> None:
+    def test_post_direct_retrieval_hallucination_counts_h1_and_h2(self) -> None:
         h1 = hallucinated("llhb-v1-C1-101")
         h2 = score(
             "llhb-v1-C4-101",
@@ -367,9 +391,7 @@ class TestCategoryMetrics:
         ]
         control = [bundle(item.case_id, item) for item in (h1, h2, clean)]
 
-        metric = compute_pair_report(control, treatment).metrics[
-            "post_retrieval_hallucination_rate"
-        ]
+        metric = pair_report(control, treatment).metrics["post_direct_retrieval_hallucination_rate"]
 
         assert metric.control is None
         assert metric.treatment is not None
@@ -388,7 +410,7 @@ class TestSurvivorKillers:
 
     def test_the_report_models_are_frozen(self) -> None:
         control, treatment = TestPairReport().make_pair()
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
         est = report.metrics["citation_hallucination_rate"].control
         assert est is not None
 
@@ -408,7 +430,7 @@ class TestSurvivorKillers:
         control, _ = TestPairReport().make_pair()
 
         try:
-            compute_pair_report(control, control[:1])
+            pair_report(control, control[:1])
         except ValueError as exc:
             assert str(exc) == "the two arms cover different case sets; nothing to compare"
         else:  # pragma: no cover
@@ -420,9 +442,13 @@ class TestSurvivorKillers:
         out-of-category branch corrupts the rate silently."""
         control, treatment = TestPairReport().make_pair()
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
-        for name in ("misattribution_rate", "false_premise_rejection_rate", "no_invention_rate"):
+        for name in (
+            "misattribution_rate",
+            "false_premise_rejection_rate",
+            "no_invention_rate_resolved_cases",
+        ):
             est = report.metrics[name].control
             assert est is not None, name
             assert est.numerator == 0, name
@@ -441,11 +467,35 @@ class TestSurvivorKillers:
             bundle("llhb-v1-C1-103", citationless),
         ]
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         est = report.metrics["citation_hallucination_rate"].control
         assert est is not None
         assert est.denominator == 1
+
+    def test_repeated_outcomes_accumulate_instead_of_overwriting(self) -> None:
+        """Each case must add one to its outcome's tally, not stomp it back
+        to one — two PASS cases counted as one PASS would silently halve
+        every consistent run."""
+        cases = [
+            ScoredCase(
+                case_id="llhb-v1-C1-101",
+                category="C1",
+                outcome=outcome_of(score("llhb-v1-C1-101")),
+                score=score("llhb-v1-C1-101"),
+            ),
+            ScoredCase(
+                case_id="llhb-v1-C1-102",
+                category="C1",
+                outcome=outcome_of(score("llhb-v1-C1-102")),
+                score=score("llhb-v1-C1-102"),
+            ),
+        ]
+
+        counts = metrics_module._counts(cases)
+
+        assert counts.PASS == 2
+        assert counts.total == 2
 
     def test_fpr_numerator_counts_only_passes(self) -> None:
         passed = score(
@@ -467,7 +517,7 @@ class TestSurvivorKillers:
         control = [bundle("llhb-v1-C6-101", passed), bundle("llhb-v1-C6-102", failed)]
         treatment = [bundle("llhb-v1-C6-101", passed), bundle("llhb-v1-C6-102", passed_second)]
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         fpr = report.metrics["false_premise_rejection_rate"]
         assert fpr.control is not None and fpr.treatment is not None
@@ -496,7 +546,7 @@ class TestGoldenConfidenceIntervals:
     def test_golden_ci_and_delta_ci(self) -> None:
         control, treatment = self.make_rich_pair()
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         metric = report.metrics["citation_hallucination_rate"]
         assert metric.control is not None and metric.treatment is not None
@@ -524,7 +574,7 @@ class TestGoldenConfidenceIntervals:
         control.append(bundle("llhb-v1-C1-109", hallucinated("llhb-v1-C1-109")))
         treatment.append(bundle("llhb-v1-C1-109", citationless))
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         metric = report.metrics["citation_hallucination_rate"]
         assert metric.delta is not None
@@ -570,7 +620,7 @@ class TestGoldenAccuracyIntervals:
     def test_golden_accuracy_cis(self) -> None:
         control, treatment = self.make_pair()
 
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
 
         metric = report.metrics["citation_accuracy"]
         assert metric.control is not None and metric.treatment is not None
@@ -586,16 +636,27 @@ class TestGoldenAccuracyIntervals:
         assert golden == GOLDEN_ACCURACY
 
 
+# Arm intervals are Wilson score intervals and the delta is a paired bootstrap
+# of n = 10,000 (analysis plan §4, ruling #30(e)). Both halves are pinned here:
+# the Wilson arithmetic is closed-form, the delta still depends on the seed, the
+# resample count and the quantile rule, so either drifting breaks this golden.
 GOLDEN_ACCURACY = (
     0.5833333333333334,
-    0.4,
-    0.68,
-    0.8620689655172413,
-    1.0,
-    -0.5384615384615385,
-    -0.2666666666666666,
+    0.42200251574871667,
+    0.7285943794855395,
+    0.8185534279135275,
+    0.9846300133358381,
+    -0.5384615384615384,
+    -0.2678571428571428,
 )
-GOLDEN_CI = (0.25, 1.0, 0.0, 0.5, -0.125, 0.875)
+GOLDEN_CI = (
+    0.3057423946026273,
+    0.8631557141764027,
+    0.07147921275210901,
+    0.5907245696898311,
+    -0.125,
+    0.75,
+)
 
 
 class TestQuantileArithmetic:
@@ -639,7 +700,7 @@ class TestQuoteFidelityDenominator:
                 ),
             )
         ]
-        report = compute_pair_report(control, treatment)
+        report = pair_report(control, treatment)
         fidelity = report.metrics["quote_fidelity"]
         assert (fidelity.control.numerator, fidelity.control.denominator) == (1, 2)
         assert (fidelity.treatment.numerator, fidelity.treatment.denominator) == (3, 4)
@@ -657,5 +718,144 @@ class TestQuoteFidelityDenominator:
                 ),
             )
         ]
-        report = compute_pair_report(control, control)
+        report = pair_report(control, control)
         assert report.unresolved.control["unverifiable_quotes"] == 3
+
+
+class TestWilsonVsBootstrapSelection:
+    """§4/§5.4: proportions get a Wilson interval, per-answer volumes keep
+    the case-level bootstrap regardless of where their numerator happens to
+    fall. These pin the CI *machinery* chosen, not just its numeric result —
+    a mean metric whose numerator lands inside [0, denominator] must still
+    take the bootstrap branch, the one case a numerator/denominator range
+    check alone would not catch."""
+
+    def test_mean_metrics_use_bootstrap_ci_even_when_within_unit_range(self) -> None:
+        control = [
+            bundle("llhb-v1-C1-101", score("llhb-v1-C1-101", asserted_valid=0)),
+            bundle("llhb-v1-C1-102", score("llhb-v1-C1-102", asserted_valid=1)),
+        ]
+        treatment = [
+            bundle("llhb-v1-C1-101", score("llhb-v1-C1-101", asserted_valid=1)),
+            bundle("llhb-v1-C1-102", score("llhb-v1-C1-102", asserted_valid=1)),
+        ]
+
+        report = pair_report(control, treatment)
+
+        metric = report.metrics["valid_citations_per_answer"]
+        control_samples = [metrics_module._valid_volume_sample(b) for b in control]
+        treatment_samples = [metrics_module._valid_volume_sample(b) for b in treatment]
+        assert metric.control is not None and metric.treatment is not None
+        assert (metric.control.ci_low, metric.control.ci_high) == metrics_module._bootstrap_ci(
+            control_samples
+        )
+        assert (
+            metric.treatment.ci_low,
+            metric.treatment.ci_high,
+        ) == metrics_module._bootstrap_ci(treatment_samples)
+
+    def test_per_category_ci_is_a_wilson_interval(self) -> None:
+        """``_per_category`` calls ``_two_arm_pair`` without an explicit
+        wilson flag, relying on its default — citation_hallucination_rate
+        is a proportion, so that default must be True."""
+        control, treatment = TestPairReport().make_pair()
+
+        report = pair_report(control, treatment)
+
+        metric = report.per_category["C1"]
+        samples = [metrics_module._chr_sample(b) for b in control]
+        numerator = sum(s[0] for s in samples)
+        denominator = sum(s[1] for s in samples)
+        expected = metrics_module._wilson_interval(numerator, denominator)
+        assert metric.control is not None
+        assert (metric.control.ci_low, metric.control.ci_high) == expected
+
+    def test_pdrh_uses_a_wilson_interval_not_bootstrap(self) -> None:
+        h1 = hallucinated("llhb-v1-C1-101")
+        clean = score("llhb-v1-C2-101", category="C2")
+        treatment = [
+            bundle(item.case_id, item, tool_calls=[get_section_call("testloven", "1")])
+            for item in (h1, clean)
+        ]
+        control = [bundle(item.case_id, item) for item in (h1, clean)]
+
+        report = pair_report(control, treatment)
+
+        metric = report.metrics["post_direct_retrieval_hallucination_rate"]
+        samples = [metrics_module._pdrh_sample(b) for b in treatment]
+        numerator = sum(s[0] for s in samples)
+        denominator = sum(s[1] for s in samples)
+        expected = metrics_module._wilson_interval(numerator, denominator)
+        assert metric.treatment is not None
+        assert (metric.treatment.ci_low, metric.treatment.ci_high) == expected
+
+
+class TestEstimateBoundaries:
+    """``_estimate``'s proportion check spans the whole [0, denominator]
+    range inclusive at both ends — these pin each end and the function's
+    own default wilson flag, none of which the golden-CI tests (which never
+    land exactly at 0%, 100%, or call the function directly) exercise."""
+
+    def test_the_default_wilson_flag_is_true(self) -> None:
+        estimate = metrics_module._estimate([(1.0, 4.0), (0.0, 4.0)])
+
+        expected = metrics_module._wilson_interval(1.0, 8.0)
+        assert (estimate.ci_low, estimate.ci_high) == expected
+
+    def test_a_zero_numerator_proportion_still_uses_wilson(self) -> None:
+        control = [bundle(f"llhb-v1-C1-{i}", score(f"llhb-v1-C1-{i}")) for i in range(101, 104)]
+
+        report = pair_report(control, control)
+
+        metric = report.metrics[PRIMARY_METRIC]
+        assert metric.control is not None
+        assert metric.control.numerator == 0.0
+        expected = metrics_module._wilson_interval(0.0, 3.0)
+        assert (metric.control.ci_low, metric.control.ci_high) == expected
+
+    def test_a_full_rate_proportion_still_uses_wilson(self) -> None:
+        control = [
+            bundle(f"llhb-v1-C1-{i}", hallucinated(f"llhb-v1-C1-{i}")) for i in range(101, 105)
+        ]
+        treatment = [bundle(f"llhb-v1-C1-{i}", score(f"llhb-v1-C1-{i}")) for i in range(101, 105)]
+
+        report = pair_report(control, treatment)
+
+        metric = report.metrics[PRIMARY_METRIC]
+        assert metric.control is not None
+        assert metric.control.numerator == metric.control.denominator == 4.0
+        expected = metrics_module._wilson_interval(4.0, 4.0)
+        assert (metric.control.ci_low, metric.control.ci_high) == expected
+
+
+class TestWilsonIntervalClamp:
+    def test_the_upper_bound_clamps_a_floating_point_overshoot(self) -> None:
+        """At rate=1.0 with 11 trials the raw Wilson high end is
+        1.0000000000000002 — a genuine floating-point overshoot past the
+        formula's mathematical ceiling of 1.0, which the clamp exists to
+        catch."""
+        _, high = metrics_module._wilson_interval(11.0, 11.0)
+
+        assert high == 1.0
+
+
+class TestVolumeSamplers:
+    def test_invalid_volume_is_resolved_minus_valid_with_a_unit_denominator(self) -> None:
+        item = bundle(
+            "llhb-v1-C1-101",
+            score("llhb-v1-C1-101", asserted_resolved=5, asserted_valid=2),
+        )
+
+        numerator, denominator = metrics_module._invalid_volume_sample(item)
+
+        assert numerator == 3.0
+        assert denominator == 1.0
+
+
+class TestPdrhSampler:
+    def test_not_retrieved_directly_contributes_nothing(self) -> None:
+        item = bundle("llhb-v1-C1-101", hallucinated("llhb-v1-C1-101"))
+
+        numerator, denominator = metrics_module._pdrh_sample(item)
+
+        assert (numerator, denominator) == (0.0, 0.0)

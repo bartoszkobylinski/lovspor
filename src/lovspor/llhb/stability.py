@@ -9,6 +9,7 @@ the whole selection; never a silent gap.
 """
 
 import random
+from collections.abc import Hashable, Mapping, Sequence
 from typing import Any, Final
 
 from pydantic import BaseModel
@@ -62,13 +63,15 @@ def summarize_rates(values: list[float | None]) -> RateSummary:
     )
 
 
-def flipped_cases(outcomes_by_repeat: list[dict[str, bool | None]]) -> list[str]:
+def flipped_cases(outcomes_by_repeat: Sequence[Mapping[str, Hashable]]) -> list[str]:
     """Case ids whose outcome is not identical across every repeat.
 
     A case absent from any repeat is unstable by definition — silence
-    is not the same outcome as a verdict.
+    is not the same outcome as a verdict. The outcome is whatever the caller
+    compares by equality: a tri-state pass since v1, a five-way reason code
+    since ruling #30(c).
     """
-    outcomes: dict[str, list[bool | None]] = {}
+    outcomes: dict[str, list[Hashable]] = {}
     for repeat in outcomes_by_repeat:
         for case_id, outcome in repeat.items():
             outcomes.setdefault(case_id, []).append(outcome)

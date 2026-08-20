@@ -107,3 +107,78 @@ the same bytes on the wire, and a test asserting request.method only ever sees
 the normalised value. Verified against the pinned httpx: Request("get", url).method
 == Request("GET", url).method == "GET".
 """
+
+[[equivalent]]
+file = "src/lovspor/llhb/metrics.py"
+symbol = "_missingness_band"
+registered = "2026-08-20, PR #150, from run 32312439454"
+mutation = """
+-    survives = None if not dropped else (low > 0 if delta > 0 else high < 0 if delta < 0 else False)
++    survives = None if not dropped else (low > 0 if delta >= 0 else high < 0 if delta < 0 else False)
+"""
+justification = """
+`delta >= 0` differs from `delta > 0` only at `delta == 0`, and `delta` is
+`observed / total` with `total > 0`, so `delta == 0` means `observed == 0`.
+The branch is guarded by `if not dropped`, so `dropped >= 1` whenever it is
+reached, which makes `low = (0 - dropped) / total` strictly negative and
+`low > 0` False. The original returns the literal False for that case. Both
+spellings therefore answer False, by different routes. Verified exhaustively
+over every reachable state — total 1..40, dropped 0..total, observed from
+-scored to +scored (the sum of per-pair differences in {-1, 0, +1}), on
+Fraction to keep the comparisons exact: 23,820 states, zero disagreements.
+
+The three boundary spellings of this line are interchangeable for the same
+underlying reason and are registered together; `delta >= 0` is this one. No
+rewrite of the function kills them: at `delta == 0` every route computes
+False. Returning None there instead would kill them and would also make one
+None mean both "no dropped pairs" and "no sign to test" — the overloaded null
+this version exists to remove.
+"""
+
+[[equivalent]]
+file = "src/lovspor/llhb/metrics.py"
+symbol = "_missingness_band"
+registered = "2026-08-20, PR #150, from run 32312439454"
+mutation = """
+-    survives = None if not dropped else (low > 0 if delta > 0 else high < 0 if delta < 0 else False)
++    survives = None if not dropped else (low > 0 if delta > 0 else high < 0 if delta <= 0 else False)
+"""
+justification = """
+Same `delta == 0` boundary from the other side. There `high = (0 + dropped) /
+total` is strictly positive because the branch is only reached with
+`dropped >= 1`, so `high < 0` is False — the same answer the original's
+literal False gives. Verified in the same exhaustive sweep: 23,820 states,
+zero disagreements.
+
+The three boundary spellings of this line are interchangeable for the same
+underlying reason and are registered together; `delta <= 0` is this one. No
+rewrite of the function kills them: at `delta == 0` every route computes
+False. Returning None there instead would kill them and would also make one
+None mean both "no dropped pairs" and "no sign to test" — the overloaded null
+this version exists to remove.
+"""
+
+[[equivalent]]
+file = "src/lovspor/llhb/metrics.py"
+symbol = "_missingness_band"
+registered = "2026-08-20, PR #150, from run 32312439454"
+mutation = """
+-    survives = None if not dropped else (low > 0 if delta > 0 else high < 0 if delta < 0 else False)
++    survives = None if not dropped else (low > 0 if delta > 0 else high < 0 if delta < 1 else False)
+"""
+justification = """
+`delta` is a mean of per-pair differences drawn from {-1, 0, +1}, so it lies
+in [-1, 1], and any `delta > 0` is taken by the first branch before this one.
+What reaches the mutated comparison is therefore `delta <= 0`, where
+`delta < 1` and `delta < 0` agree except at `delta == 0` — and there
+`high = (0 + dropped) / total > 0` makes `high < 0` False, which is what the
+original's literal False returns. Verified in the same exhaustive sweep:
+23,820 states, zero disagreements.
+
+The three boundary spellings of this line are interchangeable for the same
+underlying reason and are registered together; `delta < 1` is this one. No
+rewrite of the function kills them: at `delta == 0` every route computes
+False. Returning None there instead would kill them and would also make one
+None mean both "no dropped pairs" and "no sign to test" — the overloaded null
+this version exists to remove.
+"""
