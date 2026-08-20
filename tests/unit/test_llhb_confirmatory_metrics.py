@@ -374,6 +374,23 @@ class TestMissingness:
         assert report.primary.missingness.sign_survives_worst_case is False
         assert report.primary.verdict != "confirmed"
 
+    def test_a_zero_effect_has_no_sign_to_survive(self) -> None:
+        """The arms differ nowhere, so the worst-case band straddles zero
+        whichever way the missing pair falls. Registered as the resting place
+        of three equivalent mutants: at delta == 0 every spelling of the
+        boundary computes False, and none of them can be killed by a test."""
+        both = [score(i) for i in ids(3)]
+        rest = both[:-1]
+        broken = [failed(both[-1].case_id, CaseOutcome.MODEL_ERROR)]
+
+        report = compute_pair_report(arm(rest, broken), arm(rest, broken))
+
+        missingness = report.primary.missingness
+        assert missingness.delta_all_cases == 0.0
+        assert missingness.dropped_pairs == 1
+        assert missingness.sign_survives_worst_case is False
+        assert report.primary.verdict != "confirmed"
+
     def test_no_dropped_pairs_leaves_the_question_unasked(self) -> None:
         good = [score(i) for i in ids(3)]
 
