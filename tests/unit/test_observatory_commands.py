@@ -11,6 +11,8 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -18,6 +20,7 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from lovspor.observatory.commands import _entry_points
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import read_registry
@@ -881,6 +884,37 @@ def _robots(httpx_mock: HTTPXMock, body: str) -> None:
     httpx_mock.add_response(url=ROBOTS_URL, text=body, is_reusable=True)
 
 
+class TestEntryPoints:
+    def test_explicit_entry_points_are_not_marked_as_a_conventional_probe(self) -> None:
+        fetcher = Mock()
+
+        starts = _entry_points(fetcher, SimpleNamespace(access_policy=None), ["one", "two"])
+
+        assert starts.urls == ("one", "two")
+        assert starts.probed is False
+        fetcher.declared_sitemaps.assert_not_called()
+
+    def test_a_source_without_an_access_policy_has_no_entry_points_or_probe(self) -> None:
+        fetcher = Mock()
+
+        starts = _entry_points(fetcher, SimpleNamespace(access_policy=None), None)
+
+        assert starts.urls == ()
+        assert starts.probed is False
+        fetcher.declared_sitemaps.assert_not_called()
+
+    def test_declared_entry_points_are_not_marked_as_a_conventional_probe(self) -> None:
+        fetcher = Mock()
+        fetcher.declared_sitemaps.return_value = (SITEMAP_URL, NESTED_SITEMAP_URL)
+        record = SimpleNamespace(access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL))
+
+        starts = _entry_points(fetcher, record, None)
+
+        assert starts.urls == (SITEMAP_URL, NESTED_SITEMAP_URL)
+        assert starts.probed is False
+        fetcher.declared_sitemaps.assert_called_once_with(ROBOTS_URL)
+
+
 class TestDiscover:
     """Reading what a source publishes about itself. Only the HTTP transport is
     mocked; the registry, the gates, the log and the blob store are real."""
@@ -1006,16 +1040,69 @@ class TestDiscover:
         assert "off_source_host  https://oslo.kommune.no/forskrift" in result.output
         assert "candidates: 1" in result.output
 
-    def test_a_source_that_declares_no_sitemap_is_refused(
+    def test_a_source_that_declares_no_sitemap_is_probed_at_the_conventional_path(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
         _activate(root)
         _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "documents read: 1" in result.output
+        assert f"sitemap  {PAGE_URL}" in result.output
+
+    def test_a_source_with_no_sitemap_anywhere_is_refused(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
 
         result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
 
         assert result.exit_code == 1
         assert "declares no sitemap" in result.stderr
+
+    def test_declared_sitemaps_that_cannot_be_read_are_refused_as_declarations(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            f"Refused: {BAERUM_ID} declares sitemaps that could not be read. "
+            "Discovery read no documents, so there is nothing to capture.\n"
+        )
+
+    def test_an_unreadable_explicit_entry_point_is_reported_not_refused(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "discover",
+                "--id",
+                BAERUM_ID,
+                "--entry-point",
+                SITEMAP_URL,
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "documents read: 0" in result.output
+        assert f"fetch_failed: http_404  {SITEMAP_URL}" in result.output
+        assert "Refused:" not in result.stderr
 
     def test_an_inactive_source_is_refused_before_any_request(
         self, root: Path, httpx_mock: HTTPXMock
@@ -1279,22 +1366,60 @@ class TestCapture:
         _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
         httpx_mock.add_response(url=SITEMAP_URL, content=sitemap)
 
-    def test_a_source_without_a_sitemap_is_a_refusal_not_a_silent_zero(
+    def test_an_undeclared_sitemap_is_found_at_the_conventional_path(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #151: 190 of 358 Norwegian municipalities publish a sitemap
+        at /sitemap.xml without declaring it in robots.txt (Phase A sweep,
+        2026-08-20). A declaration is the exception, not the rule, so an
+        undeclared sitemap is probed at the conventional path — through the
+        same gates and recorded the same way as any declared one."""
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+
+    def test_a_source_without_any_sitemap_is_a_refusal_not_a_silent_zero(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
         """Issue #151: this used to end `captured: 0` with exit code 0 — in a
         cron job indistinguishable from a healthy no-change run. Nothing was
-        captured because nothing COULD be: discovery had no entry points."""
+        captured because nothing COULD be: no sitemap is declared, and the
+        conventional path answered with nothing readable either."""
         _activate(root)
         _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
 
         result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
 
         assert result.exit_code == 1
         assert result.stderr == (
-            f"Refused: {BAERUM_ID} declares no sitemap in its robots.txt. "
-            "Discovery has no entry points, so there is nothing to capture.\n"
+            f"Refused: {BAERUM_ID} declares no sitemap in its robots.txt, and "
+            "nothing readable answered at the conventional /sitemap.xml. "
+            "Discovery read no documents, so there is nothing to capture.\n"
         )
+        assert "captured:" not in result.output
+
+    def test_declared_sitemaps_that_cannot_be_read_refuse_capture(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            f"Refused: {BAERUM_ID} declares sitemaps that could not be read. "
+            "Discovery read no documents, so there is nothing to capture.\n"
+        )
+        assert "candidates:" not in result.output
         assert "captured:" not in result.output
 
     def test_an_unreachable_robots_file_cannot_report_a_successful_zero_capture(
