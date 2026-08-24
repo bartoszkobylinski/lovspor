@@ -77,6 +77,29 @@ class TestStatusClassification:
 
 
 class TestAppendOnly:
+    def test_the_append_encoding_is_explicitly_utf8(
+        self, root: ObservatoryRoot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_open = Path.open
+        encodings: list[str | None] = []
+
+        def recording_open(path: Path, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            encodings.append(kwargs.get("encoding"))  # type: ignore[arg-type]
+            return original_open(path, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Path, "open", recording_open)
+
+        append_sweep_run(root, _run())
+
+        assert encodings == ["utf-8"]
+
+    def test_a_deep_archive_root_is_created_for_the_first_run(self, tmp_path: Path) -> None:
+        root = ObservatoryRoot(tmp_path / "archive" / "lovspor" / "observatory", ())
+
+        append_sweep_run(root, _run())
+
+        assert read_sweep_runs(sweeps_path(root)) == [_run()]
+
     def test_a_written_run_round_trips_without_losing_fields(self, root: ObservatoryRoot) -> None:
         run = _run(refused=1, completed=1)
 
@@ -142,7 +165,31 @@ class TestDamageIsRefused:
         with pytest.raises(LogIntegrityError) as exc:
             read_sweep_runs(sweeps_path(root))
 
-        assert "2" in str(exc.value)
+        assert str(exc.value).startswith(f"{sweeps_path(root)}:2: unreadable sweep run:")
+
+    def test_blank_lines_between_runs_are_ignored(self, root: ObservatoryRoot) -> None:
+        first = _run().model_copy(update={"run_id": "run with spaces"})
+        second = _run(started=START + timedelta(days=1))
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_bytes(
+            first.model_dump_json().encode()
+            + b"\n \t\n"
+            + second.model_dump_json().encode()
+            + b"\n"
+        )
+
+        assert read_sweep_runs(sweeps_path(root)) == [first, second]
+
+    def test_damage_after_a_blank_line_reports_its_physical_line(
+        self, root: ObservatoryRoot
+    ) -> None:
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_bytes(_run().model_dump_json().encode() + b"\n\n{broken\n")
+
+        with pytest.raises(LogIntegrityError) as exc:
+            read_sweep_runs(sweeps_path(root))
+
+        assert str(exc.value).startswith(f"{sweeps_path(root)}:3: unreadable sweep run:")
 
     def test_a_line_missing_a_field_is_damage_too(self, root: ObservatoryRoot) -> None:
         sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)

@@ -20,10 +20,17 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.observatory.commands import _entry_points
+from lovspor.observatory.commands import (
+    _echo_cadence,
+    _echo_last_sweep,
+    _echo_sources,
+    _entry_points,
+    _hm,
+    _SweepTotals,
+)
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
-from lovspor.observatory.registry import read_registry
+from lovspor.observatory.registry import SourceRegistry, read_registry
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
@@ -31,6 +38,9 @@ from lovspor.observatory.storage import (
     engine_root,
 )
 from lovspor.observatory.sweeps import (
+    OBSERVATION_SLA,
+    SWEEP_DEADLINE,
+    CadenceState,
     SweepRun,
     append_sweep_run,
     latest_sweep_run,
@@ -1507,6 +1517,9 @@ class TestCaptureAll:
         assert first.exit_code == 0, first.output
         assert second.exit_code == 0, second.output
         assert second.output.count("captured: 0 | failed: 0 | unchanged since last seen: 1") == 2
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert run.unchanged == 2
         requested = [str(request.url) for request in httpx_mock.get_requests()]
         assert requested.count(PAGE_URL) == 1
         assert requested.count(ASKER_PAGE_URL) == 1
@@ -1584,7 +1597,7 @@ class TestCaptureAll:
         result = runner.invoke(app, ["observatory", "capture-all"])
 
         assert result.exit_code == 1
-        assert "no activated sources" in result.stderr
+        assert result.stderr == "Refused: no activated sources.\n"
 
     def test_a_damaged_log_refuses_before_any_request(
         self, root: Path, httpx_mock: HTTPXMock
@@ -1597,7 +1610,9 @@ class TestCaptureAll:
         result = runner.invoke(app, ["observatory", "capture-all"])
 
         assert result.exit_code == 1
-        assert "log is damaged" in result.stderr
+        assert result.stderr == (
+            "Refused: the observation log is damaged. Run `observatory verify` first.\n"
+        )
         assert httpx_mock.get_requests() == []
 
     def test_a_clean_sweep_records_itself(self, root: Path, httpx_mock: HTTPXMock) -> None:
@@ -1668,6 +1683,67 @@ THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
 
 
 class TestStatus:
+    def test_status_sections_render_the_complete_operator_report(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run = SweepRun(
+            run_id="report",
+            started_at=datetime(2026, 8, 25, 1, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 8, 25, 2, 16, tzinfo=UTC),
+            active_sources=3,
+            sources_completed=2,
+            sources_refused=1,
+            captured=47,
+            failed_fetches=1,
+            unchanged=4218,
+            status="degraded",
+        )
+
+        _echo_sources(SourceRegistry())
+        _echo_last_sweep(run)
+        _echo_cadence(CadenceState(age=timedelta(hours=25), overdue=True))
+
+        assert capsys.readouterr().out == (
+            "Sources\n"
+            "  registered: 0\n"
+            "  active:     0\n"
+            "\nLast sweep\n"
+            "  started:    2026-08-25T01:00:00+00:00\n"
+            "  finished:   2026-08-25T02:16:00+00:00\n"
+            "  duration:   1h16m\n"
+            "  completed:  2 / 3\n"
+            "  refused:    1\n"
+            "  captured:   47 | unchanged: 4218\n"
+            "  status:     DEGRADED\n"
+            "\nCadence\n"
+            f"  target:     {_hm(OBSERVATION_SLA)}\n"
+            "  age:        25h00m\n"
+            f"  deadline:   {_hm(SWEEP_DEADLINE)}\n"
+            "  state:      OVERDUE\n"
+        )
+
+    def test_never_swept_status_uses_the_exact_operator_label(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _echo_last_sweep(None)
+        _echo_cadence(CadenceState(age=None, overdue=True))
+
+        assert capsys.readouterr().out == (
+            "\nLast sweep\n"
+            "  never\n"
+            "\nCadence\n"
+            f"  target:     {_hm(OBSERVATION_SLA)}\n"
+            "  age:        never swept\n"
+            f"  deadline:   {_hm(SWEEP_DEADLINE)}\n"
+            "  state:      OVERDUE\n"
+        )
+
+    def test_duration_discards_partial_minutes(self) -> None:
+        assert _hm(timedelta(hours=1, minutes=1, seconds=59)) == "1h01m"
+
+    def test_sweep_totals_preserve_unchanged_counts(self) -> None:
+        assert _SweepTotals(unchanged=2).plus(_SweepTotals(unchanged=3)).unchanged == 5
+
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case
         the deadline exists for."""
