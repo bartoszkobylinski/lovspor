@@ -77,6 +77,13 @@ class TestStatusClassification:
 
 
 class TestAppendOnly:
+    def test_a_written_run_round_trips_without_losing_fields(self, root: ObservatoryRoot) -> None:
+        run = _run(refused=1, completed=1)
+
+        append_sweep_run(root, run)
+
+        assert read_sweep_runs(sweeps_path(root)) == [run]
+
     def test_a_run_is_appended_next_to_the_registry(self, root: ObservatoryRoot) -> None:
         append_sweep_run(root, _run())
 
@@ -105,6 +112,15 @@ class TestAppendOnly:
 
         assert latest is not None
         assert latest.status == "degraded"
+
+    def test_latest_is_selected_by_start_time_not_file_position(
+        self, root: ObservatoryRoot
+    ) -> None:
+        newest = _run(refused=1, started=START + timedelta(days=1))
+        append_sweep_run(root, newest)
+        append_sweep_run(root, _run())
+
+        assert latest_sweep_run(sweeps_path(root)) == newest
 
     def test_no_file_yet_is_not_an_error(self, root: ObservatoryRoot) -> None:
         """A fresh archive has never swept. That is a fact to report, not a
@@ -160,6 +176,37 @@ class TestDamageIsRefused:
         the status command tries to subtract the two."""
         line = _run().model_dump(mode="json")
         line["started_at"] = "2026-08-25T01:00:00"
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_a_finish_timestamp_without_a_timezone_is_log_damage(
+        self, root: ObservatoryRoot
+    ) -> None:
+        line = _run().model_dump(mode="json")
+        line["finished_at"] = "2026-08-25T02:16:00"
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    @pytest.mark.parametrize(
+        "field",
+        [
+            "active_sources",
+            "sources_completed",
+            "sources_refused",
+            "captured",
+            "failed_fetches",
+            "unchanged",
+        ],
+    )
+    def test_negative_counts_are_log_damage(self, root: ObservatoryRoot, field: str) -> None:
+        line = _run().model_dump(mode="json")
+        line[field] = -1
         sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
         sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
 
