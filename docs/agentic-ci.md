@@ -4,6 +4,49 @@ PR-driven pipeline: Claude/human implements → small PR → GitHub Actions driv
 **READY TO MERGE** or an explicit **BLOCKED**. Merge is always human. Source spec:
 `docs/LOVSPOR_AGENTIC_CI_IMPLEMENTATION.md`.
 
+## What READY TO MERGE actually requires
+
+The ruleset `main-branch-protection` (id 20274337, `active`, targeting the default
+branch) is what turns a green pipeline into a merge. It carries four rules:
+
+| rule | effect |
+| --- | --- |
+| `pull_request` | changes reach `main` only through a PR |
+| `required_status_checks` | `fast-ci`, `mutation`, `test (3.12)`, `test (3.13)`, `test (3.14)` |
+| `non_fast_forward` | no force-push |
+| `deletion` | the branch cannot be deleted |
+
+`codex-tests` is deliberately **not** in the required set: a docs-only PR skips it, and
+a skipped required check blocks a PR forever. It is still read before merging — it is
+the check that says whether the independent author agreed with the implementation.
+
+### The gate was decorative until 2026-08-24 (issue #163)
+
+The ruleset also carried an `update` rule — *restrict updates*, meaning only an actor
+with bypass permission may update the ref at all. Merging a PR **is** an update, so it
+failed on every merge regardless of the checks, and each merge to `main` was recorded
+as a bypass:
+
+```
+sha=a32c050 update:fail required_status_checks:pass pull_request:pass   # PR #164
+sha=bd627cb update:fail required_status_checks:pass pull_request:pass   # PR #161
+sha=776fc9b update:fail required_status_checks:pass pull_request:pass   # PR #159
+sha=a63237d update:fail required_status_checks:pass pull_request:pass   # PR #156
+```
+
+The same click that waived `update` waived the five required checks with it, so the
+invariant this document states — merge only on a green pipeline — rested entirely on
+the operator reading the checks first. The `update` rule has been removed; the four
+rules above are what remains, and they are now reachable without a bypass.
+
+Read `result` and the per-rule breakdown, never the summary alone:
+
+```bash
+sid=$(gh api "repos/bartoszkobylinski/lovspor/rulesets/rule-suites?ref=refs/heads/main&per_page=1" --jq '.[0].id')
+gh api "repos/bartoszkobylinski/lovspor/rulesets/rule-suites/$sid" \
+  --jq '"result=\(.result)  " + ([.rule_evaluations[]|"\(.rule_type):\(.result)"]|join(" "))'
+```
+
 ```text
 PR opened/synchronize
   ├─ fast-ci        (ubuntu, 3.12: ruff, mypy, unit tests)
