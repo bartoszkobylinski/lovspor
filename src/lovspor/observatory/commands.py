@@ -265,18 +265,21 @@ def _require_documents(record: SourceRecord, result: DiscoveryResult, probed: bo
     """
     if result.documents_read:
         return
-    reason = (
+    typer.echo(
+        f"Refused: {record.authority_id} {_no_documents_reason(probed)}. "
+        "Discovery read no documents, so there is nothing to capture.",
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
+def _no_documents_reason(probed: bool) -> str:
+    return (
         "declares no sitemap in its robots.txt, and nothing readable answered "
         "at the conventional /sitemap.xml"
         if probed
         else "declares sitemaps that could not be read"
     )
-    typer.echo(
-        f"Refused: {record.authority_id} {reason}. "
-        "Discovery read no documents, so there is nothing to capture.",
-        err=True,
-    )
-    raise typer.Exit(1)
 
 
 def _entry_points(fetcher: Fetcher, record: SourceRecord, given: list[str] | None) -> _Starts:
@@ -459,7 +462,8 @@ def _capture_candidates(
 def capture(
     authority_id: _AuthorityIdOption,
     limit: Annotated[
-        int, typer.Option("--limit", help="Stop after this many fetches. 0 means no bound.")
+        int,
+        typer.Option("--limit", min=0, help="Stop after this many fetches. 0 means no bound."),
     ] = 0,
 ) -> None:
     """Observe what discovery proposes, skipping what has not changed since.
@@ -492,3 +496,70 @@ def capture(
         fetcher, result.candidates, latest_observations(scan.records), limit
     )
     typer.echo(f"captured: {captured} | failed: {failed} | unchanged since last seen: {skipped}")
+
+
+def _sweep_one(
+    fetcher: Fetcher,
+    log: ObservationLog,
+    record: SourceRecord,
+    observed: dict[str, datetime],
+    limit: int,
+) -> bool:
+    """One source of a sweep; True when it refused.
+
+    The sweep continues either way — one municipality's missing sitemap must
+    not cost the other two hundred their day's observations, and each host
+    waits out only its own rate limit — but the refusal stays on stderr and
+    moves the sweep's exit code.
+    """
+    starts = _entry_points(fetcher, record, None)
+    result = Discoverer(fetcher, log).discover(record, starts.urls)
+    if not result.documents_read:
+        typer.echo(
+            f"  refused: {record.authority_id} {_no_documents_reason(starts.probed)}", err=True
+        )
+        return True
+    typer.echo(f"candidates: {len(result.candidates)}")
+    captured, failed, skipped = _capture_candidates(fetcher, result.candidates, observed, limit)
+    typer.echo(f"captured: {captured} | failed: {failed} | unchanged since last seen: {skipped}")
+    return False
+
+
+@observatory_app.command("capture-all")
+def capture_all(
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit", min=0, help="Stop after this many fetches per source. 0 means no bound."
+        ),
+    ] = 0,
+) -> None:
+    """Sweep every activated source once, in authority-id order.
+
+    The steady-state cycle: after a source's bootstrap, a sweep is one
+    sitemap read plus whatever changed since — minutes per source — so a
+    sequential pass over the whole register fits a nightly cron. Exit code 0
+    means every source was observed; any refusal makes it 1, because a sweep
+    that quietly skipped a source would be the silent zero of issue #151 at
+    fleet scale.
+    """
+    active = [r for _, r in sorted(_load(_registry_file()).sources.items()) if r.active]
+    if not active:
+        typer.echo("Refused: no activated sources.", err=True)
+        raise typer.Exit(1)
+    log = ObservationLog(_root())
+    scan = log.scan()
+    if not scan.complete:
+        typer.echo(
+            "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
+        )
+        raise typer.Exit(1)
+    fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
+    observed = latest_observations(scan.records)
+    refused = 0
+    for record in active:
+        typer.echo(f"== {record.authority_id} {record.name}")
+        refused += _sweep_one(fetcher, log, record, observed, limit)
+    if refused:
+        typer.echo(f"sources refused: {refused} of {len(active)}", err=True)
+        raise typer.Exit(1)
