@@ -42,4 +42,38 @@ if [ "${#violations[@]}" -gt 0 ]; then
   exit 1
 fi
 
+# The allowlist is about WHICH files changed; it says nothing about HOW. A
+# deleted test still matches tests/*, so removal of a test the agent did not
+# write passes the check above untouched (issue #162). Rename detection is off
+# on purpose: moving a human test out from under the name its failures are
+# reported by is the same loss as deleting it.
+deleted="$(git diff --no-renames --diff-filter=D --name-only "$BASE_SHA" -- 'tests/*')"
+if [ -n "$deleted" ]; then
+  echo "SCOPE VIOLATION — Codex removed test files that existed at $BASE_SHA:" >&2
+  # One path per line, quoted. Unquoted expansion splits on IFS, so a filename
+  # containing a space was reported as several nonexistent paths — and an
+  # operator who cannot copy the name out of this message cannot act on it.
+  while IFS= read -r path; do printf '  %s\n' "$path" >&2; done <<< "$deleted"
+  exit 1
+fi
+
+# Rewriting an existing assertion stays ALLOWED. On PR #161 the agent tightened
+# one, and failing that would have painted a good round as an implementation
+# problem — the confusion this guard exists to prevent. But a weakened assertion
+# and a correct new test both leave this job green, so the rewrite is reported
+# where a human reads it rather than left to be noticed.
+# Formatted inside awk, on tab-separated fields: the path must never pass
+# through shell word splitting. Pairing a count with a path by splitting would
+# not merely mangle a spaced path, it would print a plausible line count
+# against a filename that does not exist.
+rewritten="$(git diff --no-renames --numstat "$BASE_SHA" -- 'tests/*' \
+  | awk -F'\t' '$2 ~ /^[0-9]+$/ && $2 > 0 {print "  -" $2 " line(s)  " $3}')"
+if [ -n "$rewritten" ]; then
+  {
+    echo "REWRITTEN TESTS — lines were removed from test files that existed at $BASE_SHA."
+    echo "Read the diff: this guard cannot tell a tightened assertion from a gutted one."
+    echo "$rewritten"
+  } | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+fi
+
 echo "scope guard OK ($(printf '%s\n' "$changed" | grep -c . || true) changed file(s), all allowed)"

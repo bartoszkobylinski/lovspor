@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -89,8 +90,15 @@ def _scope_repo(tmp_path: Path) -> tuple[Path, str]:
 
 
 def _run_scope_guard(repo: Path, base: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.pop("GITHUB_STEP_SUMMARY", None)
     return subprocess.run(
-        [str(SCOPE_GUARD), base], cwd=repo, check=False, text=True, capture_output=True
+        [str(SCOPE_GUARD), base],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
     )
 
 
@@ -127,6 +135,143 @@ def test_scope_guard_rejects_non_test_changes(tmp_path: Path, state: str) -> Non
     assert result.returncode == 1
     assert "SCOPE VIOLATION" in result.stderr
     assert "src/lovspor/forbidden.py" in result.stderr
+
+
+def _scope_repo_with_test(tmp_path: Path) -> tuple[Path, str, Path]:
+    """A repo whose base commit already carries a human-written test."""
+    repo, _ = _scope_repo(tmp_path)
+    human = repo / "tests" / "unit" / "test_human.py"
+    human.parent.mkdir(parents=True)
+    human.write_text("def test_contract():\n    assert compute() < ceiling()\n")
+    _git(repo, "add", "tests/unit/test_human.py")
+    _git(repo, "commit", "--quiet", "-m", "human test")
+    return repo, _git(repo, "rev-parse", "HEAD").stdout.strip(), human
+
+
+@pytest.mark.parametrize("state", ["committed", "staged", "unstaged"])
+def test_scope_guard_rejects_deleting_a_pre_existing_test(tmp_path: Path, state: str) -> None:
+    """Issue #162: the path allowlist accepts a deletion under tests/, because
+    the deleted path still matches tests/*. A test the agent did not write is
+    not the agent's to remove."""
+    repo, base, human = _scope_repo_with_test(tmp_path)
+    human.unlink()
+    if state == "committed":
+        _git(repo, "commit", "--quiet", "-a", "-m", "drop the human test")
+    elif state == "staged":
+        _git(repo, "add", "--update", "tests/unit/test_human.py")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert "SCOPE VIOLATION" in result.stderr
+    assert "tests/unit/test_human.py" in result.stderr
+
+
+def test_scope_guard_reports_deleted_test_path_with_spaces_verbatim(tmp_path: Path) -> None:
+    repo, _ = _scope_repo(tmp_path)
+    relative_path = Path("tests/unit/test human contract.py")
+    human = repo / relative_path
+    human.parent.mkdir(parents=True)
+    human.write_text("def test_contract():\n    assert True\n")
+    _git(repo, "add", str(relative_path))
+    _git(repo, "commit", "--quiet", "-m", "human test with spaces")
+    base = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    human.unlink()
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert f"  {relative_path}\n" in result.stderr
+
+
+def test_scope_guard_reports_rewritten_path_with_spaces_verbatim(tmp_path: Path) -> None:
+    """The same splitting bug is worse on the report path than on the violation
+    path: pairing a line count with a path by word splitting would print a
+    plausible count against a filename that does not exist."""
+    repo, _ = _scope_repo(tmp_path)
+    relative_path = Path("tests/unit/test human contract.py")
+    human = repo / relative_path
+    human.parent.mkdir(parents=True)
+    human.write_text("def test_contract():\n    assert compute() < ceiling()\n")
+    _git(repo, "add", str(relative_path))
+    _git(repo, "commit", "--quiet", "-m", "human test with spaces")
+    base = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    human.write_text("def test_contract():\n    assert True\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0
+    assert f"-1 line(s)  {relative_path}\n" in result.stdout
+
+
+def test_scope_guard_rejects_renaming_a_pre_existing_test_away(tmp_path: Path) -> None:
+    """Rename detection is off on purpose: moving a human test out from under
+    the name its failures are reported by is the same loss as deleting it."""
+    repo, base, human = _scope_repo_with_test(tmp_path)
+    _git(repo, "mv", "tests/unit/test_human.py", "tests/unit/test_moved.py")
+    _git(repo, "commit", "--quiet", "-m", "move the human test")
+    assert not human.exists()
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert "tests/unit/test_human.py" in result.stderr
+
+
+def test_scope_guard_reports_lines_removed_from_a_pre_existing_test(tmp_path: Path) -> None:
+    """Rewriting an existing assertion stays ALLOWED — on PR #161 the agent
+    tightened one, and failing that would paint a good round as an
+    implementation problem. It must not pass unseen, though."""
+    repo, base, human = _scope_repo_with_test(tmp_path)
+    human.write_text("def test_contract():\n    assert True\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0
+    assert "REWRITTEN TESTS" in result.stdout
+    assert "tests/unit/test_human.py" in result.stdout
+
+
+def test_scope_guard_writes_the_rewrite_report_to_the_job_summary(tmp_path: Path) -> None:
+    """The report is only useful where a human reads it: the job summary."""
+    repo, base, human = _scope_repo_with_test(tmp_path)
+    human.write_text("def test_contract():\n    assert True\n")
+    summary = tmp_path / "summary.md"
+
+    result = subprocess.run(
+        [str(SCOPE_GUARD), base],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+        env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)},
+    )
+
+    assert result.returncode == 0
+    assert "tests/unit/test_human.py" in summary.read_text()
+
+
+def test_scope_guard_stays_silent_when_only_new_tests_are_added(tmp_path: Path) -> None:
+    """Appending a whole new test file removes nothing — no report, no noise."""
+    repo, base, _ = _scope_repo_with_test(tmp_path)
+    (repo / "tests" / "unit" / "test_added.py").write_text("def test_new():\n    assert True\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0
+    assert "REWRITTEN TESTS" not in result.stdout
+
+
+def test_scope_guard_stays_silent_when_existing_test_only_gains_lines(tmp_path: Path) -> None:
+    """An additive edit to a human test is not a rewrite requiring review."""
+    repo, base, human = _scope_repo_with_test(tmp_path)
+    with human.open("a") as test_file:
+        test_file.write("\n\ndef test_boundary():\n    assert compute() == ceiling()\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0
+    assert "REWRITTEN TESTS" not in result.stdout
 
 
 def test_all_killed_passes(tmp_path: Path) -> None:
