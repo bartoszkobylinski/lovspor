@@ -199,6 +199,31 @@ jobs:
           } > "$RUNNER_TEMP/escalation.md"
           gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/escalation.md"
 
+      - name: Commit and push test additions
+        id: push
+        if: steps.antiloop.outputs.skip != 'true'
+        run: |
+          if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Squash everything since BEFORE_SHA into ONE marker commit — the anti-loop
+          # check reads the HEAD message, even if Codex committed on its own without it.
+          git reset --soft "$BEFORE_SHA"
+          # The committer identity names the author that actually ran, like the
+          # marker does. Hardcoding codex-ci attributed the Claude fallback's work
+          # to Codex in git blame and `git log --author` — fabricated provenance,
+          # caught on a real commit in milamber_assistant.
+          author="${{ steps.author.outputs.author || 'codex' }}"
+          git config user.name "${author}-ci"
+          git config user.email "${author}-ci@users.noreply.github.com"
+          git add -A
+          # The marker names the ACTUAL author — a Claude-written commit
+          # stamped [agent:codex-tests] would be fabricated provenance.
+          git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:${{ steps.author.outputs.author || 'codex' }}-tests]"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
       # Issue #160: an unfixable lint in agent output failed the normalize step
       # before the tests ran. The job went red, the PR got nothing, and the
       # author's whole run was discarded. #95 preserved the tests when they
@@ -238,31 +263,6 @@ jobs:
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > "$RUNNER_TEMP/pipeline-escalation.md"
           gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/pipeline-escalation.md"
-
-      - name: Commit and push test additions
-        id: push
-        if: steps.antiloop.outputs.skip != 'true'
-        run: |
-          if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
-            echo "pushed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Squash everything since BEFORE_SHA into ONE marker commit — the anti-loop
-          # check reads the HEAD message, even if Codex committed on its own without it.
-          git reset --soft "$BEFORE_SHA"
-          # The committer identity names the author that actually ran, like the
-          # marker does. Hardcoding codex-ci attributed the Claude fallback's work
-          # to Codex in git blame and `git log --author` — fabricated provenance,
-          # caught on a real commit in milamber_assistant.
-          author="${{ steps.author.outputs.author || 'codex' }}"
-          git config user.name "${author}-ci"
-          git config user.email "${author}-ci@users.noreply.github.com"
-          git add -A
-          # The marker names the ACTUAL author — a Claude-written commit
-          # stamped [agent:codex-tests] would be fabricated provenance.
-          git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:${{ steps.author.outputs.author || 'codex' }}-tests]"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
   mutation:
     # Runs only when fast CI is green, Codex finished, and Codex did NOT just push —

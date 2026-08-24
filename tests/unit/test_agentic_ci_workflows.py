@@ -432,6 +432,19 @@ class TestEscalationCoversEveryFailure:
             "if-no-files-found": "ignore",
         }
 
+    def test_the_pipeline_escalation_runs_after_every_step_it_reports_on(self) -> None:
+        """Also the author's, and the sharper of its two catches: steps run in
+        order, so a failure in step N cannot trigger a step at N-1. Placed
+        before the push, this escalation could never report a push that
+        failed — and a rejected non-fast-forward push is a real mode, seen in
+        issue #67. It must sit last."""
+        names = [step.get("name") for step in _steps("pr-pipeline.yml", "codex-tests")]
+
+        assert names.index("Escalate — the pipeline failed before the tests ran") > names.index(
+            "Commit and push test additions"
+        )
+        assert names[-1] == "Escalate — the pipeline failed before the tests ran"
+
     def test_the_pipeline_escalation_names_the_pr_and_the_preserved_artifact(self) -> None:
         """Also the author's: a comment that does not say where the work went
         leaves the operator with a label and no way to recover the round."""
