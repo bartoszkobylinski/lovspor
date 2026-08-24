@@ -483,6 +483,53 @@ class TestFailuresAreObservations:
         assert result.http_headers["location"] == elsewhere
         assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS_URL, PAGE_URL]
 
+    @pytest.mark.parametrize(
+        "target",
+        [
+            f"https://not{BAERUM_DOMAIN}/moved",
+            f"https://{BAERUM_DOMAIN}.example.invalid/moved",
+        ],
+    )
+    def test_a_redirect_to_a_domain_lookalike_is_not_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock, target: str
+    ) -> None:
+        """Redirect clearance is label-wise, not a permissive suffix check.
+
+        Both lookalikes contain the activated domain as text, but neither is
+        the domain nor one of its subdomains and therefore neither may receive
+        a request.
+        """
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302, headers={"Location": target})
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+        assert result.http_headers["location"] == target
+        assert [str(request.url) for request in httpx_mock.get_requests()] == [
+            ROBOTS_URL,
+            PAGE_URL,
+        ]
+
+    def test_a_redirect_without_a_location_is_not_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """A malformed redirect is a terminal recorded observation."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+        assert result.http_status == 302
+        assert result.http_headers == {}
+        assert [str(request.url) for request in httpx_mock.get_requests()] == [
+            ROBOTS_URL,
+            PAGE_URL,
+        ]
+
     def test_a_redirect_inside_the_authorised_domain_is_followed(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
