@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, NamedTuple
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.storage import ObservatoryRoot
@@ -58,8 +58,12 @@ class SweepRun(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str = Field(min_length=1)
-    started_at: datetime
-    finished_at: datetime
+    # Timezone-aware on purpose. Cadence compares these against an aware UTC
+    # clock, so a naive stamp does not fail here — it fails later, inside
+    # `observatory status`, as a TypeError from subtracting the two. Refusing
+    # it at the boundary keeps the damage where the line number still exists.
+    started_at: AwareDatetime
+    finished_at: AwareDatetime
     active_sources: int = Field(ge=0)
     sources_completed: int = Field(ge=0)
     sources_refused: int = Field(ge=0)
@@ -123,17 +127,24 @@ def read_sweep_runs(path: Path) -> list[SweepRun]:
     if not path.exists():
         return []
     runs: list[SweepRun] = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for number, line in enumerate(path.read_bytes().split(b"\n"), start=1):
         if not line.strip():
             continue
         runs.append(_parse_run(path, number, line))
     return runs
 
 
-def _parse_run(path: Path, number: int, line: str) -> SweepRun:
+def _parse_run(path: Path, number: int, line: bytes) -> SweepRun:
+    """Split and validated as bytes, never decoded first.
+
+    Decoding the file in one call would let a single bad byte take the whole
+    read down with a `UnicodeDecodeError` before any line number could be
+    named — the caller then learns the archive is damaged but not where. The
+    observation log splits on bytes for the same reason.
+    """
     try:
         return SweepRun.model_validate(json.loads(line))
-    except (json.JSONDecodeError, ValidationError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
         raise LogIntegrityError(f"{path}:{number}: unreadable sweep run: {exc}") from exc
 
 

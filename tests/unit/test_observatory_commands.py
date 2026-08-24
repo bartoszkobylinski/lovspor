@@ -1630,6 +1630,22 @@ class TestCaptureAll:
         assert run is not None
         assert (run.status, run.sources_completed, run.sources_refused) == ("degraded", 1, 1)
 
+    def test_document_fetch_failures_are_recorded_in_sweep_totals(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.captured, run.failed_fetches, run.unchanged) == (1, 1, 0)
+
     def test_two_sweeps_leave_two_records(self, root: Path, httpx_mock: HTTPXMock) -> None:
         self._two_sources(root, httpx_mock)
         httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)

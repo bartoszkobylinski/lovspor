@@ -6,6 +6,7 @@ are the behaviour under test — a fixture holding records in memory would
 prove neither.
 """
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -144,6 +145,25 @@ class TestDamageIsRefused:
             handle.write(line[:-1] + ',"invented":1}\n')
 
         with pytest.raises(LogIntegrityError):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_malformed_utf8_is_reported_as_log_damage(self, root: ObservatoryRoot) -> None:
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_bytes(b'{"run_id":"\xff"}\n')
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_a_timestamp_without_a_timezone_is_log_damage(self, root: ObservatoryRoot) -> None:
+        """Cadence compares the stored timestamp with an aware UTC clock, so
+        accepting a naive timestamp only postpones the integrity failure until
+        the status command tries to subtract the two."""
+        line = _run().model_dump(mode="json")
+        line["started_at"] = "2026-08-25T01:00:00"
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
             read_sweep_runs(sweeps_path(root))
 
 
