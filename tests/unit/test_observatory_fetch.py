@@ -481,6 +481,87 @@ class TestFailuresAreObservations:
         assert result.http_headers["location"] == elsewhere
         assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS_URL, PAGE_URL]
 
+    def test_a_redirect_inside_the_authorised_domain_is_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #158: www→apex is the commonest hosting shape in the country
+        and it never leaves the canonical domain the reviewer cleared. The ban
+        exists to stop a redirect carrying us OFF the authorised host, not to
+        stop movement inside it — 5 of the first 36 municipalities of the fleet
+        bootstrap were refused for this alone."""
+        apex = f"https://{BAERUM_DOMAIN}/sitemap.xml"
+        www = f"https://www.{BAERUM_DOMAIN}/sitemap.xml"
+        httpx_mock.add_response(
+            url=f"https://www.{BAERUM_DOMAIN}/robots.txt", text="User-agent: *\nAllow: /\n"
+        )
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=www, status_code=301, headers={"Location": apex})
+        httpx_mock.add_response(url=apex, content=PAYLOAD, headers={"Content-Type": "text/xml"})
+
+        result = _fetcher(log).capture(www, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == apex
+        assert result.sha256 == hashlib.sha256(PAYLOAD).hexdigest()
+        hops = [r for r in log.records() if getattr(r, "outcome", None) == "redirect_followed"]
+        assert [r.url for r in hops] == [www]
+        assert hops[0].http_headers["location"] == apex
+
+    def test_a_followed_redirect_passes_every_gate_again(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The target is a new request, so robots decides about it on its own
+        terms: a redirect must not smuggle a fetch past a rule that covers
+        where it lands."""
+        apex = f"https://{BAERUM_DOMAIN}/private/sitemap.xml"
+        www = f"https://www.{BAERUM_DOMAIN}/sitemap.xml"
+        # Python's RobotFileParser honours rule ORDER, not longest match, so
+        # the specific rule has to precede the blanket Allow.
+        robots = "User-agent: *\nDisallow: /private/\nAllow: /\n"
+        httpx_mock.add_response(url=f"https://www.{BAERUM_DOMAIN}/robots.txt", text=robots)
+        httpx_mock.add_response(url=ROBOTS_URL, text=robots)
+        httpx_mock.add_response(url=www, status_code=301, headers={"Location": apex})
+
+        result = _fetcher(log).capture(www, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "robots_disallowed"
+        assert result.url == apex
+        assert apex not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_redirect_chain_is_bounded(self, log: ObservationLog, httpx_mock: HTTPXMock) -> None:
+        """A loop inside the domain must end as a recorded outcome, not as a
+        crawler spinning against someone else's server."""
+        first = f"https://{BAERUM_DOMAIN}/a"
+        second = f"https://{BAERUM_DOMAIN}/b"
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=first, status_code=302, headers={"Location": second}, is_reusable=True
+        )
+        httpx_mock.add_response(
+            url=second, status_code=302, headers={"Location": first}, is_reusable=True
+        )
+
+        result = _fetcher(log).capture(first, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_limit_exceeded"
+
+    def test_a_relative_location_resolves_against_the_current_url(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        target = f"https://{BAERUM_DOMAIN}/sitemaps/index.xml"
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=PAGE_URL, status_code=301, headers={"Location": "/sitemaps/index.xml"}
+        )
+        httpx_mock.add_response(url=target, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == target
+
     def test_an_oversized_response_is_recorded_and_never_stored(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:

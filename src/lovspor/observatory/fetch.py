@@ -37,7 +37,7 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -45,7 +45,12 @@ import httpx
 from lovspor.errors import SourceNotActivatedError
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, FetchFailure, RetrievalProvenance
-from lovspor.observatory.registry import SourceRegistry, authorise_capture, capture_host
+from lovspor.observatory.registry import (
+    SourceRegistry,
+    authorise_capture,
+    capture_host,
+    host_within_domain,
+)
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 # Municipal PDFs are the large case; a cap keeps one oversized response from
@@ -56,6 +61,7 @@ CHANNEL_HTTP = "http"
 ROBOTS_PATH = "/robots.txt"
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
 _REDIRECT_STATUS = 300
+_MAX_REDIRECT_HOPS = 3
 _CLIENT_ERROR_STATUS = 400
 _SERVER_ERROR_STATUS = 500
 # Recorded response headers, by allowlist. A blanket copy would put Set-Cookie
@@ -109,6 +115,8 @@ class _Attempt:
     authority_id: str
     url: str
     provenance: RetrievalProvenance
+    canonical_domain: str = ""
+    hops_left: int = 0
 
 
 class RateLimiter:
@@ -234,6 +242,20 @@ class Fetcher:
                 recorded — no observation happened, and a record for a request
                 never made would be fiction in an evidence log.
         """
+        hops_left = _MAX_REDIRECT_HOPS
+        while True:
+            result = self._attempt(url, discovery_method, adapter, hops_left)
+            if not (isinstance(result, FetchFailure) and result.outcome == "redirect_followed"):
+                return result
+            url = urljoin(url, result.http_headers["location"])
+            hops_left -= 1
+
+    def _attempt(
+        self, url: str, discovery_method: str, adapter: str, hops_left: int
+    ) -> ArtifactObservation | FetchFailure:
+        """One hop: every gate, then the request. A redirect target is a new
+        request and passes the gates again — a redirect must never smuggle a
+        fetch past a rule that covers where it lands."""
         source = authorise_capture(self._registry, url)
         policy = source.access_policy
         if policy is None:
@@ -250,6 +272,8 @@ class Fetcher:
                 user_agent=policy.user_agent,
                 rate_limit_seconds=policy.rate_limit_seconds,
             ),
+            canonical_domain=source.canonical_domain,
+            hops_left=hops_left,
         )
         if not self._robots.allows(url, policy.user_agent):
             return self._failure(attempt, "robots_disallowed")
@@ -274,7 +298,10 @@ class Fetcher:
         recorded = _selected_headers(response.headers.items())
         status = response.status_code
         if status >= _REDIRECT_STATUS:
-            return self._failure(attempt, _outcome_for(status), status, recorded)
+            outcome = _outcome_for(status)
+            if outcome == "redirect_not_followed":
+                outcome = _redirect_outcome(attempt, recorded.get("location"))
+            return self._failure(attempt, outcome, status, recorded)
         payload = self._body(response)
         if payload is None:
             return self._failure(attempt, "response_exceeded_max_bytes", status, recorded)
@@ -318,6 +345,28 @@ class Fetcher:
         )
         self._log.append(record)
         return record
+
+
+def _redirect_outcome(attempt: _Attempt, location: str | None) -> str:
+    """Name a redirect by whether it stays inside the cleared domain.
+
+    The ban on following exists so a redirect cannot carry a fetch off the
+    host the reviewer cleared (ADR-0010 §4). A hop from ``www.X`` to ``X`` —
+    the commonest hosting shape among Norwegian municipalities — never leaves
+    it, and refusing that one blocked 5 of the first 36 sources of the fleet
+    bootstrap (issue #158). A target outside the domain, or one hop too many,
+    still ends here.
+    """
+    if not location:
+        return "redirect_not_followed"
+    target = urljoin(attempt.url, location)
+    try:
+        host = capture_host(target)
+    except SourceNotActivatedError:
+        return "redirect_not_followed"
+    if not host_within_domain(host, attempt.canonical_domain):
+        return "redirect_not_followed"
+    return "redirect_followed" if attempt.hops_left > 0 else "redirect_limit_exceeded"
 
 
 def _outcome_for(status: int) -> str:
