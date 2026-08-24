@@ -139,6 +139,10 @@ jobs:
         run: uv sync --frozen
 
       - name: Codex — mutation remediation (tests only)
+        # Below the job ceiling on purpose: a job-level timeout cancels the
+        # job and skips the escalation, which is exactly how run 32423861392
+        # ended with a red check, no label and no comment (issue #157).
+        timeout-minutes: 45
         id: author
         if: steps.cycle.outputs.run == 'true'
         env:
@@ -234,7 +238,9 @@ jobs:
       # Issue #67: a remediation job that dies mid-run must never fail silently —
       # the escalation contract (label + comment) applies to the failure itself.
       - name: Escalate on remediation failure
-        if: failure() && steps.cycle.outputs.pr != ''
+        # cancelled() as well as failure(): a job killed by its ceiling is not
+        # a failed job, and `failure()` alone let that path end in silence.
+        if: (failure() || cancelled()) && steps.cycle.outputs.pr != ''
         run: |
           gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
           gh pr comment "${{ steps.cycle.outputs.pr }}" --body \

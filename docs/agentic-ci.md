@@ -123,6 +123,25 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
   remediation failure escalates itself: `needs-human:mutation` + a comment linking the
   failed run. A remediation run never dies silently (issue #67).
 
+**Every failure escalates, not only a failing test.** Twice on 2026-08-24 a job
+ended red and silent because the failure happened outside the one step the
+escalation was watching: an unfixable lint (`RUF007`) in agent output failed the
+normalize step before the tests ran (issue #160), and a hung Codex CLI was killed
+by the job's own 60-minute ceiling, which *cancels* rather than fails and so
+skipped the reporting steps (issue #157).
+
+Two rules follow, and they are pinned by tests:
+
+- The agent step carries its own `timeout-minutes` (45), strictly below the job's
+  (60). A hang then fails the step, and the escalation still runs. A ceiling only
+  on the job buys silence.
+- `codex-tests` escalates on any failure. A failing Codex test labels
+  `needs-implementation-fix` (the implementation is the suspect); anything else
+  labels **`needs-human:pipeline`** and says so in the comment, because a pipeline
+  defect is not evidence about the code under review. The agent's work for that
+  round is preserved as artifact `agent-work-<sha>` instead of being discarded.
+- Remediation escalates on `failure() || cancelled()`, since a job killed by its
+  ceiling is not a failed job.
 ## Infrastructure
 
 - Self-hosted runner: label `codex`, dedicated VM with no production data or secrets.
