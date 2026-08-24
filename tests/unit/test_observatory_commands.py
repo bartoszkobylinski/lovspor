@@ -26,6 +26,7 @@ from lovspor.observatory.commands import (
     _echo_sources,
     _entry_points,
     _hm,
+    _record_sweep,
     _SweepTotals,
 )
 from lovspor.observatory.log import ObservationLog
@@ -1630,6 +1631,16 @@ class TestCaptureAll:
         assert run is not None
         assert (run.status, run.active_sources, run.sources_refused) == ("success", 2, 0)
         assert (run.captured, run.unchanged) == (2, 0)
+
+    def test_a_zero_source_sweep_is_recorded_as_failed(self, root: Path) -> None:
+        """A sweep that observed nothing must not leave green telemetry."""
+        started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
+
+        _record_sweep(ObservatoryRoot(root, ()), started, 0, _SweepTotals())
+
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.active_sources, run.sources_completed, run.status) == (0, 0, "failed")
 
     def test_a_degraded_sweep_is_recorded_too(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """The run that lost a municipality is the one somebody will want to
