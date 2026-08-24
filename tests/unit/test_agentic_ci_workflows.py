@@ -389,11 +389,13 @@ class TestEscalationCoversEveryFailure:
             ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
         ):
             step = _named_step(_steps(workflow_name, job_name), step_name)
+            job = _workflow(workflow_name)["jobs"][job_name]
 
-            assert (
-                step["timeout-minutes"]
-                < _workflow(workflow_name)["jobs"][job_name]["timeout-minutes"]
-            ), f"{workflow_name}: the step ceiling must bite before the job's"
+            assert step["timeout-minutes"] == 45
+            assert job["timeout-minutes"] == 60
+            assert step["timeout-minutes"] < job["timeout-minutes"], (
+                f"{workflow_name}: the step ceiling must bite before the job's"
+            )
 
     def test_a_failure_before_the_tests_still_escalates(self) -> None:
         """Issue #160: the lint step failed, the job went red, and the PR got
@@ -473,3 +475,13 @@ class TestEscalationCoversEveryFailure:
 
         assert "cancelled()" in escalate["if"]
         assert "failure()" in escalate["if"]
+
+    def test_remediation_escalation_runs_after_every_step_it_reports_on(self) -> None:
+        """A failure can only be reported by a later step. In particular, a
+        rejected push must not become another red, silent remediation run."""
+        names = [step.get("name") for step in _steps("mutation-remediation.yml", "remediate")]
+
+        assert names.index("Escalate on remediation failure") > names.index(
+            "Commit and push, or report BLOCKED"
+        )
+        assert names[-1] == "Escalate on remediation failure"
