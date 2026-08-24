@@ -414,7 +414,43 @@ class TestEscalationCoversEveryFailure:
         preserve = _named_step(steps, "Preserve agent work when the pipeline fails")
 
         assert preserve["if"] == "failure() && steps.codex-pytest.outcome != 'failure'"
-        assert "git add -N tests/" in preserve["run"]
+        # Written by the independent test author, which caught the first
+        # version diffing the worktree instead of BEFORE_SHA: the agent
+        # commits its own work, so a bare `git diff` preserves nothing.
+        assert [
+            line for line in preserve["run"].splitlines() if not line.strip().startswith("#")
+        ] == [
+            "git add -N tests/",
+            'git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true',
+        ]
+
+        upload = _named_step(steps, "Upload preserved agent work")
+        assert upload["if"] == preserve["if"]
+        assert upload["with"] == {
+            "name": "agent-work-${{ github.event.pull_request.head.sha }}",
+            "path": "${{ runner.temp }}/agent-work.patch",
+            "if-no-files-found": "ignore",
+        }
+
+    def test_the_pipeline_escalation_names_the_pr_and_the_preserved_artifact(self) -> None:
+        """Also the author's: a comment that does not say where the work went
+        leaves the operator with a label and no way to recover the round."""
+        fallback = _named_step(
+            _steps("pr-pipeline.yml", "codex-tests"),
+            "Escalate — the pipeline failed before the tests ran",
+        )
+        command = fallback["run"]
+
+        assert fallback["env"] == {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+        assert "agent-work-${{ github.event.pull_request.head.sha }}" in command
+        assert (
+            'gh pr comment "${{ github.event.pull_request.number }}" '
+            '--body-file "$RUNNER_TEMP/pipeline-escalation.md"' in command
+        )
+        run_url = (
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        )
+        assert run_url in command
 
     def test_remediation_escalates_even_when_it_is_cancelled(self) -> None:
         """Issue #157: a cancelled job is not a failed one, so `failure()`

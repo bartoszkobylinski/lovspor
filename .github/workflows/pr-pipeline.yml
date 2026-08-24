@@ -207,7 +207,12 @@ jobs:
         if: failure() && steps.codex-pytest.outcome != 'failure'
         run: |
           git add -N tests/
-          git diff -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true
+          # Diff against BEFORE_SHA, not the worktree: the agent commits its own
+          # work (which is why the push step squashes with `git reset --soft`),
+          # and a bare `git diff` would then preserve an empty patch — exactly
+          # in the case this step exists for. Caught by the independent author
+          # on this PR; the older preserve step from #95 already did it right.
+          git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true
 
       - name: Upload preserved agent work
         if: failure() && steps.codex-pytest.outcome != 'failure'
