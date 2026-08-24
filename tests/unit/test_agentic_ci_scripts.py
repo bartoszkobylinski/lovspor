@@ -90,8 +90,15 @@ def _scope_repo(tmp_path: Path) -> tuple[Path, str]:
 
 
 def _run_scope_guard(repo: Path, base: str) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.pop("GITHUB_STEP_SUMMARY", None)
     return subprocess.run(
-        [str(SCOPE_GUARD), base], cwd=repo, check=False, text=True, capture_output=True
+        [str(SCOPE_GUARD), base],
+        cwd=repo,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
     )
 
 
@@ -248,6 +255,18 @@ def test_scope_guard_stays_silent_when_only_new_tests_are_added(tmp_path: Path) 
     """Appending a whole new test file removes nothing — no report, no noise."""
     repo, base, _ = _scope_repo_with_test(tmp_path)
     (repo / "tests" / "unit" / "test_added.py").write_text("def test_new():\n    assert True\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0
+    assert "REWRITTEN TESTS" not in result.stdout
+
+
+def test_scope_guard_stays_silent_when_existing_test_only_gains_lines(tmp_path: Path) -> None:
+    """An additive edit to a human test is not a rewrite requiring review."""
+    repo, base, human = _scope_repo_with_test(tmp_path)
+    with human.open("a") as test_file:
+        test_file.write("\n\ndef test_boundary():\n    assert compute() == ceiling()\n")
 
     result = _run_scope_guard(repo, base)
 
