@@ -98,6 +98,12 @@ jobs:
       - name: Codex — independent PR test author
         id: author
         if: steps.antiloop.outputs.skip != 'true'
+        # The ceiling belongs on the STEP, not only on the job: a job-level
+        # timeout CANCELS the job, and a cancelled job skips the escalation
+        # steps that would say why it died. On the step, the same hang fails
+        # the step and the reporting below still runs (issue #157, seen on
+        # the remediation side when the Codex CLI hung for ~50 minutes).
+        timeout-minutes: 45
         env:
           CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
           CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
@@ -217,6 +223,46 @@ jobs:
           git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:${{ steps.author.outputs.author || 'codex' }}-tests]"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      # Issue #160: an unfixable lint in agent output failed the normalize step
+      # before the tests ran. The job went red, the PR got nothing, and the
+      # author's whole run was discarded. #95 preserved the tests when they
+      # FAILED; they must also survive the pipeline itself failing.
+      - name: Preserve agent work when the pipeline fails
+        if: failure() && steps.codex-pytest.outcome != 'failure'
+        run: |
+          git add -N tests/
+          # Diff against BEFORE_SHA, not the worktree: the agent commits its own
+          # work (which is why the push step squashes with `git reset --soft`),
+          # and a bare `git diff` would then preserve an empty patch — exactly
+          # in the case this step exists for. Caught by the independent author
+          # on this PR; the older preserve step from #95 already did it right.
+          git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true
+
+      - name: Upload preserved agent work
+        if: failure() && steps.codex-pytest.outcome != 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-work-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/agent-work.patch
+          if-no-files-found: ignore
+
+      - name: Escalate — the pipeline failed before the tests ran
+        if: failure() && steps.codex-pytest.outcome != 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" --add-label "needs-human:pipeline"
+          {
+            echo "codex-tests BLOCKED before the tests ran — this is a pipeline"
+            echo "failure, not evidence about the implementation."
+            echo ""
+            echo "Nothing was pushed, and the independent author's work for this"
+            echo "round is preserved as artifact \`agent-work-${{ github.event.pull_request.head.sha }}\`."
+            echo ""
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "$RUNNER_TEMP/pipeline-escalation.md"
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/pipeline-escalation.md"
 
   mutation:
     # Runs only when fast CI is green, Codex finished, and Codex did NOT just push —

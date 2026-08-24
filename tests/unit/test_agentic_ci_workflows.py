@@ -104,7 +104,9 @@ def test_remediation_failure_escalates_only_after_pr_resolution() -> None:
     escalation = _named_step(steps, "Escalate on remediation failure")
     command = escalation["run"]
 
-    assert escalation["if"] == "failure() && steps.cycle.outputs.pr != ''"
+    # Widened to cover cancellation in #157: a job killed by its ceiling is
+    # not a failed job, and the PR-resolution guard is what this test pins.
+    assert escalation["if"] == "(failure() || cancelled()) && steps.cycle.outputs.pr != ''"
     assert (
         'gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"' in command
     )
@@ -368,3 +370,118 @@ def test_pr_pipeline_workflow_scoped_concurrency_still_cancels_stale_runs() -> N
 
     assert concurrency["group"] == "pr-${{ github.event.pull_request.number }}"
     assert concurrency["cancel-in-progress"] is True
+
+
+class TestEscalationCoversEveryFailure:
+    """Issues #157 and #160. The pipeline's contract is that a blocked PR ends
+    labelled and commented (docs/agentic-ci.md). Twice in one day it ended red
+    and silent instead: once when an unfixable lint in agent output failed the
+    normalize step before the tests ran, once when the job's own 60-minute
+    ceiling cancelled a hung Codex CLI. Both failures happened outside the one
+    step the escalation was watching."""
+
+    def test_the_agent_step_carries_its_own_ceiling(self) -> None:
+        """A ceiling on the JOB cancels it, and a cancelled job skips the
+        escalation steps that would have reported why. On the STEP, the same
+        hang fails the step and the escalation still runs."""
+        for workflow_name, job_name, step_name in (
+            ("pr-pipeline.yml", "codex-tests", "Codex — independent PR test author"),
+            ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
+        ):
+            step = _named_step(_steps(workflow_name, job_name), step_name)
+            job = _workflow(workflow_name)["jobs"][job_name]
+
+            assert step["timeout-minutes"] == 45
+            assert job["timeout-minutes"] == 60
+            assert step["timeout-minutes"] < job["timeout-minutes"], (
+                f"{workflow_name}: the step ceiling must bite before the job's"
+            )
+
+    def test_a_failure_before_the_tests_still_escalates(self) -> None:
+        """Issue #160: the lint step failed, the job went red, and the PR got
+        no label and no comment because the escalation asked only about the
+        pytest step."""
+        steps = _steps("pr-pipeline.yml", "codex-tests")
+        fallback = _named_step(steps, "Escalate — the pipeline failed before the tests ran")
+
+        assert fallback["if"] == "failure() && steps.codex-pytest.outcome != 'failure'"
+        assert "needs-human:pipeline" in fallback["run"]
+        assert "gh pr comment" in fallback["run"]
+
+    def test_agent_work_survives_a_failure_before_the_tests(self) -> None:
+        """Issue #160, second half: the independent author's whole run was
+        discarded, so the next round starts from zero. #95 preserved the tests
+        when they FAILED; they must also survive the pipeline failing."""
+        steps = _steps("pr-pipeline.yml", "codex-tests")
+        preserve = _named_step(steps, "Preserve agent work when the pipeline fails")
+
+        assert preserve["if"] == "failure() && steps.codex-pytest.outcome != 'failure'"
+        # Written by the independent test author, which caught the first
+        # version diffing the worktree instead of BEFORE_SHA: the agent
+        # commits its own work, so a bare `git diff` preserves nothing.
+        assert [
+            line for line in preserve["run"].splitlines() if not line.strip().startswith("#")
+        ] == [
+            "git add -N tests/",
+            'git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true',
+        ]
+
+        upload = _named_step(steps, "Upload preserved agent work")
+        assert upload["if"] == preserve["if"]
+        assert upload["with"] == {
+            "name": "agent-work-${{ github.event.pull_request.head.sha }}",
+            "path": "${{ runner.temp }}/agent-work.patch",
+            "if-no-files-found": "ignore",
+        }
+
+    def test_the_pipeline_escalation_runs_after_every_step_it_reports_on(self) -> None:
+        """Also the author's, and the sharper of its two catches: steps run in
+        order, so a failure in step N cannot trigger a step at N-1. Placed
+        before the push, this escalation could never report a push that
+        failed — and a rejected non-fast-forward push is a real mode, seen in
+        issue #67. It must sit last."""
+        names = [step.get("name") for step in _steps("pr-pipeline.yml", "codex-tests")]
+
+        assert names.index("Escalate — the pipeline failed before the tests ran") > names.index(
+            "Commit and push test additions"
+        )
+        assert names[-1] == "Escalate — the pipeline failed before the tests ran"
+
+    def test_the_pipeline_escalation_names_the_pr_and_the_preserved_artifact(self) -> None:
+        """Also the author's: a comment that does not say where the work went
+        leaves the operator with a label and no way to recover the round."""
+        fallback = _named_step(
+            _steps("pr-pipeline.yml", "codex-tests"),
+            "Escalate — the pipeline failed before the tests ran",
+        )
+        command = fallback["run"]
+
+        assert fallback["env"] == {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
+        assert "agent-work-${{ github.event.pull_request.head.sha }}" in command
+        assert (
+            'gh pr comment "${{ github.event.pull_request.number }}" '
+            '--body-file "$RUNNER_TEMP/pipeline-escalation.md"' in command
+        )
+        run_url = (
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        )
+        assert run_url in command
+
+    def test_remediation_escalates_even_when_it_is_cancelled(self) -> None:
+        """Issue #157: a cancelled job is not a failed one, so `failure()`
+        alone let the timeout path end without a label."""
+        steps = _steps("mutation-remediation.yml", "remediate")
+        escalate = _named_step(steps, "Escalate on remediation failure")
+
+        assert "cancelled()" in escalate["if"]
+        assert "failure()" in escalate["if"]
+
+    def test_remediation_escalation_runs_after_every_step_it_reports_on(self) -> None:
+        """A failure can only be reported by a later step. In particular, a
+        rejected push must not become another red, silent remediation run."""
+        names = [step.get("name") for step in _steps("mutation-remediation.yml", "remediate")]
+
+        assert names.index("Escalate on remediation failure") > names.index(
+            "Commit and push, or report BLOCKED"
+        )
+        assert names[-1] == "Escalate on remediation failure"
