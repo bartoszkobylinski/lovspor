@@ -562,6 +562,23 @@ class TestFailuresAreObservations:
         assert isinstance(result, ArtifactObservation)
         assert result.url == target
 
+    def test_a_same_host_redirect_is_rate_limited_as_a_second_request(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Following a redirect does not waive the source's spacing rule:
+        each HTTP request is independently subject to the per-host limit."""
+        target = f"https://{BAERUM_DOMAIN}/moved"
+        clock = _Clock()
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302, headers={"Location": target})
+        httpx_mock.add_response(url=target, content=PAYLOAD)
+
+        result = _fetcher(log, _settings(clock)).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == target
+        assert clock.slept == [2.0]
+
     def test_an_oversized_response_is_recorded_and_never_stored(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
