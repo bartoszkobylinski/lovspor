@@ -50,7 +50,10 @@ fi
 deleted="$(git diff --no-renames --diff-filter=D --name-only "$BASE_SHA" -- 'tests/*')"
 if [ -n "$deleted" ]; then
   echo "SCOPE VIOLATION — Codex removed test files that existed at $BASE_SHA:" >&2
-  printf '  %s\n' $deleted >&2
+  # One path per line, quoted. Unquoted expansion splits on IFS, so a filename
+  # containing a space was reported as several nonexistent paths — and an
+  # operator who cannot copy the name out of this message cannot act on it.
+  while IFS= read -r path; do printf '  %s\n' "$path" >&2; done <<< "$deleted"
   exit 1
 fi
 
@@ -59,12 +62,17 @@ fi
 # problem — the confusion this guard exists to prevent. But a weakened assertion
 # and a correct new test both leave this job green, so the rewrite is reported
 # where a human reads it rather than left to be noticed.
-rewritten="$(git diff --no-renames --numstat "$BASE_SHA" -- 'tests/*' | awk '$2 ~ /^[0-9]+$/ && $2 > 0 {print $2 "\t" $3}')"
+# Formatted inside awk, on tab-separated fields: the path must never pass
+# through shell word splitting. Pairing a count with a path by splitting would
+# not merely mangle a spaced path, it would print a plausible line count
+# against a filename that does not exist.
+rewritten="$(git diff --no-renames --numstat "$BASE_SHA" -- 'tests/*' \
+  | awk -F'\t' '$2 ~ /^[0-9]+$/ && $2 > 0 {print "  -" $2 " line(s)  " $3}')"
 if [ -n "$rewritten" ]; then
   {
     echo "REWRITTEN TESTS — lines were removed from test files that existed at $BASE_SHA."
     echo "Read the diff: this guard cannot tell a tightened assertion from a gutted one."
-    printf '  -%s line(s)  %s\n' $rewritten
+    echo "$rewritten"
   } | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 fi
 

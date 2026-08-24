@@ -141,7 +141,7 @@ def _scope_repo_with_test(tmp_path: Path) -> tuple[Path, str, Path]:
     return repo, _git(repo, "rev-parse", "HEAD").stdout.strip(), human
 
 
-@pytest.mark.parametrize("state", ["committed", "unstaged"])
+@pytest.mark.parametrize("state", ["committed", "staged", "unstaged"])
 def test_scope_guard_rejects_deleting_a_pre_existing_test(tmp_path: Path, state: str) -> None:
     """Issue #162: the path allowlist accepts a deletion under tests/, because
     the deleted path still matches tests/*. A test the agent did not write is
@@ -150,12 +150,51 @@ def test_scope_guard_rejects_deleting_a_pre_existing_test(tmp_path: Path, state:
     human.unlink()
     if state == "committed":
         _git(repo, "commit", "--quiet", "-a", "-m", "drop the human test")
+    elif state == "staged":
+        _git(repo, "add", "--update", "tests/unit/test_human.py")
 
     result = _run_scope_guard(repo, base)
 
     assert result.returncode == 1
     assert "SCOPE VIOLATION" in result.stderr
     assert "tests/unit/test_human.py" in result.stderr
+
+
+def test_scope_guard_reports_deleted_test_path_with_spaces_verbatim(tmp_path: Path) -> None:
+    repo, _ = _scope_repo(tmp_path)
+    relative_path = Path("tests/unit/test human contract.py")
+    human = repo / relative_path
+    human.parent.mkdir(parents=True)
+    human.write_text("def test_contract():\n    assert True\n")
+    _git(repo, "add", str(relative_path))
+    _git(repo, "commit", "--quiet", "-m", "human test with spaces")
+    base = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    human.unlink()
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 1
+    assert f"  {relative_path}\n" in result.stderr
+
+
+def test_scope_guard_reports_rewritten_path_with_spaces_verbatim(tmp_path: Path) -> None:
+    """The same splitting bug is worse on the report path than on the violation
+    path: pairing a line count with a path by word splitting would print a
+    plausible count against a filename that does not exist."""
+    repo, _ = _scope_repo(tmp_path)
+    relative_path = Path("tests/unit/test human contract.py")
+    human = repo / relative_path
+    human.parent.mkdir(parents=True)
+    human.write_text("def test_contract():\n    assert compute() < ceiling()\n")
+    _git(repo, "add", str(relative_path))
+    _git(repo, "commit", "--quiet", "-m", "human test with spaces")
+    base = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    human.write_text("def test_contract():\n    assert True\n")
+
+    result = _run_scope_guard(repo, base)
+
+    assert result.returncode == 0
+    assert f"-1 line(s)  {relative_path}\n" in result.stdout
 
 
 def test_scope_guard_rejects_renaming_a_pre_existing_test_away(tmp_path: Path) -> None:
