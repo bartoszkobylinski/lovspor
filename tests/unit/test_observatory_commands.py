@@ -1457,6 +1457,35 @@ class TestCaptureAll:
         assert baerum_second not in requested
         assert asker_second not in requested
 
+    def test_unchanged_pages_are_skipped_for_every_source_on_the_next_sweep(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The fleet command must preserve capture's freshness rule in every
+        lane; otherwise a nightly sweep needlessly downloads the full corpus."""
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(
+            url=SITEMAP_URL,
+            content=_urlset(PAGE_URL, lastmod="2020-01-01"),
+            is_reusable=True,
+        )
+        httpx_mock.add_response(
+            url=ASKER_SITEMAP_URL,
+            content=_urlset(ASKER_PAGE_URL, lastmod="2020-01-01"),
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        first = runner.invoke(app, ["observatory", "capture-all"])
+        second = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert first.exit_code == 0, first.output
+        assert second.exit_code == 0, second.output
+        assert second.output.count("captured: 0 | failed: 0 | unchanged since last seen: 1") == 2
+        requested = [str(request.url) for request in httpx_mock.get_requests()]
+        assert requested.count(PAGE_URL) == 1
+        assert requested.count(ASKER_PAGE_URL) == 1
+
     def test_conventional_sitemap_refusal_is_loud_but_does_not_stop_the_sweep(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
