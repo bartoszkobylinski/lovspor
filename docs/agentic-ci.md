@@ -32,6 +32,23 @@ PR opened/synchronize
   (`[agent:claude-tests]` / `[agent:claude-mutation]`); the scope guard applies unchanged.
 - **Human** — merge, methodology changes, frozen benchmark decisions, every BLOCKED.
 
+### What the scope guard does and does not decide
+
+`assert_codex_scope.sh` answers two questions, and it is worth knowing which.
+
+**It fails the job** when a path outside `tests/` changed, and when a test file that
+existed at `BEFORE_SHA` was deleted or renamed away. Rename detection is deliberately
+off: moving a human test out from under the name its failures are reported by loses
+the same coverage as deleting it.
+
+**It reports, without failing**, when lines were removed from a test file that already
+existed — the count and the path go to stdout and to the job summary. Rewriting an
+existing assertion is legitimate (on PR #161 the independent author tightened one), so
+failing it would paint a good round as an implementation problem. But a tightened
+assertion and a gutted one leave the job equally green, and the guard cannot tell them
+apart. The report exists so a human reads that diff rather than trusting the check
+colour. Issue #162 is where this gap was written down.
+
 ## Mutation policy (unchanged, now automated)
 
 `scripts/mutmut-pr.sh <base-sha>` runs mutmut 3.7.0 for functions changed by the PR.
