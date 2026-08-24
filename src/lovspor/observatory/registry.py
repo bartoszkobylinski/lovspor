@@ -41,6 +41,15 @@ REGISTRY_FILENAME = "sources.json"
 GLOBALLY_DENIED_HOSTS = frozenset({"lovdata.no"})
 
 
+def host_within_domain(host: str, domain: str) -> bool:
+    """Public name for the domain test the capture gate already applies.
+
+    Exposed so the redirect rule and the activation gate cannot drift apart:
+    "inside the cleared domain" must mean exactly one thing (issue #158).
+    """
+    return _host_matches(host, domain)
+
+
 def _host_matches(host: str, domain: str) -> bool:
     """True when ``host`` is ``domain`` or a subdomain of it.
 

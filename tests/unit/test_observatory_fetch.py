@@ -6,6 +6,7 @@ would be testing the stubs, and the gates are the whole point of this module.
 """
 
 import hashlib
+import itertools
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from lovspor.errors import SourceNotActivatedError
+from lovspor.observatory import fetch as fetch_module
 from lovspor.observatory.fetch import (
     CaptureSettings,
     Fetcher,
@@ -480,6 +482,198 @@ class TestFailuresAreObservations:
         assert result.outcome == "redirect_not_followed"
         assert result.http_headers["location"] == elsewhere
         assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS_URL, PAGE_URL]
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            f"https://not{BAERUM_DOMAIN}/moved",
+            f"https://{BAERUM_DOMAIN}.example.invalid/moved",
+        ],
+    )
+    def test_a_redirect_to_a_domain_lookalike_is_not_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock, target: str
+    ) -> None:
+        """Redirect clearance is label-wise, not a permissive suffix check.
+
+        Both lookalikes contain the activated domain as text, but neither is
+        the domain nor one of its subdomains and therefore neither may receive
+        a request.
+        """
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302, headers={"Location": target})
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+        assert result.http_headers["location"] == target
+        assert [str(request.url) for request in httpx_mock.get_requests()] == [
+            ROBOTS_URL,
+            PAGE_URL,
+        ]
+
+    def test_a_redirect_without_a_location_is_not_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """A malformed redirect is a terminal recorded observation."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+        assert result.http_status == 302
+        assert result.http_headers == {}
+        assert [str(request.url) for request in httpx_mock.get_requests()] == [
+            ROBOTS_URL,
+            PAGE_URL,
+        ]
+
+    def test_a_redirect_inside_the_authorised_domain_is_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #158: www→apex is the commonest hosting shape in the country
+        and it never leaves the canonical domain the reviewer cleared. The ban
+        exists to stop a redirect carrying us OFF the authorised host, not to
+        stop movement inside it — 5 of the first 36 municipalities of the fleet
+        bootstrap were refused for this alone."""
+        apex = f"https://{BAERUM_DOMAIN}/sitemap.xml"
+        www = f"https://www.{BAERUM_DOMAIN}/sitemap.xml"
+        httpx_mock.add_response(
+            url=f"https://www.{BAERUM_DOMAIN}/robots.txt", text="User-agent: *\nAllow: /\n"
+        )
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=www, status_code=301, headers={"Location": apex})
+        httpx_mock.add_response(url=apex, content=PAYLOAD, headers={"Content-Type": "text/xml"})
+
+        result = _fetcher(log).capture(www, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == apex
+        assert result.sha256 == hashlib.sha256(PAYLOAD).hexdigest()
+        hops = [r for r in log.records() if getattr(r, "outcome", None) == "redirect_followed"]
+        assert [r.url for r in hops] == [www]
+        assert hops[0].http_headers["location"] == apex
+
+    def test_a_followed_redirect_passes_every_gate_again(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The target is a new request, so robots decides about it on its own
+        terms: a redirect must not smuggle a fetch past a rule that covers
+        where it lands."""
+        apex = f"https://{BAERUM_DOMAIN}/private/sitemap.xml"
+        www = f"https://www.{BAERUM_DOMAIN}/sitemap.xml"
+        # Python's RobotFileParser honours rule ORDER, not longest match, so
+        # the specific rule has to precede the blanket Allow.
+        robots = "User-agent: *\nDisallow: /private/\nAllow: /\n"
+        httpx_mock.add_response(url=f"https://www.{BAERUM_DOMAIN}/robots.txt", text=robots)
+        httpx_mock.add_response(url=ROBOTS_URL, text=robots)
+        httpx_mock.add_response(url=www, status_code=301, headers={"Location": apex})
+
+        result = _fetcher(log).capture(www, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "robots_disallowed"
+        assert result.url == apex
+        assert apex not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
+    def test_a_redirect_chain_is_bounded(self, log: ObservationLog, httpx_mock: HTTPXMock) -> None:
+        """A chain inside the domain must end as a recorded outcome, not as a
+        crawler spinning against someone else's server.
+
+        The chain is finite and every response single-use on purpose. Mocked
+        as a two-URL loop with reusable responses, a mutant that stops
+        decrementing the budget spins until mutmut's timeout instead of
+        failing — two such timeouts, not kills, failed the gate on run
+        32732243735. Against a finite chain the same mutant walks past the
+        fourth hop, returns the artifact, and dies on these assertions in
+        milliseconds. The last response stays unrequested by design — it is
+        the bait such a mutant would take.
+        """
+        hops = [f"https://{BAERUM_DOMAIN}/hop{index}" for index in range(5)]
+        _allow_robots(httpx_mock)
+        for source, target in itertools.pairwise(hops):
+            httpx_mock.add_response(url=source, status_code=302, headers={"Location": target})
+        httpx_mock.add_response(url=hops[-1], content=PAYLOAD)
+
+        result = _fetcher(log).capture(hops[0], "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_limit_exceeded"
+        assert result.url == hops[3]
+        followed = [
+            record
+            for record in log.records()
+            if getattr(record, "outcome", None) == "redirect_followed"
+        ]
+        assert len(followed) == 3
+        capture_requests = [
+            request
+            for request in httpx_mock.get_requests()
+            if "/robots.txt" not in str(request.url)
+        ]
+        assert [str(request.url) for request in capture_requests] == hops[:4]
+
+    def test_a_redirect_target_without_a_host_is_not_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Location whose host cannot be captured is recorded using the
+        stable refusal outcome rather than being followed."""
+        target = f"https://{BAERUM_DOMAIN}/unusable-target"
+        real_capture_host = fetch_module.capture_host
+
+        def reject_unusable_target(url: str) -> str:
+            if url == target:
+                raise SourceNotActivatedError("target has no usable host")
+            return real_capture_host(url)
+
+        monkeypatch.setattr(fetch_module, "capture_host", reject_unusable_target)
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302, headers={"Location": target})
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+        assert result.http_headers["location"] == target
+        assert [str(request.url) for request in httpx_mock.get_requests()] == [
+            ROBOTS_URL,
+            PAGE_URL,
+        ]
+
+    def test_a_relative_location_resolves_against_the_current_url(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        target = f"https://{BAERUM_DOMAIN}/sitemaps/index.xml"
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=PAGE_URL, status_code=301, headers={"Location": "/sitemaps/index.xml"}
+        )
+        httpx_mock.add_response(url=target, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == target
+
+    def test_a_same_host_redirect_is_rate_limited_as_a_second_request(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Following a redirect does not waive the source's spacing rule:
+        each HTTP request is independently subject to the per-host limit."""
+        target = f"https://{BAERUM_DOMAIN}/moved"
+        clock = _Clock()
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302, headers={"Location": target})
+        httpx_mock.add_response(url=target, content=PAYLOAD)
+
+        result = _fetcher(log, _settings(clock)).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == target
+        assert clock.slept == [2.0]
 
     def test_an_oversized_response_is_recorded_and_never_stored(
         self, log: ObservationLog, httpx_mock: HTTPXMock
