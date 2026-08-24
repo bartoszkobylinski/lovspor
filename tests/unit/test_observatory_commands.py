@@ -1412,6 +1412,10 @@ class TestCaptureAll:
 
         assert result.exit_code == 0, result.output
         assert result.output.index(f"== {BAERUM_ID}") < result.output.index(f"== {ASKER_ID}")
+        # The candidates line is part of the sweep's contract, per lane — an
+        # operator reading a nightly log needs it to tell a lane that found
+        # nothing new from a lane that never proposed anything.
+        assert result.output.count("candidates: 1") == 2
         assert result.output.count("captured: 1 | failed: 0 | unchanged since last seen: 0") == 2
 
     def test_one_refusing_source_does_not_stop_the_sweep(
