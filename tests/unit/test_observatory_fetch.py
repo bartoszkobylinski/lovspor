@@ -6,6 +6,7 @@ would be testing the stubs, and the gates are the whole point of this module.
 """
 
 import hashlib
+import itertools
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -530,23 +531,31 @@ class TestFailuresAreObservations:
         assert result.url == apex
         assert apex not in [str(r.url) for r in httpx_mock.get_requests()]
 
+    @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
     def test_a_redirect_chain_is_bounded(self, log: ObservationLog, httpx_mock: HTTPXMock) -> None:
-        """A loop inside the domain must end as a recorded outcome, not as a
-        crawler spinning against someone else's server."""
-        first = f"https://{BAERUM_DOMAIN}/a"
-        second = f"https://{BAERUM_DOMAIN}/b"
-        _allow_robots(httpx_mock)
-        httpx_mock.add_response(
-            url=first, status_code=302, headers={"Location": second}, is_reusable=True
-        )
-        httpx_mock.add_response(
-            url=second, status_code=302, headers={"Location": first}, is_reusable=True
-        )
+        """A chain inside the domain must end as a recorded outcome, not as a
+        crawler spinning against someone else's server.
 
-        result = _fetcher(log).capture(first, "sitemap")
+        The chain is finite and every response single-use on purpose. Mocked
+        as a two-URL loop with reusable responses, a mutant that stops
+        decrementing the budget spins until mutmut's timeout instead of
+        failing — two such timeouts, not kills, failed the gate on run
+        32732243735. Against a finite chain the same mutant walks past the
+        fourth hop, returns the artifact, and dies on these assertions in
+        milliseconds. The last response stays unrequested by design — it is
+        the bait such a mutant would take.
+        """
+        hops = [f"https://{BAERUM_DOMAIN}/hop{index}" for index in range(5)]
+        _allow_robots(httpx_mock)
+        for source, target in itertools.pairwise(hops):
+            httpx_mock.add_response(url=source, status_code=302, headers={"Location": target})
+        httpx_mock.add_response(url=hops[-1], content=PAYLOAD)
+
+        result = _fetcher(log).capture(hops[0], "sitemap")
 
         assert isinstance(result, FetchFailure)
         assert result.outcome == "redirect_limit_exceeded"
+        assert result.url == hops[3]
         followed = [
             record
             for record in log.records()
@@ -558,7 +567,7 @@ class TestFailuresAreObservations:
             for request in httpx_mock.get_requests()
             if "/robots.txt" not in str(request.url)
         ]
-        assert len(capture_requests) == 4
+        assert [str(request.url) for request in capture_requests] == hops[:4]
 
     def test_a_redirect_target_without_a_host_is_not_followed(
         self, log: ObservationLog, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
