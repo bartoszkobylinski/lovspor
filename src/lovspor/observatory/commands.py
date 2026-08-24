@@ -462,7 +462,8 @@ def _capture_candidates(
 def capture(
     authority_id: _AuthorityIdOption,
     limit: Annotated[
-        int, typer.Option("--limit", help="Stop after this many fetches. 0 means no bound.")
+        int,
+        typer.Option("--limit", min=0, help="Stop after this many fetches. 0 means no bound."),
     ] = 0,
 ) -> None:
     """Observe what discovery proposes, skipping what has not changed since.
@@ -528,7 +529,9 @@ def _sweep_one(
 def capture_all(
     limit: Annotated[
         int,
-        typer.Option("--limit", help="Stop after this many fetches per source. 0 means no bound."),
+        typer.Option(
+            "--limit", min=0, help="Stop after this many fetches per source. 0 means no bound."
+        ),
     ] = 0,
 ) -> None:
     """Sweep every activated source once, in authority-id order.

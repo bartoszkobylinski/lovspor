@@ -1508,6 +1508,24 @@ class TestCaptureAll:
         assert f"== {ASKER_ID}" not in result.output
         assert all(ASKER_DOMAIN not in str(r.url) for r in httpx_mock.get_requests())
 
+    @pytest.mark.parametrize("command", ["capture", "capture-all"])
+    def test_a_negative_limit_is_a_usage_error_before_any_request(
+        self, command: str, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """--limit -1 used to stop the loop at the first candidate and exit 0
+        with `captured: 0` — a cron typo away from the silent zero of issue
+        #151. Found by the independent test author on PR #156; the bound is
+        enforced at the option, before any traffic."""
+        _activate(root)
+
+        args = ["observatory", command, "--limit", "-1"]
+        if command == "capture":
+            args += ["--id", BAERUM_ID]
+        result = runner.invoke(app, args)
+
+        assert result.exit_code == 2
+        assert httpx_mock.get_requests() == []
+
     def test_no_activated_sources_is_a_refusal(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "capture-all"])
 
