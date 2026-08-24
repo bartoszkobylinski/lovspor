@@ -1,0 +1,160 @@
+"""Telemetry for a whole sweep — the run as an observable object (issue #167).
+
+The observation log answers what the servers did. It cannot answer whether the
+Observatory ran last night, because a sweep that never started leaves no trace
+in it by construction — and that is the failure worth catching. A Mac powered
+off for three days looks, from the observation log alone, exactly like three
+quiet days at two hundred municipalities.
+
+So a sweep records itself here instead: process telemetry, deliberately not an
+observation, in its own append-only file beside the registry. Three states,
+because "it failed" hides a distinction that matters operationally — a sweep
+that ran and lost one municipality needs a different response from a sweep that
+could not start because the archive disk was not mounted.
+
+The cadence target lives here too, as a value rather than a comment. How often
+a source must be observed is a property of the data; which hour the job fires
+is deployment configuration, and belongs in the launchd plist, not in this
+module.
+"""
+
+import fcntl
+import json
+import os
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Literal, NamedTuple
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from lovspor.errors import LogIntegrityError
+from lovspor.observatory.storage import ObservatoryRoot
+
+SWEEPS_FILENAME = "sweep-runs.jsonl"
+
+#: Every active source is observed at least this often. A first SLA for local
+#: legal material, chosen to be measured against rather than defended: the
+#: steady state of the register has never been timed, and the number should be
+#: argued down only once sweep durations and delta counts exist.
+OBSERVATION_SLA = timedelta(hours=24)
+
+#: How long without a completed sweep before the dead-man switch alerts. Longer
+#: than the target on purpose — sleep/wake and one slow run must not page
+#: anyone — but under two targets, so two whole days cannot pass unnoticed.
+SWEEP_DEADLINE = timedelta(hours=36)
+
+SweepStatus = Literal["success", "degraded", "failed"]
+
+
+class SweepRun(BaseModel):
+    """What one pass over the register did.
+
+    Unknown fields are forbidden for the same reason the observation records
+    forbid them: this file is read back to answer whether the archive is
+    healthy, and quietly dropping a field a newer writer added would answer it
+    from a partial record.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str = Field(min_length=1)
+    started_at: datetime
+    finished_at: datetime
+    active_sources: int = Field(ge=0)
+    sources_completed: int = Field(ge=0)
+    sources_refused: int = Field(ge=0)
+    captured: int = Field(ge=0)
+    failed_fetches: int = Field(ge=0)
+    unchanged: int = Field(ge=0)
+    status: SweepStatus
+
+
+class CadenceState(NamedTuple):
+    """How long since a sweep last began, and whether that is now an alert.
+
+    ``age`` is None when nothing was ever swept, which is not the same as zero
+    and must never be rendered as a healthy duration.
+    """
+
+    age: timedelta | None
+    overdue: bool
+
+
+def sweep_status(*, active: int, refused: int) -> SweepStatus:
+    """Classify a sweep that ran to completion.
+
+    No active sources is not a success: a register with nothing to sweep means
+    the sweep observed nothing, and reporting that green is how issue #151's
+    silent zero comes back at fleet scale.
+    """
+    if active == 0:
+        return "failed"
+    return "degraded" if refused else "success"
+
+
+def sweeps_path(root: ObservatoryRoot) -> Path:
+    """Where sweep telemetry lives inside a validated observatory root."""
+    return root.path / SWEEPS_FILENAME
+
+
+def append_sweep_run(root: ObservatoryRoot, run: SweepRun) -> None:
+    """Append one run, flushed and fsynced before returning.
+
+    Locked and fsynced like the observation log: the nightly job and an
+    operator running a sweep by hand are two writers, and a torn line here
+    costs the answer to when the archive was last healthy.
+    """
+    path = sweeps_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        handle.write(run.model_dump_json() + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def read_sweep_runs(path: Path) -> list[SweepRun]:
+    """Every recorded run, oldest first, or a refusal naming the bad line.
+
+    Damage is never skipped. Reading past a line this module does not
+    understand would answer "when did we last sweep successfully" with some
+    older run, and that answer is indistinguishable from a true one.
+    """
+    if not path.exists():
+        return []
+    runs: list[SweepRun] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        runs.append(_parse_run(path, number, line))
+    return runs
+
+
+def _parse_run(path: Path, number: int, line: str) -> SweepRun:
+    try:
+        return SweepRun.model_validate(json.loads(line))
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise LogIntegrityError(f"{path}:{number}: unreadable sweep run: {exc}") from exc
+
+
+def latest_sweep_run(path: Path) -> SweepRun | None:
+    """The most recently started run, or None when nothing was ever swept."""
+    runs = read_sweep_runs(path)
+    if not runs:
+        return None
+    return max(runs, key=lambda run: run.started_at)
+
+
+def cadence_state(run: SweepRun | None, *, now: datetime | None = None) -> CadenceState:
+    """How stale the archive's observations are.
+
+    Measured from when the last sweep *started*, not when it finished. A sweep
+    that began 35 hours ago and took two hours has still not begun a new
+    observation in 35 hours; measuring from the finish would hide precisely the
+    slow run the deadline exists to catch.
+    """
+    moment = now if now is not None else datetime.now(UTC)
+    if run is None:
+        return CadenceState(age=None, overdue=True)
+    age = moment - run.started_at
+    return CadenceState(age=age, overdue=age >= SWEEP_DEADLINE)

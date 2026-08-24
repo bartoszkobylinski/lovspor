@@ -9,7 +9,7 @@ real one lands.
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -29,6 +29,12 @@ from lovspor.observatory.storage import (
     ENV_OBSERVATORY_ROOT,
     ObservatoryRoot,
     engine_root,
+)
+from lovspor.observatory.sweeps import (
+    SweepRun,
+    append_sweep_run,
+    latest_sweep_run,
+    read_sweep_runs,
 )
 
 runner = CliRunner()
@@ -880,6 +886,25 @@ def _activate(root: Path, rate_limit_seconds: float = 0.001) -> None:
     assert result.exit_code == 0, result.output
 
 
+def _write_sweep(root: Path, *, started: datetime, refused: int = 0) -> None:
+    """A recorded sweep, written the way capture-all writes one."""
+    append_sweep_run(
+        ObservatoryRoot(root, ()),
+        SweepRun(
+            run_id=started.isoformat(),
+            started_at=started,
+            finished_at=started + timedelta(minutes=76),
+            active_sources=1,
+            sources_completed=1 - refused,
+            sources_refused=refused,
+            captured=3,
+            failed_fetches=0,
+            unchanged=11,
+            status="degraded" if refused else "success",
+        ),
+    )
+
+
 def _robots(httpx_mock: HTTPXMock, body: str) -> None:
     httpx_mock.add_response(url=ROBOTS_URL, text=body, is_reusable=True)
 
@@ -1575,9 +1600,121 @@ class TestCaptureAll:
         assert "log is damaged" in result.stderr
         assert httpx_mock.get_requests() == []
 
+    def test_a_clean_sweep_records_itself(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """Issue #167: the observation log cannot answer whether the sweep ran
+        at all, so the run records itself beside the registry."""
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        assert runner.invoke(app, ["observatory", "capture-all"]).exit_code == 0
+
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.active_sources, run.sources_refused) == ("success", 2, 0)
+        assert (run.captured, run.unchanged) == (2, 0)
+
+    def test_a_degraded_sweep_is_recorded_too(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """The run that lost a municipality is the one somebody will want to
+        read tomorrow, so it must not be the run that left no record."""
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        assert runner.invoke(app, ["observatory", "capture-all"]).exit_code == 1
+
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.sources_completed, run.sources_refused) == ("degraded", 1, 1)
+
+    def test_two_sweeps_leave_two_records(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>", is_reusable=True)
+        httpx_mock.add_response(
+            url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL), is_reusable=True
+        )
+        httpx_mock.add_response(
+            url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>", is_reusable=True
+        )
+
+        runner.invoke(app, ["observatory", "capture-all"])
+        runner.invoke(app, ["observatory", "capture-all"])
+
+        assert len(read_sweep_runs(root / "sweep-runs.jsonl")) == 2
+
 
 OTHER_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-avfallssug"
 THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
+
+
+class TestStatus:
+    def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
+        """Never swept cannot read as healthy — that is the Mac-was-off case
+        the deadline exists for."""
+        _activate(root)
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert result.exit_code == 1
+        assert "never" in result.output
+        assert "OVERDUE" in result.output
+
+    def test_a_recent_sweep_reports_ok(self, root: Path) -> None:
+        _activate(root)
+        _write_sweep(root, started=datetime.now(UTC) - timedelta(hours=18))
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert result.exit_code == 0
+        assert "state:      OK" in result.output
+        assert "status:     SUCCESS" in result.output
+
+    def test_a_sweep_older_than_the_deadline_is_overdue(self, root: Path) -> None:
+        _activate(root)
+        _write_sweep(root, started=datetime.now(UTC) - timedelta(hours=37))
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert result.exit_code == 1
+        assert "OVERDUE" in result.output
+
+    def test_it_counts_registered_and_active_separately(self, root: Path) -> None:
+        _activate(root)
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                "3203",
+                "--name",
+                "Nesodden",
+                "--domain",
+                "nesodden.kommune.no",
+            ],
+        )
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "registered: 2" in result.output
+        assert "active:     1" in result.output
+
+    def test_a_damaged_sweep_file_refuses_rather_than_reporting_an_older_run(
+        self, root: Path
+    ) -> None:
+        _activate(root)
+        _write_sweep(root, started=datetime.now(UTC) - timedelta(hours=1))
+        with (root / "sweep-runs.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write("{not json\n")
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert result.exit_code == 1
+        assert "unreadable sweep run" in result.stderr
 
 
 class TestCapture:

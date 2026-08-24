@@ -289,6 +289,87 @@ than reported — every blob the unread lines account for would otherwise show
 up as an orphan, burying the real defect under invented ones. Re-run the audit
 after recovery to get the full picture.
 
+## Observatory: the 24-hour observation SLA (issue #167)
+
+> **Every active source is observed at least once per 24 hours.**
+
+That is the invariant, and it is a property of the data, not of the scheduler.
+Which hour the job fires is deployment configuration and belongs in the launchd
+plist; `OBSERVATION_SLA` and `SWEEP_DEADLINE` in
+`src/lovspor/observatory/sweeps.py` are where the cadence itself is stated.
+
+24h is a first SLA for local legal material, deliberately chosen to be measured
+against rather than defended: the steady state of the register has never been
+timed. Argue it down to 12h or 6h once there are sweep durations and delta
+counts to argue from, not before.
+
+### The sweep records itself
+
+The observation log answers what the servers did. It cannot answer whether the
+Observatory ran last night — a sweep that never started leaves no trace in it by
+construction, and a machine that was off for three days looks exactly like three
+quiet days at two hundred municipalities.
+
+So `capture-all` appends one line per run to `sweep-runs.jsonl`, beside the
+registry. Process telemetry, not an observation:
+
+```json
+{"run_id":"2026-08-25T01:00:00+00:00","started_at":"...","finished_at":"...",
+ "active_sources":201,"sources_completed":198,"sources_refused":3,
+ "captured":47,"failed_fetches":2,"unchanged":4218,"status":"degraded"}
+```
+
+| status | meaning | who records it |
+| --- | --- | --- |
+| `success` | every active source was swept | `capture-all` |
+| `degraded` | the sweep ran, at least one source refused | `capture-all` |
+| `failed` | the sweep could not execute — archive not mounted, log damaged | the nightly wrapper |
+
+`capture-all` still exits 1 on `degraded`. The `failed` state belongs to the
+wrapper because the cases that produce it are the ones where `capture-all`
+cannot run far enough to write anything — and an unmounted archive is exactly
+the case where there is nowhere to write to.
+
+### Is it working?
+
+```bash
+uv run lovspor observatory status
+```
+
+```
+Sources
+  registered: 201
+  active:     198
+
+Last sweep
+  started:    2026-08-24T03:01:00+00:00
+  finished:   2026-08-24T04:17:00+00:00
+  duration:   1h16m
+  completed:  196 / 198
+  refused:    2
+  captured:   47 | unchanged: 4218
+  status:     DEGRADED
+
+Cadence
+  target:     24h00m
+  age:        18h47m
+  deadline:   36h00m
+  state:      OK
+```
+
+It exits 1 when no sweep has *begun* inside the deadline, so the same command
+serves a monitor. Two details are deliberate:
+
+- **Age is measured from the start of the last sweep, not its finish.** A sweep
+  that began 35 hours ago and ran for two has still not begun a new observation
+  in 35 hours; measuring from the finish would hide precisely the slow run the
+  deadline exists to catch.
+- **Never swept reads as OVERDUE, never as OK.** That is the machine-was-off
+  case, and it is the one a naive check misses.
+
+The deadline is 36h rather than 24h: room for sleep/wake and one long run,
+without letting two whole days pass unnoticed.
+
 ## Scheduled runs (production)
 
 `.github/workflows/sync.yml` runs daily at **04:00 UTC (~05:00–06:00 CET)** — about 2.5 hours after Lovdata's nightly tarball drop at ~01:30 UTC. Manual reruns are available via the **Actions → Sync legal corpus → Run workflow** button on GitHub.
