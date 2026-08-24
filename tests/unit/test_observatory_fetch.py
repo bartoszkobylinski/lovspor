@@ -14,6 +14,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from lovspor.errors import SourceNotActivatedError
+from lovspor.observatory import fetch as fetch_module
 from lovspor.observatory.fetch import (
     CaptureSettings,
     Fetcher,
@@ -546,6 +547,45 @@ class TestFailuresAreObservations:
 
         assert isinstance(result, FetchFailure)
         assert result.outcome == "redirect_limit_exceeded"
+        followed = [
+            record
+            for record in log.records()
+            if getattr(record, "outcome", None) == "redirect_followed"
+        ]
+        assert len(followed) == 3
+        capture_requests = [
+            request
+            for request in httpx_mock.get_requests()
+            if "/robots.txt" not in str(request.url)
+        ]
+        assert len(capture_requests) == 4
+
+    def test_a_redirect_target_without_a_host_is_not_followed(
+        self, log: ObservationLog, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A Location whose host cannot be captured is recorded using the
+        stable refusal outcome rather than being followed."""
+        target = f"https://{BAERUM_DOMAIN}/unusable-target"
+        real_capture_host = fetch_module.capture_host
+
+        def reject_unusable_target(url: str) -> str:
+            if url == target:
+                raise SourceNotActivatedError("target has no usable host")
+            return real_capture_host(url)
+
+        monkeypatch.setattr(fetch_module, "capture_host", reject_unusable_target)
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=302, headers={"Location": target})
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "redirect_not_followed"
+        assert result.http_headers["location"] == target
+        assert [str(request.url) for request in httpx_mock.get_requests()] == [
+            ROBOTS_URL,
+            PAGE_URL,
+        ]
 
     def test_a_relative_location_resolves_against_the_current_url(
         self, log: ObservationLog, httpx_mock: HTTPXMock
