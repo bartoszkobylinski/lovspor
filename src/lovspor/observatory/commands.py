@@ -448,9 +448,23 @@ def repair(
     _remove_unfinished_record(log, raw)
 
 
+class _CaptureCounts(NamedTuple):
+    """What one source's pass did, and whether the limit cut it short.
+
+    ``capped`` is the point of the type: the three counters cannot express the
+    difference between a sitemap that ran out and a pass that was stopped, and
+    that difference is what makes a truncated source read as finished (#172).
+    """
+
+    captured: int
+    failed: int
+    unchanged: int
+    capped: bool
+
+
 def _capture_candidates(
     fetcher: Fetcher, candidates: tuple[Candidate, ...], observed: dict[str, datetime], limit: int
-) -> tuple[int, int, int]:
+) -> _CaptureCounts:
     """Fetch what has changed, in order, and report each outcome as it happens.
 
     A run over a municipal site is hours of politely-spaced requests, so the
@@ -464,7 +478,7 @@ def _capture_candidates(
             continue
         if limit and captured + failed >= limit:
             typer.echo(f"stopping at --limit {limit}")
-            break
+            return _CaptureCounts(captured, failed, skipped, capped=True)
         record = fetcher.capture(candidate.url, candidate.discovery_method)
         if isinstance(record, ArtifactObservation):
             captured += 1
@@ -472,7 +486,7 @@ def _capture_candidates(
         else:
             failed += 1
             typer.echo(f"  {record.outcome}  {candidate.url}")
-    return captured, failed, skipped
+    return _CaptureCounts(captured, failed, skipped, capped=False)
 
 
 @observatory_app.command("capture")
@@ -509,10 +523,13 @@ def capture(
     result = Discoverer(fetcher, log).discover(record, starts.urls)
     _require_documents(record, result, starts.probed)
     typer.echo(f"candidates: {len(result.candidates)}")
-    captured, failed, skipped = _capture_candidates(
+    counts = _capture_candidates(
         fetcher, result.candidates, latest_observations(scan.records), limit
     )
-    typer.echo(f"captured: {captured} | failed: {failed} | unchanged since last seen: {skipped}")
+    typer.echo(
+        f"captured: {counts.captured} | failed: {counts.failed} "
+        f"| unchanged since last seen: {counts.unchanged}"
+    )
 
 
 class _SweepTotals(NamedTuple):
@@ -522,6 +539,7 @@ class _SweepTotals(NamedTuple):
     captured: int = 0
     failed: int = 0
     unchanged: int = 0
+    capped: int = 0
 
     def plus(self, other: "_SweepTotals") -> "_SweepTotals":
         return _SweepTotals(
@@ -529,6 +547,7 @@ class _SweepTotals(NamedTuple):
             captured=self.captured + other.captured,
             failed=self.failed + other.failed,
             unchanged=self.unchanged + other.unchanged,
+            capped=self.capped + other.capped,
         )
 
 
@@ -554,9 +573,22 @@ def _sweep_one(
         )
         return _SweepTotals(refused=1)
     typer.echo(f"candidates: {len(result.candidates)}")
-    captured, failed, skipped = _capture_candidates(fetcher, result.candidates, observed, limit)
-    typer.echo(f"captured: {captured} | failed: {failed} | unchanged since last seen: {skipped}")
-    return _SweepTotals(captured=captured, failed=failed, unchanged=skipped)
+    counts = _capture_candidates(fetcher, result.candidates, observed, limit)
+    typer.echo(
+        f"captured: {counts.captured} | failed: {counts.failed} "
+        f"| unchanged since last seen: {counts.unchanged}"
+    )
+    if counts.capped:
+        # Loud on stderr, like a refusal: a source stopped by the limit was
+        # truncated, and the whole point of #172 is that this is otherwise
+        # indistinguishable from a source that simply ran out of pages.
+        typer.echo(f"  capped: {record.authority_id} stopped at --limit {limit}", err=True)
+    return _SweepTotals(
+        captured=counts.captured,
+        failed=counts.failed,
+        unchanged=counts.unchanged,
+        capped=1 if counts.capped else 0,
+    )
 
 
 @observatory_app.command("capture-all")
@@ -589,6 +621,11 @@ def capture_all(
     _record_sweep(root, started_at, len(active), totals)
     if totals.refused:
         typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
+    if totals.capped:
+        typer.echo(f"sources capped: {totals.capped} of {len(active)}", err=True)
+    if totals.refused or totals.capped:
+        # The exit code follows the recorded status, and a capped source makes
+        # that status degraded: the sweep ran but did not finish observing.
         raise typer.Exit(1)
 
 
@@ -637,10 +674,11 @@ def _record_sweep(
             active_sources=active,
             sources_completed=active - totals.refused,
             sources_refused=totals.refused,
+            sources_capped=totals.capped,
             captured=totals.captured,
             failed_fetches=totals.failed,
             unchanged=totals.unchanged,
-            status=sweep_status(active=active, refused=totals.refused),
+            status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
         ),
     )
 
@@ -676,6 +714,7 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(f"  duration:   {_hm(run.finished_at - run.started_at)}")
     typer.echo(f"  completed:  {run.sources_completed} / {run.active_sources}")
     typer.echo(f"  refused:    {run.sources_refused}")
+    typer.echo(f"  capped:     {run.sources_capped}")
     typer.echo(f"  captured:   {run.captured} | unchanged: {run.unchanged}")
     typer.echo(f"  status:     {run.status.upper()}")
 

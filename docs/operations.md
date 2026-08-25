@@ -321,14 +321,31 @@ registry. Process telemetry, not an observation:
 
 | status | meaning | who records it |
 | --- | --- | --- |
-| `success` | every active source was swept | `capture-all` |
-| `degraded` | the sweep ran, at least one source refused | `capture-all` |
+| `success` | every active source was swept to the end of its sitemap | `capture-all` |
+| `degraded` | the sweep ran, and at least one source was refused **or capped** | `capture-all` |
 | `failed` | the sweep could not execute — archive not mounted, log damaged | the nightly wrapper |
 
 `capture-all` still exits 1 on `degraded`. The `failed` state belongs to the
 wrapper because the cases that produce it are the ones where `capture-all`
 cannot run far enough to write anything — and an unmounted archive is exactly
 the case where there is nowhere to write to.
+
+### A capped source is not a finished one (issue #172)
+
+`--limit` stops a source's pass after that many fetches. The three counters cannot express
+the difference between *the sitemap ran out* and *the pass was stopped*, and that
+difference is the whole problem: a refused source yields nothing and says so loudly, while
+a truncated one yields most of itself and reads as finished.
+
+So the run record carries `sources_capped`, a capped source makes the sweep `degraded`, and
+`capture-all` exits 1 — the exit code follows the recorded status, not the operator's
+intent. A deliberate `--limit` run therefore exits non-zero: the bound was intentional, the
+incompleteness is still real, and the next sweep should pick the source up rather than
+count it as done. `freshness` makes that cheap — pages already captured fail the freshness
+test and are skipped.
+
+This was found in the bootstrap: seven municipalities, Bergen among them, stopped at the
+lane's round cap and were recorded as complete.
 
 ### Is it working?
 
@@ -347,6 +364,7 @@ Last sweep
   duration:   1h16m
   completed:  196 / 198
   refused:    2
+  capped:     0
   captured:   47 | unchanged: 4218
   status:     DEGRADED
 

@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.observatory.commands import (
+    _capture_candidates,
     _echo_cadence,
     _echo_last_sweep,
     _echo_sources,
@@ -29,6 +30,7 @@ from lovspor.observatory.commands import (
     _record_sweep,
     _SweepTotals,
 )
+from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import SourceRegistry, read_registry
@@ -1486,7 +1488,12 @@ class TestCaptureAll:
 
         result = runner.invoke(app, ["observatory", "capture-all", "--limit", "1"])
 
-        assert result.exit_code == 0, result.output
+        # Exit 1, not 0: since #172 a source stopped by the limit is recorded
+        # as capped, which makes the sweep degraded. The bound was deliberate,
+        # but the sweep still did not finish observing, and the exit code
+        # follows the recorded status rather than the operator's intent.
+        assert result.exit_code == 1, result.output
+        assert "sources capped: 2 of 2" in result.stderr
         assert result.output.count("stopping at --limit 1") == 2
         assert result.output.count("captured: 1 | failed: 0 | unchanged since last seen: 0") == 2
         requested = [str(request.url) for request in httpx_mock.get_requests()]
@@ -1672,6 +1679,83 @@ class TestCaptureAll:
         assert run is not None
         assert (run.captured, run.failed_fetches, run.unchanged) == (1, 1, 0)
 
+    def test_a_complete_pass_reports_capped_as_a_real_false(self) -> None:
+        """`capped` is declared `bool` and every call site tests it for truth,
+        so returning None would behave identically everywhere while being a lie
+        about the declared type. Identity is the only thing that catches it —
+        and a NamedTuple validates nothing at runtime, so nothing else will."""
+        counts = _capture_candidates(Mock(), (), {}, 0)
+
+        assert counts.capped is False
+        assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
+
+    def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
+        """A limit is truncation only when another fetch remains."""
+        candidate = Candidate(
+            url=PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+        )
+        fetcher = Mock()
+        fetcher.capture.return_value = _observation(b"page", PAGE_URL)
+
+        counts = _capture_candidates(fetcher, (candidate,), {}, limit=1)
+
+        assert counts.capped is False
+        assert (counts.captured, counts.failed, counts.unchanged) == (1, 0, 0)
+
+    def test_unchanged_candidates_after_the_limit_do_not_make_a_source_capped(self) -> None:
+        """The fetch budget may be exhausted while the sitemap is still fully swept.
+
+        Candidates already observed after their reported change need no fetch,
+        so merely appearing after the last permitted fetch is not truncation.
+        """
+        fresh = Candidate(
+            url=PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+        )
+        unchanged = Candidate(
+            url=OTHER_PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+            site_reported_lastmod="2020-01-01",
+        )
+        fetcher = Mock()
+        fetcher.capture.return_value = _observation(b"page", PAGE_URL)
+
+        counts = _capture_candidates(
+            fetcher,
+            (fresh, unchanged),
+            {OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)},
+            limit=1,
+        )
+
+        assert counts.capped is False
+        assert (counts.captured, counts.failed, counts.unchanged) == (1, 0, 1)
+        fetcher.capture.assert_called_once_with(PAGE_URL, "sitemap")
+
+    def test_a_capped_source_is_recorded_and_degrades_the_sweep(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #172: the whole harm is that a truncated source reads as
+        finished. The record has to carry the difference, not just stdout."""
+        self._two_sources(root, httpx_mock)
+        second = f"https://www.{BAERUM_DOMAIN}/forskrift-2"
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, second))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all", "--limit", "1"])
+
+        assert result.exit_code == 1
+        assert f"capped: {BAERUM_ID} stopped at --limit 1" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        # Bærum was cut short; Asker had exactly one candidate and finished.
+        assert (run.sources_capped, run.sources_refused, run.status) == (1, 0, "degraded")
+
     def test_two_sweeps_leave_two_records(self, root: Path, httpx_mock: HTTPXMock) -> None:
         self._two_sources(root, httpx_mock)
         httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
@@ -1724,6 +1808,7 @@ class TestStatus:
             "  duration:   1h16m\n"
             "  completed:  2 / 3\n"
             "  refused:    1\n"
+            "  capped:     0\n"
             "  captured:   47 | unchanged: 4218\n"
             "  status:     DEGRADED\n"
             "\nCadence\n"
@@ -1754,6 +1839,9 @@ class TestStatus:
 
     def test_sweep_totals_preserve_unchanged_counts(self) -> None:
         assert _SweepTotals(unchanged=2).plus(_SweepTotals(unchanged=3)).unchanged == 5
+
+    def test_sweep_totals_add_capped_sources(self) -> None:
+        assert _SweepTotals(capped=1).plus(_SweepTotals(capped=2)).capped == 3
 
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case
