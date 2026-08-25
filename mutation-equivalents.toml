@@ -220,3 +220,20 @@ constructed, and a sweep stamped ahead of the clock reads as overdue with no
 age. A zero-length run stays legal, so the boundary itself is covered.
 """
 assumption_test = "tests/unit/test_observatory_sweeps.py::TestNegativeDurationsCannotHappen::test_a_sweep_stamped_ahead_of_the_clock_is_overdue_not_fresh"
+
+
+[[equivalent]]
+file = "src/lovspor/exclusive_workload.py"
+symbol = "read_holder"
+registered = "2026-08-25, PR #186, from PR #186 run 32895480439"
+mutation = """
+-        data = json.loads(path.read_bytes().decode("utf-8"))
++        data = json.loads(path.read_bytes().decode("UTF-8"))
+"""
+justification = """
+Python's codec registry normalises encoding names before lookup — case is folded,
+and hyphens and underscores are interchangeable (`codecs.lookup("UTF-8")` and
+`codecs.lookup("utf-8")` return the same CodecInfo, `encodings.normalize_encoding`).
+`bytes.decode` goes through that registry, so both spellings select the same
+decoder and produce byte-identical results on every input, valid or invalid.
+"""

@@ -69,6 +69,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from lovspor.errors import LovsporError
+from lovspor.exclusive_workload import exclusive_workload
 from lovspor.llhb.claude_cli import RunIdentity, ToolAccess, build_argv
 from lovspor.llhb.corpus_pin import CorpusPin, verify_pin
 from lovspor.llhb.mcp_surface import (
@@ -514,7 +515,12 @@ def main() -> int:
     if not args.execute:
         _report_dry_run(metadata, cases[0], access, args)
         return 0
-    execute(metadata, cases, args, access)
+    # Held across every model call (issue #169): a run that shares the host
+    # with an Observatory sweep records the sweep's fingerprint as its own
+    # latencies. Held by someone else -> refuse, never queue; a dry run needs
+    # no lock because it calls nothing.
+    with exclusive_workload("llhb-run-arm"):
+        execute(metadata, cases, args, access)
     return 0
 
 

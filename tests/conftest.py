@@ -1,6 +1,10 @@
 """Shared pytest fixtures."""
 
+from pathlib import Path
+
 import pytest
+
+from lovspor.exclusive_workload import ENV_LOCK_PATH
 
 # Repo-targeting variables git exports to hook subprocesses. Anything spawned
 # with these inherited operates on the EXPORTING repo, not on the cwd repo.
@@ -27,3 +31,15 @@ def _hermetic_git_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in _GIT_REPO_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_exclusive_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the host-level workload lock at the test's own tmpdir.
+
+    The default lives under the developer's ``~/.local/state``; a suite
+    sharing it with a live benchmark or sweep would either refuse (a test
+    failing for a reason outside the test) or, worse, hold the real lock
+    against the real workload for the length of a test.
+    """
+    monkeypatch.setenv(ENV_LOCK_PATH, str(tmp_path / "exclusive-workload.lock"))

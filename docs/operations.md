@@ -323,7 +323,7 @@ registry. Process telemetry, not an observation:
 | --- | --- | --- |
 | `success` | every active source was swept to the end of its sitemap | `capture-all` |
 | `degraded` | the sweep ran, and at least one source was refused **or capped** | `capture-all` |
-| `failed` | the sweep could not execute — archive not mounted, log damaged | the nightly wrapper |
+| `failed` | the sweep could not execute — archive not mounted, log damaged, or the host reserved for a benchmark (`deferred_exclusive_workload`) | the nightly wrapper |
 
 `capture-all` still exits 1 on `degraded`. The `failed` state belongs to the
 wrapper because the cases that produce it are the ones where `capture-all`
@@ -348,9 +348,21 @@ wrong place:
 | `storage_unavailable` | the archive directory is not there — T7 not mounted |
 | `registry_missing` | the archive is there, the source registry is not |
 | `observation_log_damaged` | the log does not scan clean; run `observatory verify` |
+| `deferred_exclusive_workload` | the ground was fine, but the host is reserved: an LLHB benchmark arm holds the exclusive workload lock (issue #169). The sweep did not start; the next scheduled one picks up |
 
 Each writes a `failed` run carrying its reason — **except `storage_unavailable`**, which
-by definition has nowhere to write. There the message and the exit code are the whole
+by definition has nowhere to write. The deferral is checked *after* the ground checks for
+the same reason: its record needs an archive to land in. It still pings the dead-man
+switch's `/fail` URL — truthfully, the sweep did not run — so a deferred night shows up
+as red, and whoever reserved the host is the one looking at it.
+
+The lock is one file, `$XDG_STATE_HOME/lovspor/exclusive-workload.lock` (else
+`~/.local/state/lovspor/…`; `LOVSPOR_EXCLUSIVE_LOCK_PATH` overrides), held with
+`flock` for the whole sweep by `nightly` and `capture-all`, and for the whole arm by
+`benchmarks/llhb/runner/run_arm.py --execute`. Neither side waits: the sweep defers, the
+benchmark refuses. A crashed holder leaves nothing behind — the kernel releases the lock
+with the process. Per-source `observatory capture` does not take it; it is an operator's
+hand tool, not a workload. There the message and the exit code are the whole
 output, and the remote dead-man switch is what turns the resulting silence into an alarm.
 
 **There is no fallback.** If the archive is absent the sweep refuses. Quietly creating a

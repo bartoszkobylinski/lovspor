@@ -404,6 +404,19 @@ Driven by the Stage 3.5 human audit (see
   in the sandbox directory.
 
 
+## Host-level exclusive workload lock (2026-08-25, issue #169)
+
+`run_arm.py --execute` holds `lovspor.exclusive_workload.exclusive_workload("llhb-run-arm")`
+across every model call of the arm — the same lock the Observatory's `nightly` and
+`capture-all` sweeps hold across a sweep. Held by the other side, the benchmark
+**refuses** (`error: llhb-run-arm refused: the exclusive workload lock is held by
+observatory-sweep (pid …, since …)`, exit 1) and the sweep **defers** (a `failed` run with
+`deferred_exclusive_workload`). Neither waits: a benchmark queued behind a sweep would
+start at an unplanned moment on an uninspected host. Dry runs take no lock — they call
+nothing. Path: `$XDG_STATE_HOME/lovspor/exclusive-workload.lock`, else
+`~/.local/state/lovspor/…`, `LOVSPOR_EXCLUSIVE_LOCK_PATH` overrides; `flock`, released
+with the process, so a killed run leaves no stale lock.
+
 ## OpenAI-compatible chat driver, control arm only (2026-08-25)
 
 * **Module**: `lovspor.llhb.openai_chat` (unit-tested; the orchestrator

@@ -128,6 +128,42 @@ class TestFrozenMetadata:
 
 
 class TestDryRunSummary:
+    def test_execute_holds_the_exclusive_lock_around_every_model_call(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(sys, "argv", ["run_arm.py", *FROZEN_ARGS, "--limit", "1", "--execute"])
+        observed: list[str] = []
+
+        class Lock:
+            def __enter__(self) -> None:
+                observed.append("lock-enter")
+
+            def __exit__(self, *_: object) -> None:
+                observed.append("lock-exit")
+
+        def lock(owner: str) -> Lock:
+            assert owner == "llhb-run-arm"
+            return Lock()
+
+        def execute(*_: object) -> None:
+            observed.append("execute")
+
+        monkeypatch.setattr(run_arm_script, "exclusive_workload", lock)
+        monkeypatch.setattr(run_arm_script, "execute", execute)
+
+        assert run_arm_script.main() == 0
+        assert observed == ["lock-enter", "execute", "lock-exit"]
+
+    def test_dry_run_does_not_reserve_the_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sys, "argv", ["run_arm.py", *FROZEN_ARGS, "--limit", "1"])
+
+        def unexpected_lock(owner: str) -> None:
+            pytest.fail(f"dry run acquired {owner}")
+
+        monkeypatch.setattr(run_arm_script, "exclusive_workload", unexpected_lock)
+
+        assert run_arm_script.main() == 0
+
     def test_the_frozen_summary_names_the_frozen_pool(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
