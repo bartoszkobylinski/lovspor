@@ -301,6 +301,8 @@ CHAT_ARGS = (
     "openai-chat",
     "--provider",
     "norallm",
+    "--api-key-env",
+    "SIGMA2_API_KEY",
 )
 
 
@@ -311,7 +313,15 @@ class TestChatDriverArguments:
 
     def test_the_chat_driver_requires_a_provider(self) -> None:
         with pytest.raises(SystemExit):
-            args_for(*CHAT_ARGS[:8], "--limit", "10")
+            args_for(*CHAT_ARGS[:8], *CHAT_ARGS[10:], "--limit", "10")
+
+    def test_the_chat_driver_requires_an_api_key_env(self) -> None:
+        with pytest.raises(SystemExit):
+            args_for(*CHAT_ARGS[:10], "--limit", "10")
+
+    def test_the_cli_driver_refuses_an_api_key_env(self) -> None:
+        with pytest.raises(SystemExit):
+            args_for(*FROZEN_ARGS, "--frozen", "--api-key-env", "SIGMA2_API_KEY")
 
     def test_the_cli_driver_refuses_a_foreign_provider(self) -> None:
         with pytest.raises(SystemExit):
@@ -336,7 +346,7 @@ class TestChatDriverArguments:
     def test_chat_dry_run_needs_no_key_and_does_not_execute(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("LLHB_OPENAI_CHAT_API_KEY", raising=False)
+        monkeypatch.delenv("SIGMA2_API_KEY", raising=False)
         monkeypatch.setattr(sys, "argv", ["run_arm.py", *CHAT_ARGS, "--limit", "1"])
 
         assert run_arm_script.main() == 0
@@ -356,17 +366,17 @@ class TestChatDriverArguments:
     def test_the_chat_endpoint_fails_closed_without_a_key(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv("LLHB_OPENAI_CHAT_API_KEY", raising=False)
+        monkeypatch.delenv("SIGMA2_API_KEY", raising=False)
         monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)
         args = args_for(*CHAT_ARGS, "--frozen")
 
-        with pytest.raises(run_arm_script.LovsporError, match="LLHB_OPENAI_CHAT_API_KEY"):
+        with pytest.raises(run_arm_script.LovsporError, match="SIGMA2_API_KEY"):
             run_arm_script.chat_endpoint(args)
 
     def test_the_chat_endpoint_carries_base_url_key_and_timeout(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("LLHB_OPENAI_CHAT_API_KEY", "sk-test")
+        monkeypatch.setenv("SIGMA2_API_KEY", "sk-test")
         monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)
         args = args_for(
             *CHAT_ARGS, "--frozen", "--base-url", "http://vllm.local/v1", "--timeout", "90"
@@ -380,3 +390,20 @@ class TestChatDriverArguments:
             "sk-test",
             90,
         )
+
+    def test_the_chat_endpoint_uses_the_named_provider_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Multiple configured providers must not share or cross-wire credentials."""
+        monkeypatch.setenv("SIGMA2_API_KEY", "sigma2-secret")
+        monkeypatch.setenv("BOREALIS_API_KEY", "borealis-secret")
+        monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)
+        borealis_args = [
+            "BOREALIS_API_KEY" if value == "SIGMA2_API_KEY" else value for value in CHAT_ARGS
+        ]
+        args = args_for(*borealis_args, "--frozen")
+
+        endpoint = run_arm_script.chat_endpoint(args)
+
+        assert endpoint is not None
+        assert endpoint.api_key == "borealis-secret"

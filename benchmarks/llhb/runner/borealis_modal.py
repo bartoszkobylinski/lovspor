@@ -12,8 +12,9 @@ Stop:    modal app stop borealis-vllm      <- do this after the run; idle GPU bi
 Run:     uv run python benchmarks/llhb/runner/run_arm.py --condition control \\
              --driver openai-chat --provider nbailab --model borealis-27b \\
              --base-url https://<workspace>--borealis-vllm-serve.modal.run/v1 \\
+             --api-key-env BOREALIS_API_KEY \\
              --suffix <sfx> --frozen --execute
-         with LLHB_OPENAI_CHAT_API_KEY=<the same token> in .env.
+         with BOREALIS_API_KEY=<the same token> in .env.
 """
 
 import os

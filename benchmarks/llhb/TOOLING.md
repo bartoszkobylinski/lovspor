@@ -432,8 +432,9 @@ Driven by the Stage 3.5 human audit (see
   [], permission_denials: []}` — the fairness checker treats a null
   harness on a completed record as missing evidence.
 * **Orchestrator**: `RunConfig.driver = "openai-chat"` with a
-  `chat_endpoint` (base URL, bearer token from `LLHB_OPENAI_CHAT_API_KEY`
-  in `.env`, per-case timeout). The HTTP exchange is mapped onto the
+  `chat_endpoint` (base URL, bearer token read from `.env` under the
+  variable named by `--api-key-env` — one per provider, e.g.
+  `SIGMA2_API_KEY`, `BOREALIS_API_KEY` — per-case timeout). The HTTP exchange is mapped onto the
   same `CliInvocation` the CLI path produces, so the retry loop
   (issue #80), failed-attempt retention and the tool-count cross-check
   run unchanged. HTTP 401/403 map to the permanent exit code and are not
