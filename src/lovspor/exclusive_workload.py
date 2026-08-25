@@ -93,7 +93,7 @@ def read_holder(path: Path) -> Holder | None:
     message, never the decision.
     """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_bytes().decode("utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):

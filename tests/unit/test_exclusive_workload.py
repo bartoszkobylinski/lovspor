@@ -1,5 +1,6 @@
 """Tests for the host-level mutual exclusion shared by long workloads."""
 
+import fcntl
 import json
 from pathlib import Path
 
@@ -71,3 +72,38 @@ def test_lock_is_released_and_record_cleared_when_workload_raises(tmp_path: Path
     with exclusive_workload("replacement", path):
         record = json.loads(path.read_text(encoding="utf-8"))
         assert record["owner"] == "replacement"
+
+
+def test_lock_path_falls_back_to_the_xdg_state_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No override, no XDG variable: the lock lives under ``~/.local/state``,
+    the state directory — not config, not cache — like the docstring says."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert default_lock_path({}) == (
+        tmp_path / ".local" / "state" / "lovspor" / "exclusive-workload.lock"
+    )
+
+
+def test_a_lock_held_without_a_record_is_refused_as_unidentified(tmp_path: Path) -> None:
+    """The flock is the decision; the record only names the holder. A foreign
+    holder that wrote nothing is still a holder — refused, and said so."""
+    path = tmp_path / "workload.lock"
+
+    with path.open("a+", encoding="utf-8") as foreign:
+        fcntl.flock(foreign.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ExclusiveWorkloadHeldError) as raised, exclusive_workload("llhb", path):
+            pytest.fail("entered the critical section against a foreign holder")
+
+    assert raised.value.holder is None
+    assert "held by an unidentified process" in str(raised.value)
+
+
+def test_holder_record_round_trips_a_non_ascii_owner(tmp_path: Path) -> None:
+    path = tmp_path / "workload.lock"
+
+    with exclusive_workload("observatory-sweep-\u00f8", path) as held:
+        assert read_holder(path) == held
+        assert read_holder(path) is not None
+        assert read_holder(path).owner == "observatory-sweep-\u00f8"
