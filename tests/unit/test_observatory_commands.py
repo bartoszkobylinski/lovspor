@@ -1486,7 +1486,12 @@ class TestCaptureAll:
 
         result = runner.invoke(app, ["observatory", "capture-all", "--limit", "1"])
 
-        assert result.exit_code == 0, result.output
+        # Exit 1, not 0: since #172 a source stopped by the limit is recorded
+        # as capped, which makes the sweep degraded. The bound was deliberate,
+        # but the sweep still did not finish observing, and the exit code
+        # follows the recorded status rather than the operator's intent.
+        assert result.exit_code == 1, result.output
+        assert "sources capped: 2 of 2" in result.stderr
         assert result.output.count("stopping at --limit 1") == 2
         assert result.output.count("captured: 1 | failed: 0 | unchanged since last seen: 0") == 2
         requested = [str(request.url) for request in httpx_mock.get_requests()]
@@ -1672,6 +1677,27 @@ class TestCaptureAll:
         assert run is not None
         assert (run.captured, run.failed_fetches, run.unchanged) == (1, 1, 0)
 
+    def test_a_capped_source_is_recorded_and_degrades_the_sweep(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #172: the whole harm is that a truncated source reads as
+        finished. The record has to carry the difference, not just stdout."""
+        self._two_sources(root, httpx_mock)
+        second = f"https://www.{BAERUM_DOMAIN}/forskrift-2"
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, second))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all", "--limit", "1"])
+
+        assert result.exit_code == 1
+        assert f"capped: {BAERUM_ID} stopped at --limit 1" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        # Bærum was cut short; Asker had exactly one candidate and finished.
+        assert (run.sources_capped, run.sources_refused, run.status) == (1, 0, "degraded")
+
     def test_two_sweeps_leave_two_records(self, root: Path, httpx_mock: HTTPXMock) -> None:
         self._two_sources(root, httpx_mock)
         httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
@@ -1724,6 +1750,7 @@ class TestStatus:
             "  duration:   1h16m\n"
             "  completed:  2 / 3\n"
             "  refused:    1\n"
+            "  capped:     0\n"
             "  captured:   47 | unchanged: 4218\n"
             "  status:     DEGRADED\n"
             "\nCadence\n"

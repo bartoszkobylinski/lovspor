@@ -67,6 +67,11 @@ class SweepRun(BaseModel):
     active_sources: int = Field(ge=0)
     sources_completed: int = Field(ge=0)
     sources_refused: int = Field(ge=0)
+    #: Sources whose pass was cut short by the fetch limit rather than by the
+    #: sitemap running out. Counted apart from refusals because the failure is
+    #: different in kind: a refused source yielded nothing and says so loudly,
+    #: a capped one yielded most of itself and looks finished (issue #172).
+    sources_capped: int = Field(default=0, ge=0)
     captured: int = Field(ge=0)
     failed_fetches: int = Field(ge=0)
     unchanged: int = Field(ge=0)
@@ -99,6 +104,10 @@ class SweepRun(BaseModel):
                 f"{self.sources_completed} completed + {self.sources_refused} refused "
                 f"!= {self.active_sources} active"
             )
+        if self.sources_capped > self.sources_completed:
+            raise ValueError(
+                f"{self.sources_capped} capped exceeds {self.sources_completed} completed"
+            )
         return self
 
     @model_validator(mode="after")
@@ -109,7 +118,9 @@ class SweepRun(BaseModel):
         `observatory status` would print SUCCESS out of data that contradicts
         itself — the one thing a health check must never do.
         """
-        expected = sweep_status(active=self.active_sources, refused=self.sources_refused)
+        expected = sweep_status(
+            active=self.active_sources, refused=self.sources_refused, capped=self.sources_capped
+        )
         if self.status != expected:
             raise ValueError(
                 f"status {self.status!r} contradicts the counts (expected {expected!r})"
@@ -128,16 +139,20 @@ class CadenceState(NamedTuple):
     overdue: bool
 
 
-def sweep_status(*, active: int, refused: int) -> SweepStatus:
+def sweep_status(*, active: int, refused: int, capped: int = 0) -> SweepStatus:
     """Classify a sweep that ran to completion.
 
     No active sources is not a success: a register with nothing to sweep means
     the sweep observed nothing, and reporting that green is how issue #151's
     silent zero comes back at fleet scale.
+
+    A capped source degrades the sweep for the same reason a refusal does, and
+    it is the easier one to miss: a refusal is loud and yields nothing, while a
+    truncated source yields most of itself and reads as finished (issue #172).
     """
     if active == 0:
         return "failed"
-    return "degraded" if refused else "success"
+    return "degraded" if refused or capped else "success"
 
 
 def sweeps_path(root: ObservatoryRoot) -> Path:

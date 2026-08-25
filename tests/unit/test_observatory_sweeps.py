@@ -39,7 +39,13 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ObservatoryRoot:
     return ObservatoryRoot(tmp_path / "observatory", ())
 
 
-def _run(*, refused: int = 0, completed: int | None = None, started: datetime = START) -> SweepRun:
+def _run(
+    *,
+    refused: int = 0,
+    completed: int | None = None,
+    started: datetime = START,
+    capped: int = 0,
+) -> SweepRun:
     """A valid run. `completed` defaults to whatever `refused` leaves over —
     the helper used to take it independently and could build a record with more
     outcomes than active sources, which the model now refuses."""
@@ -50,10 +56,11 @@ def _run(*, refused: int = 0, completed: int | None = None, started: datetime = 
         active_sources=2,
         sources_completed=2 - refused if completed is None else completed,
         sources_refused=refused,
+        sources_capped=capped,
         captured=47,
         failed_fetches=1,
         unchanged=4218,
-        status=sweep_status(active=2, refused=refused),
+        status=sweep_status(active=2, refused=refused, capped=capped),
     )
 
 
@@ -334,6 +341,50 @@ class TestDamageIsRefused:
 
         with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
             read_sweep_runs(sweeps_path(root))
+
+
+class TestACappedSourceIsNotAComplete:
+    """Issue #172. A source stopped by the fetch limit has been *truncated*,
+    not observed — and the counts alone cannot tell the two apart. During the
+    bootstrap seven municipalities stopped this way, Bergen among them, and
+    every one read as finished."""
+
+    def test_capping_degrades_a_sweep_with_no_refusals(self) -> None:
+        assert sweep_status(active=201, refused=0, capped=1) == "degraded"
+
+    def test_an_uncapped_sweep_with_no_refusals_is_still_success(self) -> None:
+        assert sweep_status(active=201, refused=0, capped=0) == "success"
+
+    def test_no_active_sources_still_outranks_capping(self) -> None:
+        assert sweep_status(active=0, refused=0, capped=1) == "failed"
+
+    def test_more_capped_than_completed_is_log_damage(self, root: ObservatoryRoot) -> None:
+        """A source cannot be truncated without having been swept at all."""
+        line = _run().model_dump(mode="json")
+        line["sources_capped"] = line["sources_completed"] + 1
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_a_status_ignoring_the_cap_is_log_damage(self, root: ObservatoryRoot) -> None:
+        """`success` beside a capped source is the exact claim #172 is about."""
+        line = _run().model_dump(mode="json")
+        line["sources_capped"] = 1
+        line["status"] = "success"
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_a_capped_run_round_trips(self, root: ObservatoryRoot) -> None:
+        run = _run(capped=1)
+        append_sweep_run(root, run)
+
+        assert read_sweep_runs(sweeps_path(root)) == [run]
+        assert run.status == "degraded"
 
 
 class TestNegativeDurationsCannotHappen:
