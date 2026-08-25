@@ -349,6 +349,18 @@ class TestMutationSurvivors:
         assert parsed.ok is False
         assert parsed.error == "empty answer after stripping the thinking block"
 
+    def test_only_text_parts_reach_the_answer(self) -> None:
+        parts = [
+            {"type": "image", "text": "internal image metadata"},
+            {"type": "text", "text": "Oslo."},
+            {"text": "no type, no answer"},
+            "junk",
+        ]
+
+        parsed = parse_chat_completion(exchange(body(parts)))
+
+        assert parsed.final_answer == "Oslo."
+
     def test_content_parts_without_text_contribute_nothing(self) -> None:
         parts = [{"type": "image"}, {"type": "text", "text": "Oslo."}, "junk"]
 

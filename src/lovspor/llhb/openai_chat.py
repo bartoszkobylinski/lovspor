@@ -162,8 +162,13 @@ def _answer_text(message: dict[str, Any]) -> str:
     if content is None:
         return ""
     if isinstance(content, list):
-        # Some servers answer in content parts; only the text parts carry the answer.
-        content = "".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
+        # Some servers answer in content parts; only `text` parts carry the answer —
+        # an image part may carry a `text` field too, and that is metadata.
+        content = "".join(
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
     if not isinstance(content, str):
         raise TypeError(f"content is {type(content).__name__}")
     return strip_thinking(content)
