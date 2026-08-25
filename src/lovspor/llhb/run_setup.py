@@ -40,6 +40,9 @@ class RunSpec(BaseModel):
     started_at: str
     tool_config: dict[str, Any] | None = None
     notes: str | None = None
+    provider: str = "anthropic"
+    # Sent verbatim to the provider; None for a CLI that exposes no sampling control.
+    sampling: dict[str, Any] | None = None
 
 
 def sha256_text(text: str) -> str:
@@ -104,7 +107,7 @@ def compose_run_metadata(spec: RunSpec, cases: list[dict[str, Any]]) -> dict[str
         "run_id": spec.run_id,
         "llhb_version": "1.0",
         "dataset_checksum": dataset_checksum(canonical_jsonl(cases)),
-        "provider": "anthropic",
+        "provider": spec.provider,
         "model_id": spec.model_id,
         "api_version": None,
         "condition": spec.condition,
@@ -112,7 +115,7 @@ def compose_run_metadata(spec: RunSpec, cases: list[dict[str, Any]]) -> dict[str
         "system_prompt_sha256": sha256_text(spec.system_prompt_text),
         "system_prompt_path": spec.system_prompt_path,
         "tool_config": spec.tool_config,
-        "sampling": {"temperature": None},
+        "sampling": spec.sampling if spec.sampling is not None else {"temperature": None},
         "max_turns": None,
         "started_at": spec.started_at,
         "finished_at": None,

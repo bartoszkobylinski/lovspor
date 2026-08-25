@@ -11,9 +11,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
+from pytest_httpx import HTTPXMock
 
 from lovspor.llhb import orchestrator
 from lovspor.llhb.claude_cli import RunIdentity, ToolAccess
+from lovspor.llhb.openai_chat import ChatEndpoint, ChatExchange
 from lovspor.llhb.orchestrator import (
     OrchestratorError,
     RunConfig,
@@ -983,3 +986,319 @@ def test_artifact_retention_rejects_an_invalid_case_id(tmp_path: Path) -> None:
 
 def test_text_converts_absent_process_output_to_empty_text() -> None:
     assert orchestrator._text(None) == ""
+
+
+CHAT_ENDPOINT = ChatEndpoint(base_url="https://chat.example/api", api_key="sk-test", timeout_s=30)
+
+
+def chat_config(tmp_path: Path, **overrides: Any) -> RunConfig:
+    fields: dict[str, Any] = {
+        "driver": "openai-chat",
+        "chat_endpoint": CHAT_ENDPOINT,
+        "identity": IDENTITY.model_copy(update={"provider": "norallm", "model_id": "NorMistral"}),
+        "extra_env": {},
+    }
+    fields.update(overrides)
+    return make_config(tmp_path, tmp_path / "unused-bin", **fields)
+
+
+def chat_body(content: str, **overrides: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "model": "NorMistral",
+        "choices": [
+            {"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+    body.update(overrides)
+    return body
+
+
+class TestChatDriver:
+    def test_cli_attempt_passes_the_case_question_to_argv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: list[str] = []
+
+        def fake_build_argv(
+            identity: RunIdentity, question: str, system_prompt: str, tool_access: ToolAccess | None
+        ) -> list[str]:
+            captured.append(question)
+            return ["claude"]
+
+        monkeypatch.setattr(orchestrator, "build_argv", fake_build_argv)
+        monkeypatch.setattr(
+            orchestrator,
+            "execute_argv",
+            lambda *args: orchestrator.CliInvocation(
+                stdout=SUCCESS_STREAM, stderr="", returncode=0, duration_ms=1
+            ),
+        )
+
+        orchestrator._attempt_case(
+            make_config(tmp_path, tmp_path / "bin"), make_case("llhb-v1-C1-001")
+        )
+
+        assert captured == ["Hva sier loven?"]
+
+    def test_chat_attempt_passes_the_case_question_to_request(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: list[str] = []
+
+        def fake_build_request(
+            identity: RunIdentity, question: str, system_prompt: str, sampling: Any
+        ) -> dict[str, Any]:
+            captured.append(question)
+            return {}
+
+        monkeypatch.setattr(orchestrator, "build_request", fake_build_request)
+        monkeypatch.setattr(
+            orchestrator,
+            "post_chat",
+            lambda endpoint, request: ChatExchange(
+                status=200, body=json.dumps(chat_body("Svar.")), duration_ms=1
+            ),
+        )
+
+        orchestrator._attempt_chat(chat_config(tmp_path), make_case("llhb-v1-C1-001"))
+
+        assert captured == ["Hva sier loven?"]
+
+    def test_chat_attempt_without_endpoint_has_stable_error(self, tmp_path: Path) -> None:
+        config = chat_config(tmp_path).model_copy(update={"chat_endpoint": None})
+
+        with pytest.raises(OrchestratorError) as exc_info:
+            orchestrator._attempt_chat(config, make_case("llhb-v1-C1-001"))
+
+        assert str(exc_info.value) == "the openai-chat driver needs a chat_endpoint"
+
+    @pytest.mark.parametrize(
+        ("exchange", "expected_returncode"),
+        [
+            (ChatExchange(status=200, body="ok", duration_ms=7), 0),
+            (ChatExchange(status=503, body="no", duration_ms=8), 1),
+        ],
+    )
+    def test_chat_exchange_invocation_preserves_status_fields(
+        self, exchange: ChatExchange, expected_returncode: int
+    ) -> None:
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.returncode == expected_returncode
+        assert invocation.stdout == exchange.body
+        assert invocation.stderr == ""
+        assert invocation.duration_ms == exchange.duration_ms
+        assert invocation.timed_out is exchange.timed_out
+
+    def test_timed_out_chat_exchange_preserves_error_and_timeout(self) -> None:
+        exchange = ChatExchange(
+            status=0,
+            body="",
+            duration_ms=9,
+            timed_out=True,
+            error="chat request timed out",
+        )
+
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.returncode == 1
+        assert invocation.stderr == "chat request timed out"
+        assert invocation.timed_out is True
+
+    def test_end_to_end_records_match_the_cli_shape(
+        self, tmp_path: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            url="https://chat.example/api/chat/completions",
+            json=chat_body("<think>tenker</think>Svar fra modellen."),
+        )
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        metadata = make_metadata(provider="norallm", model_id="NorMistral")
+
+        summary = run_arm(chat_config(tmp_path), [make_case("llhb-v1-C1-001")], metadata, store)
+
+        record = store.read_records(RUN_ID)[0]
+        assert summary["cases_completed"] == 1
+        assert record["final_answer"] == "Svar fra modellen."
+        assert record["tool_calls"] == []
+        assert record["harness"] == {
+            "exposed_tools": [],
+            "mcp_servers": [],
+            "permission_denials": [],
+        }
+        raw = json.loads((tmp_path / "runs" / RUN_ID / "raw" / "llhb-v1-C1-001.json").read_text())
+        assert "<think>tenker</think>" in raw["stdout"]
+
+    def test_sends_no_tools_and_the_bearer_token(
+        self, tmp_path: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            url="https://chat.example/api/chat/completions", json=chat_body("Svar.")
+        )
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            chat_config(tmp_path),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(provider="norallm", model_id="NorMistral"),
+            store,
+        )
+
+        request = httpx_mock.get_requests()[0]
+        sent = json.loads(request.content)
+        assert "tools" not in sent
+        assert sent["messages"][0] == {"role": "system", "content": "SYSTEM"}
+        assert request.headers["Authorization"] == "Bearer sk-test"
+
+    def test_a_rejected_credential_is_not_retried(
+        self, tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        httpx_mock.add_response(url="https://chat.example/api/chat/completions", status_code=401)
+        slept: list[float] = []
+        stub_retry_sleep(monkeypatch, slept.append)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            chat_config(tmp_path),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(provider="norallm", model_id="NorMistral"),
+            store,
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is False
+        assert record["errors"] == [
+            {"stage": "request", "message": "chat endpoint returned HTTP 401"}
+        ]
+        assert len(httpx_mock.get_requests()) == 1
+        assert slept == []
+
+    def test_a_server_error_is_retried_within_the_budget(
+        self, tmp_path: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        httpx_mock.add_response(url="https://chat.example/api/chat/completions", status_code=503)
+        httpx_mock.add_response(
+            url="https://chat.example/api/chat/completions", json=chat_body("Svar.")
+        )
+        slept: list[float] = []
+        stub_retry_sleep(monkeypatch, slept.append)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+
+        run_arm(
+            chat_config(tmp_path),
+            [make_case("llhb-v1-C1-001")],
+            make_metadata(provider="norallm", model_id="NorMistral"),
+            store,
+        )
+
+        record = store.read_records(RUN_ID)[0]
+        assert record["completed"] is True
+        assert record["errors"][0]["stage"] == "other"
+        assert slept == [30.0]
+
+    def test_the_chat_driver_refuses_tool_access(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="control arm only"):
+            chat_config(
+                tmp_path,
+                identity=IDENTITY.model_copy(update={"condition": "lovspor"}),
+                tool_access=ACCESS,
+            )
+
+    def test_the_chat_driver_refuses_tool_access_for_a_control_identity(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ValidationError, match="control arm only"):
+            chat_config(tmp_path, tool_access=ACCESS)
+
+    def test_the_chat_driver_refuses_a_treatment_identity_without_tool_access(
+        self, tmp_path: Path
+    ) -> None:
+        """A lovspor-labelled run with no tools would be recorded as treatment
+        while measuring control; the config fails closed, not the request."""
+        with pytest.raises(ValidationError, match="control arm only"):
+            chat_config(
+                tmp_path,
+                identity=IDENTITY.model_copy(
+                    update={"provider": "norallm", "condition": "lovspor"}
+                ),
+            )
+
+    def test_the_chat_driver_needs_an_endpoint(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="chat_endpoint"):
+            make_config(tmp_path, tmp_path / "bin", driver="openai-chat", extra_env={})
+
+    def test_the_cli_driver_refuses_a_chat_endpoint(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="only meaningful"):
+            make_config(tmp_path, tmp_path / "bin", chat_endpoint=CHAT_ENDPOINT)
+
+
+class TestChatInvocationShape:
+    """The HTTP exchange maps onto CliInvocation exactly; the retry loop reads it."""
+
+    def test_success_is_exit_zero_with_the_body_as_stdout(self) -> None:
+        exchange = ChatExchange(status=200, body='{"choices": []}', duration_ms=42)
+
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.model_dump() == {
+            "stdout": '{"choices": []}',
+            "stderr": "",
+            "returncode": 0,
+            "duration_ms": 42,
+            "timed_out": False,
+        }
+
+    def test_a_timeout_keeps_its_flag_and_message(self) -> None:
+        exchange = ChatExchange(
+            status=0, body="", duration_ms=7, timed_out=True, error="chat request timed out"
+        )
+
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.timed_out is True
+        assert invocation.stderr == "chat request timed out"
+        # Recorded in raw/<case>.json: a retryable failure is exit 1, nothing else.
+        assert invocation.returncode == 1
+
+    def test_a_rejected_credential_maps_to_the_permanent_exit_code(self) -> None:
+        exchange = ChatExchange(status=403, body="{}", duration_ms=1)
+
+        assert orchestrator._as_invocation(exchange).returncode == orchestrator._CANNOT_EXECUTE
+
+    def test_the_chat_attempt_sends_the_case_question(
+        self, tmp_path: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            url="https://chat.example/api/chat/completions", json=chat_body("Svar.")
+        )
+        case = {"case_id": "llhb-v1-C1-001", "question": "Hva sier loven om husleie?"}
+
+        record, invocation, parsed = orchestrator._attempt_case(chat_config(tmp_path), case)
+
+        sent = json.loads(httpx_mock.get_requests()[0].content)
+        assert sent["messages"][1]["content"] == "Hva sier loven om husleie?"
+        assert record["completed"] is True
+        assert invocation.returncode == 0
+        assert parsed.final_answer == "Svar."
+
+    def test_the_chat_attempt_refuses_a_missing_endpoint_by_name(self, tmp_path: Path) -> None:
+        config = make_config(tmp_path, tmp_path / "bin", extra_env={})
+        config = config.model_copy(update={"driver": "openai-chat"})
+
+        with pytest.raises(orchestrator.OrchestratorError) as caught:
+            orchestrator._attempt_chat(config, make_case("llhb-v1-C1-001"))
+
+        assert str(caught.value) == "the openai-chat driver needs a chat_endpoint"
+
+    def test_the_cli_attempt_passes_the_case_question_verbatim(self, tmp_path: Path) -> None:
+        """The question is the one thing that differs between cases; it must reach
+        the CLI exactly, not a stringified placeholder."""
+        argv_log = tmp_path / "argv.txt"
+        bin_dir = fake_claude(tmp_path, f'printf "%s\\n" "$@" > {argv_log}; ' + SUCCESS_STREAM)
+        case = {"case_id": "llhb-v1-C1-001", "question": "Hva sier husleieloven § 9-6?"}
+
+        record, _, _ = orchestrator._attempt_case(make_config(tmp_path, bin_dir), case)
+
+        assert record["completed"] is True
+        assert "Hva sier husleieloven § 9-6?" in argv_log.read_text().splitlines()

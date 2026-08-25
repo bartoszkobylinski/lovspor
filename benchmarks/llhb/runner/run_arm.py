@@ -70,6 +70,7 @@ from lovspor.llhb.mcp_surface import (
     tool_surface,
     verify_server_command,
 )
+from lovspor.llhb.openai_chat import ChatEndpoint, ChatSampling, build_request
 from lovspor.llhb.orchestrator import RunConfig, run_arm
 from lovspor.llhb.results import ResultsStore, new_run_id
 from lovspor.llhb.run_setup import (
@@ -90,6 +91,7 @@ STABILITY_SUBSET = LLHB_DIR / "dataset" / "frozen" / "llhb-v1-stability30.json"
 DEFAULT_CANDIDATES = LLHB_DIR / "dataset" / "candidates" / "regen-v5" / "candidates.jsonl"
 DEFAULT_SERVER_COMMAND = REPO_ROOT / ".venv" / "bin" / "lovspor"
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
+DEFAULT_CHAT_BASE_URL = "https://chat.llm.sigma2.no/api"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -124,8 +126,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="run the lovspor arm with no OPENAI_API_KEY, recording the weaker surface",
     )
+    parser.add_argument(
+        "--driver",
+        choices=["claude-cli", "openai-chat"],
+        default="claude-cli",
+        help="claude-cli spawns `claude -p` (ruling #25); openai-chat posts one chat "
+        "completion per case to an OpenAI-compatible endpoint, control arm only",
+    )
+    parser.add_argument(
+        "--provider",
+        default=None,
+        help="run-metadata provider: anthropic for claude-cli (default), required for "
+        "openai-chat (e.g. norallm)",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=DEFAULT_CHAT_BASE_URL,
+        help="openai-chat only: API base; /chat/completions is appended",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="openai-chat only: sent verbatim and recorded in sampling",
+    )
     parser.add_argument("--execute", action="store_true", help="actually spawn the CLI")
     args = parser.parse_args(argv)
+    _check_driver_args(parser, args)
     pilot_knobs = args.limit is not None or args.candidates is not None
     if args.stability and (args.frozen or pilot_knobs):
         parser.error("--stability runs the committed subset; no --frozen/--limit/--candidates")
@@ -138,6 +165,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.candidates is None:
         args.candidates = DEFAULT_CANDIDATES
     return args
+
+
+def _check_driver_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """The chat driver is control-only and must name its provider explicitly."""
+    if args.driver == "openai-chat":
+        if args.condition != "control":
+            parser.error("--driver openai-chat serves the control arm only (no tool bridge in v1)")
+        if not args.provider:
+            parser.error("--provider is required with --driver openai-chat (e.g. norallm)")
+        return
+    if args.provider not in (None, "anthropic"):
+        parser.error("--provider must be anthropic (or omitted) with --driver claude-cli")
+    args.provider = "anthropic"
 
 
 def git_head(repo: Path) -> str:
@@ -283,13 +323,33 @@ def compose(
         started_at=now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         tool_config=config,
         notes=_notes(args),
+        provider=str(args.provider),
+        sampling=_sampling(args),
     )
     return compose_run_metadata(spec, cases)
 
 
-def _notes(args: argparse.Namespace) -> str:
+def _sampling(args: argparse.Namespace) -> dict[str, Any] | None:
+    # The CLI exposes no sampling control, so a claude-cli run records none.
+    return {"temperature": args.temperature} if args.driver == "openai-chat" else None
+
+
+def _harness_note(args: argparse.Namespace) -> str:
+    if args.driver == "openai-chat":
+        return (
+            f"driver=openai-chat base_url={args.base_url}; temperature recorded in "
+            f"sampling; single completion per case, so max-turn does not apply"
+        )
     # claude --version only on --execute: a dry run must spawn nothing.
     cli = claude_version() if args.execute else "not-captured-dry-run"
+    return (
+        f"cli={cli}; the CLI exposes no temperature or max-turn control, "
+        f"so both are recorded as unset"
+    )
+
+
+def _notes(args: argparse.Namespace) -> str:
+    harness = _harness_note(args)
     degraded = (
         "; semantic_search is served but non-functional (no OPENAI_API_KEY): "
         "15 of 16 tools usable, embedding-based retrieval untested in this run"
@@ -300,19 +360,13 @@ def _notes(args: argparse.Namespace) -> str:
         return (
             f"STABILITY subset 30x5 (ruling #26), repeat {args.repeat}/5 for this "
             f"provider-condition arm; cases drawn from the frozen llhb-v1 dataset "
-            f"({STABILITY_SUBSET.name}); cli={cli}; the CLI exposes no temperature "
-            f"or max-turn control, so both are recorded as unset{degraded}"
+            f"({STABILITY_SUBSET.name}); {harness}{degraded}"
         )
     if args.frozen:
-        return (
-            f"FROZEN dataset llhb-v1 (Stage 9 evaluation); cli={cli}; the CLI "
-            f"exposes no temperature or max-turn control, so both are recorded "
-            f"as unset{degraded}"
-        )
+        return f"FROZEN dataset llhb-v1 (Stage 9 evaluation); {harness}{degraded}"
     return (
         f"pilot on discarded candidates from {args.candidates.name}; "
-        f"NOT the frozen dataset; cli={cli}; the CLI exposes no temperature "
-        f"or max-turn control, so both are recorded as unset{degraded}"
+        f"NOT the frozen dataset; {harness}{degraded}"
     )
 
 
@@ -334,6 +388,8 @@ def child_env(args: argparse.Namespace) -> dict[str, str]:
     result depend on statement order rather than on configuration.
     """
     load_dotenv(REPO_ROOT / ".env")
+    if args.driver == "openai-chat":
+        return {}  # no child process; the bearer token travels in chat_endpoint
     env = {"CLAUDE_CODE_OAUTH_TOKEN": subscription_token()}
     if args.condition == "control":
         return env
@@ -348,6 +404,20 @@ def child_env(args: argparse.Namespace) -> dict[str, str]:
             "Pass --without-semantic-search to accept that, recorded in notes."
         )
     return env
+
+
+def chat_endpoint(args: argparse.Namespace) -> ChatEndpoint | None:
+    """The endpoint the openai-chat driver posts to; None for the CLI driver."""
+    if args.driver != "openai-chat":
+        return None
+    load_dotenv(REPO_ROOT / ".env")
+    key = os.environ.get("LLHB_OPENAI_CHAT_API_KEY", "")
+    if not key:
+        raise LovsporError(
+            "LLHB_OPENAI_CHAT_API_KEY missing from .env; the openai-chat driver needs "
+            "the endpoint's bearer token (chat.llm.sigma2.no: Settings -> Account -> API keys)"
+        )
+    return ChatEndpoint(base_url=args.base_url, api_key=key, timeout_s=args.timeout)
 
 
 def execute(
@@ -366,6 +436,9 @@ def execute(
         sandbox_home=sandbox,
         tool_access=access,
         extra_env=child_env(args),
+        driver=args.driver,
+        chat_endpoint=chat_endpoint(args),
+        chat_sampling=ChatSampling(temperature=args.temperature),
     )
     store = ResultsStore(runs_root=RUNS_ROOT, schema_dir=LLHB_DIR / "schema")
     print(json.dumps(run_arm(config, cases, metadata, store), indent=2))
@@ -381,9 +454,22 @@ def _identity(metadata: dict[str, Any]) -> RunIdentity:
 
 
 def _report_dry_run(
-    metadata: dict[str, Any], case: dict[str, Any], access: ToolAccess | None
+    metadata: dict[str, Any],
+    case: dict[str, Any],
+    access: ToolAccess | None,
+    args: argparse.Namespace,
 ) -> None:
-    argv = build_argv(_identity(metadata), str(case["question"]), "<system-prompt>", access)
+    identity = _identity(metadata)
+    if args.driver == "openai-chat":
+        sampling = ChatSampling(temperature=args.temperature)
+        request = build_request(identity, str(case["question"]), "<system-prompt>", sampling)
+        print(
+            f"\nDRY RUN - first-case request to {args.base_url}/chat/completions (prompt elided):"
+        )
+        print(json.dumps(request, ensure_ascii=False))
+        print("\nre-run with --execute to post the requests")
+        return
+    argv = build_argv(identity, str(case["question"]), "<system-prompt>", access)
     print("\nDRY RUN - first-case argv (prompt elided):")
     print(json.dumps(argv, ensure_ascii=False))
     if access is not None:
@@ -406,7 +492,7 @@ def main() -> int:
         pool = "drops only"
     print(f"\ncases: {len(cases)} ({pool}), runs root: {RUNS_ROOT}", flush=True)
     if not args.execute:
-        _report_dry_run(metadata, cases[0], access)
+        _report_dry_run(metadata, cases[0], access, args)
         return 0
     execute(metadata, cases, args, access)
     return 0

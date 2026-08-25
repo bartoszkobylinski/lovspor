@@ -25,9 +25,9 @@ import subprocess
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from lovspor.errors import LovsporError
 from lovspor.llhb.claude_cli import (
@@ -39,6 +39,14 @@ from lovspor.llhb.claude_cli import (
     build_argv,
     build_result_record,
     parse_stream_json,
+)
+from lovspor.llhb.openai_chat import (
+    ChatEndpoint,
+    ChatExchange,
+    ChatSampling,
+    build_request,
+    parse_chat_completion,
+    post_chat,
 )
 from lovspor.llhb.results import ResultsStore
 
@@ -81,6 +89,22 @@ class RunConfig(BaseModel):
     extra_env: dict[str, str] = {}
     # Total invocations allowed per case, first try included (issue #80).
     case_attempts: int = Field(default=3, ge=1)
+    # ``claude-cli`` spawns the vendor CLI (ruling #25); ``openai-chat`` posts
+    # one chat completion per case to ``chat_endpoint`` — control arm only.
+    driver: Literal["claude-cli", "openai-chat"] = "claude-cli"
+    chat_endpoint: ChatEndpoint | None = None
+    chat_sampling: ChatSampling = ChatSampling()
+
+    @model_validator(mode="after")
+    def _check_driver(self) -> "RunConfig":
+        if self.driver == "openai-chat":
+            if self.chat_endpoint is None:
+                raise ValueError("the openai-chat driver needs a chat_endpoint")
+            if self.tool_access is not None or self.identity.condition != "control":
+                raise ValueError("the openai-chat driver serves the control arm only")
+        elif self.chat_endpoint is not None:
+            raise ValueError("chat_endpoint is only meaningful with the openai-chat driver")
+        return self
 
 
 class CliInvocation(BaseModel):
@@ -234,6 +258,8 @@ def _run_case(config: RunConfig, case: dict[str, Any], run_dir: Path) -> dict[st
 def _attempt_case(
     config: RunConfig, case: dict[str, Any]
 ) -> tuple[dict[str, Any], CliInvocation, ParsedCliResult]:
+    if config.driver == "openai-chat":
+        return _attempt_chat(config, case)
     argv = build_argv(
         config.identity, str(case["question"]), config.system_prompt, config.tool_access
     )
@@ -245,6 +271,48 @@ def _attempt_case(
     record = build_result_record(config.identity, str(case["case_id"]), parsed, timing)
     _reconcile_tool_calls(record, invocation)
     return record, invocation, parsed
+
+
+def _attempt_chat(
+    config: RunConfig, case: dict[str, Any]
+) -> tuple[dict[str, Any], CliInvocation, ParsedCliResult]:
+    """One chat completion, recorded in the same shape as a CLI attempt."""
+    if config.chat_endpoint is None:
+        raise OrchestratorError("the openai-chat driver needs a chat_endpoint")
+    request = build_request(
+        config.identity, str(case["question"]), config.system_prompt, config.chat_sampling
+    )
+    started_at = _utc_now()
+    exchange = post_chat(config.chat_endpoint, request)
+    invocation = _as_invocation(exchange)
+    timing = CaseTiming(started_at=started_at, total_ms=exchange.duration_ms)
+    parsed = parse_chat_completion(exchange)
+    record = build_result_record(config.identity, str(case["case_id"]), parsed, timing)
+    _reconcile_tool_calls(record, invocation)
+    return record, invocation, parsed
+
+
+def _as_invocation(exchange: ChatExchange) -> CliInvocation:
+    """The HTTP exchange in the shape the retry loop and raw retention expect.
+
+    The response body stands in for the transcript, so the raw file keeps
+    the thinking block the parser stripped, and the tool-count cross-check
+    runs over it unchanged. A rejected credential maps to the exit code the
+    retry loop already treats as permanent.
+    """
+    if exchange.permanent_failure:
+        returncode = _CANNOT_EXECUTE
+    elif exchange.succeeded:
+        returncode = 0
+    else:
+        returncode = 1
+    return CliInvocation(
+        stdout=exchange.body,
+        stderr=exchange.error or "",
+        returncode=returncode,
+        duration_ms=exchange.duration_ms,
+        timed_out=exchange.timed_out,
+    )
 
 
 def _retryable(invocation: CliInvocation, attempt: int, budget: int) -> bool:

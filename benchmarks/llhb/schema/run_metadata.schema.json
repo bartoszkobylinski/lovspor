@@ -33,7 +33,7 @@
       "pattern": "^[0-9a-f]{64}$",
       "description": "SHA-256 of the canonical frozen JSONL (FREEZE.md §4); asserted before the run."
     },
-    "provider": { "type": "string", "enum": ["anthropic", "openai", "google"] },
+    "provider": { "type": "string", "enum": ["anthropic", "openai", "google", "norallm"] },
     "model_id": {
       "type": "string",
       "description": "Exact provider model identifier, recorded at run time."

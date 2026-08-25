@@ -451,3 +451,24 @@ rules, experiment metadata format, matching notebook research-log structure,
 and recording of these decisions. Explicitly not yet authorized: candidate
 generation, model runs, publication claims, architecture changes, embeddings
 changes, semantic/LLM judging.
+
+## Addendum — proposed 2026-08-25 (owner ratifies by merging the PR that carries it)
+
+31. **Control-only HTTP driver for models without a vendor CLI.** Ruling
+    #25 chose vendor-native CLIs on subscription billing for cost, not for
+    method. Norwegian models (NorMistral via Sigma2's free endpoint,
+    Borealis on rented vLLM) have no CLI and no subscription; they take
+    the **control arm only** through `lovspor.llhb.openai_chat`, an
+    OpenAI-compatible chat-completions driver that sends the identical
+    system prompt and question bytes, never a `tools` field, and records
+    `provider` and `sampling` in run metadata (`provider` enum extended
+    with `norallm`). Such a run is a **diagnostic baseline** for that
+    model — unaided citation invention rate on the frozen v1 set — and
+    is reported beside the Claude control arm with the harness caveat of
+    #25. It is not a confirmatory result, produces no pair manifest and
+    no delta, and does not change the v1 primary comparison. The
+    treatment arm for these models still requires the function-calling
+    bridge deferred to v2. Ruling #30(g) is unaffected: NorMistral-11b-
+    thinking (released 2025-12) predates the 2026-08-14 publication of
+    v1, so the "unseen" guarantee holds for it; a model trained after
+    that date runs on the held-out set #30(g) prescribes.
