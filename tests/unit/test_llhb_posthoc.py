@@ -94,11 +94,13 @@ class TestTheGuard:
         assert all(len(digest) == 64 for digest in EXPECTED_RECORD_SHA256.values())
 
     def test_an_arm_that_is_not_250_cases_is_refused(self) -> None:
-        with pytest.raises(PosthocGuardError, match="expected 250"):
+        """Named by arm, not just refused: "one of them is short" costs a
+        second look at both."""
+        with pytest.raises(PosthocGuardError, match="^control: 1 cases, expected 250$"):
             verify_scored_pair(_arm([_score()]), _full_arm([]))
 
     def test_a_short_treatment_arm_is_refused_too(self) -> None:
-        with pytest.raises(PosthocGuardError, match="treatment"):
+        with pytest.raises(PosthocGuardError, match="^treatment: 1 cases, expected 250$"):
             verify_scored_pair(_full_arm([]), _arm([_score()]))
 
     def test_a_different_scorer_version_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -164,6 +166,56 @@ class TestTheArtifactSaysWhatItIs:
         report = supplementary_report(_full_arm([]), _full_arm([]))
 
         assert report["records_sha256"] == EXPECTED_RECORD_SHA256
+
+    def test_the_artifact_has_exactly_this_shape(self) -> None:
+        """The key names are the published contract, not an implementation
+        detail. This file is committed, read by whoever cites it, and rendered
+        by a script that indexes into it — a renamed key is a silently different
+        document, and eighteen surviving mutants said nothing pinned it.
+        """
+        report = supplementary_report(_full_arm([]), _full_arm([]))
+
+        assert set(report) == {
+            "analysis_status",
+            "confirmatory",
+            "reason",
+            "ruling",
+            "control_run",
+            "treatment_run",
+            "semantic_scorer",
+            "cases_per_arm",
+            "records_sha256",
+            "metrics",
+        }
+
+    def test_both_arms_are_reported_under_their_own_names(self) -> None:
+        report = supplementary_report(_full_arm([]), _full_arm([]))
+
+        assert set(report["metrics"]) == {"control", "treatment"}
+
+    def test_each_arm_reports_exactly_the_four_figures_and_its_coverage(self) -> None:
+        """Four metrics plus how much of the arm carries a score. Anything more
+        is a metric nobody agreed to publish; anything less is one the ruling
+        asked for."""
+        report = supplementary_report(_full_arm([]), _full_arm([]))
+
+        assert set(report["metrics"]["control"]) == {
+            "unconditional_h1",
+            "citation_coverage",
+            "valid_citation_instances",
+            "invalid_citation_instances",
+            "scored",
+            "unscored",
+        }
+
+    def test_every_figure_carries_a_count_and_a_mean(self) -> None:
+        """Never the mean alone: a rate without its numerator hides how much
+        evidence is behind it."""
+        report = supplementary_report(_full_arm([]), _full_arm([]))
+        figures = report["metrics"]["treatment"]
+
+        for name in ("unconditional_h1", "citation_coverage", "valid_citation_instances"):
+            assert set(figures[name]) == {"count", "mean_per_answer"}, name
 
     def test_it_refuses_to_build_from_an_arm_of_the_wrong_size(self) -> None:
         with pytest.raises(PosthocGuardError):
