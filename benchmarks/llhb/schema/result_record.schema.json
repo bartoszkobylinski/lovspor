@@ -31,7 +31,8 @@
         "anthropic",
         "openai",
         "google",
-        "norallm"
+        "norallm",
+        "nbailab"
       ]
     },
     "model_id": {
