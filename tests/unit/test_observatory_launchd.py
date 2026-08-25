@@ -63,11 +63,18 @@ def test_every_machine_specific_value_is_a_placeholder(job: dict[str, Any]) -> N
     machine_specific = [
         job["ProgramArguments"][0],
         job["EnvironmentVariables"]["LOVSPOR_OBSERVATORY_ROOT"],
+        job["EnvironmentVariables"]["LOVSPOR_OBSERVATORY_HEARTBEAT_URL"],
         job["StandardOutPath"],
         job["StandardErrorPath"],
     ]
 
     assert all("__" in value for value in machine_specific), machine_specific
+
+
+def test_the_heartbeat_endpoint_has_a_slot(job: dict[str, Any]) -> None:
+    """The switch is armed by configuration, not by code. Leaving no slot for
+    it in the job that runs unattended is how it stays unarmed forever."""
+    assert "LOVSPOR_OBSERVATORY_HEARTBEAT_URL" in job["EnvironmentVariables"]
 
 
 def test_it_yields_to_whatever_the_machine_is_doing(job: dict[str, Any]) -> None:

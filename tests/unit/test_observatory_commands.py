@@ -19,6 +19,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
+import lovspor.observatory.commands as observatory_commands
 from lovspor.cli import app
 from lovspor.observatory.commands import (
     _capture_candidates,
@@ -31,6 +32,7 @@ from lovspor.observatory.commands import (
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
+from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import SourceRegistry, read_registry
@@ -56,6 +58,7 @@ BAERUM_ID = "3201"
 BAERUM_DOMAIN = "baerum.kommune.no"
 ROBOTS_URL = f"https://www.{BAERUM_DOMAIN}/robots.txt"
 USER_AGENT = "lovspor-observatory/0.1 (+https://lovspor.no/observatory)"
+HEARTBEAT = "https://hc.example.invalid/abc123"
 
 
 @pytest.fixture
@@ -1956,6 +1959,202 @@ class TestNightly:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.sources_capped, run.status, run.failure_reason) == (1, "degraded", None)
+
+    def test_a_clean_sweep_reports_alive(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=HEARTBEAT)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert "heartbeat: reported success" in result.output
+        assert HEARTBEAT in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_missing_archive_still_reports_failure(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The case with nowhere to write is the case that most needs the
+        switch: the heartbeat does not need the archive to speak."""
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        missing = root.parent / "not-mounted"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(missing))
+        httpx_mock.add_response(url=HEARTBEAT + FAIL_SUFFIX)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [HEARTBEAT + FAIL_SUFFIX]
+        assert not missing.exists()
+
+    def test_a_writable_preflight_failure_reports_the_current_failed_run(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failures stored in the archive must also reach the remote switch.
+
+        The request body pins the failure to this invocation and preserves the
+        actionable reason; an endpoint-only assertion would allow yesterday's
+        failed record, or a reasonless placeholder, to be reported instead.
+        """
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        root.mkdir(parents=True)
+        httpx_mock.add_response(url=HEARTBEAT + FAIL_SUFFIX)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 1
+        assert requests[0].url == HEARTBEAT + FAIL_SUFFIX
+        assert b'"status":"failed"' in requests[0].content
+        assert b'"failure_reason":"registry_missing"' in requests[0].content
+        recorded = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert recorded is not None
+        assert requests[0].content == recorded.model_dump_json().encode()
+
+    def test_an_undeliverable_failure_heartbeat_preserves_the_preflight_failure(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Monitoring is secondary even when the sweep itself already failed.
+
+        A refused failure ping must stay loud without replacing the actionable
+        preflight reason or preventing its run record from being written.
+        """
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        root.mkdir(parents=True)
+        httpx_mock.add_response(url=HEARTBEAT + FAIL_SUFFIX, status_code=503)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "reason: registry_missing\n" in result.stderr
+        assert "heartbeat: NOT DELIVERED (run was failed)\n" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "registry_missing")
+
+    def test_a_concurrent_run_is_never_reported_as_ours(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The independent author's finding, kept as a property rather than as a
+        guard: a timestamp cannot say which invocation wrote a record, so this
+        command no longer asks. It reports the run it holds, and another sweep
+        writing a newer one — an operator running by hand while the nightly
+        fires — cannot be mistaken for it.
+        """
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=HEARTBEAT)
+        _write_sweep(root, started=datetime.now(UTC) + timedelta(hours=1), refused=1)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        # Ours succeeded; the newer record is degraded. Reporting the log's
+        # last line would have said so.
+        assert "heartbeat: reported success" in result.output
+
+    def test_an_unarmed_switch_says_so_rather_than_passing_quietly(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        # The exact line: a substring assertion passes against any message that
+        # merely contains this phrase, which is how five mutants survived here.
+        assert "heartbeat: not configured; no dead-man switch is armed\n" in result.stderr
+
+    def test_an_undeliverable_heartbeat_does_not_fail_a_good_sweep(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The sweep is the point; the telemetry is not. But it must be loud —
+        a switch that silently stopped reporting looks like a dead machine."""
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=HEARTBEAT, status_code=502)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert "heartbeat: NOT DELIVERED (run was success)\n" in result.stderr
+
+    def test_a_degraded_sweep_still_reports_alive(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The non-zero exit raised by capture-all must still pass through the
+        nightly command's reporting guard: degradation is evidence it ran."""
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        second_page = f"https://www.{BAERUM_DOMAIN}/tjenester/andre-forskrift"
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, second_page))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=HEARTBEAT)
+
+        result = runner.invoke(app, ["observatory", "nightly", "--limit", "1"])
+
+        assert result.exit_code == 1
+        heartbeat = [request for request in httpx_mock.get_requests() if request.url == HEARTBEAT]
+        assert len(heartbeat) == 1
+        assert b'"status":"degraded"' in heartbeat[0].content
+
+    def test_a_crash_before_recording_does_not_report_an_old_success(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Yesterday's green record must not masquerade as this invocation's
+        heartbeat when the sweep exits unexpectedly before writing telemetry.
+
+        Since the reporting stopped inferring which record is ours, this holds
+        structurally rather than by a guard: a crash never reaches the report at
+        all. The assertion is kept because the property is what matters, not the
+        mechanism that happens to provide it.
+        """
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        yesterday = datetime.now(UTC) - timedelta(days=1)
+        append_sweep_run(
+            ObservatoryRoot(root, ()),
+            SweepRun(
+                run_id=yesterday.isoformat(),
+                started_at=yesterday,
+                finished_at=yesterday,
+                active_sources=1,
+                sources_completed=1,
+                sources_refused=0,
+                captured=0,
+                failed_fetches=0,
+                unchanged=1,
+                status="success",
+            ),
+        )
+
+        def crash_before_recording(*_: object) -> None:
+            raise RuntimeError("unexpected sweep crash")
+
+        monkeypatch.setattr(observatory_commands, "_sweep", crash_before_recording)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, RuntimeError)
+        assert httpx_mock.get_requests() == []
 
 
 class TestStatus:

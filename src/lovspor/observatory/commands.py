@@ -34,6 +34,7 @@ from lovspor.errors import (
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
 from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import latest_observations, worth_capturing
+from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import (
@@ -609,8 +610,23 @@ def capture_all(
     that quietly skipped a source would be the silent zero of issue #151 at
     fleet scale.
     """
+    run = _sweep(_root(), limit)
+    if run.status != "success":
+        # The exit code follows the recorded status, and a capped source makes
+        # that status degraded: the sweep ran but did not finish observing.
+        raise typer.Exit(1)
+
+
+def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
+    """Sweep every activated source once, and return the run it recorded.
+
+    Returning the record rather than leaving the caller to find it is the whole
+    point: a caller that reads back "the latest run" is inferring identity from
+    a timestamp, and a timestamp cannot say which invocation wrote something.
+    Two sweeps overlapping — an operator running one by hand while the nightly
+    fires — is enough to make one report the other's outcome as its own.
+    """
     started_at = datetime.now(UTC)
-    root = _root()
     active = _active_sources()
     log, observed = _sweep_inputs(root)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
@@ -618,15 +634,11 @@ def capture_all(
     for record in active:
         typer.echo(f"== {record.authority_id} {record.name}")
         totals = totals.plus(_sweep_one(fetcher, log, record, observed, limit))
-    _record_sweep(root, started_at, len(active), totals)
     if totals.refused:
         typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
     if totals.capped:
         typer.echo(f"sources capped: {totals.capped} of {len(active)}", err=True)
-    if totals.refused or totals.capped:
-        # The exit code follows the recorded status, and a capped source makes
-        # that status degraded: the sweep ran but did not finish observing.
-        raise typer.Exit(1)
+    return _record_sweep(root, started_at, len(active), totals)
 
 
 def _active_sources() -> list[SourceRecord]:
@@ -658,34 +670,33 @@ def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, dict[str, date
 
 def _record_sweep(
     root: ObservatoryRoot, started_at: datetime, active: int, totals: _SweepTotals
-) -> None:
+) -> SweepRun:
     """Record that this sweep happened, and how completely.
 
     Written before the exit code is raised, so a degraded sweep leaves the same
     evidence a clean one does — the run that refused a source is exactly the
     run somebody will want to read tomorrow.
     """
-    append_sweep_run(
-        root,
-        SweepRun(
-            run_id=started_at.isoformat(),
-            started_at=started_at,
-            finished_at=datetime.now(UTC),
-            active_sources=active,
-            sources_completed=active - totals.refused,
-            sources_refused=totals.refused,
-            sources_capped=totals.capped,
-            captured=totals.captured,
-            failed_fetches=totals.failed,
-            unchanged=totals.unchanged,
-            status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
-            # A register with nothing to sweep is a failure with a nameable
-            # cause, not a green run over an empty list. `capture-all` refuses
-            # before reaching here, but the recorder must stay total: the one
-            # caller that does produce it must not produce a reasonless failure.
-            failure_reason=_NO_ACTIVE_SOURCES if active == 0 else None,
-        ),
+    run = SweepRun(
+        run_id=started_at.isoformat(),
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        active_sources=active,
+        sources_completed=active - totals.refused,
+        sources_refused=totals.refused,
+        sources_capped=totals.capped,
+        captured=totals.captured,
+        failed_fetches=totals.failed,
+        unchanged=totals.unchanged,
+        status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
+        # A register with nothing to sweep is a failure with a nameable
+        # cause, not a green run over an empty list. `capture-all` refuses
+        # before reaching here, but the recorder must stay total: the one
+        # caller that does produce it must not produce a reasonless failure.
+        failure_reason=_NO_ACTIVE_SOURCES if active == 0 else None,
     )
+    append_sweep_run(root, run)
+    return run
 
 
 def _hm(delta: timedelta) -> str:
@@ -771,24 +782,45 @@ def _preflight(root: ObservatoryRoot) -> str | None:
     return None
 
 
-def _record_failed_sweep(root: ObservatoryRoot, started_at: datetime, reason: str) -> None:
-    """A run that could not sweep anything, recorded so the gap has a cause."""
-    append_sweep_run(
-        root,
-        SweepRun(
-            run_id=started_at.isoformat(),
-            started_at=started_at,
-            finished_at=datetime.now(UTC),
-            active_sources=0,
-            sources_completed=0,
-            sources_refused=0,
-            captured=0,
-            failed_fetches=0,
-            unchanged=0,
-            status="failed",
-            failure_reason=reason,
-        ),
+def _failed_run(started_at: datetime, reason: str) -> SweepRun:
+    """A run that could not sweep anything, as a record.
+
+    Built before it is stored, because the case that most needs reporting —
+    the archive is not mounted — is exactly the case with nowhere to store it.
+    The dead-man switch does not need the archive to speak.
+    """
+    return SweepRun(
+        run_id=started_at.isoformat(),
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        active_sources=0,
+        sources_completed=0,
+        sources_refused=0,
+        captured=0,
+        failed_fetches=0,
+        unchanged=0,
+        status="failed",
+        failure_reason=reason,
     )
+
+
+def _report(run: SweepRun) -> None:
+    """Send the outbound heartbeat, loudly enough to notice when it fails.
+
+    Never fatal: a monitoring endpoint being unreachable must not turn a
+    completed sweep into a failed command. Never silent either — a switch that
+    quietly stopped reporting looks exactly like a dead machine, and the
+    operator should learn that from this line rather than from a false alarm.
+    """
+    base = heartbeat_url()
+    if base is None:
+        typer.echo("heartbeat: not configured; no dead-man switch is armed", err=True)
+        return
+    with httpx.Client() as client:
+        if send_heartbeat(base, run, client):
+            typer.echo(f"heartbeat: reported {run.status}")
+        else:
+            typer.echo(f"heartbeat: NOT DELIVERED (run was {run.status})", err=True)
 
 
 @observatory_app.command("nightly")
@@ -821,10 +853,18 @@ def nightly(
     if reason is not None:
         typer.echo(f"OBSERVATORY SWEEP FAILED\nreason: {reason}", err=True)
         typer.echo(f"expected: {root.path}", err=True)
+        failed = _failed_run(started_at, reason)
         if reason != _STORAGE_UNAVAILABLE:
-            _record_failed_sweep(root, started_at, reason)
+            append_sweep_run(root, failed)
+        _report(failed)
         raise typer.Exit(1)
-    capture_all(limit)
+    run = _sweep(root, limit)
+    # Reported from the record this invocation holds, never from whatever the
+    # log happens to end with. A degraded sweep still reports: it ran, and
+    # liveness is what the switch guards.
+    _report(run)
+    if run.status != "success":
+        raise typer.Exit(1)
 
 
 @observatory_app.command("status")
