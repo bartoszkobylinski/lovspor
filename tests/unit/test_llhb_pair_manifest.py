@@ -88,6 +88,13 @@ def _build(repo: Path) -> PairManifest:
     return build_pair_manifest(repo, _runs_root(repo), RUN_IDS, repo / PLAN_REL)
 
 
+def _set_runner_commit(repo: Path, run_id: str, commit: str) -> None:
+    metadata_path = _runs_root(repo) / run_id / "run-metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["runner_commit"] = commit
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+
 class TestFileSha256:
     def test_hashes_exact_bytes(self, tmp_path: Path) -> None:
         path = tmp_path / "f.jsonl"
@@ -192,6 +199,48 @@ class TestBuild:
         with pytest.raises(PairManifestError, match="arms disagree on model_id"):
             _build(repo)
 
+    def test_results_only_descendant_runner_commit_is_accepted(self, repo: Path) -> None:
+        older = _git(repo, "rev-parse", "HEAD")
+        evidence = _runs_root(repo) / RUN_IDS[0] / "freeze.txt"
+        evidence.write_text("frozen\n", encoding="utf-8")
+        _git(repo, "add", str(evidence.relative_to(repo)))
+        _git(repo, "commit", "--quiet", "-m", "freeze control")
+        newer = _git(repo, "rev-parse", "HEAD")
+        _set_runner_commit(repo, RUN_IDS[0], older)
+        _set_runner_commit(repo, RUN_IDS[1], newer)
+        _git(repo, "commit", "--quiet", "-am", "bind arm commits")
+
+        manifest = _build(repo)
+
+        assert manifest.runner_commit == older
+
+    def test_runner_commit_lineage_must_point_from_control_to_treatment(self, repo: Path) -> None:
+        older = _git(repo, "rev-parse", "HEAD")
+        evidence = _runs_root(repo) / RUN_IDS[0] / "freeze.txt"
+        evidence.write_text("frozen\n", encoding="utf-8")
+        _git(repo, "add", str(evidence.relative_to(repo)))
+        _git(repo, "commit", "--quiet", "-m", "freeze control")
+        newer = _git(repo, "rev-parse", "HEAD")
+        _set_runner_commit(repo, RUN_IDS[0], newer)
+        _set_runner_commit(repo, RUN_IDS[1], older)
+        _git(repo, "commit", "--quiet", "-am", "bind reversed arm commits")
+
+        with pytest.raises(PairManifestError, match="arms disagree on runner_commit"):
+            _build(repo)
+
+    def test_runner_commit_lineage_rejects_a_non_results_change(self, repo: Path) -> None:
+        older = _git(repo, "rev-parse", "HEAD")
+        (repo / "runner.py").write_text("changed = True\n", encoding="utf-8")
+        _git(repo, "add", "runner.py")
+        _git(repo, "commit", "--quiet", "-m", "change runner")
+        newer = _git(repo, "rev-parse", "HEAD")
+        _set_runner_commit(repo, RUN_IDS[0], older)
+        _set_runner_commit(repo, RUN_IDS[1], newer)
+        _git(repo, "commit", "--quiet", "-am", "bind arm commits")
+
+        with pytest.raises(PairManifestError, match="arms disagree on runner_commit"):
+            _build(repo)
+
     def test_prompt_bytes_must_match_what_the_runs_recorded(self, repo: Path) -> None:
         (repo / PROMPT_REL).write_text("Different prompt.\n", encoding="utf-8")
         _git(repo, "commit", "--quiet", "-am", "prompt drift")
@@ -235,6 +284,15 @@ class TestVerify:
 
         with pytest.raises(PairManifestError, match="not the manifest scorer_commit"):
             verify_pair_manifest(manifest, repo, _runs_root(repo))
+
+    def test_results_only_descendant_head_is_accepted(self, repo: Path) -> None:
+        manifest = _build(repo)
+        manifest_path = repo / "benchmarks/llhb/results/pair-manifests/pair.json"
+        write_pair_manifest(manifest, manifest_path)
+        _git(repo, "add", str(manifest_path.relative_to(repo)))
+        _git(repo, "commit", "--quiet", "-m", "commit pair manifest")
+
+        verify_pair_manifest(manifest, repo, _runs_root(repo))
 
     def test_dirty_tree_refuses_scoring(self, repo: Path) -> None:
         manifest = _build(repo)

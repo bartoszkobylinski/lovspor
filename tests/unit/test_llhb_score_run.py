@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -170,3 +171,31 @@ def test_score_pair_uses_only_manifest_bound_dataset_and_runs(
     assert observed[0] == (score_run.REPO_ROOT / manifest.dataset_path, corpus_path)
     assert "control-from-manifest" in observed
     assert "treatment-from-manifest" in observed
+
+
+def test_write_report_emits_the_canonical_pair_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _manifest()
+
+    class Report:
+        def model_dump(self, *, mode: str) -> dict[str, object]:
+            assert mode == "json"
+            return {"primary": {"verdict": "INCONCLUSIVE"}, "metrics": {}}
+
+    report = Report()
+    out = tmp_path / "nested" / "report.json"
+    monkeypatch.setattr(score_run, "score_pair", lambda *_: (report, 20))
+
+    written, returned_report, cases = score_run.write_report(
+        manifest, tmp_path / "corpus", tmp_path / "runs", out
+    )
+
+    assert (written, returned_report, cases) == (out, report, 20)
+    assert json.loads(out.read_text(encoding="utf-8")) == {
+        "control_run": manifest.control_run_id,
+        "treatment_run": manifest.treatment_run_id,
+        "cases_scored": 20,
+        "pair_manifest": manifest.model_dump(mode="json"),
+        **report.model_dump(mode="json"),
+    }
