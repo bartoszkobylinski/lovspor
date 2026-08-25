@@ -384,6 +384,14 @@ class TestNegativeDurationsCannotHappen:
 
         assert run.finished_at == run.started_at
 
+    def test_a_sweep_that_started_this_instant_is_fresh_not_overdue(self) -> None:
+        """The boundary at exactly zero: a sweep beginning now has an age of
+        zero, which is a real age and a healthy one. Folding it in with the
+        ahead-of-clock case would report a starting sweep as OVERDUE."""
+        state = cadence_state(_run(), now=START)
+
+        assert state == CadenceState(age=timedelta(0), overdue=False)
+
     def test_a_sweep_stamped_ahead_of_the_clock_is_overdue_not_fresh(self) -> None:
         """A clock that jumped backwards, or a forged record, would otherwise
         hold the dead-man switch shut for as long as the stamp stayed ahead."""

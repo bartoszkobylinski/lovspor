@@ -1795,9 +1795,11 @@ class TestStatus:
         result = runner.invoke(app, ["observatory", "status"])
 
         assert result.exit_code == 1
-        assert "stamped ahead of the clock" in result.output
+        # The exact line, not a substring of it: a substring assertion passes
+        # against any label that merely contains this phrase.
+        assert "  age:        unknown — last sweep is stamped ahead of the clock\n" in result.output
         assert "never swept" not in result.output
-        assert "OVERDUE" in result.output
+        assert "  state:      OVERDUE\n" in result.output
 
     def test_it_counts_registered_and_active_separately(self, root: Path) -> None:
         _activate(root)
