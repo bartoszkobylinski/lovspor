@@ -774,7 +774,6 @@ def _record_failed_sweep(root: ObservatoryRoot, started_at: datetime, reason: st
             active_sources=0,
             sources_completed=0,
             sources_refused=0,
-            sources_capped=0,
             captured=0,
             failed_fetches=0,
             unchanged=0,

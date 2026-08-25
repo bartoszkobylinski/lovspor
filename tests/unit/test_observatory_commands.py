@@ -1823,6 +1823,26 @@ class TestNightly:
         assert run is not None
         assert (run.status, run.failure_reason) == ("failed", "registry_missing")
 
+    def test_a_failed_run_reports_that_nothing_happened(self, root: Path) -> None:
+        """The point of a failed record is that no observation took place. The
+        status says why it stopped; these say that it stopped before doing
+        anything, and without them a record could claim a page was captured by
+        a sweep that never started.
+
+        `sources_capped` is deliberately not passed at the call site — the
+        model's default is 0 and passing it again only creates a value nobody
+        reads. This assertion is what pins the default, so a change to it comes
+        back as a red test rather than as a quietly different record.
+        """
+        root.mkdir(parents=True)
+
+        assert runner.invoke(app, ["observatory", "nightly"]).exit_code == 1
+
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.active_sources, run.sources_completed, run.sources_refused) == (0, 0, 0)
+        assert (run.sources_capped, run.captured, run.failed_fetches, run.unchanged) == (0, 0, 0, 0)
+
     def test_a_damaged_log_is_recorded_with_its_reason(self, root: Path) -> None:
         _activate(root)
         (root / "observations.jsonl").write_text("{not json\n", encoding="utf-8")
