@@ -47,6 +47,13 @@ Usage:
     uv run python benchmarks/llhb/runner/run_arm.py \
         --condition control --suffix stabc1 --stability --repeat 1 \
         --model claude-opus-5 [--execute]
+
+    # Control-only HTTP driver (ruling #31): one bearer token per provider,
+    # named per endpoint in .env and picked by --api-key-env:
+    uv run python benchmarks/llhb/runner/run_arm.py \
+        --condition control --suffix nmctrl1 --frozen \
+        --driver openai-chat --provider norallm --api-key-env SIGMA2_API_KEY \
+        --model NorMistral-11b-thinking:latest [--execute]
 """
 
 import argparse
@@ -150,6 +157,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0.0,
         help="openai-chat only: sent verbatim and recorded in sampling",
     )
+    parser.add_argument(
+        "--api-key-env",
+        default=None,
+        help="openai-chat only: name of the .env variable holding the endpoint's bearer "
+        "token (e.g. SIGMA2_API_KEY, BOREALIS_API_KEY); one variable per provider",
+    )
     parser.add_argument("--execute", action="store_true", help="actually spawn the CLI")
     args = parser.parse_args(argv)
     _check_driver_args(parser, args)
@@ -174,9 +187,15 @@ def _check_driver_args(parser: argparse.ArgumentParser, args: argparse.Namespace
             parser.error("--driver openai-chat serves the control arm only (no tool bridge in v1)")
         if not args.provider:
             parser.error("--provider is required with --driver openai-chat (e.g. norallm)")
+        if not args.api_key_env:
+            parser.error(
+                "--api-key-env is required with --driver openai-chat (e.g. SIGMA2_API_KEY)"
+            )
         return
     if args.provider not in (None, "anthropic"):
         parser.error("--provider must be anthropic (or omitted) with --driver claude-cli")
+    if args.api_key_env:
+        parser.error("--api-key-env applies to --driver openai-chat only")
     args.provider = "anthropic"
 
 
@@ -411,11 +430,12 @@ def chat_endpoint(args: argparse.Namespace) -> ChatEndpoint | None:
     if args.driver != "openai-chat":
         return None
     load_dotenv(REPO_ROOT / ".env")
-    key = os.environ.get("LLHB_OPENAI_CHAT_API_KEY", "")
+    key = os.environ.get(args.api_key_env, "")
     if not key:
         raise LovsporError(
-            "LLHB_OPENAI_CHAT_API_KEY missing from .env; the openai-chat driver needs "
-            "the endpoint's bearer token (chat.llm.sigma2.no: Settings -> Account -> API keys)"
+            f"{args.api_key_env} missing from .env; the openai-chat driver needs the "
+            "endpoint's bearer token under the name given by --api-key-env "
+            "(chat.llm.sigma2.no: Settings -> Account -> API keys)"
         )
     return ChatEndpoint(base_url=args.base_url, api_key=key, timeout_s=args.timeout)
 
