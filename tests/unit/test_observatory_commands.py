@@ -1583,7 +1583,7 @@ class TestCaptureAll:
         assert f"== {ASKER_ID}" not in result.output
         assert all(ASKER_DOMAIN not in str(r.url) for r in httpx_mock.get_requests())
 
-    @pytest.mark.parametrize("command", ["capture", "capture-all"])
+    @pytest.mark.parametrize("command", ["capture", "capture-all", "nightly"])
     def test_a_negative_limit_is_a_usage_error_before_any_request(
         self, command: str, root: Path, httpx_mock: HTTPXMock
     ) -> None:
@@ -1648,6 +1648,9 @@ class TestCaptureAll:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.active_sources, run.sources_completed, run.status) == (0, 0, "failed")
+        # A failure has to say why: telemetry that is red without a cause is
+        # barely better than telemetry that is missing.
+        assert run.failure_reason == "no_active_sources"
 
     def test_a_degraded_sweep_is_recorded_too(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """The run that lost a municipality is the one somebody will want to
@@ -1775,6 +1778,184 @@ class TestCaptureAll:
 
 OTHER_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-avfallssug"
 THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
+
+
+class TestNightly:
+    """#167: the scheduled entry point. Preflight is the whole value — a sweep
+    that starts on a half-present archive produces records nobody can trust."""
+
+    def test_a_missing_archive_fails_and_creates_nothing(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The most damaging thing this command could do to be helpful is
+        quietly start a second observatory on the internal disk."""
+        missing = root.parent / "not-mounted"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(missing))
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "OBSERVATORY SWEEP FAILED" in result.stderr
+        assert "storage_unavailable" in result.stderr
+        assert str(missing) in result.stderr
+        assert not missing.exists()
+
+    def test_a_missing_archive_records_nothing_either(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With nowhere to write, the message and the exit code are the whole
+        output — the remote dead-man switch is what makes the silence loud."""
+        missing = root.parent / "not-mounted"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(missing))
+
+        runner.invoke(app, ["observatory", "nightly"])
+
+        assert not (missing / "sweep-runs.jsonl").exists()
+
+    def test_a_missing_registry_is_recorded_with_its_reason(self, root: Path) -> None:
+        root.mkdir(parents=True)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "registry_missing" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "registry_missing")
+
+    def test_a_registry_with_no_active_sources_records_a_failed_run(self, root: Path) -> None:
+        """An installed but unconfigured registry must leave failed telemetry.
+
+        This is distinct from a missing registry: preflight can read it, but a
+        scheduled run still observed nothing and must not disappear from the
+        sweep history without the ``no_active_sources`` reason.
+        """
+        root.mkdir(parents=True)
+        (root / "sources.json").write_text('{"sources": {}}\n', encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "no_active_sources")
+
+    def test_registered_but_inactive_sources_count_as_no_active_sources(self, root: Path) -> None:
+        """A non-empty registry is not enough to make a nightly run viable.
+
+        Registration records eligibility; only activation records the human
+        access-policy decision that permits network traffic.
+        """
+        _register()
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "no_active_sources" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "no_active_sources")
+
+    def test_one_active_source_is_enough_when_another_is_inactive(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Preflight asks whether *any* source is active, not whether all are.
+
+        An authority awaiting review must neither block an approved authority
+        nor receive a request of its own.
+        """
+        _activate(root)
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                ASKER_ID,
+                "--name",
+                "Asker",
+                "--domain",
+                ASKER_DOMAIN,
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert all(ASKER_DOMAIN not in str(request.url) for request in httpx_mock.get_requests())
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.active_sources, run.status) == (1, "success")
+
+    def test_a_failed_run_reports_that_nothing_happened(self, root: Path) -> None:
+        """The point of a failed record is that no observation took place. The
+        status says why it stopped; these say that it stopped before doing
+        anything, and without them a record could claim a page was captured by
+        a sweep that never started.
+
+        `sources_capped` is deliberately not passed at the call site — the
+        model's default is 0 and passing it again only creates a value nobody
+        reads. This assertion is what pins the default, so a change to it comes
+        back as a red test rather than as a quietly different record.
+        """
+        root.mkdir(parents=True)
+
+        assert runner.invoke(app, ["observatory", "nightly"]).exit_code == 1
+
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.active_sources, run.sources_completed, run.sources_refused) == (0, 0, 0)
+        assert (run.sources_capped, run.captured, run.failed_fetches, run.unchanged) == (0, 0, 0, 0)
+
+    def test_a_damaged_log_is_recorded_with_its_reason(self, root: Path) -> None:
+        _activate(root)
+        (root / "observations.jsonl").write_text("{not json\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "observation_log_damaged" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "observation_log_damaged")
+
+    def test_a_clean_archive_sweeps(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason, run.captured) == ("success", None, 1)
+
+    def test_the_fetch_limit_is_forwarded_to_the_sweep(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The scheduler-facing wrapper owns the same emergency bound as
+        capture-all; accepting the option but dropping it would make a nightly
+        run look complete after ignoring the operator's requested limit."""
+        _activate(root)
+        second_page = f"https://www.{BAERUM_DOMAIN}/tjenester/andre-forskrift"
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, second_page))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly", "--limit", "1"])
+
+        assert result.exit_code == 1
+        assert "stopping at --limit 1" in result.output
+        assert all(str(request.url) != second_page for request in httpx_mock.get_requests())
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.sources_capped, run.status, run.failure_reason) == (1, "degraded", None)
 
 
 class TestStatus:

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Nightly observatory sweep (issue #167).
+
+  Template. Replace every __PLACEHOLDER__ before loading; see
+  docs/operations.md, "Observatory: the 24-hour observation SLA".
+
+  StartCalendarInterval rather than cron on purpose: if the machine is asleep
+  at the scheduled time launchd runs the job on wake, and several missed
+  triggers coalesce into one. cron simply loses them.
+
+  The hour lives here and nowhere else. How often a source must be observed is
+  a property of the data and is stated once, in
+  src/lovspor/observatory/sweeps.py; which hour the job fires is deployment
+  configuration.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>no.lovspor.observatory.nightly</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__LOVSPOR_BIN__</string>
+        <string>observatory</string>
+        <string>nightly</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- No default anywhere in the engine: the archive must be named, so
+             that a forgotten variable fails loudly instead of writing
+             observed material somewhere it does not belong (ADR-0010 §5). -->
+        <key>LOVSPOR_OBSERVATORY_ROOT</key>
+        <string>__OBSERVATORY_ROOT__</string>
+    </dict>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Never at load: `launchctl load` during setup must not start a sweep
+         against two hundred municipal servers as a side effect. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/observatory-nightly.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/observatory-nightly.err.log</string>
+
+    <!-- The sweep is polite by construction — every host waits out its own
+         rate limit — so it must not also compete for CPU with whatever the
+         machine is doing. -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>

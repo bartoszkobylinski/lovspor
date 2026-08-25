@@ -679,6 +679,11 @@ def _record_sweep(
             failed_fetches=totals.failed,
             unchanged=totals.unchanged,
             status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
+            # A register with nothing to sweep is a failure with a nameable
+            # cause, not a green run over an empty list. `capture-all` refuses
+            # before reaching here, but the recorder must stay total: the one
+            # caller that does produce it must not produce a reasonless failure.
+            failure_reason=_NO_ACTIVE_SOURCES if active == 0 else None,
         ),
     )
 
@@ -732,6 +737,94 @@ def _echo_cadence(state: CadenceState, run: SweepRun | None) -> None:
     typer.echo(f"  age:        {_hm(state.age) if state.age is not None else unknown}")
     typer.echo(f"  deadline:   {_hm(SWEEP_DEADLINE)}")
     typer.echo(f"  state:      {'OVERDUE' if state.overdue else 'OK'}")
+
+
+#: Preflight verdicts. Strings rather than an enum because they are written
+#: into the run record and read by a human at 03:00, not branched on.
+_STORAGE_UNAVAILABLE = "storage_unavailable"
+_REGISTRY_MISSING = "registry_missing"
+_LOG_DAMAGED = "observation_log_damaged"
+_NO_ACTIVE_SOURCES = "no_active_sources"
+
+
+def _preflight(root: ObservatoryRoot) -> str | None:
+    """What stops the sweep before it starts, or None to proceed.
+
+    Ordered by how early the failure is: a missing archive is not the same
+    problem as a damaged log, and answering "why is it red" with the wrong one
+    sends the operator to the wrong place.
+
+    A register with nothing activated is checked here rather than left to
+    `capture-all`, which refuses before it can record anything. A scheduled run
+    that observed nothing must leave telemetry saying why — otherwise the night
+    simply vanishes from the sweep history, and `no_active_sources` would be a
+    name for a state nothing could ever write.
+    """
+    if not root.path.exists():
+        return _STORAGE_UNAVAILABLE
+    if not registry_path(root).exists():
+        return _REGISTRY_MISSING
+    if not any(record.active for record in _load(registry_path(root)).sources.values()):
+        return _NO_ACTIVE_SOURCES
+    if not ObservationLog(root).scan().complete:
+        return _LOG_DAMAGED
+    return None
+
+
+def _record_failed_sweep(root: ObservatoryRoot, started_at: datetime, reason: str) -> None:
+    """A run that could not sweep anything, recorded so the gap has a cause."""
+    append_sweep_run(
+        root,
+        SweepRun(
+            run_id=started_at.isoformat(),
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            active_sources=0,
+            sources_completed=0,
+            sources_refused=0,
+            captured=0,
+            failed_fetches=0,
+            unchanged=0,
+            status="failed",
+            failure_reason=reason,
+        ),
+    )
+
+
+@observatory_app.command("nightly")
+def nightly(
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit", min=0, help="Stop after this many fetches per source. 0 means no bound."
+        ),
+    ] = 0,
+) -> None:
+    """The scheduled entry point: check the ground, then sweep.
+
+    Everything checkable without touching a server is checked first, because a
+    sweep that starts on a half-present archive is worse than one that refuses:
+    it produces records nobody can trust.
+
+    There is deliberately **no fallback** when the archive is absent. Quietly
+    creating a second observatory on the internal disk is the most damaging
+    thing this command could do to be helpful — two archives, each partial,
+    neither knowing about the other.
+
+    That case is also the one it cannot record: with nowhere to write, the only
+    output is this message and the exit code, and the remote dead-man switch is
+    what turns the resulting silence into an alarm.
+    """
+    started_at = datetime.now(UTC)
+    root = _root()
+    reason = _preflight(root)
+    if reason is not None:
+        typer.echo(f"OBSERVATORY SWEEP FAILED\nreason: {reason}", err=True)
+        typer.echo(f"expected: {root.path}", err=True)
+        if reason != _STORAGE_UNAVAILABLE:
+            _record_failed_sweep(root, started_at, reason)
+        raise typer.Exit(1)
+    capture_all(limit)
 
 
 @observatory_app.command("status")

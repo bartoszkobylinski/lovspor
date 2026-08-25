@@ -76,6 +76,11 @@ class SweepRun(BaseModel):
     failed_fetches: int = Field(ge=0)
     unchanged: int = Field(ge=0)
     status: SweepStatus
+    #: Why the sweep could not execute. Present exactly when ``status`` is
+    #: ``failed``: a red light with no next step is barely better than none,
+    #: and "the archive is unreadable" needs a different response from "the
+    #: archive is not mounted".
+    failure_reason: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _finished_after_started(self) -> "SweepRun":
@@ -108,6 +113,20 @@ class SweepRun(BaseModel):
             raise ValueError(
                 f"{self.sources_capped} capped exceeds {self.sources_completed} completed"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _a_reason_belongs_to_a_failure_and_only_to_one(self) -> "SweepRun":
+        """The reason and the failure travel together, in both directions.
+
+        Missing on a failure leaves the operator nothing to act on; present on
+        a green run it puts an alarming string on a healthy record, which is
+        the direction that erodes trust in the whole file.
+        """
+        if self.status == "failed" and self.failure_reason is None:
+            raise ValueError("a failed run must carry failure_reason")
+        if self.status != "failed" and self.failure_reason is not None:
+            raise ValueError(f"failure_reason on a {self.status} run")
         return self
 
     @model_validator(mode="after")

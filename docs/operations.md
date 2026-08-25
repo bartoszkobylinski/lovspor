@@ -330,6 +330,54 @@ wrapper because the cases that produce it are the ones where `capture-all`
 cannot run far enough to write anything — and an unmounted archive is exactly
 the case where there is nowhere to write to.
 
+### Running it: `observatory nightly`
+
+`capture-all` sweeps. `nightly` checks the ground first, and it is what the scheduler
+runs:
+
+```bash
+uv run lovspor observatory nightly
+```
+
+Preflight, in the order the failures happen — a missing archive is a different problem
+from a damaged log, and answering "why is it red" with the wrong one sends you to the
+wrong place:
+
+| verdict | meaning |
+| --- | --- |
+| `storage_unavailable` | the archive directory is not there — T7 not mounted |
+| `registry_missing` | the archive is there, the source registry is not |
+| `observation_log_damaged` | the log does not scan clean; run `observatory verify` |
+
+Each writes a `failed` run carrying its reason — **except `storage_unavailable`**, which
+by definition has nowhere to write. There the message and the exit code are the whole
+output, and the remote dead-man switch is what turns the resulting silence into an alarm.
+
+**There is no fallback.** If the archive is absent the sweep refuses. Quietly creating a
+second observatory on the internal disk is the most damaging thing this command could do
+while trying to be helpful: two archives, each partial, neither aware of the other.
+
+### Installing the job
+
+`deploy/launchd/no.lovspor.observatory.nightly.plist` is a template. Replace every
+`__PLACEHOLDER__`, then:
+
+```bash
+cp deploy/launchd/no.lovspor.observatory.nightly.plist ~/Library/LaunchAgents/
+# edit __LOVSPOR_BIN__, __OBSERVATORY_ROOT__, __LOG_DIR__
+launchctl load ~/Library/LaunchAgents/no.lovspor.observatory.nightly.plist
+launchctl list | grep lovspor          # confirm it is registered
+launchctl start no.lovspor.observatory.nightly   # one manual run, to prove the wiring
+```
+
+`RunAtLoad` is false on purpose: loading the job during setup must not start a sweep
+against two hundred municipal servers as a side effect.
+
+`StartCalendarInterval`, not `StartInterval` or cron: if the machine is asleep at 03:00,
+launchd runs the job on wake and coalesces missed triggers. cron loses them silently.
+A machine that is powered off gets no run at all — that is precisely the case the
+dead-man switch exists for, and no scheduler can cover it from inside.
+
 ### A capped source is not a finished one (issue #172)
 
 `--limit` stops a source's pass after that many fetches. The three counters cannot express
