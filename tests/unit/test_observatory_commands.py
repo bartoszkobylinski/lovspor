@@ -1583,7 +1583,7 @@ class TestCaptureAll:
         assert f"== {ASKER_ID}" not in result.output
         assert all(ASKER_DOMAIN not in str(r.url) for r in httpx_mock.get_requests())
 
-    @pytest.mark.parametrize("command", ["capture", "capture-all"])
+    @pytest.mark.parametrize("command", ["capture", "capture-all", "nightly"])
     def test_a_negative_limit_is_a_usage_error_before_any_request(
         self, command: str, root: Path, httpx_mock: HTTPXMock
     ) -> None:
@@ -1847,6 +1847,27 @@ class TestNightly:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.status, run.failure_reason, run.captured) == ("success", None, 1)
+
+    def test_the_fetch_limit_is_forwarded_to_the_sweep(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The scheduler-facing wrapper owns the same emergency bound as
+        capture-all; accepting the option but dropping it would make a nightly
+        run look complete after ignoring the operator's requested limit."""
+        _activate(root)
+        second_page = f"https://www.{BAERUM_DOMAIN}/tjenester/andre-forskrift"
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, second_page))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly", "--limit", "1"])
+
+        assert result.exit_code == 1
+        assert "stopping at --limit 1" in result.output
+        assert all(str(request.url) != second_page for request in httpx_mock.get_requests())
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.sources_capped, run.status, run.failure_reason) == (1, "degraded", None)
 
 
 class TestStatus:
