@@ -30,6 +30,7 @@ from lovspor.observatory.commands import (
     _record_sweep,
     _SweepTotals,
 )
+from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import SourceRegistry, read_registry
@@ -1687,6 +1688,52 @@ class TestCaptureAll:
 
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
+
+    def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
+        """A limit is truncation only when another fetch remains."""
+        candidate = Candidate(
+            url=PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+        )
+        fetcher = Mock()
+        fetcher.capture.return_value = _observation(b"page", PAGE_URL)
+
+        counts = _capture_candidates(fetcher, (candidate,), {}, limit=1)
+
+        assert counts.capped is False
+        assert (counts.captured, counts.failed, counts.unchanged) == (1, 0, 0)
+
+    def test_unchanged_candidates_after_the_limit_do_not_make_a_source_capped(self) -> None:
+        """The fetch budget may be exhausted while the sitemap is still fully swept.
+
+        Candidates already observed after their reported change need no fetch,
+        so merely appearing after the last permitted fetch is not truncation.
+        """
+        fresh = Candidate(
+            url=PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+        )
+        unchanged = Candidate(
+            url=OTHER_PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+            site_reported_lastmod="2020-01-01",
+        )
+        fetcher = Mock()
+        fetcher.capture.return_value = _observation(b"page", PAGE_URL)
+
+        counts = _capture_candidates(
+            fetcher,
+            (fresh, unchanged),
+            {OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)},
+            limit=1,
+        )
+
+        assert counts.capped is False
+        assert (counts.captured, counts.failed, counts.unchanged) == (1, 0, 1)
+        fetcher.capture.assert_called_once_with(PAGE_URL, "sitemap")
 
     def test_a_capped_source_is_recorded_and_degrades_the_sweep(
         self, root: Path, httpx_mock: HTTPXMock
