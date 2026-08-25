@@ -1352,6 +1352,41 @@ class TestUpdateSource:
         assert result.exit_code == 0, result.output
         assert _listings(root) == (LISTING_URL,)
 
+    def test_repeating_the_same_listing_in_one_update_leaves_one(self, root: Path) -> None:
+        """Idempotence has to hold within a single invocation too.
+
+        The first version compared each addition against what was already in
+        the registry and not against what the same command had just added, so
+        one repeated ``--add-listing`` declared the page twice. A duplicate
+        entry point is not cosmetic: every sweep would fetch that page once
+        per copy, against someone else's server.
+        """
+        _register()
+
+        result = _update("--add-listing", LISTING_URL, "--add-listing", LISTING_URL)
+
+        assert result.exit_code == 0, result.output
+        assert _listings(root) == (LISTING_URL,)
+
+    def test_adding_and_removing_the_same_listing_at_once_is_refused(self, root: Path) -> None:
+        """One command cannot be told both things about one URL.
+
+        Applying removals first and additions second would let the addition
+        win, and the operator who asked for the entry to go would be told the
+        update succeeded while the page stayed live — the failure the removal
+        rules exist to prevent. Neither order is more correct than the other,
+        so the instruction is refused rather than resolved.
+        """
+        _register()
+        _update("--add-listing", LISTING_URL)
+        before = (root / "sources.json").read_bytes()
+
+        result = _update("--add-listing", LISTING_URL, "--remove-listing", LISTING_URL)
+
+        assert result.exit_code == 1
+        assert "both added and removed" in result.stderr
+        assert (root / "sources.json").read_bytes() == before
+
     def test_an_update_with_nothing_to_do_is_refused(self, root: Path) -> None:
         _register()
 

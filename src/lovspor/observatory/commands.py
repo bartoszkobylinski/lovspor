@@ -195,14 +195,29 @@ def _next_listings(current: tuple[str, ...], add: list[str], remove: list[str]) 
     operator's intent is to stop sending traffic to a page; reporting success
     while the entry they actually declared stays live is the one outcome this
     command must not produce. An addition already present is not the same
-    case — it ends in exactly the state that was asked for.
+    case — it ends in exactly the state that was asked for, so it is
+    idempotent, and it stays idempotent within one invocation: each addition
+    is checked against what this command has already added, not only against
+    what the registry held on entry.
+
+    A URL given as both an addition and a removal is refused. Applying
+    removals first would let the addition win and report success to an
+    operator who asked for the entry to go; neither order is more correct
+    than the other, so the instruction is declined rather than resolved.
     """
+    both = list(dict.fromkeys(url for url in add if url in remove))
+    if both:
+        typer.echo(f"Refused: {', '.join(both)} is both added and removed.", err=True)
+        raise typer.Exit(1)
     missing = [url for url in remove if url not in current]
     if missing:
         typer.echo(f"Refused: {', '.join(missing)} not declared on this source.", err=True)
         raise typer.Exit(1)
-    kept = [url for url in current if url not in remove]
-    return tuple(kept + [url for url in add if url not in kept])
+    listings = [url for url in current if url not in remove]
+    for url in add:
+        if url not in listings:
+            listings.append(url)
+    return tuple(listings)
 
 
 def _with_listings(record: SourceRecord, listings: tuple[str, ...]) -> SourceRecord:
