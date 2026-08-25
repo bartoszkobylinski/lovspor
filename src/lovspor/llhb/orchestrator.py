@@ -100,7 +100,7 @@ class RunConfig(BaseModel):
         if self.driver == "openai-chat":
             if self.chat_endpoint is None:
                 raise ValueError("the openai-chat driver needs a chat_endpoint")
-            if self.tool_access is not None:
+            if self.tool_access is not None or self.identity.condition != "control":
                 raise ValueError("the openai-chat driver serves the control arm only")
         elif self.chat_endpoint is not None:
             raise ValueError("chat_endpoint is only meaningful with the openai-chat driver")

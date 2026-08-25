@@ -1114,6 +1114,19 @@ class TestChatDriver:
                 tool_access=ACCESS,
             )
 
+    def test_the_chat_driver_refuses_a_treatment_identity_without_tool_access(
+        self, tmp_path: Path
+    ) -> None:
+        """A lovspor-labelled run with no tools would be recorded as treatment
+        while measuring control; the config fails closed, not the request."""
+        with pytest.raises(ValidationError, match="control arm only"):
+            chat_config(
+                tmp_path,
+                identity=IDENTITY.model_copy(
+                    update={"provider": "norallm", "condition": "lovspor"}
+                ),
+            )
+
     def test_the_chat_driver_needs_an_endpoint(self, tmp_path: Path) -> None:
         with pytest.raises(ValidationError, match="chat_endpoint"):
             make_config(tmp_path, tmp_path / "bin", driver="openai-chat", extra_env={})
