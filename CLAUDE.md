@@ -95,6 +95,28 @@ proposals. It did not, and only a test written against the *claim* rather than
 the output found it. Both are one rule — **assert the premise, do not carry it**
 — and it applies to prose about the world as much as to comments about code.
 
+## A new field is not shipped until an operator can reach it
+
+Any new field on the registry, or on any configuration a human is expected to
+set, ships with the supported command that writes it and with a test asking
+the operator's question: **can this state be reached using only supported
+interfaces?** Coverage of the field, its validation and its consumers does not
+answer that question — those tests construct the state directly, which is the
+one move the operator cannot make.
+
+Origin (2026-08-25, #182 → #184): `listing_entry_points` shipped with the
+model, its domain validator, both consumers, 3,850 unit tests, 113 integration
+tests, an import smoke test and a clean security check — and no command could
+write it. The only route was hand-editing `sources.json`, which is exactly the
+route that skips the validator refusing an entry point outside the cleared
+domain. So the feature's activation step went around the guarantee the feature
+was built on, and every test passed while it did.
+
+Passing the URL to `discover --entry-point` was not the workaround either: the
+HTML reader is gated on registry membership, so an undeclared listing reaches
+the XML parser and is declined. When the only path to a new state is one the
+supported interface refuses, the feature does not exist yet.
+
 ## Testing strategy
 
 - `tests/unit/` — fast, isolated, one module at a time. Every public function covered.
