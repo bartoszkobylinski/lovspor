@@ -1648,6 +1648,9 @@ class TestCaptureAll:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.active_sources, run.sources_completed, run.status) == (0, 0, "failed")
+        # A failure has to say why: telemetry that is red without a cause is
+        # barely better than telemetry that is missing.
+        assert run.failure_reason == "no_active_sources"
 
     def test_a_degraded_sweep_is_recorded_too(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """The run that lost a municipality is the one somebody will want to
@@ -1775,6 +1778,75 @@ class TestCaptureAll:
 
 OTHER_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-avfallssug"
 THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
+
+
+class TestNightly:
+    """#167: the scheduled entry point. Preflight is the whole value — a sweep
+    that starts on a half-present archive produces records nobody can trust."""
+
+    def test_a_missing_archive_fails_and_creates_nothing(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The most damaging thing this command could do to be helpful is
+        quietly start a second observatory on the internal disk."""
+        missing = root.parent / "not-mounted"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(missing))
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "OBSERVATORY SWEEP FAILED" in result.stderr
+        assert "storage_unavailable" in result.stderr
+        assert str(missing) in result.stderr
+        assert not missing.exists()
+
+    def test_a_missing_archive_records_nothing_either(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With nowhere to write, the message and the exit code are the whole
+        output — the remote dead-man switch is what makes the silence loud."""
+        missing = root.parent / "not-mounted"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(missing))
+
+        runner.invoke(app, ["observatory", "nightly"])
+
+        assert not (missing / "sweep-runs.jsonl").exists()
+
+    def test_a_missing_registry_is_recorded_with_its_reason(self, root: Path) -> None:
+        root.mkdir(parents=True)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "registry_missing" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "registry_missing")
+
+    def test_a_damaged_log_is_recorded_with_its_reason(self, root: Path) -> None:
+        _activate(root)
+        (root / "observations.jsonl").write_text("{not json\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "observation_log_damaged" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "observation_log_damaged")
+
+    def test_a_clean_archive_sweeps(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason, run.captured) == ("success", None, 1)
 
 
 class TestStatus:

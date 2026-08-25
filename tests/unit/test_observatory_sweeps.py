@@ -400,6 +400,54 @@ class TestACappedSourceIsNotAComplete:
         assert run.status == "degraded"
 
 
+class TestAFailedRunSaysWhy:
+    """#167: `failed` means the sweep could not execute — the archive was not
+    mounted, the log was damaged. Recording that without the reason leaves an
+    operator with a red light and no next step."""
+
+    def _failed(self, *, reason: str | None) -> dict[str, object]:
+        line = _run().model_dump(mode="json")
+        line.update(
+            active_sources=0,
+            sources_completed=0,
+            sources_refused=0,
+            sources_capped=0,
+            captured=0,
+            failed_fetches=0,
+            unchanged=0,
+            status="failed",
+            failure_reason=reason,
+        )
+        return line
+
+    def test_a_failed_run_carries_its_reason(self) -> None:
+        run = SweepRun.model_validate(self._failed(reason="storage_unavailable"))
+
+        assert (run.status, run.failure_reason) == ("failed", "storage_unavailable")
+
+    def test_a_failed_run_without_a_reason_is_damage(self, root: ObservatoryRoot) -> None:
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(self._failed(reason=None))}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_a_reason_on_a_run_that_did_not_fail_is_damage(self, root: ObservatoryRoot) -> None:
+        """A reason beside a green run is a contradiction, and the direction
+        that matters: it would let a healthy record carry an alarming string
+        nobody can act on."""
+        line = _run().model_dump(mode="json")
+        line["failure_reason"] = "storage_unavailable"
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_a_successful_run_needs_no_reason(self) -> None:
+        assert _run().failure_reason is None
+
+
 class TestNegativeDurationsCannotHappen:
     """The surviving `_hm` mutant (`// 60` -> `/ 60`) differs only on negative
     input, so the question it asks is whether a negative duration can reach a
