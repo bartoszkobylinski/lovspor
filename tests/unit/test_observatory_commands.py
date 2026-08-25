@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 import lovspor.observatory.commands as observatory_commands
 from lovspor.cli import app
+from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.commands import (
     _capture_candidates,
     _echo_cadence,
@@ -1466,6 +1467,28 @@ class TestCaptureAll:
     delta cycle. One municipality's defect must not cost the other two hundred
     their day's observations, but a defect must still move the exit code."""
 
+    def test_a_reserved_host_defers_without_starting_or_recording_a_sweep(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root.mkdir(parents=True)
+        called = False
+
+        def sweep(*_: object) -> None:
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(observatory_commands, "_sweep", sweep)
+        lock_path = default_lock_path()
+        with exclusive_workload("llhb-run-arm", lock_path):
+            result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert "OBSERVATORY SWEEP DEFERRED" in result.stderr
+        assert "deferred_exclusive_workload" in result.stderr
+        assert "llhb-run-arm" in result.stderr
+        assert called is False
+        assert not (root / "sweep-runs.jsonl").exists()
+
     def _two_sources(self, root: Path, httpx_mock: HTTPXMock) -> None:
         _activate(root)
         _activate_asker(root)
@@ -1822,6 +1845,28 @@ THIRD_PAGE_URL = f"https://www.{BAERUM_DOMAIN}/tjenester/forskrift-om-vann"
 class TestNightly:
     """#167: the scheduled entry point. Preflight is the whole value — a sweep
     that starts on a half-present archive produces records nobody can trust."""
+
+    def test_a_reserved_host_records_deferral_after_successful_preflight(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _activate(root)
+        called = False
+
+        def sweep(*_: object) -> None:
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(observatory_commands, "_sweep", sweep)
+        lock_path = default_lock_path()
+        with exclusive_workload("llhb-run-arm", lock_path):
+            result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "OBSERVATORY SWEEP DEFERRED" in result.stderr
+        assert called is False
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "deferred_exclusive_workload")
 
     def test_a_missing_archive_fails_and_creates_nothing(
         self, root: Path, monkeypatch: pytest.MonkeyPatch
