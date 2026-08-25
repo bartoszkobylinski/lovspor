@@ -8,6 +8,8 @@ from types import ModuleType
 
 import pytest
 
+from lovspor.llhb.posthoc import PosthocGuardError
+
 ROOT = Path(__file__).parents[2]
 SCRIPT = ROOT / "benchmarks" / "llhb" / "runner" / "posthoc_supplementary.py"
 REPORT_JSON = (
@@ -81,3 +83,44 @@ def test_custom_output_path_applies_to_both_report_formats(
         report
     )
     assert not default_markdown.exists()
+
+
+def test_guard_refusal_happens_before_dataset_or_corpus_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The byte-identity gate must run before any input is aggregated."""
+    module = _load_script()
+
+    def refuse(*args: object) -> None:
+        raise PosthocGuardError("wrong frozen pair")
+
+    def unexpected(*args: object) -> None:
+        pytest.fail("read or scoring started before the frozen-pair guard passed")
+
+    monkeypatch.setattr(module, "verify_frozen_pair", refuse)
+    monkeypatch.setattr(module, "load_cases_jsonl", unexpected)
+
+    with pytest.raises(PosthocGuardError, match="wrong frozen pair"):
+        module.build_report(tmp_path / "corpus", tmp_path / "runs")
+
+
+def test_main_refusal_writes_neither_report_format(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = _load_script()
+    output = tmp_path / "supplementary.json"
+
+    def refuse(*args: object) -> None:
+        raise PosthocGuardError("wrong frozen pair")
+
+    monkeypatch.setattr(module, "build_report", refuse)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(SCRIPT), "--corpus-path", str(tmp_path / "corpus"), "--out", str(output)],
+    )
+
+    assert module.main() == 1
+    assert capsys.readouterr().err == "refused: wrong frozen pair\n"
+    assert not output.exists()
+    assert not output.with_suffix(".md").exists()

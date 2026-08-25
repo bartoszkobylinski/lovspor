@@ -198,6 +198,18 @@ class TestTheArtifactSaysWhatItIs:
 
         assert set(report["metrics"]) == {"control", "treatment"}
 
+    def test_each_arm_keeps_its_own_measurements(self) -> None:
+        """A symmetric empty fixture cannot detect swapped arm labels."""
+        control = _full_arm([_score(h1=True, citations=1, resolved=1, valid=1)])
+        treatment = _full_arm([_score(citations=2, resolved=2, valid=0)])
+
+        report = supplementary_report(control, treatment)
+
+        assert report["metrics"]["control"]["unconditional_h1"]["count"] == 1
+        assert report["metrics"]["control"]["valid_citation_instances"]["count"] == 1
+        assert report["metrics"]["treatment"]["unconditional_h1"]["count"] == 0
+        assert report["metrics"]["treatment"]["invalid_citation_instances"]["count"] == 2
+
     def test_each_arm_reports_exactly_the_four_figures_and_its_coverage(self) -> None:
         """Four metrics plus how much of the arm carries a score. Anything more
         is a metric nobody agreed to publish; anything less is one the ruling
@@ -219,7 +231,12 @@ class TestTheArtifactSaysWhatItIs:
         report = supplementary_report(_full_arm([]), _full_arm([]))
         figures = report["metrics"]["treatment"]
 
-        for name in ("unconditional_h1", "citation_coverage", "valid_citation_instances"):
+        for name in (
+            "unconditional_h1",
+            "citation_coverage",
+            "valid_citation_instances",
+            "invalid_citation_instances",
+        ):
             assert set(figures[name]) == {"count", "mean_per_answer"}, name
 
     def test_it_refuses_to_build_from_an_arm_of_the_wrong_size(self) -> None:
