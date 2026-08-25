@@ -104,6 +104,33 @@ class TestDelivery:
         assert b'"status":"degraded"' in sent.content
         assert b'"sources_refused":1' in sent.content
 
+    def test_the_body_is_declared_as_json(self, httpx_mock: HTTPXMock) -> None:
+        """The body is a record, not a token. A service storing it as text is
+        free to parse it, and it can only know to try if we say what it is."""
+        httpx_mock.add_response(url=BASE)
+
+        with httpx.Client() as client:
+            send_heartbeat(BASE, _run(), client)
+
+        sent = httpx_mock.get_requests()[0]
+        assert sent.headers["content-type"] == "application/json"
+        # Canonical lowercase, asserted on the raw pair rather than through the
+        # case-insensitive lookup above: the spelling that goes on the wire is
+        # then a decision rather than whatever someone typed.
+        assert (b"content-type", b"application/json") in sent.headers.raw
+
+    def test_the_request_carries_the_bounded_timeout(self, httpx_mock: HTTPXMock) -> None:
+        """A default-timeout or timeout-less request is the failure mode this
+        constant exists to prevent, and it is invisible in a passing test that
+        only checks the response."""
+        httpx_mock.add_response(url=BASE)
+
+        with httpx.Client() as client:
+            send_heartbeat(BASE, _run(), client)
+
+        timeout = httpx_mock.get_requests()[0].extensions["timeout"]
+        assert set(timeout.values()) == {HEARTBEAT_TIMEOUT_SECONDS}
+
     def test_a_refused_ping_is_reported_not_raised(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(url=BASE, status_code=500)
 

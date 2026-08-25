@@ -29,6 +29,7 @@ from lovspor.observatory.commands import (
     _entry_points,
     _hm,
     _record_sweep,
+    _report_recorded,
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
@@ -1992,6 +1993,26 @@ class TestNightly:
         assert [str(r.url) for r in httpx_mock.get_requests()] == [HEARTBEAT + FAIL_SUFFIX]
         assert not missing.exists()
 
+    def test_a_record_stamped_at_the_invocation_instant_is_ours(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The boundary of the "did this invocation write it" guard.
+
+        `started_at < ours` and `<= ours` differ only when the record's start
+        equals this command's to the microsecond. Clocks make that rare and the
+        consequence is not: under `<=` our own record reads as somebody else's,
+        so a healthy sweep reports nothing and the switch counts down to a false
+        alarm on a machine that is fine.
+        """
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        httpx_mock.add_response(url=HEARTBEAT)
+        moment = datetime.now(UTC)
+        _write_sweep(root, started=moment)
+
+        _report_recorded(ObservatoryRoot(root, ()), moment)
+
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [HEARTBEAT]
+
     def test_an_unarmed_switch_says_so_rather_than_passing_quietly(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2004,7 +2025,9 @@ class TestNightly:
         result = runner.invoke(app, ["observatory", "nightly"])
 
         assert result.exit_code == 0, result.output
-        assert "no dead-man switch is armed" in result.stderr
+        # The exact line: a substring assertion passes against any message that
+        # merely contains this phrase, which is how five mutants survived here.
+        assert "heartbeat: not configured; no dead-man switch is armed\n" in result.stderr
 
     def test_an_undeliverable_heartbeat_does_not_fail_a_good_sweep(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
@@ -2021,7 +2044,7 @@ class TestNightly:
         result = runner.invoke(app, ["observatory", "nightly"])
 
         assert result.exit_code == 0, result.output
-        assert "heartbeat: NOT DELIVERED" in result.stderr
+        assert "heartbeat: NOT DELIVERED (run was success)\n" in result.stderr
 
     def test_a_degraded_sweep_still_reports_alive(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
@@ -2076,7 +2099,7 @@ class TestNightly:
 
         assert result.exit_code == 1
         assert isinstance(result.exception, RuntimeError)
-        assert "this run recorded nothing; not reporting" in result.stderr
+        assert "heartbeat: this run recorded nothing; not reporting\n" in result.stderr
         assert httpx_mock.get_requests() == []
 
 
