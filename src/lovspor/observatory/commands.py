@@ -188,6 +188,77 @@ def activate_source(
     typer.echo(f"Reviewed by {policy.reviewed_by}; rate limit {policy.rate_limit_seconds}s")
 
 
+def _next_listings(current: tuple[str, ...], add: list[str], remove: list[str]) -> tuple[str, ...]:
+    """The entry points after this update, or a refusal.
+
+    A removal that matched nothing is an error rather than a no-op. The
+    operator's intent is to stop sending traffic to a page; reporting success
+    while the entry they actually declared stays live is the one outcome this
+    command must not produce. An addition already present is not the same
+    case — it ends in exactly the state that was asked for.
+    """
+    missing = [url for url in remove if url not in current]
+    if missing:
+        typer.echo(f"Refused: {', '.join(missing)} not declared on this source.", err=True)
+        raise typer.Exit(1)
+    kept = [url for url in current if url not in remove]
+    return tuple(kept + [url for url in add if url not in kept])
+
+
+def _with_listings(record: SourceRecord, listings: tuple[str, ...]) -> SourceRecord:
+    """The same source with new entry points, rebuilt through the model.
+
+    ``model_copy`` would be shorter and would skip every validator, so the
+    domain check that refuses an entry point outside the cleared domain would
+    never run — which is precisely the hole that hand-editing the registry
+    opened. The record is therefore revalidated as a whole, and a refusal
+    happens before anything is written.
+    """
+    return SourceRecord.model_validate({**record.model_dump(), "listing_entry_points": listings})
+
+
+@observatory_app.command("update-source")
+def update_source(
+    authority_id: _AuthorityIdOption,
+    add_listing: Annotated[
+        list[str] | None,
+        typer.Option("--add-listing", help="Declare an overview page as an entry. Repeatable."),
+    ] = None,
+    remove_listing: Annotated[
+        list[str] | None,
+        typer.Option("--remove-listing", help="Withdraw a declared entry. Repeatable."),
+    ] = None,
+) -> None:
+    """Change the mutable properties of a source that is already registered.
+
+    Listing entry points are declared here rather than at registration
+    because most sources are registered long before anyone reads their site
+    for an overview page, and because the 116 municipalities that need one are
+    already in the registry (#151, #184). Editing ``sources.json`` by hand
+    reaches the same field while skipping the model's domain validation, so
+    the supported route has to exist for the guarantee to mean anything.
+    """
+    if not add_listing and not remove_listing:
+        typer.echo("Refused: nothing to change; pass --add-listing or --remove-listing.", err=True)
+        raise typer.Exit(1)
+    path = _registry_file()
+    registry = _load(path)
+    record = registry.sources.get(authority_id)
+    if record is None:
+        typer.echo(f"{authority_id} is not registered; run register-source first.", err=True)
+        raise typer.Exit(1)
+    listings = _next_listings(record.listing_entry_points, add_listing or [], remove_listing or [])
+    try:
+        updated = _with_listings(record, listings)
+    except ValidationError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    _save({**registry.sources, authority_id: updated}, path)
+    typer.echo(f"{authority_id}: {len(listings)} listing entry point(s) declared.")
+    for url in listings:
+        typer.echo(f"  listing  {url}")
+
+
 @observatory_app.command("sources")
 def list_sources() -> None:
     """List registered sources and whether capture is permitted."""
