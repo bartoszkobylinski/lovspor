@@ -165,6 +165,17 @@ class TestComposeRunMetadata:
         assert metadata["sampling"] == {"temperature": None}
         assert metadata["provider"] == "anthropic"
 
+    def test_explicit_provider_and_sampling_are_preserved(self) -> None:
+        sampling = {"temperature": 0.25, "max_output_tokens": 2048}
+
+        metadata = compose_run_metadata(
+            make_spec(provider="norallm", sampling=sampling),
+            [make_case("llhb-v1-C1-001")],
+        )
+
+        assert metadata["provider"] == "norallm"
+        assert metadata["sampling"] == sampling
+
     def test_treatment_metadata_carries_the_tool_config(self, tmp_path: Path) -> None:
         spec = make_spec(condition="lovspor", tool_config=TOOL_CONFIG)
 

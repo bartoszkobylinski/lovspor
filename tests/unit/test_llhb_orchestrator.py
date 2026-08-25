@@ -1205,6 +1205,12 @@ class TestChatDriver:
                 tool_access=ACCESS,
             )
 
+    def test_the_chat_driver_refuses_tool_access_for_a_control_identity(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(ValidationError, match="control arm only"):
+            chat_config(tmp_path, tool_access=ACCESS)
+
     def test_the_chat_driver_refuses_a_treatment_identity_without_tool_access(
         self, tmp_path: Path
     ) -> None:
@@ -1221,6 +1227,10 @@ class TestChatDriver:
     def test_the_chat_driver_needs_an_endpoint(self, tmp_path: Path) -> None:
         with pytest.raises(ValidationError, match="chat_endpoint"):
             make_config(tmp_path, tmp_path / "bin", driver="openai-chat", extra_env={})
+
+    def test_the_cli_driver_refuses_a_chat_endpoint(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="only meaningful"):
+            make_config(tmp_path, tmp_path / "bin", chat_endpoint=CHAT_ENDPOINT)
 
 
 class TestChatInvocationShape:
