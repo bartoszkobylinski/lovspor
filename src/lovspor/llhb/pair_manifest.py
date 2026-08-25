@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -112,15 +113,67 @@ def _read_metadata(runs_root: Path, run_id: str) -> dict[str, Any]:
     return metadata
 
 
-def _shared_metadata(runs_root: Path, run_ids: tuple[str, str]) -> dict[str, Any]:
-    """The binding fields both arms must agree on, or no manifest exists."""
+def _shared_metadata(repo_root: Path, runs_root: Path, run_ids: tuple[str, str]) -> dict[str, Any]:
+    """The binding fields both arms must agree on, or no manifest exists.
+
+    ``runner_commit`` alone may differ, in one direction: the ceremony
+    (ruling #30(d)) freezes and commits the control arm before the
+    treatment arm runs, so the treatment records the freeze commit as its
+    HEAD. That commit added result files and nothing else — the runner
+    code is byte-identical — which is exactly what ``_results_only_lineage``
+    verifies before the difference is accepted. The manifest then pins the
+    control arm's commit, the older of the two.
+    """
     control, treatment = (_read_metadata(runs_root, run_id) for run_id in run_ids)
     for field in _METADATA_FIELDS:
-        if control[field] != treatment[field]:
-            raise PairManifestError(
-                f"arms disagree on {field}: {control[field]!r} vs {treatment[field]!r}"
-            )
+        if control[field] == treatment[field]:
+            continue
+        if field == "runner_commit" and _results_only_lineage(
+            repo_root, runs_root.parent, str(control[field]), str(treatment[field])
+        ):
+            continue
+        raise PairManifestError(
+            f"arms disagree on {field}: {control[field]!r} vs {treatment[field]!r}"
+        )
     return control
+
+
+def _results_only_lineage(repo_root: Path, results_dir: Path, older: str, newer: str) -> bool:
+    """True when ``newer`` descends from ``older`` through commits that
+    touched only files under ``results_dir``.
+
+    A commit that adds frozen records, a manifest or a report does not
+    change the code that produced or scores them, so a pin on ``older``
+    still describes the code at ``newer``. Any path outside the results
+    tree — one line of the scorer, one byte of the plan — breaks the
+    lineage and the pin stands as written. Equal commits are trivially
+    related; a results dir outside the repo can vouch for nothing.
+    """
+    if older == newer:
+        return True
+    try:
+        prefix = results_dir.resolve().relative_to(repo_root.resolve()).as_posix() + "/"
+    except ValueError:
+        return False
+    ancestry = _git(repo_root, "merge-base", "--is-ancestor", older, newer)
+    if ancestry.returncode != 0:
+        return False
+    changed = _git(repo_root, "diff", "--name-only", f"{older}..{newer}")
+    if changed.returncode != 0:
+        raise PairManifestError(
+            f"git diff {older[:12]}..{newer[:12]} failed in {repo_root}: {changed.stderr.strip()}"
+        )
+    paths = [line for line in changed.stdout.splitlines() if line.strip()]
+    return bool(paths) and all(path.startswith(prefix) for path in paths)
+
+
+def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 — fixed argv, no shell, repo-local
+        ["git", "-C", str(repo_root), *args],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def build_pair_manifest(
@@ -136,7 +189,7 @@ def build_pair_manifest(
     """
     if not working_tree_clean(repo_root):
         raise PairManifestError("working tree is dirty; a manifest must pin committed code")
-    metadata = _shared_metadata(runs_root, run_ids)
+    metadata = _shared_metadata(repo_root, runs_root, run_ids)
     dataset = repo_root / "benchmarks" / "llhb" / "dataset" / "frozen" / "llhb-v1.jsonl"
     analysis_plan_sha256 = file_sha256(analysis_plan)
     if analysis_plan_sha256 != str(metadata["analysis_plan_sha256"]):
@@ -202,8 +255,8 @@ def write_pair_manifest(manifest: PairManifest, path: Path) -> None:
 def verify_pair_manifest(manifest: PairManifest, repo_root: Path, runs_root: Path) -> None:
     """Every referenced hash and commit verifies, or scoring must not run."""
     _verify_files(manifest, repo_root, runs_root)
-    _verify_scorer_commit(manifest, repo_root)
-    _verify_arm_metadata(manifest, runs_root)
+    _verify_scorer_commit(manifest, repo_root, runs_root)
+    _verify_arm_metadata(manifest, repo_root, runs_root)
 
 
 def _verify_files(manifest: PairManifest, repo_root: Path, runs_root: Path) -> None:
@@ -222,9 +275,12 @@ def _verify_files(manifest: PairManifest, repo_root: Path, runs_root: Path) -> N
             )
 
 
-def _verify_scorer_commit(manifest: PairManifest, repo_root: Path) -> None:
+def _verify_scorer_commit(manifest: PairManifest, repo_root: Path, runs_root: Path) -> None:
+    """HEAD is the pinned scorer commit, or descends from it through
+    results-only commits — the manifest's own commit is one of those, and
+    the ceremony commits it before scoring (make_pair_manifest.py)."""
     head = git_head_sha(repo_root)
-    if head != manifest.scorer_commit:
+    if not _results_only_lineage(repo_root, runs_root.parent, manifest.scorer_commit, head):
         raise PairManifestError(
             f"checkout HEAD {head} is not the manifest scorer_commit "
             f"{manifest.scorer_commit}; refusing to score with unpinned code"
@@ -233,8 +289,10 @@ def _verify_scorer_commit(manifest: PairManifest, repo_root: Path) -> None:
         raise PairManifestError("working tree is dirty; the scorer_commit pin is meaningless")
 
 
-def _verify_arm_metadata(manifest: PairManifest, runs_root: Path) -> None:
-    shared = _shared_metadata(runs_root, (manifest.control_run_id, manifest.treatment_run_id))
+def _verify_arm_metadata(manifest: PairManifest, repo_root: Path, runs_root: Path) -> None:
+    shared = _shared_metadata(
+        repo_root, runs_root, (manifest.control_run_id, manifest.treatment_run_id)
+    )
     bindings = (
         ("runner_commit", manifest.runner_commit),
         ("model_id", manifest.model_requested),
