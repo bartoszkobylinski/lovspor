@@ -151,6 +151,29 @@ class TestDelivery:
         with httpx.Client() as client:
             assert send_heartbeat(BASE, _run(), client) is False
 
+    def test_an_invalid_configured_url_is_reported_not_raised(self) -> None:
+        """A typo in unattended-job configuration must not replace a
+        completed sweep's result with a heartbeat traceback."""
+        with httpx.Client() as client:
+            assert send_heartbeat("https://hc.example.invalid/bad\npath", _run(), client) is False
+
+    def test_the_never_fatal_promise_is_pinned_to_httpx_s_own_tree(self) -> None:
+        """The handler enumerates exception types, so the promise is only as
+        good as the enumeration. This is what says so when httpx moves.
+
+        `InvalidURL` is the reason: it is not an `HTTPError` and never was,
+        so catching `HTTPError` alone let a mistyped endpoint escape and fail
+        an otherwise good sweep.
+        """
+        assert not issubclass(httpx.InvalidURL, httpx.HTTPError)
+        assert issubclass(httpx.ConnectError, httpx.HTTPError)
+        assert issubclass(httpx.ReadTimeout, httpx.HTTPError)
+
+    def test_a_configured_endpoint_that_is_not_a_url_is_reported_not_raised(self) -> None:
+        """A stray character in the plist must cost a heartbeat, not a sweep."""
+        with httpx.Client() as client:
+            assert send_heartbeat("http://ex ample.invalid/x", _run(), client) is False
+
     def test_the_wait_is_bounded(self) -> None:
         """The sweep already spends hours waiting out per-host rate limits; it
         must not also hang on a monitor."""

@@ -83,6 +83,13 @@ def send_heartbeat(base: str, run: SweepRun, client: httpx.Client) -> bool:
             headers={"content-type": "application/json"},
             timeout=HEARTBEAT_TIMEOUT_SECONDS,
         )
-    except httpx.HTTPError:
+    except (httpx.HTTPError, httpx.InvalidURL):
+        # InvalidURL is named separately because it is NOT an HTTPError — it
+        # sits outside that tree entirely, next to CookieConflict and
+        # StreamError. A stray character in the configured endpoint would
+        # otherwise escape this handler and turn every successful sweep into a
+        # failed command, which is the exact opposite of what this module
+        # promises. The promise is only as good as this enumeration, so the
+        # tests pin both halves of it.
         return False
     return response.is_success
