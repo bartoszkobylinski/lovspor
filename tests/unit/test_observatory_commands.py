@@ -1840,6 +1840,57 @@ class TestNightly:
         assert run is not None
         assert (run.status, run.failure_reason) == ("failed", "no_active_sources")
 
+    def test_registered_but_inactive_sources_count_as_no_active_sources(self, root: Path) -> None:
+        """A non-empty registry is not enough to make a nightly run viable.
+
+        Registration records eligibility; only activation records the human
+        access-policy decision that permits network traffic.
+        """
+        _register()
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "no_active_sources" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "no_active_sources")
+
+    def test_one_active_source_is_enough_when_another_is_inactive(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Preflight asks whether *any* source is active, not whether all are.
+
+        An authority awaiting review must neither block an approved authority
+        nor receive a request of its own.
+        """
+        _activate(root)
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                ASKER_ID,
+                "--name",
+                "Asker",
+                "--domain",
+                ASKER_DOMAIN,
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert all(ASKER_DOMAIN not in str(request.url) for request in httpx_mock.get_requests())
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.active_sources, run.status) == (1, "success")
+
     def test_a_failed_run_reports_that_nothing_happened(self, root: Path) -> None:
         """The point of a failed record is that no observation took place. The
         status says why it stopped; these say that it stopped before doing
