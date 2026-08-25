@@ -333,6 +333,19 @@ class TestChatDriverArguments:
         assert metadata["tool_config"] is None
         assert "driver=openai-chat base_url=https://chat.llm.sigma2.no/api" in metadata["notes"]
 
+    def test_chat_dry_run_needs_no_key_and_does_not_execute(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LLHB_OPENAI_CHAT_API_KEY", raising=False)
+        monkeypatch.setattr(sys, "argv", ["run_arm.py", *CHAT_ARGS, "--limit", "1"])
+
+        assert run_arm_script.main() == 0
+
+        out = capsys.readouterr().out
+        assert "DRY RUN - first-case request" in out
+        assert '"tools"' not in out
+        assert "re-run with --execute to post the requests" in out
+
     def test_the_chat_driver_needs_no_claude_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("LLHB_CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)

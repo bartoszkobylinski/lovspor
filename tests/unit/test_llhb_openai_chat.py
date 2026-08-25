@@ -162,6 +162,16 @@ class TestParseChatCompletion:
         assert parsed.ok is False
         assert parsed.error == "response carried tool calls in a control run"
 
+    def test_tool_calls_are_reported_even_when_the_response_has_no_text(self) -> None:
+        """A function-call-only response is still a control-arm violation."""
+        document = body(None)
+        document["choices"][0]["message"]["tool_calls"] = [{"id": "call_1"}]
+
+        parsed = parse_chat_completion(exchange(document))
+
+        assert parsed.ok is False
+        assert parsed.error == "response carried tool calls in a control run"
+
     def test_an_answer_that_is_all_thinking_is_an_error(self) -> None:
         parsed = parse_chat_completion(exchange(body("<think>bare tanker</think>")))
 
