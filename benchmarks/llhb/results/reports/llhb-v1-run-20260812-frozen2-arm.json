@@ -1,0 +1,127 @@
+{
+  "report_kind": "single-arm",
+  "epistemic_status": "single-arm diagnostic baseline (ruling #31): no pair manifest, no delta, no verdict; rates are descriptive and not a treatment-effect estimate",
+  "run_id": "llhb-v1-run-20260812-frozen2",
+  "provider": "anthropic",
+  "model_id": "claude-opus-5",
+  "condition": "control",
+  "dataset_checksum": "118eec543609442693643b3bdf29b3ec9aac30f0bee889afd6f47eefe07a4cc5",
+  "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+  "lovspor_commit": "981dbdbe46a36488811cff1bcb44f0876b1faa06",
+  "system_prompt_sha256": "1e984ac1bdb481be7dda5a20b84c1b84edf608e9b4739b346aef59017ef890ec",
+  "sampling": {
+    "temperature": null
+  },
+  "cases_scored": 250,
+  "scorer_version": "llhb-score-v2",
+  "generated_at": "2026-08-25T14:28:56Z",
+  "metrics": {
+    "unconditional_h1_rate": {
+      "numerator": 42.0,
+      "denominator": 250.0,
+      "rate": 0.168,
+      "ci_low": 0.12675855309343148,
+      "ci_high": 0.21928995777154373
+    },
+    "citation_coverage": {
+      "numerator": 215.0,
+      "denominator": 250.0,
+      "rate": 0.86,
+      "ci_low": 0.8115202816735541,
+      "ci_high": 0.8975837426897257
+    },
+    "citation_hallucination_rate": {
+      "numerator": 42.0,
+      "denominator": 215.0,
+      "rate": 0.19534883720930232,
+      "ci_low": 0.14789684962408023,
+      "ci_high": 0.2534962835329522
+    },
+    "citation_accuracy": {
+      "numerator": 128.0,
+      "denominator": 189.0,
+      "rate": 0.6772486772486772,
+      "ci_low": 0.6076367981567362,
+      "ci_high": 0.739798864328566
+    },
+    "valid_citations_per_answer": {
+      "numerator": 128.0,
+      "denominator": 250.0,
+      "rate": 0.512,
+      "ci_low": 0.384,
+      "ci_high": 0.66
+    },
+    "invalid_citations_per_answer": {
+      "numerator": 61.0,
+      "denominator": 250.0,
+      "rate": 0.244,
+      "ci_low": 0.164,
+      "ci_high": 0.336
+    },
+    "misattribution_rate": {
+      "numerator": 0.0,
+      "denominator": 30.0,
+      "rate": 0.0,
+      "ci_low": 0.0,
+      "ci_high": 0.11351339317396876
+    },
+    "correct_provision_identification": {
+      "numerator": 8.0,
+      "denominator": 90.0,
+      "rate": 0.08888888888888889,
+      "ci_low": 0.04573049253679448,
+      "ci_high": 0.16570546626054086
+    },
+    "quote_fidelity": {
+      "numerator": 2.0,
+      "denominator": 18.0,
+      "rate": 0.1111111111111111,
+      "ci_low": 0.031019522645612366,
+      "ci_high": 0.32799765130178804
+    },
+    "false_premise_rejection_rate": {
+      "numerator": 0.0,
+      "denominator": 35.0,
+      "rate": 0.0,
+      "ci_low": 6.252630411177045e-18,
+      "ci_high": 0.09890099232440402
+    },
+    "no_invention_rate_resolved_cases": {
+      "numerator": 7.0,
+      "denominator": 7.0,
+      "rate": 1.0,
+      "ci_low": 0.6456695649333126,
+      "ci_high": 1.0
+    },
+    "post_direct_retrieval_hallucination_rate": {
+      "numerator": 0.0,
+      "denominator": 0.0,
+      "rate": null,
+      "ci_low": null,
+      "ci_high": null
+    }
+  },
+  "outcomes": {
+    "PASS": 35,
+    "FAIL": 188,
+    "UNRESOLVED_SEMANTIC": 27,
+    "SCORER_ERROR": 0,
+    "MODEL_ERROR": 0,
+    "total": 250
+  },
+  "c8_outcomes": {
+    "PASS": 7,
+    "FAIL": 0,
+    "UNRESOLVED_SEMANTIC": 13,
+    "SCORER_ERROR": 0,
+    "MODEL_ERROR": 0,
+    "total": 20
+  },
+  "unresolved": {
+    "unresolved_claims": 6,
+    "unattached_quotes": 405,
+    "unverifiable_quotes": 517,
+    "cases_unresolved": 27
+  },
+  "metrics_version": "llhb-metrics-v3"
+}

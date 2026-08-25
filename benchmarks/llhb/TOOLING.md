@@ -572,6 +572,18 @@ Driven by the Stage 3.5 human audit (see
   and a cases file carrying more than one pin refuses to score. Run
   the fairness gate first — `--frozen` for the published evaluation;
   this script does not re-check fairness.
+* **Scoring one arm alone** (`runner/score_arm.py`, ruling #31): the same
+  per-case scorer and the same §6 samplers over a single run, for a model
+  that has no treatment arm yet (the openai-chat driver's control runs).
+  Writes `results/reports/<run-id>-arm.json` with `report_kind:
+  "single-arm"` and an `epistemic_status` line saying there is no pair
+  manifest, no delta and no verdict. `compute_arm_report`
+  (`lovspor.llhb.metrics`) is the aggregation; its estimates are, by
+  construction, the control column a later pair report would carry — the
+  test pins that against `compute_pair_report` on a self-pair. First use:
+  `llhb-v1-run-20260825-nmctrl1` (NorMistral-11b-thinking via Sigma2) and,
+  for a like-for-like baseline, the frozen Opus control arm
+  `llhb-v1-run-20260812-frozen2` rescored with the same samplers.
 * **First treatment pilot (2026-08-10)**: `llhb-v1-run-20260810-pilot6`
   (control) and `llhb-v1-run-20260810-treat3` (lovspor), same 10
   discarded candidates, same seed, same prompt hash, same
