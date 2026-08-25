@@ -215,6 +215,41 @@ class TestListingDiscovery:
             (self.LISTING_URL, "unparseable_listing")
         ]
 
+    def test_an_unparseable_nested_listing_keeps_the_document_that_linked_to_it(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=INDEX_URL, content=_sitemapindex(self.LISTING_URL))
+        httpx_mock.add_response(url=self.LISTING_URL, content=b"")
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [INDEX_URL])
+
+        assert [(skip.url, skip.reason, skip.found_in) for skip in result.skipped] == [
+            (self.LISTING_URL, "unparseable_listing", INDEX_URL)
+        ]
+
+    def test_a_nested_listing_warning_keeps_the_document_that_linked_to_it(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=INDEX_URL, content=_sitemapindex(self.LISTING_URL))
+        httpx_mock.add_response(
+            url=self.LISTING_URL,
+            content=(
+                b'<ul><li><a href="/undated">Undated</a></li>'
+                b'<li><time datetime="2026-08-20">d</time>'
+                b'<a href="/forskrifter/renovasjon">Dated</a></li></ul>'
+            ),
+        )
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [INDEX_URL])
+
+        assert [(skip.url, skip.reason, skip.found_in) for skip in result.skipped] == [
+            (self.LISTING_URL, "listing_entries_without_date: 1", INDEX_URL)
+        ]
+
 
 class TestParseDiscoveryDocuments:
     def test_a_sitemap_index_yields_nested_documents(self) -> None:

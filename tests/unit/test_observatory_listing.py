@@ -7,9 +7,10 @@ nothing is committed that came off someone's server.
 """
 
 import pytest
+from lxml import etree, html
 
 from lovspor.errors import ParseError
-from lovspor.observatory.listing import parse_listing, safe_html_parser
+from lovspor.observatory.listing import _tag_of, parse_listing, safe_html_parser
 
 PAGE_URL = "https://www.example.invalid/kunngjoringer/"
 
@@ -119,8 +120,14 @@ class TestWhatIsRefused:
             )
 
     def test_the_refusal_names_the_browser_assembly_it_will_not_do(self) -> None:
-        with pytest.raises(ParseError, match="assembled in the browser"):
+        with pytest.raises(ParseError) as caught:
             parse_listing(_page('<div id="app"></div>'), PAGE_URL)
+
+        assert str(caught.value) == (
+            f"{PAGE_URL}: no dated listing entries in the served HTML "
+            "(0 undated link(s) seen) — the page may be assembled in the browser, "
+            "which this reader deliberately does not do"
+        )
 
     def test_a_link_outside_any_entry_is_skipped_rather_than_dated_wrongly(self) -> None:
         """Navigation and footers sit beside the list; borrowing an entry's date
@@ -156,6 +163,40 @@ class TestWhatIsRefused:
                 _page("<ul><li><time>1. august 2026</time><a href='/a'>A</a></li></ul>"), PAGE_URL
             )
 
+    def test_an_anchor_without_href_does_not_count_as_an_undated_link(self) -> None:
+        readout = parse_listing(
+            _page(
+                "<ul><li><a>Label only</a></li>"
+                '<li><time datetime="2026-08-09">d</time><a href="/a">A</a></li></ul>'
+            ),
+            PAGE_URL,
+        )
+
+        assert readout.skipped_without_date == 0
+        assert [entry.url for entry in readout.entries] == ["https://www.example.invalid/a"]
+
+    def test_a_non_document_link_does_not_stop_later_entries(self) -> None:
+        readout = parse_listing(
+            _page(
+                '<a href="#navigation">Skip</a>'
+                '<ul><li><time datetime="2026-08-09">d</time><a href="/a">A</a></li></ul>'
+            ),
+            PAGE_URL,
+        )
+
+        assert [entry.url for entry in readout.entries] == ["https://www.example.invalid/a"]
+
+    def test_only_anchor_elements_are_links_even_if_another_element_has_href(self) -> None:
+        readout = parse_listing(
+            _page(
+                '<ul><li><time datetime="2026-08-09">d</time><span href="/not-a-link">x</span>'
+                '<a href="/a">A</a></li></ul>'
+            ),
+            PAGE_URL,
+        )
+
+        assert [entry.url for entry in readout.entries] == ["https://www.example.invalid/a"]
+
 
 class TestTheSamePageTwice:
     def test_a_url_listed_twice_is_proposed_once(self) -> None:
@@ -189,6 +230,52 @@ class TestTheSamePageTwice:
 
 
 class TestTheParserItself:
+    def test_safe_parser_passes_every_hardening_option_explicitly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sentinel = object()
+        calls: list[dict[str, bool]] = []
+
+        def parser_factory(**options: bool) -> object:
+            calls.append(options)
+            return sentinel
+
+        monkeypatch.setattr(html, "HTMLParser", parser_factory)
+
+        assert safe_html_parser() is sentinel
+        assert calls == [{"no_network": True, "huge_tree": False, "remove_comments": True}]
+
+    def test_parse_listing_passes_its_url_and_safe_parser_to_lxml(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        parser = object()
+        root = html.fromstring(
+            _page('<ul><li><time datetime="2026-08-12">d</time><a href="/a">A</a></li></ul>')
+        )
+        calls: list[tuple[bytes, str, object]] = []
+
+        monkeypatch.setattr("lovspor.observatory.listing.safe_html_parser", lambda: parser)
+
+        def fromstring(payload: bytes, *, base_url: str, parser: object) -> html.HtmlElement:
+            calls.append((payload, base_url, parser))
+            return root
+
+        monkeypatch.setattr(html, "fromstring", fromstring)
+        payload = b"served bytes"
+
+        parse_listing(payload, PAGE_URL)
+
+        assert calls == [(payload, PAGE_URL, parser)]
+
+    def test_an_unreadable_page_reports_its_url_and_parser_error(self) -> None:
+        with pytest.raises(ParseError) as caught:
+            parse_listing(b"", PAGE_URL)
+
+        assert str(caught.value).startswith(f"{PAGE_URL}: unreadable listing page:")
+
+    def test_a_non_element_node_has_no_tag_name(self) -> None:
+        assert _tag_of(etree.Comment("not an element")) == ""
+
     def test_a_declared_external_entity_is_not_expanded(self) -> None:
         """The XML side switches entity resolution off explicitly; the HTML
         parser does not take that argument and does not substitute DOCTYPE
