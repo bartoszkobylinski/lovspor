@@ -753,11 +753,19 @@ def _preflight(root: ObservatoryRoot) -> str | None:
     Ordered by how early the failure is: a missing archive is not the same
     problem as a damaged log, and answering "why is it red" with the wrong one
     sends the operator to the wrong place.
+
+    A register with nothing activated is checked here rather than left to
+    `capture-all`, which refuses before it can record anything. A scheduled run
+    that observed nothing must leave telemetry saying why — otherwise the night
+    simply vanishes from the sweep history, and `no_active_sources` would be a
+    name for a state nothing could ever write.
     """
     if not root.path.exists():
         return _STORAGE_UNAVAILABLE
     if not registry_path(root).exists():
         return _REGISTRY_MISSING
+    if not any(record.active for record in _load(registry_path(root)).sources.values()):
+        return _NO_ACTIVE_SOURCES
     if not ObservationLog(root).scan().complete:
         return _LOG_DAMAGED
     return None

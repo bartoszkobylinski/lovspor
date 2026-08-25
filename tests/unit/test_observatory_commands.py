@@ -1823,6 +1823,23 @@ class TestNightly:
         assert run is not None
         assert (run.status, run.failure_reason) == ("failed", "registry_missing")
 
+    def test_a_registry_with_no_active_sources_records_a_failed_run(self, root: Path) -> None:
+        """An installed but unconfigured registry must leave failed telemetry.
+
+        This is distinct from a missing registry: preflight can read it, but a
+        scheduled run still observed nothing and must not disappear from the
+        sweep history without the ``no_active_sources`` reason.
+        """
+        root.mkdir(parents=True)
+        (root / "sources.json").write_text('{"sources": {}}\n', encoding="utf-8")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "no_active_sources")
+
     def test_a_failed_run_reports_that_nothing_happened(self, root: Path) -> None:
         """The point of a failed record is that no observation took place. The
         status says why it stopped; these say that it stopped before doing
