@@ -19,6 +19,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
+import lovspor.observatory.commands as observatory_commands
 from lovspor.cli import app
 from lovspor.observatory.commands import (
     _capture_candidates,
@@ -2021,6 +2022,62 @@ class TestNightly:
 
         assert result.exit_code == 0, result.output
         assert "heartbeat: NOT DELIVERED" in result.stderr
+
+    def test_a_degraded_sweep_still_reports_alive(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The non-zero exit raised by capture-all must still pass through the
+        nightly command's reporting guard: degradation is evidence it ran."""
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        second_page = f"https://www.{BAERUM_DOMAIN}/tjenester/andre-forskrift"
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, second_page))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=HEARTBEAT)
+
+        result = runner.invoke(app, ["observatory", "nightly", "--limit", "1"])
+
+        assert result.exit_code == 1
+        heartbeat = [request for request in httpx_mock.get_requests() if request.url == HEARTBEAT]
+        assert len(heartbeat) == 1
+        assert b'"status":"degraded"' in heartbeat[0].content
+
+    def test_a_crash_before_recording_does_not_report_an_old_success(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Yesterday's green record must not masquerade as this invocation's
+        heartbeat when the sweep exits unexpectedly before writing telemetry."""
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        yesterday = datetime.now(UTC) - timedelta(days=1)
+        append_sweep_run(
+            ObservatoryRoot(root, ()),
+            SweepRun(
+                run_id=yesterday.isoformat(),
+                started_at=yesterday,
+                finished_at=yesterday,
+                active_sources=1,
+                sources_completed=1,
+                sources_refused=0,
+                captured=0,
+                failed_fetches=0,
+                unchanged=1,
+                status="success",
+            ),
+        )
+
+        def crash_before_recording(limit: int | None = None) -> None:
+            raise RuntimeError("unexpected sweep crash")
+
+        monkeypatch.setattr(observatory_commands, "capture_all", crash_before_recording)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, RuntimeError)
+        assert "this run recorded nothing; not reporting" in result.stderr
+        assert httpx_mock.get_requests() == []
 
 
 class TestStatus:
