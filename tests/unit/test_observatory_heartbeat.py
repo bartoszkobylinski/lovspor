@@ -103,6 +103,18 @@ class TestWhichEndpointARunReportsTo:
     def test_several_trailing_slashes_are_still_one_endpoint(self) -> None:
         assert ping_url(BASE + "///", _run(failed=True)) == BASE + FAIL_SUFFIX
 
+    def test_only_slashes_are_stripped_from_the_endpoint(self) -> None:
+        """`rstrip` takes a character SET, not a suffix, so widening it silently
+        eats real path characters. An endpoint ending in any other character
+        must survive untouched — the same mutation is registered as equivalent
+        elsewhere in this repo only because that call lowercases its input on
+        the line above, and this one does not.
+        """
+        ends_in_x = "https://hc.example.invalid/checkX"
+
+        assert ping_url(ends_in_x, _run()) == ends_in_x
+        assert ping_url(ends_in_x, _run(failed=True)) == ends_in_x + FAIL_SUFFIX
+
 
 class TestDelivery:
     def test_the_run_travels_in_the_body(self, httpx_mock: HTTPXMock) -> None:
