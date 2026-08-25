@@ -242,6 +242,16 @@ class TestParseChatCompletion:
 
 
 class TestPostChat:
+    def test_preserves_a_trailing_x_in_the_base_url(self, httpx_mock: HTTPXMock) -> None:
+        endpoint = ENDPOINT.model_copy(update={"base_url": "https://chat.example/apiX"})
+        expected_url = "https://chat.example/apiX/chat/completions"
+        httpx_mock.add_response(url=expected_url, json=body("Oslo."))
+
+        result = post_chat(endpoint, build_request(IDENTITY, "q", "s", ChatSampling()))
+
+        assert str(httpx_mock.get_requests()[0].url) == expected_url
+        assert result.status == 200
+
     def test_posts_json_with_the_bearer_token(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(url=URL, json=body("Oslo."))
         request = build_request(IDENTITY, "q", "s", ChatSampling())
@@ -289,13 +299,13 @@ class TestPostChat:
             return real_client(*args, **kwargs)
 
         monkeypatch.setattr("lovspor.llhb.openai_chat.httpx.Client", client_with_observed_timeout)
-        times = iter((10.0, 10.25))
+        times = iter((10.0, 11.0))
         monkeypatch.setattr("lovspor.llhb.openai_chat.time.monotonic", lambda: next(times))
 
         result = post_chat(ENDPOINT, build_request(IDENTITY, "q", "s", ChatSampling()))
 
         assert observed_timeouts == [30]
-        assert result.duration_ms == 250
+        assert result.duration_ms == 1000
 
     def test_a_rejected_credential_is_permanent(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(url=URL, status_code=401, json={"detail": "bad key"})
