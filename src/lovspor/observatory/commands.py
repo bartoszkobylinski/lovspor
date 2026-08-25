@@ -317,7 +317,15 @@ def _entry_points(fetcher: Fetcher, record: SourceRecord, given: list[str] | Non
         return _Starts((), probed=False)
     declared = fetcher.declared_sitemaps(policy.robots_txt_url)
     if declared:
-        return _Starts(declared, probed=False)
+        return _Starts(declared + record.listing_entry_points, probed=False)
+    # Listings are the entry for the 116 municipalities that publish no sitemap
+    # at all (#151), where discovery otherwise has none and a capture is a
+    # structural no-op. They are added rather than substituted when a sitemap
+    # does exist: a source can publish both, and the sitemap is the machine
+    # index while a listing is the page a person reads — neither is a fallback
+    # for the other.
+    if record.listing_entry_points:
+        return _Starts(record.listing_entry_points, probed=False)
     # A declaration is the exception, not the rule: 190 of 358 municipalities
     # serve a sitemap at the conventional path without declaring it (Phase A
     # sweep, 2026-08-20). The probe is an ordinary gated fetch against the

@@ -29,6 +29,7 @@ from lovspor.observatory.discovery import (
     parse_discovery_document,
 )
 from lovspor.observatory.fetch import CaptureSettings, Fetcher
+from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, Tombstone
 from lovspor.observatory.registry import (
@@ -100,13 +101,14 @@ def _policy() -> AccessPolicyCheck:
     )
 
 
-def _source() -> SourceRecord:
+def _source(*, listing_entry_points: tuple[str, ...] = ()) -> SourceRecord:
     return activate(
         SourceRecord(
             authority_type="kommune",
             authority_id=BAERUM_ID,
             name="Bærum",
             canonical_domain=BAERUM_DOMAIN,
+            listing_entry_points=listing_entry_points,
         ),
         _policy(),
     )
@@ -118,9 +120,12 @@ def log(tmp_path: Path) -> ObservationLog:
 
 
 def _discoverer(
-    log: ObservationLog, settings: DiscoverySettings | None = None
+    log: ObservationLog,
+    settings: DiscoverySettings | None = None,
+    *,
+    listing_entry_points: tuple[str, ...] = (),
 ) -> tuple[Discoverer, SourceRecord]:
-    source = _source()
+    source = _source(listing_entry_points=listing_entry_points)
     fetcher = Fetcher(
         SourceRegistry(sources={BAERUM_ID: source}),
         log,
@@ -147,6 +152,106 @@ class TestParseSitemap:
         assert links[0].site_reported_lastmod == "2026-08-01"
         assert links[1].site_reported_lastmod is None
 
+
+class TestListingDiscovery:
+    LISTING_URL = f"https://{BAERUM_DOMAIN}/kunngjoringer/"
+
+    def test_a_registered_listing_yields_candidates_with_listing_provenance(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=self.LISTING_URL,
+            content=(
+                b'<ul><li><time datetime="2026-08-20">20. august</time>'
+                b'<a href="/forskrifter/renovasjon">Renovasjon</a></li></ul>'
+            ),
+        )
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [self.LISTING_URL])
+
+        assert [
+            (candidate.url, candidate.discovery_method, candidate.site_reported_lastmod)
+            for candidate in result.candidates
+        ] == [(PAGE_URL, LISTING_METHOD, "2026-08-20")]
+        observations = [
+            record for record in log.records() if isinstance(record, ArtifactObservation)
+        ]
+        assert observations[0].provenance.discovery_method == DISCOVERY_ENTRY_POINT
+
+    def test_undated_listing_entries_are_reported_while_dated_entries_continue(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(
+            url=self.LISTING_URL,
+            content=(
+                b'<ul><li><a href="/undated">Undated</a></li>'
+                b'<li><time datetime="2026-08-20">d</time>'
+                b'<a href="/forskrifter/renovasjon">Dated</a></li></ul>'
+            ),
+        )
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [self.LISTING_URL])
+
+        assert [candidate.url for candidate in result.candidates] == [PAGE_URL]
+        assert [(skip.url, skip.reason) for skip in result.skipped] == [
+            (self.LISTING_URL, "listing_entries_without_date: 1")
+        ]
+
+    def test_an_unreadable_registered_listing_has_a_listing_specific_skip_reason(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=self.LISTING_URL, content=b"")
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [self.LISTING_URL])
+
+        assert result.candidates == ()
+        assert [(skip.url, skip.reason) for skip in result.skipped] == [
+            (self.LISTING_URL, "unparseable_listing")
+        ]
+
+    def test_an_unparseable_nested_listing_keeps_the_document_that_linked_to_it(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=INDEX_URL, content=_sitemapindex(self.LISTING_URL))
+        httpx_mock.add_response(url=self.LISTING_URL, content=b"")
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [INDEX_URL])
+
+        assert [(skip.url, skip.reason, skip.found_in) for skip in result.skipped] == [
+            (self.LISTING_URL, "unparseable_listing", INDEX_URL)
+        ]
+
+    def test_a_nested_listing_warning_keeps_the_document_that_linked_to_it(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=INDEX_URL, content=_sitemapindex(self.LISTING_URL))
+        httpx_mock.add_response(
+            url=self.LISTING_URL,
+            content=(
+                b'<ul><li><a href="/undated">Undated</a></li>'
+                b'<li><time datetime="2026-08-20">d</time>'
+                b'<a href="/forskrifter/renovasjon">Dated</a></li></ul>'
+            ),
+        )
+        discoverer, source = _discoverer(log, listing_entry_points=(self.LISTING_URL,))
+
+        result = discoverer.discover(source, [INDEX_URL])
+
+        assert [(skip.url, skip.reason, skip.found_in) for skip in result.skipped] == [
+            (self.LISTING_URL, "listing_entries_without_date: 1", INDEX_URL)
+        ]
+
+
+class TestParseDiscoveryDocuments:
     def test_a_sitemap_index_yields_nested_documents(self) -> None:
         links = parse_discovery_document(_sitemapindex(NESTED_URL), INDEX_URL)
 

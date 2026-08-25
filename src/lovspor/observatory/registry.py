@@ -114,8 +114,40 @@ class SourceRecord(BaseModel):
     authority_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     canonical_domain: str = Field(min_length=1)
+    #: Overview pages to read as a second entry into discovery (issue #151).
+    #: Declared by a human at activation, one per listing, because "this URL is
+    #: an index of documents" is a judgement about a page and not something to
+    #: infer: guessing it would let an error page or a search form be walked as
+    #: though it listed anything.
+    #:
+    #: Empty for every source that publishes a sitemap. It exists for the 116
+    #: municipalities that publish none, where discovery currently has no entry
+    #: at all and a capture is structurally a no-op.
+    listing_entry_points: tuple[str, ...] = ()
     access_policy: AccessPolicyCheck | None = None
     active: bool = False
+
+    @model_validator(mode="after")
+    def _listings_stay_inside_the_cleared_domain(self) -> "SourceRecord":
+        """A listing must live on the domain this source was cleared for.
+
+        The access-policy check answers a question about one domain, so a
+        listing on another host would be crawled under a clearance nobody gave
+        for it. The fetcher's domain guard would refuse those pages anyway;
+        refusing the record is better, because a registry that can hold an
+        unreachable entry point invites someone to widen the guard instead.
+        """
+        outside = [url for url in self.listing_entry_points if not self._inside(url)]
+        if outside:
+            raise ValueError(
+                f"source {self.authority_id} lists entry points outside "
+                f"{self.canonical_domain}: {', '.join(outside)}"
+            )
+        return self
+
+    def _inside(self, url: str) -> bool:
+        host = urlsplit(url).hostname
+        return host is not None and _host_matches(host, self.canonical_domain)
 
     @model_validator(mode="after")
     def _active_requires_clearance(self) -> "SourceRecord":
