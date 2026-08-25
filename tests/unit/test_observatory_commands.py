@@ -2017,6 +2017,27 @@ class TestNightly:
         assert recorded is not None
         assert requests[0].content == recorded.model_dump_json().encode()
 
+    def test_an_undeliverable_failure_heartbeat_preserves_the_preflight_failure(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Monitoring is secondary even when the sweep itself already failed.
+
+        A refused failure ping must stay loud without replacing the actionable
+        preflight reason or preventing its run record from being written.
+        """
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        root.mkdir(parents=True)
+        httpx_mock.add_response(url=HEARTBEAT + FAIL_SUFFIX, status_code=503)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "reason: registry_missing\n" in result.stderr
+        assert "heartbeat: NOT DELIVERED (run was failed)\n" in result.stderr
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason) == ("failed", "registry_missing")
+
     def test_a_concurrent_run_is_never_reported_as_ours(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
