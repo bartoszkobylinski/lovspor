@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.observatory.commands import (
+    _capture_candidates,
     _echo_cadence,
     _echo_last_sweep,
     _echo_sources,
@@ -1676,6 +1677,16 @@ class TestCaptureAll:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.captured, run.failed_fetches, run.unchanged) == (1, 1, 0)
+
+    def test_a_complete_pass_reports_capped_as_a_real_false(self) -> None:
+        """`capped` is declared `bool` and every call site tests it for truth,
+        so returning None would behave identically everywhere while being a lie
+        about the declared type. Identity is the only thing that catches it —
+        and a NamedTuple validates nothing at runtime, so nothing else will."""
+        counts = _capture_candidates(Mock(), (), {}, 0)
+
+        assert counts.capped is False
+        assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
 
     def test_a_capped_source_is_recorded_and_degrades_the_sweep(
         self, root: Path, httpx_mock: HTTPXMock
