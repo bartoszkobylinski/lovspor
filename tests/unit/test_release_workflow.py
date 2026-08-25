@@ -31,7 +31,7 @@ _RELEASED_MARKER = "Lovspor is distributed on PyPI"
 # bump has to move `pyproject.toml`, `uv.lock` and the installed metadata
 # together — CI runs `uv sync --frozen`, so a forgotten `uv lock` fails the
 # build rather than shipping a mismatched artifact.
-_EXPECTED_VERSION = "0.5.1"
+_EXPECTED_VERSION = "0.6.0"
 
 # The README is deliberately NOT here. Since the 2026-08-06 user-first rewrite it
 # is a landing page, not a release doc: it shows the `uvx` install and delegates
