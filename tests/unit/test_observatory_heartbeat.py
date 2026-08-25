@@ -115,6 +115,7 @@ class TestDelivery:
             assert send_heartbeat(BASE, _run(refused=1), client) is True
 
         sent = httpx_mock.get_requests()[0]
+        assert sent.method == "POST"
         assert b'"status":"degraded"' in sent.content
         assert b'"sources_refused":1' in sent.content
 

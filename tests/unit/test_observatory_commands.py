@@ -1992,6 +1992,31 @@ class TestNightly:
         assert [str(r.url) for r in httpx_mock.get_requests()] == [HEARTBEAT + FAIL_SUFFIX]
         assert not missing.exists()
 
+    def test_a_writable_preflight_failure_reports_the_current_failed_run(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failures stored in the archive must also reach the remote switch.
+
+        The request body pins the failure to this invocation and preserves the
+        actionable reason; an endpoint-only assertion would allow yesterday's
+        failed record, or a reasonless placeholder, to be reported instead.
+        """
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        root.mkdir(parents=True)
+        httpx_mock.add_response(url=HEARTBEAT + FAIL_SUFFIX)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 1
+        assert requests[0].url == HEARTBEAT + FAIL_SUFFIX
+        assert b'"status":"failed"' in requests[0].content
+        assert b'"failure_reason":"registry_missing"' in requests[0].content
+        recorded = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert recorded is not None
+        assert requests[0].content == recorded.model_dump_json().encode()
+
     def test_a_concurrent_run_is_never_reported_as_ours(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
