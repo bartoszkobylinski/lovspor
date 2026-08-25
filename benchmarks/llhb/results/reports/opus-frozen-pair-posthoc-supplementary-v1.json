@@ -1,0 +1,56 @@
+{
+  "analysis_status": "post_hoc_supplementary",
+  "cases_per_arm": 250,
+  "confirmatory": false,
+  "control_run": "llhb-v1-run-20260812-frozen2",
+  "metrics": {
+    "control": {
+      "citation_coverage": {
+        "count": 215,
+        "mean_per_answer": 0.86
+      },
+      "invalid_citation_instances": {
+        "count": 61,
+        "mean_per_answer": 0.244
+      },
+      "scored": 250,
+      "unconditional_h1": {
+        "count": 42,
+        "mean_per_answer": 0.168
+      },
+      "unscored": 0,
+      "valid_citation_instances": {
+        "count": 128,
+        "mean_per_answer": 0.512
+      }
+    },
+    "treatment": {
+      "citation_coverage": {
+        "count": 249,
+        "mean_per_answer": 0.996
+      },
+      "invalid_citation_instances": {
+        "count": 63,
+        "mean_per_answer": 0.252
+      },
+      "scored": 250,
+      "unconditional_h1": {
+        "count": 30,
+        "mean_per_answer": 0.12
+      },
+      "unscored": 0,
+      "valid_citation_instances": {
+        "count": 431,
+        "mean_per_answer": 1.724
+      }
+    }
+  },
+  "reason": "reporting definitions adopted after inspection of frozen-pair outputs",
+  "records_sha256": {
+    "llhb-v1-run-20260812-frozen2": "2ad1653744c1d6d29cf0ecb53d17b3883ce15412af7169e3b8f34d451b0e8024",
+    "llhb-v1-run-20260812-treatfrozen4": "ba587eaddbded0bf4b3a2f760563314bc53014563c84f6c05f9e4ccf6419fa92"
+  },
+  "ruling": "DECISIONS.md #30(a)",
+  "semantic_scorer": "llhb-score-v2",
+  "treatment_run": "llhb-v1-run-20260812-treatfrozen4"
+}

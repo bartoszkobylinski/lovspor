@@ -516,6 +516,17 @@ def _unconditional_h1_sample(bundle: _Bundle) -> _Sample:
     return (1.0 if bundle[2].asserted_h1 else 0.0, 1.0)
 
 
+def _coverage_sample(bundle: _Bundle) -> _Sample:
+    """Citation coverage — answers asserting at least one citation (plan §5.1).
+
+    The same quantity `_chr_sample` already computes as its denominator, hoisted
+    into a metric of its own because the plan mandates it per arm. Without it a
+    conditional rate can only be read against an unstated base: 42/215 and 30/249
+    are not comparable until the 215 and the 249 are on the page (issue #178).
+    """
+    return (1.0 if bundle[2].asserted_citations else 0.0, 1.0)
+
+
 def _chr_sample(bundle: _Bundle) -> _Sample:
     score = bundle[2]
     in_denominator = 1.0 if score.asserted_citations else 0.0
@@ -596,6 +607,7 @@ def _pdrh_sample(bundle: _Bundle) -> _Sample:
 
 _SAMPLERS: dict[str, _Sampler] = {
     PRIMARY_METRIC: _unconditional_h1_sample,
+    "citation_coverage": _coverage_sample,
     "citation_hallucination_rate": _chr_sample,
     "citation_accuracy": _accuracy_sample,
     "valid_citations_per_answer": _valid_volume_sample,
