@@ -642,9 +642,18 @@ class ArmReport(BaseModel, frozen=True):
 
 
 def compute_arm_report(arm: ArmScoring) -> ArmReport:
-    """Every §6 metric over one arm alone; treatment-only metrics stay 0/0."""
+    """Every §6 metric over one arm alone; treatment-only metrics stay 0/0.
+
+    A single-arm report exists for arms with no partner (ruling #31), which
+    in v1 means control arms. A metric defined only for the treatment arm is
+    therefore reported empty rather than computed — even if a record carries
+    tool activity, which would make the run invalid under ruling #25 rather
+    than make the metric meaningful.
+    """
     estimates = {
         name: _estimate([sampler(bundle) for bundle in arm.bundles], name not in _MEAN_METRICS)
+        if name not in _TREATMENT_ONLY
+        else _estimate([])
         for name, sampler in _SAMPLERS.items()
     }
     return ArmReport(

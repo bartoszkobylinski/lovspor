@@ -907,6 +907,24 @@ class TestArmReport:
         assert not hasattr(report, "primary")
         assert "delta" not in json.dumps(report.model_dump(mode="json"))
 
+    def test_treatment_only_metrics_stay_empty_even_with_tool_activity(self) -> None:
+        """A single arm has no partner, so a treatment-only metric is never
+        computed — a control record with tool calls is a ruling #25 violation,
+        not a data point."""
+        arm_score = hallucinated("llhb-v1-C1-001")
+        bundles = [
+            bundle(
+                "llhb-v1-C1-001",
+                arm_score,
+                tool_calls=[get_section_call("testloven", "15-99")],
+            )
+        ]
+
+        report = compute_arm_report(arm(bundles))
+
+        estimate = report.metrics["post_direct_retrieval_hallucination_rate"]
+        assert (estimate.numerator, estimate.denominator, estimate.rate) == (0.0, 0.0, None)
+
     def test_treatment_only_metrics_are_empty_for_a_tool_less_arm(self) -> None:
         report = compute_arm_report(arm([bundle("llhb-v1-C1-001", score("llhb-v1-C1-001"))]))
 
