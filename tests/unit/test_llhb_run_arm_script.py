@@ -390,3 +390,20 @@ class TestChatDriverArguments:
             "sk-test",
             90,
         )
+
+    def test_the_chat_endpoint_uses_the_named_provider_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Multiple configured providers must not share or cross-wire credentials."""
+        monkeypatch.setenv("SIGMA2_API_KEY", "sigma2-secret")
+        monkeypatch.setenv("BOREALIS_API_KEY", "borealis-secret")
+        monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)
+        borealis_args = [
+            "BOREALIS_API_KEY" if value == "SIGMA2_API_KEY" else value for value in CHAT_ARGS
+        ]
+        args = args_for(*borealis_args, "--frozen")
+
+        endpoint = run_arm_script.chat_endpoint(args)
+
+        assert endpoint is not None
+        assert endpoint.api_key == "borealis-secret"
