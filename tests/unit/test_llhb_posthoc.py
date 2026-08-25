@@ -96,11 +96,11 @@ class TestTheGuard:
     def test_an_arm_that_is_not_250_cases_is_refused(self) -> None:
         """Named by arm, not just refused: "one of them is short" costs a
         second look at both."""
-        with pytest.raises(PosthocGuardError, match="^control: 1 cases, expected 250$"):
+        with pytest.raises(PosthocGuardError, match=r"^control: 1 cases, expected 250$"):
             verify_scored_pair(_arm([_score()]), _full_arm([]))
 
     def test_a_short_treatment_arm_is_refused_too(self) -> None:
-        with pytest.raises(PosthocGuardError, match="^treatment: 1 cases, expected 250$"):
+        with pytest.raises(PosthocGuardError, match=r"^treatment: 1 cases, expected 250$"):
             verify_scored_pair(_full_arm([]), _arm([_score()]))
 
     def test_a_different_scorer_version_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
