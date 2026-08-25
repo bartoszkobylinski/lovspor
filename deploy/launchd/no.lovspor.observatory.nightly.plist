@@ -34,6 +34,13 @@
              observed material somewhere it does not belong (ADR-0010 §5). -->
         <key>LOVSPOR_OBSERVATORY_ROOT</key>
         <string>__OBSERVATORY_ROOT__</string>
+
+        <!-- The outbound half of the dead-man switch. Unset means no switch is
+             armed, and the sweep says so on stderr rather than passing
+             quietly — silence is the failure this whole mechanism exists to
+             make audible. -->
+        <key>LOVSPOR_OBSERVATORY_HEARTBEAT_URL</key>
+        <string>__HEARTBEAT_URL__</string>
     </dict>
 
     <key>StartCalendarInterval</key>

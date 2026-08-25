@@ -34,6 +34,7 @@ from lovspor.errors import (
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
 from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import latest_observations, worth_capturing
+from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import (
@@ -771,24 +772,63 @@ def _preflight(root: ObservatoryRoot) -> str | None:
     return None
 
 
-def _record_failed_sweep(root: ObservatoryRoot, started_at: datetime, reason: str) -> None:
-    """A run that could not sweep anything, recorded so the gap has a cause."""
-    append_sweep_run(
-        root,
-        SweepRun(
-            run_id=started_at.isoformat(),
-            started_at=started_at,
-            finished_at=datetime.now(UTC),
-            active_sources=0,
-            sources_completed=0,
-            sources_refused=0,
-            captured=0,
-            failed_fetches=0,
-            unchanged=0,
-            status="failed",
-            failure_reason=reason,
-        ),
+def _failed_run(started_at: datetime, reason: str) -> SweepRun:
+    """A run that could not sweep anything, as a record.
+
+    Built before it is stored, because the case that most needs reporting —
+    the archive is not mounted — is exactly the case with nowhere to store it.
+    The dead-man switch does not need the archive to speak.
+    """
+    return SweepRun(
+        run_id=started_at.isoformat(),
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        active_sources=0,
+        sources_completed=0,
+        sources_refused=0,
+        captured=0,
+        failed_fetches=0,
+        unchanged=0,
+        status="failed",
+        failure_reason=reason,
     )
+
+
+def _report(run: SweepRun) -> None:
+    """Send the outbound heartbeat, loudly enough to notice when it fails.
+
+    Never fatal: a monitoring endpoint being unreachable must not turn a
+    completed sweep into a failed command. Never silent either — a switch that
+    quietly stopped reporting looks exactly like a dead machine, and the
+    operator should learn that from this line rather than from a false alarm.
+    """
+    base = heartbeat_url()
+    if base is None:
+        typer.echo("heartbeat: not configured; no dead-man switch is armed", err=True)
+        return
+    with httpx.Client() as client:
+        if send_heartbeat(base, run, client):
+            typer.echo(f"heartbeat: reported {run.status}")
+        else:
+            typer.echo(f"heartbeat: NOT DELIVERED (run was {run.status})", err=True)
+
+
+def _report_recorded(root: ObservatoryRoot, started_at: datetime) -> None:
+    """Report the run this invocation wrote, and only that one.
+
+    Reading "the latest run" unguarded would, on any unexpected error, report
+    yesterday's healthy sweep as today's — the switch performing the very
+    failure it exists to catch.
+
+    The test is "started no earlier than this invocation" rather than an exact
+    id: the record is stamped by the sweep, which begins a moment after this
+    command does, so the ids are close but never equal.
+    """
+    latest = latest_sweep_run(sweeps_path(root))
+    if latest is None or latest.started_at < started_at:
+        typer.echo("heartbeat: this run recorded nothing; not reporting", err=True)
+        return
+    _report(latest)
 
 
 @observatory_app.command("nightly")
@@ -821,10 +861,17 @@ def nightly(
     if reason is not None:
         typer.echo(f"OBSERVATORY SWEEP FAILED\nreason: {reason}", err=True)
         typer.echo(f"expected: {root.path}", err=True)
+        failed = _failed_run(started_at, reason)
         if reason != _STORAGE_UNAVAILABLE:
-            _record_failed_sweep(root, started_at, reason)
+            append_sweep_run(root, failed)
+        _report(failed)
         raise typer.Exit(1)
-    capture_all(limit)
+    try:
+        capture_all(limit)
+    finally:
+        # In `finally` on purpose: a degraded sweep exits non-zero and still
+        # ran, so it still has to report. Liveness is what the switch guards.
+        _report_recorded(root, started_at)
 
 
 @observatory_app.command("status")

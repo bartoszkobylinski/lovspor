@@ -357,6 +357,46 @@ output, and the remote dead-man switch is what turns the resulting silence into 
 second observatory on the internal disk is the most damaging thing this command could do
 while trying to be helpful: two archives, each partial, neither aware of the other.
 
+### The dead-man switch (issue #167, part 3)
+
+Two failures look identical from inside this machine: *the sweep ran and found nothing
+new* and *the machine was off for three days*. Both leave the observation log silent. So
+the alarm is inverted — after every run the sweep reports out to a service that is **not
+on this machine**, and that service alarms when the report fails to arrive. Nobody has to
+detect the machine dying; it is enough that it stopped saying it is alive.
+
+Remote is the whole point. A watchdog on this Mac cannot notice that this Mac is off, the
+way a smoke detector cannot be powered from the burning room.
+
+```bash
+export LOVSPOR_OBSERVATORY_HEARTBEAT_URL="https://hc-ping.com/<uuid>"
+```
+
+Set the check's period to 24h and its grace to 12h, so it alarms at the same 36h the
+engine already treats as the deadline (`SWEEP_DEADLINE`).
+
+| run status | reports to | why |
+| --- | --- | --- |
+| `success` | the ping URL | |
+| `degraded` | the ping URL | it **ran**, and liveness is what this guards |
+| `failed` | the ping URL + `/fail` | it could not run |
+
+**Degradation deliberately does not alarm here.** Ten sources already refuse on a normal
+night; alarming on that would fire nightly, and a monitor that cries wolf gets muted —
+taking the liveness signal with it. Degradation has its own channels: the exit code,
+`observatory status`, and the run record. The full run travels in the ping body, so the
+service's history still shows what kind of night it was.
+
+**An undelivered heartbeat never fails a sweep, and is never silent.** The sweep is the
+point; the telemetry is not. But a switch that quietly stopped reporting is
+indistinguishable from a dead machine, so it says `heartbeat: NOT DELIVERED` on stderr —
+better learned from the log than from a false alarm at 3am. With nothing configured it
+says `no dead-man switch is armed` rather than passing quietly.
+
+The limit worth knowing: this detects **this machine** going quiet, not the monitoring
+service going quiet. If the hosted check dies you get silence instead of an alarm. No
+number of watchers closes that; it moves.
+
 ### Installing the job
 
 `deploy/launchd/no.lovspor.observatory.nightly.plist` is a template. Replace every

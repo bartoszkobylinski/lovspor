@@ -31,6 +31,7 @@ from lovspor.observatory.commands import (
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
+from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import SourceRegistry, read_registry
@@ -56,6 +57,7 @@ BAERUM_ID = "3201"
 BAERUM_DOMAIN = "baerum.kommune.no"
 ROBOTS_URL = f"https://www.{BAERUM_DOMAIN}/robots.txt"
 USER_AGENT = "lovspor-observatory/0.1 (+https://lovspor.no/observatory)"
+HEARTBEAT = "https://hc.example.invalid/abc123"
 
 
 @pytest.fixture
@@ -1956,6 +1958,69 @@ class TestNightly:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.sources_capped, run.status, run.failure_reason) == (1, "degraded", None)
+
+    def test_a_clean_sweep_reports_alive(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=HEARTBEAT)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert "heartbeat: reported success" in result.output
+        assert HEARTBEAT in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_missing_archive_still_reports_failure(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The case with nowhere to write is the case that most needs the
+        switch: the heartbeat does not need the archive to speak."""
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        missing = root.parent / "not-mounted"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(missing))
+        httpx_mock.add_response(url=HEARTBEAT + FAIL_SUFFIX)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [HEARTBEAT + FAIL_SUFFIX]
+        assert not missing.exists()
+
+    def test_an_unarmed_switch_says_so_rather_than_passing_quietly(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert "no dead-man switch is armed" in result.stderr
+
+    def test_an_undeliverable_heartbeat_does_not_fail_a_good_sweep(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The sweep is the point; the telemetry is not. But it must be loud —
+        a switch that silently stopped reporting looks like a dead machine."""
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        httpx_mock.add_response(url=HEARTBEAT, status_code=502)
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        assert "heartbeat: NOT DELIVERED" in result.stderr
 
 
 class TestStatus:
