@@ -87,6 +87,40 @@ class TestEligibilityIsNotActivation:
         assert source.active is False
 
 
+class TestListingEntryPointsStayWithinTheClearedDomain:
+    def test_a_listing_on_the_canonical_domain_or_a_subdomain_is_accepted(self) -> None:
+        source = SourceRecord(
+            authority_type="kommune",
+            authority_id="9999",
+            name="Testby",
+            canonical_domain="testby.example.invalid",
+            listing_entry_points=(
+                "https://testby.example.invalid/notices",
+                "https://www.testby.example.invalid/hearings",
+            ),
+        )
+
+        assert len(source.listing_entry_points) == 2
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://other.example.invalid/notices",
+            "https://testby.example.invalid.evil.invalid/notices",
+            "https:///notices",
+        ],
+    )
+    def test_an_off_domain_or_hostless_listing_is_refused(self, url: str) -> None:
+        with pytest.raises(ValidationError, match="entry points outside"):
+            SourceRecord(
+                authority_type="kommune",
+                authority_id="9999",
+                name="Testby",
+                canonical_domain="testby.example.invalid",
+                listing_entry_points=(url,),
+            )
+
+
 class TestAccessPolicyCheckFieldConstraints:
     @pytest.mark.parametrize("value", [0, -1.0])
     def test_non_positive_rate_limit_is_refused(self, value: float) -> None:
