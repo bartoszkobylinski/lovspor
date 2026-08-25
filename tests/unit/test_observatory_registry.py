@@ -400,6 +400,7 @@ class TestRegistryFileIsPinnedToBytes:
       "authority_id": "9999",
       "authority_type": "kommune",
       "canonical_domain": "testby.example.invalid",
+      "listing_entry_points": [],
       "name": "Testbø"
     }
   },
@@ -421,6 +422,31 @@ class TestRegistryFileIsPinnedToBytes:
 
     def test_file_matches_the_pinned_layout(self, tmp_path: Path) -> None:
         assert self.written(tmp_path) == self.EXPECTED
+
+    def test_a_registry_written_before_listings_still_loads(self, tmp_path: Path) -> None:
+        """The file on disk outlives the schema. `listing_entry_points` arrived
+        with #151, and every record written before it has to keep loading —
+        with the empty default, not with a refusal, because a registry that
+        stops parsing takes every recorded access-policy decision with it."""
+        path = tmp_path / "registry.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "sources": {
+                        "9999": {
+                            "authority_type": "kommune",
+                            "authority_id": "9999",
+                            "name": "Testbø",
+                            "canonical_domain": "testby.example.invalid",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert read_registry(path).sources["9999"].listing_entry_points == ()
 
     def test_keys_are_sorted_at_every_level(self, tmp_path: Path) -> None:
         def assert_sorted(pairs: list[tuple[str, object]]) -> dict[str, object]:

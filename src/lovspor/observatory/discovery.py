@@ -39,6 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.errors import ParseError, SourceNotActivatedError, TombstonedArtifactError
 from lovspor.observatory.fetch import Fetcher
+from lovspor.observatory.listing import LISTING_METHOD, parse_listing
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import SourceRecord, capture_host
@@ -373,14 +374,52 @@ class Discoverer:
         fetcher has just written it, so its absence is the corruption
         ``verify_snapshot`` exists to report — not an ordinary bad document.
         """
+        payload = self._log.read_blob(record.sha256)
+        if pending.url in walk.source.listing_entry_points:
+            return self._listing_links(walk, payload, pending)
         try:
-            payload = self._log.read_blob(record.sha256)
             return parse_discovery_document(
                 payload, pending.url, self._settings.max_decompressed_bytes
             )
         except ParseError:
             walk.skip(pending.url, "unparseable_document", pending.found_in)
         return ()
+
+    def _listing_links(
+        self, walk: _Walk, payload: bytes, pending: _Pending
+    ) -> tuple[DiscoveredLink, ...]:
+        """A registered listing page, read as one.
+
+        Only URLs the registry declares as listings take this path. Falling
+        back to it whenever the XML reader failed would read an HTML error page
+        served under a sitemap URL as a listing — the case
+        `parse_discovery_document` refuses on purpose — and "this URL is an
+        index of documents" is a judgement a human made at activation, not
+        something to infer from a parse failure.
+        """
+        try:
+            readout = parse_listing(payload, pending.url)
+        except ParseError:
+            walk.skip(pending.url, "unparseable_listing", pending.found_in)
+            return ()
+        if readout.skipped_without_date:
+            # Not a failure, but not silence either: a listing where most links
+            # carry no date is one this reader is reading badly, and a caller
+            # that only sees what was proposed cannot notice.
+            walk.skip(
+                pending.url,
+                f"listing_entries_without_date: {readout.skipped_without_date}",
+                pending.found_in,
+            )
+        return tuple(
+            DiscoveredLink(
+                url=entry.url,
+                discovery_method=LISTING_METHOD,
+                is_nested_document=False,
+                site_reported_lastmod=entry.site_reported_lastmod,
+            )
+            for entry in readout.entries
+        )
 
     def _accept(self, walk: _Walk, link: DiscoveredLink, parent: _Pending) -> None:
         if link.is_nested_document:

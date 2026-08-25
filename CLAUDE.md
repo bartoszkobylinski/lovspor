@@ -75,6 +75,26 @@ unformatted commits (#66) and the remediation path not firing on a
 mutation failure (#67) — existed only in a chat transcript until the
 owner mandated this rule.
 
+## Owner decisions carry observed state
+
+A request for an owner decision names the state it was read from, and that state
+is **read at the time of asking** — not recalled from a note, a handoff, or the
+start of the session. Paste the reading.
+
+Origin (2026-08-25, #151): a recon note from 2026-08-20 listed Bergen and
+Sandefjord as unregistered. Five days later that was false — both were
+registered, active, and had been crawled; Bergen alone had 7,840 artifacts and
+had hit the bootstrap round cap. The decision request repeated the note as
+current fact, so the owner was asked to decide whether to register two
+municipalities that were already running. Correct reasoning on a stale premise
+reads exactly like correct reasoning, which is what makes it expensive.
+
+The same session produced the code-side twin: a comment asserting that
+`resolve_base_href=False` stopped a page's `<base href>` from moving discovery's
+proposals. It did not, and only a test written against the *claim* rather than
+the output found it. Both are one rule — **assert the premise, do not carry it**
+— and it applies to prose about the world as much as to comments about code.
+
 ## Testing strategy
 
 - `tests/unit/` — fast, isolated, one module at a time. Every public function covered.

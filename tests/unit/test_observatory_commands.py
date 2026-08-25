@@ -947,13 +947,49 @@ class TestEntryPoints:
     def test_declared_entry_points_are_not_marked_as_a_conventional_probe(self) -> None:
         fetcher = Mock()
         fetcher.declared_sitemaps.return_value = (SITEMAP_URL, NESTED_SITEMAP_URL)
-        record = SimpleNamespace(access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL))
+        record = SimpleNamespace(
+            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL), listing_entry_points=()
+        )
 
         starts = _entry_points(fetcher, record, None)
 
         assert starts.urls == (SITEMAP_URL, NESTED_SITEMAP_URL)
         assert starts.probed is False
         fetcher.declared_sitemaps.assert_called_once_with(ROBOTS_URL)
+
+    def test_a_declared_listing_is_walked_alongside_the_sitemap(self) -> None:
+        """A source can publish both. The sitemap is the machine index and the
+        listing is the page a person reads; neither is a fallback for the
+        other, so a listing is added rather than substituted."""
+        fetcher = Mock()
+        fetcher.declared_sitemaps.return_value = (SITEMAP_URL,)
+        listing = f"https://www.{BAERUM_DOMAIN}/kunngjoringer/"
+        record = SimpleNamespace(
+            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL),
+            listing_entry_points=(listing,),
+        )
+
+        starts = _entry_points(fetcher, record, None)
+
+        assert starts.urls == (SITEMAP_URL, listing)
+        assert starts.probed is False
+
+    def test_a_listing_is_the_entry_when_there_is_no_sitemap_at_all(self) -> None:
+        """The 116 municipalities of #151: without this the source has no entry
+        and a capture proposes nothing while exiting zero."""
+        fetcher = Mock()
+        fetcher.declared_sitemaps.return_value = ()
+        listing = f"https://www.{BAERUM_DOMAIN}/kunngjoringer/"
+        record = SimpleNamespace(
+            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL),
+            listing_entry_points=(listing,),
+        )
+
+        starts = _entry_points(fetcher, record, None)
+
+        assert starts.urls == (listing,)
+        # Not a probe: the operator declared this URL, nothing was guessed.
+        assert starts.probed is False
 
 
 class TestDiscover:
