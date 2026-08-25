@@ -27,6 +27,7 @@ from lovspor.errors import LovsporError
 from lovspor.llhb.metrics import ArmReport, compute_arm_report
 from lovspor.llhb.reporting import score_arm
 from lovspor.llhb.results import ResultsStore
+from lovspor.llhb.schema import load_schema, validate_case
 from lovspor.llhb.scoring import SCORER_VERSION, CaseScorer
 from lovspor.mcp import CorpusReader
 
@@ -64,17 +65,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def read_metadata(runs_root: Path, run_id: str) -> dict[str, Any]:
+    """The run's own metadata, schema-valid, claiming this directory, control arm."""
     path = runs_root / run_id / "run-metadata.json"
     if not path.is_file():
         raise LovsporError(f"no run-metadata.json under {runs_root / run_id}")
     metadata = dict(json.loads(path.read_text(encoding="utf-8")))
+    _check_metadata(metadata, run_id)
+    return metadata
+
+
+def _check_metadata(metadata: dict[str, Any], run_id: str) -> None:
+    problems = validate_case(metadata, load_schema(SCHEMA_DIR / "run_metadata.schema.json"))
+    if problems:
+        raise LovsporError(f"run-metadata.json under {run_id} is not schema-valid: {problems[0]}")
     if metadata.get("run_id") != run_id:
         # A copied or renamed run directory would otherwise report under a name
         # its own metadata does not claim.
         raise LovsporError(
             f"run-metadata.json under {run_id} declares run_id {metadata.get('run_id')!r}"
         )
-    return metadata
+    if metadata.get("condition") != "control":
+        # Ruling #31 scores lone control arms; a treatment arm has a partner and
+        # belongs in score_run.py with its pair manifest.
+        raise LovsporError(
+            f"{run_id} is a {metadata.get('condition')!r} arm; single-arm scoring is for control"
+        )
 
 
 def build_report(run_id: str, metadata: dict[str, Any], arm: ArmReport) -> dict[str, Any]:

@@ -66,25 +66,61 @@ class TestArguments:
         assert args.out is None
 
 
+VALID_METADATA_PATH = (
+    Path(__file__).parents[2]
+    / "benchmarks"
+    / "llhb"
+    / "results"
+    / "runs"
+    / "llhb-v1-run-20260825-nmctrl1"
+    / "run-metadata.json"
+)
+
+
+def valid_metadata(**overrides: object) -> dict[str, object]:
+    metadata = dict(json.loads(VALID_METADATA_PATH.read_text(encoding="utf-8")))
+    metadata.update(overrides)
+    return metadata
+
+
+def write_run(tmp_path: Path, metadata: dict[str, object], name: str | None = None) -> str:
+    run_dir = tmp_path / (name or str(metadata["run_id"]))
+    run_dir.mkdir()
+    (run_dir / "run-metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+    return run_dir.name
+
+
 class TestMetadata:
     def test_a_missing_run_fails_closed(self, tmp_path: Path) -> None:
         with pytest.raises(LovsporError, match=r"run-metadata\.json"):
             score_arm_script.read_metadata(tmp_path, "llhb-v1-run-20260825-nope")
 
+    def test_metadata_is_read_from_the_run_directory(self, tmp_path: Path) -> None:
+        metadata = valid_metadata()
+        name = write_run(tmp_path, metadata)
+
+        assert score_arm_script.read_metadata(tmp_path, name) == metadata
+
     def test_metadata_must_claim_the_directory_it_sits_in(self, tmp_path: Path) -> None:
-        run_dir = tmp_path / "llhb-v1-run-20260825-copy"
-        run_dir.mkdir()
-        (run_dir / "run-metadata.json").write_text(json.dumps(METADATA), encoding="utf-8")
+        name = write_run(tmp_path, valid_metadata(), name="llhb-v1-run-20260825-copy")
 
         with pytest.raises(LovsporError, match="declares run_id"):
-            score_arm_script.read_metadata(tmp_path, run_dir.name)
+            score_arm_script.read_metadata(tmp_path, name)
 
-    def test_metadata_is_read_from_the_run_directory(self, tmp_path: Path) -> None:
-        run_dir = tmp_path / "llhb-v1-run-20260825-nmctrl1"
-        run_dir.mkdir()
-        (run_dir / "run-metadata.json").write_text(json.dumps(METADATA), encoding="utf-8")
+    def test_metadata_missing_required_provenance_fails_closed(self, tmp_path: Path) -> None:
+        metadata = valid_metadata()
+        del metadata["dataset_checksum"]
+        name = write_run(tmp_path, metadata)
 
-        assert score_arm_script.read_metadata(tmp_path, run_dir.name) == METADATA
+        with pytest.raises(LovsporError, match="not schema-valid"):
+            score_arm_script.read_metadata(tmp_path, name)
+
+    def test_treatment_metadata_is_rejected(self, tmp_path: Path) -> None:
+        metadata = valid_metadata(condition="lovspor", tool_config={"tools": ["x"]})
+        name = write_run(tmp_path, metadata)
+
+        with pytest.raises(LovsporError, match="single-arm scoring is for control"):
+            score_arm_script.read_metadata(tmp_path, name)
 
 
 class TestReport:
