@@ -12,10 +12,13 @@ LLHB_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "llhb"
 RUNS_DIR = LLHB_DIR / "results" / "runs"
 REPORTS_DIR = LLHB_DIR / "results" / "reports"
 SCHEMA_DIR = LLHB_DIR / "schema"
-NEW_RUN_ID = "llhb-v1-run-20260825-nmctrl1"
+CONTROL_RUN_IDS = (
+    "llhb-v1-run-20260825-nmctrl1",
+    "llhb-v1-run-20260825-nbctrl1",
+)
 ARM_REPORTS = (
     "llhb-v1-run-20260812-frozen2-arm.json",
-    f"{NEW_RUN_ID}-arm.json",
+    *(f"{run_id}-arm.json" for run_id in CONTROL_RUN_IDS),
 )
 MEAN_METRICS = {"valid_citations_per_answer", "invalid_citations_per_answer"}
 
@@ -30,8 +33,11 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def test_new_control_run_is_schema_valid_and_is_exactly_the_frozen_dataset() -> None:
-    run_dir = RUNS_DIR / NEW_RUN_ID
+@pytest.mark.parametrize("run_id", CONTROL_RUN_IDS)
+def test_new_control_run_is_schema_valid_and_is_exactly_the_frozen_dataset(
+    run_id: str,
+) -> None:
+    run_dir = RUNS_DIR / run_id
     metadata = _read_json(run_dir / "run-metadata.json")
     records = _read_jsonl(run_dir / "records.jsonl")
     frozen_ids = {
@@ -41,7 +47,7 @@ def test_new_control_run_is_schema_valid_and_is_exactly_the_frozen_dataset() -> 
     record_schema = load_schema(SCHEMA_DIR / "result_record.schema.json")
 
     assert validate_case(metadata, metadata_schema) == []
-    assert metadata["run_id"] == NEW_RUN_ID
+    assert metadata["run_id"] == run_id
     assert metadata["condition"] == "control"
     assert metadata["tool_config"] is None
     assert len(records) == metadata["cases_total"] == metadata["cases_completed"] == 250
