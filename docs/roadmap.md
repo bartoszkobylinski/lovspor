@@ -6,6 +6,14 @@
 
 > **Commercial priority changed 2026-07-14** *(historical — superseded above)*. The option catalogue below is preserved, but its previous priority ordering is superseded by the Hosted Lovspor MCP pivot. Sprint 12 now focuses on turning the existing local read-only MCP into a paid remote service. Structural depth, domain expansion, and local distribution remain candidate follow-ups rather than the immediate plan.
 
+> **This document predates the observatory (2026-08-25).** It was written after Sprint 8 and
+> reviewed against a corpus-and-MCP project. The active line of work since 2026-08-18 is the
+> **local-law observatory** (ADR-0010) — capturing municipal and county sources that Lovdata's
+> API does not serve — and it appears nowhere in the option catalogue below, because it did not
+> come from it. It arrived through `lovspor-notebook` issue #76. The catalogue's classes A–G
+> remain a menu of directions, and **nothing new has been selected from it since 2026-05-18**;
+> treat its "Recommendation" ordering as unreviewed rather than current.
+
 ---
 
 ## Where the project stands today
@@ -23,10 +31,11 @@
 - Upstream-drift tolerance: unknown Lovdata API fields no longer take the sync offline — they are accepted, surfaced, and auto-filed as a GitHub issue. Documents Lovdata serves as an error notice are withheld rather than published as placeholder text.
 - Atomic corpus writes (manifest, documents, history) so a crashed sync cannot leave a half-written corpus.
 - Daily 04:00 UTC scheduled sync via GitHub Actions; CI matrix across Python 3.12 / 3.13 / 3.14.
-- 1161 tests (1058 unit + 94 integration + 9 Hypothesis property tests), 98% coverage, Codex review on every PR.
+- Test suite counted from the tree rather than restated here, because this line has drifted before: **3,107 `def test_` in `tests/unit` + 95 in `tests/integration`** (`git grep -c 'def test_' main`, 2026-08-25). pytest reports more than that — parametrised cases each count once — and CI is the live figure. Coverage gate ≥ 90% on changed files.
+- Every PR runs the agentic pipeline (`docs/agentic-ci.md`): fast-ci, an independent Codex test author, and a deterministic PR-scoped mutation gate with automatic remediation.
 
 ### Corpus (`lovverk`)
-- ~5,900 Norwegian acts and central regulations rendered to Markdown (764 *lover* + 5,147 central *forskrifter* = 5,911 as of the 2026-07-12 sync; each dataset's `INDEX.md` carries the live count, and the MCP `corpus_status` tool reports it).
+- Norwegian acts and central regulations rendered to Markdown — **5,878 current documents** as reported by the MCP `corpus_status` tool against the 2026-08-19 manifest. The count moves with every sync; each dataset's `INDEX.md` and `corpus_status` are the live sources, and this line is a dated snapshot, not a figure to maintain.
 - Full git history, exposed since Sprint 10 through the time-machine tools below.
 - Manifest as the single source of truth for change detection.
 
@@ -49,6 +58,53 @@
 | `get_eu_basis` | Norwegian act → CELEX list |
 | `search_eu_implementations` | CELEX → list of acts |
 | `corpus_status` | freshness / staleness signal |
+
+### Observatory (ADR-0010) — the active build
+
+Municipal and county regulations (*lokale forskrifter*) are Norsk Lovtidend avd. II, which
+Lovdata's `publicData` API does not serve, and Lovdata's own compiled version is §43-blocked.
+The observatory captures them from each authority's own site instead. ADR-0010 is Accepted
+(`lovspor-notebook` PR #83, owner decision 2026-08-18); governance is closed and the ADR is not
+edited by hand.
+
+What is on `main`:
+
+- `src/lovspor/observatory/` — `model`, `storage`, `log`, `registry`, `fetch`, `discovery`,
+  `freshness`, `commands`.
+- CLI: `register-source`, `activate-source`, `sources`, `discover`, `capture`, `capture-all`,
+  `verify`, `repair`, `status`.
+- **Every sweep records itself** in `sweep-runs.jsonl` beside the registry — process telemetry,
+  not an observation — because the observation log cannot answer whether the sweep ran at all: a
+  sweep that never started leaves no trace in it by construction. `status` reads that back and
+  exits non-zero when no sweep has *begun* inside the deadline, so the same command serves a
+  monitor. The observation SLA is stated once, as a value: 24h target, 36h alert deadline.
+- **Three gates before every request** (ADR-0010 §2/§4/§7): activation, a *live* read of
+  `robots.txt`, and a per-host rate limit. A refusal is **written to the log**, because the log
+  has to be able to prove compliance, not just record successes.
+- **Redirects are followed only inside the cleared domain** (max 3 hops), and each hop runs the
+  full gate sequence again. A redirect that leaves the domain stops the crawler — see #166 for
+  the registry-side consequence.
+- **Storage is a validated type, not a convention.** `ObservatoryRoot` refuses a path inside the
+  engine repo or the corpus, so observed bytes cannot reach a published repository by accident.
+  The archive lives outside git entirely (ADR-0010 §5); nothing about it is committed.
+- **The observation log is append-only and fsynced per record**, and a failure is a record, not a
+  gap: "this endpoint was not retrievable at that time" is evidence.
+- **`freshness` declines work one-sidedly.** A sitemap's `lastmod` may only ever *skip* a fetch,
+  never assert that a page is current, and every ambiguity resolves toward fetching — a wasted
+  request costs one request, a wrongly skipped page costs an observation window that cannot be
+  recreated.
+- Politeness is honest: the `User-Agent` names the project and links to a page explaining how to
+  block it (ADR-0010, `https://lovspor.no/observatory/`). Requests are never disguised as a
+  browser.
+
+What is **not** there yet: **nothing schedules the sweep** — the telemetry and the SLA exist,
+the launchd job, the storage preflight and the remote dead-man switch do not (#167); discovery is
+sitemap-only, so a source without one captures nothing (#151); a source whose site has moved to
+another domain has no safe migration path (#166); and a bootstrap lane that exhausts its round
+cap exits silently, so a truncated municipality reads as complete (#172).
+
+The register is operator-maintained and every activation requires a recorded human
+access-policy check; `lovspor observatory sources` lists what is registered and what is active.
 
 ### Positioning
 Parity-or-better with the polish-law-mcp ecosystem (Ansvar, numikel, janisz). The only Norwegian-law MCP server. 16 tools versus their ~13, with Sprint 9 closing the semantic-search gap and adding a four-layer grounding and verification path (`semantic_search` → `get_section` + `cross_references` → `verify_quote` → `validate_citation`), and Sprint 10 adding a git-history time-machine set (`get_law_at`, `list_law_versions`, `diff_law_versions`) that no other corpus-MCP can match because none of them version their corpus through git.
@@ -103,7 +159,7 @@ Until the hosted beta is usable, do not start AST, Høyesterett ingestion, local
 Grouped by source availability (restructured 2026-05-18 — see Class D for execution detail and "Currently out of scope" for the §43 reasoning behind the blocked items).
 
 **In Lovdata's `publicData` API — pipeline work only:**
-- **`gjeldende-lokale-forskrifter`** — ⚠️ **NOT in the `publicData` catalogue** (verified 2026-07-18): municipal + county regs are Norsk Lovtidend avd. II, which this API doesn't serve. **Moved to D-DIRECT-6** (direct municipal sourcing; Lovdata's compiled version is §43-blocked). ~37k docs at full scope.
+- **`gjeldende-lokale-forskrifter`** — ⚠️ **NOT in the `publicData` catalogue** (verified 2026-07-18): municipal + county regs are Norsk Lovtidend avd. II, which this API doesn't serve. **Moved to D-DIRECT-6** (direct municipal sourcing; Lovdata's compiled version is §43-blocked). ~37k docs at full scope. **This is now the observatory** (ADR-0010, above) — the only D-class entry with code on `main`, and it reached that state from `lovspor-notebook` #76 rather than through this catalogue.
 - **`historiske-lover`** — repealed acts, for "what was the law in 2015?" questions the time-machine can't reach. ⚠️ **NOT in the live catalogue as of 2026-07-18** — availability unconfirmed.
 - **`lovtidend-avd1-{year}`** — official change announcements (Norwegian Federal Register equivalent). Explains *why* a law changed, complementing our existing change-detection.
 - **Sami-language datasets** — northern Sami, Lule Sami translations of selected acts.
@@ -145,6 +201,22 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **Diff tool — SHIPPED (Sprint 10 B2).** `diff_law_versions(slug, date_a, date_b)` returns a section-by-section diff between two dates — unique to this project, since competitors lack the git-based architecture. Built on the B1 time-machine (`get_law_at` + `list_law_versions`).
 - **No quality monitor.** Whether every cross-reference in body text resolves to a real act is unknown.
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
+- **The observatory has no scheduler.** The 24h SLA and the per-run record shipped in #170; what
+  is still missing is anything that *fires* the sweep — no cron, no timer, no wrapper. **#167**
+  covers the rest: a launchd job on the machine holding the archive, a hard storage preflight that
+  fails rather than falling back to the internal disk, and a *remote* dead-man switch — remote
+  because a watchdog on the same machine cannot notice that the machine is off.
+- **A capped bootstrap lane is silent (#172).** The lane stops a municipality on `DONE`,
+  `REFUSED` or `BLOCKED`, each of them announced — but exhausting the 80-round cap announces
+  nothing. Seven sources have already stopped that way, Bergen among them, and each reads as
+  complete while being truncated. This is #151's silent zero one level up: there a source
+  captured nothing and looked fine; here it captured most of itself and looks finished.
+- **Observatory discovery is sitemap-only (#151).** A source that publishes no sitemap captures
+  nothing, which at fleet scale reads identically to a source that published nothing.
+- **A source that moved domains has no safe migration (#166).** Changing `canonical_domain`
+  by hand would let a clearance obtained for the old domain authorise traffic to the new one;
+  nothing validates that the recorded access-policy check was performed for the domain now in
+  force.
 
 ### Distribution
 - **PyPI local distribution — WITHDRAWN 2026-07-14, RESUMED 2026-08-03.** Versions `0.2.0`–`0.3.0` shipped, then were removed when the engine moved to a private hosted-service strategy. Distribution resumed with the open-infrastructure publication: `0.4.0` is live on PyPI via Trusted Publishing (`uvx lovspor` / `pip install lovspor` — see `docs/releasing.md`), so this is no longer a gap.
@@ -351,6 +423,13 @@ Documented for clarity; do not attempt. See "Currently out of scope" for the leg
 
 ## Recommendation
 
+> **What actually sets priorities today (2026-08-25).** Neither ordering below. Current work is
+> the observatory line and its open issues — **#167** (observation SLA and scheduling),
+> **#166** (source-domain migration), **#151** (discovery beyond sitemaps) — plus the frozen
+> LLHB benchmark's two remaining steps, **#168** (the layer-3 post-hoc artifact that ruling
+> #30(a) requires) and **#169** (the Fable confirmatory ceremony). The backlog below is
+> preserved because its arguments still hold; it is not a queue anyone is working from.
+
 > **Status change 2026-07-14** *(historical — the commercial framing was superseded 2026-07-30 by the open-infrastructure direction; see the note at the top)*: Hosted MCP (E3) supersedes the ordering below as the active commercial priority. The earlier recommendations are retained as the option backlog and should be reconsidered after the hosted beta identifies concrete retrieval, coverage, or adoption gaps. Current priorities are set by `docs/publication-plan.md`, not by this section.
 
 ### Active commercial priority (historical — superseded 2026-07-30)
@@ -401,4 +480,9 @@ Until (c), the following remain out of scope as a matter of Norwegian law, not p
 
 ---
 
-*Last reviewed: 2026-08-02 — the 2026-07-14 commercial framing marked historical after the 2026-07-30 open-infrastructure supersession (`decisions.md` §1); hosted-endpoint auth facts aligned with production. Previous review 2026-07-16 (Sprint 12 item 1 — Streamable HTTP transport shipped). Written 2026-07-14 for the commercial pivot to Hosted Lovspor MCP; PyPI withdrawal; E3 promoted to active Sprint 12 without removing the prior option catalogue. The post-Sprint-11 engine/corpus inventory and the 2026-05-18 source-legality structure remain in force. Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
+*Last reviewed: 2026-08-25 — observatory (ADR-0010) added as its own track: it was the entire
+active line of work and this document did not mention it. Engine test count and corpus document
+count replaced with dated snapshots plus their live sources, after both had drifted (1161 tests
+against 3,107 test functions; ~5,911 documents against 5,878). Known gaps gained the three open
+observatory issues. The Recommendation section now says plainly that neither of its orderings is
+what sets priorities. Previous review: 2026-08-02 — the 2026-07-14 commercial framing marked historical after the 2026-07-30 open-infrastructure supersession (`decisions.md` §1); hosted-endpoint auth facts aligned with production. Previous review 2026-07-16 (Sprint 12 item 1 — Streamable HTTP transport shipped). Written 2026-07-14 for the commercial pivot to Hosted Lovspor MCP; PyPI withdrawal; E3 promoted to active Sprint 12 without removing the prior option catalogue. The post-Sprint-11 engine/corpus inventory and the 2026-05-18 source-legality structure remain in force. Roadmap is intended for quarterly review. Items move between classes through discussion in the issue tracker.*
