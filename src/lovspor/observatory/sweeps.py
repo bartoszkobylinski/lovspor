@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, NamedTuple
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.storage import ObservatoryRoot
@@ -71,6 +71,19 @@ class SweepRun(BaseModel):
     failed_fetches: int = Field(ge=0)
     unchanged: int = Field(ge=0)
     status: SweepStatus
+
+    @model_validator(mode="after")
+    def _finished_after_started(self) -> "SweepRun":
+        """A run cannot end before it began.
+
+        Damage, not a curiosity: the duration is rendered to an operator and
+        subtracted elsewhere, so an inverted pair would print a negative
+        elapsed time as though it meant something. Refused at the boundary,
+        where the line number is still in reach.
+        """
+        if self.finished_at < self.started_at:
+            raise ValueError("finished_at precedes started_at")
+        return self
 
 
 class CadenceState(NamedTuple):
@@ -168,4 +181,12 @@ def cadence_state(run: SweepRun | None, *, now: datetime | None = None) -> Caden
     if run is None:
         return CadenceState(age=None, overdue=True)
     age = moment - run.started_at
+    if age < timedelta(0):
+        # A sweep stamped in the future has not observed anything yet, so it
+        # cannot be evidence of freshness. Returning its negative age as an
+        # ordinary one would report OK — and a clock that jumped backwards, or
+        # a forged record, would then hold the dead-man switch shut for as long
+        # as the stamp stayed ahead. That is the exact failure this file exists
+        # to catch, so it reads as overdue with no usable age.
+        return CadenceState(age=None, overdue=True)
     return CadenceState(age=age, overdue=age >= SWEEP_DEADLINE)

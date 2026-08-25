@@ -680,10 +680,17 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(f"  status:     {run.status.upper()}")
 
 
-def _echo_cadence(state: CadenceState) -> None:
+def _echo_cadence(state: CadenceState, run: SweepRun | None) -> None:
+    """Render the cadence, distinguishing the two ways an age can be missing.
+
+    "Never swept" beside a printed last sweep would contradict itself; the
+    other case is a run stamped ahead of the clock, which is worth naming
+    because it is the one that would otherwise have read as fresh.
+    """
+    unknown = "never swept" if run is None else "unknown — last sweep is stamped ahead of the clock"
     typer.echo("\nCadence")
     typer.echo(f"  target:     {_hm(OBSERVATION_SLA)}")
-    typer.echo(f"  age:        {_hm(state.age) if state.age is not None else 'never swept'}")
+    typer.echo(f"  age:        {_hm(state.age) if state.age is not None else unknown}")
     typer.echo(f"  deadline:   {_hm(SWEEP_DEADLINE)}")
     typer.echo(f"  state:      {'OVERDUE' if state.overdue else 'OK'}")
 
@@ -702,6 +709,6 @@ def status() -> None:
     state = cadence_state(latest)
     _echo_sources(_load(_registry_file()))
     _echo_last_sweep(latest)
-    _echo_cadence(state)
+    _echo_cadence(state, latest)
     if state.overdue:
         raise typer.Exit(1)

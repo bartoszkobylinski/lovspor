@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.errors import LogIntegrityError
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
@@ -259,6 +260,62 @@ class TestDamageIsRefused:
 
         with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
             read_sweep_runs(sweeps_path(root))
+
+
+class TestNegativeDurationsCannotHappen:
+    """The surviving `_hm` mutant (`// 60` -> `/ 60`) differs only on negative
+    input, so the question it asks is whether a negative duration can reach a
+    renderer at all. These pin the two answers: it cannot, and each way it
+    could have is refused where the damage is still locatable."""
+
+    def test_a_run_that_finished_before_it_started_is_damage(self, root: ObservatoryRoot) -> None:
+        line = _run().model_dump(mode="json")
+        line["finished_at"] = (START - timedelta(minutes=1)).isoformat()
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    def test_an_inverted_pair_cannot_be_constructed_either(self) -> None:
+        with pytest.raises(ValidationError):
+            SweepRun(
+                run_id="x",
+                started_at=START,
+                finished_at=START - timedelta(seconds=1),
+                active_sources=1,
+                sources_completed=1,
+                sources_refused=0,
+                captured=0,
+                failed_fetches=0,
+                unchanged=0,
+                status="success",
+            )
+
+    def test_a_zero_length_run_is_allowed(self) -> None:
+        """Equal stamps are not damage — a sweep of an empty candidate list can
+        finish inside the clock's resolution."""
+        run = SweepRun(
+            run_id="x",
+            started_at=START,
+            finished_at=START,
+            active_sources=1,
+            sources_completed=1,
+            sources_refused=0,
+            captured=0,
+            failed_fetches=0,
+            unchanged=0,
+            status="success",
+        )
+
+        assert run.finished_at == run.started_at
+
+    def test_a_sweep_stamped_ahead_of_the_clock_is_overdue_not_fresh(self) -> None:
+        """A clock that jumped backwards, or a forged record, would otherwise
+        hold the dead-man switch shut for as long as the stamp stayed ahead."""
+        state = cadence_state(_run(), now=START - timedelta(hours=2))
+
+        assert state == CadenceState(age=None, overdue=True)
 
 
 class TestCadence:

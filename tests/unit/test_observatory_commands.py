@@ -1712,7 +1712,7 @@ class TestStatus:
 
         _echo_sources(SourceRegistry())
         _echo_last_sweep(run)
-        _echo_cadence(CadenceState(age=timedelta(hours=25), overdue=True))
+        _echo_cadence(CadenceState(age=timedelta(hours=25), overdue=True), run)
 
         assert capsys.readouterr().out == (
             "Sources\n"
@@ -1737,7 +1737,7 @@ class TestStatus:
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         _echo_last_sweep(None)
-        _echo_cadence(CadenceState(age=None, overdue=True))
+        _echo_cadence(CadenceState(age=None, overdue=True), None)
 
         assert capsys.readouterr().out == (
             "\nLast sweep\n"
@@ -1783,6 +1783,20 @@ class TestStatus:
         result = runner.invoke(app, ["observatory", "status"])
 
         assert result.exit_code == 1
+        assert "OVERDUE" in result.output
+
+    def test_a_sweep_stamped_ahead_of_the_clock_is_named_not_called_never(self, root: Path) -> None:
+        """ "Never swept" printed beside a printed last sweep would contradict
+        itself, and the ahead-of-clock case is the one that would otherwise
+        have read as fresh."""
+        _activate(root)
+        _write_sweep(root, started=datetime.now(UTC) + timedelta(hours=2))
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert result.exit_code == 1
+        assert "stamped ahead of the clock" in result.output
+        assert "never swept" not in result.output
         assert "OVERDUE" in result.output
 
     def test_it_counts_registered_and_active_separately(self, root: Path) -> None:
