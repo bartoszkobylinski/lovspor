@@ -75,9 +75,6 @@ def read_metadata(runs_root: Path, run_id: str) -> dict[str, Any]:
 
 
 def _check_metadata(metadata: dict[str, Any], run_id: str) -> None:
-    problems = validate_case(metadata, load_schema(SCHEMA_DIR / "run_metadata.schema.json"))
-    if problems:
-        raise LovsporError(f"run-metadata.json under {run_id} is not schema-valid: {problems[0]}")
     if metadata.get("run_id") != run_id:
         # A copied or renamed run directory would otherwise report under a name
         # its own metadata does not claim.
@@ -90,6 +87,9 @@ def _check_metadata(metadata: dict[str, Any], run_id: str) -> None:
         raise LovsporError(
             f"{run_id} is a {metadata.get('condition')!r} arm; single-arm scoring is for control"
         )
+    problems = validate_case(metadata, load_schema(SCHEMA_DIR / "run_metadata.schema.json"))
+    if problems:
+        raise LovsporError(f"run-metadata.json under {run_id} is not schema-valid: {problems[0]}")
 
 
 def build_report(run_id: str, metadata: dict[str, Any], arm: ArmReport) -> dict[str, Any]:
