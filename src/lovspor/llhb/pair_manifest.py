@@ -172,7 +172,6 @@ def _git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         ["git", "-C", str(repo_root), *args],  # noqa: S607
         capture_output=True,
         text=True,
-        check=False,
     )
 
 
