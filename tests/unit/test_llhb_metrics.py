@@ -189,6 +189,20 @@ class TestPairReport:
         assert chr_metric.treatment.rate == 0.0
         assert chr_metric.delta == 0.5
 
+    def test_citation_coverage_uses_every_eligible_answer_as_denominator(self) -> None:
+        control, treatment = self.make_pair()
+        control[1] = bundle(
+            "llhb-v1-C1-102",
+            score("llhb-v1-C1-102", asserted_citations=0, asserted_resolved=0, asserted_valid=0),
+        )
+
+        coverage = pair_report(control, treatment).metrics["citation_coverage"]
+
+        assert coverage.control is not None and coverage.treatment is not None
+        assert (coverage.control.numerator, coverage.control.denominator) == (1, 2)
+        assert (coverage.treatment.numerator, coverage.treatment.denominator) == (2, 2)
+        assert coverage.delta == -0.5
+
     def test_delta_subtracts_treatment_when_both_rates_are_nonzero(self) -> None:
         control = [
             bundle("llhb-v1-C1-101", hallucinated("llhb-v1-C1-101")),

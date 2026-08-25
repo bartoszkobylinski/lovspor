@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.llhb import posthoc as posthoc_module
 from lovspor.llhb.outcomes import CaseOutcome, ScoredCase
 from lovspor.llhb.posthoc import (
     CASES_PER_ARM,
@@ -99,6 +100,12 @@ class TestTheGuard:
     def test_a_short_treatment_arm_is_refused_too(self) -> None:
         with pytest.raises(PosthocGuardError, match="treatment"):
             verify_scored_pair(_full_arm([]), _arm([_score()]))
+
+    def test_a_different_scorer_version_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(posthoc_module, "SCORER_VERSION", "llhb-score-v3")
+
+        with pytest.raises(PosthocGuardError, match="scorer is llhb-score-v3"):
+            verify_scored_pair(_full_arm([]), _full_arm([]))
 
 
 class TestTheFourFigures:
