@@ -67,6 +67,11 @@ def ping_url(base: str, run: SweepRun) -> str:
     `failed` is the only status that reports failure. See the module docstring:
     a degraded sweep ran, and alarming on that would fire most nights.
     """
+    # rstrip on the base: an endpoint copied from a browser address bar carries
+    # a trailing slash, and joining that with the suffix produced "//fail" — a
+    # path the service does not know, so failures would have been the one thing
+    # that never reached the switch.
+    base = base.rstrip("/")
     return f"{base}{FAIL_SUFFIX}" if run.status == "failed" else base
 
 

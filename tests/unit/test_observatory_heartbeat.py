@@ -89,6 +89,20 @@ class TestWhichEndpointARunReportsTo:
     def test_only_a_sweep_that_could_not_run_reports_failure(self) -> None:
         assert ping_url(BASE, _run(failed=True)) == BASE + FAIL_SUFFIX
 
+    def test_a_trailing_slash_does_not_change_the_failure_endpoint(self) -> None:
+        """A copied check URL may carry a harmless trailing slash; reporting a
+        failure must still target the service's documented ``/fail`` route,
+        not a distinct ``//fail`` path."""
+        assert ping_url(BASE + "/", _run(failed=True)) == BASE + FAIL_SUFFIX
+
+    def test_a_trailing_slash_does_not_change_the_success_endpoint_either(self) -> None:
+        """Both halves, not just the one that broke: a success ping to a base
+        with a trailing slash must still be the base the service registered."""
+        assert ping_url(BASE + "/", _run()) == BASE
+
+    def test_several_trailing_slashes_are_still_one_endpoint(self) -> None:
+        assert ping_url(BASE + "///", _run(failed=True)) == BASE + FAIL_SUFFIX
+
 
 class TestDelivery:
     def test_the_run_travels_in_the_body(self, httpx_mock: HTTPXMock) -> None:
