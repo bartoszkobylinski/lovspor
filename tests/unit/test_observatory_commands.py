@@ -29,7 +29,6 @@ from lovspor.observatory.commands import (
     _entry_points,
     _hm,
     _record_sweep,
-    _report_recorded,
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
@@ -1993,25 +1992,29 @@ class TestNightly:
         assert [str(r.url) for r in httpx_mock.get_requests()] == [HEARTBEAT + FAIL_SUFFIX]
         assert not missing.exists()
 
-    def test_a_record_stamped_at_the_invocation_instant_is_ours(
+    def test_a_concurrent_run_is_never_reported_as_ours(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The boundary of the "did this invocation write it" guard.
-
-        `started_at < ours` and `<= ours` differ only when the record's start
-        equals this command's to the microsecond. Clocks make that rare and the
-        consequence is not: under `<=` our own record reads as somebody else's,
-        so a healthy sweep reports nothing and the switch counts down to a false
-        alarm on a machine that is fine.
+        """The independent author's finding, kept as a property rather than as a
+        guard: a timestamp cannot say which invocation wrote a record, so this
+        command no longer asks. It reports the run it holds, and another sweep
+        writing a newer one — an operator running by hand while the nightly
+        fires — cannot be mistaken for it.
         """
         monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
         httpx_mock.add_response(url=HEARTBEAT)
-        moment = datetime.now(UTC)
-        _write_sweep(root, started=moment)
+        _write_sweep(root, started=datetime.now(UTC) + timedelta(hours=1), refused=1)
 
-        _report_recorded(ObservatoryRoot(root, ()), moment)
+        result = runner.invoke(app, ["observatory", "nightly"])
 
-        assert [str(r.url) for r in httpx_mock.get_requests()] == [HEARTBEAT]
+        assert result.exit_code == 0, result.output
+        # Ours succeeded; the newer record is degraded. Reporting the log's
+        # last line would have said so.
+        assert "heartbeat: reported success" in result.output
 
     def test_an_unarmed_switch_says_so_rather_than_passing_quietly(
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
@@ -2070,7 +2073,13 @@ class TestNightly:
         self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Yesterday's green record must not masquerade as this invocation's
-        heartbeat when the sweep exits unexpectedly before writing telemetry."""
+        heartbeat when the sweep exits unexpectedly before writing telemetry.
+
+        Since the reporting stopped inferring which record is ours, this holds
+        structurally rather than by a guard: a crash never reaches the report at
+        all. The assertion is kept because the property is what matters, not the
+        mechanism that happens to provide it.
+        """
         monkeypatch.setenv(ENV_HEARTBEAT_URL, HEARTBEAT)
         _activate(root)
         yesterday = datetime.now(UTC) - timedelta(days=1)
@@ -2090,16 +2099,15 @@ class TestNightly:
             ),
         )
 
-        def crash_before_recording(limit: int | None = None) -> None:
+        def crash_before_recording(*_: object) -> None:
             raise RuntimeError("unexpected sweep crash")
 
-        monkeypatch.setattr(observatory_commands, "capture_all", crash_before_recording)
+        monkeypatch.setattr(observatory_commands, "_sweep", crash_before_recording)
 
         result = runner.invoke(app, ["observatory", "nightly"])
 
         assert result.exit_code == 1
         assert isinstance(result.exception, RuntimeError)
-        assert "heartbeat: this run recorded nothing; not reporting\n" in result.stderr
         assert httpx_mock.get_requests() == []
 
 

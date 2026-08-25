@@ -610,8 +610,23 @@ def capture_all(
     that quietly skipped a source would be the silent zero of issue #151 at
     fleet scale.
     """
+    run = _sweep(_root(), limit)
+    if run.status != "success":
+        # The exit code follows the recorded status, and a capped source makes
+        # that status degraded: the sweep ran but did not finish observing.
+        raise typer.Exit(1)
+
+
+def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
+    """Sweep every activated source once, and return the run it recorded.
+
+    Returning the record rather than leaving the caller to find it is the whole
+    point: a caller that reads back "the latest run" is inferring identity from
+    a timestamp, and a timestamp cannot say which invocation wrote something.
+    Two sweeps overlapping — an operator running one by hand while the nightly
+    fires — is enough to make one report the other's outcome as its own.
+    """
     started_at = datetime.now(UTC)
-    root = _root()
     active = _active_sources()
     log, observed = _sweep_inputs(root)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
@@ -619,15 +634,11 @@ def capture_all(
     for record in active:
         typer.echo(f"== {record.authority_id} {record.name}")
         totals = totals.plus(_sweep_one(fetcher, log, record, observed, limit))
-    _record_sweep(root, started_at, len(active), totals)
     if totals.refused:
         typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
     if totals.capped:
         typer.echo(f"sources capped: {totals.capped} of {len(active)}", err=True)
-    if totals.refused or totals.capped:
-        # The exit code follows the recorded status, and a capped source makes
-        # that status degraded: the sweep ran but did not finish observing.
-        raise typer.Exit(1)
+    return _record_sweep(root, started_at, len(active), totals)
 
 
 def _active_sources() -> list[SourceRecord]:
@@ -659,34 +670,33 @@ def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, dict[str, date
 
 def _record_sweep(
     root: ObservatoryRoot, started_at: datetime, active: int, totals: _SweepTotals
-) -> None:
+) -> SweepRun:
     """Record that this sweep happened, and how completely.
 
     Written before the exit code is raised, so a degraded sweep leaves the same
     evidence a clean one does — the run that refused a source is exactly the
     run somebody will want to read tomorrow.
     """
-    append_sweep_run(
-        root,
-        SweepRun(
-            run_id=started_at.isoformat(),
-            started_at=started_at,
-            finished_at=datetime.now(UTC),
-            active_sources=active,
-            sources_completed=active - totals.refused,
-            sources_refused=totals.refused,
-            sources_capped=totals.capped,
-            captured=totals.captured,
-            failed_fetches=totals.failed,
-            unchanged=totals.unchanged,
-            status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
-            # A register with nothing to sweep is a failure with a nameable
-            # cause, not a green run over an empty list. `capture-all` refuses
-            # before reaching here, but the recorder must stay total: the one
-            # caller that does produce it must not produce a reasonless failure.
-            failure_reason=_NO_ACTIVE_SOURCES if active == 0 else None,
-        ),
+    run = SweepRun(
+        run_id=started_at.isoformat(),
+        started_at=started_at,
+        finished_at=datetime.now(UTC),
+        active_sources=active,
+        sources_completed=active - totals.refused,
+        sources_refused=totals.refused,
+        sources_capped=totals.capped,
+        captured=totals.captured,
+        failed_fetches=totals.failed,
+        unchanged=totals.unchanged,
+        status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
+        # A register with nothing to sweep is a failure with a nameable
+        # cause, not a green run over an empty list. `capture-all` refuses
+        # before reaching here, but the recorder must stay total: the one
+        # caller that does produce it must not produce a reasonless failure.
+        failure_reason=_NO_ACTIVE_SOURCES if active == 0 else None,
     )
+    append_sweep_run(root, run)
+    return run
 
 
 def _hm(delta: timedelta) -> str:
@@ -813,24 +823,6 @@ def _report(run: SweepRun) -> None:
             typer.echo(f"heartbeat: NOT DELIVERED (run was {run.status})", err=True)
 
 
-def _report_recorded(root: ObservatoryRoot, started_at: datetime) -> None:
-    """Report the run this invocation wrote, and only that one.
-
-    Reading "the latest run" unguarded would, on any unexpected error, report
-    yesterday's healthy sweep as today's — the switch performing the very
-    failure it exists to catch.
-
-    The test is "started no earlier than this invocation" rather than an exact
-    id: the record is stamped by the sweep, which begins a moment after this
-    command does, so the ids are close but never equal.
-    """
-    latest = latest_sweep_run(sweeps_path(root))
-    if latest is None or latest.started_at < started_at:
-        typer.echo("heartbeat: this run recorded nothing; not reporting", err=True)
-        return
-    _report(latest)
-
-
 @observatory_app.command("nightly")
 def nightly(
     limit: Annotated[
@@ -866,12 +858,13 @@ def nightly(
             append_sweep_run(root, failed)
         _report(failed)
         raise typer.Exit(1)
-    try:
-        capture_all(limit)
-    finally:
-        # In `finally` on purpose: a degraded sweep exits non-zero and still
-        # ran, so it still has to report. Liveness is what the switch guards.
-        _report_recorded(root, started_at)
+    run = _sweep(root, limit)
+    # Reported from the record this invocation holds, never from whatever the
+    # log happens to end with. A degraded sweep still reports: it ran, and
+    # liveness is what the switch guards.
+    _report(run)
+    if run.status != "success":
+        raise typer.Exit(1)
 
 
 @observatory_app.command("status")
