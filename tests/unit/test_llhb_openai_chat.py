@@ -135,6 +135,13 @@ class TestParseChatCompletion:
 
         assert parsed.final_answer == "Oslo."
 
+    def test_text_content_part_without_text_contributes_empty_text(self) -> None:
+        parts = [{"type": "text"}, {"type": "text", "text": "Oslo."}]
+
+        parsed = parse_chat_completion(exchange(body(parts)))
+
+        assert parsed.final_answer == "Oslo."
+
     def test_absent_content_is_an_empty_answer_error(self) -> None:
         parsed = parse_chat_completion(exchange(body(None)))
 
