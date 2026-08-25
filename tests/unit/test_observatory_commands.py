@@ -1346,11 +1346,22 @@ class TestUpdateSource:
         _register()
         _update("--add-listing", LISTING_URL)
         before = (root / "sources.json").read_bytes()
+        first_missing = f"https://www.{BAERUM_DOMAIN}/kunngjoringer"
+        second_missing = f"https://www.{BAERUM_DOMAIN}/horinger"
 
-        result = _update("--remove-listing", f"https://www.{BAERUM_DOMAIN}/kunngjoringer")
+        result = _update(
+            "--remove-listing",
+            first_missing,
+            "--remove-listing",
+            second_missing,
+        )
 
         assert result.exit_code == 1
         assert "not declared" in result.output
+        assert result.stderr == (
+            f"Refused: {first_missing}, {second_missing} not declared on this source.\n"
+        )
+        assert result.stdout == ""
         assert (root / "sources.json").read_bytes() == before
 
     def test_declaring_the_same_listing_twice_leaves_one(self, root: Path) -> None:
@@ -1388,14 +1399,27 @@ class TestUpdateSource:
         rules exist to prevent. Neither order is more correct than the other,
         so the instruction is refused rather than resolved.
         """
+        second_listing = f"https://www.{BAERUM_DOMAIN}/horinger/"
         _register()
-        _update("--add-listing", LISTING_URL)
+        _update("--add-listing", LISTING_URL, "--add-listing", second_listing)
         before = (root / "sources.json").read_bytes()
 
-        result = _update("--add-listing", LISTING_URL, "--remove-listing", LISTING_URL)
+        result = _update(
+            "--add-listing",
+            LISTING_URL,
+            "--add-listing",
+            second_listing,
+            "--remove-listing",
+            LISTING_URL,
+            "--remove-listing",
+            second_listing,
+        )
 
         assert result.exit_code == 1
         assert "both added and removed" in result.stderr
+        assert result.stderr == (
+            f"Refused: {LISTING_URL}, {second_listing} is both added and removed.\n"
+        )
         assert (root / "sources.json").read_bytes() == before
 
     def test_an_update_with_nothing_to_do_is_refused(self, root: Path) -> None:
