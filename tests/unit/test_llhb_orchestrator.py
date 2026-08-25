@@ -1221,3 +1221,74 @@ class TestChatDriver:
     def test_the_chat_driver_needs_an_endpoint(self, tmp_path: Path) -> None:
         with pytest.raises(ValidationError, match="chat_endpoint"):
             make_config(tmp_path, tmp_path / "bin", driver="openai-chat", extra_env={})
+
+
+class TestChatInvocationShape:
+    """The HTTP exchange maps onto CliInvocation exactly; the retry loop reads it."""
+
+    def test_success_is_exit_zero_with_the_body_as_stdout(self) -> None:
+        exchange = ChatExchange(status=200, body='{"choices": []}', duration_ms=42)
+
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.model_dump() == {
+            "stdout": '{"choices": []}',
+            "stderr": "",
+            "returncode": 0,
+            "duration_ms": 42,
+            "timed_out": False,
+        }
+
+    def test_a_timeout_keeps_its_flag_and_message(self) -> None:
+        exchange = ChatExchange(
+            status=0, body="", duration_ms=7, timed_out=True, error="chat request timed out"
+        )
+
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.timed_out is True
+        assert invocation.stderr == "chat request timed out"
+        # Recorded in raw/<case>.json: a retryable failure is exit 1, nothing else.
+        assert invocation.returncode == 1
+
+    def test_a_rejected_credential_maps_to_the_permanent_exit_code(self) -> None:
+        exchange = ChatExchange(status=403, body="{}", duration_ms=1)
+
+        assert orchestrator._as_invocation(exchange).returncode == orchestrator._CANNOT_EXECUTE
+
+    def test_the_chat_attempt_sends_the_case_question(
+        self, tmp_path: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(
+            url="https://chat.example/api/chat/completions", json=chat_body("Svar.")
+        )
+        case = {"case_id": "llhb-v1-C1-001", "question": "Hva sier loven om husleie?"}
+
+        record, invocation, parsed = orchestrator._attempt_case(chat_config(tmp_path), case)
+
+        sent = json.loads(httpx_mock.get_requests()[0].content)
+        assert sent["messages"][1]["content"] == "Hva sier loven om husleie?"
+        assert record["completed"] is True
+        assert invocation.returncode == 0
+        assert parsed.final_answer == "Svar."
+
+    def test_the_chat_attempt_refuses_a_missing_endpoint_by_name(self, tmp_path: Path) -> None:
+        config = make_config(tmp_path, tmp_path / "bin", extra_env={})
+        config = config.model_copy(update={"driver": "openai-chat"})
+
+        with pytest.raises(orchestrator.OrchestratorError) as caught:
+            orchestrator._attempt_chat(config, make_case("llhb-v1-C1-001"))
+
+        assert str(caught.value) == "the openai-chat driver needs a chat_endpoint"
+
+    def test_the_cli_attempt_passes_the_case_question_verbatim(self, tmp_path: Path) -> None:
+        """The question is the one thing that differs between cases; it must reach
+        the CLI exactly, not a stringified placeholder."""
+        argv_log = tmp_path / "argv.txt"
+        bin_dir = fake_claude(tmp_path, f'printf "%s\\n" "$@" > {argv_log}; ' + SUCCESS_STREAM)
+        case = {"case_id": "llhb-v1-C1-001", "question": "Hva sier husleieloven § 9-6?"}
+
+        record, _, _ = orchestrator._attempt_case(make_config(tmp_path, bin_dir), case)
+
+        assert record["completed"] is True
+        assert "Hva sier husleieloven § 9-6?" in argv_log.read_text().splitlines()

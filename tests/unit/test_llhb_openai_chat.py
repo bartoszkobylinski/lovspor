@@ -260,6 +260,8 @@ class TestPostChat:
 
         sent = httpx_mock.get_requests()[0]
         assert sent.headers["Authorization"] == "Bearer sk-test"
+        # The header name as it went on the wire, not the case-insensitive lookup.
+        assert (b"Authorization", b"Bearer sk-test") in sent.headers.raw
         assert json.loads(sent.content)["messages"][1]["content"] == "q"
         assert result.status == 200
         assert result.timed_out is False
@@ -321,3 +323,103 @@ class TestPostChat:
         result = post_chat(ENDPOINT, build_request(IDENTITY, "q", "s", ChatSampling()))
 
         assert result.permanent_failure is False
+
+
+class TestMutationSurvivors:
+    """Pins that the PR-scoped mutation gate showed were missing."""
+
+    def test_an_unclosed_block_is_cut_at_its_first_opening(self) -> None:
+        # rfind would keep "Svar.<think>b" — the first opening is the cut.
+        assert strip_thinking("Svar.<think>b<think>c") == "Svar."
+
+    def test_a_transport_error_is_not_ok(self) -> None:
+        failed = ChatExchange(status=0, body="", duration_ms=1, error="chat request failed: x")
+
+        parsed = parse_chat_completion(failed)
+
+        assert parsed.ok is False
+        assert parsed.final_answer is None
+
+    def test_a_null_content_is_an_empty_answer(self) -> None:
+        document = body("x")
+        document["choices"][0]["message"]["content"] = None
+
+        parsed = parse_chat_completion(exchange(document))
+
+        assert parsed.ok is False
+        assert parsed.error == "empty answer after stripping the thinking block"
+
+    def test_content_parts_without_text_contribute_nothing(self) -> None:
+        parts = [{"type": "image"}, {"type": "text", "text": "Oslo."}, "junk"]
+
+        parsed = parse_chat_completion(exchange(body(parts)))
+
+        assert parsed.final_answer == "Oslo."
+
+    @pytest.mark.parametrize(
+        ("document", "message"),
+        [
+            ([1, 2], "unreadable chat response: body is not a JSON object"),
+            ({"choices": []}, "unreadable chat response: no choices"),
+            (
+                {"choices": [{"message": "text"}]},
+                "unreadable chat response: message is not an object",
+            ),
+        ],
+    )
+    def test_unreadable_bodies_name_the_defect_exactly(self, document: Any, message: str) -> None:
+        assert parse_chat_completion(exchange(document)).error == message
+
+    def test_the_treatment_refusal_names_the_rule(self) -> None:
+        treatment = IDENTITY.model_copy(update={"condition": "lovspor"})
+
+        with pytest.raises(ValueError) as caught:
+            build_request(treatment, "q", "s", ChatSampling())
+
+        assert str(caught.value) == "the chat driver serves the control arm only"
+
+    def test_only_trailing_slashes_are_trimmed_from_the_base_url(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url="https://chat.example/v1/chat/completions", json=body("Ok."))
+        httpx_mock.add_response(url="https://chat.example/vX/chat/completions", json=body("Ok."))
+        request = build_request(IDENTITY, "q", "s", ChatSampling())
+
+        post_chat(ChatEndpoint(base_url="https://chat.example/v1///", api_key="k"), request)
+        post_chat(ChatEndpoint(base_url="https://chat.example/vX", api_key="k"), request)
+
+        urls = [str(sent.url) for sent in httpx_mock.get_requests()]
+        assert urls == [
+            "https://chat.example/v1/chat/completions",
+            "https://chat.example/vX/chat/completions",
+        ]
+
+    def test_the_endpoint_timeout_reaches_the_client(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=URL, json=body("Ok."))
+
+        post_chat(ENDPOINT, build_request(IDENTITY, "q", "s", ChatSampling()))
+
+        timeout = httpx_mock.get_requests()[0].extensions["timeout"]
+        assert timeout["read"] == 30
+
+    def test_failure_exchanges_carry_no_body_and_status_zero(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_exception(httpx.ReadTimeout("slow"), url=URL)
+        httpx_mock.add_exception(httpx.ConnectError("refused"), url=URL)
+        request = build_request(IDENTITY, "q", "s", ChatSampling())
+
+        timed_out = post_chat(ENDPOINT, request)
+        refused = post_chat(ENDPOINT, request)
+
+        assert (timed_out.status, timed_out.body) == (0, "")
+        assert (refused.status, refused.body) == (0, "")
+
+    def test_duration_is_wall_clock_milliseconds(
+        self, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        httpx_mock.add_response(url=URL, json=body("Ok."))
+        ticks = iter([100.0, 101.0])
+        monkeypatch.setattr("lovspor.llhb.openai_chat.time.monotonic", lambda: next(ticks))
+
+        result = post_chat(ENDPOINT, build_request(IDENTITY, "q", "s", ChatSampling()))
+
+        assert result.duration_ms == 1000
