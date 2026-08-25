@@ -38,13 +38,16 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ObservatoryRoot:
     return ObservatoryRoot(tmp_path / "observatory", ())
 
 
-def _run(*, refused: int = 0, completed: int = 2, started: datetime = START) -> SweepRun:
+def _run(*, refused: int = 0, completed: int | None = None, started: datetime = START) -> SweepRun:
+    """A valid run. `completed` defaults to whatever `refused` leaves over —
+    the helper used to take it independently and could build a record with more
+    outcomes than active sources, which the model now refuses."""
     return SweepRun(
         run_id=started.isoformat(),
         started_at=started,
         finished_at=started + timedelta(minutes=76),
         active_sources=2,
-        sources_completed=completed,
+        sources_completed=2 - refused if completed is None else completed,
         sources_refused=refused,
         captured=47,
         failed_fetches=1,
@@ -255,6 +258,56 @@ class TestDamageIsRefused:
     def test_negative_counts_are_log_damage(self, root: ObservatoryRoot, field: str) -> None:
         line = _run().model_dump(mode="json")
         line[field] = -1
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+    @pytest.mark.parametrize(
+        "updates",
+        [
+            {"sources_completed": 3},
+            {"sources_refused": 3},
+            {"sources_completed": 2, "sources_refused": 1},
+            {"sources_completed": 1, "sources_refused": 0},
+        ],
+        ids=["too-many-completed", "too-many-refused", "too-many-outcomes", "missing-outcome"],
+    )
+    def test_inconsistent_source_totals_are_log_damage(
+        self, root: ObservatoryRoot, updates: dict[str, int]
+    ) -> None:
+        """Counts are operational evidence, not independent counters: every
+        active source must end in exactly one of completed or refused."""
+        line = _run().model_dump(mode="json")
+        line.update(updates)
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run") as exc:
+            read_sweep_runs(sweeps_path(root))
+
+        assert str(exc.value).startswith(f"{sweeps_path(root)}:1:")
+
+    @pytest.mark.parametrize(
+        ("updates", "status"),
+        [
+            ({}, "degraded"),
+            ({"sources_completed": 1, "sources_refused": 1}, "success"),
+            (
+                {"active_sources": 0, "sources_completed": 0, "sources_refused": 0},
+                "success",
+            ),
+        ],
+    )
+    def test_status_that_contradicts_source_outcomes_is_log_damage(
+        self, root: ObservatoryRoot, updates: dict[str, int], status: str
+    ) -> None:
+        """The persisted classification must be derivable from the counts;
+        otherwise status can report green from internally contradictory data."""
+        line = _run().model_dump(mode="json")
+        line.update(updates)
+        line["status"] = status
         sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
         sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
 

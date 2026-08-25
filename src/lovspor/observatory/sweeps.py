@@ -85,6 +85,37 @@ class SweepRun(BaseModel):
             raise ValueError("finished_at precedes started_at")
         return self
 
+    @model_validator(mode="after")
+    def _outcomes_account_for_every_source(self) -> "SweepRun":
+        """Every active source ends in exactly one of completed or refused.
+
+        These are not three independent counters. A record where they disagree
+        describes a sweep that cannot have happened, and the disagreement is
+        precisely what would let "196 of 198" sit above a refusal count that
+        says otherwise.
+        """
+        if self.sources_completed + self.sources_refused != self.active_sources:
+            raise ValueError(
+                f"{self.sources_completed} completed + {self.sources_refused} refused "
+                f"!= {self.active_sources} active"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _status_follows_from_the_counts(self) -> "SweepRun":
+        """The stored classification must be derivable from the counts.
+
+        Otherwise a record can carry refusals and still claim success, and
+        `observatory status` would print SUCCESS out of data that contradicts
+        itself — the one thing a health check must never do.
+        """
+        expected = sweep_status(active=self.active_sources, refused=self.sources_refused)
+        if self.status != expected:
+            raise ValueError(
+                f"status {self.status!r} contradicts the counts (expected {expected!r})"
+            )
+        return self
+
 
 class CadenceState(NamedTuple):
     """How long since a sweep last began, and whether that is now an alert.
