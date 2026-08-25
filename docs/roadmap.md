@@ -72,7 +72,12 @@ What is on `main`:
 - `src/lovspor/observatory/` — `model`, `storage`, `log`, `registry`, `fetch`, `discovery`,
   `freshness`, `commands`.
 - CLI: `register-source`, `activate-source`, `sources`, `discover`, `capture`, `capture-all`,
-  `verify`, `repair`.
+  `verify`, `repair`, `status`.
+- **Every sweep records itself** in `sweep-runs.jsonl` beside the registry — process telemetry,
+  not an observation — because the observation log cannot answer whether the sweep ran at all: a
+  sweep that never started leaves no trace in it by construction. `status` reads that back and
+  exits non-zero when no sweep has *begun* inside the deadline, so the same command serves a
+  monitor. The observation SLA is stated once, as a value: 24h target, 36h alert deadline.
 - **Three gates before every request** (ADR-0010 §2/§4/§7): activation, a *live* read of
   `robots.txt`, and a per-host rate limit. A refusal is **written to the log**, because the log
   has to be able to prove compliance, not just record successes.
@@ -92,9 +97,11 @@ What is on `main`:
   block it (ADR-0010, `https://lovspor.no/observatory/`). Requests are never disguised as a
   browser.
 
-What is **not** there yet: nothing schedules a sweep (#167), discovery is sitemap-only so a
-source without one captures nothing (#151), and a source whose site has moved to another domain
-has no safe migration path (#166).
+What is **not** there yet: **nothing schedules the sweep** — the telemetry and the SLA exist,
+the launchd job, the storage preflight and the remote dead-man switch do not (#167); discovery is
+sitemap-only, so a source without one captures nothing (#151); a source whose site has moved to
+another domain has no safe migration path (#166); and a bootstrap lane that exhausts its round
+cap exits silently, so a truncated municipality reads as complete (#172).
 
 The register is operator-maintained and every activation requires a recorded human
 access-policy check; `lovspor observatory sources` lists what is registered and what is active.
@@ -194,11 +201,16 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
 - **Diff tool — SHIPPED (Sprint 10 B2).** `diff_law_versions(slug, date_a, date_b)` returns a section-by-section diff between two dates — unique to this project, since competitors lack the git-based architecture. Built on the B1 time-machine (`get_law_at` + `list_law_versions`).
 - **No quality monitor.** Whether every cross-reference in body text resolves to a real act is unknown.
 - **No corpus signing.** The manifest could be GPG-signed. Useful once `lovverk` becomes a trust anchor for downstream consumers.
-- **The observatory has no cadence.** Nothing schedules `capture-all`: no cron, no timer, no
-  wrapper. The sweep is a function someone invokes. **#167** establishes 24h as the observation
-  SLA, a launchd job on the machine holding the archive, a hard storage preflight that fails
-  rather than falling back to the internal disk, a per-run record, and a *remote* dead-man
-  switch — remote because a watchdog on the same machine cannot notice that the machine is off.
+- **The observatory has no scheduler.** The 24h SLA and the per-run record shipped in #170; what
+  is still missing is anything that *fires* the sweep — no cron, no timer, no wrapper. **#167**
+  covers the rest: a launchd job on the machine holding the archive, a hard storage preflight that
+  fails rather than falling back to the internal disk, and a *remote* dead-man switch — remote
+  because a watchdog on the same machine cannot notice that the machine is off.
+- **A capped bootstrap lane is silent (#172).** The lane stops a municipality on `DONE`,
+  `REFUSED` or `BLOCKED`, each of them announced — but exhausting the 80-round cap announces
+  nothing. Seven sources have already stopped that way, Bergen among them, and each reads as
+  complete while being truncated. This is #151's silent zero one level up: there a source
+  captured nothing and looked fine; here it captured most of itself and looks finished.
 - **Observatory discovery is sitemap-only (#151).** A source that publishes no sitemap captures
   nothing, which at fleet scale reads identically to a source that published nothing.
 - **A source that moved domains has no safe migration (#166).** Changing `canonical_domain`
