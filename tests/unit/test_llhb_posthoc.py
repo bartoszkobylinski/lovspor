@@ -160,7 +160,12 @@ class TestTheArtifactSaysWhatItIs:
         report = supplementary_report(_full_arm([]), _full_arm([]))
 
         assert report["ruling"] == "DECISIONS.md #30(a)"
-        assert "inspection of frozen-pair outputs" in report["reason"]
+        # The whole string, not a phrase inside it. This sentence is the
+        # artifact's own account of why it is not confirmatory, and it is what
+        # a reader who never opens DECISIONS.md will go by.
+        assert report["reason"] == (
+            "reporting definitions adopted after inspection of frozen-pair outputs"
+        )
 
     def test_it_carries_the_hashes_it_verified_against(self) -> None:
         report = supplementary_report(_full_arm([]), _full_arm([]))
