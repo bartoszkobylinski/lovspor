@@ -72,8 +72,10 @@ class TestBuildRequest:
     def test_refuses_the_treatment_condition(self) -> None:
         treatment = IDENTITY.model_copy(update={"condition": "lovspor"})
 
-        with pytest.raises(ValueError, match="control arm only"):
+        with pytest.raises(ValueError) as exc_info:
             build_request(treatment, "q", "s", ChatSampling())
+
+        assert str(exc_info.value) == "the chat driver serves the control arm only"
 
 
 class TestStripThinking:
@@ -85,6 +87,9 @@ class TestStripThinking:
 
     def test_drops_an_unclosed_block_to_the_end(self) -> None:
         assert strip_thinking("Svar.<think>aldri lukket") == "Svar."
+
+    def test_drops_from_the_first_of_multiple_unclosed_blocks(self) -> None:
+        assert strip_thinking("Svar.<think>første<think>andre") == "Svar."
 
     def test_leaves_plain_text_alone(self) -> None:
         assert strip_thinking("  Bare et svar.  ") == "Bare et svar."
@@ -123,6 +128,19 @@ class TestParseChatCompletion:
 
         assert parsed.final_answer == "Oslo."
 
+    def test_content_parts_without_text_contribute_empty_text(self) -> None:
+        parts = [{"type": "image", "url": "ignored"}, {"type": "text", "text": "Oslo."}]
+
+        parsed = parse_chat_completion(exchange(body(parts)))
+
+        assert parsed.final_answer == "Oslo."
+
+    def test_absent_content_is_an_empty_answer_error(self) -> None:
+        parsed = parse_chat_completion(exchange(body(None)))
+
+        assert parsed.ok is False
+        assert parsed.error == "empty answer after stripping the thinking block"
+
     def test_length_finish_reason_marks_truncation(self) -> None:
         document = body("Delvis")
         document["choices"][0]["finish_reason"] = "length"
@@ -145,6 +163,19 @@ class TestParseChatCompletion:
         assert parsed.error is not None
         assert "unreadable chat response" in parsed.error
         assert fragment in parsed.error
+
+    @pytest.mark.parametrize(
+        ("document", "message"),
+        [
+            ([1, 2], "unreadable chat response: body is not a JSON object"),
+            ({"choices": []}, "unreadable chat response: no choices"),
+            ({"choices": [{"message": []}]}, "unreadable chat response: message is not an object"),
+        ],
+    )
+    def test_structural_errors_have_stable_diagnostics(self, document: Any, message: str) -> None:
+        parsed = parse_chat_completion(exchange(document))
+
+        assert parsed.error == message
 
     def test_malformed_json_fails_closed(self) -> None:
         parsed = parse_chat_completion(ChatExchange(status=200, body="{not json", duration_ms=1))
@@ -187,12 +218,18 @@ class TestParseChatCompletion:
     def test_a_transport_error_wins_over_the_body(self) -> None:
         failed = ChatExchange(status=0, body="", duration_ms=1, error="chat request failed: x")
 
-        assert parse_chat_completion(failed).error == "chat request failed: x"
+        parsed = parse_chat_completion(failed)
+
+        assert parsed.ok is False
+        assert parsed.error == "chat request failed: x"
 
     def test_a_timeout_is_an_error(self) -> None:
         timed_out = ChatExchange(status=0, body="", duration_ms=1, timed_out=True)
 
-        assert parse_chat_completion(timed_out).error == "chat request timed out"
+        parsed = parse_chat_completion(timed_out)
+
+        assert parsed.ok is False
+        assert parsed.error == "chat request timed out"
 
     def test_failure_builds_a_schema_valid_record(self) -> None:
         parsed = parse_chat_completion(exchange({"error": "nope"}, status=500))
@@ -227,6 +264,7 @@ class TestPostChat:
         assert result.timed_out is True
         assert result.error == "chat request timed out"
         assert result.status == 0
+        assert result.body == ""
 
     def test_a_connection_error_becomes_a_result(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_exception(httpx.ConnectError("refused"), url=URL)
@@ -234,8 +272,30 @@ class TestPostChat:
         result = post_chat(ENDPOINT, build_request(IDENTITY, "q", "s", ChatSampling()))
 
         assert result.timed_out is False
+        assert result.status == 0
+        assert result.body == ""
         assert result.error is not None
         assert result.error.startswith("chat request failed: ")
+
+    def test_uses_the_configured_timeout_and_records_elapsed_milliseconds(
+        self, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        httpx_mock.add_response(url=URL, json=body("Oslo."))
+        observed_timeouts: list[object] = []
+        real_client = httpx.Client
+
+        def client_with_observed_timeout(*args: Any, **kwargs: Any) -> httpx.Client:
+            observed_timeouts.append(kwargs.get("timeout"))
+            return real_client(*args, **kwargs)
+
+        monkeypatch.setattr("lovspor.llhb.openai_chat.httpx.Client", client_with_observed_timeout)
+        times = iter((10.0, 10.25))
+        monkeypatch.setattr("lovspor.llhb.openai_chat.time.monotonic", lambda: next(times))
+
+        result = post_chat(ENDPOINT, build_request(IDENTITY, "q", "s", ChatSampling()))
+
+        assert observed_timeouts == [30]
+        assert result.duration_ms == 250
 
     def test_a_rejected_credential_is_permanent(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(url=URL, status_code=401, json={"detail": "bad key"})

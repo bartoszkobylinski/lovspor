@@ -16,7 +16,7 @@ from pytest_httpx import HTTPXMock
 
 from lovspor.llhb import orchestrator
 from lovspor.llhb.claude_cli import RunIdentity, ToolAccess
-from lovspor.llhb.openai_chat import ChatEndpoint
+from lovspor.llhb.openai_chat import ChatEndpoint, ChatExchange
 from lovspor.llhb.orchestrator import (
     OrchestratorError,
     RunConfig,
@@ -1015,6 +1015,97 @@ def chat_body(content: str, **overrides: Any) -> dict[str, Any]:
 
 
 class TestChatDriver:
+    def test_cli_attempt_passes_the_case_question_to_argv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: list[str] = []
+
+        def fake_build_argv(
+            identity: RunIdentity, question: str, system_prompt: str, tool_access: ToolAccess | None
+        ) -> list[str]:
+            captured.append(question)
+            return ["claude"]
+
+        monkeypatch.setattr(orchestrator, "build_argv", fake_build_argv)
+        monkeypatch.setattr(
+            orchestrator,
+            "execute_argv",
+            lambda *args: orchestrator.CliInvocation(
+                stdout=SUCCESS_STREAM, stderr="", returncode=0, duration_ms=1
+            ),
+        )
+
+        orchestrator._attempt_case(
+            make_config(tmp_path, tmp_path / "bin"), make_case("llhb-v1-C1-001")
+        )
+
+        assert captured == ["Hva sier loven?"]
+
+    def test_chat_attempt_passes_the_case_question_to_request(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: list[str] = []
+
+        def fake_build_request(
+            identity: RunIdentity, question: str, system_prompt: str, sampling: Any
+        ) -> dict[str, Any]:
+            captured.append(question)
+            return {}
+
+        monkeypatch.setattr(orchestrator, "build_request", fake_build_request)
+        monkeypatch.setattr(
+            orchestrator,
+            "post_chat",
+            lambda endpoint, request: ChatExchange(
+                status=200, body=json.dumps(chat_body("Svar.")), duration_ms=1
+            ),
+        )
+
+        orchestrator._attempt_chat(chat_config(tmp_path), make_case("llhb-v1-C1-001"))
+
+        assert captured == ["Hva sier loven?"]
+
+    def test_chat_attempt_without_endpoint_has_stable_error(self, tmp_path: Path) -> None:
+        config = chat_config(tmp_path).model_copy(update={"chat_endpoint": None})
+
+        with pytest.raises(OrchestratorError) as exc_info:
+            orchestrator._attempt_chat(config, make_case("llhb-v1-C1-001"))
+
+        assert str(exc_info.value) == "the openai-chat driver needs a chat_endpoint"
+
+    @pytest.mark.parametrize(
+        ("exchange", "expected_returncode"),
+        [
+            (ChatExchange(status=200, body="ok", duration_ms=7), 0),
+            (ChatExchange(status=503, body="no", duration_ms=8), 1),
+        ],
+    )
+    def test_chat_exchange_invocation_preserves_status_fields(
+        self, exchange: ChatExchange, expected_returncode: int
+    ) -> None:
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.returncode == expected_returncode
+        assert invocation.stdout == exchange.body
+        assert invocation.stderr == ""
+        assert invocation.duration_ms == exchange.duration_ms
+        assert invocation.timed_out is exchange.timed_out
+
+    def test_timed_out_chat_exchange_preserves_error_and_timeout(self) -> None:
+        exchange = ChatExchange(
+            status=0,
+            body="",
+            duration_ms=9,
+            timed_out=True,
+            error="chat request timed out",
+        )
+
+        invocation = orchestrator._as_invocation(exchange)
+
+        assert invocation.returncode == 1
+        assert invocation.stderr == "chat request timed out"
+        assert invocation.timed_out is True
+
     def test_end_to_end_records_match_the_cli_shape(
         self, tmp_path: Path, httpx_mock: HTTPXMock
     ) -> None:
