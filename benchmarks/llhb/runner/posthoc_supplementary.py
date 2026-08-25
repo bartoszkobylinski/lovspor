@@ -42,6 +42,9 @@ RUNS_ROOT = LLHB_DIR / "results" / "runs"
 SCHEMA_DIR = LLHB_DIR / "schema"
 DATASET = LLHB_DIR / "dataset" / "frozen" / "llhb-v1.jsonl"
 OUT_JSON = LLHB_DIR / "results" / "reports" / "opus-frozen-pair-posthoc-supplementary-v1.json"
+#: The default markdown path. Not read by `main`, which derives the path
+#: from whatever `--out` actually is — it stands as the sentinel a test
+#: patches to prove that a custom output never touches the committed one.
 OUT_MD = OUT_JSON.with_suffix(".md")
 
 
@@ -146,10 +149,16 @@ def main() -> int:
     except LovsporError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
+    # The markdown follows the JSON wherever it goes. Writing it to a fixed
+    # path while the JSON moved would have let a run with --out overwrite the
+    # committed markdown from a report nobody committed — the two files are
+    # meant to be the same document in two forms, and a test already pins that
+    # they agree.
+    markdown_path = args.out.with_suffix(".md")
     args.out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    OUT_MD.write_text(render_markdown(report), encoding="utf-8")
+    markdown_path.write_text(render_markdown(report), encoding="utf-8")
     print(f"wrote {args.out}")
-    print(f"wrote {OUT_MD}")
+    print(f"wrote {markdown_path}")
     return 0
 
 
