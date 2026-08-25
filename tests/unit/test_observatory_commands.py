@@ -1324,6 +1324,17 @@ class TestUpdateSource:
         assert result.exit_code == 0, result.output
         assert _listings(root) == ()
 
+    def test_distinct_additions_and_removals_are_applied_together(self, root: Path) -> None:
+        kept = f"https://www.{BAERUM_DOMAIN}/horinger/"
+        added = f"https://www.{BAERUM_DOMAIN}/politiske-saker/"
+        _register()
+        assert _update("--add-listing", LISTING_URL, "--add-listing", kept).exit_code == 0
+
+        result = _update("--remove-listing", LISTING_URL, "--add-listing", added)
+
+        assert result.exit_code == 0, result.output
+        assert _listings(root) == (kept, added)
+
     def test_withdrawing_a_listing_that_was_never_declared_is_refused(self, root: Path) -> None:
         """A remove that matched nothing is a typo with live consequences.
 
