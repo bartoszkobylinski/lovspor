@@ -71,6 +71,14 @@ class TestMetadata:
         with pytest.raises(LovsporError, match=r"run-metadata\.json"):
             score_arm_script.read_metadata(tmp_path, "llhb-v1-run-20260825-nope")
 
+    def test_metadata_must_claim_the_directory_it_sits_in(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "llhb-v1-run-20260825-copy"
+        run_dir.mkdir()
+        (run_dir / "run-metadata.json").write_text(json.dumps(METADATA), encoding="utf-8")
+
+        with pytest.raises(LovsporError, match="declares run_id"):
+            score_arm_script.read_metadata(tmp_path, run_dir.name)
+
     def test_metadata_is_read_from_the_run_directory(self, tmp_path: Path) -> None:
         run_dir = tmp_path / "llhb-v1-run-20260825-nmctrl1"
         run_dir.mkdir()

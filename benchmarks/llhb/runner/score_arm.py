@@ -67,7 +67,14 @@ def read_metadata(runs_root: Path, run_id: str) -> dict[str, Any]:
     path = runs_root / run_id / "run-metadata.json"
     if not path.is_file():
         raise LovsporError(f"no run-metadata.json under {runs_root / run_id}")
-    return dict(json.loads(path.read_text(encoding="utf-8")))
+    metadata = dict(json.loads(path.read_text(encoding="utf-8")))
+    if metadata.get("run_id") != run_id:
+        # A copied or renamed run directory would otherwise report under a name
+        # its own metadata does not claim.
+        raise LovsporError(
+            f"run-metadata.json under {run_id} declares run_id {metadata.get('run_id')!r}"
+        )
+    return metadata
 
 
 def build_report(run_id: str, metadata: dict[str, Any], arm: ArmReport) -> dict[str, Any]:
