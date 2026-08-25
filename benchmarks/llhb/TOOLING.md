@@ -403,6 +403,47 @@ Driven by the Stage 3.5 human audit (see
   those runs is comparable to a fixed run. Fixed by running the child
   in the sandbox directory.
 
+
+## OpenAI-compatible chat driver, control arm only (2026-08-25)
+
+* **Module**: `lovspor.llhb.openai_chat` (unit-tested; the orchestrator
+  posts, the module builds and parses). Selected with
+  `run_arm.py --driver openai-chat --provider <name>`; refused for
+  `--condition lovspor` because no tool bridge exists in v1 (ruling #25
+  defers the function-calling bridge to a possible v2).
+* **Why it exists**: models with no vendor CLI — NorMistral served by
+  Sigma2 (`https://chat.llm.sigma2.no/api`, the default `--base-url`),
+  Borealis on a rented vLLM — can take the control arm over the
+  chat-completions shape every such server speaks. The prompt bytes are
+  the ones the Claude driver sends: `system-prompt-v1.txt` as the system
+  message, the case question verbatim as the user message.
+* **Request**: `{"model", "messages": [system, user], "temperature",
+  "stream": false}` and, only when set, `max_tokens`. Never a `tools`
+  field. `sampling.temperature` is recorded in run metadata (default
+  0.0); `provider` comes from `--provider` and must be in the schema enum
+  (`norallm` added for NorMistral).
+* **Parsing**: `parse_chat_completion` never raises. A transport failure,
+  a timeout, a non-200 status, an unreadable body, an empty answer or a
+  response that reports `tool_calls` becomes `ParsedCliResult(ok=False,
+  error=...)`. A `<think>…</think>` block (NorMistral-11b-thinking) is
+  stripped from `final_answer`; the raw body, block included, is what
+  the orchestrator retains under `raw/<case_id>.json`, so the stripping
+  is auditable. Records carry `harness = {exposed_tools: [], mcp_servers:
+  [], permission_denials: []}` — the fairness checker treats a null
+  harness on a completed record as missing evidence.
+* **Orchestrator**: `RunConfig.driver = "openai-chat"` with a
+  `chat_endpoint` (base URL, bearer token from `LLHB_OPENAI_CHAT_API_KEY`
+  in `.env`, per-case timeout). The HTTP exchange is mapped onto the
+  same `CliInvocation` the CLI path produces, so the retry loop
+  (issue #80), failed-attempt retention and the tool-count cross-check
+  run unchanged. HTTP 401/403 map to the permanent exit code and are not
+  retried; anything else failed is retried within the budget.
+* **What it does not give you**: a treatment arm, a pair manifest, or a
+  scoreable delta. A control-only run is a diagnostic baseline for that
+  model (how often it invents citations unaided), reported next to the
+  Claude control arm with the harness caveat of ruling #25 — never as a
+  confirmatory result.
+
 ## Stage 6 treatment arm (2026-08-09, ruling #25)
 
 * **Backend**: a local stdio `lovspor mcp` server bound to the pinned

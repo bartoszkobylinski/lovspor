@@ -30,7 +30,8 @@
       "enum": [
         "anthropic",
         "openai",
-        "google"
+        "google",
+        "norallm"
       ]
     },
     "model_id": {

@@ -288,3 +288,82 @@ class TestStabilityMode:
         out = capsys.readouterr().out
         assert "(stability-30 of frozen llhb-v1)" in out
         assert "drops only" not in out
+
+
+CHAT_ARGS = (
+    "--condition",
+    "control",
+    "--suffix",
+    "nmctrl1",
+    "--model",
+    "NorMistral-11b-thinking:latest",
+    "--driver",
+    "openai-chat",
+    "--provider",
+    "norallm",
+)
+
+
+class TestChatDriverArguments:
+    def test_the_chat_driver_is_control_only(self) -> None:
+        with pytest.raises(SystemExit):
+            args_for(*CHAT_ARGS[2:], "--condition", "lovspor", "--limit", "10")
+
+    def test_the_chat_driver_requires_a_provider(self) -> None:
+        with pytest.raises(SystemExit):
+            args_for(*CHAT_ARGS[:8], "--limit", "10")
+
+    def test_the_cli_driver_refuses_a_foreign_provider(self) -> None:
+        with pytest.raises(SystemExit):
+            args_for(*FROZEN_ARGS, "--frozen", "--provider", "norallm")
+
+    def test_the_cli_driver_defaults_to_anthropic(self) -> None:
+        args = args_for(*FROZEN_ARGS, "--frozen")
+
+        assert args.provider == "anthropic"
+
+    def test_chat_metadata_records_provider_and_sampling(self) -> None:
+        args = args_for(*CHAT_ARGS, "--frozen", "--temperature", "0.0")
+        cases, lock = run_arm_script.load_inputs(args)
+
+        metadata = run_arm_script.compose(args, cases, lock, None)
+
+        assert metadata["provider"] == "norallm"
+        assert metadata["sampling"] == {"temperature": 0.0}
+        assert metadata["tool_config"] is None
+        assert "driver=openai-chat base_url=https://chat.llm.sigma2.no/api" in metadata["notes"]
+
+    def test_the_chat_driver_needs_no_claude_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LLHB_CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+        monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)
+        args = args_for(*CHAT_ARGS, "--frozen")
+
+        assert run_arm_script.child_env(args) == {}
+
+    def test_the_chat_endpoint_fails_closed_without_a_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LLHB_OPENAI_CHAT_API_KEY", raising=False)
+        monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)
+        args = args_for(*CHAT_ARGS, "--frozen")
+
+        with pytest.raises(run_arm_script.LovsporError, match="LLHB_OPENAI_CHAT_API_KEY"):
+            run_arm_script.chat_endpoint(args)
+
+    def test_the_chat_endpoint_carries_base_url_key_and_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLHB_OPENAI_CHAT_API_KEY", "sk-test")
+        monkeypatch.setattr(run_arm_script, "load_dotenv", lambda path: None)
+        args = args_for(
+            *CHAT_ARGS, "--frozen", "--base-url", "http://vllm.local/v1", "--timeout", "90"
+        )
+
+        endpoint = run_arm_script.chat_endpoint(args)
+
+        assert endpoint is not None
+        assert (endpoint.base_url, endpoint.api_key, endpoint.timeout_s) == (
+            "http://vllm.local/v1",
+            "sk-test",
+            90,
+        )
