@@ -16,7 +16,7 @@ check; a flag would be a one-word way to write access-policy records into the
 engine repository, which is the thing the boundary exists to prevent.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, NamedTuple
 
@@ -24,7 +24,13 @@ import httpx
 import typer
 from pydantic import ValidationError
 
-from lovspor.errors import ConfigError, ParseError, SourceNotActivatedError, StorageBoundaryError
+from lovspor.errors import (
+    ConfigError,
+    LogIntegrityError,
+    ParseError,
+    SourceNotActivatedError,
+    StorageBoundaryError,
+)
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
 from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import latest_observations, worth_capturing
@@ -40,6 +46,17 @@ from lovspor.observatory.registry import (
     write_registry,
 )
 from lovspor.observatory.storage import ObservatoryRoot, observatory_root
+from lovspor.observatory.sweeps import (
+    OBSERVATION_SLA,
+    SWEEP_DEADLINE,
+    CadenceState,
+    SweepRun,
+    append_sweep_run,
+    cadence_state,
+    latest_sweep_run,
+    sweep_status,
+    sweeps_path,
+)
 
 observatory_app = typer.Typer(
     name="observatory",
@@ -498,14 +515,31 @@ def capture(
     typer.echo(f"captured: {captured} | failed: {failed} | unchanged since last seen: {skipped}")
 
 
+class _SweepTotals(NamedTuple):
+    """Running counts over a whole sweep, so the run can describe itself."""
+
+    refused: int = 0
+    captured: int = 0
+    failed: int = 0
+    unchanged: int = 0
+
+    def plus(self, other: "_SweepTotals") -> "_SweepTotals":
+        return _SweepTotals(
+            refused=self.refused + other.refused,
+            captured=self.captured + other.captured,
+            failed=self.failed + other.failed,
+            unchanged=self.unchanged + other.unchanged,
+        )
+
+
 def _sweep_one(
     fetcher: Fetcher,
     log: ObservationLog,
     record: SourceRecord,
     observed: dict[str, datetime],
     limit: int,
-) -> bool:
-    """One source of a sweep; True when it refused.
+) -> _SweepTotals:
+    """One source of a sweep, as counts; ``refused`` is 1 when it refused.
 
     The sweep continues either way — one municipality's missing sitemap must
     not cost the other two hundred their day's observations, and each host
@@ -518,11 +552,11 @@ def _sweep_one(
         typer.echo(
             f"  refused: {record.authority_id} {_no_documents_reason(starts.probed)}", err=True
         )
-        return True
+        return _SweepTotals(refused=1)
     typer.echo(f"candidates: {len(result.candidates)}")
     captured, failed, skipped = _capture_candidates(fetcher, result.candidates, observed, limit)
     typer.echo(f"captured: {captured} | failed: {failed} | unchanged since last seen: {skipped}")
-    return False
+    return _SweepTotals(captured=captured, failed=failed, unchanged=skipped)
 
 
 @observatory_app.command("capture-all")
@@ -543,23 +577,138 @@ def capture_all(
     that quietly skipped a source would be the silent zero of issue #151 at
     fleet scale.
     """
+    started_at = datetime.now(UTC)
+    root = _root()
+    active = _active_sources()
+    log, observed = _sweep_inputs(root)
+    fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
+    totals = _SweepTotals()
+    for record in active:
+        typer.echo(f"== {record.authority_id} {record.name}")
+        totals = totals.plus(_sweep_one(fetcher, log, record, observed, limit))
+    _record_sweep(root, started_at, len(active), totals)
+    if totals.refused:
+        typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
+        raise typer.Exit(1)
+
+
+def _active_sources() -> list[SourceRecord]:
     active = [r for _, r in sorted(_load(_registry_file()).sources.items()) if r.active]
     if not active:
         typer.echo("Refused: no activated sources.", err=True)
         raise typer.Exit(1)
-    log = ObservationLog(_root())
+    return active
+
+
+def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, dict[str, datetime]]:
+    """The log to append to and what has already been seen.
+
+    A damaged log refuses here, before anything is fetched, and therefore
+    before a sweep run is recorded. That path is the nightly wrapper's to
+    report as FAILED: it runs `observatory verify` in preflight, which is the
+    one place that can tell "the archive is unreadable" from "the archive is
+    not even mounted".
+    """
+    log = ObservationLog(root)
     scan = log.scan()
     if not scan.complete:
         typer.echo(
             "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
         )
         raise typer.Exit(1)
-    fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
-    observed = latest_observations(scan.records)
-    refused = 0
-    for record in active:
-        typer.echo(f"== {record.authority_id} {record.name}")
-        refused += _sweep_one(fetcher, log, record, observed, limit)
-    if refused:
-        typer.echo(f"sources refused: {refused} of {len(active)}", err=True)
+    return log, latest_observations(scan.records)
+
+
+def _record_sweep(
+    root: ObservatoryRoot, started_at: datetime, active: int, totals: _SweepTotals
+) -> None:
+    """Record that this sweep happened, and how completely.
+
+    Written before the exit code is raised, so a degraded sweep leaves the same
+    evidence a clean one does — the run that refused a source is exactly the
+    run somebody will want to read tomorrow.
+    """
+    append_sweep_run(
+        root,
+        SweepRun(
+            run_id=started_at.isoformat(),
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            active_sources=active,
+            sources_completed=active - totals.refused,
+            sources_refused=totals.refused,
+            captured=totals.captured,
+            failed_fetches=totals.failed,
+            unchanged=totals.unchanged,
+            status=sweep_status(active=active, refused=totals.refused),
+        ),
+    )
+
+
+def _hm(delta: timedelta) -> str:
+    """A duration as hours and minutes, e.g. ``1h16m``."""
+    minutes = int(delta.total_seconds() // 60)
+    return f"{minutes // 60}h{minutes % 60:02d}m"
+
+
+def _latest_sweep(root: ObservatoryRoot) -> SweepRun | None:
+    try:
+        return latest_sweep_run(sweeps_path(root))
+    except LogIntegrityError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+
+def _echo_sources(registry: SourceRegistry) -> None:
+    active = sum(1 for record in registry.sources.values() if record.active)
+    typer.echo("Sources")
+    typer.echo(f"  registered: {len(registry.sources)}")
+    typer.echo(f"  active:     {active}")
+
+
+def _echo_last_sweep(run: SweepRun | None) -> None:
+    typer.echo("\nLast sweep")
+    if run is None:
+        typer.echo("  never")
+        return
+    typer.echo(f"  started:    {run.started_at.isoformat(timespec='seconds')}")
+    typer.echo(f"  finished:   {run.finished_at.isoformat(timespec='seconds')}")
+    typer.echo(f"  duration:   {_hm(run.finished_at - run.started_at)}")
+    typer.echo(f"  completed:  {run.sources_completed} / {run.active_sources}")
+    typer.echo(f"  refused:    {run.sources_refused}")
+    typer.echo(f"  captured:   {run.captured} | unchanged: {run.unchanged}")
+    typer.echo(f"  status:     {run.status.upper()}")
+
+
+def _echo_cadence(state: CadenceState, run: SweepRun | None) -> None:
+    """Render the cadence, distinguishing the two ways an age can be missing.
+
+    "Never swept" beside a printed last sweep would contradict itself; the
+    other case is a run stamped ahead of the clock, which is worth naming
+    because it is the one that would otherwise have read as fresh.
+    """
+    unknown = "never swept" if run is None else "unknown — last sweep is stamped ahead of the clock"
+    typer.echo("\nCadence")
+    typer.echo(f"  target:     {_hm(OBSERVATION_SLA)}")
+    typer.echo(f"  age:        {_hm(state.age) if state.age is not None else unknown}")
+    typer.echo(f"  deadline:   {_hm(SWEEP_DEADLINE)}")
+    typer.echo(f"  state:      {'OVERDUE' if state.overdue else 'OK'}")
+
+
+@observatory_app.command("status")
+def status() -> None:
+    """Is the archive actually being observed?
+
+    Exists so that question never again means grepping a 12 GB log. The exit
+    code answers it too — 1 when no sweep has begun inside the deadline —
+    because the same command then serves a monitor, and a health check nobody
+    can script is a health check nobody runs.
+    """
+    root = _root()
+    latest = _latest_sweep(root)
+    state = cadence_state(latest)
+    _echo_sources(_load(_registry_file()))
+    _echo_last_sweep(latest)
+    _echo_cadence(state, latest)
+    if state.overdue:
         raise typer.Exit(1)

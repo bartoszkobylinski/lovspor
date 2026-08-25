@@ -68,7 +68,13 @@ def _broken_assumption_tests(entries: list[dict[str, Any]], root: Path) -> list[
         node_id = entry.get("assumption_test")
         if not node_id:
             continue
-        path, _, name = str(node_id).partition("::")
+        # rpartition, not partition: a class-scoped node id is
+        # `file::Class::test_name`, and splitting on the FIRST separator left
+        # `name` as "Class::test_name", which no `def` line can ever contain.
+        # A valid id then read as broken — the failure mode this check exists
+        # to prevent, pointed the wrong way.
+        head, _, name = str(node_id).rpartition("::")
+        path = head.partition("::")[0]
         target = root / path
         if not target.exists() or f"def {name}(" not in target.read_text(encoding="utf-8"):
             broken.append(str(node_id))
@@ -101,6 +107,30 @@ def test_every_declared_assumption_test_exists() -> None:
     broken = _broken_assumption_tests(_entries(), _ROOT)
 
     assert broken == []
+
+
+def test_a_class_scoped_node_id_resolves(tmp_path: Path) -> None:
+    """`file::Class::test_name` is an ordinary pytest id and must not read as
+    broken merely for having two separators."""
+    module = tmp_path / "tests" / "unit" / "test_x.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("class TestThing:\n    def test_holds(self) -> None:\n        pass\n")
+    entry = [{"assumption_test": "tests/unit/test_x.py::TestThing::test_holds"}]
+
+    assert _broken_assumption_tests(entry, tmp_path) == []
+
+
+def test_a_node_id_naming_a_missing_test_is_still_broken(tmp_path: Path) -> None:
+    """The widened split must not widen what passes: a name that is not there
+    still fails, class-scoped or not."""
+    module = tmp_path / "tests" / "unit" / "test_x.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("class TestThing:\n    def test_holds(self) -> None:\n        pass\n")
+    entry = [{"assumption_test": "tests/unit/test_x.py::TestThing::test_gone"}]
+
+    assert _broken_assumption_tests(entry, tmp_path) == [
+        "tests/unit/test_x.py::TestThing::test_gone"
+    ]
 
 
 def test_an_entry_naming_a_dependency_without_an_assumption_test_is_caught() -> None:

@@ -182,3 +182,41 @@ False. Returning None there instead would kill them and would also make one
 None mean both "no dropped pairs" and "no sign to test" — the overloaded null
 this version exists to remove.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/commands.py"
+symbol = "_hm"
+registered = "2026-08-25, PR #170, from run 32785337529"
+mutation = """
+-    minutes = int(delta.total_seconds() // 60)
++    minutes = int(delta.total_seconds() / 60)
+"""
+justification = """
+Floor division and truncating division disagree only on negative operands: at
+-90 seconds `// 60` gives -2 and `int(/ 60)` gives -1. On every non-negative
+value they are the same integer, because floor and truncate-toward-zero are the
+same operation there. So this mutant is equivalent exactly when `_hm` cannot
+receive a negative timedelta, and that is now a property of the code rather
+than a hope.
+
+`_hm` has four call sites. Two pass the module constants OBSERVATION_SLA and
+SWEEP_DEADLINE, both positive literals. The third passes
+`run.finished_at - run.started_at`, and SweepRun._finished_after_started
+rejects a run whose finish precedes its start, so that difference is >= 0 for
+any SweepRun that exists. The fourth passes `state.age`, and cadence_state
+returns `age=None` — never a negative timedelta — when the last sweep is
+stamped ahead of the clock; `_echo_cadence` renders None as text and does not
+call `_hm` at all.
+
+Both guards were added in this PR, in response to this survivor, and the
+question it asked was worth more than the mutant: before them a run stamped in
+the future produced a negative age, which compared below SWEEP_DEADLINE and so
+reported the archive as fresh — holding the dead-man switch shut for as long as
+the stamp stayed ahead.
+
+Pinned by tests/unit/test_observatory_sweeps.py::TestNegativeDurationsCannotHappen,
+which asserts all three: an inverted pair is refused on read, it cannot be
+constructed, and a sweep stamped ahead of the clock reads as overdue with no
+age. A zero-length run stays legal, so the boundary itself is covered.
+"""
+assumption_test = "tests/unit/test_observatory_sweeps.py::TestNegativeDurationsCannotHappen::test_a_sweep_stamped_ahead_of_the_clock_is_overdue_not_fresh"
