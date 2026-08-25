@@ -31,6 +31,7 @@ from lovspor.errors import (
     SourceNotActivatedError,
     StorageBoundaryError,
 )
+from lovspor.exclusive_workload import ExclusiveWorkloadHeldError, exclusive_workload
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
 from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import latest_observations, worth_capturing
@@ -618,7 +619,15 @@ def capture_all(
     that quietly skipped a source would be the silent zero of issue #151 at
     fleet scale.
     """
-    run = _sweep(_root(), limit)
+    root = _root()
+    try:
+        with exclusive_workload(OBSERVATORY_WORKLOAD):
+            run = _sweep(root, limit)
+    except ExclusiveWorkloadHeldError as exc:
+        # A hand-run sweep defers exactly like the scheduled one; it just has
+        # no run record to leave, because it never had one for failures.
+        typer.echo(f"OBSERVATORY SWEEP DEFERRED\nreason: {_EXCLUSIVE_WORKLOAD}\n{exc}", err=True)
+        raise typer.Exit(1) from exc
     if run.status != "success":
         # The exit code follows the recorded status, and a capped source makes
         # that status degraded: the sweep ran but did not finish observing.
@@ -764,6 +773,12 @@ _STORAGE_UNAVAILABLE = "storage_unavailable"
 _REGISTRY_MISSING = "registry_missing"
 _LOG_DAMAGED = "observation_log_damaged"
 _NO_ACTIVE_SOURCES = "no_active_sources"
+#: Not a preflight verdict: the ground was fine, the host was reserved. The
+#: sweep did not start and says so (issue #169).
+_EXCLUSIVE_WORKLOAD = "deferred_exclusive_workload"
+#: The name a sweep writes into the host lock, so a refused benchmark can say
+#: who held it.
+OBSERVATORY_WORKLOAD = "observatory-sweep"
 
 
 def _preflight(root: ObservatoryRoot) -> str | None:
@@ -866,7 +881,20 @@ def nightly(
             append_sweep_run(root, failed)
         _report(failed)
         raise typer.Exit(1)
-    run = _sweep(root, limit)
+    # After preflight, not before: the deferral record needs an archive to
+    # land in, and preflight is what establishes there is one. Held across the
+    # whole sweep — a benchmark starting mid-sweep is the overlap the lock is
+    # for (issue #169). Held by the benchmark -> defer: record it, exit 1, the
+    # next scheduled sweep picks up. Never wait.
+    try:
+        with exclusive_workload(OBSERVATORY_WORKLOAD):
+            run = _sweep(root, limit)
+    except ExclusiveWorkloadHeldError as exc:
+        typer.echo(f"OBSERVATORY SWEEP DEFERRED\nreason: {_EXCLUSIVE_WORKLOAD}\n{exc}", err=True)
+        deferred = _failed_run(started_at, _EXCLUSIVE_WORKLOAD)
+        append_sweep_run(root, deferred)
+        _report(deferred)
+        raise typer.Exit(1) from exc
     # Reported from the record this invocation holds, never from whatever the
     # log happens to end with. A degraded sweep still reports: it ran, and
     # liveness is what the switch guards.
