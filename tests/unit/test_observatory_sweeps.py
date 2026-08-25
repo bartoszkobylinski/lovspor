@@ -14,6 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from lovspor.errors import LogIntegrityError
+from lovspor.observatory import sweeps
 from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
 from lovspor.observatory.sweeps import (
     OBSERVATION_SLA,
@@ -81,6 +82,26 @@ class TestStatusClassification:
 
 
 class TestAppendOnly:
+    def test_an_append_is_locked_and_synced_before_returning(
+        self, root: ObservatoryRoot, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Telemetry is the dead-man switch's evidence, so returning before
+        the line is locked and durable would permit overlapping or lost runs."""
+        locked: list[tuple[int, int]] = []
+        synced: list[int] = []
+        monkeypatch.setattr(
+            sweeps.fcntl,
+            "flock",
+            lambda descriptor, operation: locked.append((descriptor, operation)),
+        )
+        monkeypatch.setattr(sweeps.os, "fsync", synced.append)
+
+        append_sweep_run(root, _run())
+
+        assert len(locked) == 1
+        assert locked[0][1] == sweeps.fcntl.LOCK_EX
+        assert synced == [locked[0][0]]
+
     def test_the_append_encoding_is_explicitly_utf8(
         self, root: ObservatoryRoot, monkeypatch: pytest.MonkeyPatch
     ) -> None:
