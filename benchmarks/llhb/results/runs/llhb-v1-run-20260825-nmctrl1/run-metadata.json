@@ -1,0 +1,28 @@
+{
+  "analysis_plan_sha256": "f04018ef9db1c9ef3632438d7f3131b8e176259856d3fc5070e6427c910032fd",
+  "api_version": null,
+  "case_order_seed": 42,
+  "cases_completed": 250,
+  "cases_total": 250,
+  "condition": "control",
+  "dataset_checksum": "118eec543609442693643b3bdf29b3ec9aac30f0bee889afd6f47eefe07a4cc5",
+  "errors_total": 0,
+  "evaluator_version": null,
+  "finished_at": "2026-08-25T12:04:56Z",
+  "llhb_version": "1.0",
+  "lovspor_commit": "038c1934f11a64689afd969ee22c73448d9f552e",
+  "lovverk_commit": "6ec7059d53d25ddae99d8a64bf5157a90c4c166c",
+  "max_turns": null,
+  "model_id": "NorMistral-11b-thinking:latest",
+  "notes": "FROZEN dataset llhb-v1 (Stage 9 evaluation); driver=openai-chat base_url=https://chat.llm.sigma2.no/api; temperature recorded in sampling; single completion per case, so max-turn does not apply",
+  "provider": "norallm",
+  "run_id": "llhb-v1-run-20260825-nmctrl1",
+  "runner_commit": "038c1934f11a64689afd969ee22c73448d9f552e",
+  "sampling": {
+    "temperature": 0.0
+  },
+  "started_at": "2026-08-25T11:21:14Z",
+  "system_prompt_path": "benchmarks/llhb/runner/system-prompt-v1.txt",
+  "system_prompt_sha256": "1e984ac1bdb481be7dda5a20b84c1b84edf608e9b4739b346aef59017ef890ec",
+  "tool_config": null
+}

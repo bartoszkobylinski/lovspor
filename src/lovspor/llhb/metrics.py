@@ -623,3 +623,42 @@ _TREATMENT_ONLY = frozenset({"post_direct_retrieval_hallucination_rate"})
 #: Rates that are means per answer, not proportions: no Wilson interval exists
 #: for them, and a value above 1 is normal rather than a defect.
 _MEAN_METRICS = frozenset({"valid_citations_per_answer", "invalid_citations_per_answer"})
+
+
+class ArmReport(BaseModel, frozen=True):
+    """One arm on its own: per-metric estimates and outcome counts, no delta.
+
+    A single-arm report is a diagnostic baseline under ruling #31 — a model
+    with no treatment arm yet. It reuses every sampler of the pair report so
+    the numbers are the ones a later pair would carry, and deliberately has
+    no ``primary``, no ``delta`` and no verdict field to misread.
+    """
+
+    metrics: dict[str, MetricEstimate]
+    outcomes: OutcomeCounts
+    c8_outcomes: OutcomeCounts
+    unresolved: dict[str, int]
+    metrics_version: str = METRICS_VERSION
+
+
+def compute_arm_report(arm: ArmScoring) -> ArmReport:
+    """Every §6 metric over one arm alone; treatment-only metrics stay 0/0.
+
+    A single-arm report exists for arms with no partner (ruling #31), which
+    in v1 means control arms. A metric defined only for the treatment arm is
+    therefore reported empty rather than computed — even if a record carries
+    tool activity, which would make the run invalid under ruling #25 rather
+    than make the metric meaningful.
+    """
+    estimates = {
+        name: _estimate([sampler(bundle) for bundle in arm.bundles], name not in _MEAN_METRICS)
+        if name not in _TREATMENT_ONLY
+        else _estimate([])
+        for name, sampler in _SAMPLERS.items()
+    }
+    return ArmReport(
+        metrics=estimates,
+        outcomes=_counts(arm.cases),
+        c8_outcomes=_counts(_c8(arm.cases)),
+        unresolved=_buckets(arm.bundles),
+    )

@@ -5,6 +5,9 @@ same scores produce byte-identical reports. Tests build scores by hand
 — the per-case scorer has its own suite; this layer only counts.
 """
 
+import json
+
+import pytest
 from pydantic import ValidationError
 
 from lovspor.llhb import metrics as metrics_module
@@ -14,6 +17,7 @@ from lovspor.llhb.metrics import (
     BOOTSTRAP_SEED,
     METRICS_VERSION,
     PRIMARY_METRIC,
+    compute_arm_report,
     compute_pair_report,
     retrieved_directly,
 )
@@ -873,3 +877,62 @@ class TestPdrhSampler:
         numerator, denominator = metrics_module._pdrh_sample(item)
 
         assert (numerator, denominator) == (0.0, 0.0)
+
+
+class TestArmReport:
+    """Ruling #31: one arm alone, every pair-report number, no delta."""
+
+    def test_single_arm_estimates_equal_the_control_side_of_a_pair(self) -> None:
+        bundles = [
+            bundle("llhb-v1-C1-001", score("llhb-v1-C1-001")),
+            bundle("llhb-v1-C1-002", hallucinated("llhb-v1-C1-002")),
+            bundle("llhb-v1-C1-003", hallucinated("llhb-v1-C1-003")),
+        ]
+
+        single = compute_arm_report(arm(bundles))
+        paired = compute_pair_report(arm(bundles), arm(bundles))
+
+        for name, estimate in single.metrics.items():
+            if name in metrics_module._TREATMENT_ONLY:
+                continue
+            assert estimate == paired.metrics[name].control, name
+        assert single.outcomes == paired.outcomes.control
+        assert single.c8_outcomes == paired.c8_outcomes.control
+        assert single.unresolved == paired.unresolved.control
+        assert single.metrics_version == METRICS_VERSION
+
+    def test_the_arm_report_has_no_delta_and_no_verdict(self) -> None:
+        report = compute_arm_report(arm([bundle("llhb-v1-C1-001", score("llhb-v1-C1-001"))]))
+
+        assert not hasattr(report, "primary")
+        assert "delta" not in json.dumps(report.model_dump(mode="json"))
+
+    def test_treatment_only_metrics_stay_empty_even_with_tool_activity(self) -> None:
+        """A single arm has no partner, so a treatment-only metric is never
+        computed — a control record with tool calls is a ruling #25 violation,
+        not a data point."""
+        arm_score = hallucinated("llhb-v1-C1-001")
+        bundles = [
+            bundle(
+                "llhb-v1-C1-001",
+                arm_score,
+                tool_calls=[get_section_call("testloven", "15-99")],
+            )
+        ]
+
+        report = compute_arm_report(arm(bundles))
+
+        estimate = report.metrics["post_direct_retrieval_hallucination_rate"]
+        assert (estimate.numerator, estimate.denominator, estimate.rate) == (0.0, 0.0, None)
+
+    def test_treatment_only_metrics_are_empty_for_a_tool_less_arm(self) -> None:
+        report = compute_arm_report(arm([bundle("llhb-v1-C1-001", score("llhb-v1-C1-001"))]))
+
+        estimate = report.metrics["post_direct_retrieval_hallucination_rate"]
+        assert (estimate.numerator, estimate.denominator, estimate.rate) == (0.0, 0.0, None)
+
+    def test_the_arm_report_is_frozen(self) -> None:
+        report = compute_arm_report(arm([bundle("llhb-v1-C1-001", score("llhb-v1-C1-001"))]))
+
+        with pytest.raises(ValidationError):
+            report.metrics_version = "other"  # type: ignore[misc]
