@@ -139,6 +139,18 @@ class TestAppendOnly:
 
         assert read_sweep_runs(sweeps_path(root)) == [run]
 
+    def test_a_run_written_before_capped_telemetry_defaults_to_uncapped(
+        self, root: ObservatoryRoot
+    ) -> None:
+        """Existing append-only archives predate ``sources_capped`` and must
+        remain readable after the telemetry schema grows."""
+        line = _run().model_dump(mode="json")
+        del line["sources_capped"]
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        assert read_sweep_runs(sweeps_path(root))[0].sources_capped == 0
+
     def test_a_run_is_appended_next_to_the_registry(self, root: ObservatoryRoot) -> None:
         append_sweep_run(root, _run())
 
@@ -278,6 +290,7 @@ class TestDamageIsRefused:
             "active_sources",
             "sources_completed",
             "sources_refused",
+            "sources_capped",
             "captured",
             "failed_fetches",
             "unchanged",

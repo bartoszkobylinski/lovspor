@@ -1782,6 +1782,9 @@ class TestStatus:
     def test_sweep_totals_preserve_unchanged_counts(self) -> None:
         assert _SweepTotals(unchanged=2).plus(_SweepTotals(unchanged=3)).unchanged == 5
 
+    def test_sweep_totals_add_capped_sources(self) -> None:
+        assert _SweepTotals(capped=1).plus(_SweepTotals(capped=2)).capped == 3
+
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case
         the deadline exists for."""
