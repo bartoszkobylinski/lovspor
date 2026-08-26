@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -485,3 +486,149 @@ class TestEscalationCoversEveryFailure:
             "Commit and push, or report BLOCKED"
         )
         assert names[-1] == "Escalate on remediation failure"
+
+
+class TestAGreenRunRetractsItsOwnVerdict:
+    """Issue #191. The pipeline's verdict is durable only in the labels —
+    checks scroll off a PR, labels sit on it and on every filtered list. Six
+    `--add-label` calls existed across the two workflows and no `--remove-label`
+    anywhere, so #187 finished with every check green, `mergeStateStatus:
+    CLEAN`, and `needs-implementation-fix` still on it from the round before
+    the fix. A label that outlives its verdict inverts the signal it exists to
+    carry, and the direction of the error is the expensive one: a genuinely
+    blocked PR then looks exactly like a resolved one."""
+
+    def _ready_step(self) -> dict[str, Any]:
+        return _named_step(
+            _steps("pr-pipeline.yml", "ready"), "Retract the blocked labels this run disproved"
+        )
+
+    def test_a_green_run_clears_the_labels_a_blocked_round_wrote(self) -> None:
+        command = self._ready_step()["run"]
+
+        assert "for label in $BLOCKED_LABELS; do" in command
+        assert 'gh pr edit "$PR" --remove-label "$label"' in command
+
+    def test_every_label_the_pipeline_can_apply_is_one_it_can_retract(self) -> None:
+        """The guard that survives the next label. Adding a `--add-label` with
+        no matching retraction reintroduces exactly this bug, so the two sets
+        are compared rather than a fixed list being asserted."""
+        applied = set()
+        for workflow_name in ("pr-pipeline.yml", "mutation-remediation.yml"):
+            text = (_WORKFLOWS / workflow_name).read_text(encoding="utf-8")
+            applied.update(re.findall(r'--add-label "([^"]+)"', text))
+        retracted = set(self._ready_step()["env"]["BLOCKED_LABELS"].split())
+
+        assert applied, "no --add-label found; the regex or the workflows moved"
+        assert applied <= retracted, f"never retracted: {sorted(applied - retracted)}"
+
+    def test_the_retraction_waits_for_the_gate_it_speaks_for(self) -> None:
+        """READY is a claim about the mutation gate, so it must not be made
+        when that job was skipped — which is what happens on the run where the
+        test author pushed and a fresh run is already starting."""
+        job = _workflow("pr-pipeline.yml")["jobs"]["ready"]
+
+        assert set(job["needs"]) == {"fast-ci", "codex-tests", "mutation"}
+        assert job["if"] == "needs.mutation.result == 'success'"
+
+    def test_the_retraction_is_allowed_to_write_labels(self) -> None:
+        """A step that silently lacks the scope would leave the bug in place
+        while reporting success."""
+        job = _workflow("pr-pipeline.yml")["jobs"]["ready"]
+
+        assert job["permissions"]["pull-requests"] == "write"
+
+    def test_a_label_that_is_not_there_is_not_removed(self) -> None:
+        """`gh pr edit --remove-label` on an absent label is an API call whose
+        failure would fail the job at the one moment the pipeline is trying to
+        say everything passed. The step asks first."""
+        command = self._ready_step()["run"]
+
+        assert "gh pr view" in command
+        assert "grep -Fxq" in command
+        assert command.index("grep -Fxq") < command.index('--remove-label "$label"')
+
+
+class TestAJobThatDiesWithItsRunnerStillReports:
+    """Issue #193. Both `codex-tests` escalations are steps of that job, and a
+    step cannot run on a runner that no longer exists — so no in-job condition,
+    `failure()` or `always()` or `cancelled()`, can report a job that died with
+    its runner. #157 and #160 fixed the cases where the job survived to reach a
+    later step; on #192 it did not: five steps ran, the self-hosted box went
+    offline mid-Codex-step, and the PR ended red with no label and no comment.
+
+    The reporting job therefore lives outside that job, on a hosted runner, so
+    it cannot share the failure mode it exists to report."""
+
+    JOB = "codex-tests-report"
+
+    def _job(self) -> dict[str, Any]:
+        return _workflow("pr-pipeline.yml")["jobs"][self.JOB]
+
+    def _step(self) -> dict[str, Any]:
+        return _named_step(
+            _steps("pr-pipeline.yml", self.JOB),
+            "Report a codex-tests job that never reached its own escalation",
+        )
+
+    def test_the_reporter_does_not_run_on_the_lane_it_reports_on(self) -> None:
+        """A reporter on the `codex` runner would be offline in exactly the
+        case it exists for."""
+        assert self._job()["runs-on"] == "ubuntu-latest"
+        assert self._job()["needs"] == ["codex-tests"]
+
+    def test_the_reporter_speaks_for_a_failure_and_stays_out_of_a_cancellation(self) -> None:
+        """`always()` would fire on a concurrency cancellation too, and a run
+        cancelled by the next push is not a blocked PR — labelling it would put
+        `needs-human:pipeline` on healthy work. `!cancelled()` is the form that
+        survives a failed dependency without claiming a cancelled one."""
+        assert self._job()["if"] == ("${{ !cancelled() && needs.codex-tests.result == 'failure' }}")
+
+    def test_the_reporter_is_silent_when_the_job_already_reported_itself(self) -> None:
+        """The in-job escalation runs before `codex-tests` completes, so this
+        job sees its label. Two labels and two comments for one failure is
+        noise that trains a reader to ignore both."""
+        command = self._step()["run"]
+
+        assert "gh pr view" in command
+        assert "grep -Fxq" in command
+        assert "already reported" in command
+        assert command.index("exit 0") < command.index('--add-label "needs-human:pipeline"')
+
+    def test_the_reporter_recognises_every_blocking_verdict(self) -> None:
+        """Any blocking label means an earlier escalation already left the
+        durable verdict. The outside reporter must not add a second verdict and
+        comment merely because that escalation used a different blocked label."""
+        reporter_labels = set(self._step()["env"]["BLOCKED_LABELS"].split())
+        ready_labels = set(
+            _named_step(
+                _steps("pr-pipeline.yml", "ready"),
+                "Retract the blocked labels this run disproved",
+            )["env"]["BLOCKED_LABELS"].split()
+        )
+
+        assert reporter_labels == ready_labels
+
+    def test_the_reporter_labels_and_links_the_run(self) -> None:
+        """A label says a human is needed; the run URL is the only thing that
+        says why, since the job's own log is what went missing."""
+        command = self._step()["run"]
+
+        assert '--add-label "needs-human:pipeline"' in command
+        assert "gh pr comment" in command
+        assert (
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            in command
+        )
+
+    def test_the_reporter_is_allowed_to_write_labels(self) -> None:
+        permissions = self._job()["permissions"]
+
+        assert permissions["pull-requests"] == "write"
+        assert permissions["issues"] == "write"
+
+    def test_a_skipped_agent_lane_is_not_a_failure(self) -> None:
+        """`codex-tests` is skipped on fork PRs by design. Reporting that as a
+        pipeline defect would label every external contribution."""
+        assert "needs.codex-tests.result == 'failure'" in self._job()["if"]
+        assert "!= 'skipped'" not in self._job()["if"]

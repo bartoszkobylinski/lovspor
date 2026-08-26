@@ -202,6 +202,27 @@ Two rules follow, and they are pinned by tests:
   round is preserved as artifact `agent-work-<sha>` instead of being discarded.
 - Remediation escalates on `failure() || cancelled()`, since a job killed by its
   ceiling is not a failed job.
+- A `codex-tests` job that dies **with its runner** is reported from outside it.
+  Both escalations are steps of that job, and a step cannot run on a runner that
+  no longer exists — so no in-job condition can cover the case (issue #193). On
+  #192 five steps ran, the self-hosted box went offline mid-Codex-step, and the
+  PR ended red with no label and no comment. The `codex-tests-report` job runs on
+  `ubuntu-latest`, so it cannot share the failure mode it reports; it fires on
+  `!cancelled() && needs.codex-tests.result == 'failure'` (never on a concurrency
+  cancellation, never on the skipped fork lane), stays silent when the in-job
+  escalation already labelled, and otherwise applies `needs-human:pipeline` with
+  the run link and a pointer at the runner list.
+- A run that ends green **retracts** the labels a blocked round wrote. The `ready`
+  job removes `needs-implementation-fix`, `needs-human:mutation` and
+  `needs-human:pipeline` before reporting READY TO MERGE. Until 2026-08-26 the
+  workflows only ever *added* labels (issue #191): #187 finished with every check
+  green and `needs-implementation-fix` still on it from the round before the fix.
+  The label is the durable half of the verdict — checks scroll off, labels stay on
+  the PR list — so a stale one inverts the signal, and in the expensive direction: a
+  genuinely blocked PR then looks exactly like a resolved one. `ready` is gated on
+  `needs.mutation.result == 'success'`, so it stays silent on the run where the test
+  author pushed and mutation was skipped in favour of a fresh run. It is not in the
+  required set for the same reason `codex-tests` is not.
 ## Infrastructure
 
 - Self-hosted runner: label `codex`, dedicated VM with no production data or secrets.
