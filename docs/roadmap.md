@@ -22,7 +22,7 @@
 - Downloads `gjeldende-lover` and `gjeldende-sentrale-forskrifter` from Lovdata's NLOD 2.0 public-data API.
 - Safely extracts XML members (XXE + billion-laughs blocked via lxml `safe_parser`; tar path traversal blocked by streaming members with `extractfile()` — never `extractall()`/`extract()`; decompression bombs bounded by a per-member size cap).
 - Deterministic SHA256 over normalized XML.
-- Deterministic Markdown rendering (frontmatter + body), stamped with a `RENDERER_VERSION` (currently 3).
+- Deterministic Markdown rendering (frontmatter + body), stamped with a `RENDERER_VERSION` (currently 8).
 - Change detection: new / changed / removed / unchanged + rename detection.
 - Per-document conventional commits (`add(lov):`, `update(forskrift):`, `rename(...)`, `remove(...)`).
 - Per-act history (`history/<slug>.{json,md}`) extracted via `git log --follow`.

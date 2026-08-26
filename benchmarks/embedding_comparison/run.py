@@ -1,6 +1,6 @@
 """Embedding-model comparison benchmark.
 
-Compares four embedding models on the real lovverk corpus using 80
+Compares four embedding models on the real lovverk corpus using 47
 queries extracted from ``evals/scenarios/``. Outputs Recall@5, MRR,
 indexing time, query latency, and per-query breakdowns to a
 markdown report.
