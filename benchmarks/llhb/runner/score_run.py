@@ -89,14 +89,16 @@ def score_pair(
     return compute_pair_report(control, treatment), len(control.cases)
 
 
-def main() -> int:
-    args = parse_args()
-    manifest = load_pair_manifest(args.manifest)
-    # Ruling #30(d): no aggregate scoring until every referenced hash — the
-    # runs, the dataset, the plan, the prompt, the scorer commit — verifies.
-    verify_pair_manifest(manifest, REPO_ROOT, args.runs_root)
-    report, cases = score_pair(manifest, args.corpus_path, args.runs_root)
-    out = args.out or REPORTS_DIR / f"{manifest.control_run_id}-vs-{manifest.treatment_run_id}.json"
+def write_report(
+    manifest: PairManifest, corpus_path: Path, runs_root: Path, out: Path | None
+) -> tuple[Path, PairReport, int]:
+    """Score a verified pair and write the report document; returns where it landed.
+
+    Callers verify the manifest first — this only scores and writes, so the
+    ceremony driver and the CLI produce byte-identical documents.
+    """
+    report, cases = score_pair(manifest, corpus_path, runs_root)
+    out = out or REPORTS_DIR / f"{manifest.control_run_id}-vs-{manifest.treatment_run_id}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     document = {
         "control_run": manifest.control_run_id,
@@ -106,6 +108,16 @@ def main() -> int:
         **report.model_dump(mode="json"),
     }
     out.write_text(json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+    return out, report, cases
+
+
+def main() -> int:
+    args = parse_args()
+    manifest = load_pair_manifest(args.manifest)
+    # Ruling #30(d): no aggregate scoring until every referenced hash — the
+    # runs, the dataset, the plan, the prompt, the scorer commit — verifies.
+    verify_pair_manifest(manifest, REPO_ROOT, args.runs_root)
+    out, report, cases = write_report(manifest, args.corpus_path, args.runs_root, args.out)
     print(f"report: {out} ({cases} cases per arm)")
     for name, pair in report.metrics.items():
         _print_metric(name, pair)

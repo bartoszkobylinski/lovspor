@@ -237,3 +237,34 @@ and hyphens and underscores are interchangeable (`codecs.lookup("UTF-8")` and
 `bytes.decode` goes through that registry, so both spellings select the same
 decoder and produce byte-identical results on every input, valid or invalid.
 """
+
+[[equivalent]]
+file = "src/lovspor/llhb/pair_manifest.py"
+symbol = "_git"
+registered = "2026-08-26, PR #189, from PR #189 run 32908340437"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth (`if check and retcode:` in
+subprocess.py) and never compares it to False, so None and False select the
+same path: return the CompletedProcess, never raise. The argument is spelled
+out only because ruff PLW1510 demands an explicit `check`; the semantics are
+the default's.
+"""
+
+[[equivalent]]
+file = "src/lovspor/llhb/pair_manifest.py"
+symbol = "_git"
+registered = "2026-08-26, PR #189, from PR #189 run 32908340437"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` leaves the call byte-for-byte equivalent in behaviour.
+It is spelled out only because ruff PLW1510 demands an explicit `check`.
+"""

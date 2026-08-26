@@ -417,6 +417,86 @@ nothing. Path: `$XDG_STATE_HOME/lovspor/exclusive-workload.lock`, else
 `~/.local/state/lovspor/…`, `LOVSPOR_EXCLUSIVE_LOCK_PATH` overrides; `flock`, released
 with the process, so a killed run leaves no stale lock.
 
+## Confirmatory ceremony driver (2026-08-26, issue #169)
+
+`runner/run_confirmatory_pair.py` is ruling #30(d) as a state machine that
+refuses to skip a step. It knows no results and makes no scientific
+decisions; it holds the host lock above for the whole ceremony and commits
+every step it completes, so the ceremony is auditable from `git log` alone:
+
+    PRECHECKED -> CONTROL_RUNNING -> CONTROL_FROZEN -> TREATMENT_RUNNING
+      -> TREATMENT_FROZEN -> FAIRNESS_VERIFIED -> MANIFEST_COMMITTED
+      -> SCORED -> REPORTED            (ABORTED is the one exit off the path)
+
+* **Precheck** (no lock, no model, no state written without `--execute`):
+  clean checkout; no `observatory capture`/`nightly` process on the host;
+  `--analysis-plan` is the one file `run_arm.py` hashes into every arm;
+  frozen dataset verifies against its lock; pinned corpus at the pinned
+  commit and clean; tool surface; both arms' credentials (`child_env`);
+  `claude --version`; 2 GiB free under `results/runs/`. Network is not
+  probed — the first model call is the probe.
+* **Arms** run in-process through `run_arm.py`'s own helpers
+  (`compose`, `execute`), never as subprocesses: a child would contend for
+  the lock this process holds. The treatment arm's metadata is composed the
+  moment the control arm finishes and **before** the control freeze commit
+  moves HEAD, so both arms record the same `runner_commit` (the fairness
+  gate compares them; the freeze commit adds results, not runner code). It
+  is kept in the state file until the treatment arm has run, so `--resume`
+  after `CONTROL_FROZEN` runs the arm it was bound to.
+* **Freeze** = SHA-256 over the exact `records.jsonl` bytes, both files
+  `chmod 444`, one commit per arm carrying only content-independent counts
+  (cases completed, MODEL_ERROR), the hash and the runner commit. Model
+  output is not regenerable (ruling #27), so an arm that trips the abort
+  below is frozen and committed all the same, as evidence.
+* **What it reads of a running arm**: nothing until the runner finalized
+  it; then each record's `case_id` and `completed` — the content-independent
+  view of ruling #30(d). `final_answer`, `raw/`, `tools/` stay unread until
+  both arms are frozen. `content_inspection_violations` in the state file is
+  the disclosure slot the ruling requires; a human writes it, code cannot
+  detect one.
+* **MODEL_ERROR abort**: after the control arm, more than
+  `--model-error-abort` (default `MODEL_ERROR_MAX_PAIRS` = 5) cases with
+  `completed: false` make the plan's pair gate unreachable whatever the
+  treatment does → `ABORTED`, treatment not run. After both arms, the union
+  of affected pairs is recorded and left to the scorer's eligibility gate.
+* **Fairness** = `check_fairness --frozen` in-process, with one distinction
+  the CLI does not make: findings from `paired_completion_violations` (a
+  case that produced no comparison) are set aside as
+  `tolerated_completion_findings` — the arms were equal, the provider
+  failed, and the plan prices that through the MODEL_ERROR gate. Every other
+  finding is a defect of the pair and aborts.
+* **Manifest and scoring** use `make_pair_manifest`/`score_run` machinery
+  (`score_run.write_report`); the report lands at
+  `results/reports/<control>-vs-<treatment>.json`, the state at
+  `results/ceremonies/<ceremony-id>.json`, the manifest at
+  `results/pair-manifests/`. `REPORTED` is the commit of report + state.
+  There is no Markdown renderer for a pair report; the paper is written by
+  hand from the JSON.
+* **Resume** (`--resume <state file>`) continues from `CONTROL_FROZEN`,
+  `TREATMENT_FROZEN`, `FAIRNESS_VERIFIED`, `MANIFEST_COMMITTED` or `SCORED`
+  on a clean checkout. A `*_RUNNING` state is a half-written arm and is
+  refused; `REPORTED`/`ABORTED` are finished. The commit that froze an arm
+  is written into the state by the *next* step (writing it right after the
+  commit would dirty the tree the next gate requires clean); a ceremony
+  killed between the two has it in `git log` only.
+
+Two gates were adjusted so the documented ceremony can actually run — both
+are reporting-layer changes of the kind ruling #30(b) says land before the
+run, and neither touches the scorer:
+
+* `pair_manifest.verify_pair_manifest` accepted only `HEAD ==
+  scorer_commit`, while `make_pair_manifest.py` pins HEAD *before* telling
+  you to commit the manifest — the committed manifest could never be scored
+  (an untested path; the Opus pair predates the manifest gate). HEAD may now
+  also *descend* from `scorer_commit` through commits that touched only
+  `benchmarks/llhb/results/` (`_results_only_lineage`: `merge-base
+  --is-ancestor` + `diff --name-only`). One path outside the results tree
+  and the pin stands as written. The same lineage test lets the two arms'
+  `runner_commit` differ across a freeze commit, the control arm's being the
+  one the manifest pins.
+* `score_run.write_report` was split out of `main()` so the driver and the
+  CLI write byte-identical report documents.
+
 ## OpenAI-compatible chat driver, control arm only (2026-08-25)
 
 * **Module**: `lovspor.llhb.openai_chat` (unit-tested; the orchestrator
