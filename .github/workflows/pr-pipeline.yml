@@ -341,3 +341,44 @@ jobs:
 
       - name: Mutation gate
         run: python scripts/ci/mutation_gate.py mutation-result.json
+
+  # Issue #191. The pipeline's verdict is durable only in the labels: checks
+  # scroll off a PR, labels sit on it and on every filtered list. Six
+  # `--add-label` calls existed across the two workflows and no `--remove-label`
+  # anywhere, so a PR that was blocked, fixed and re-run green kept asserting a
+  # defect that had been resolved rounds earlier. The error runs in the
+  # expensive direction — a genuinely blocked PR then looks like a resolved one.
+  ready:
+    needs: [fast-ci, codex-tests, mutation]
+    # READY is a claim about the mutation gate, so it is not made when that job
+    # was skipped. That is the run where the test author pushed and a fresh run
+    # is already on its way to reach its own verdict.
+    if: needs.mutation.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Retract the blocked labels this run disproved
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          # Read by tests/unit/test_agentic_ci_workflows.py, which compares this
+          # list against every `--add-label` in both workflows: a new blocked
+          # label with no retraction here is a failing test, not a silent
+          # regression.
+          BLOCKED_LABELS: "needs-implementation-fix needs-human:mutation needs-human:pipeline"
+        run: |
+          set -euo pipefail
+          # Ask before removing. `--remove-label` on a label the PR does not
+          # carry is an API call that can fail the job at the one moment the
+          # pipeline is trying to report that everything passed.
+          current=$(gh pr view "$PR" --json labels --jq '.labels[].name')
+          for label in $BLOCKED_LABELS; do
+            if printf '%s\n' "$current" | grep -Fxq "$label"; then
+              gh pr edit "$PR" --remove-label "$label"
+              echo "retracted $label"
+            fi
+          done
+          echo "READY TO MERGE"

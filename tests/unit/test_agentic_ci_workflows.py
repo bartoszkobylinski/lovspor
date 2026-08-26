@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -485,3 +486,63 @@ class TestEscalationCoversEveryFailure:
             "Commit and push, or report BLOCKED"
         )
         assert names[-1] == "Escalate on remediation failure"
+
+
+class TestAGreenRunRetractsItsOwnVerdict:
+    """Issue #191. The pipeline's verdict is durable only in the labels —
+    checks scroll off a PR, labels sit on it and on every filtered list. Six
+    `--add-label` calls existed across the two workflows and no `--remove-label`
+    anywhere, so #187 finished with every check green, `mergeStateStatus:
+    CLEAN`, and `needs-implementation-fix` still on it from the round before
+    the fix. A label that outlives its verdict inverts the signal it exists to
+    carry, and the direction of the error is the expensive one: a genuinely
+    blocked PR then looks exactly like a resolved one."""
+
+    def _ready_step(self) -> dict[str, Any]:
+        return _named_step(
+            _steps("pr-pipeline.yml", "ready"), "Retract the blocked labels this run disproved"
+        )
+
+    def test_a_green_run_clears_the_labels_a_blocked_round_wrote(self) -> None:
+        command = self._ready_step()["run"]
+
+        assert "gh pr edit" in command
+        assert "--remove-label" in command
+
+    def test_every_label_the_pipeline_can_apply_is_one_it_can_retract(self) -> None:
+        """The guard that survives the next label. Adding a `--add-label` with
+        no matching retraction reintroduces exactly this bug, so the two sets
+        are compared rather than a fixed list being asserted."""
+        applied = set()
+        for workflow_name in ("pr-pipeline.yml", "mutation-remediation.yml"):
+            text = (_WORKFLOWS / workflow_name).read_text(encoding="utf-8")
+            applied.update(re.findall(r'--add-label "([^"]+)"', text))
+        retracted = set(self._ready_step()["env"]["BLOCKED_LABELS"].split())
+
+        assert applied, "no --add-label found; the regex or the workflows moved"
+        assert applied <= retracted, f"never retracted: {sorted(applied - retracted)}"
+
+    def test_the_retraction_waits_for_the_gate_it_speaks_for(self) -> None:
+        """READY is a claim about the mutation gate, so it must not be made
+        when that job was skipped — which is what happens on the run where the
+        test author pushed and a fresh run is already starting."""
+        job = _workflow("pr-pipeline.yml")["jobs"]["ready"]
+
+        assert set(job["needs"]) == {"fast-ci", "codex-tests", "mutation"}
+        assert job["if"] == "needs.mutation.result == 'success'"
+
+    def test_the_retraction_is_allowed_to_write_labels(self) -> None:
+        """A step that silently lacks the scope would leave the bug in place
+        while reporting success."""
+        job = _workflow("pr-pipeline.yml")["jobs"]["ready"]
+
+        assert job["permissions"]["pull-requests"] == "write"
+
+    def test_a_label_that_is_not_there_is_not_removed(self) -> None:
+        """`gh pr edit --remove-label` on an absent label is an API call whose
+        failure would fail the job at the one moment the pipeline is trying to
+        say everything passed. The step asks first."""
+        command = self._ready_step()["run"]
+
+        assert "gh pr view" in command
+        assert "grep -Fxq" in command
