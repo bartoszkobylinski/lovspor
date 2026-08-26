@@ -264,6 +264,57 @@ jobs:
           } > "$RUNNER_TEMP/pipeline-escalation.md"
           gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/pipeline-escalation.md"
 
+  # Issue #193. Both escalations in `codex-tests` are steps of that job, and a
+  # step cannot run on a runner that no longer exists — so no in-job condition
+  # can report a job that died with its runner. On #192 five steps ran, the
+  # self-hosted box went offline mid-Codex-step, and the PR ended red with no
+  # label and no comment. This reporter runs on a hosted runner so it cannot
+  # share the failure mode it exists to report.
+  codex-tests-report:
+    needs: [codex-tests]
+    # `always()` would fire on a concurrency cancellation as well, and a run
+    # cancelled by the next push is not a blocked PR. `!cancelled()` still runs
+    # after a failed dependency, without claiming a cancelled one. A skipped
+    # lane (fork PRs) is not a failure either, and `== 'failure'` excludes it.
+    if: ${{ !cancelled() && needs.codex-tests.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Report a codex-tests job that never reached its own escalation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BLOCKED_LABELS: "needs-implementation-fix needs-human:mutation needs-human:pipeline"
+        run: |
+          set -euo pipefail
+          # The in-job escalation runs before `codex-tests` completes, so its
+          # label is already visible here. Two labels and two comments for one
+          # failure trains a reader to ignore both.
+          current=$(gh pr view "$PR" --json labels --jq '.labels[].name')
+          for label in $BLOCKED_LABELS; do
+            if printf '%s\n' "$current" | grep -Fxq "$label"; then
+              echo "already reported: $label"
+              exit 0
+            fi
+          done
+          gh pr edit "$PR" --add-label "needs-human:pipeline"
+          {
+            echo "codex-tests BLOCKED and reported nothing itself — the job ended"
+            echo "without reaching its own escalation steps, which is what happens"
+            echo "when the agent lane's runner goes away mid-job."
+            echo ""
+            echo "This is a pipeline failure, not evidence about the implementation."
+            echo "Check the runner before re-reading the diff:"
+            echo "\`gh api repos/${{ github.repository }}/actions/runners\`"
+            echo ""
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "$RUNNER_TEMP/lane-escalation.md"
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/lane-escalation.md"
+
   mutation:
     # Runs only when fast CI is green, Codex finished, and Codex did NOT just push —
     # a push fires a fresh synchronize run that redoes mutation on the new SHA.

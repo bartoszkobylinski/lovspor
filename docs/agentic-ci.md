@@ -202,6 +202,16 @@ Two rules follow, and they are pinned by tests:
   round is preserved as artifact `agent-work-<sha>` instead of being discarded.
 - Remediation escalates on `failure() || cancelled()`, since a job killed by its
   ceiling is not a failed job.
+- A `codex-tests` job that dies **with its runner** is reported from outside it.
+  Both escalations are steps of that job, and a step cannot run on a runner that
+  no longer exists — so no in-job condition can cover the case (issue #193). On
+  #192 five steps ran, the self-hosted box went offline mid-Codex-step, and the
+  PR ended red with no label and no comment. The `codex-tests-report` job runs on
+  `ubuntu-latest`, so it cannot share the failure mode it reports; it fires on
+  `!cancelled() && needs.codex-tests.result == 'failure'` (never on a concurrency
+  cancellation, never on the skipped fork lane), stays silent when the in-job
+  escalation already labelled, and otherwise applies `needs-human:pipeline` with
+  the run link and a pointer at the runner list.
 - A run that ends green **retracts** the labels a blocked round wrote. The `ready`
   job removes `needs-implementation-fix`, `needs-human:mutation` and
   `needs-human:pipeline` before reporting READY TO MERGE. Until 2026-08-26 the
