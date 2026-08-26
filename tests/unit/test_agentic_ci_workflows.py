@@ -506,8 +506,8 @@ class TestAGreenRunRetractsItsOwnVerdict:
     def test_a_green_run_clears_the_labels_a_blocked_round_wrote(self) -> None:
         command = self._ready_step()["run"]
 
-        assert "gh pr edit" in command
-        assert "--remove-label" in command
+        assert "for label in $BLOCKED_LABELS; do" in command
+        assert 'gh pr edit "$PR" --remove-label "$label"' in command
 
     def test_every_label_the_pipeline_can_apply_is_one_it_can_retract(self) -> None:
         """The guard that survives the next label. Adding a `--add-label` with
@@ -546,6 +546,7 @@ class TestAGreenRunRetractsItsOwnVerdict:
 
         assert "gh pr view" in command
         assert "grep -Fxq" in command
+        assert command.index("grep -Fxq") < command.index('--remove-label "$label"')
 
 
 class TestAJobThatDiesWithItsRunnerStillReports:
@@ -581,11 +582,7 @@ class TestAJobThatDiesWithItsRunnerStillReports:
         cancelled by the next push is not a blocked PR — labelling it would put
         `needs-human:pipeline` on healthy work. `!cancelled()` is the form that
         survives a failed dependency without claiming a cancelled one."""
-        condition = self._job()["if"]
-
-        assert "!cancelled()" in condition
-        assert "needs.codex-tests.result == 'failure'" in condition
-        assert "always()" not in condition
+        assert self._job()["if"] == ("${{ !cancelled() && needs.codex-tests.result == 'failure' }}")
 
     def test_the_reporter_is_silent_when_the_job_already_reported_itself(self) -> None:
         """The in-job escalation runs before `codex-tests` completes, so this
@@ -596,6 +593,21 @@ class TestAJobThatDiesWithItsRunnerStillReports:
         assert "gh pr view" in command
         assert "grep -Fxq" in command
         assert "already reported" in command
+        assert command.index("exit 0") < command.index('--add-label "needs-human:pipeline"')
+
+    def test_the_reporter_recognises_every_blocking_verdict(self) -> None:
+        """Any blocking label means an earlier escalation already left the
+        durable verdict. The outside reporter must not add a second verdict and
+        comment merely because that escalation used a different blocked label."""
+        reporter_labels = set(self._step()["env"]["BLOCKED_LABELS"].split())
+        ready_labels = set(
+            _named_step(
+                _steps("pr-pipeline.yml", "ready"),
+                "Retract the blocked labels this run disproved",
+            )["env"]["BLOCKED_LABELS"].split()
+        )
+
+        assert reporter_labels == ready_labels
 
     def test_the_reporter_labels_and_links_the_run(self) -> None:
         """A label says a human is needed; the run URL is the only thing that
@@ -610,7 +622,10 @@ class TestAJobThatDiesWithItsRunnerStillReports:
         )
 
     def test_the_reporter_is_allowed_to_write_labels(self) -> None:
-        assert self._job()["permissions"]["pull-requests"] == "write"
+        permissions = self._job()["permissions"]
+
+        assert permissions["pull-requests"] == "write"
+        assert permissions["issues"] == "write"
 
     def test_a_skipped_agent_lane_is_not_a_failure(self) -> None:
         """`codex-tests` is skipped on fork PRs by design. Reporting that as a
