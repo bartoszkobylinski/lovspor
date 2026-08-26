@@ -105,6 +105,64 @@ class AccessPolicyCheck(BaseModel):
         return self.robots_allows and self.terms_reviewed and self.terms_permit_capture
 
 
+#: What a completed investigation concluded about a source. Closed on purpose:
+#: a free-text outcome cannot be counted, and `observatory status` has to count
+#: these so a held source stays visible rather than quietly dropping out.
+CaptureOutcome = Literal["no_machine_reachable_source", "access_blocked"]
+
+
+class CaptureVerdict(BaseModel):
+    """What was concluded about capturing a source, and on what evidence.
+
+    The twin of :class:`AccessPolicyCheck`, and recorded for the same reason.
+    That one carries a human's conclusion that a source *may* be fetched and
+    has to answer "why was this activated?" months later. This one carries the
+    conclusion that fetching it yields nothing, and answers "why does this one
+    never produce anything?" — so that the next sweep does not re-derive it
+    from scratch and reach the same silent zero (issue #195).
+
+    ``routes_checked`` is mandatory and non-empty. A bare "unreachable" would
+    have to be re-trusted by every later reader; the routes make the verdict
+    re-readable instead, and a route that opens later is then a specific thing
+    to re-test rather than a whole investigation to redo.
+
+    ``recheck_after`` is mandatory because a verdict that never expires is
+    exactly the silence this record exists to prevent, moved one level up: a
+    source that stops being asked looks identical to a source that has nothing
+    to say. The web changes, and a conclusion from a year ago is a different
+    claim from one reached last week.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: CaptureOutcome
+    routes_checked: tuple[str, ...] = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    reached_at: datetime
+    reviewed_by: str = Field(min_length=1)
+    recheck_after: datetime
+
+    @field_validator("reached_at", "recheck_after")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return require_utc(value)
+
+    @model_validator(mode="after")
+    def _the_recheck_follows_the_verdict(self) -> "CaptureVerdict":
+        """A re-check date at or before the verdict is already due on arrival,
+        which records an expiry while granting none."""
+        if self.recheck_after <= self.reached_at:
+            raise ValueError(
+                f"recheck_after {self.recheck_after.isoformat()} must be later than "
+                f"reached_at {self.reached_at.isoformat()}"
+            )
+        return self
+
+    def due(self, now: datetime) -> bool:
+        """Whether this verdict has reached its re-check date."""
+        return now >= self.recheck_after
+
+
 class SourceRecord(BaseModel):
     """One authority as a capture source, with its activation state."""
 
@@ -125,6 +183,11 @@ class SourceRecord(BaseModel):
     #: at all and a capture is structurally a no-op.
     listing_entry_points: tuple[str, ...] = ()
     access_policy: AccessPolicyCheck | None = None
+    #: What an investigation concluded about capturing this source (#195).
+    #: Independent of ``active``: concluding that a source publishes nothing a
+    #: machine can reach is not a withdrawal of permission to fetch it, and the
+    #: re-check depends on the source still being activated.
+    capture_verdict: CaptureVerdict | None = None
     active: bool = False
 
     @model_validator(mode="after")
@@ -320,3 +383,26 @@ def read_access_policy_check(path: Path) -> AccessPolicyCheck:
         return AccessPolicyCheck.model_validate(data)
     except ValidationError as exc:
         raise ParseError(f"{path}: invalid access-policy check: {exc}") from exc
+
+
+def read_capture_verdict(path: Path) -> CaptureVerdict:
+    """Load a completed capture investigation from a JSON document.
+
+    A document rather than flags, for the reason the access-policy check is
+    one: it is the record of a human conclusion, it carries the routes that
+    were checked, and it has to stay readable months later when the question
+    is why a source never produces anything.
+
+    Raises:
+        FileNotFoundError: ``path`` does not exist.
+        ParseError: the file is not valid UTF-8 JSON or does not match the
+            capture-verdict schema.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ParseError(f"{path}: unreadable capture verdict: {exc}") from exc
+    try:
+        return CaptureVerdict.model_validate(data)
+    except ValidationError as exc:
+        raise ParseError(f"{path}: invalid capture verdict: {exc}") from exc

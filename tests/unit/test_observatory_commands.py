@@ -1504,6 +1504,196 @@ class TestUpdateSource:
         assert f"unparseable_document  {LISTING_URL}" in result.output
 
 
+VERDICT_EVIDENCE = "https://github.com/bartoszkobylinski/lovspor/issues/194"
+
+
+def _verdict_document(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "outcome": "no_machine_reachable_source",
+        "routes_checked": ["sitemap and sitemap index", "atom and rss at conventional paths"],
+        "evidence": VERDICT_EVIDENCE,
+        "reached_at": "2026-08-26T18:00:00Z",
+        "reviewed_by": "Bartosz Kobyliński",
+        "recheck_after": "2026-11-26T18:00:00Z",
+    }
+    document.update(overrides)
+    return document
+
+
+def _write_verdict(path: Path, **overrides: object) -> Path:
+    path.write_text(json.dumps(_verdict_document(**overrides)), encoding="utf-8")
+    return path
+
+
+class TestRecordVerdict:
+    """Recording what an investigation concluded about a source (#195).
+
+    Twelve municipalities in the bootstrap crawl publish no sitemap, no feed
+    and no server-rendered index, and their regulations are absent from the
+    only source this project may use. That result existed as a line in a shell
+    log; the next sweep would have re-derived it from scratch. It is an
+    operator decision, so it goes through the same route every other one does.
+    """
+
+    def test_a_verdict_is_recorded_against_the_source(self, root: Path) -> None:
+        _activate(root)
+        document = _write_verdict(root / "verdict.json")
+
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+
+        assert result.exit_code == 0, result.output
+        recorded = read_registry(root / "sources.json").sources[BAERUM_ID].capture_verdict
+        assert recorded is not None
+        assert recorded.outcome == "no_machine_reachable_source"
+        assert recorded.evidence == VERDICT_EVIDENCE
+
+    def test_the_verdict_does_not_withdraw_the_activation(self, root: Path) -> None:
+        """Two separate decisions. The re-check this verdict schedules depends
+        on the source still being cleared to fetch."""
+        _activate(root)
+
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(_write_verdict(root / "verdict.json")),
+            ],
+        )
+
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert record.active is True
+        assert record.access_policy is not None
+
+    def test_an_unregistered_source_cannot_carry_a_verdict(self, root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        document = _write_verdict(root / "verdict.json")
+
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+
+        assert result.exit_code == 1
+        assert "not registered" in result.stderr
+
+    def test_a_verdict_that_fails_the_schema_is_refused(self, root: Path) -> None:
+        """The registry is not a place to put a conclusion with no routes
+        behind it — the model decides that, here as in code."""
+        _activate(root)
+        document = _write_verdict(root / "verdict.json", routes_checked=[])
+        before = (root / "sources.json").read_bytes()
+
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+        assert (root / "sources.json").read_bytes() == before
+
+    def test_an_unreadable_verdict_path_is_an_operator_mistake_not_a_traceback(
+        self, root: Path
+    ) -> None:
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(root / "nope.json"),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+
+    def test_recording_a_verdict_reports_when_it_must_be_rechecked(self, root: Path) -> None:
+        """The expiry is the point, so the operator sees it at the moment they
+        record the verdict rather than discovering it in a file later."""
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(_write_verdict(root / "verdict.json")),
+            ],
+        )
+
+        assert "2026-11-26" in result.output
+
+
+class TestStatusShowsHeldSources:
+    """A verdict must stay visible. A held source that vanished from the
+    report would be the silent zero of #151 one level up — the archive looks
+    complete because the sources that fail are no longer counted."""
+
+    def test_status_reports_nothing_when_no_source_is_held(self, root: Path) -> None:
+        _activate(root)
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "held under a verdict" not in result.output
+
+    def test_a_held_source_is_counted(self, root: Path) -> None:
+        _activate(root)
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(_write_verdict(root / "verdict.json")),
+            ],
+        )
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "held under a verdict: 1" in result.output
+
+    def test_a_verdict_past_its_recheck_date_is_reported_as_due(self, root: Path) -> None:
+        _activate(root)
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(
+                    _write_verdict(
+                        root / "verdict.json",
+                        reached_at="2020-01-01T00:00:00Z",
+                        recheck_after="2020-04-01T00:00:00Z",
+                    )
+                ),
+            ],
+        )
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "due for re-check: 1" in result.output
+
+
 class TestRepair:
     """Removing an unfinished final record. This edits evidence, so what it
     refuses matters more than what it does."""

@@ -1,7 +1,7 @@
 """Tests for lovspor.observatory.registry — eligibility is not activation."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from lovspor.errors import ParseError, SourceNotActivatedError
 from lovspor.observatory.registry import (
     AccessPolicyCheck,
+    CaptureVerdict,
     SourceRecord,
     SourceRegistry,
     _host_matches,
@@ -17,6 +18,7 @@ from lovspor.observatory.registry import (
     authorise_capture,
     capture_host,
     read_access_policy_check,
+    read_capture_verdict,
     read_registry,
     registry_path,
     write_registry,
@@ -434,6 +436,7 @@ class TestRegistryFileIsPinnedToBytes:
       "authority_id": "9999",
       "authority_type": "kommune",
       "canonical_domain": "testby.example.invalid",
+      "capture_verdict": null,
       "listing_entry_points": [],
       "name": "Testbø"
     }
@@ -645,3 +648,174 @@ class TestReadAccessPolicyCheck:
 
         with pytest.raises(ParseError, match="invalid access-policy check"):
             read_access_policy_check(path)
+
+
+REACHED_AT = datetime(2026, 8, 26, 18, 0, tzinfo=UTC)
+RECHECK_AFTER = datetime(2026, 11, 26, 18, 0, tzinfo=UTC)
+
+
+def verdict_document(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "outcome": "no_machine_reachable_source",
+        "routes_checked": [
+            "lovdata public data (avdeling I only; local regulations are avdeling II)",
+            "sitemap and sitemap index",
+            "atom and rss at conventional paths",
+            "server-rendered index",
+        ],
+        "evidence": "https://github.com/bartoszkobylinski/lovspor/issues/194",
+        "reached_at": REACHED_AT.isoformat().replace("+00:00", "Z"),
+        "reviewed_by": "Bartosz Kobyliński",
+        "recheck_after": RECHECK_AFTER.isoformat().replace("+00:00", "Z"),
+    }
+    document.update(overrides)
+    return document
+
+
+def verdict(**overrides: object) -> CaptureVerdict:
+    return CaptureVerdict.model_validate(verdict_document(**overrides))
+
+
+class TestCaptureVerdict:
+    """What was concluded about a source, and on what evidence (#195).
+
+    The twin of :class:`AccessPolicyCheck`. That one records a human's
+    conclusion that a source *may* be fetched; this one records a conclusion
+    that fetching it produces nothing — reached for twelve municipalities that
+    publish no sitemap, no feed, and no server-rendered index, and whose
+    regulations are absent from the only source this project may use.
+    """
+
+    def test_a_verdict_carries_what_was_checked_not_only_what_was_concluded(self) -> None:
+        """An unsupported conclusion is the thing this field must not become.
+
+        A bare "unreachable" would have to be re-trusted by every later reader;
+        the routes make it re-readable instead.
+        """
+        with pytest.raises(ValidationError):
+            CaptureVerdict.model_validate(verdict_document(routes_checked=[]))
+
+    def test_a_verdict_is_attributed(self) -> None:
+        """Someone concluded this. An unattributed verdict is not evidence
+        that anyone looked — the same rule `reviewed_by` already carries."""
+        with pytest.raises(ValidationError):
+            CaptureVerdict.model_validate(verdict_document(reviewed_by=""))
+
+    def test_a_verdict_must_expire(self) -> None:
+        """A verdict without a re-check date is the silence this exists to
+        prevent, one level up: a source that stops being asked looks like a
+        source that has nothing to say."""
+        document = verdict_document()
+        del document["recheck_after"]
+
+        with pytest.raises(ValidationError):
+            CaptureVerdict.model_validate(document)
+
+    def test_the_recheck_cannot_precede_the_verdict(self) -> None:
+        with pytest.raises(ValidationError, match="recheck_after"):
+            CaptureVerdict.model_validate(
+                verdict_document(recheck_after=REACHED_AT.isoformat().replace("+00:00", "Z"))
+            )
+
+    def test_both_timestamps_must_be_utc(self) -> None:
+        """The same axis rule the observations keep: a naive stamp is
+        ambiguous the moment the machine moves."""
+        for field in ("reached_at", "recheck_after"):
+            with pytest.raises(ValidationError):
+                CaptureVerdict.model_validate(verdict_document(**{field: "2026-08-26T18:00:00"}))
+
+    def test_an_unknown_outcome_is_refused(self) -> None:
+        """The vocabulary is closed on purpose: a free-text outcome cannot be
+        counted, and `observatory status` has to count these."""
+        with pytest.raises(ValidationError):
+            CaptureVerdict.model_validate(verdict_document(outcome="probably-fine"))
+
+    def test_a_verdict_is_due_once_its_recheck_date_has_passed(self) -> None:
+        held = verdict()
+
+        assert held.due(RECHECK_AFTER - timedelta(seconds=1)) is False
+        assert held.due(RECHECK_AFTER) is True
+        assert held.due(RECHECK_AFTER + timedelta(days=1)) is True
+
+
+class TestASourceCarriesItsVerdict:
+    def test_a_source_without_a_verdict_is_unchanged(self) -> None:
+        """The field is additive: every source recorded before it still loads,
+        and carries no verdict rather than an empty one."""
+        record = SourceRecord.model_validate(
+            {
+                "authority_type": "kommune",
+                "authority_id": "1860",
+                "name": "Vestvågøy",
+                "canonical_domain": "vestvagoy.kommune.no",
+            }
+        )
+
+        assert record.capture_verdict is None
+
+    def test_a_verdict_survives_a_write_and_a_read(self, tmp_path: Path) -> None:
+        """The registry holds operator decisions, and this is one of them."""
+        record = SourceRecord.model_validate(
+            {
+                "authority_type": "kommune",
+                "authority_id": "1860",
+                "name": "Vestvågøy",
+                "canonical_domain": "vestvagoy.kommune.no",
+                "capture_verdict": verdict_document(),
+            }
+        )
+        path = tmp_path / "sources.json"
+        write_registry(SourceRegistry(sources={"1860": record}), path)
+
+        loaded = read_registry(path).sources["1860"].capture_verdict
+
+        assert loaded is not None
+        assert loaded.outcome == "no_machine_reachable_source"
+        assert loaded.reviewed_by == "Bartosz Kobyliński"
+        assert len(loaded.routes_checked) == 4
+
+    def test_a_verdict_does_not_deactivate_the_source(self) -> None:
+        """Recording that a source publishes nothing reachable is not a
+        withdrawal of permission to fetch it. The two are separate decisions,
+        and the re-check depends on the source still being activated."""
+        record = SourceRecord.model_validate(
+            {
+                "authority_type": "kommune",
+                "authority_id": "1860",
+                "name": "Vestvågøy",
+                "canonical_domain": "vestvagoy.kommune.no",
+                "access_policy": check_document(),
+                "active": True,
+                "capture_verdict": verdict_document(),
+            }
+        )
+
+        assert record.active is True
+        assert record.capture_verdict is not None
+
+
+class TestReadingAVerdictDocument:
+    """A verdict arrives as a document for the same reason an access-policy
+    check does: it is the record of a human decision, it has to answer "why
+    does this source never produce anything?" months later, and a conclusion
+    typed into a shell leaves nothing to re-read."""
+
+    def test_a_well_formed_document_loads(self, tmp_path: Path) -> None:
+        path = tmp_path / "verdict.json"
+        path.write_text(json.dumps(verdict_document()), encoding="utf-8")
+
+        assert read_capture_verdict(path).outcome == "no_machine_reachable_source"
+
+    def test_a_schema_violation_is_a_parse_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "verdict.json"
+        path.write_text(json.dumps(verdict_document(routes_checked=[])), encoding="utf-8")
+
+        with pytest.raises(ParseError, match="invalid capture verdict"):
+            read_capture_verdict(path)
+
+    def test_unreadable_bytes_are_a_parse_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "verdict.json"
+        path.write_bytes(json.dumps(verdict_document()).encode("utf-16"))
+
+        with pytest.raises(ParseError, match="unreadable capture verdict"):
+            read_capture_verdict(path)
