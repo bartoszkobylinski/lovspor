@@ -13,7 +13,7 @@ One-off empirical benchmark to pick the embedding model for Sprint 9 PR-B (seman
 
 ## Queries
 
-47 queries extracted from `evals/scenarios/*.yaml` — every scenario whose `expected_tool_calls` includes a `slug_match` pattern. These are the same realistic 8-persona queries that drive the eval suite, so any retrieval failure here directly maps to a real user-frustration scenario.
+52 queries (as of 2026-08-26; 47 when the committed 2026-04-30 results were produced — the count follows the scenario files) extracted from `evals/scenarios/*.yaml` — every scenario whose `expected_tool_calls` includes a `slug_match` pattern. These are the same realistic 8-persona queries that drive the eval suite, so any retrieval failure here directly maps to a real user-frustration scenario.
 
 ## Metrics
 
@@ -52,7 +52,7 @@ Embeddings are cached to `benchmarks/embedding_comparison/.cache/<model>-<corpus
 | nb-sbert-v2-base indexing | ~15 min |
 | nb-sbert-v2-large indexing | ~30 min |
 | OpenAI 3-small + 3-large indexing (mostly API latency) | ~10 min combined |
-| Query phase (47 queries × 4 models) | <5 min |
+| Query phase (~50 queries × 4 models) | <5 min |
 | **Total one-time** | **~60-90 min** |
 
 Estimated OpenAI cost: ~$5-10 total for both 3-small + 3-large indexing the full corpus (~135K sections × ~500 tokens average).
