@@ -16,6 +16,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from click.testing import Result
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
@@ -34,6 +35,7 @@ from lovspor.observatory.commands import (
 )
 from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
+from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
 from lovspor.observatory.registry import SourceRegistry, read_registry
@@ -1241,6 +1243,265 @@ class TestDiscover:
         assert result.exit_code == 0, result.output
         requested = [str(request.url) for request in httpx_mock.get_requests()]
         assert requested.count(ROBOTS_URL) == 1
+
+
+LISTING_URL = f"https://www.{BAERUM_DOMAIN}/kunngjoringer/"
+LISTED_URL = f"https://www.{BAERUM_DOMAIN}/forskrift-om-vann"
+OTHER_DOMAIN_LISTING = "https://www.asker.kommune.no/kunngjoringer/"
+
+
+def _listing_page(href: str = "/forskrift-om-vann", date: str = "2026-08-01") -> bytes:
+    body = (
+        f'<ul><li><time datetime="{date}">1. august</time>'
+        f'<a href="{href}">Forskrift om vann</a></li></ul>'
+    )
+    return f"<html><body>{body}</body></html>".encode()
+
+
+def _update(*args: str) -> Result:
+    return runner.invoke(app, ["observatory", "update-source", "--id", BAERUM_ID, *args])
+
+
+def _listings(root: Path) -> tuple[str, ...]:
+    return read_registry(root / "sources.json").sources[BAERUM_ID].listing_entry_points
+
+
+class TestUpdateSource:
+    """Declaring a listing entry point on a source that already exists (#184).
+
+    The registry is the only switch that puts a URL on the listing path, and
+    #182 shipped the field with no supported way to write it. Hand-editing
+    ``sources.json`` was the only route, and that route is exactly the one
+    that skips :class:`SourceRecord`'s domain validation — so the feature's
+    activation step went around the guarantee the feature is built on.
+
+    Nothing is mocked below except HTTP transport. Each test drives the same
+    command an operator types.
+    """
+
+    def test_a_listing_on_the_cleared_domain_is_declared(self, root: Path) -> None:
+        _register()
+
+        result = _update("--add-listing", LISTING_URL)
+
+        assert result.exit_code == 0, result.output
+        assert _listings(root) == (LISTING_URL,)
+
+    def test_a_listing_outside_the_cleared_domain_is_refused(self, root: Path) -> None:
+        """The refusal the hand-edited registry could not give.
+
+        The reviewer's access-policy check answers a question about one
+        domain. A listing on another host would be crawled under a clearance
+        nobody gave for it.
+        """
+        _register()
+        before = (root / "sources.json").read_bytes()
+
+        result = _update("--add-listing", OTHER_DOMAIN_LISTING)
+
+        assert result.exit_code == 1
+        assert "Refused" in result.output
+        assert (root / "sources.json").read_bytes() == before
+
+    def test_a_refused_update_reaches_stderr(self, root: Path) -> None:
+        _register()
+
+        result = runner.invoke(
+            app,
+            ["observatory", "update-source", "--id", BAERUM_ID, "--add-listing", "not-a-url"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+        assert result.stdout == ""
+
+    def test_a_declared_listing_can_be_withdrawn(self, root: Path) -> None:
+        _register()
+        _update("--add-listing", LISTING_URL)
+
+        result = _update("--remove-listing", LISTING_URL)
+
+        assert result.exit_code == 0, result.output
+        assert _listings(root) == ()
+
+    def test_distinct_additions_and_removals_are_applied_together(self, root: Path) -> None:
+        kept = f"https://www.{BAERUM_DOMAIN}/horinger/"
+        added = f"https://www.{BAERUM_DOMAIN}/politiske-saker/"
+        _register()
+        assert _update("--add-listing", LISTING_URL, "--add-listing", kept).exit_code == 0
+
+        result = _update("--remove-listing", LISTING_URL, "--add-listing", added)
+
+        assert result.exit_code == 0, result.output
+        assert _listings(root) == (kept, added)
+
+    def test_withdrawing_a_listing_that_was_never_declared_is_refused(self, root: Path) -> None:
+        """A remove that matched nothing is a typo with live consequences.
+
+        The operator means to stop sending traffic to a page. Reporting
+        success while the entry they actually declared stays live is the one
+        outcome this command must never produce, so a miss is an error rather
+        than a no-op.
+        """
+        _register()
+        _update("--add-listing", LISTING_URL)
+        before = (root / "sources.json").read_bytes()
+        first_missing = f"https://www.{BAERUM_DOMAIN}/kunngjoringer"
+        second_missing = f"https://www.{BAERUM_DOMAIN}/horinger"
+
+        result = _update(
+            "--remove-listing",
+            first_missing,
+            "--remove-listing",
+            second_missing,
+        )
+
+        assert result.exit_code == 1
+        assert "not declared" in result.output
+        assert result.stderr == (
+            f"Refused: {first_missing}, {second_missing} not declared on this source.\n"
+        )
+        assert result.stdout == ""
+        assert (root / "sources.json").read_bytes() == before
+
+    def test_declaring_the_same_listing_twice_leaves_one(self, root: Path) -> None:
+        """Re-running the command ends in the state the operator asked for."""
+        _register()
+        _update("--add-listing", LISTING_URL)
+
+        result = _update("--add-listing", LISTING_URL)
+
+        assert result.exit_code == 0, result.output
+        assert _listings(root) == (LISTING_URL,)
+
+    def test_repeating_the_same_listing_in_one_update_leaves_one(self, root: Path) -> None:
+        """Idempotence has to hold within a single invocation too.
+
+        The first version compared each addition against what was already in
+        the registry and not against what the same command had just added, so
+        one repeated ``--add-listing`` declared the page twice. A duplicate
+        entry point is not cosmetic: every sweep would fetch that page once
+        per copy, against someone else's server.
+        """
+        _register()
+
+        result = _update("--add-listing", LISTING_URL, "--add-listing", LISTING_URL)
+
+        assert result.exit_code == 0, result.output
+        assert _listings(root) == (LISTING_URL,)
+
+    def test_adding_and_removing_the_same_listing_at_once_is_refused(self, root: Path) -> None:
+        """One command cannot be told both things about one URL.
+
+        Applying removals first and additions second would let the addition
+        win, and the operator who asked for the entry to go would be told the
+        update succeeded while the page stayed live — the failure the removal
+        rules exist to prevent. Neither order is more correct than the other,
+        so the instruction is refused rather than resolved.
+        """
+        second_listing = f"https://www.{BAERUM_DOMAIN}/horinger/"
+        _register()
+        _update("--add-listing", LISTING_URL, "--add-listing", second_listing)
+        before = (root / "sources.json").read_bytes()
+
+        result = _update(
+            "--add-listing",
+            LISTING_URL,
+            "--add-listing",
+            second_listing,
+            "--remove-listing",
+            LISTING_URL,
+            "--remove-listing",
+            second_listing,
+        )
+
+        assert result.exit_code == 1
+        assert "both added and removed" in result.stderr
+        assert result.stderr == (
+            f"Refused: {LISTING_URL}, {second_listing} is both added and removed.\n"
+        )
+        assert (root / "sources.json").read_bytes() == before
+
+    def test_an_update_with_nothing_to_do_is_refused(self, root: Path) -> None:
+        _register()
+
+        result = _update()
+
+        assert result.exit_code == 1
+        assert "Refused" in result.output
+
+    def test_an_unregistered_source_cannot_be_updated(self, root: Path) -> None:
+        result = _update("--add-listing", LISTING_URL)
+
+        assert result.exit_code == 1
+        assert "not registered" in result.output
+
+    def test_the_update_preserves_the_activation_it_did_not_touch(self, root: Path) -> None:
+        """Rebuilding the record must not quietly drop the reviewer's check.
+
+        The record is revalidated rather than mutated, so every field travels
+        through the model again — including the access-policy evidence that is
+        the whole reason this file is not in the engine repository.
+        """
+        _activate(root)
+
+        result = _update("--add-listing", LISTING_URL)
+
+        assert result.exit_code == 0, result.output
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert record.active is True
+        assert record.access_policy is not None
+        assert record.access_policy.reviewed_by == "Bartosz Kobyliński"
+        assert record.access_policy.rate_limit_seconds == 0.001
+
+    def test_a_listing_declared_through_the_cli_is_read_as_a_listing(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The end-to-end the operator cares about: CLI, registry, discovery.
+
+        This is the path that did not exist. The HTML reader engages only for
+        a URL the registry declares, so until a supported command could write
+        that field, no sequence of documented commands reached this state —
+        which is why the feature had 3,850 unit tests and was still
+        unreachable.
+
+        robots.txt declares no sitemap on purpose: that is the case listings
+        were built for, the 116 municipalities where discovery otherwise has
+        no entry at all.
+        """
+        _activate(root)
+        assert _update("--add-listing", LISTING_URL).exit_code == 0
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=LISTING_URL, content=_listing_page())
+
+        result = runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert f"read {LISTING_URL}" in result.output
+        assert f"{LISTING_METHOD}  {LISTED_URL}" in result.output
+
+    def test_without_the_declaration_the_same_page_is_not_read_as_a_listing(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Why ``--entry-point`` was never the workaround.
+
+        Discovery will fetch the page when told to, but the HTML reader is
+        gated on registry membership, so an undeclared listing reaches the XML
+        parser and is declined. That refusal is deliberate — an error page
+        served under a sitemap URL must not become a source of discovery — and
+        it is also what made the field unreachable.
+        """
+        _activate(root)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=LISTING_URL, content=_listing_page())
+
+        result = runner.invoke(
+            app, ["observatory", "discover", "--id", BAERUM_ID, "--entry-point", LISTING_URL]
+        )
+
+        assert LISTED_URL not in result.output
+        assert f"unparseable_document  {LISTING_URL}" in result.output
 
 
 class TestRepair:
