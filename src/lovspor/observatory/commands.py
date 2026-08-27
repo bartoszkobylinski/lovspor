@@ -39,10 +39,12 @@ from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.registry import (
+    CaptureVerdict,
     SourceRecord,
     SourceRegistry,
     activate,
     read_access_policy_check,
+    read_capture_verdict,
     read_registry,
     registry_path,
     write_registry,
@@ -273,6 +275,70 @@ def update_source(
     typer.echo(f"{authority_id}: {len(listings)} listing entry point(s) declared.")
     for url in listings:
         typer.echo(f"  listing  {url}")
+
+
+def _with_verdict(record: SourceRecord, verdict: CaptureVerdict) -> SourceRecord:
+    """The same source carrying its verdict, rebuilt through the model.
+
+    ``model_copy`` would skip every validator, which is the hole a hand-edited
+    registry opens (#184). Revalidating the whole record also carries the
+    access-policy evidence back through the model rather than around it.
+    """
+    return SourceRecord.model_validate({**record.model_dump(), "capture_verdict": verdict})
+
+
+@observatory_app.command("record-verdict")
+def record_verdict(
+    authority_id: _AuthorityIdOption,
+    verdict: Annotated[
+        Path,
+        typer.Option("--verdict", help="JSON capture verdict: what was concluded, and on what."),
+    ],
+) -> None:
+    """Record what an investigation concluded about capturing this source.
+
+    The twin of ``activate-source``. That one attaches a human's conclusion
+    that a source may be fetched; this attaches the conclusion that fetching
+    it yields nothing, so the next sweep does not re-derive it and reach the
+    same silent zero (#195). It arrives as a document rather than as flags for
+    the reason the access-policy check does: it carries the routes that were
+    checked, and a conclusion typed into a shell leaves nothing to re-read.
+
+    Recording a verdict does not deactivate the source. The two are separate
+    decisions, and the re-check the verdict schedules depends on the source
+    still being cleared to fetch.
+    """
+    path = _registry_file()
+    registry = _load(path)
+    record = registry.sources.get(authority_id)
+    if record is None:
+        typer.echo(f"{authority_id} is not registered; run register-source first.", err=True)
+        raise typer.Exit(1)
+    recorded = _read_verdict(verdict)
+    try:
+        updated = _with_verdict(record, recorded)
+    except ValidationError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    _save({**registry.sources, authority_id: updated}, path)
+    typer.echo(f"Recorded {recorded.outcome} for {authority_id} ({record.name})")
+    typer.echo(f"Re-check after {recorded.recheck_after.isoformat(timespec='seconds')}")
+
+
+def _read_verdict(path: Path) -> CaptureVerdict:
+    """The verdict document, or an operator-legible refusal.
+
+    A mistyped path and a document the model rejects are both ordinary
+    mistakes rather than bugs, so neither reaches the operator as a traceback.
+    """
+    try:
+        return read_capture_verdict(path)
+    except ParseError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    except OSError as exc:
+        typer.echo(f"Refused: cannot read the capture verdict at {path}: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 @observatory_app.command("sources")
@@ -636,6 +702,7 @@ class _SweepTotals(NamedTuple):
     failed: int = 0
     unchanged: int = 0
     capped: int = 0
+    held: int = 0
 
     def plus(self, other: "_SweepTotals") -> "_SweepTotals":
         return _SweepTotals(
@@ -644,6 +711,7 @@ class _SweepTotals(NamedTuple):
             failed=self.failed + other.failed,
             unchanged=self.unchanged + other.unchanged,
             capped=self.capped + other.capped,
+            held=self.held + other.held,
         )
 
 
@@ -736,12 +804,36 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
     totals = _SweepTotals()
     for record in active:
         typer.echo(f"== {record.authority_id} {record.name}")
+        if _held(record, started_at):
+            totals = totals.plus(_SweepTotals(held=1))
+            continue
         totals = totals.plus(_sweep_one(fetcher, log, record, observed, limit))
     if totals.refused:
         typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
     if totals.capped:
         typer.echo(f"sources capped: {totals.capped} of {len(active)}", err=True)
+    if totals.held:
+        typer.echo(f"sources held under a verdict: {totals.held} of {len(active)}")
     return _record_sweep(root, started_at, len(active), totals)
+
+
+def _held(record: SourceRecord, now: datetime) -> bool:
+    """Whether a recorded verdict spares this source the sweep, said aloud.
+
+    A verdict that has not reached its re-check date is the record of an
+    investigation already done; sending the source down the same dead path
+    nightly would re-derive it and reach the same silent zero (#195). One that
+    is due is not a skip: the re-check is the deliberate act the expiry
+    exists for, and a source that refuses again refuses loudly.
+    """
+    verdict = record.capture_verdict
+    if verdict is None or verdict.due(now):
+        return False
+    typer.echo(
+        f"  held: {record.authority_id} under {verdict.outcome} "
+        f"until {verdict.recheck_after.isoformat(timespec='seconds')}"
+    )
+    return True
 
 
 def _active_sources() -> list[SourceRecord]:
@@ -785,9 +877,10 @@ def _record_sweep(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         active_sources=active,
-        sources_completed=active - totals.refused,
+        sources_completed=active - totals.refused - totals.held,
         sources_refused=totals.refused,
         sources_capped=totals.capped,
+        sources_held=totals.held,
         captured=totals.captured,
         failed_fetches=totals.failed,
         unchanged=totals.unchanged,
@@ -821,6 +914,22 @@ def _echo_sources(registry: SourceRegistry) -> None:
     typer.echo("Sources")
     typer.echo(f"  registered: {len(registry.sources)}")
     typer.echo(f"  active:     {active}")
+    _echo_verdicts(registry)
+
+
+def _echo_verdicts(registry: SourceRegistry) -> None:
+    """Held sources stay on the report, and say when they are due again.
+
+    A verdict that removed its source from view would be #151's silent zero
+    one level up: the archive reads as complete because the sources that
+    produce nothing have stopped being counted (#195).
+    """
+    held = [r.capture_verdict for r in registry.sources.values() if r.capture_verdict is not None]
+    if not held:
+        return
+    now = datetime.now(UTC)
+    typer.echo(f"  held under a verdict: {len(held)}")
+    typer.echo(f"  due for re-check: {sum(1 for verdict in held if verdict.due(now))}")
 
 
 def _echo_last_sweep(run: SweepRun | None) -> None:
@@ -834,6 +943,7 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(f"  completed:  {run.sources_completed} / {run.active_sources}")
     typer.echo(f"  refused:    {run.sources_refused}")
     typer.echo(f"  capped:     {run.sources_capped}")
+    typer.echo(f"  held:       {run.sources_held}")
     typer.echo(f"  captured:   {run.captured} | unchanged: {run.unchanged}")
     typer.echo(f"  status:     {run.status.upper()}")
 

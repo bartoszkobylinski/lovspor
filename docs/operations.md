@@ -322,7 +322,7 @@ registry. Process telemetry, not an observation:
 | status | meaning | who records it |
 | --- | --- | --- |
 | `success` | every active source was swept to the end of its sitemap | `capture-all` |
-| `degraded` | the sweep ran, and at least one source was refused **or capped** | `capture-all` |
+| `degraded` | the sweep ran, and at least one source was refused **or capped** (a source held under a verdict does not degrade it — it is counted, not asked) | `capture-all` |
 | `failed` | the sweep could not execute — archive not mounted, log damaged, or the host reserved for a benchmark (`deferred_exclusive_workload`) | the nightly wrapper |
 
 `capture-all` still exits 1 on `degraded`. The `failed` state belongs to the
@@ -447,6 +447,45 @@ test and are skipped.
 This was found in the bootstrap: seven municipalities, Bergen among them, stopped at the
 lane's round cap and were recorded as complete.
 
+### A source found to publish nothing machine-reachable (issue #195)
+
+A source that was activated, crawled, and found to publish nothing a machine can reach —
+no sitemap, no feed, no server-rendered index — refuses loudly on every sweep, and the
+conclusion that it always will lives nowhere. Twelve municipalities in the bootstrap ended
+that way, with the evidence in a shell log. The registry can hold the conclusion instead:
+
+```bash
+uv run lovspor observatory record-verdict --id 1860 --verdict vestvagoy-verdict.json
+```
+
+```json
+{
+  "outcome": "no_machine_reachable_source",
+  "routes_checked": [
+    "sitemap.xml and sitemap index, declared and conventional",
+    "Atom and RSS at conventional feed paths",
+    "server-rendered listing page (zero <time>, zero datetime=)",
+    "Lovdata publicData catalogue (avdeling I only)"
+  ],
+  "evidence": "issue #194: ACOS front end, listing assembled in the browser from /api/presentation/ behind a per-page token",
+  "reached_at": "2026-08-26T18:00:00Z",
+  "reviewed_by": "Bartosz Kobyliński",
+  "recheck_after": "2026-11-26T00:00:00Z"
+}
+```
+
+The verdict is the twin of the access-policy check and travels the same way: a document,
+because it is the record of a human conclusion and has to be re-readable months later.
+`outcome` is a closed vocabulary (`no_machine_reachable_source`, `access_blocked`) so that
+verdicts can be counted; `routes_checked` and `recheck_after` are mandatory.
+
+A held source is **not** deactivated — the re-check depends on it still being cleared to
+fetch — and it does not vanish. `capture-all` skips it until `recheck_after`, prints
+`held: <id> under <outcome> until <date>` and `sources held under a verdict: N of M`, and
+the run record carries `sources_held`. `status` reports `held under a verdict` and
+`due for re-check`. Once the date passes the source is swept again; if it refuses again,
+it refuses as loudly as before, and a new verdict is a new decision.
+
 ### Is it working?
 
 ```bash
@@ -465,6 +504,7 @@ Last sweep
   completed:  196 / 198
   refused:    2
   capped:     0
+  held:       0
   captured:   47 | unchanged: 4218
   status:     DEGRADED
 

@@ -53,6 +53,7 @@ from lovspor.observatory.sweeps import (
     append_sweep_run,
     latest_sweep_run,
     read_sweep_runs,
+    sweeps_path,
 )
 
 runner = CliRunner()
@@ -1504,6 +1505,217 @@ class TestUpdateSource:
         assert f"unparseable_document  {LISTING_URL}" in result.output
 
 
+VERDICT_EVIDENCE = "https://github.com/bartoszkobylinski/lovspor/issues/194"
+
+
+def _verdict_document(**overrides: object) -> dict[str, object]:
+    document: dict[str, object] = {
+        "outcome": "no_machine_reachable_source",
+        "routes_checked": ["sitemap and sitemap index", "atom and rss at conventional paths"],
+        "evidence": VERDICT_EVIDENCE,
+        "reached_at": "2026-08-26T18:00:00Z",
+        "reviewed_by": "Bartosz Kobyliński",
+        "recheck_after": "2026-11-26T18:00:00Z",
+    }
+    document.update(overrides)
+    return document
+
+
+def _write_verdict(path: Path, **overrides: object) -> Path:
+    path.write_text(json.dumps(_verdict_document(**overrides)), encoding="utf-8")
+    return path
+
+
+class TestRecordVerdict:
+    """Recording what an investigation concluded about a source (#195).
+
+    Twelve municipalities in the bootstrap crawl publish no sitemap, no feed
+    and no server-rendered index, and their regulations are absent from the
+    only source this project may use. That result existed as a line in a shell
+    log; the next sweep would have re-derived it from scratch. It is an
+    operator decision, so it goes through the same route every other one does.
+    """
+
+    def test_a_verdict_is_recorded_against_the_source(self, root: Path) -> None:
+        _activate(root)
+        document = _write_verdict(root / "verdict.json")
+
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+
+        assert result.exit_code == 0, result.output
+        recorded = read_registry(root / "sources.json").sources[BAERUM_ID].capture_verdict
+        assert recorded is not None
+        assert recorded.outcome == "no_machine_reachable_source"
+        assert recorded.evidence == VERDICT_EVIDENCE
+
+    def test_the_verdict_does_not_withdraw_the_activation(self, root: Path) -> None:
+        """Two separate decisions. The re-check this verdict schedules depends
+        on the source still being cleared to fetch."""
+        _activate(root)
+
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(_write_verdict(root / "verdict.json")),
+            ],
+        )
+
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert record.active is True
+        assert record.access_policy is not None
+
+    def test_an_unregistered_source_cannot_carry_a_verdict(self, root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        document = _write_verdict(root / "verdict.json")
+
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+
+        assert result.exit_code == 1
+        assert "not registered" in result.stderr
+
+    def test_a_verdict_that_fails_the_schema_is_refused(self, root: Path) -> None:
+        """The registry is not a place to put a conclusion with no routes
+        behind it — the model decides that, here as in code."""
+        _activate(root)
+        document = _write_verdict(root / "verdict.json", routes_checked=[])
+        before = (root / "sources.json").read_bytes()
+
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+        assert (root / "sources.json").read_bytes() == before
+
+    def test_an_unreadable_verdict_path_is_an_operator_mistake_not_a_traceback(
+        self, root: Path
+    ) -> None:
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(root / "nope.json"),
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Refused" in result.stderr
+
+    def test_a_verdict_path_that_is_a_directory_is_refused_not_crashed(self, root: Path) -> None:
+        _activate(root)
+        verdict_dir = root / "a-directory"
+        verdict_dir.mkdir()
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(verdict_dir),
+            ],
+        )
+
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
+        assert "Refused: cannot read the capture verdict" in result.stderr
+
+    def test_recording_a_verdict_reports_when_it_must_be_rechecked(self, root: Path) -> None:
+        """The expiry is the point, so the operator sees it at the moment they
+        record the verdict rather than discovering it in a file later."""
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(_write_verdict(root / "verdict.json")),
+            ],
+        )
+
+        assert "2026-11-26" in result.output
+
+
+class TestStatusShowsHeldSources:
+    """A verdict must stay visible. A held source that vanished from the
+    report would be the silent zero of #151 one level up — the archive looks
+    complete because the sources that fail are no longer counted."""
+
+    def test_status_reports_nothing_when_no_source_is_held(self, root: Path) -> None:
+        _activate(root)
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "held under a verdict" not in result.output
+
+    def test_a_held_source_is_counted(self, root: Path) -> None:
+        _activate(root)
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(_write_verdict(root / "verdict.json")),
+            ],
+        )
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "held under a verdict: 1" in result.output
+
+    def test_a_verdict_past_its_recheck_date_is_reported_as_due(self, root: Path) -> None:
+        _activate(root)
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(
+                    _write_verdict(
+                        root / "verdict.json",
+                        reached_at="2020-01-01T00:00:00Z",
+                        recheck_after="2020-04-01T00:00:00Z",
+                    )
+                ),
+            ],
+        )
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "due for re-check: 1" in result.output
+
+
 class TestRepair:
     """Removing an unfinished final record. This edits evidence, so what it
     refuses matters more than what it does."""
@@ -1795,6 +2007,71 @@ class TestCaptureAll:
         assert f"refused: {BAERUM_ID}" in result.stderr
         assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
         assert "sources refused: 1" in result.stderr
+
+    def _asker_only_on_the_wire(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """Two activated sources, but only Asker's server is expected to be
+        asked: pytest-httpx refuses any request nothing was registered for, so
+        a fetch to Bærum fails the test rather than passing unnoticed."""
+        _activate(root)
+        _activate_asker(root)
+        httpx_mock.add_response(
+            url=ASKER_ROBOTS_URL,
+            text=f"User-agent: *\nAllow: /\nSitemap: {ASKER_SITEMAP_URL}\n",
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+    def _record_verdict(self, root: Path, **overrides: object) -> None:
+        document = _write_verdict(root / "verdict.json", **overrides)
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_a_source_held_under_a_verdict_is_not_asked_until_due(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The verdict is the record of an investigation already done (#195):
+        Bærum is skipped, says so on the report, and the sweep stays green
+        because nothing was left unobserved that could have been."""
+        self._asker_only_on_the_wire(root, httpx_mock)
+        self._record_verdict(root, recheck_after="2126-08-26T18:00:00Z")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert f"held: {BAERUM_ID} under no_machine_reachable_source until 2126-08-26" in (
+            result.output
+        )
+        assert "sources held under a verdict: 1 of 2" in result.output
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+        run = latest_sweep_run(sweeps_path(ObservatoryRoot(root, ())))
+        assert run is not None
+        assert (run.sources_held, run.sources_completed, run.status) == (1, 1, "success")
+
+    def test_a_due_verdict_is_re_checked_and_a_refusal_is_loud_again(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Expiry is the point: a verdict past its re-check date does not
+        spare the source, so the web changing is noticed rather than assumed
+        away. Nothing has changed here, and the refusal is as loud as ever."""
+        self._asker_only_on_the_wire(root, httpx_mock)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+        self._record_verdict(
+            root, reached_at="2026-01-01T00:00:00Z", recheck_after="2026-02-01T00:00:00Z"
+        )
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert "held:" not in result.output
+        assert f"refused: {BAERUM_ID}" in result.stderr
+        run = latest_sweep_run(sweeps_path(ObservatoryRoot(root, ())))
+        assert run is not None
+        assert (run.sources_held, run.sources_refused, run.status) == (0, 1, "degraded")
 
     def test_limit_is_applied_independently_to_each_source(
         self, root: Path, httpx_mock: HTTPXMock
@@ -2531,6 +2808,7 @@ class TestStatus:
             "  completed:  2 / 3\n"
             "  refused:    1\n"
             "  capped:     0\n"
+            "  held:       0\n"
             "  captured:   47 | unchanged: 4218\n"
             "  status:     DEGRADED\n"
             "\nCadence\n"
@@ -2564,6 +2842,9 @@ class TestStatus:
 
     def test_sweep_totals_add_capped_sources(self) -> None:
         assert _SweepTotals(capped=1).plus(_SweepTotals(capped=2)).capped == 3
+
+    def test_sweep_totals_add_held_sources(self) -> None:
+        assert _SweepTotals(held=1).plus(_SweepTotals(held=2)).held == 3
 
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case

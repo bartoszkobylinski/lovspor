@@ -71,8 +71,8 @@ What is on `main`:
 
 - `src/lovspor/observatory/` — `model`, `storage`, `log`, `registry`, `fetch`, `discovery`,
   `freshness`, `commands`.
-- CLI: `register-source`, `activate-source`, `sources`, `discover`, `capture`, `capture-all`,
-  `verify`, `repair`, `status`.
+- CLI: `register-source`, `activate-source`, `update-source`, `record-verdict`, `sources`,
+  `discover`, `capture`, `capture-all`, `nightly`, `verify`, `repair`, `status`.
 - **Every sweep records itself** in `sweep-runs.jsonl` beside the registry — process telemetry,
   not an observation — because the observation log cannot answer whether the sweep ran at all: a
   sweep that never started leaves no trace in it by construction. `status` reads that back and
