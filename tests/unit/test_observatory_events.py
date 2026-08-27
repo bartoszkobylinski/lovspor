@@ -10,6 +10,8 @@ import fcntl
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -95,6 +97,33 @@ class TestTheFingerprintIdentifiesARecord:
         assert record_fingerprint(activate(_source(), _policy())) == record_fingerprint(
             activate(_source(), _policy())
         )
+
+    def test_the_same_record_fingerprints_identically_across_python_sessions(self) -> None:
+        """The event must remain verifiable after the process which wrote it
+        has exited; hash randomisation cannot become part of the recipe."""
+        record = activate(_source(), _policy())
+        serialized = record.model_dump_json()
+        program = (
+            "import sys\n"
+            "from lovspor.observatory.events import record_fingerprint\n"
+            "from lovspor.observatory.registry import SourceRecord\n"
+            "print(record_fingerprint(SourceRecord.model_validate_json(sys.stdin.read())))\n"
+        )
+
+        fingerprints = []
+        for seed in ("1", "987654"):
+            environment = {**os.environ, "PYTHONHASHSEED": seed}
+            result = subprocess.run(
+                [sys.executable, "-c", program],
+                input=serialized,
+                text=True,
+                capture_output=True,
+                check=True,
+                env=environment,
+            )
+            fingerprints.append(result.stdout.strip())
+
+        assert fingerprints == [record_fingerprint(record), record_fingerprint(record)]
 
     def test_norwegian_characters_do_not_change_the_hash_by_escaping(self) -> None:
         """`ensure_ascii=False` matches how the registry is written; escaping

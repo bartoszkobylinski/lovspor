@@ -3501,6 +3501,31 @@ class TestReplaceSourceDomain:
         assert read_registry(root / "sources.json").sources[BAERUM_ID].active is True
         assert self._events(root) == []
 
+    def test_a_blank_destination_is_refused_before_anything_is_written(self, root: Path) -> None:
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                BAERUM_ID,
+                "--domain",
+                " \t ",
+                "--reason",
+                "baerum.kommune.no redirects to baerum.no",
+                "--by",
+                "Bartosz Kobyliński",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Refused:" in result.stderr
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert (record.canonical_domain, record.active) == (BAERUM_DOMAIN, True)
+        assert self._events(root) == []
+
     def test_the_operator_is_told_the_one_step_that_restores_capture(self, root: Path) -> None:
         """The report is half of what this command does. A migration leaves the
         source unfetchable on purpose, so an operator who is not told which
