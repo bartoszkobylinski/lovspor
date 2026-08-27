@@ -3421,6 +3421,29 @@ class TestReplaceSourceDomain:
         )
         assert self._events(root) == []
 
+    def test_a_registry_write_failure_does_not_record_a_change_that_never_landed(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The event is evidence of a completed withdrawal, so it must not be
+        appended when current state could not be changed. This pins the safe
+        side of the command's registry-first ordering."""
+        _activate(root)
+        append = Mock()
+        monkeypatch.setattr(
+            observatory_commands,
+            "write_registry",
+            Mock(side_effect=OSError("registry unavailable")),
+        )
+        monkeypatch.setattr(observatory_commands, "append_source_event", append)
+
+        result = self._replace()
+
+        assert result.exit_code == 1
+        append.assert_not_called()
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert (record.canonical_domain, record.active) == (BAERUM_DOMAIN, True)
+        assert self._events(root) == []
+
     def test_a_domain_typed_with_stray_whitespace_reaches_both_records_the_same(
         self, root: Path
     ) -> None:
