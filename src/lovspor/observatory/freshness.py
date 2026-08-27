@@ -14,7 +14,7 @@ costs an observation window that cannot be recovered, and ADR-0010 exists
 because that asymmetry is the whole point.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, time
 
 from lovspor.observatory.discovery import Candidate
@@ -25,19 +25,49 @@ from lovspor.observatory.model import ArtifactObservation, ObservationRecord
 _DATE_ONLY_LENGTH = 10
 
 
-def latest_observations(records: Iterable[ObservationRecord]) -> dict[str, datetime]:
-    """The most recent time each URL was observed *with content*.
+def collect_latest_observations(
+    latest: dict[str, datetime], authority_id: str | None = None
+) -> Callable[[ObservationRecord], None]:
+    """A collector for :meth:`ObservationLog.scan_into` that folds into ``latest``.
+
+    Push-based rather than a pass over materialised records, because the log
+    is orders of magnitude larger than this map and only the map is wanted:
+    610,850 records reduced to 81,408 URLs when this was written (issue #199).
 
     Failures are excluded on purpose: a timeout says nothing about whether the
     page changed, and treating it as a sighting would let one bad night hide a
     page for as long as its ``lastmod`` stayed put.
+
+    ``authority_id`` narrows the fold to one source's own observations, which
+    is what a capture can act on: its candidates are URLs on that source's
+    cleared domain, and the gate records them under that source. The narrowing
+    is safe in one direction only, and that is the direction it errs — should
+    two registered sources ever cover one host, an observation filed under the
+    other id is simply not seen here, and an unseen observation re-fetches a
+    page. Skipping one wrongly is the mistake this module exists to avoid.
     """
-    latest: dict[str, datetime] = {}
-    for record in records:
+
+    def collect(record: ObservationRecord) -> None:
         if not isinstance(record, ArtifactObservation):
-            continue
+            return
+        if authority_id is not None and record.authority_id != authority_id:
+            return
         seen = latest.get(record.url)
         latest[record.url] = record.observed_at if seen is None else max(seen, record.observed_at)
+
+    return collect
+
+
+def latest_observations(records: Iterable[ObservationRecord]) -> dict[str, datetime]:
+    """The most recent time each URL was observed *with content*.
+
+    The pull-based form of :func:`collect_latest_observations`, for a caller
+    that already holds the records it wants folded.
+    """
+    latest: dict[str, datetime] = {}
+    collect = collect_latest_observations(latest)
+    for record in records:
+        collect(record)
     return latest
 
 

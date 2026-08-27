@@ -20,7 +20,7 @@ still serves the same bytes.
 import fcntl
 import hashlib
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
@@ -62,6 +62,10 @@ class LogScan(BaseModel):
     records: tuple[ObservationRecord, ...] = ()
     incomplete_final_record: bool = False
     malformed_lines: tuple[int, ...] = ()
+    #: How many records parsed, whether or not they were retained. A caller
+    #: that folded the log rather than keeping it still has to be able to say
+    #: how much it read (issue #199).
+    records_read: int = 0
 
     @property
     def complete(self) -> bool:
@@ -237,10 +241,17 @@ class ObservationLog:
         except ValidationError as exc:
             raise LogIntegrityError(f"{self.log_path}:{number}: unreadable record: {exc}") from exc
 
-    def scan(self) -> LogScan:
-        """Read every line the log will give up, and report what it will not.
+    def scan_into(self, collect: Callable[[ObservationRecord], None]) -> LogScan:
+        """Stream every line past ``collect`` and report what would not parse.
 
-        Split on bytes and validated as bytes, never decoded first. An append
+        The reading every other scan is built on. Records are handed over one
+        at a time and never retained, so a caller that folds the log — the
+        freshness map is the only fold there is — pays for its answer instead
+        of for the archive. That distinction is not cosmetic: the log held
+        610,850 records and 2.13 GB when this was written, and `capture` read
+        all of it, on every round, to ask about one source's 653 (issue #199).
+
+        Read as bytes and validated as bytes, never decoded first. An append
         cut mid-character leaves a line that is not valid UTF-8 at all, so
         reading the file as text would fail before a single intact record
         could be recovered — and decoding leniently to get past that would
@@ -249,23 +260,70 @@ class ObservationLog:
         observed. A refused line is visible; a silently altered one reads as
         genuine forever after.
 
-        The terminating newline is what tells the two damage modes apart, and
-        splitting on bytes carries that for free: a file that ends with one
-        yields a trailing empty element, which is skipped and can therefore
-        never be the malformed line. So "the final element failed to parse"
-        means exactly "the write never finished" — no separate check for the
-        newline, and no way for the two to disagree.
+        The terminating newline is what tells the two damage modes apart. A
+        malformed *last* line that ended without one is a write that never
+        finished; anywhere else, or with the newline present, it is corruption
+        an interrupted append cannot produce. Both are reported, never raised:
+        the audit exists to answer "how bad is it?".
+
+        A line is validated with its terminator still attached, because JSON
+        ignores trailing whitespace and every append in this module writes one.
+        Trimming it first would be a step whose removal changed nothing, and a
+        step nothing can observe is a step nothing can check.
         """
         if not self.log_path.exists():
             return LogScan()
-        lines = self.log_path.read_bytes().split(b"\n")
-        records, malformed = _scan_lines(lines)
-        torn_tail = bool(malformed) and malformed[-1] == len(lines)
+        malformed: list[int] = []
+        read = 0
+        torn_tail = False
+        with self.log_path.open("rb") as handle:
+            for number, raw in enumerate(handle, start=1):
+                if not raw.strip():
+                    continue
+                try:
+                    record = _RECORD_ADAPTER.validate_json(raw)
+                except ValidationError:
+                    malformed.append(number)
+                    # Only a file's last line can lack its terminator, so a
+                    # malformed line without one is the write that never
+                    # finished. A malformed line that has one is corruption,
+                    # and says so by setting this back to false.
+                    torn_tail = not raw.endswith(b"\n")
+                    continue
+                read += 1
+                collect(record)
         return LogScan(
-            records=tuple(records),
             incomplete_final_record=torn_tail,
             malformed_lines=tuple(malformed[:-1] if torn_tail else malformed),
+            records_read=read,
         )
+
+    def scan(self) -> LogScan:
+        """Every record the log will give up, plus the damage report.
+
+        Retains the whole log in memory, which is the right cost only for a
+        caller that genuinely needs every record at once — the snapshot audit
+        replaying hashes in append order. Anything that reduces the log to a
+        smaller answer should use :meth:`scan_into` and keep the answer.
+        """
+        records: list[ObservationRecord] = []
+        scan = self.scan_into(records.append)
+        return LogScan(
+            records=tuple(records),
+            incomplete_final_record=scan.incomplete_final_record,
+            malformed_lines=scan.malformed_lines,
+            records_read=scan.records_read,
+        )
+
+    def scan_damage(self) -> LogScan:
+        """Whether the log reads to the end, and how much of it did.
+
+        For the callers whose whole question is "is this archive intact?" —
+        the nightly preflight and `repair`. Neither needs a record, and
+        materialising the log to answer would put the archive's own size
+        between an operator and the news that it is damaged.
+        """
+        return self.scan_into(_discard)
 
     def stored_hashes(self) -> frozenset[str]:
         """Hashes actually present in the blob store, read from disk."""
@@ -284,18 +342,8 @@ class ObservationLog:
         return self.blob_path(sha256).read_bytes()
 
 
-def _scan_lines(lines: list[bytes]) -> tuple[list[ObservationRecord], list[int]]:
-    """Parse what parses; return the 1-based numbers of the lines that do not."""
-    records: list[ObservationRecord] = []
-    malformed: list[int] = []
-    for number, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
-        try:
-            records.append(_RECORD_ADAPTER.validate_json(line))
-        except ValidationError:
-            malformed.append(number)
-    return records, malformed
+def _discard(record: ObservationRecord) -> None:
+    """Read a record and keep nothing, for a scan that only wants the damage."""
 
 
 class _Timeline(BaseModel):

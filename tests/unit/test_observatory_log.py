@@ -723,8 +723,8 @@ class TestCrashRecovery:
         assert scan.complete is True
 
     def test_a_present_but_empty_log_file_scans_as_empty_and_intact(self, tmp_path: Path) -> None:
-        """Distinct code path from the absent case: this exercises
-        ``read_bytes()`` on a zero-byte file rather than the existence guard."""
+        """Distinct code path from the absent case: this exercises opening and
+        iterating a zero-byte file rather than the existence guard."""
         log = make_log(tmp_path)
         log.log_path.touch()
 
@@ -900,3 +900,119 @@ class TestWriterExclusion:
         log.append(observation(b"payload"))
 
         assert lock_was_held_at_fsync == [True]
+
+
+class TestScanningWithoutHoldingTheLog:
+    """Issue #199. `capture` read all 610,850 records — 390 MB, 2.13 GB of
+    Pydantic models — to build a map of 81,408 URLs, on every round of every
+    lane. The damage report is unchanged; what changes is that a caller can
+    take its answer without taking the archive with it."""
+
+    def _two_records(self, tmp_path: Path) -> ObservationLog:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"first"), b"first")
+        log.append_artifact(observation(b"second", url="https://example.invalid/g"), b"second")
+        return log
+
+    def test_every_record_is_handed_over_and_none_retained(self, tmp_path: Path) -> None:
+        log = self._two_records(tmp_path)
+        seen: list[str] = []
+
+        scan = log.scan_into(lambda record: seen.append(record.url))
+
+        assert seen == ["https://example.invalid/f", "https://example.invalid/g"]
+        assert scan.records == ()
+        assert scan.records_read == 2
+        assert scan.complete is True
+
+    def test_the_log_is_never_read_into_memory_whole(self, tmp_path: Path) -> None:
+        """The property, not the implementation: a reading that materialises
+        the file is exactly what made a round cost gigabytes, and it would
+        come back unnoticed the moment someone finds `read_bytes()` tidier."""
+        log = self._two_records(tmp_path)
+
+        def refuse(_self: Path) -> bytes:
+            raise AssertionError("the log must be streamed, not read whole")
+
+        with pytest.MonkeyPatch.context() as patched:
+            patched.setattr(Path, "read_bytes", refuse)
+            assert log.scan_into(lambda _record: None).records_read == 2
+            assert len(log.scan().records) == 2
+
+    def test_scan_still_returns_the_records_it_counted(self, tmp_path: Path) -> None:
+        scan = self._two_records(tmp_path).scan()
+
+        assert scan.records_read == len(scan.records) == 2
+
+    def test_scan_damage_reads_the_log_without_keeping_a_record(self, tmp_path: Path) -> None:
+        scan = self._two_records(tmp_path).scan_damage()
+
+        assert scan.records == ()
+        assert scan.records_read == 2
+        assert scan.complete is True
+
+    def test_a_torn_tail_is_reported_the_same_way(self, tmp_path: Path) -> None:
+        log = self._two_records(tmp_path)
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"99')
+
+        scan = log.scan_damage()
+
+        assert scan.incomplete_final_record is True
+        assert scan.malformed_lines == ()
+        assert scan.records_read == 2
+        assert scan.complete is False
+
+    def test_mid_file_corruption_is_reported_the_same_way(self, tmp_path: Path) -> None:
+        log = self._two_records(tmp_path)
+        lines = log.log_path.read_bytes().split(b"\n")
+        log.log_path.write_bytes(b"\n".join([lines[0], b"{ truncated", lines[1], b""]))
+
+        scan = log.scan_damage()
+
+        assert scan.malformed_lines == (2,)
+        assert scan.incomplete_final_record is False
+        assert scan.records_read == 2
+
+    def test_collection_continues_after_a_malformed_record(self, tmp_path: Path) -> None:
+        log = self._two_records(tmp_path)
+        first, second = log.log_path.read_bytes().splitlines(keepends=True)
+        log.log_path.write_bytes(first + b"{ truncated\n" + second)
+        seen: list[str] = []
+
+        scan = log.scan_into(lambda record: seen.append(record.url))
+
+        assert seen == ["https://example.invalid/f", "https://example.invalid/g"]
+        assert scan.malformed_lines == (2,)
+        assert scan.records_read == 2
+        assert scan.complete is False
+
+    def test_a_blank_line_after_damage_means_the_log_did_not_stop_there(
+        self, tmp_path: Path
+    ) -> None:
+        """The tear is a property of the last line. Something was written after
+        this damage — even an empty line — so the write that failed was not the
+        one the log ended on, and truncating the tail would not repair it."""
+        log = self._two_records(tmp_path)
+        log.log_path.write_bytes(log.log_path.read_bytes() + b"{ truncated\n\n")
+
+        scan = log.scan_damage()
+
+        assert scan.incomplete_final_record is False
+        assert scan.malformed_lines == (3,)
+
+    def test_a_record_after_damage_means_the_log_did_not_stop_there(self, tmp_path: Path) -> None:
+        log = self._two_records(tmp_path)
+        first, second = log.log_path.read_bytes().splitlines(keepends=True)
+        log.log_path.write_bytes(first + b"{ truncated\n" + second)
+
+        scan = log.scan_damage()
+
+        assert scan.incomplete_final_record is False
+        assert scan.malformed_lines == (2,)
+        assert scan.records_read == 2
+
+    def test_an_absent_log_folds_to_nothing(self, tmp_path: Path) -> None:
+        scan = make_log(tmp_path).scan_into(lambda _record: None)
+
+        assert (scan.records_read, scan.complete) == (0, True)

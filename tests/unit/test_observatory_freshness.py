@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.freshness import (
+    collect_latest_observations,
     latest_observations,
     parse_site_lastmod,
     worth_capturing,
@@ -186,3 +187,62 @@ class TestWorthCapturing:
         observed = {URL: datetime(2026, 8, 18, 6, 0, tzinfo=UTC)}
 
         assert worth_capturing(_candidate("2026-08-18"), observed) is True
+
+
+class TestCollectingWithoutHoldingTheRecords:
+    """Issue #199. The freshness map is what the log is read for, and it is
+    smaller than the log by orders of magnitude — 81,408 URLs out of 610,850
+    records. The collector folds each record as it streams past, so a caller
+    keeps the map rather than the archive."""
+
+    def test_it_folds_the_same_map_the_pull_form_returns(self) -> None:
+        early = datetime(2026, 8, 1, tzinfo=UTC)
+        late = datetime(2026, 8, 18, tzinfo=UTC)
+        records = [_observation(early), _failure(late), _observation(late, "https://other/x")]
+        folded: dict[str, datetime] = {}
+        collect = collect_latest_observations(folded)
+
+        for record in records:
+            collect(record)
+
+        assert folded == latest_observations(records)
+
+    def test_the_latest_sighting_wins_whatever_order_they_arrive_in(self) -> None:
+        early = datetime(2026, 8, 1, tzinfo=UTC)
+        late = datetime(2026, 8, 18, tzinfo=UTC)
+        folded: dict[str, datetime] = {}
+        collect = collect_latest_observations(folded)
+
+        collect(_observation(late))
+        collect(_observation(early))
+
+        assert folded == {URL: late}
+
+    def test_narrowing_to_one_source_ignores_another_authority(self) -> None:
+        """A capture asks about URLs on its own cleared domain, so its own
+        records are the only ones that can answer."""
+        folded: dict[str, datetime] = {}
+        collect = collect_latest_observations(folded, "3201")
+
+        collect(
+            _observation(datetime(2026, 8, 18, tzinfo=UTC)).model_copy(
+                update={"authority_id": "9999"}
+            )
+        )
+
+        assert folded == {}
+
+    def test_narrowing_keeps_the_sources_own_records(self) -> None:
+        seen = datetime(2026, 8, 18, tzinfo=UTC)
+        folded: dict[str, datetime] = {}
+
+        collect_latest_observations(folded, "3201")(_observation(seen))
+
+        assert folded == {URL: seen}
+
+    def test_a_failure_is_still_not_a_sighting_when_narrowed(self) -> None:
+        folded: dict[str, datetime] = {}
+
+        collect_latest_observations(folded, "3201")(_failure(datetime(2026, 8, 18, tzinfo=UTC)))
+
+        assert folded == {}
