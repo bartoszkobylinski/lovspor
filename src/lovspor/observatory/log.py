@@ -265,27 +265,33 @@ class ObservationLog:
         finished; anywhere else, or with the newline present, it is corruption
         an interrupted append cannot produce. Both are reported, never raised:
         the audit exists to answer "how bad is it?".
+
+        A line is validated with its terminator still attached, because JSON
+        ignores trailing whitespace and every append in this module writes one.
+        Trimming it first would be a step whose removal changed nothing, and a
+        step nothing can observe is a step nothing can check.
         """
         if not self.log_path.exists():
             return LogScan()
         malformed: list[int] = []
         read = 0
-        number = 0
-        newline_terminated = True
+        torn_tail = False
         with self.log_path.open("rb") as handle:
             for number, raw in enumerate(handle, start=1):
-                newline_terminated = raw.endswith(b"\n")
-                line = raw.removesuffix(b"\n")
-                if not line.strip():
+                if not raw.strip():
                     continue
                 try:
-                    record = _RECORD_ADAPTER.validate_json(line)
+                    record = _RECORD_ADAPTER.validate_json(raw)
                 except ValidationError:
                     malformed.append(number)
+                    # Only a file's last line can lack its terminator, so a
+                    # malformed line without one is the write that never
+                    # finished. A malformed line that has one is corruption,
+                    # and says so by setting this back to false.
+                    torn_tail = not raw.endswith(b"\n")
                     continue
                 read += 1
                 collect(record)
-        torn_tail = bool(malformed) and malformed[-1] == number and not newline_terminated
         return LogScan(
             incomplete_final_record=torn_tail,
             malformed_lines=tuple(malformed[:-1] if torn_tail else malformed),

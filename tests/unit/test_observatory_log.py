@@ -974,6 +974,31 @@ class TestScanningWithoutHoldingTheLog:
         assert scan.incomplete_final_record is False
         assert scan.records_read == 2
 
+    def test_a_blank_line_after_damage_means_the_log_did_not_stop_there(
+        self, tmp_path: Path
+    ) -> None:
+        """The tear is a property of the last line. Something was written after
+        this damage — even an empty line — so the write that failed was not the
+        one the log ended on, and truncating the tail would not repair it."""
+        log = self._two_records(tmp_path)
+        log.log_path.write_bytes(log.log_path.read_bytes() + b"{ truncated\n\n")
+
+        scan = log.scan_damage()
+
+        assert scan.incomplete_final_record is False
+        assert scan.malformed_lines == (3,)
+
+    def test_a_record_after_damage_means_the_log_did_not_stop_there(self, tmp_path: Path) -> None:
+        log = self._two_records(tmp_path)
+        first, second = log.log_path.read_bytes().splitlines(keepends=True)
+        log.log_path.write_bytes(first + b"{ truncated\n" + second)
+
+        scan = log.scan_damage()
+
+        assert scan.incomplete_final_record is False
+        assert scan.malformed_lines == (2,)
+        assert scan.records_read == 2
+
     def test_an_absent_log_folds_to_nothing(self, tmp_path: Path) -> None:
         scan = make_log(tmp_path).scan_into(lambda _record: None)
 
