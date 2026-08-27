@@ -72,6 +72,11 @@ class SweepRun(BaseModel):
     #: different in kind: a refused source yielded nothing and says so loudly,
     #: a capped one yielded most of itself and looks finished (issue #172).
     sources_capped: int = Field(default=0, ge=0)
+    #: Sources not asked this sweep because a recorded capture verdict has not
+    #: reached its re-check date (issue #195). Counted, not hidden: a source
+    #: that quietly stopped being asked would read as an archive with nothing
+    #: missing, which is #151's silent zero one level up.
+    sources_held: int = Field(default=0, ge=0)
     captured: int = Field(ge=0)
     failed_fetches: int = Field(ge=0)
     unchanged: int = Field(ge=0)
@@ -97,17 +102,18 @@ class SweepRun(BaseModel):
 
     @model_validator(mode="after")
     def _outcomes_account_for_every_source(self) -> "SweepRun":
-        """Every active source ends in exactly one of completed or refused.
+        """Every active source ends in exactly one of completed, refused or held.
 
-        These are not three independent counters. A record where they disagree
+        These are not independent counters. A record where they disagree
         describes a sweep that cannot have happened, and the disagreement is
         precisely what would let "196 of 198" sit above a refusal count that
         says otherwise.
         """
-        if self.sources_completed + self.sources_refused != self.active_sources:
+        outcomes = self.sources_completed + self.sources_refused + self.sources_held
+        if outcomes != self.active_sources:
             raise ValueError(
                 f"{self.sources_completed} completed + {self.sources_refused} refused "
-                f"!= {self.active_sources} active"
+                f"+ {self.sources_held} held != {self.active_sources} active"
             )
         if self.sources_capped > self.sources_completed:
             raise ValueError(

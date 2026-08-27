@@ -53,6 +53,7 @@ from lovspor.observatory.sweeps import (
     append_sweep_run,
     latest_sweep_run,
     read_sweep_runs,
+    sweeps_path,
 )
 
 runner = CliRunner()
@@ -1986,6 +1987,71 @@ class TestCaptureAll:
         assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
         assert "sources refused: 1" in result.stderr
 
+    def _asker_only_on_the_wire(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """Two activated sources, but only Asker's server is expected to be
+        asked: pytest-httpx refuses any request nothing was registered for, so
+        a fetch to Bærum fails the test rather than passing unnoticed."""
+        _activate(root)
+        _activate_asker(root)
+        httpx_mock.add_response(
+            url=ASKER_ROBOTS_URL,
+            text=f"User-agent: *\nAllow: /\nSitemap: {ASKER_SITEMAP_URL}\n",
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+    def _record_verdict(self, root: Path, **overrides: object) -> None:
+        document = _write_verdict(root / "verdict.json", **overrides)
+        result = runner.invoke(
+            app,
+            ["observatory", "record-verdict", "--id", BAERUM_ID, "--verdict", str(document)],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_a_source_held_under_a_verdict_is_not_asked_until_due(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The verdict is the record of an investigation already done (#195):
+        Bærum is skipped, says so on the report, and the sweep stays green
+        because nothing was left unobserved that could have been."""
+        self._asker_only_on_the_wire(root, httpx_mock)
+        self._record_verdict(root, recheck_after="2126-08-26T18:00:00Z")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert f"held: {BAERUM_ID} under no_machine_reachable_source until 2126-08-26" in (
+            result.output
+        )
+        assert "sources held under a verdict: 1 of 2" in result.output
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+        run = latest_sweep_run(sweeps_path(ObservatoryRoot(root, ())))
+        assert run is not None
+        assert (run.sources_held, run.sources_completed, run.status) == (1, 1, "success")
+
+    def test_a_due_verdict_is_re_checked_and_a_refusal_is_loud_again(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Expiry is the point: a verdict past its re-check date does not
+        spare the source, so the web changing is noticed rather than assumed
+        away. Nothing has changed here, and the refusal is as loud as ever."""
+        self._asker_only_on_the_wire(root, httpx_mock)
+        _robots(httpx_mock, "User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP_URL, status_code=404)
+        self._record_verdict(
+            root, reached_at="2026-01-01T00:00:00Z", recheck_after="2026-02-01T00:00:00Z"
+        )
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert "held:" not in result.output
+        assert f"refused: {BAERUM_ID}" in result.stderr
+        run = latest_sweep_run(sweeps_path(ObservatoryRoot(root, ())))
+        assert run is not None
+        assert (run.sources_held, run.sources_refused, run.status) == (0, 1, "degraded")
+
     def test_limit_is_applied_independently_to_each_source(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
@@ -2721,6 +2787,7 @@ class TestStatus:
             "  completed:  2 / 3\n"
             "  refused:    1\n"
             "  capped:     0\n"
+            "  held:       0\n"
             "  captured:   47 | unchanged: 4218\n"
             "  status:     DEGRADED\n"
             "\nCadence\n"

@@ -702,6 +702,7 @@ class _SweepTotals(NamedTuple):
     failed: int = 0
     unchanged: int = 0
     capped: int = 0
+    held: int = 0
 
     def plus(self, other: "_SweepTotals") -> "_SweepTotals":
         return _SweepTotals(
@@ -710,6 +711,7 @@ class _SweepTotals(NamedTuple):
             failed=self.failed + other.failed,
             unchanged=self.unchanged + other.unchanged,
             capped=self.capped + other.capped,
+            held=self.held + other.held,
         )
 
 
@@ -802,12 +804,36 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
     totals = _SweepTotals()
     for record in active:
         typer.echo(f"== {record.authority_id} {record.name}")
+        if _held(record, started_at):
+            totals = totals.plus(_SweepTotals(held=1))
+            continue
         totals = totals.plus(_sweep_one(fetcher, log, record, observed, limit))
     if totals.refused:
         typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
     if totals.capped:
         typer.echo(f"sources capped: {totals.capped} of {len(active)}", err=True)
+    if totals.held:
+        typer.echo(f"sources held under a verdict: {totals.held} of {len(active)}")
     return _record_sweep(root, started_at, len(active), totals)
+
+
+def _held(record: SourceRecord, now: datetime) -> bool:
+    """Whether a recorded verdict spares this source the sweep, said aloud.
+
+    A verdict that has not reached its re-check date is the record of an
+    investigation already done; sending the source down the same dead path
+    nightly would re-derive it and reach the same silent zero (#195). One that
+    is due is not a skip: the re-check is the deliberate act the expiry
+    exists for, and a source that refuses again refuses loudly.
+    """
+    verdict = record.capture_verdict
+    if verdict is None or verdict.due(now):
+        return False
+    typer.echo(
+        f"  held: {record.authority_id} under {verdict.outcome} "
+        f"until {verdict.recheck_after.isoformat(timespec='seconds')}"
+    )
+    return True
 
 
 def _active_sources() -> list[SourceRecord]:
@@ -851,9 +877,10 @@ def _record_sweep(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         active_sources=active,
-        sources_completed=active - totals.refused,
+        sources_completed=active - totals.refused - totals.held,
         sources_refused=totals.refused,
         sources_capped=totals.capped,
+        sources_held=totals.held,
         captured=totals.captured,
         failed_fetches=totals.failed,
         unchanged=totals.unchanged,
@@ -916,6 +943,7 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(f"  completed:  {run.sources_completed} / {run.active_sources}")
     typer.echo(f"  refused:    {run.sources_refused}")
     typer.echo(f"  capped:     {run.sources_capped}")
+    typer.echo(f"  held:       {run.sources_held}")
     typer.echo(f"  captured:   {run.captured} | unchanged: {run.unchanged}")
     typer.echo(f"  status:     {run.status.upper()}")
 
