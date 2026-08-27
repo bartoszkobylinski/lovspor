@@ -269,8 +269,16 @@ class TestBuildingTheEventFromTheRecord:
         assert event.previous_record_sha256 == record_fingerprint(record)
         assert (event.from_domain, event.to_domain) == ("haugesund.no", "haugesund.kommune.no")
 
-    @pytest.mark.parametrize("field", ["reason", "changed_by"])
-    def test_an_unattributed_or_unexplained_change_is_refused(self, field: str) -> None:
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("reason", ""),
+            ("reason", " \t "),
+            ("changed_by", ""),
+            ("changed_by", " \t "),
+        ],
+    )
+    def test_an_unattributed_or_unexplained_change_is_refused(self, field: str, value: str) -> None:
         """Both are human input about traffic to someone else's server. An
         empty one is not evidence that anybody decided anything, and this
         module never fills one in."""
@@ -281,10 +289,34 @@ class TestBuildingTheEventFromTheRecord:
             "changed_at": CHANGED_AT,
             "changed_by": "Bartosz Kobyliński",
         }
-        arguments[field] = ""
+        arguments[field] = value
 
         with pytest.raises(ParseError, match="refusing to record this replacement"):
             domain_replacement(**arguments)  # type: ignore[arg-type]
+
+    def test_a_name_typed_with_stray_whitespace_is_stored_trimmed(self) -> None:
+        """An event log holding two spellings of one person cannot be grouped
+        by who decided what."""
+        event = domain_replacement(
+            record=activate(_source(), _policy()),
+            to_domain="haugesund.kommune.no",
+            reason=f"  {REASON}\n",
+            changed_at=CHANGED_AT,
+            changed_by="  Bartosz Kobyliński  ",
+        )
+
+        assert event.changed_by == "Bartosz Kobyliński"
+        assert event.reason == REASON
+
+    def test_a_blank_domain_is_refused_like_a_blank_reason(self) -> None:
+        with pytest.raises(ParseError):
+            domain_replacement(
+                record=activate(_source(), _policy()),
+                to_domain="   ",
+                reason=REASON,
+                changed_at=CHANGED_AT,
+                changed_by="Bartosz Kobyliński",
+            )
 
     def test_a_naive_timestamp_is_refused_at_the_boundary(self) -> None:
         with pytest.raises(ParseError):

@@ -3397,6 +3397,82 @@ class TestReplaceSourceDomain:
         assert (record.canonical_domain, record.active) == (BAERUM_DOMAIN, True)
         assert self._events(root) == []
 
+    def test_an_event_log_write_failure_leaves_the_source_safely_deactivated(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The registry is deliberately written first: if recording the
+        decision fails, the old clearance must not remain live."""
+        _activate(root)
+        monkeypatch.setattr(
+            observatory_commands,
+            "append_source_event",
+            Mock(side_effect=OSError("archive unavailable")),
+        )
+
+        result = self._replace()
+
+        assert result.exit_code == 1
+        assert "history is incomplete" in result.stderr
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert (record.canonical_domain, record.access_policy, record.active) == (
+            NEW_BAERUM_DOMAIN,
+            None,
+            False,
+        )
+        assert self._events(root) == []
+
+    def test_a_domain_typed_with_stray_whitespace_reaches_both_records_the_same(
+        self, root: Path
+    ) -> None:
+        """The registry and the event must not disagree about where the source
+        moved to; the argument is normalised once, before either is built."""
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                BAERUM_ID,
+                "--domain",
+                f"  {NEW_BAERUM_DOMAIN}  ",
+                "--reason",
+                "baerum.kommune.no redirects to baerum.no",
+                "--by",
+                "Bartosz Kobyliński",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert record.canonical_domain == NEW_BAERUM_DOMAIN
+        assert self._events(root)[0].to_domain == NEW_BAERUM_DOMAIN
+
+    def test_a_blank_reason_is_refused_like_an_empty_one(self, root: Path) -> None:
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                BAERUM_ID,
+                "--domain",
+                NEW_BAERUM_DOMAIN,
+                "--reason",
+                "   ",
+                "--by",
+                "Bartosz Kobyliński",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "refusing to record this replacement" in result.stderr
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is True
+        assert self._events(root) == []
+
     def test_the_operator_is_told_the_one_step_that_restores_capture(self, root: Path) -> None:
         _activate(root)
 

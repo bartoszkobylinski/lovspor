@@ -356,6 +356,10 @@ def _plan_replacement(
     record as it stands — after the write it would identify the record that
     replaced it, which is the one question the fingerprint is not for.
     """
+    # Stripped once, here, so the registry and the event cannot disagree about
+    # the domain: the event model normalises its own fields, and a record built
+    # from the raw argument would keep whitespace the event had removed.
+    domain = domain.strip()
     try:
         replaced = replace_domain(record, domain)
     except (SourceNotActivatedError, ValidationError) as exc:
