@@ -974,6 +974,19 @@ class TestScanningWithoutHoldingTheLog:
         assert scan.incomplete_final_record is False
         assert scan.records_read == 2
 
+    def test_collection_continues_after_a_malformed_record(self, tmp_path: Path) -> None:
+        log = self._two_records(tmp_path)
+        first, second = log.log_path.read_bytes().splitlines(keepends=True)
+        log.log_path.write_bytes(first + b"{ truncated\n" + second)
+        seen: list[str] = []
+
+        scan = log.scan_into(lambda record: seen.append(record.url))
+
+        assert seen == ["https://example.invalid/f", "https://example.invalid/g"]
+        assert scan.malformed_lines == (2,)
+        assert scan.records_read == 2
+        assert scan.complete is False
+
     def test_a_blank_line_after_damage_means_the_log_did_not_stop_there(
         self, tmp_path: Path
     ) -> None:
