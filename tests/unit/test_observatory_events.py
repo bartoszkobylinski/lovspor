@@ -215,6 +215,18 @@ class TestReadingTheHistory:
 
         assert str(exc.value).startswith(f"{path}:2:")
 
+    def test_malformed_utf8_is_reported_as_log_damage(self, root: ObservatoryRoot) -> None:
+        """The event archive is UTF-8 JSONL. Invalid bytes must not be
+        skipped or escape as an encoding implementation detail."""
+        path = source_events_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'{"event":"source_domain_replaced","reason":"\xff"}\n')
+
+        with pytest.raises(LogIntegrityError, match="unreadable source event") as exc:
+            read_source_events(path)
+
+        assert str(exc.value).startswith(f"{path}:1:")
+
     def test_an_unknown_field_is_damage_too(self, root: ObservatoryRoot) -> None:
         """`extra="forbid"`: a field a newer writer added must not be dropped
         on the floor by an older reader answering from a partial record."""
