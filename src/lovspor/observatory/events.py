@@ -94,10 +94,13 @@ SourceEvent = SourceDomainReplaced
 def record_fingerprint(record: SourceRecord) -> str:
     """Identify a source record by its content.
 
-    Canonicalised exactly as ``write_registry`` writes it — sorted keys, no
-    ASCII escaping — so the fingerprint in an event can be recomputed from an
-    archived ``sources.json`` by anyone with a SHA-256 implementation, without
-    reading this module or running this engine.
+    The recipe is stated here rather than referred to, because it has to be
+    followable by someone holding an archived ``sources.json`` and nothing
+    else: take that record's JSON object, re-serialise it with **sorted keys,
+    no indentation and no ASCII escaping**, encode UTF-8, SHA-256. It is not
+    a substring of the registry file — that one is written with ``indent=2``
+    and wraps the records in a ``version``/``sources`` envelope — so the
+    record must be re-serialised rather than sliced out.
     """
     canonical = json.dumps(record.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

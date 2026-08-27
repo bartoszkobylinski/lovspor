@@ -316,6 +316,17 @@ def activate(source: SourceRecord, check: AccessPolicyCheck) -> SourceRecord:
         ) from exc
 
 
+def _same_domain(one: str, other: str) -> bool:
+    """Whether two spellings name the same domain.
+
+    Compared the way :func:`_host_matches` normalises — case-folded, trailing
+    dot removed — but this is equality, not containment. A subdomain is a
+    different domain: moving a source from ``sub.X`` to ``X`` widens what it
+    covers and is a real migration, so it must not be refused as a no-op.
+    """
+    return one.lower().rstrip(".") == other.lower().rstrip(".")
+
+
 def replace_domain(source: SourceRecord, domain: str) -> SourceRecord:
     """The same authority on a different domain, with its clearance withdrawn.
 
@@ -340,9 +351,7 @@ def replace_domain(source: SourceRecord, domain: str) -> SourceRecord:
             replaces nothing would withdraw a live clearance and report
             success, which is a worse outcome than refusing a typo.
     """
-    if _host_matches(source.canonical_domain, domain) and _host_matches(
-        domain, source.canonical_domain
-    ):
+    if _same_domain(source.canonical_domain, domain):
         raise SourceNotActivatedError(
             f"source {source.authority_id} is already on {source.canonical_domain}"
         )

@@ -1001,6 +1001,19 @@ class TestReplacingTheDomain:
         with pytest.raises(SourceNotActivatedError):
             replace_domain(self._activated(), "HAUGESUND.NO")
 
+    def test_moving_to_a_subdomain_is_a_real_migration(self) -> None:
+        """A subdomain is a different domain. `sub.X` -> `X` widens what the
+        source covers and `X` -> `sub.X` narrows it; refusing either as "already
+        on" would leave an operator no supported way to make the change."""
+        replaced = replace_domain(self._activated(), "www.haugesund.no")
+
+        assert replaced.canonical_domain == "www.haugesund.no"
+        assert replaced.access_policy is None
+
+    def test_a_trailing_dot_does_not_make_it_a_different_domain(self) -> None:
+        with pytest.raises(SourceNotActivatedError):
+            replace_domain(self._activated(), "haugesund.no.")
+
     def test_the_replaced_record_is_a_valid_one(self) -> None:
         """It has to load back out of the registry it is about to be written
         to, or the migration leaves the archive unreadable."""

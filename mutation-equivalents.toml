@@ -268,3 +268,39 @@ justification = """
 explicit `check=False` leaves the call byte-for-byte equivalent in behaviour.
 It is spelled out only because ruff PLW1510 demands an explicit `check`.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/events.py"
+symbol = "record_fingerprint"
+registered = "2026-08-27, PR #203, from run 33075123315"
+mutation = """
+-    canonical = json.dumps(record.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
++    canonical = json.dumps(record.model_dump(mode="json"), sort_keys=True, ensure_ascii=None)
+"""
+justification = """
+The third instance of the falsy-None equivalence already registered for
+record_to_json_line and write_registry: `json.dumps` tests ensure_ascii for
+truth and None is falsy, so None and False select the same encoder. This call
+takes neither of the other two paths — no separators, no indent — so it was
+verified on its own: dumps({"name": "Bærum", ...}, sort_keys=True,
+ensure_ascii=False) and the same call with ensure_ascii=None returned
+byte-identical strings, and the literal æ survived both.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/events.py"
+symbol = "record_fingerprint"
+registered = "2026-08-27, PR #203, from run 33075123315"
+mutation = """
+-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++    return hashlib.sha256(canonical.encode("UTF-8")).hexdigest()
+"""
+justification = """
+Codec names are looked up case-insensitively and normalised before a codec is
+selected: codecs.lookup("UTF-8").name and codecs.lookup("utf-8").name are both
+"utf-8", so the two spellings reach the same encoder and produce the same
+bytes. Verified directly on the string this function hashes, including the
+non-ASCII case: sha256(s.encode("utf-8")).hexdigest() ==
+sha256(s.encode("UTF-8")).hexdigest(). No test can distinguish them, because
+there is no input for which they differ.
+"""

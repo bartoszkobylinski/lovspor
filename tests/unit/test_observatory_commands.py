@@ -3412,7 +3412,12 @@ class TestReplaceSourceDomain:
         result = self._replace()
 
         assert result.exit_code == 1
-        assert "history is incomplete" in result.stderr
+        assert result.stderr == (
+            f"Refused: {BAERUM_ID} was moved to {NEW_BAERUM_DOMAIN} and deactivated, "
+            "but the decision could not be recorded: archive unavailable. The source "
+            "is safe — it has no clearance — but the history is incomplete; record it "
+            "before re-activating.\n"
+        )
         record = read_registry(root / "sources.json").sources[BAERUM_ID]
         assert (record.canonical_domain, record.access_policy, record.active) == (
             NEW_BAERUM_DOMAIN,
@@ -3497,9 +3502,32 @@ class TestReplaceSourceDomain:
         assert self._events(root) == []
 
     def test_the_operator_is_told_the_one_step_that_restores_capture(self, root: Path) -> None:
+        """The report is half of what this command does. A migration leaves the
+        source unfetchable on purpose, so an operator who is not told which
+        record was replaced, or what re-activates it, has been handed a broken
+        source and no way back."""
         _activate(root)
 
         result = self._replace()
 
-        assert "clearance withdrawn" in result.output
-        assert f"activate-source --id {BAERUM_ID}" in result.output
+        fingerprint = self._events(root)[0].previous_record_sha256
+        assert result.output == (
+            f"{BAERUM_ID} (Bærum): {BAERUM_DOMAIN} -> {NEW_BAERUM_DOMAIN}\n"
+            "  clearance withdrawn; the source is inactive and will not be swept\n"
+            f"  replaced record {fingerprint[:12]} recorded in the event log\n"
+            f"Next: review {NEW_BAERUM_DOMAIN} and run\n"
+            f"  lovspor observatory activate-source --id {BAERUM_ID} --check <check>.json\n"
+        )
+
+    def test_the_reported_fingerprint_identifies_the_record_that_was_replaced(
+        self, root: Path
+    ) -> None:
+        """Twelve hex digits, and they must be the ones an operator can match
+        against the event log — a prefix of some other hash would be worse than
+        printing nothing."""
+        _activate(root)
+        before = read_registry(root / "sources.json").sources[BAERUM_ID]
+
+        result = self._replace()
+
+        assert f"  replaced record {record_fingerprint(before)[:12]} " in result.output
