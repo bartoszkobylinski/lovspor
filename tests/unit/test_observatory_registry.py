@@ -806,6 +806,27 @@ class TestReadingAVerdictDocument:
 
         assert read_capture_verdict(path).outcome == "no_machine_reachable_source"
 
+    def test_document_is_read_with_an_explicit_utf8_encoding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verdicts are portable records, not documents in the host locale."""
+        path = tmp_path / "verdict.json"
+        document = json.dumps(verdict_document())
+        encodings: list[str | None] = []
+        original_read_text = Path.read_text
+
+        def recording_read_text(
+            target: Path, encoding: str | None = None, errors: str | None = None
+        ) -> str:
+            encodings.append(encoding)
+            return original_read_text(target, encoding=encoding, errors=errors)
+
+        path.write_text(document, encoding="utf-8")
+        monkeypatch.setattr(Path, "read_text", recording_read_text)
+
+        assert read_capture_verdict(path).outcome == "no_machine_reachable_source"
+        assert encodings == ["utf-8"]
+
     def test_a_schema_violation_is_a_parse_error(self, tmp_path: Path) -> None:
         path = tmp_path / "verdict.json"
         path.write_text(json.dumps(verdict_document(routes_checked=[])), encoding="utf-8")
