@@ -304,3 +304,35 @@ non-ASCII case: sha256(s.encode("utf-8")).hexdigest() ==
 sha256(s.encode("UTF-8")).hexdigest(). No test can distinguish them, because
 there is no input for which they differ.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "_same_domain"
+registered = "2026-08-27, PR #203, from run 33079011317"
+mutation = """
+-    return one.lower().rstrip(".") == other.lower().rstrip(".")
++    return one.lower().rstrip("XX.XX") == other.lower().rstrip(".")
+"""
+justification = """
+The same lowercase-then-strip equivalence already registered twice for
+_host_matches, in the function that replaced its two-containment spelling of
+equality. rstrip takes a CHARACTER SET, so "XX.XX" is the set {X, .}; `.lower()`
+runs on the same expression and never yields an uppercase ASCII X, so the added
+member can never match. Verified on the strings this function actually sees,
+including a trailing root dot: "haugesund.no", "haugesund.no.",
+"x.haugesund.nox" and "ovre-eiker.kommune.no" all rstrip identically under both
+sets.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/registry.py"
+symbol = "_same_domain"
+registered = "2026-08-27, PR #203, from run 33079011317"
+mutation = """
+-    return one.lower().rstrip(".") == other.lower().rstrip(".")
++    return one.lower().rstrip(".") == other.lower().rstrip("XX.XX")
+"""
+justification = """
+The same mutation on the other operand, equivalent for the same reason:
+lowercased input cannot contain the uppercase X the mutated set adds.
+"""

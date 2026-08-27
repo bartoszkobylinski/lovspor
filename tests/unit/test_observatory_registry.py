@@ -1011,8 +1011,49 @@ class TestReplacingTheDomain:
         assert replaced.access_policy is None
 
     def test_a_trailing_dot_does_not_make_it_a_different_domain(self) -> None:
+        """The root dot is DNS syntax for the same name, so `X.` and `X` are
+        one domain — whichever side it is typed on."""
         with pytest.raises(SourceNotActivatedError):
             replace_domain(self._activated(), "haugesund.no.")
+
+    def test_a_trailing_dot_on_the_registered_side_is_normalised_too(self) -> None:
+        """The mirror of the case above. Normalising only the argument would
+        let a source registered as `X.` be "migrated" to `X` — a replacement
+        that replaces nothing, withdrawing a live clearance for a typo."""
+        record = SourceRecord(
+            authority_type="kommune",
+            authority_id="1106",
+            name="Haugesund",
+            canonical_domain="haugesund.no.",
+        )
+        activated = activate(record, check(robots_txt_url="https://www.haugesund.no/robots.txt"))
+
+        with pytest.raises(SourceNotActivatedError):
+            replace_domain(activated, "haugesund.no")
+
+    def test_case_is_normalised_on_the_registered_side_too(self) -> None:
+        """Domains are case-insensitive, and the registry can hold either
+        spelling. Folding only the argument would let a source registered as
+        `X` in capitals be "migrated" to the same name in lower case, which
+        withdraws a live clearance and changes nothing."""
+        record = SourceRecord(
+            authority_type="kommune",
+            authority_id="1106",
+            name="Haugesund",
+            canonical_domain="HAUGESUND.NO",
+        )
+        activated = activate(record, check(robots_txt_url="https://www.haugesund.no/robots.txt"))
+
+        with pytest.raises(SourceNotActivatedError):
+            replace_domain(activated, "haugesund.no")
+
+    def test_a_leading_dot_is_a_different_domain(self) -> None:
+        """Only the trailing root dot is syntax. A leading one is malformed,
+        and stripping it would silently equate two spellings that name
+        different things."""
+        replaced = replace_domain(self._activated(), ".haugesund.no")
+
+        assert replaced.canonical_domain == ".haugesund.no"
 
     def test_the_replaced_record_is_a_valid_one(self) -> None:
         """It has to load back out of the registry it is about to be written
