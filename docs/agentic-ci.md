@@ -49,7 +49,7 @@ gh api "repos/bartoszkobylinski/lovspor/rulesets/rule-suites/$sid" \
 
 ```text
 PR opened/synchronize
-  ├─ fast-ci        (ubuntu, 3.12: ruff, mypy, unit tests)
+  ├─ fast-ci        (ubuntu, 3.12: conflict-marker check, ruff, mypy, unit tests)
   ├─ Test           (existing workflow, matrix 3.12–3.14 — unchanged)
   ├─ codex-tests    (self-hosted `codex` runner: independent test author)
   │     └─ pushes `[agent:codex-tests]` → fresh synchronize run, old run cancelled

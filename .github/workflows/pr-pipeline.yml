@@ -31,6 +31,14 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
+      - name: No committed conflict markers
+        # docs/architecture.md carried an unresolved merge block on main for a week
+        # (issue #196); nothing read it and nothing checked it.
+        run: |
+          if git grep -nE '^(<{7}|>{7}) ' -- .; then
+            echo '::error::unresolved merge-conflict markers are committed'
+            exit 1
+          fi
       - name: Ruff lint
         run: uv run ruff check
 
