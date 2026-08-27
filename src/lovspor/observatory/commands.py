@@ -33,6 +33,11 @@ from lovspor.errors import (
 )
 from lovspor.exclusive_workload import ExclusiveWorkloadHeldError, exclusive_workload
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
+from lovspor.observatory.events import (
+    SourceDomainReplaced,
+    append_source_event,
+    domain_replacement,
+)
 from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import collect_latest_observations, worth_capturing
 from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
@@ -47,6 +52,7 @@ from lovspor.observatory.registry import (
     read_capture_verdict,
     read_registry,
     registry_path,
+    replace_domain,
     write_registry,
 )
 from lovspor.observatory.storage import ObservatoryRoot, observatory_root
@@ -339,6 +345,106 @@ def _read_verdict(path: Path) -> CaptureVerdict:
     except OSError as exc:
         typer.echo(f"Refused: cannot read the capture verdict at {path}: {exc}", err=True)
         raise typer.Exit(1) from exc
+
+
+def _plan_replacement(
+    record: SourceRecord, domain: str, reason: str, changed_by: str
+) -> tuple[SourceRecord, SourceDomainReplaced]:
+    """The record after the move and the event describing it, or a refusal.
+
+    Both are built before anything is written, and the event fingerprints the
+    record as it stands — after the write it would identify the record that
+    replaced it, which is the one question the fingerprint is not for.
+    """
+    try:
+        replaced = replace_domain(record, domain)
+    except (SourceNotActivatedError, ValidationError) as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    try:
+        event = domain_replacement(
+            record=record,
+            to_domain=domain,
+            reason=reason,
+            changed_at=datetime.now(UTC),
+            changed_by=changed_by,
+        )
+    except ParseError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    return replaced, event
+
+
+def _record_replacement(root: ObservatoryRoot, event: SourceDomainReplaced) -> None:
+    """Append the decision, and say plainly when the archive would not take it.
+
+    Written after the registry, not before. The registry change only ever
+    *removes* clearance, so a change that lands without its event leaves the
+    engine more restrictive than the record claims — visibly, since the source
+    now reads inactive. The other order would let an event describe a
+    withdrawal that never happened while the source kept crawling the old
+    domain under its old clearance, which is the failure worth avoiding.
+    """
+    try:
+        append_source_event(root, event)
+    except OSError as exc:
+        typer.echo(
+            f"Refused: {event.authority_id} was moved to {event.to_domain} and deactivated, "
+            f"but the decision could not be recorded: {exc}. The source is safe — it has no "
+            "clearance — but the history is incomplete; record it before re-activating.",
+            err=True,
+        )
+        raise typer.Exit(1) from exc
+
+
+@observatory_app.command("replace-source-domain")
+def replace_source_domain(
+    authority_id: _AuthorityIdOption,
+    domain: Annotated[
+        str, typer.Option("--domain", help="The domain this authority publishes on now.")
+    ],
+    reason: Annotated[
+        str, typer.Option("--reason", help="Why it moved. Recorded verbatim, not paraphrased.")
+    ],
+    changed_by: Annotated[
+        str, typer.Option("--by", help="Who decided. Never synthesised from the environment.")
+    ],
+) -> None:
+    """Move an authority to a different domain, withdrawing its clearance.
+
+    A municipality that starts redirecting to another domain cannot simply
+    have `canonical_domain` edited: the access-policy check answers about the
+    old host, and leaving it in place would let a clearance obtained for one
+    server authorise traffic to another (issue #166). So the move is one
+    operation — new domain, no policy, inactive, entry points dropped — and
+    capture resumes only after a fresh `activate-source` on a fresh review.
+
+    The decision is appended to `source-events.jsonl` with the fingerprint of
+    the record it replaced, because `sources.json` is current state and cannot
+    say what was withdrawn.
+    """
+    root = _root()
+    path = registry_path(root)
+    registry = _load(path)
+    record = registry.sources.get(authority_id)
+    if record is None:
+        typer.echo(f"{authority_id} is not registered; run register-source first.", err=True)
+        raise typer.Exit(1)
+    replaced, event = _plan_replacement(record, domain, reason, changed_by)
+    _save({**registry.sources, authority_id: replaced}, path)
+    _record_replacement(root, event)
+    _echo_replacement(replaced, event)
+
+
+def _echo_replacement(replaced: SourceRecord, event: SourceDomainReplaced) -> None:
+    """What changed, and the one step that makes the source fetchable again."""
+    typer.echo(f"{event.authority_id} ({replaced.name}): {event.from_domain} -> {event.to_domain}")
+    typer.echo("  clearance withdrawn; the source is inactive and will not be swept")
+    typer.echo(f"  replaced record {event.previous_record_sha256[:12]} recorded in the event log")
+    typer.echo(
+        f"Next: review {event.to_domain} and run\n"
+        f"  lovspor observatory activate-source --id {event.authority_id} --check <check>.json"
+    )
 
 
 @observatory_app.command("sources")

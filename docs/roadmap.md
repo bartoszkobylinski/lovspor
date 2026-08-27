@@ -71,8 +71,9 @@ What is on `main`:
 
 - `src/lovspor/observatory/` — `model`, `storage`, `log`, `registry`, `fetch`, `discovery`,
   `freshness`, `commands`.
-- CLI: `register-source`, `activate-source`, `update-source`, `record-verdict`, `sources`,
-  `discover`, `capture`, `capture-all`, `nightly`, `verify`, `repair`, `status`.
+- CLI: `register-source`, `activate-source`, `update-source`, `replace-source-domain`,
+  `record-verdict`, `sources`, `discover`, `capture`, `capture-all`, `nightly`, `verify`,
+  `repair`, `status`.
 - **Every sweep records itself** in `sweep-runs.jsonl` beside the registry — process telemetry,
   not an observation — because the observation log cannot answer whether the sweep ran at all: a
   sweep that never started leaves no trace in it by construction. `status` reads that back and
@@ -213,10 +214,12 @@ Grouped by source availability (restructured 2026-05-18 — see Class D for exec
   captured nothing and looked fine; here it captured most of itself and looks finished.
 - **Observatory discovery is sitemap-only (#151).** A source that publishes no sitemap captures
   nothing, which at fleet scale reads identically to a source that published nothing.
-- **A source that moved domains has no safe migration (#166).** Changing `canonical_domain`
-  by hand would let a clearance obtained for the old domain authorise traffic to the new one;
-  nothing validates that the recorded access-policy check was performed for the domain now in
-  force.
+- **A source that moved domains — CLOSED (#166).** `replace-source-domain` moves the domain,
+  withdraws the clearance and records the decision in `source-events.jsonl`; the access-policy
+  check is now bound to the domain it was performed for, so a hand-edited `canonical_domain`
+  is refused rather than silently authorising traffic to a host nobody reviewed. What is still
+  open is surfacing an observed cross-domain redirect as a migration candidate, so an operator
+  learns about it from `sources` rather than from the log.
 
 ### Distribution
 - **PyPI local distribution — WITHDRAWN 2026-07-14, RESUMED 2026-08-03.** Versions `0.2.0`–`0.3.0` shipped, then were removed when the engine moved to a private hosted-service strategy. Distribution resumed with the open-infrastructure publication: `0.4.0` is live on PyPI via Trusted Publishing (`uvx lovspor` / `pip install lovspor` — see `docs/releasing.md`), so this is no longer a gap.

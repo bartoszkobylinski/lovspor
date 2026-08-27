@@ -34,6 +34,11 @@ from lovspor.observatory.commands import (
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
+from lovspor.observatory.events import (
+    read_source_events,
+    record_fingerprint,
+    source_events_path,
+)
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.log import ObservationLog
@@ -3220,3 +3225,182 @@ class TestCapture:
         assert result.exit_code == 1
         assert "not an activated source" in result.stderr
         assert httpx_mock.get_requests() == []
+
+
+NEW_BAERUM_DOMAIN = "baerum.no"
+NEW_BAERUM_ROBOTS = f"https://www.{NEW_BAERUM_DOMAIN}/robots.txt"
+
+
+class TestReplaceSourceDomain:
+    """Issue #166. A municipality that starts redirecting to another domain
+    cannot have `canonical_domain` edited: the review answers about the old
+    host, and leaving it in place would let a clearance obtained for one
+    server authorise traffic to another. The supported route withdraws the
+    clearance and records the decision."""
+
+    def _replace(self, *extra: str) -> Result:
+        return runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                BAERUM_ID,
+                "--domain",
+                NEW_BAERUM_DOMAIN,
+                "--reason",
+                "baerum.kommune.no redirects to baerum.no",
+                "--by",
+                "Bartosz Kobyliński",
+                *extra,
+            ],
+        )
+
+    def _events(self, root: Path) -> list[object]:
+        return list(read_source_events(source_events_path(ObservatoryRoot(root, ()))))
+
+    def test_the_domain_moves_and_the_clearance_is_withdrawn(self, root: Path) -> None:
+        _activate(root)
+
+        result = self._replace()
+
+        assert result.exit_code == 0, result.output
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert record.canonical_domain == NEW_BAERUM_DOMAIN
+        assert record.access_policy is None
+        assert record.active is False
+
+    def test_the_decision_is_recorded_with_what_it_replaced(self, root: Path) -> None:
+        """`sources.json` is current state and cannot say what was withdrawn;
+        the fingerprint identifies the record by content, not by timestamp."""
+        _activate(root)
+        before = read_registry(root / "sources.json").sources[BAERUM_ID]
+
+        self._replace()
+
+        recorded = self._events(root)
+        assert len(recorded) == 1
+        event = recorded[0]
+        assert event.authority_id == BAERUM_ID
+        assert (event.from_domain, event.to_domain) == (BAERUM_DOMAIN, NEW_BAERUM_DOMAIN)
+        assert event.reason == "baerum.kommune.no redirects to baerum.no"
+        assert event.changed_by == "Bartosz Kobyliński"
+        assert event.previous_record_sha256 == record_fingerprint(before)
+
+    def test_the_old_clearance_cannot_activate_the_new_domain(self, root: Path) -> None:
+        """The property the whole command exists for, asked the way an
+        operator would: re-activating with the check that is already on disk
+        must fail, because that check was performed against the old host."""
+        _activate(root)
+        stale = _write_check(root / "stale.json", _check_document())
+        self._replace()
+
+        result = runner.invoke(
+            app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(stale)]
+        )
+
+        assert result.exit_code == 1
+        assert "was not performed for" in result.stderr
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is False
+
+    def test_a_review_of_the_new_domain_activates_it(self, root: Path) -> None:
+        _activate(root)
+        self._replace()
+        fresh = _write_check(
+            root / "fresh.json",
+            {**_check_document(), "robots_txt_url": NEW_BAERUM_ROBOTS},
+        )
+
+        result = runner.invoke(
+            app, ["observatory", "activate-source", "--id", BAERUM_ID, "--check", str(fresh)]
+        )
+
+        assert result.exit_code == 0, result.output
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert record.active is True
+        assert record.canonical_domain == NEW_BAERUM_DOMAIN
+
+    def test_declared_listings_do_not_survive_the_move(self, root: Path) -> None:
+        _activate(root)
+        runner.invoke(
+            app,
+            [
+                "observatory",
+                "update-source",
+                "--id",
+                BAERUM_ID,
+                "--add-listing",
+                f"https://www.{BAERUM_DOMAIN}/kunngjoringer",
+            ],
+        )
+
+        self._replace()
+
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].listing_entry_points == ()
+
+    def test_an_unregistered_source_is_refused(self, root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+
+        result = self._replace()
+
+        assert result.exit_code == 1
+        assert "not registered" in result.stderr
+
+    def test_replacing_a_domain_with_itself_is_refused_and_writes_nothing(self, root: Path) -> None:
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                BAERUM_ID,
+                "--domain",
+                BAERUM_DOMAIN,
+                "--reason",
+                "no reason at all",
+                "--by",
+                "Bartosz Kobyliński",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "already on" in result.stderr
+        assert read_registry(root / "sources.json").sources[BAERUM_ID].active is True
+        assert self._events(root) == []
+
+    def test_an_unattributed_change_is_refused_before_anything_is_written(self, root: Path) -> None:
+        """The registry must not move on a decision the history cannot hold —
+        the refusal happens while both are still unwritten."""
+        _activate(root)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                BAERUM_ID,
+                "--domain",
+                NEW_BAERUM_DOMAIN,
+                "--reason",
+                "baerum.kommune.no redirects to baerum.no",
+                "--by",
+                "",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "refusing to record this replacement" in result.stderr
+        record = read_registry(root / "sources.json").sources[BAERUM_ID]
+        assert (record.canonical_domain, record.active) == (BAERUM_DOMAIN, True)
+        assert self._events(root) == []
+
+    def test_the_operator_is_told_the_one_step_that_restores_capture(self, root: Path) -> None:
+        _activate(root)
+
+        result = self._replace()
+
+        assert "clearance withdrawn" in result.output
+        assert f"activate-source --id {BAERUM_ID}" in result.output

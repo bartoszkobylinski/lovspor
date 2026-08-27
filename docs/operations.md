@@ -466,6 +466,57 @@ test and are skipped.
 This was found in the bootstrap: seven municipalities, Bergen among them, stopped at the
 lane's round cap and were recorded as complete.
 
+### When an authority moves to another domain (issue #166)
+
+`haugesund.no` officially redirects to `haugesund.kommune.no`. The redirect leaves the cleared
+domain, so the fetcher refuses to follow it and the source yields nothing while still counting
+as active. Editing `canonical_domain` is not the fix: the access-policy check answers about the
+old host — the reviewer read *its* `robots.txt` and *its* terms — and leaving that check in
+place would let a clearance obtained for one server authorise traffic to another.
+
+```bash
+uv run lovspor observatory replace-source-domain \
+    --id 1106 \
+    --domain haugesund.kommune.no \
+    --reason "official haugesund.no redirects to haugesund.kommune.no" \
+    --by "Bartosz Kobyliński"
+```
+
+One operation, because the parts are not independently safe. The domain changes, the
+access-policy check is removed, the source is deactivated, and the declared listing entry
+points and any capture verdict are dropped — all of them were obtained for a host that is no
+longer this source's. Capture resumes only after a fresh review:
+
+```bash
+uv run lovspor observatory activate-source --id 1106 --check haugesund-kommune-no.json
+```
+
+Handing that command the *old* check is refused, not accepted: the check names the
+`robots.txt` it was performed against, and a record whose clearance points outside its own
+domain does not validate. That is enforced in the model, so a hand-edited `sources.json`
+refuses to load rather than granting what the command would not.
+
+The decision itself goes to `source-events.jsonl` beside the registry — append-only, one JSON
+object per line, locked and fsynced like the observation log:
+
+```json
+{"event":"source_domain_replaced","authority_id":"1106",
+ "from_domain":"haugesund.no","to_domain":"haugesund.kommune.no",
+ "reason":"official haugesund.no redirects to haugesund.kommune.no",
+ "changed_at":"2026-08-24T11:00:00Z","changed_by":"Bartosz Kobyliński",
+ "previous_record_sha256":"…"}
+```
+
+`sources.json` is rewritten whole by every command, so it is current state and cannot answer
+"what was withdrawn, and on whose word". The three artifacts split the job: `sources.json` what
+is true now, `source-events.jsonl` what an operator decided, `observations.jsonl` what the
+servers actually did. The fingerprint is the SHA-256 of the replaced record in the same
+canonical JSON the registry is written in, so it can be recomputed from an archived
+`sources.json` without this engine.
+
+`--reason` and `--by` are mandatory and never synthesised. This is a human decision about
+traffic to someone else's server, and an unattributed one is not evidence that anybody made it.
+
 ### A source found to publish nothing machine-reachable (issue #195)
 
 A source that was activated, crawled, and found to publish nothing a machine can reach —

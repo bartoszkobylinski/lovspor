@@ -213,6 +213,36 @@ class SourceRecord(BaseModel):
         return host is not None and _host_matches(host, self.canonical_domain)
 
     @model_validator(mode="after")
+    def _the_clearance_belongs_to_the_domain_it_was_given_for(self) -> "SourceRecord":
+        """Refuse a record whose access-policy check answers about another domain.
+
+        The check answers one question — may *this* domain be crawled, on
+        these terms, at this rate — and the domain it answered for is the host
+        of the ``robots.txt`` the reviewer read. Nothing tied the two together
+        before, so swapping ``canonical_domain`` and leaving the check in
+        place let a clearance obtained for ``haugesund.no`` authorise traffic
+        to ``haugesund.kommune.no`` (issue #166). One field edited by hand,
+        and the review that gates every request is answering about a server
+        nobody looked at.
+
+        Refused in the type, like every other clearance rule here, so a
+        hand-edited registry gets the same answer as code: a domain change
+        withdraws the clearance, and only a fresh review restores it.
+        """
+        policy = self.access_policy
+        if policy is None:
+            return self
+        host = urlsplit(policy.robots_txt_url).hostname
+        if host is None or not _host_matches(host, self.canonical_domain):
+            raise ValueError(
+                f"source {self.authority_id} carries an access-policy check performed "
+                f"against {policy.robots_txt_url} , which is outside "
+                f"{self.canonical_domain}; a domain change needs a fresh review "
+                "(replace-source-domain, then activate-source)"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _active_requires_clearance(self) -> "SourceRecord":
         """Refuse an active source whose access-policy record does not clear it.
 
@@ -272,6 +302,58 @@ def activate(source: SourceRecord, check: AccessPolicyCheck) -> SourceRecord:
         )
     data = source.model_dump()
     data.update(access_policy=check.model_dump(), active=True)
+    try:
+        return SourceRecord.model_validate(data)
+    except ValidationError as exc:
+        # The record was valid on the way in and only the clearance changed,
+        # so the one rule left to break is the domain binding: a check read
+        # against some other host. That is an operator handing over the wrong
+        # document, not a bug, and it belongs in the same refusal as a check
+        # that does not permit capture (issue #166).
+        raise SourceNotActivatedError(
+            f"the access-policy check for {source.authority_id} was not performed for "
+            f"{source.canonical_domain}: {exc}"
+        ) from exc
+
+
+def replace_domain(source: SourceRecord, domain: str) -> SourceRecord:
+    """The same authority on a different domain, with its clearance withdrawn.
+
+    One operation rather than three, because the three are not independently
+    safe. The clearance, the activation and the entry points were all obtained
+    for the old domain: a review of its terms, a decision to send traffic, and
+    pages someone confirmed list documents. None of that transfers to a host
+    nobody has looked at, and leaving any of it in place is what would let a
+    migration quietly authorise the new domain (issue #166).
+
+    The capture verdict goes for the same reason (issue #195): "this source
+    publishes nothing a machine can reach" was concluded about the old host,
+    from routes checked there. Carried across, it would hold a server nobody
+    has looked at out of every sweep, under evidence that is not about it.
+
+    So the record comes back inactive, with no policy, no entry points and no
+    verdict, and the only route to capturing the new domain is a fresh
+    ``activate-source`` on a fresh review — which is the point.
+
+    Raises:
+        SourceNotActivatedError: the domain is unchanged. A replacement that
+            replaces nothing would withdraw a live clearance and report
+            success, which is a worse outcome than refusing a typo.
+    """
+    if _host_matches(source.canonical_domain, domain) and _host_matches(
+        domain, source.canonical_domain
+    ):
+        raise SourceNotActivatedError(
+            f"source {source.authority_id} is already on {source.canonical_domain}"
+        )
+    data = source.model_dump()
+    data.update(
+        canonical_domain=domain,
+        access_policy=None,
+        active=False,
+        listing_entry_points=(),
+        capture_verdict=None,
+    )
     return SourceRecord.model_validate(data)
 
 
