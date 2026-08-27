@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,59 @@ def _steps(workflow_name: str, job_name: str) -> list[dict[str, Any]]:
 
 def _named_step(steps: list[dict[str, Any]], name: str) -> dict[str, Any]:
     return next(step for step in steps if step.get("name") == name)
+
+
+def test_fast_ci_rejects_committed_conflict_markers_before_lint(tmp_path: Path) -> None:
+    steps = _steps("pr-pipeline.yml", "fast-ci")
+    names = [step.get("name") for step in steps]
+    gate = _named_step(steps, "No committed conflict markers")
+
+    assert names.index(gate["name"]) < names.index("Ruff lint")
+
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    tracked = tmp_path / "tracked.txt"
+    tracked.write_text("<<<<<<< HEAD\nkept\n=======\nother\n>>>>>>> branch\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+
+    result = subprocess.run(
+        ["bash", "-eu", "-o", "pipefail", "-c", gate["run"]],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "tracked.txt:1:<<<<<<< HEAD" in result.stdout
+    assert "tracked.txt:5:>>>>>>> branch" in result.stdout
+    assert "::error::unresolved merge-conflict markers are committed" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "ordinary text\n=======\n",
+        "example: <<<<<<< HEAD\n",
+        "<<<<<<<HEAD\n>>>>>>>branch\n",
+    ],
+)
+def test_fast_ci_conflict_marker_gate_accepts_non_marker_boundaries(
+    tmp_path: Path, contents: str
+) -> None:
+    gate = _named_step(_steps("pr-pipeline.yml", "fast-ci"), "No committed conflict markers")
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text(contents, encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+
+    result = subprocess.run(
+        ["bash", "-eu", "-o", "pipefail", "-c", gate["run"]],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(
