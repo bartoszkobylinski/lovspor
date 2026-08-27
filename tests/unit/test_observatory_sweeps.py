@@ -293,6 +293,7 @@ class TestDamageIsRefused:
             "sources_completed",
             "sources_refused",
             "sources_capped",
+            "sources_held",
             "captured",
             "failed_fetches",
             "unchanged",

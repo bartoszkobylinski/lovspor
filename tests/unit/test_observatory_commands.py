@@ -1620,6 +1620,27 @@ class TestRecordVerdict:
         assert result.exit_code == 1
         assert "Refused" in result.stderr
 
+    def test_a_verdict_path_that_is_a_directory_is_refused_not_crashed(self, root: Path) -> None:
+        _activate(root)
+        verdict_dir = root / "a-directory"
+        verdict_dir.mkdir()
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "record-verdict",
+                "--id",
+                BAERUM_ID,
+                "--verdict",
+                str(verdict_dir),
+            ],
+        )
+
+        assert isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1
+        assert "Refused: cannot read the capture verdict" in result.stderr
+
     def test_recording_a_verdict_reports_when_it_must_be_rechecked(self, root: Path) -> None:
         """The expiry is the point, so the operator sees it at the moment they
         record the verdict rather than discovering it in a file later."""
@@ -2821,6 +2842,9 @@ class TestStatus:
 
     def test_sweep_totals_add_capped_sources(self) -> None:
         assert _SweepTotals(capped=1).plus(_SweepTotals(capped=2)).capped == 3
+
+    def test_sweep_totals_add_held_sources(self) -> None:
+        assert _SweepTotals(held=1).plus(_SweepTotals(held=2)).held == 3
 
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case
