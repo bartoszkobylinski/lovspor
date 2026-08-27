@@ -2757,6 +2757,29 @@ class TestCapture:
         assert "captured: 0 | failed: 0 | unchanged since last seen: 1" in second.output
         assert [str(r.url) for r in httpx_mock.get_requests()].count(PAGE_URL) == 1
 
+    def test_only_this_sources_own_sightings_can_hold_a_page_back(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #199. The freshness fold is narrowed to the source being
+        captured, so a sighting filed under another authority does not answer
+        for this one. The narrowing can only lose a sighting, and a lost
+        sighting re-fetches — the direction freshness always errs in."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL, content=_urlset(PAGE_URL, lastmod="2020-01-01"), is_reusable=True
+        )
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+        log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
+        foreign = _observation(b"<html>forskrift</html>", PAGE_URL).model_copy(
+            update={"authority_id": "9999"}
+        )
+        log.append(foreign)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+
     def test_a_page_changed_since_the_last_run_is_fetched_again(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:

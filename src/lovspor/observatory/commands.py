@@ -34,7 +34,7 @@ from lovspor.errors import (
 from lovspor.exclusive_workload import ExclusiveWorkloadHeldError, exclusive_workload
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
 from lovspor.observatory.fetch import Fetcher
-from lovspor.observatory.freshness import latest_observations, worth_capturing
+from lovspor.observatory.freshness import collect_latest_observations, worth_capturing
 from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.model import ArtifactObservation
@@ -523,7 +523,7 @@ def repair(
     machine where the answer is "do not touch this".
     """
     log = ObservationLog(_root())
-    scan = log.scan()
+    scan = log.scan_damage()
     if scan.malformed_lines:
         numbers = ", ".join(str(number) for number in scan.malformed_lines)
         typer.echo(
@@ -537,7 +537,7 @@ def repair(
         return
     raw = log.log_path.read_bytes()
     unfinished = raw.rpartition(b"\n")[2]
-    typer.echo(f"unfinished final record: {len(unfinished)} bytes, {len(scan.records)} intact")
+    typer.echo(f"unfinished final record: {len(unfinished)} bytes, {scan.records_read} intact")
     if not apply:
         typer.echo("dry run — nothing written. Re-run with --apply to remove it.")
         return
@@ -608,24 +608,44 @@ def capture(
     """
     record = _activated_source(authority_id)
     log = ObservationLog(_root())
-    scan = log.scan()
-    if not scan.complete:
-        typer.echo(
-            "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
-        )
-        raise typer.Exit(1)
+    observed = _observed_urls(log, record.authority_id)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
     starts = _entry_points(fetcher, record, None)
     result = Discoverer(fetcher, log).discover(record, starts.urls)
     _require_documents(record, result, starts.probed)
     typer.echo(f"candidates: {len(result.candidates)}")
-    counts = _capture_candidates(
-        fetcher, result.candidates, latest_observations(scan.records), limit
-    )
+    counts = _capture_candidates(fetcher, result.candidates, observed, limit)
     typer.echo(
         f"captured: {counts.captured} | failed: {counts.failed} "
         f"| unchanged since last seen: {counts.unchanged}"
     )
+
+
+def _observed_urls(log: ObservationLog, authority_id: str | None) -> dict[str, datetime]:
+    """When each URL was last seen with content, or refuse a damaged log.
+
+    Folded out of the log rather than materialised from it. The map is the
+    whole reason the log is read here, and it is smaller than the log by
+    orders of magnitude — 81,408 URLs against 610,850 records when this was
+    written, which `capture` re-read in full, every round, at 2.13 GB a time
+    (issue #199).
+
+    ``authority_id`` narrows the fold to the source being captured; None asks
+    about every source, which is what a sweep over the whole register needs.
+
+    The damaged-log refusal lives here because both callers must make it, and
+    must make it identically: a fold that quietly skipped unreadable lines
+    would answer "never seen" for pages the archive holds, and every one of
+    them would be re-fetched as though the observation had never happened.
+    """
+    observed: dict[str, datetime] = {}
+    scan = log.scan_into(collect_latest_observations(observed, authority_id))
+    if not scan.complete:
+        typer.echo(
+            "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
+        )
+        raise typer.Exit(1)
+    return observed
 
 
 class _SweepTotals(NamedTuple):
@@ -762,13 +782,7 @@ def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, dict[str, date
     not even mounted".
     """
     log = ObservationLog(root)
-    scan = log.scan()
-    if not scan.complete:
-        typer.echo(
-            "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
-        )
-        raise typer.Exit(1)
-    return log, latest_observations(scan.records)
+    return log, _observed_urls(log, None)
 
 
 def _record_sweep(
@@ -886,7 +900,7 @@ def _preflight(root: ObservatoryRoot) -> str | None:
         return _REGISTRY_MISSING
     if not any(record.active for record in _load(registry_path(root)).sources.values()):
         return _NO_ACTIVE_SOURCES
-    if not ObservationLog(root).scan().complete:
+    if not ObservationLog(root).scan_damage().complete:
         return _LOG_DAMAGED
     return None
 

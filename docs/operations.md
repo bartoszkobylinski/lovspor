@@ -240,6 +240,25 @@ thousands.
 A damaged log is refused before anything is fetched: appending thousands of
 records would bury the damage. Run `observatory verify` first.
 
+### What a capture costs the machine it runs on
+
+Before it fetches anything, `capture` reads the observation log once to learn
+when each of this source's URLs was last seen. That reading is a stream and
+the freshness map is narrowed to the source being captured, so the memory it
+needs is the size of the answer rather than the size of the archive — 70 MB
+against a 390 MB log holding 610,850 records (issue #199). The parse itself
+still walks every line, because the completeness guarantee depends on it:
+budget a few seconds per invocation, growing with the archive.
+
+That per-invocation cost is what decides how many captures may run at once.
+Bounding a pass with `--limit` and looping pays it again on every round, so a
+lane that captures in batches of 100 re-reads the log every 100 fetches.
+Before this was measured, twenty-four parallel lanes on a 16 GB machine asked
+for roughly 51 GB between them and completed no rounds at all in thirty-four
+minutes — every lane sat in swap instead of fetching. Prefer few lanes and
+`ROUNDS_MAX=0`, and remember that a lane spends nearly all of its wall clock
+waiting out `rate_limit_seconds`, not working.
+
 ## Observatory: after an interrupted run
 
 The archive lives on storage that can go away mid-write — an external disk, a
