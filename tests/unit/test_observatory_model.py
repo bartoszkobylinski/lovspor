@@ -337,6 +337,14 @@ class TestSerialisationIsPinnedToBytes:
         the compatibility direction that matters for an append-only log."""
         assert self.line() == self.EXPECTED
 
+    def test_record_from_before_redirect_chain_was_added_still_parses(self) -> None:
+        old_line = self.EXPECTED.replace('"redirect_chain":[],', "")
+
+        record = TypeAdapter(ObservationRecord).validate_json(old_line)
+
+        assert isinstance(record, ArtifactObservation)
+        assert record.provenance.redirect_chain == ()
+
     def test_keys_are_sorted_in_the_emitted_text(self) -> None:
         """Read back preserving order — json.loads alone would hide the ordering."""
         keys = [key for key, _ in json.loads(self.line(), object_pairs_hook=list)]

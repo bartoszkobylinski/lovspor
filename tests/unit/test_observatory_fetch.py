@@ -599,6 +599,22 @@ class TestFailuresAreObservations:
         assert result.url == PAGE_URL
         assert result.provenance.redirect_chain == ()
 
+    def test_each_redirect_target_is_recorded_in_order(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        middle = f"https://{BAERUM_DOMAIN}/moved-once"
+        landing = f"https://{BAERUM_DOMAIN}/moved-twice"
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, status_code=301, headers={"Location": middle})
+        httpx_mock.add_response(url=middle, status_code=302, headers={"Location": landing})
+        httpx_mock.add_response(url=landing, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == PAGE_URL
+        assert result.provenance.redirect_chain == (middle, landing)
+
     def test_a_followed_redirect_passes_every_gate_again(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
@@ -619,6 +635,7 @@ class TestFailuresAreObservations:
         assert isinstance(result, FetchFailure)
         assert result.outcome == "robots_disallowed"
         assert result.url == apex
+        assert result.provenance.redirect_chain == (apex,)
         assert apex not in [str(r.url) for r in httpx_mock.get_requests()]
 
     @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
