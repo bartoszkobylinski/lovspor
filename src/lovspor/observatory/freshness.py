@@ -125,18 +125,19 @@ def worth_capturing(candidate: Candidate, observed: Mapping[str, datetime], now:
     claim, and is there because a candidate with no ``lastmod`` was otherwise
     re-fetched on every pass forever (issue #209).
 
-    An observation stamped ahead of ``now`` fetches. It cannot be used to
-    compute an age, and a clock that disagrees with the archive must not be
-    able to hold a page back.
+    A sighting stamped ahead of ``now`` fetches, whichever comparison it would
+    have fed. Either the clock is wrong or the record is, and neither makes it
+    usable evidence that a page was seen after the site changed it — so the
+    rule is hoisted above both branches rather than guarding only the age
+    arithmetic it happens to break.
     """
     last_seen = observed.get(candidate.url)
-    if last_seen is None:
+    if last_seen is None or last_seen > now:
         return True
     changed_at = _site_claim(candidate)
     if changed_at is not None:
         return last_seen <= changed_at
-    age = now - last_seen
-    return age < timedelta() or age >= UNDATED_RECHECK
+    return now - last_seen >= UNDATED_RECHECK
 
 
 def _site_claim(candidate: Candidate) -> datetime | None:

@@ -183,6 +183,14 @@ class TestWorthCapturing:
 
         assert worth_capturing(_candidate(None), observed, NOW) is True
 
+    def test_a_future_observation_cannot_make_a_dated_candidate_look_unchanged(self) -> None:
+        """The clock-safety rule applies even when the site supplies a claim.
+        A future archive timestamp cannot prove that an earlier site change
+        was observed, so it must resolve toward fetching."""
+        observed = {URL: NOW + timedelta(hours=1)}
+
+        assert worth_capturing(_candidate("2026-08-19"), observed, NOW) is True
+
     def test_an_observation_at_this_very_instant_is_left_alone(self) -> None:
         """The near boundary. Age zero is inside the window, not on the far
         edge of it: a page seen at exactly this moment is the strongest case
