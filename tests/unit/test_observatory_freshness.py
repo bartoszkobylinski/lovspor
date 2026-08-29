@@ -183,6 +183,16 @@ class TestWorthCapturing:
 
         assert worth_capturing(_candidate(None), observed, NOW) is True
 
+    def test_an_observation_at_this_very_instant_is_left_alone(self) -> None:
+        """The near boundary. Age zero is inside the window, not on the far
+        edge of it: a page seen at exactly this moment is the strongest case
+        there is for not asking again, and the two boundaries answer opposite
+        ways on purpose — nothing has elapsed here, the whole window has
+        elapsed there."""
+        observed = {URL: NOW}
+
+        assert worth_capturing(_candidate(None), observed, NOW) is False
+
     def test_the_window_boundary_fetches(self) -> None:
         """Exactly at the window the page is asked about, for the reason every
         tie in this module resolves toward fetching."""
