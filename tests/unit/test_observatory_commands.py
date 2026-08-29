@@ -2297,6 +2297,28 @@ class TestCaptureAll:
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
 
+    def test_every_candidate_in_a_pass_uses_the_same_clock_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A long pass must not classify equal-age observations differently
+        merely because the wall clock advanced between candidates."""
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = now
+        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        candidates = tuple(
+            Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
+            for url in (PAGE_URL, OTHER_PAGE_URL)
+        )
+        observed = {candidate.url: now - timedelta(hours=23) for candidate in candidates}
+        fetcher = Mock()
+
+        counts = _capture_candidates(fetcher, candidates, observed, limit=0)
+
+        clock.now.assert_called_once_with(UTC)
+        assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 2)
+        fetcher.capture.assert_not_called()
+
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""
         candidate = Candidate(
