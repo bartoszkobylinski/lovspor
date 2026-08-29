@@ -744,8 +744,12 @@ def _capture_candidates(
     run from a stuck one.
     """
     captured = failed = skipped = 0
+    # One instant for the whole pass: a clock read per candidate would let two
+    # candidates observed at the same moment fall on opposite sides of the
+    # re-check window, for no reason a reader could reconstruct later.
+    now = datetime.now(UTC)
     for candidate in candidates:
-        if not worth_capturing(candidate, observed):
+        if not worth_capturing(candidate, observed, now):
             skipped += 1
             continue
         if limit and captured + failed >= limit:

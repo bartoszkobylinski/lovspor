@@ -2297,6 +2297,60 @@ class TestCaptureAll:
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
 
+    def test_every_candidate_in_a_pass_uses_the_same_clock_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A long pass must not classify equal-age observations differently
+        merely because the wall clock advanced between candidates."""
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = now
+        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        candidates = tuple(
+            Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
+            for url in (PAGE_URL, OTHER_PAGE_URL)
+        )
+        observed = {candidate.url: now - timedelta(hours=23) for candidate in candidates}
+        fetcher = Mock()
+
+        counts = _capture_candidates(fetcher, candidates, observed, limit=0)
+
+        clock.now.assert_called_once_with(UTC)
+        assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 2)
+        fetcher.capture.assert_not_called()
+
+    def test_a_recent_undated_candidate_does_not_spend_the_fetch_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #209. Skipping the repeatedly proposed head of the list must
+        leave the limited fetch budget available for an unseen URL behind it."""
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = now
+        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        recent = Candidate(
+            url=PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+        )
+        unseen = Candidate(
+            url=OTHER_PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+        )
+        fetcher = Mock()
+        fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
+
+        counts = _capture_candidates(
+            fetcher,
+            (recent, unseen),
+            {PAGE_URL: now - timedelta(hours=1)},
+            limit=1,
+        )
+
+        assert counts == (1, 0, 1, False)
+        fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
+
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""
         candidate = Candidate(
@@ -3061,6 +3115,41 @@ class TestCapture:
             update={"authority_id": "9999"}
         )
         log.append(foreign)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+
+    def test_an_undated_page_is_not_fetched_again_on_the_next_pass(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #209. A sitemap entry with no `lastmod` used to be fetched on
+        every pass, so a crawl could never reach `captured: 0` and never
+        finished. Worse, the fetch budget was spent on the same head of the
+        list every round, and the candidates behind it were never reached at
+        all — 214 of one municipality's 274 URLs went unseen for two days
+        while 58 were re-downloaded."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in first.output
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 1" in second.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(PAGE_URL) == 1
+
+    def test_an_undated_page_never_seen_is_still_fetched(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The window only ever applies to a URL already observed. A candidate
+        with no claim and no sighting is fetched, as it always was."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
 
         result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
 
