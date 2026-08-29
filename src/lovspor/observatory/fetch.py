@@ -21,11 +21,20 @@ Three gates stand in front of every request, in order:
    access-policy check, enforced per host by waiting. ADR-0010 calls per-source
    limits load-bearing rather than cosmetic; this is where that is true or not.
 
-Redirects are deliberately not followed. A redirect can leave the authorised
-host entirely — including onto a host ADR-0010 §4 forbids — and following it
-would fetch a URL that never passed gate 1. The 3xx is recorded with its
-``Location`` header, so the caller can submit that target as its own capture
-and let it pass the gates on its own merits.
+A redirect is followed only while its target stays inside the cleared domain.
+The ban exists so a redirect cannot carry a fetch onto a host that never
+passed gate 1 — including one ADR-0010 §4 forbids — and a hop from ``www.X``
+to ``X`` never leaves it. Refusing that one blocked 5 of the first 36 sources
+of the fleet bootstrap, which is why it is allowed (issue #159). A target
+outside the domain is recorded with its ``Location`` header and not followed,
+so the caller can submit it as its own capture and let it pass the gates on
+its own merits.
+
+Every hop is recorded, including the ones that were followed. A followed
+redirect is filed as a ``FetchFailure`` because that hop returned no content,
+which is what the type's docstring says and not what its name suggests — the
+log therefore reports far more "failures" than documents it failed to get
+(issue #188).
 
 Every outcome ends up in the append-only log, success or not: a fetch that
 timed out is evidence about the source, and Design Principle §15 keeps it
