@@ -45,10 +45,10 @@ OBSERVED_AT = datetime(2026, 8, 18, 10, 30, tzinfo=UTC)
 PAYLOAD = "Forskrift om renovasjon, Bærum kommune. Æ Ø Å".encode()
 
 
-def _policy(rate_limit_seconds: float = 2.0) -> AccessPolicyCheck:
+def _policy(rate_limit_seconds: float = 2.0, robots_txt_url: str = ROBOTS_URL) -> AccessPolicyCheck:
     return AccessPolicyCheck(
         checked_at=datetime(2026, 8, 17, 9, 0, tzinfo=UTC),
-        robots_txt_url=ROBOTS_URL,
+        robots_txt_url=robots_txt_url,
         robots_allows=True,
         terms_reviewed=True,
         terms_permit_capture=True,
@@ -84,7 +84,7 @@ def _two_host_registry(rate_limit_seconds: float = 2.0) -> SourceRegistry:
     return SourceRegistry(
         sources={
             BAERUM_ID: activate(baerum, _policy(rate_limit_seconds)),
-            OSLO_ID: activate(oslo, _policy(rate_limit_seconds)),
+            OSLO_ID: activate(oslo, _policy(rate_limit_seconds, OSLO_ROBOTS_URL)),
         }
     )
 

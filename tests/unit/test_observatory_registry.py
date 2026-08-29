@@ -1,6 +1,7 @@
 """Tests for lovspor.observatory.registry — eligibility is not activation."""
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from lovspor.observatory.registry import (
     read_capture_verdict,
     read_registry,
     registry_path,
+    replace_domain,
     write_registry,
 )
 from lovspor.observatory.storage import ObservatoryRoot
@@ -31,7 +33,7 @@ CHECKED_AT = datetime(2026, 8, 18, 6, 0, tzinfo=UTC)
 def check(**overrides: object) -> AccessPolicyCheck:
     fields: dict[str, object] = {
         "checked_at": CHECKED_AT,
-        "robots_txt_url": "https://example.invalid/robots.txt",
+        "robots_txt_url": "https://testby.example.invalid/robots.txt",
         "robots_allows": True,
         "terms_reviewed": True,
         "terms_permit_capture": True,
@@ -46,7 +48,7 @@ def check(**overrides: object) -> AccessPolicyCheck:
 def check_document(**overrides: object) -> dict[str, object]:
     fields: dict[str, object] = {
         "checked_at": "2026-08-18T06:00:00Z",
-        "robots_txt_url": "https://example.invalid/robots.txt",
+        "robots_txt_url": "https://testby.example.invalid/robots.txt",
         "robots_allows": True,
         "terms_reviewed": True,
         "terms_permit_capture": True,
@@ -208,7 +210,8 @@ class TestCaptureGate:
             name="Testby",
             canonical_domain="lovdata.no",
         )
-        registry = SourceRegistry(sources={"9999": activate(denied, check())})
+        cleared = check(robots_txt_url="https://lovdata.no/robots.txt")
+        registry = SourceRegistry(sources={"9999": activate(denied, cleared)})
 
         with pytest.raises(SourceNotActivatedError, match="globally denied"):
             authorise_capture(registry, url)
@@ -426,7 +429,7 @@ class TestRegistryFileIsPinnedToBytes:
         "rate_limit_seconds": 2.0,
         "reviewed_by": "project owner",
         "robots_allows": true,
-        "robots_txt_url": "https://example.invalid/robots.txt",
+        "robots_txt_url": "https://testby.example.invalid/robots.txt",
         "terms_permit_capture": true,
         "terms_reviewed": true,
         "terms_url": null,
@@ -784,7 +787,9 @@ class TestASourceCarriesItsVerdict:
                 "authority_id": "1860",
                 "name": "Vestvågøy",
                 "canonical_domain": "vestvagoy.kommune.no",
-                "access_policy": check_document(),
+                "access_policy": check_document(
+                    robots_txt_url="https://www.vestvagoy.kommune.no/robots.txt"
+                ),
                 "active": True,
                 "capture_verdict": verdict_document(),
             }
@@ -840,3 +845,219 @@ class TestReadingAVerdictDocument:
 
         with pytest.raises(ParseError, match="unreadable capture verdict"):
             read_capture_verdict(path)
+
+
+class TestTheClearanceBelongsToItsDomain:
+    """Issue #166. An access-policy check answers about one host — the one
+    whose robots.txt the reviewer read. Nothing tied the two together, so
+    editing `canonical_domain` let a clearance obtained for haugesund.no
+    authorise traffic to haugesund.kommune.no."""
+
+    def _record(self, domain: str, robots: str) -> SourceRecord:
+        return SourceRecord.model_validate(
+            {
+                "authority_type": "kommune",
+                "authority_id": "1106",
+                "name": "Haugesund",
+                "canonical_domain": domain,
+                "access_policy": check_document(robots_txt_url=robots),
+                "active": True,
+            }
+        )
+
+    def test_a_check_performed_against_the_domain_itself_is_accepted(self) -> None:
+        record = self._record("haugesund.no", "https://haugesund.no/robots.txt")
+
+        assert record.active is True
+
+    def test_a_check_performed_against_a_subdomain_is_accepted(self) -> None:
+        """`www.X` is inside `X` — the commonest hosting shape among Norwegian
+        municipalities, and the one the redirect rule already allows."""
+        record = self._record("haugesund.no", "https://www.haugesund.no/robots.txt")
+
+        assert record.active is True
+
+    def test_a_check_performed_against_another_domain_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match=re.escape("outside haugesund.kommune.no")):
+            self._record("haugesund.kommune.no", "https://www.haugesund.no/robots.txt")
+
+    def test_a_check_performed_against_the_parent_domain_is_refused(self) -> None:
+        """The parent is not the child: clearing `example.invalid` says
+        nothing about what `testby.example.invalid` serves or permits."""
+        with pytest.raises(ValidationError, match=re.escape("outside testby.example.invalid")):
+            self._record("testby.example.invalid", "https://example.invalid/robots.txt")
+
+    def test_a_lookalike_host_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            self._record("haugesund.no", "https://nothaugesund.no/robots.txt")
+
+    def test_a_robots_url_with_no_host_is_refused(self) -> None:
+        with pytest.raises(ValidationError):
+            self._record("haugesund.no", "robots.txt")
+
+    def test_an_inactive_record_is_held_to_it_too(self) -> None:
+        """The check is on the record, not on activation: a record that keeps
+        a foreign clearance while inactive is one `activate` away from using
+        it, and the registry should not be able to hold that state at all."""
+        with pytest.raises(ValidationError, match=re.escape("outside haugesund.kommune.no")):
+            SourceRecord.model_validate(
+                {
+                    "authority_type": "kommune",
+                    "authority_id": "1106",
+                    "name": "Haugesund",
+                    "canonical_domain": "haugesund.kommune.no",
+                    "access_policy": check_document(
+                        robots_txt_url="https://www.haugesund.no/robots.txt"
+                    ),
+                    "active": False,
+                }
+            )
+
+    def test_a_record_without_a_check_is_unaffected(self) -> None:
+        assert eligible_source().access_policy is None
+
+    def test_a_hand_edited_registry_gets_the_same_answer(self, tmp_path: Path) -> None:
+        """The whole point of putting it in the type: editing sources.json is
+        exactly the route that skips every other guard."""
+        path = tmp_path / "sources.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "sources": {
+                        "1106": {
+                            "authority_type": "kommune",
+                            "authority_id": "1106",
+                            "name": "Haugesund",
+                            "canonical_domain": "haugesund.kommune.no",
+                            "access_policy": check_document(
+                                robots_txt_url="https://www.haugesund.no/robots.txt"
+                            ),
+                            "active": True,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ParseError, match="invalid source registry"):
+            read_registry(path)
+
+
+class TestReplacingTheDomain:
+    """One operation, because the three parts are not independently safe: the
+    review, the decision to send traffic and the declared entry points were
+    all obtained for a host that is no longer the one being crawled."""
+
+    def _activated(self) -> SourceRecord:
+        record = SourceRecord(
+            authority_type="kommune",
+            authority_id="1106",
+            name="Haugesund",
+            canonical_domain="haugesund.no",
+            listing_entry_points=("https://www.haugesund.no/kunngjoringer",),
+        )
+        return activate(record, check(robots_txt_url="https://www.haugesund.no/robots.txt"))
+
+    def test_the_clearance_is_withdrawn_and_the_source_deactivated(self) -> None:
+        replaced = replace_domain(self._activated(), "haugesund.kommune.no")
+
+        assert replaced.canonical_domain == "haugesund.kommune.no"
+        assert replaced.access_policy is None
+        assert replaced.active is False
+
+    def test_entry_points_declared_for_the_old_domain_are_dropped(self) -> None:
+        """They are pages someone confirmed list documents — on a host that is
+        no longer this source's. The record would not even validate with them."""
+        assert replace_domain(self._activated(), "haugesund.kommune.no").listing_entry_points == ()
+
+    def test_a_verdict_reached_about_the_old_domain_is_dropped(self) -> None:
+        """ "Publishes nothing a machine can reach" was concluded from routes
+        checked on the old host. Carried across it would hold a server nobody
+        has looked at out of every sweep (issue #195)."""
+        held = SourceRecord.model_validate(
+            {**self._activated().model_dump(), "capture_verdict": verdict_document()}
+        )
+
+        assert replace_domain(held, "haugesund.kommune.no").capture_verdict is None
+
+    def test_the_authority_keeps_its_identity(self) -> None:
+        replaced = replace_domain(self._activated(), "haugesund.kommune.no")
+
+        assert (replaced.authority_id, replaced.name, replaced.authority_type) == (
+            "1106",
+            "Haugesund",
+            "kommune",
+        )
+
+    def test_replacing_a_domain_with_itself_is_refused(self) -> None:
+        """A replacement that replaces nothing would withdraw a live clearance
+        and report success — worse than refusing a typo."""
+        with pytest.raises(SourceNotActivatedError, match=re.escape("already on haugesund.no")):
+            replace_domain(self._activated(), "haugesund.no")
+
+    def test_the_refusal_survives_a_difference_of_case(self) -> None:
+        with pytest.raises(SourceNotActivatedError):
+            replace_domain(self._activated(), "HAUGESUND.NO")
+
+    def test_moving_to_a_subdomain_is_a_real_migration(self) -> None:
+        """A subdomain is a different domain. `sub.X` -> `X` widens what the
+        source covers and `X` -> `sub.X` narrows it; refusing either as "already
+        on" would leave an operator no supported way to make the change."""
+        replaced = replace_domain(self._activated(), "www.haugesund.no")
+
+        assert replaced.canonical_domain == "www.haugesund.no"
+        assert replaced.access_policy is None
+
+    def test_a_trailing_dot_does_not_make_it_a_different_domain(self) -> None:
+        """The root dot is DNS syntax for the same name, so `X.` and `X` are
+        one domain — whichever side it is typed on."""
+        with pytest.raises(SourceNotActivatedError):
+            replace_domain(self._activated(), "haugesund.no.")
+
+    def test_a_trailing_dot_on_the_registered_side_is_normalised_too(self) -> None:
+        """The mirror of the case above. Normalising only the argument would
+        let a source registered as `X.` be "migrated" to `X` — a replacement
+        that replaces nothing, withdrawing a live clearance for a typo."""
+        record = SourceRecord(
+            authority_type="kommune",
+            authority_id="1106",
+            name="Haugesund",
+            canonical_domain="haugesund.no.",
+        )
+        activated = activate(record, check(robots_txt_url="https://www.haugesund.no/robots.txt"))
+
+        with pytest.raises(SourceNotActivatedError):
+            replace_domain(activated, "haugesund.no")
+
+    def test_case_is_normalised_on_the_registered_side_too(self) -> None:
+        """Domains are case-insensitive, and the registry can hold either
+        spelling. Folding only the argument would let a source registered as
+        `X` in capitals be "migrated" to the same name in lower case, which
+        withdraws a live clearance and changes nothing."""
+        record = SourceRecord(
+            authority_type="kommune",
+            authority_id="1106",
+            name="Haugesund",
+            canonical_domain="HAUGESUND.NO",
+        )
+        activated = activate(record, check(robots_txt_url="https://www.haugesund.no/robots.txt"))
+
+        with pytest.raises(SourceNotActivatedError):
+            replace_domain(activated, "haugesund.no")
+
+    def test_a_leading_dot_is_a_different_domain(self) -> None:
+        """Only the trailing root dot is syntax. A leading one is malformed,
+        and stripping it would silently equate two spellings that name
+        different things."""
+        replaced = replace_domain(self._activated(), ".haugesund.no")
+
+        assert replaced.canonical_domain == ".haugesund.no"
+
+    def test_the_replaced_record_is_a_valid_one(self) -> None:
+        """It has to load back out of the registry it is about to be written
+        to, or the migration leaves the archive unreadable."""
+        replaced = replace_domain(self._activated(), "haugesund.kommune.no")
+
+        assert SourceRecord.model_validate(replaced.model_dump()) == replaced

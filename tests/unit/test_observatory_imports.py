@@ -25,6 +25,7 @@ _MODULES = (
     "lovspor.observatory",
     "lovspor.observatory.commands",
     "lovspor.observatory.discovery",
+    "lovspor.observatory.events",
     "lovspor.observatory.fetch",
     "lovspor.observatory.freshness",
     "lovspor.observatory.heartbeat",
