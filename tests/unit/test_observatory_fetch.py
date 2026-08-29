@@ -550,11 +550,54 @@ class TestFailuresAreObservations:
         result = _fetcher(log).capture(www, "sitemap")
 
         assert isinstance(result, ArtifactObservation)
-        assert result.url == apex
+        # Filed under what was asked for, not where it landed (issue #211): the
+        # archive is asked what THIS url served, and eight urls redirecting to
+        # one login page must not all be recorded as that login page.
+        assert result.url == www
+        assert result.provenance.redirect_chain == (apex,)
         assert result.sha256 == hashlib.sha256(PAYLOAD).hexdigest()
         hops = [r for r in log.records() if getattr(r, "outcome", None) == "redirect_followed"]
         assert [r.url for r in hops] == [www]
         assert hops[0].http_headers["location"] == apex
+
+    def test_two_urls_redirecting_to_one_page_are_observed_separately(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #211. Eight of one municipality's URLs redirected to its login
+        page, and every fetch was filed under that page — so the archive held
+        1,796 observations of the login page and none of the URLs anybody had
+        asked about, and freshness, which keys on the requested URL, re-fetched
+        all eight forever because none was ever observed."""
+        landing = f"https://{BAERUM_DOMAIN}/min-side/"
+        first = f"https://{BAERUM_DOMAIN}/tjenester/brannvern"
+        second = f"https://{BAERUM_DOMAIN}/tjenester/renovasjon"
+        _allow_robots(httpx_mock)
+        for source in (first, second):
+            httpx_mock.add_response(url=source, status_code=302, headers={"Location": landing})
+        httpx_mock.add_response(url=landing, content=PAYLOAD, is_reusable=True)
+        fetcher = _fetcher(log)
+
+        one = fetcher.capture(first, "sitemap")
+        two = fetcher.capture(second, "sitemap")
+
+        assert isinstance(one, ArtifactObservation)
+        assert isinstance(two, ArtifactObservation)
+        assert {one.url, two.url} == {first, second}
+        assert one.provenance.redirect_chain == two.provenance.redirect_chain == (landing,)
+        observed = {r.url for r in log.records() if isinstance(r, ArtifactObservation)}
+        assert landing not in observed
+
+    def test_a_capture_that_never_redirected_records_an_empty_chain(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, ArtifactObservation)
+        assert result.url == PAGE_URL
+        assert result.provenance.redirect_chain == ()
 
     def test_a_followed_redirect_passes_every_gate_again(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -656,7 +699,8 @@ class TestFailuresAreObservations:
         result = _fetcher(log).capture(PAGE_URL, "sitemap")
 
         assert isinstance(result, ArtifactObservation)
-        assert result.url == target
+        assert result.url == PAGE_URL
+        assert result.provenance.redirect_chain == (target,)
 
     def test_a_same_host_redirect_is_rate_limited_as_a_second_request(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -672,7 +716,8 @@ class TestFailuresAreObservations:
         result = _fetcher(log, _settings(clock)).capture(PAGE_URL, "sitemap")
 
         assert isinstance(result, ArtifactObservation)
-        assert result.url == target
+        assert result.url == PAGE_URL
+        assert result.provenance.redirect_chain == (target,)
         assert clock.slept == [2.0]
 
     def test_an_oversized_response_is_recorded_and_never_stored(

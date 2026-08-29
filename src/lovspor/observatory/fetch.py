@@ -119,13 +119,47 @@ class CaptureSettings:
 
 @dataclass(frozen=True)
 class _Attempt:
-    """The three fields every record of one capture attempt carries."""
+    """The three fields every record of one capture attempt carries.
+
+    ``url`` is this hop's URL, which is what a failure record is about — a
+    ``robots_disallowed`` or a 404 happened *there*. ``requested_url`` is the
+    URL the caller asked for, which is what an artifact is filed under: the
+    archive is asked "what did this URL serve", and answering under the
+    address a redirect happened to land on leaves that question unanswered
+    forever (issue #211).
+    """
 
     authority_id: str
     url: str
     provenance: RetrievalProvenance
     canonical_domain: str = ""
     hops_left: int = 0
+    requested_url: str = ""
+
+    @property
+    def subject(self) -> str:
+        """The URL an artifact from this attempt belongs to."""
+        return self.requested_url or self.url
+
+
+@dataclass(frozen=True)
+class _Request:
+    """What one `capture` call is asking for, carried across its hops.
+
+    Bundled rather than passed through as four more arguments: the chain grows
+    hop by hop, and threading it by hand is how the requested URL got lost in
+    the first place.
+    """
+
+    requested_url: str
+    discovery_method: str
+    adapter: str
+    redirect_chain: tuple[str, ...] = ()
+
+    def after(self, target: str) -> "_Request":
+        return _Request(
+            self.requested_url, self.discovery_method, self.adapter, (*self.redirect_chain, target)
+        )
 
 
 class RateLimiter:
@@ -251,16 +285,18 @@ class Fetcher:
                 recorded — no observation happened, and a record for a request
                 never made would be fiction in an evidence log.
         """
+        request = _Request(url, discovery_method, adapter)
         hops_left = _MAX_REDIRECT_HOPS
         while True:
-            result = self._attempt(url, discovery_method, adapter, hops_left)
+            result = self._attempt(url, request, hops_left)
             if not (isinstance(result, FetchFailure) and result.outcome == "redirect_followed"):
                 return result
             url = urljoin(url, result.http_headers["location"])
+            request = request.after(url)
             hops_left -= 1
 
     def _attempt(
-        self, url: str, discovery_method: str, adapter: str, hops_left: int
+        self, url: str, request: _Request, hops_left: int
     ) -> ArtifactObservation | FetchFailure:
         """One hop: every gate, then the request. A redirect target is a new
         request and passes the gates again — a redirect must never smuggle a
@@ -275,14 +311,16 @@ class Fetcher:
             authority_id=source.authority_id,
             url=url,
             provenance=RetrievalProvenance(
-                adapter=adapter,
+                adapter=request.adapter,
                 channel=CHANNEL_HTTP,
-                discovery_method=discovery_method,
+                discovery_method=request.discovery_method,
                 user_agent=policy.user_agent,
                 rate_limit_seconds=policy.rate_limit_seconds,
+                redirect_chain=request.redirect_chain,
             ),
             canonical_domain=source.canonical_domain,
             hops_left=hops_left,
+            requested_url=request.requested_url,
         )
         if not self._robots.allows(url, policy.user_agent):
             return self._failure(attempt, "robots_disallowed")
@@ -316,7 +354,7 @@ class Fetcher:
             return self._failure(attempt, "response_exceeded_max_bytes", status, recorded)
         record = ArtifactObservation(
             authority_id=attempt.authority_id,
-            url=attempt.url,
+            url=attempt.subject,
             observed_at=self._settings.now(),
             provenance=attempt.provenance,
             sha256=hashlib.sha256(payload).hexdigest(),
