@@ -3066,6 +3066,41 @@ class TestCapture:
 
         assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
 
+    def test_an_undated_page_is_not_fetched_again_on_the_next_pass(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #209. A sitemap entry with no `lastmod` used to be fetched on
+        every pass, so a crawl could never reach `captured: 0` and never
+        finished. Worse, the fetch budget was spent on the same head of the
+        list every round, and the candidates behind it were never reached at
+        all — 214 of one municipality's 274 URLs went unseen for two days
+        while 58 were re-downloaded."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in first.output
+        assert "captured: 0 | failed: 0 | unchanged since last seen: 1" in second.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(PAGE_URL) == 1
+
+    def test_an_undated_page_never_seen_is_still_fetched(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The window only ever applies to a URL already observed. A candidate
+        with no claim and no sighting is fetched, as it always was."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+
     def test_a_page_changed_since_the_last_run_is_fetched_again(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:

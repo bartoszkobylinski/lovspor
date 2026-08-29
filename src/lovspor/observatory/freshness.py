@@ -7,15 +7,30 @@ question possible: has anything changed since we last saw this URL?
 
 The comparison is deliberately one-sided. ``lastmod`` is the site's own
 unverified claim and this module never treats it as fact — it only ever uses
-it to *decline* work, never to assert that a page is current. Every ambiguity
-resolves toward fetching: an unparseable stamp, a URL never observed, a
-timestamp without a timezone. Re-fetching costs one request; skipping wrongly
-costs an observation window that cannot be recovered, and ADR-0010 exists
-because that asymmetry is the whole point.
+it to *decline* work, never to assert that a page is current. A URL never
+observed is always fetched, and so is one whose recorded change is later than
+our last sighting. Re-fetching costs one request; skipping wrongly costs an
+observation window that cannot be recovered, and ADR-0010 exists because that
+asymmetry is the whole point.
+
+**A URL the site says nothing about is the exception, and it had to become
+one.** Until issue #209 every such candidate was fetched on every pass,
+because there was no claim to compare against and "fetch when unsure" was
+applied to a URL already observed minutes earlier. Discovery proposes plenty
+of them — a link found inside a page carries no ``lastmod`` even when the
+sitemap it came from stamps every entry — so a crawl could not terminate:
+79% of all captures in the first bootstrap were re-captures, one PDF 1,675
+times, and eight lanes ran 44 hours without finishing a single municipality.
+
+For those, and only those, this module now consults its own record instead of
+a claim that does not exist: a URL seen inside :data:`UNDATED_RECHECK` is left
+alone. That is a genuine weakening — an undated page changing twice a day is
+caught a day late — accepted because the alternative is not "catch it sooner"
+but "re-download the whole site forever and never reach the pages behind it".
 """
 
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 
 from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.model import ArtifactObservation, ObservationRecord
@@ -91,15 +106,47 @@ def parse_site_lastmod(value: str) -> datetime | None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
-def worth_capturing(candidate: Candidate, observed: Mapping[str, datetime]) -> bool:
+#: How long a URL the site says nothing readable about is taken on trust once
+#: it has been observed. The same figure as the observation SLA, deliberately
+#: rather than by import: that one says how often a *source* is looked at, this
+#: says how long one undated *page* is left alone, and they are two claims that
+#: happen to agree today. Argue them down separately (issue #209).
+UNDATED_RECHECK = timedelta(hours=24)
+
+
+def worth_capturing(candidate: Candidate, observed: Mapping[str, datetime], now: datetime) -> bool:
     """Whether this candidate should be fetched now.
 
-    False only in the one case that is safe: the site says the page last
-    changed at a moment we already have an observation from after. Anything
-    less certain than that is fetched.
+    Declined in two cases, and both need the URL to have been observed already.
+    The site says it last changed at a moment we already hold a later sighting
+    from — the certain case, unchanged since this module was written. Or the
+    site says nothing readable and we saw it less than :data:`UNDATED_RECHECK`
+    ago, which is a judgement about our own record rather than about the site's
+    claim, and is there because a candidate with no ``lastmod`` was otherwise
+    re-fetched on every pass forever (issue #209).
+
+    An observation stamped ahead of ``now`` fetches. It cannot be used to
+    compute an age, and a clock that disagrees with the archive must not be
+    able to hold a page back.
     """
     last_seen = observed.get(candidate.url)
-    if last_seen is None or candidate.site_reported_lastmod is None:
+    if last_seen is None:
         return True
-    changed_at = parse_site_lastmod(candidate.site_reported_lastmod)
-    return changed_at is None or last_seen <= changed_at
+    changed_at = _site_claim(candidate)
+    if changed_at is not None:
+        return last_seen <= changed_at
+    age = now - last_seen
+    return age < timedelta() or age >= UNDATED_RECHECK
+
+
+def _site_claim(candidate: Candidate) -> datetime | None:
+    """When the site says this page last changed, or None if it did not say.
+
+    An absent ``lastmod`` and one that cannot be read are the same answer: the
+    site told us nothing we can compare against. Collapsing them here keeps the
+    two from drifting apart, which is how an unparseable stamp ended up on the
+    fetch-always path while an absent one was about to gain a window.
+    """
+    if candidate.site_reported_lastmod is None:
+        return None
+    return parse_site_lastmod(candidate.site_reported_lastmod)

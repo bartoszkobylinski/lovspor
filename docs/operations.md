@@ -225,11 +225,23 @@ is fetched under the source's own rate limit — a full first pass over a
 municipal site is hours, and the per-URL line is how you tell a slow run from
 a stuck one.
 
-**A candidate is skipped only when the site's `lastmod` predates an
-observation already in the log.** Everything less certain than that is
-fetched: no `lastmod`, an unreadable one, a URL never seen, a timestamp that
-ties exactly. Re-fetching costs one request; skipping wrongly costs an
-observation window that cannot be recovered.
+**A candidate with a `lastmod` is skipped only when that stamp predates an
+observation already in the log.** Everything less certain is fetched: an
+unreadable stamp, a URL never seen, a timestamp that ties exactly.
+Re-fetching costs one request; skipping wrongly costs an observation window
+that cannot be recovered.
+
+**A candidate the site says nothing about is skipped for 24 hours after it was
+last seen** (`UNDATED_RECHECK`, issue #209). This is the one judgement the
+freshness rule makes from our own record rather than the site's claim, and it
+had to become one: discovery proposes plenty of undated candidates — a link
+found inside a page carries no `lastmod` even when the sitemap it came from
+stamps every entry — and each was fetched on every pass. A crawl could not
+reach `captured: 0`, so it never finished. It also never got past them: the
+`--limit` was spent on the same head of the candidate list every round, and
+one municipality had 214 of its 274 URLs unseen for two days while 58 were
+re-downloaded. The trade is that an undated page changing twice a day is
+caught a day late.
 
 That rule is also what makes an interrupted run need no resuming. Each
 observation is appended as it happens, so running the command again picks up
