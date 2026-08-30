@@ -54,6 +54,7 @@ import httpx
 from lovspor.errors import SourceNotActivatedError
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, FetchFailure, RetrievalProvenance
+from lovspor.observatory.outcomes import REDIRECT_FOLLOWED, is_redirect_hop
 from lovspor.observatory.registry import (
     SourceRegistry,
     authorise_capture,
@@ -289,7 +290,7 @@ class Fetcher:
         hops_left = _MAX_REDIRECT_HOPS
         while True:
             result = self._attempt(url, request, hops_left)
-            if not (isinstance(result, FetchFailure) and result.outcome == "redirect_followed"):
+            if not (isinstance(result, FetchFailure) and is_redirect_hop(result.outcome)):
                 return result
             url = urljoin(url, result.http_headers["location"])
             request = request.after(url)
@@ -413,7 +414,7 @@ def _redirect_outcome(attempt: _Attempt, location: str | None) -> str:
         return "redirect_not_followed"
     if not host_within_domain(host, attempt.canonical_domain):
         return "redirect_not_followed"
-    return "redirect_followed" if attempt.hops_left > 0 else "redirect_limit_exceeded"
+    return REDIRECT_FOLLOWED if attempt.hops_left > 0 else "redirect_limit_exceeded"
 
 
 def _outcome_for(status: int) -> str:

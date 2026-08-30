@@ -37,7 +37,8 @@ times. Every one of those also occupied a rate-limit slot a capturable
 document was queued behind, which is why this is not merely untidy.
 
 So a failure is now evidence too — but only the kind that describes the URL
-rather than the moment (:func:`is_url_property`). A timeout or a 503 says
+rather than the moment (:func:`~lovspor.observatory.outcomes.is_url_property`).
+A timeout or a 503 says
 nothing about the page and still counts for nothing here. A 404, a redirect we
 will not follow, a body over the cap: those will land the same way tomorrow,
 and the URL is left alone for :func:`failure_backoff` before being asked
@@ -53,6 +54,7 @@ from typing import NamedTuple
 
 from lovspor.observatory.discovery import Candidate
 from lovspor.observatory.model import ArtifactObservation, FetchFailure, ObservationRecord
+from lovspor.observatory.outcomes import is_url_property
 
 # "2026-08-18" — a W3C date with no time part, which is what municipal
 # sitemaps overwhelmingly publish.
@@ -126,73 +128,6 @@ def parse_site_lastmod(value: str) -> datetime | None:
     if parsed.time() == time.min and len(value.strip()) <= _DATE_ONLY_LENGTH:
         parsed = datetime.combine(parsed.date(), time.max)
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
-
-
-#: Failure outcomes that are a property of the URL and of policy settled before
-#: the request, rather than of the moment it was made. Named rather than
-#: derived: what makes ``robots_disallowed`` repeatable is that we decided it,
-#: and what makes ``redirect_not_followed`` repeatable is that the target sits
-#: outside a domain a human cleared — neither is legible from a status code,
-#: and ``redirect_not_followed`` carries a 301 or a 302, which read as
-#: perfectly ordinary responses.
-_URL_PROPERTY_OUTCOMES = frozenset(
-    {
-        "redirect_limit_exceeded",
-        "redirect_not_followed",
-        "response_exceeded_max_bytes",
-        "robots_disallowed",
-    }
-)
-
-#: Client errors that are the server saying "not now" rather than "not this
-#: URL" — a request timeout, a retry sent too early, a rate-limit refusal.
-#: Treating these as properties of the URL would let a source that throttled us
-#: once hold its own pages back for two days.
-_MOMENTARY_CLIENT_ERRORS = frozenset({408, 425, 429})
-
-_HTTP_OUTCOME_PREFIX = "http_"
-_CLIENT_ERROR_STATUS = 400
-_SERVER_ERROR_STATUS = 500
-
-
-def is_url_property(outcome: str) -> bool:
-    """Whether this failure describes the URL rather than the moment.
-
-    The category is the point, not the status code. It was defined the other
-    way round in issue #204 — around ``http_404`` and its neighbours — because
-    the archive at the time was dominated by them. Once #210 and #212 had
-    removed two unrelated re-fetch loops, a clean fleet sample said otherwise:
-    ``redirect_not_followed`` was the largest deterministic bucket by a factor
-    of four, 100 URLs asked 268 times in 41 minutes, and it has no status code
-    of its own to be recognised by.
-
-    Anything unrecognised is a property of the moment. That is the safe
-    default and the same asymmetry the rest of this module runs on: an outcome
-    a future fetcher invents will be re-asked until somebody classifies it,
-    which costs requests, rather than held back, which costs observations.
-    """
-    if outcome in _URL_PROPERTY_OUTCOMES:
-        return True
-    status = _status_in(outcome)
-    if status is None:
-        return False
-    if status in _MOMENTARY_CLIENT_ERRORS:
-        return False
-    return _CLIENT_ERROR_STATUS <= status < _SERVER_ERROR_STATUS
-
-
-def _status_in(outcome: str) -> int | None:
-    """The status an ``http_404``-shaped outcome names, or None for the rest.
-
-    ``transport_error: ConnectError`` and ``timeout`` are named failures with
-    no status at all, and must not be read as one.
-    """
-    if not outcome.startswith(_HTTP_OUTCOME_PREFIX):
-        return None
-    try:
-        return int(outcome.removeprefix(_HTTP_OUTCOME_PREFIX))
-    except ValueError:
-        return None
 
 
 class FailureHold(NamedTuple):

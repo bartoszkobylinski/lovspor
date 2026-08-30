@@ -44,7 +44,12 @@ from lovspor.observatory.freshness import CaptureState, FailureHold
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.log import ObservationLog
-from lovspor.observatory.model import ArtifactObservation, RetrievalProvenance, Tombstone
+from lovspor.observatory.model import (
+    ArtifactObservation,
+    FetchFailure,
+    RetrievalProvenance,
+    Tombstone,
+)
 from lovspor.observatory.registry import SourceRegistry, read_registry
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
@@ -615,6 +620,82 @@ def _archive(root: Path, payload: bytes = b"first") -> ObservationLog:
     return log
 
 
+class TestComposition:
+    """Issue #188. The archive files a followed redirect as a `fetch_failure`,
+    because that hop returned no bytes, and three quarters of everything it
+    calls a failure is one. Every summary the engine prints is derived from
+    what a fetch returned, not from the log — so this is the one place a reader
+    of the archive itself gets the honest number instead of writing their own
+    query and getting the overstated one."""
+
+    def _log(self, root: Path) -> ObservationLog:
+        return ObservationLog(ObservatoryRoot(root, forbidden=[]))
+
+    def _fetch_failure(self, outcome: str) -> FetchFailure:
+        return FetchFailure(
+            authority_id=BAERUM_ID,
+            url=PAGE_URL,
+            observed_at=datetime(2026, 8, 20, 12, 0, tzinfo=UTC),
+            provenance=_observation(b"x").provenance,
+            outcome=outcome,
+        )
+
+    def test_a_hop_is_reported_apart_from_a_lost_document(self, root: Path) -> None:
+        log = _archive(root)
+        log.append(self._fetch_failure("redirect_followed"))
+        log.append(self._fetch_failure("http_404"))
+
+        result = runner.invoke(app, ["observatory", "composition"])
+
+        assert result.exit_code == 0, result.output
+        assert "records:          3" in result.output
+        assert "artifacts:      1" in result.output
+        assert "redirect hops:  1" in result.output
+        assert "lost documents: 1" in result.output
+
+    def test_both_rates_are_printed_so_a_quoted_number_can_be_recognised(self, root: Path) -> None:
+        """Somebody has already quoted the overstated figure. A report that
+        silently replaces it leaves them unable to tell which one they had."""
+        log = _archive(root)
+        for _ in range(2):
+            log.append(self._fetch_failure("redirect_followed"))
+        log.append(self._fetch_failure("http_404"))
+
+        result = runner.invoke(app, ["observatory", "composition"])
+
+        assert "lost documents:   25.00% of all records" in result.output
+        assert "counting kind alone: 75.00%" in result.output
+
+    def test_the_outcome_breakdown_keeps_the_hops_visible(self, root: Path) -> None:
+        """The breakdown is the evidence for the headline. A hop that stops
+        counting as a failure must not stop being counted at all."""
+        log = _archive(root)
+        log.append(self._fetch_failure("redirect_followed"))
+
+        result = runner.invoke(app, ["observatory", "composition"])
+
+        assert "redirect_followed" in result.output
+
+    def test_an_empty_archive_reports_zero_rather_than_dividing_by_it(self, root: Path) -> None:
+        result = runner.invoke(app, ["observatory", "composition"])
+
+        assert result.exit_code == 0, result.output
+        assert "records:          0" in result.output
+        assert "lost documents:   0.00% of all records" in result.output
+
+    def test_a_damaged_log_is_refused_rather_than_summarised(self, root: Path) -> None:
+        """A composition folded from a log that could not be read to the end
+        is a number about part of the archive presented as the whole."""
+        log = _archive(root)
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind":"artifact","authority_id":"32')
+
+        result = runner.invoke(app, ["observatory", "composition"])
+
+        assert result.exit_code == 1
+        assert "log is damaged" in result.stderr
+
+
 class TestVerify:
     """The audit an operator runs after an interrupted run. Its whole value is
     that it answers "how bad is it?" precisely when the archive is damaged."""
@@ -625,14 +706,14 @@ class TestVerify:
         result = runner.invoke(app, ["observatory", "verify"])
 
         assert result.exit_code == 0, result.output
-        assert "records read: 1" in result.output
+        assert "artifacts checked: 1" in result.output
         assert "snapshot ok" in result.output
 
     def test_an_empty_archive_passes(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "verify"])
 
         assert result.exit_code == 0, result.output
-        assert "records read: 0" in result.output
+        assert "artifacts checked: 0" in result.output
 
     def test_an_unfinished_final_write_is_named_and_recoverable(self, root: Path) -> None:
         log = _archive(root)
@@ -1046,7 +1127,7 @@ class TestDiscover:
         runner.invoke(app, ["observatory", "discover", "--id", BAERUM_ID])
 
         verify = runner.invoke(app, ["observatory", "verify"])
-        assert "records read: 1" in verify.output
+        assert "artifacts checked: 1" in verify.output
         assert verify.exit_code == 0
 
     def test_an_explicit_entry_point_overrides_the_declaration(
@@ -2386,7 +2467,7 @@ class TestCaptureAll:
             limit=1,
         )
 
-        assert counts == (1, 0, 1, False, 0)
+        assert counts == (1, 0, 1, False, 0, 0)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
 
     def test_multiple_held_candidates_are_all_counted_as_deferred(
@@ -2424,7 +2505,7 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
-        assert counts == (1, 0, 0, True, 1)
+        assert counts == (1, 0, 0, True, 1, 0)
 
     def test_one_sweep_source_preserves_deferred_counts(
         self, monkeypatch: pytest.MonkeyPatch
@@ -3168,7 +3249,7 @@ class TestCapture:
         assert f"200  {PAGE_URL}" in result.output
         assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
         # The sitemap and the page: discovery's own document is evidence too.
-        assert "records read: 2" in runner.invoke(app, ["observatory", "verify"]).output
+        assert "artifacts checked: 2" in runner.invoke(app, ["observatory", "verify"]).output
 
     def test_a_page_unchanged_since_the_last_run_is_not_fetched_again(
         self, root: Path, httpx_mock: HTTPXMock
@@ -3406,6 +3487,30 @@ class TestCapture:
         assert result.exit_code == 1
         assert "not an activated source" in result.stderr
         assert httpx_mock.get_requests() == []
+
+    def test_a_pass_says_how_many_redirects_it_followed(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #188. The hops are not failures and never were counted as
+        such here — but they are 75% of what the log files under
+        `fetch_failure`, and the pass that stops calling them failures must not
+        be the pass that stops mentioning them. A page reached through one
+        `www` to apex hop is one captured document and one hop."""
+        apex = f"https://{BAERUM_DOMAIN}/politikk-og-samfunn/ny-forskrift"
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=f"https://{BAERUM_DOMAIN}/robots.txt", text="User-agent: *\nAllow: /\n"
+        )
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, status_code=301, headers={"Location": apex})
+        httpx_mock.add_response(url=apex, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "captured: 1 | failed: 0" in result.output
+        assert "redirect hops: 1" in result.output
 
     def test_a_url_that_only_ever_404s_is_not_asked_again_next_pass(
         self, root: Path, httpx_mock: HTTPXMock

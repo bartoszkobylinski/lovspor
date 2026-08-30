@@ -124,6 +124,18 @@ class FetchFailure(_ObservationBase):
     server answered at all. Carrying no bytes, a failure has no SHA-256 —
     which is why the two kinds are separate types rather than one type with
     optional bytes that callers would have to remember to check.
+
+    **A followed redirect is filed here too, and it is not a failure.** The hop
+    returned no bytes, which is what this type means, but the fetcher went
+    straight on to ask the target and the document arrives under its own
+    record. Three quarters of the archive's ``fetch_failure`` records are such
+    hops, so counting this ``kind`` is how a reader gets a failure rate four
+    times the real one (issue #188). Whether an outcome lost a document is
+    :func:`~lovspor.observatory.outcomes.lost_the_document`, and it is that
+    function rather than this type that any count should ask — the name is
+    kept because the records already written mean what they meant, and a
+    rename would split the archive into two vocabularies at a commit boundary
+    without making one record truer.
     """
 
     kind: Literal["fetch_failure"] = "fetch_failure"

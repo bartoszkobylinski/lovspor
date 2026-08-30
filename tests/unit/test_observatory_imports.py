@@ -32,6 +32,7 @@ _MODULES = (
     "lovspor.observatory.listing",
     "lovspor.observatory.log",
     "lovspor.observatory.model",
+    "lovspor.observatory.outcomes",
     "lovspor.observatory.registry",
     "lovspor.observatory.storage",
     "lovspor.observatory.sweeps",
