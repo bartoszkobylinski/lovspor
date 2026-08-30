@@ -207,6 +207,29 @@ class TestArchiveComposition:
 
         assert (found.artifacts, found.hops, found.lost) == (1, 1, 1)
 
+    def test_each_record_kind_accumulates_across_the_whole_archive(self) -> None:
+        """The collector folds a stream, so later records must increment rather
+        than replace the count established by the first record of that kind."""
+        found = ArchiveComposition()
+        collect = collect_composition(found)
+        tombstone = Tombstone(
+            sha256="b" * 64,
+            removed_at=WHEN,
+            basis="test",
+            authorised_by="test",
+        )
+
+        for record in (_artifact(), _artifact()):
+            collect(record)
+        for record in (_failure(REDIRECT_FOLLOWED), _failure(REDIRECT_FOLLOWED)):
+            collect(record)
+        for record in (_failure("http_404"), _failure("http_404")):
+            collect(record)
+        collect(tombstone)
+        collect(tombstone)
+
+        assert (found.artifacts, found.hops, found.lost, found.tombstones) == (2, 2, 2, 2)
+
     def test_every_failure_is_counted_by_outcome_including_the_hops(self) -> None:
         """The breakdown is the evidence for the headline number, so a hop
         must appear in it rather than be quietly dropped once it stops

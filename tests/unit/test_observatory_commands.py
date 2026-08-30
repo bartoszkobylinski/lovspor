@@ -674,7 +674,14 @@ class TestComposition:
 
         result = runner.invoke(app, ["observatory", "composition"])
 
+        assert "\nfailures by outcome\n" in result.output
         assert "redirect_followed" in result.output
+
+    def test_the_composition_labels_every_record_kind(self, root: Path) -> None:
+        result = runner.invoke(app, ["observatory", "composition"])
+
+        assert result.exit_code == 0, result.output
+        assert "  tombstones:     0\n" in result.output
 
     def test_an_empty_archive_reports_zero_rather_than_dividing_by_it(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "composition"])
@@ -2443,6 +2450,35 @@ class TestCaptureAll:
 
         assert (counts.captured, counts.failed, counts.redirects) == (0, 1, 2)
         assert counts.capped is False
+
+    def test_capped_counts_preserve_redirects_from_every_completed_fetch(self) -> None:
+        """Stopping before the next fetch returns the route totals already
+        observed; redirects from later records add to rather than replace them."""
+        candidates = tuple(
+            Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
+            for url in (PAGE_URL, OTHER_PAGE_URL, THIRD_PAGE_URL)
+        )
+        first = _observation(b"first", PAGE_URL).model_copy(
+            update={
+                "provenance": _observation(b"first", PAGE_URL).provenance.model_copy(
+                    update={"redirect_chain": (OTHER_PAGE_URL, THIRD_PAGE_URL)}
+                )
+            }
+        )
+        second = _observation(b"second", OTHER_PAGE_URL).model_copy(
+            update={
+                "provenance": _observation(b"second", OTHER_PAGE_URL).provenance.model_copy(
+                    update={"redirect_chain": (PAGE_URL, THIRD_PAGE_URL, SITEMAP_URL)}
+                )
+            }
+        )
+        fetcher = Mock()
+        fetcher.capture.side_effect = (first, second)
+
+        counts = _capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
+
+        assert counts == (2, 0, 0, True, 0, 5)
+        assert fetcher.capture.call_count == 2
 
     def test_every_candidate_in_a_pass_uses_the_same_clock_read(
         self, monkeypatch: pytest.MonkeyPatch
