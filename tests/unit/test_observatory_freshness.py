@@ -521,6 +521,20 @@ class TestCaptureStateFold:
 
         assert state.holds == {URL: FailureHold("http_404", 1, when)}
 
+    def test_pull_fold_applies_the_authority_filter(self) -> None:
+        """The convenience wrapper must preserve the collector's narrowing."""
+        when = datetime(2026, 8, 19, tzinfo=UTC)
+
+        state = capture_state(
+            [
+                _failure(when, outcome="http_404"),
+                _failure(when, outcome="http_404", authority_id="9999"),
+            ],
+            authority_id="3201",
+        )
+
+        assert state.holds == {URL: FailureHold("http_404", 1, when)}
+
     def test_narrowing_ignores_another_sources_content(self) -> None:
         """A hold belongs to the source that recorded the failures. Another
         source's artifact for the same URL must not clear it, for the same
@@ -614,6 +628,12 @@ class TestWorthCapturingAfterFailure:
         holds = {URL: FailureHold("http_404", 1, NOW + timedelta(hours=1))}
 
         assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is True
+
+    def test_a_failure_stamped_exactly_now_still_obeys_the_backoff(self) -> None:
+        """Equal clocks are usable evidence; only a future failure is suspect."""
+        holds = {URL: FailureHold("http_404", 1, NOW)}
+
+        assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is False
 
     def test_an_unreadable_claim_leaves_the_wait_in_force(self) -> None:
         """A stamp we cannot read is not a statement that the URL changed."""

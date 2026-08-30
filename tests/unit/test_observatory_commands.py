@@ -31,6 +31,7 @@ from lovspor.observatory.commands import (
     _entry_points,
     _hm,
     _record_sweep,
+    _sweep_one,
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
@@ -39,7 +40,7 @@ from lovspor.observatory.events import (
     record_fingerprint,
     source_events_path,
 )
-from lovspor.observatory.freshness import CaptureState
+from lovspor.observatory.freshness import CaptureState, FailureHold
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.log import ObservationLog
@@ -2258,6 +2259,16 @@ class TestCaptureAll:
         # barely better than telemetry that is missing.
         assert run.failure_reason == "no_active_sources"
 
+    def test_recorded_sweep_preserves_deferred_count(self, root: Path) -> None:
+        started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
+
+        run = _record_sweep(ObservatoryRoot(root, ()), started, 1, _SweepTotals(deferred=3))
+
+        assert run.deferred == 3
+        recorded = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert recorded is not None
+        assert recorded.deferred == 3
+
     def test_a_degraded_sweep_is_recorded_too(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """The run that lost a municipality is the one somebody will want to
         read tomorrow, so it must not be the run that left no record."""
@@ -2351,6 +2362,59 @@ class TestCaptureAll:
 
         assert counts == (1, 0, 1, False, 0)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
+
+    def test_multiple_held_candidates_are_all_counted_as_deferred(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = now
+        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        candidates = tuple(
+            Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
+            for url in (PAGE_URL, OTHER_PAGE_URL)
+        )
+        holds = {candidate.url: FailureHold("http_404", 1, now) for candidate in candidates}
+        fetcher = Mock()
+
+        counts = _capture_candidates(fetcher, candidates, CaptureState({}, holds), limit=0)
+
+        assert counts.deferred == 2
+        fetcher.capture.assert_not_called()
+
+    def test_capped_counts_preserve_deferred_candidates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = now
+        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        held = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        first = Candidate(url=OTHER_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        capped = Candidate(url=THIRD_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        fetcher = Mock()
+        fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
+        state = CaptureState({}, {PAGE_URL: FailureHold("http_404", 1, now)})
+
+        counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
+
+        assert counts == (1, 0, 0, True, 1)
+
+    def test_one_sweep_source_preserves_deferred_counts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidate = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        discovery = SimpleNamespace(documents_read=1, candidates=(candidate,))
+        monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
+        discoverer = Mock()
+        discoverer.discover.return_value = discovery
+        monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
+        monkeypatch.setattr(observatory_commands, "worth_capturing", lambda *args: False)
+        record = Mock(authority_id=BAERUM_ID)
+
+        totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
+
+        assert totals.deferred == 1
 
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""
