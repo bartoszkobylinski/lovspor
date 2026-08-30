@@ -39,7 +39,11 @@ from lovspor.observatory.events import (
     domain_replacement,
 )
 from lovspor.observatory.fetch import Fetcher
-from lovspor.observatory.freshness import collect_latest_observations, worth_capturing
+from lovspor.observatory.freshness import (
+    CaptureState,
+    collect_capture_state,
+    worth_capturing,
+)
 from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.model import ArtifactObservation
@@ -726,16 +730,23 @@ class _CaptureCounts(NamedTuple):
     ``capped`` is the point of the type: the three counters cannot express the
     difference between a sitemap that ran out and a pass that was stopped, and
     that difference is what makes a truncated source read as finished (#172).
+
+    ``deferred`` is counted apart from ``unchanged`` because the two are
+    different answers. A URL is unchanged when the site says so; it is deferred
+    when it has refused us the same way and we are waiting before asking again
+    (#204). Folding them together would hide a source whose candidate list has
+    quietly become a list of dead ends.
     """
 
     captured: int
     failed: int
     unchanged: int
     capped: bool
+    deferred: int = 0
 
 
 def _capture_candidates(
-    fetcher: Fetcher, candidates: tuple[Candidate, ...], observed: dict[str, datetime], limit: int
+    fetcher: Fetcher, candidates: tuple[Candidate, ...], state: CaptureState, limit: int
 ) -> _CaptureCounts:
     """Fetch what has changed, in order, and report each outcome as it happens.
 
@@ -743,18 +754,21 @@ def _capture_candidates(
     per-URL line is not noise: it is the only way an operator can tell a slow
     run from a stuck one.
     """
-    captured = failed = skipped = 0
+    captured = failed = skipped = deferred = 0
     # One instant for the whole pass: a clock read per candidate would let two
     # candidates observed at the same moment fall on opposite sides of the
     # re-check window, for no reason a reader could reconstruct later.
     now = datetime.now(UTC)
     for candidate in candidates:
-        if not worth_capturing(candidate, observed, now):
-            skipped += 1
+        if not worth_capturing(candidate, state, now):
+            if candidate.url in state.observed:
+                skipped += 1
+            else:
+                deferred += 1
             continue
         if limit and captured + failed >= limit:
             typer.echo(f"stopping at --limit {limit}")
-            return _CaptureCounts(captured, failed, skipped, capped=True)
+            return _CaptureCounts(captured, failed, skipped, True, deferred)
         record = fetcher.capture(candidate.url, candidate.discovery_method)
         if isinstance(record, ArtifactObservation):
             captured += 1
@@ -762,7 +776,7 @@ def _capture_candidates(
         else:
             failed += 1
             typer.echo(f"  {record.outcome}  {candidate.url}")
-    return _CaptureCounts(captured, failed, skipped, capped=False)
+    return _CaptureCounts(captured, failed, skipped, False, deferred)
 
 
 @observatory_app.command("capture")
@@ -788,21 +802,32 @@ def capture(
     """
     record = _activated_source(authority_id)
     log = ObservationLog(_root())
-    observed = _observed_urls(log, record.authority_id)
+    state = _capture_state(log, record.authority_id)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
     starts = _entry_points(fetcher, record, None)
     result = Discoverer(fetcher, log).discover(record, starts.urls)
     _require_documents(record, result, starts.probed)
     typer.echo(f"candidates: {len(result.candidates)}")
-    counts = _capture_candidates(fetcher, result.candidates, observed, limit)
-    typer.echo(
+    counts = _capture_candidates(fetcher, result.candidates, state, limit)
+    typer.echo(_capture_summary(counts))
+
+
+def _capture_summary(counts: _CaptureCounts) -> str:
+    """The line a whole pass is read from, and the one the fleet greps.
+
+    ``deferred`` is appended rather than inserted: the prefix is what an
+    operator's scripts match on to tell a finished source from a running one,
+    and a new counter must not move it.
+    """
+    return (
         f"captured: {counts.captured} | failed: {counts.failed} "
-        f"| unchanged since last seen: {counts.unchanged}"
+        f"| unchanged since last seen: {counts.unchanged} "
+        f"| deferred after repeated failure: {counts.deferred}"
     )
 
 
-def _observed_urls(log: ObservationLog, authority_id: str | None) -> dict[str, datetime]:
-    """When each URL was last seen with content, or refuse a damaged log.
+def _capture_state(log: ObservationLog, authority_id: str | None) -> CaptureState:
+    """What the log already knows about this source, or refuse a damaged log.
 
     Folded out of the log rather than materialised from it. The map is the
     whole reason the log is read here, and it is smaller than the log by
@@ -818,14 +843,14 @@ def _observed_urls(log: ObservationLog, authority_id: str | None) -> dict[str, d
     would answer "never seen" for pages the archive holds, and every one of
     them would be re-fetched as though the observation had never happened.
     """
-    observed: dict[str, datetime] = {}
-    scan = log.scan_into(collect_latest_observations(observed, authority_id))
+    state = CaptureState.empty()
+    scan = log.scan_into(collect_capture_state(state, authority_id))
     if not scan.complete:
         typer.echo(
             "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
         )
         raise typer.Exit(1)
-    return observed
+    return state
 
 
 class _SweepTotals(NamedTuple):
@@ -837,6 +862,7 @@ class _SweepTotals(NamedTuple):
     unchanged: int = 0
     capped: int = 0
     held: int = 0
+    deferred: int = 0
 
     def plus(self, other: "_SweepTotals") -> "_SweepTotals":
         return _SweepTotals(
@@ -846,6 +872,7 @@ class _SweepTotals(NamedTuple):
             unchanged=self.unchanged + other.unchanged,
             capped=self.capped + other.capped,
             held=self.held + other.held,
+            deferred=self.deferred + other.deferred,
         )
 
 
@@ -853,7 +880,7 @@ def _sweep_one(
     fetcher: Fetcher,
     log: ObservationLog,
     record: SourceRecord,
-    observed: dict[str, datetime],
+    state: CaptureState,
     limit: int,
 ) -> _SweepTotals:
     """One source of a sweep, as counts; ``refused`` is 1 when it refused.
@@ -871,11 +898,8 @@ def _sweep_one(
         )
         return _SweepTotals(refused=1)
     typer.echo(f"candidates: {len(result.candidates)}")
-    counts = _capture_candidates(fetcher, result.candidates, observed, limit)
-    typer.echo(
-        f"captured: {counts.captured} | failed: {counts.failed} "
-        f"| unchanged since last seen: {counts.unchanged}"
-    )
+    counts = _capture_candidates(fetcher, result.candidates, state, limit)
+    typer.echo(_capture_summary(counts))
     if counts.capped:
         # Loud on stderr, like a refusal: a source stopped by the limit was
         # truncated, and the whole point of #172 is that this is otherwise
@@ -886,6 +910,7 @@ def _sweep_one(
         failed=counts.failed,
         unchanged=counts.unchanged,
         capped=1 if counts.capped else 0,
+        deferred=counts.deferred,
     )
 
 
@@ -933,7 +958,7 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
     """
     started_at = datetime.now(UTC)
     active = _active_sources()
-    log, observed = _sweep_inputs(root)
+    log, state = _sweep_inputs(root)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
     totals = _SweepTotals()
     for record in active:
@@ -941,7 +966,7 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
         if _held(record, started_at):
             totals = totals.plus(_SweepTotals(held=1))
             continue
-        totals = totals.plus(_sweep_one(fetcher, log, record, observed, limit))
+        totals = totals.plus(_sweep_one(fetcher, log, record, state, limit))
     if totals.refused:
         typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
     if totals.capped:
@@ -978,7 +1003,7 @@ def _active_sources() -> list[SourceRecord]:
     return active
 
 
-def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, dict[str, datetime]]:
+def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, CaptureState]:
     """The log to append to and what has already been seen.
 
     A damaged log refuses here, before anything is fetched, and therefore
@@ -988,7 +1013,7 @@ def _sweep_inputs(root: ObservatoryRoot) -> tuple[ObservationLog, dict[str, date
     not even mounted".
     """
     log = ObservationLog(root)
-    return log, _observed_urls(log, None)
+    return log, _capture_state(log, None)
 
 
 def _record_sweep(
@@ -1012,6 +1037,7 @@ def _record_sweep(
         captured=totals.captured,
         failed_fetches=totals.failed,
         unchanged=totals.unchanged,
+        deferred=totals.deferred,
         status=sweep_status(active=active, refused=totals.refused, capped=totals.capped),
         # A register with nothing to sweep is a failure with a nameable
         # cause, not a green run over an empty list. `capture-all` refuses
@@ -1072,7 +1098,9 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(f"  refused:    {run.sources_refused}")
     typer.echo(f"  capped:     {run.sources_capped}")
     typer.echo(f"  held:       {run.sources_held}")
-    typer.echo(f"  captured:   {run.captured} | unchanged: {run.unchanged}")
+    typer.echo(
+        f"  captured:   {run.captured} | unchanged: {run.unchanged} | deferred: {run.deferred}"
+    )
     typer.echo(f"  status:     {run.status.upper()}")
 
 

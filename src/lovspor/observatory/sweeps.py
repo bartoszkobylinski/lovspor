@@ -80,6 +80,12 @@ class SweepRun(BaseModel):
     captured: int = Field(ge=0)
     failed_fetches: int = Field(ge=0)
     unchanged: int = Field(ge=0)
+    #: Candidates not asked because the same URL-property failure has repeated
+    #: and the re-ask window has not elapsed (issue #204). Defaulted, so runs
+    #: recorded before this counter existed still read back; counted, because a
+    #: source whose candidates have all become dead ends would otherwise report
+    #: a clean pass that fetched nothing.
+    deferred: int = Field(default=0, ge=0)
     status: SweepStatus
     #: Why the sweep could not execute. Present exactly when ``status`` is
     #: ``failed``: a red light with no next step is barely better than none,
