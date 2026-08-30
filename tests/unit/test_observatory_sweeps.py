@@ -390,6 +390,36 @@ class TestAHeldSourceIsCountedNotHidden:
         assert read_sweep_runs(sweeps_path(root))[0].sources_held == 0
 
 
+class TestDeferredCandidatesAreCountedNotHidden:
+    """Issue #204 telemetry survives persistence and remains backward compatible."""
+
+    def test_deferred_count_round_trips_through_the_sweep_log(self, root: ObservatoryRoot) -> None:
+        run = _run().model_copy(update={"deferred": 17})
+
+        append_sweep_run(root, run)
+
+        assert read_sweep_runs(sweeps_path(root))[0].deferred == 17
+
+    def test_a_run_written_before_deferred_telemetry_defaults_to_zero(
+        self, root: ObservatoryRoot
+    ) -> None:
+        line = _run().model_dump(mode="json")
+        del line["deferred"]
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        assert read_sweep_runs(sweeps_path(root))[0].deferred == 0
+
+    def test_a_negative_deferred_count_is_log_damage(self, root: ObservatoryRoot) -> None:
+        line = _run().model_dump(mode="json")
+        line["deferred"] = -1
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
+            read_sweep_runs(sweeps_path(root))
+
+
 class TestACappedSourceIsNotAComplete:
     """Issue #172. A source stopped by the fetch limit has been *truncated*,
     not observed — and the counts alone cannot tell the two apart. During the

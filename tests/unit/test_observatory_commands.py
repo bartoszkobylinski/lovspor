@@ -31,6 +31,7 @@ from lovspor.observatory.commands import (
     _entry_points,
     _hm,
     _record_sweep,
+    _sweep_one,
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
@@ -39,6 +40,7 @@ from lovspor.observatory.events import (
     record_fingerprint,
     source_events_path,
 )
+from lovspor.observatory.freshness import CaptureState, FailureHold
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.listing import LISTING_METHOD
 from lovspor.observatory.log import ObservationLog
@@ -2257,6 +2259,16 @@ class TestCaptureAll:
         # barely better than telemetry that is missing.
         assert run.failure_reason == "no_active_sources"
 
+    def test_recorded_sweep_preserves_deferred_count(self, root: Path) -> None:
+        started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
+
+        run = _record_sweep(ObservatoryRoot(root, ()), started, 1, _SweepTotals(deferred=3))
+
+        assert run.deferred == 3
+        recorded = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert recorded is not None
+        assert recorded.deferred == 3
+
     def test_a_degraded_sweep_is_recorded_too(self, root: Path, httpx_mock: HTTPXMock) -> None:
         """The run that lost a municipality is the one somebody will want to
         read tomorrow, so it must not be the run that left no record."""
@@ -2287,12 +2299,38 @@ class TestCaptureAll:
         assert run is not None
         assert (run.captured, run.failed_fetches, run.unchanged) == (1, 1, 0)
 
+    def test_a_real_dead_end_reaches_the_recorded_sweep_as_deferred(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #204, by the route an operator actually takes. The isolated
+        tests for this counter hand `_sweep_one` a mocked freshness rule and
+        `_record_sweep` a hand-built total — both construct the state directly,
+        which is the one move an operator cannot make. Here a municipality
+        really 404s, and the second sweep really has to defer it, for the count
+        on disk to be anything but zero.
+        """
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(
+            url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL), is_reusable=True
+        )
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        assert runner.invoke(app, ["observatory", "capture-all"]).exit_code == 0
+        second = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert second.exit_code == 0, second.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.deferred, run.captured, run.failed_fetches) == (1, 0, 0)
+
     def test_a_complete_pass_reports_capped_as_a_real_false(self) -> None:
         """`capped` is declared `bool` and every call site tests it for truth,
         so returning None would behave identically everywhere while being a lie
         about the declared type. Identity is the only thing that catches it —
         and a NamedTuple validates nothing at runtime, so nothing else will."""
-        counts = _capture_candidates(Mock(), (), {}, 0)
+        counts = _capture_candidates(Mock(), (), CaptureState.empty(), 0)
 
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
@@ -2313,7 +2351,7 @@ class TestCaptureAll:
         observed = {candidate.url: now - timedelta(hours=23) for candidate in candidates}
         fetcher = Mock()
 
-        counts = _capture_candidates(fetcher, candidates, observed, limit=0)
+        counts = _capture_candidates(fetcher, candidates, CaptureState(observed, {}), limit=0)
 
         clock.now.assert_called_once_with(UTC)
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 2)
@@ -2344,12 +2382,65 @@ class TestCaptureAll:
         counts = _capture_candidates(
             fetcher,
             (recent, unseen),
-            {PAGE_URL: now - timedelta(hours=1)},
+            CaptureState({PAGE_URL: now - timedelta(hours=1)}, {}),
             limit=1,
         )
 
-        assert counts == (1, 0, 1, False)
+        assert counts == (1, 0, 1, False, 0)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
+
+    def test_multiple_held_candidates_are_all_counted_as_deferred(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = now
+        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        candidates = tuple(
+            Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
+            for url in (PAGE_URL, OTHER_PAGE_URL)
+        )
+        holds = {candidate.url: FailureHold("http_404", 1, now) for candidate in candidates}
+        fetcher = Mock()
+
+        counts = _capture_candidates(fetcher, candidates, CaptureState({}, holds), limit=0)
+
+        assert counts.deferred == 2
+        fetcher.capture.assert_not_called()
+
+    def test_capped_counts_preserve_deferred_candidates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = now
+        monkeypatch.setattr(observatory_commands, "datetime", clock)
+        held = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        first = Candidate(url=OTHER_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        capped = Candidate(url=THIRD_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        fetcher = Mock()
+        fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
+        state = CaptureState({}, {PAGE_URL: FailureHold("http_404", 1, now)})
+
+        counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
+
+        assert counts == (1, 0, 0, True, 1)
+
+    def test_one_sweep_source_preserves_deferred_counts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidate = Candidate(url=PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
+        discovery = SimpleNamespace(documents_read=1, candidates=(candidate,))
+        monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
+        discoverer = Mock()
+        discoverer.discover.return_value = discovery
+        monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
+        monkeypatch.setattr(observatory_commands, "worth_capturing", lambda *args: False)
+        record = Mock(authority_id=BAERUM_ID)
+
+        totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
+
+        assert totals.deferred == 1
 
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""
@@ -2361,7 +2452,7 @@ class TestCaptureAll:
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", PAGE_URL)
 
-        counts = _capture_candidates(fetcher, (candidate,), {}, limit=1)
+        counts = _capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=1)
 
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (1, 0, 0)
@@ -2389,7 +2480,7 @@ class TestCaptureAll:
         counts = _capture_candidates(
             fetcher,
             (fresh, unchanged),
-            {OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)},
+            CaptureState({OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)}, {}),
             limit=1,
         )
 
@@ -2868,7 +2959,7 @@ class TestStatus:
             "  refused:    1\n"
             "  capped:     0\n"
             "  held:       0\n"
-            "  captured:   47 | unchanged: 4218\n"
+            "  captured:   47 | unchanged: 4218 | deferred: 0\n"
             "  status:     DEGRADED\n"
             "\nCadence\n"
             f"  target:     {_hm(OBSERVATION_SLA)}\n"
@@ -2904,6 +2995,7 @@ class TestStatus:
 
     def test_sweep_totals_add_held_sources(self) -> None:
         assert _SweepTotals(held=1).plus(_SweepTotals(held=2)).held == 3
+        assert _SweepTotals(deferred=1).plus(_SweepTotals(deferred=2)).deferred == 3
 
     def test_a_never_swept_archive_says_so_and_exits_nonzero(self, root: Path) -> None:
         """Never swept cannot read as healthy — that is the Mac-was-off case
@@ -3314,6 +3406,117 @@ class TestCapture:
         assert result.exit_code == 1
         assert "not an activated source" in result.stderr
         assert httpx_mock.get_requests() == []
+
+    def test_a_url_that_only_ever_404s_is_not_asked_again_next_pass(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #204. Freshness keyed only on sightings, so a URL that never
+        produced one was proposed, fetched, failed and proposed again on every
+        pass — 962 URLs accounted for 39,672 requests that came back with
+        nothing, one municipality's own 404 page asked for 154 times.
+
+        The second pass registers no response for the page: if the URL were
+        asked again, this test fails on the missing mock rather than on a
+        count, which is the failure mode worth having.
+        """
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 0 | failed: 1" in first.output
+        assert "captured: 0 | failed: 0" in second.output
+        assert "deferred after repeated failure: 1" in second.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(PAGE_URL) == 1
+
+    def test_a_declined_redirect_is_not_asked_again_next_pass(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The bucket the issue did not predict, and the largest one once #210
+        and #212 had removed the loops that masked it: 100 URLs asked 268 times
+        in 41 minutes. It carries a 302, so nothing about its status code says
+        it will land the same way tomorrow — only the fact that the target sits
+        outside the domain a human cleared does.
+        """
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_response(
+            url=PAGE_URL,
+            status_code=302,
+            headers={"location": "https://dialog.example.invalid/login"},
+        )
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert f"redirect_not_followed  {PAGE_URL}" in first.output
+        assert "deferred after repeated failure: 1" in second.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(PAGE_URL) == 1
+
+    def test_a_timeout_is_asked_again_next_pass(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A timeout describes the moment, not the URL. Holding it back would
+        let one bad night hide a page, which is the mistake freshness has
+        always refused to make."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_exception(httpx.TimeoutException("slow"), url=PAGE_URL, is_reusable=True)
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 0 | failed: 1" in first.output
+        assert "captured: 0 | failed: 1" in second.output
+        assert "deferred after repeated failure: 0" in second.output
+        assert [str(r.url) for r in httpx_mock.get_requests()].count(PAGE_URL) == 2
+
+    def test_a_page_the_site_says_changed_is_asked_again_despite_the_wait(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The override that keeps the backoff from becoming #151's silent
+        zero. A `lastmod` later than the failure is the source saying in public
+        that the URL is not what it was, and it outranks our own record of
+        having been refused."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL, content=_urlset(PAGE_URL, lastmod="2099-01-01"), is_reusable=True
+        )
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>published</html>")
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert "captured: 0 | failed: 1" in first.output
+        assert "captured: 1 | failed: 0" in second.output
+        assert "deferred after repeated failure: 0" in second.output
+
+    def test_a_deferred_candidate_does_not_spend_the_fetch_limit(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The cost the issue is actually about. Every re-confirmed failure
+        occupies a rate-limit slot that a capturable document is queued behind,
+        so the waste is not the wasted request — it is the page never reached.
+        """
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=SITEMAP_URL, content=_urlset(PAGE_URL, OTHER_PAGE_URL), is_reusable=True
+        )
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(url=OTHER_PAGE_URL, content=b"<html>reached</html>")
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "1"])
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID, "--limit", "1"])
+
+        assert "captured: 0 | failed: 1" in first.output
+        assert "captured: 1 | failed: 0" in second.output
+        assert f"200  {OTHER_PAGE_URL}" in second.output
 
 
 NEW_BAERUM_DOMAIN = "baerum.no"

@@ -253,6 +253,28 @@ one municipality had 214 of its 274 URLs unseen for two days while 58 were
 re-downloaded. The trade is that an undated page changing twice a day is
 caught a day late.
 
+**A URL that has never yielded content is judged on how it has been failing**
+(`FAILED_RECHECK`, issue #204). Both rules above key on a sighting, so a URL
+that only ever failed was proposed, fetched, failed and proposed again, every
+pass, forever: 962 URLs accounted for 39,672 requests that came back with
+nothing, and one municipality's own 404 page was asked for 154 times. Only
+failures that describe the *URL* count — a 4xx, a redirect we will not follow,
+a body over the cap, a path `robots.txt` denies. A timeout, a 5xx, a 429 and
+anything unrecognised describe the *moment* and count for nothing, so a bad
+night cannot hide a page. The wait starts at 24 hours, doubles with the run of
+identical failures, and is capped at 48 hours; a `lastmod` later than the
+failure overrides it outright, because the site saying the URL changed is a
+stronger statement than our record of having been refused. Deferred candidates
+are counted separately from unchanged ones in the run summary and in
+`sweep-runs.jsonl` — a source whose candidate list has quietly become a list of
+dead ends must not read as a clean pass that found nothing to do.
+
+The category is deliberately not a range of status codes. Once issues #210 and
+#212 had removed two unrelated re-fetch loops, a clean fleet sample (8 lanes,
+41 minutes, engine `33a9fe4`) showed `redirect_not_followed` to be the largest
+deterministic bucket by a factor of four — 100 URLs asked 268 times — and it
+carries a 301 or a 302, which read as perfectly ordinary responses.
+
 That rule is also what makes an interrupted run need no resuming. Each
 observation is appended as it happens, so running the command again picks up
 where it stopped — the pages already captured now fail the freshness test. And
@@ -357,7 +379,8 @@ registry. Process telemetry, not an observation:
 ```json
 {"run_id":"2026-08-25T01:00:00+00:00","started_at":"...","finished_at":"...",
  "active_sources":201,"sources_completed":198,"sources_refused":3,
- "captured":47,"failed_fetches":2,"unchanged":4218,"status":"degraded"}
+ "captured":47,"failed_fetches":2,"unchanged":4218,"deferred":36,
+ "status":"degraded"}
 ```
 
 | status | meaning | who records it |
@@ -597,7 +620,7 @@ Last sweep
   refused:    2
   capped:     0
   held:       0
-  captured:   47 | unchanged: 4218
+  captured:   47 | unchanged: 4218 | deferred: 36
   status:     DEGRADED
 
 Cadence
