@@ -47,6 +47,7 @@ from lovspor.observatory.freshness import (
 from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.model import ArtifactObservation
+from lovspor.observatory.outcomes import ArchiveComposition, collect_composition
 from lovspor.observatory.registry import (
     CaptureVerdict,
     SourceRecord,
@@ -519,7 +520,7 @@ def verify() -> None:
     sanctioned way for bytes to disappear.
     """
     result = verify_snapshot(ObservationLog(_root()))
-    typer.echo(f"records read: {result.artifacts_checked}")
+    typer.echo(f"artifacts checked: {result.artifacts_checked}")
     if result.tombstoned:
         typer.echo(f"removed under a tombstone: {len(result.tombstoned)} (sanctioned)")
     for line in _log_damage(result):
@@ -531,6 +532,51 @@ def verify() -> None:
         return
     typer.echo("snapshot NOT ok")
     raise typer.Exit(1)
+
+
+@observatory_app.command("composition")
+def composition() -> None:
+    """What the archive is made of, and the failure rate it actually has.
+
+    The log files a followed redirect as a `fetch_failure`, because that hop
+    returned no bytes — and 75% of everything it calls a failure is one. Read
+    by `kind` alone the archive reports a failure rate four times its real one
+    (issue #188), and until this command there was nowhere to read it any other
+    way: every summary the engine prints is derived from what a fetch returned,
+    not from the log, so an auditor opening the archive wrote their own query
+    and got the wrong number.
+
+    One streamed pass. The counts are the answer, not the archive, so the
+    memory this needs is the size of the report (issue #199).
+    """
+    log = ObservationLog(_root())
+    found = ArchiveComposition()
+    if not log.scan_into(collect_composition(found)).complete:
+        typer.echo(
+            "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
+        )
+        raise typer.Exit(1)
+    _echo_composition(found)
+
+
+def _echo_composition(found: ArchiveComposition) -> None:
+    """The composition, with both rates side by side.
+
+    The wrong figure is printed next to the right one on purpose: somebody has
+    already quoted it, and a report that silently replaces it leaves them
+    unable to tell which number they had.
+    """
+    typer.echo(f"records:          {found.records}")
+    typer.echo(f"  artifacts:      {found.artifacts}")
+    typer.echo(f"  redirect hops:  {found.hops}  (recorded as fetch_failure, not failures)")
+    typer.echo(f"  lost documents: {found.lost}")
+    typer.echo(f"  tombstones:     {found.tombstones}")
+    typer.echo(f"\nlost documents:   {found.loss_rate:.2%} of all records")
+    typer.echo(f"counting kind alone: {found.naive_failure_rate:.2%} — the #188 figure, overstated")
+    if found.by_outcome:
+        typer.echo("\nfailures by outcome")
+        for outcome, count in found.by_outcome.most_common():
+            typer.echo(f"  {outcome:32} {count}")
 
 
 class _Starts(NamedTuple):
@@ -743,6 +789,11 @@ class _CaptureCounts(NamedTuple):
     unchanged: int
     capped: bool
     deferred: int = 0
+    #: Redirect hops followed on the way to the records above. Reported rather
+    #: than left implicit: they are 75% of everything the log files as a
+    #: failure (#188), and the pass that stopped counting them as failures
+    #: must not be the pass that stopped mentioning them at all.
+    redirects: int = 0
 
 
 def _capture_candidates(
@@ -754,7 +805,7 @@ def _capture_candidates(
     per-URL line is not noise: it is the only way an operator can tell a slow
     run from a stuck one.
     """
-    captured = failed = skipped = deferred = 0
+    captured = failed = skipped = deferred = hops = 0
     # One instant for the whole pass: a clock read per candidate would let two
     # candidates observed at the same moment fall on opposite sides of the
     # re-check window, for no reason a reader could reconstruct later.
@@ -768,15 +819,16 @@ def _capture_candidates(
             continue
         if limit and captured + failed >= limit:
             typer.echo(f"stopping at --limit {limit}")
-            return _CaptureCounts(captured, failed, skipped, True, deferred)
+            return _CaptureCounts(captured, failed, skipped, True, deferred, hops)
         record = fetcher.capture(candidate.url, candidate.discovery_method)
+        hops += len(record.provenance.redirect_chain)
         if isinstance(record, ArtifactObservation):
             captured += 1
             typer.echo(f"  {record.http_status}  {candidate.url}")
         else:
             failed += 1
             typer.echo(f"  {record.outcome}  {candidate.url}")
-    return _CaptureCounts(captured, failed, skipped, False, deferred)
+    return _CaptureCounts(captured, failed, skipped, False, deferred, hops)
 
 
 @observatory_app.command("capture")
@@ -822,7 +874,8 @@ def _capture_summary(counts: _CaptureCounts) -> str:
     return (
         f"captured: {counts.captured} | failed: {counts.failed} "
         f"| unchanged since last seen: {counts.unchanged} "
-        f"| deferred after repeated failure: {counts.deferred}"
+        f"| deferred after repeated failure: {counts.deferred} "
+        f"| redirect hops: {counts.redirects}"
     )
 
 

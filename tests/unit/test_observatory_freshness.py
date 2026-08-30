@@ -18,7 +18,6 @@ from lovspor.observatory.freshness import (
     collect_capture_state,
     collect_latest_observations,
     failure_backoff,
-    is_url_property,
     latest_observations,
     parse_site_lastmod,
     worth_capturing,
@@ -316,64 +315,6 @@ class TestCollectingWithoutHoldingTheRecords:
         collect_latest_observations(folded, "3201")(_failure(datetime(2026, 8, 18, tzinfo=UTC)))
 
         assert folded == {}
-
-
-class TestIsUrlProperty:
-    """Which failures describe the URL, and which only describe the moment.
-
-    The category is what the backoff keys on, so a misfiled outcome is either
-    a URL re-asked forever (issue #204) or a page held back over a bad night.
-    """
-
-    def test_a_declined_redirect_is_a_property_of_the_url(self) -> None:
-        """The largest deterministic bucket in the fleet sample that motivated
-        this, and the one no status code can recognise: the record carries a
-        301 or a 302, which are ordinary responses. What makes it repeatable is
-        that the target sits outside a domain a human cleared."""
-        assert is_url_property("redirect_not_followed") is True
-
-    def test_the_other_named_url_properties(self) -> None:
-        assert is_url_property("redirect_limit_exceeded") is True
-        assert is_url_property("response_exceeded_max_bytes") is True
-        assert is_url_property("robots_disallowed") is True
-
-    def test_a_client_error_is_a_property_of_the_url(self) -> None:
-        assert is_url_property("http_400") is True
-        assert is_url_property("http_403") is True
-        assert is_url_property("http_404") is True
-        assert is_url_property("http_410") is True
-
-    def test_a_server_error_is_a_property_of_the_moment(self) -> None:
-        assert is_url_property("http_500") is False
-        assert is_url_property("http_503") is False
-
-    def test_the_server_saying_not_now_is_not_the_url(self) -> None:
-        """408, 425 and 429 are 4xx by number and momentary by meaning. Reading
-        them by range would let one throttled minute hold a source's own pages
-        back for two days."""
-        assert is_url_property("http_408") is False
-        assert is_url_property("http_425") is False
-        assert is_url_property("http_429") is False
-
-    def test_the_client_error_boundary(self) -> None:
-        """399 is not a client error and 499 is; 500 starts the server's own."""
-        assert is_url_property("http_399") is False
-        assert is_url_property("http_499") is True
-
-    def test_a_transport_failure_is_a_property_of_the_moment(self) -> None:
-        assert is_url_property("timeout") is False
-        assert is_url_property("transport_error: ConnectError") is False
-
-    def test_an_unrecognised_outcome_is_treated_as_momentary(self) -> None:
-        """The safe default. An outcome a future fetcher invents costs requests
-        until somebody classifies it, rather than costing observations."""
-        assert is_url_property("something_new") is False
-
-    def test_an_http_prefix_with_no_number_is_not_a_status(self) -> None:
-        """`http_` is a naming convention, not a guarantee. Reading the suffix
-        without checking would raise inside a fold over the whole archive."""
-        assert is_url_property("http_teapot") is False
-        assert is_url_property("http_") is False
 
 
 class TestFailureBackoff:

@@ -284,6 +284,45 @@ thousands.
 A damaged log is refused before anything is fetched: appending thousands of
 records would bury the damage. Run `observatory verify` first.
 
+### Reading the archive's failure rate: `observatory composition`
+
+**A followed redirect is recorded as `fetch_failure`, and it is not a
+failure.** The hop returned no bytes, which is what the type means, but the
+fetcher went straight on to ask the target and the document arrives under its
+own record. On the archive as it stands that is 316,109 of 416,532
+`fetch_failure` records — three quarters — so counting the `kind` field
+reports a **49.6% failure rate against a real 12.3%** (issue #188).
+
+The engine never read it that way. `Fetcher.capture()` returns only the
+terminal result, so `failed:` in a round summary, `failed_fetches` in
+`sweep-runs.jsonl` and everything `observatory status` prints have always
+counted the honest number. What had no honest reading was the archive itself,
+which is what an auditor — or a derived layer built on it later — actually
+opens.
+
+```
+uv run lovspor observatory composition
+```
+
+One streamed pass over the log, reporting artifacts, redirect hops, lost
+documents and tombstones, both rates side by side, and every failure outcome
+by count. The overstated figure is printed next to the real one on purpose:
+somebody has already quoted it, and a report that silently replaced it would
+leave them unable to tell which number they had.
+
+The rule is `outcomes.lost_the_document()` — everything except a followed
+redirect — and it is code rather than a convention in this file precisely so
+that no reader has to have read this paragraph. It applies to every record
+already written: the alternative options for #188 were a new `kind` or a
+renamed type, and because the log is append-only and its history is never
+rewritten, either would have left the 316,109 existing hops under the old
+vocabulary and split the archive at a commit boundary.
+
+A round summary now also reports `redirect hops: N`. The hops were never
+counted as failures there, but they were not mentioned either, and the pass
+that stops calling them failures must not be the pass that stops mentioning
+them.
+
 ### What a capture costs the machine it runs on
 
 Before it fetches anything, `capture` reads the observation log once to learn
