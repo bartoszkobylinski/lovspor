@@ -2299,6 +2299,32 @@ class TestCaptureAll:
         assert run is not None
         assert (run.captured, run.failed_fetches, run.unchanged) == (1, 1, 0)
 
+    def test_a_real_dead_end_reaches_the_recorded_sweep_as_deferred(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #204, by the route an operator actually takes. The isolated
+        tests for this counter hand `_sweep_one` a mocked freshness rule and
+        `_record_sweep` a hand-built total — both construct the state directly,
+        which is the one move an operator cannot make. Here a municipality
+        really 404s, and the second sweep really has to defer it, for the count
+        on disk to be anything but zero.
+        """
+        self._two_sources(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL), is_reusable=True)
+        httpx_mock.add_response(url=PAGE_URL, status_code=404)
+        httpx_mock.add_response(
+            url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL), is_reusable=True
+        )
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        assert runner.invoke(app, ["observatory", "capture-all"]).exit_code == 0
+        second = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert second.exit_code == 0, second.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.deferred, run.captured, run.failed_fetches) == (1, 0, 0)
+
     def test_a_complete_pass_reports_capped_as_a_real_false(self) -> None:
         """`capped` is declared `bool` and every call site tests it for truth,
         so returning None would behave identically everywhere while being a lie

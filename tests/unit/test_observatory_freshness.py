@@ -613,12 +613,17 @@ class TestWorthCapturingAfterFailure:
 
     def test_a_claim_exactly_at_the_failure_asks_again(self) -> None:
         """Failing at the very moment the site says the page changed does not
-        establish which came first, so it resolves toward fetching."""
-        failed_at = datetime(2026, 8, 18, 10, 0, tzinfo=UTC)
-        holds = {URL: FailureHold("http_404", 1, failed_at)}
+        establish which came first, so it resolves toward fetching.
+
+        The failure sits *inside* the wait on purpose. With an older one the
+        backoff answers first and this returns True whichever way the tie is
+        broken — which is what the first version of this test did, asserting
+        its own name rather than the behaviour it is named for.
+        """
+        holds = {URL: FailureHold("http_404", 1, NOW - timedelta(minutes=20))}
 
         assert (
-            worth_capturing(_candidate("2026-08-18T10:00:00Z"), CaptureState({}, holds), NOW)
+            worth_capturing(_candidate("2026-08-20T11:40:00Z"), CaptureState({}, holds), NOW)
             is True
         )
 
