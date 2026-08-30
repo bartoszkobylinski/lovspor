@@ -656,6 +656,17 @@ class TestWorthCapturingAfterFailure:
 
         assert worth_capturing(_candidate(None), state, NOW) is False
 
+    def test_a_failure_after_content_still_uses_the_sighting_rule(self) -> None:
+        """A later deterministic failure must not turn a URL that has served
+        content into a never-seen URL governed by failure backoff."""
+        seen = NOW - timedelta(minutes=30)
+        failed = NOW - timedelta(minutes=10)
+        state = capture_state([_observation(seen), _failure(failed, outcome="http_404")])
+
+        assert state.observed == {URL: seen}
+        assert state.holds == {URL: FailureHold("http_404", 1, failed)}
+        assert worth_capturing(_candidate(None), state, NOW) is False
+
     def test_a_sighting_outranks_a_hold_that_would_defer(self) -> None:
         """The same precedence in the direction that costs a request rather
         than an observation, so the rule is pinned from both sides."""
