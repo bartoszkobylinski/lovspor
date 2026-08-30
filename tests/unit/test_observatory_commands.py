@@ -2416,6 +2416,34 @@ class TestCaptureAll:
         assert counts.capped is False
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 0)
 
+    def test_redirect_hops_are_preserved_when_the_terminal_fetch_fails(self) -> None:
+        """The redirect count describes the route, independently of whether
+        that route eventually produced bytes. A two-hop route ending in a 404
+        is one lost document and two followed hops, not three failures."""
+        candidate = Candidate(
+            url=PAGE_URL,
+            discovery_method="sitemap",
+            found_in=SITEMAP_URL,
+        )
+        provenance = _observation(b"page").provenance.model_copy(
+            update={"redirect_chain": (OTHER_PAGE_URL, THIRD_PAGE_URL)}
+        )
+        terminal_failure = FetchFailure(
+            authority_id=BAERUM_ID,
+            url=PAGE_URL,
+            observed_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+            provenance=provenance,
+            outcome="http_404",
+            http_status=404,
+        )
+        fetcher = Mock()
+        fetcher.capture.return_value = terminal_failure
+
+        counts = _capture_candidates(fetcher, (candidate,), CaptureState.empty(), limit=0)
+
+        assert (counts.captured, counts.failed, counts.redirects) == (0, 1, 2)
+        assert counts.capped is False
+
     def test_every_candidate_in_a_pass_uses_the_same_clock_read(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
