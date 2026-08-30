@@ -77,6 +77,14 @@ class RetrievalProvenance(BaseModel):
     discovery_method: str = Field(min_length=1)
     user_agent: str = Field(min_length=1)
     rate_limit_seconds: float = Field(gt=0)
+    #: The hops between the URL that was asked for and the one that answered,
+    #: in order, empty when nothing redirected. The observation is filed under
+    #: the *requested* URL — that is the question the archive is asked — so
+    #: without this the record could not say the bytes came from somewhere
+    #: else, and eight URLs redirecting to one login page would be
+    #: indistinguishable from eight pages that happen to be identical
+    #: (issue #211).
+    redirect_chain: tuple[str, ...] = ()
 
 
 class _ObservationBase(BaseModel):

@@ -304,7 +304,8 @@ class TestSerialisationIsPinnedToBytes:
         '{"authority_id":"9999","content_type":"text/html","http_headers":{},'
         '"http_status":200,"kind":"artifact","observed_at":"2026-08-18T06:30:00Z",'
         '"provenance":{"adapter":"generic-html","channel":"http",'
-        '"discovery_method":"sitemap","rate_limit_seconds":2.0,"user_agent":"ua/0.1"},'
+        '"discovery_method":"sitemap","rate_limit_seconds":2.0,"redirect_chain":[],'
+        '"user_agent":"ua/0.1"},'
         '"sha256":"' + "a" * 64 + '",'
         '"url":"https://example.invalid/høring"}'
     )
@@ -329,7 +330,20 @@ class TestSerialisationIsPinnedToBytes:
         )
 
     def test_line_matches_the_pinned_serialisation(self) -> None:
+        """The pin moved once, deliberately: provenance gained `redirect_chain`
+        so an artifact filed under the URL that was requested can still say the
+        bytes came from somewhere else (issue #211). A record written before
+        that field existed still reads back — it defaults to empty — which is
+        the compatibility direction that matters for an append-only log."""
         assert self.line() == self.EXPECTED
+
+    def test_record_from_before_redirect_chain_was_added_still_parses(self) -> None:
+        old_line = self.EXPECTED.replace('"redirect_chain":[],', "")
+
+        record = TypeAdapter(ObservationRecord).validate_json(old_line)
+
+        assert isinstance(record, ArtifactObservation)
+        assert record.provenance.redirect_chain == ()
 
     def test_keys_are_sorted_in_the_emitted_text(self) -> None:
         """Read back preserving order — json.loads alone would hide the ordering."""

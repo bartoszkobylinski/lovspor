@@ -225,6 +225,16 @@ is fetched under the source's own rate limit — a full first pass over a
 municipal site is hours, and the per-URL line is how you tell a slow run from
 a stuck one.
 
+**An observation belongs to the URL that was asked for.** When a redirect is
+followed inside the cleared domain, the artifact is still recorded under the
+requested URL, and the hops it went through are in
+`provenance.redirect_chain`. Filing it under the destination instead — which
+is what happened until issue #211 — meant the requested URL never appeared in
+the log at all: freshness keys on it, so it was re-fetched on every pass
+forever, and the archive answered "what did this URL serve?" with an
+observation of somewhere else. One municipality had eight URLs redirecting to
+its login page and 1,796 recorded fetches of that page, none of the eight.
+
 **A candidate with a `lastmod` is skipped only when that stamp predates an
 observation already in the log.** Everything less certain is fetched: an
 unreadable stamp, a URL never seen, a timestamp that ties exactly.
