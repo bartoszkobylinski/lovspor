@@ -205,6 +205,21 @@ class TestTwoSourcesCannotShareADomain:
         with pytest.raises(AmbiguousSourceError, match="more than one activated source"):
             authorise_capture(self._both_active(), "https://testby.example.invalid/f")
 
+    def test_the_gate_refuses_overlapping_parent_and_subdomain_claims(self) -> None:
+        """The ambiguity is coverage, not just exact-domain duplication."""
+        parent = activate(
+            other_source(authority_id="8888", canonical_domain="example.invalid"),
+            check(robots_txt_url="https://example.invalid/robots.txt"),
+        )
+        child = activate(
+            eligible_source(),
+            check(robots_txt_url="https://testby.example.invalid/robots.txt"),
+        )
+        registry = SourceRegistry(sources={"8888": parent, "9999": child})
+
+        with pytest.raises(AmbiguousSourceError):
+            authorise_capture(registry, "https://testby.example.invalid/f")
+
     def test_the_refusal_names_both_claimants(self) -> None:
         """An operator has to reconcile two rows, so the message has to say
         which two. A refusal that only says "ambiguous" sends them to grep."""
