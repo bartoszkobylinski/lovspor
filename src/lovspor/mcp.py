@@ -51,7 +51,7 @@ import subprocess
 import sys
 import threading
 import unicodedata
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, NamedTuple, Self, TypedDict, final
@@ -602,38 +602,18 @@ class CorpusReader:
         # query slug, so record.slug is non-None here even though the
         # type annotation allows None.
         body = self._body_for_record(record, epoch)
-        by_id = _sections_by_id(_parse_sections(body))
-        matches = by_id.get(section_id)
-        if not matches:
-            raise CorpusNotFoundError(
-                f"section {section_id!r} not found in {slug!r}; "
-                f"available: {_available_ids_message(by_id)}",
-            )
-        section = _select_occurrence(slug, section_id, matches, occurrence)
+        section, by_id = _section_from_body(slug, body, section_id, occurrence)
         # The act's own section-id set is a free by-product of the
         # parse above — seed the cache so same-act cross-refs don't
         # re-parse the body.
         self._remember_section_ids(record.slug or "", set(by_id), epoch)
-        # Skip cross-ref resolution for sections with no ``§``
-        # patterns at all — most short sections have none.
-        cross_references: list[dict[str, Any]] = []
-        if _CROSS_REF_SECTION.search(section["body"]):
-            cross_references = _extract_cross_references(
-                section["body"],
-                record.slug or "",
-                set(self._load_slug_index()),
-                self._section_index_for,
-            )
-        return {
-            "slug": record.slug,
-            "section_id": section_id,
-            "occurrence": section["occurrence"],
-            "heading": section["heading"],
-            "parent_chapter": section["parent_chapter"],
-            "layer": section["layer"],
-            "body": section["body"],
-            "cross_references": cross_references,
-        }
+        cross_references = _cross_references_for(
+            section["body"],
+            record.slug or "",
+            set(self._load_slug_index()),
+            self._section_index_for,
+        )
+        return _section_result(record.slug, section_id, section, cross_references)
 
     def list_sections(self, slug: str) -> list[dict[str, Any]]:
         """Table of contents for one act, in document order.
@@ -715,90 +695,13 @@ class CorpusReader:
         validating one endpoint of a range as if it were the citation
         would confirm something the caller never cited.
         """
-        if "§§" in citation:
-            return {
-                "valid": False,
-                "slug": None,
-                "section_id": None,
-                "heading": None,
-                "reason": (
-                    "range citations (§§) are not supported; cite a single § section instead"
-                ),
-            }
-        section_match = _CITATION_SECTION_ID.search(citation)
-        section_id = section_match.group(1) if section_match else None
-
-        # Find slug-shaped TOKEN in citation (token = word-boundaried
-        # substring; not a substring inside a longer alphanumeric run).
-        # Plain ``record.slug in citation_lower`` is too lax: 'skatteloven-
-        # sktl' would match inside 'skatteloven-sktlX', contradicting the
-        # strict-match contract. _slug_token_in_citation rejects that.
-        # Pick the LONGEST among token-matching candidates so canonical
-        # 'skatteloven-sktl' wins over a hypothetical shorter slug that
-        # happens to also be a separate token in the same citation.
-        citation_lower = citation.lower()
-        candidates = [
-            slug
-            for slug in self._load_slug_index()
-            if _slug_token_in_citation(slug, citation_lower)
-        ]
-        matched_slug = max(candidates, key=len) if candidates else None
-
-        if matched_slug is None and section_id is None:
-            return {
-                "valid": False,
-                "slug": None,
-                "section_id": None,
-                "heading": None,
-                "reason": (
-                    f"could not parse citation {citation!r}: no § id and no known slug found"
-                    f"{self._citation_suggestion_hint(citation_lower)}"
-                ),
-            }
-
-        if matched_slug is None:
-            return {
-                "valid": False,
-                "slug": None,
-                "section_id": section_id,
-                "heading": None,
-                "reason": (
-                    f"ambiguous citation: § {section_id} found but no act "
-                    f"identifier; many acts have a section by that id"
-                    f"{self._citation_suggestion_hint(citation_lower)}"
-                ),
-            }
-
-        if section_id is None:
-            # Slug-only citation: valid if the slug is known (it is —
-            # we matched it from the manifest).
-            return {
-                "valid": True,
-                "slug": matched_slug,
-                "section_id": None,
-                "heading": None,
-                "reason": None,
-            }
-
-        # Both slug and section_id present — delegate to get_section
-        # for the section-existence check. Reuses its body-index cache
-        # and natural-order error message.
-        resolved_id, section, reason = self._resolve_cited_section(matched_slug, section_id)
-        if section is None:
-            return {
-                "valid": False,
-                "slug": matched_slug,
-                "section_id": resolved_id,
-                "heading": None,
-                "reason": reason,
-            }
-        return {
-            "valid": True,
-            "slug": matched_slug,
-            "section_id": resolved_id,
-            "heading": section["heading"],
-            "reason": None,
-        }
+        # Slug matching is token-based and longest-wins; the reasoning
+        # lives on ``_citation_verdict`` and ``_slug_token_in_citation``.
+        return _citation_verdict(
+            citation,
+            self._load_slug_index(),
+            self._resolve_cited_section,
+        )
 
     def _resolve_cited_section(
         self,
@@ -828,20 +731,7 @@ class CorpusReader:
         that path — the id exists; re-reading it would change what the
         caller cited.
         """
-        try:
-            return section_id, self.get_section(slug, section_id), None
-        except CorpusAmbiguousSectionError as exc:
-            return section_id, None, str(exc)
-        except CorpusNotFoundError as exc:
-            stripped = _CITATION_PROSE_TAIL.sub("", section_id)
-            if stripped == section_id:
-                return section_id, None, str(exc)
-            try:
-                return stripped, self.get_section(slug, stripped), None
-            except CorpusAmbiguousSectionError as ambiguous:
-                return stripped, None, str(ambiguous)
-            except CorpusNotFoundError:
-                return stripped, None, str(exc)
+        return _resolve_cited_section_with(self.get_section, slug, section_id)
 
     def get_law_history(self, slug: str) -> dict[str, Any]:
         """Return the parsed ``history/<slug>.json`` for ``slug``."""
@@ -1157,47 +1047,9 @@ class CorpusReader:
         it is ~210 MB of strings, ~270 MB peak RSS, ~1 s to load off a
         warm page cache.
         """
-        limit = _bounded_limit(limit)
-        if not query.strip():
-            return []
-        needle = query.lower()
-        tolerant = (
-            _marker_tolerant_query(needle) if len(needle) <= _MAX_MARKER_TOLERANT_QUERY else None
-        )
-        dataset_key = _resolve_dataset(dataset) if dataset is not None else None
         index = self._load_body_index()
-        slug_index = self._load_slug_index()
-        results: list[dict[str, Any]] = []
-        for doc_id, record in self.manifest.documents.items():
-            if record.status != "current" or record.slug is None:
-                continue
-            # On a duplicate slug only the slug-index owner (first
-            # manifest entry) produces a hit — otherwise the same
-            # body would be reported once per claiming record, with
-            # doc_ids that point lookups cannot resolve.
-            if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
-                continue
-            if dataset_key is not None and record.source_dataset != dataset_key:
-                continue
-            body = index.get(record.slug)
-            if body is None:
-                continue
-            summary = _body_match_summary(body, needle, tolerant)
-            if summary is None:
-                continue
-            count, snippet = summary
-            results.append(
-                {
-                    "slug": record.slug,
-                    "doc_id": doc_id,
-                    "title": record.title,
-                    "dataset": _subdir_for_dataset(record.source_dataset),
-                    "match_count": count,
-                    "snippet": snippet,
-                },
-            )
-        results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
-        return results[:limit]
+        docs = _iter_search_docs(self.manifest.documents, self._load_slug_index(), index.get)
+        return _search_body_hits(query, docs, dataset, limit)
 
     def get_eu_basis(self, slug: str) -> dict[str, Any]:
         """Return the EU / EEA CELEX identifiers a Norwegian act implements.
@@ -1560,44 +1412,10 @@ class CorpusReader:
         section, ambiguous id, and out-of-range occurrence all return
         verified=False with a recovery-oriented reason.
         """
-        section_id = _normalize_section_id(section_id)
-        if not quote.strip():
-            return {
-                "verified": False,
-                "slug": slug,
-                "section_id": section_id,
-                "reason": "quote is empty",
-            }
-        try:
-            section = self.get_section(slug, section_id, occurrence)
-        except (CorpusAmbiguousSectionError, CorpusNotFoundError) as exc:
-            return {
-                "verified": False,
-                "slug": slug,
-                "section_id": section_id,
-                "reason": str(exc),
-            }
-        section_normalized = _normalize_for_quote_match(section["body"])
-        quote_normalized = _normalize_for_quote_match(quote)
-        if quote_normalized in section_normalized:
-            return {
-                "verified": True,
-                "slug": slug,
-                "section_id": section_id,
-                "reason": None,
-            }
-        return {
-            "verified": False,
-            "slug": slug,
-            "section_id": section_id,
-            "reason": (
-                f"quote not found in § {section_id} of {slug!r} after case, "
-                f"whitespace and typographic-punctuation normalization. The quote "
-                f"may be from a different section, paraphrased rather than "
-                f"verbatim, or hallucinated. "
-                f"Call get_section({slug!r}, {section_id!r}) to read the actual text."
-            ),
-        }
+        return _quote_verdict(
+            _QuoteQuery(slug, section_id, quote, occurrence),
+            self.get_section,
+        )
 
     def _load_embedding_index(self) -> EmbeddingIndex:
         """Lazy-build the per-section embedding index for ``semantic_search``.
@@ -2070,16 +1888,7 @@ class CorpusReader:
         nothing to suggest, so pinned exact-reason contracts stay
         intact for token-less citations.
         """
-        suggestions: list[str] = []
-        for token in _SLUG_TOKEN_PATTERN.findall(citation_lower):
-            if len(token) < _MIN_SUGGESTION_TOKEN_CHARS:
-                continue
-            for match in self._slug_suggestions(token):
-                if match not in suggestions:
-                    suggestions.append(match)
-        if not suggestions:
-            return ""
-        return f"; did you mean {', '.join(suggestions[:3])}? Use search_laws for canonical slugs"
+        return _citation_hint_from(self._load_slug_index(), citation_lower)
 
     def _slug_suggestions(self, slug: str) -> list[str]:
         """Up to three near-miss canonical slugs for an unknown input.
@@ -2090,12 +1899,7 @@ class CorpusReader:
         one step instead of a search_laws round trip. Suggestions
         are advisory — the strict-match contract is unchanged.
         """
-        return difflib.get_close_matches(
-            slug.lower(),
-            list(self._load_slug_index()),
-            n=3,
-            cutoff=0.6,
-        )
+        return _slug_suggestions_from(self._load_slug_index(), slug)
 
     def _safe_join(self, *parts: str) -> Path:
         """Join ``parts`` under ``corpus_path`` and refuse paths that escape it.
@@ -2874,6 +2678,305 @@ def _normalize_section_id(section_id: str) -> str:
     untouched and fails the lookup with the available-ids message.
     """
     return canonical_section_id(section_id)
+
+
+# ---- state-agnostic primitive cores (ADR-0011) -------------------------
+#
+# The four retrieval primitives must give the same answer whether they
+# read the live working tree or a resolved historical corpus state
+# (snapshot closure, ADR-0011 point 5). These cores hold the one copy of
+# each algorithm; the live reader and the snapshot state both feed them
+# their own lookups. Anything reader-specific (epoch caches, disk reads,
+# git blobs) stays OUT of here.
+
+
+def _section_from_body(
+    slug: str,
+    body: str,
+    section_id: str,
+    occurrence: int | None,
+) -> tuple[ParsedSection, dict[str, list[ParsedSection]]]:
+    """Locate ``§ section_id`` in one act's body, or raise with the act's
+    available ids — the recovery message both states share."""
+    by_id = _sections_by_id(_parse_sections(body))
+    matches = by_id.get(section_id)
+    if not matches:
+        raise CorpusNotFoundError(
+            f"section {section_id!r} not found in {slug!r}; "
+            f"available: {_available_ids_message(by_id)}",
+        )
+    return _select_occurrence(slug, section_id, matches, occurrence), by_id
+
+
+def _section_result(
+    slug: str | None,
+    section_id: str,
+    section: ParsedSection,
+    cross_references: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The ``get_section`` response shape, shared by both states."""
+    return {
+        "slug": slug,
+        "section_id": section_id,
+        "occurrence": section["occurrence"],
+        "heading": section["heading"],
+        "parent_chapter": section["parent_chapter"],
+        "layer": section["layer"],
+        "body": section["body"],
+        "cross_references": cross_references,
+    }
+
+
+def _cross_references_for(
+    section_body: str,
+    slug: str,
+    known_slugs: set[str],
+    section_index_for: Callable[[str], SectionIndex],
+) -> list[dict[str, Any]]:
+    """Cross-references of one section, validated against the SAME state
+    the section came from — the caller supplies that state's slug set and
+    section indexes, never a mix (ADR-0011 point 5)."""
+    if not _CROSS_REF_SECTION.search(section_body):
+        return []
+    return _extract_cross_references(section_body, slug, known_slugs, section_index_for)
+
+
+def _section_index_from_body(body: str) -> SectionIndex:
+    """Parse one act's body into its ``SectionIndex``.
+
+    Snapshot counterpart of the live reader's cached
+    ``_section_ids_for`` / ``_section_index_is_complete`` pair — same
+    parse, same completeness rule, no cache to go stale.
+    """
+    ids = {section["section_id"] for section in _parse_sections(body)}
+    complete = not any(
+        _LOOKS_LIKE_SECTION_HEADING.match(line) and not _SECTION_HEADING.match(line)
+        for line in body.split("\n")
+    )
+    return SectionIndex(ids=ids, complete=complete)
+
+
+def _slug_suggestions_from(slugs: Iterable[str], slug: str) -> list[str]:
+    """Up to three near-miss canonical slugs from one state's namespace."""
+    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, cutoff=0.6)
+
+
+def _citation_hint_from(slugs: Collection[str], citation_lower: str) -> str:
+    """Near-miss hint for a citation whose act token matched nothing,
+    drawn from one state's slug namespace."""
+    suggestions: list[str] = []
+    for token in _SLUG_TOKEN_PATTERN.findall(citation_lower):
+        if len(token) < _MIN_SUGGESTION_TOKEN_CHARS:
+            continue
+        for match in _slug_suggestions_from(slugs, token):
+            if match not in suggestions:
+                suggestions.append(match)
+    if not suggestions:
+        return ""
+    return f"; did you mean {', '.join(suggestions[:3])}? Use search_laws for canonical slugs"
+
+
+def _citation_invalid(
+    reason: str,
+    slug: str | None = None,
+    section_id: str | None = None,
+) -> dict[str, Any]:
+    """An invalid ``validate_citation`` verdict, in the pinned shape."""
+    return {
+        "valid": False,
+        "slug": slug,
+        "section_id": section_id,
+        "heading": None,
+        "reason": reason,
+    }
+
+
+def _citation_verdict(
+    citation: str,
+    slugs: Collection[str],
+    resolve: Callable[[str, str], tuple[str, dict[str, Any] | None, str | None]],
+) -> dict[str, Any]:
+    """The whole ``validate_citation`` algorithm against one state.
+
+    ``slugs`` is that state's slug namespace; ``resolve`` is that state's
+    cited-section resolution (the ``_resolve_cited_section`` contract).
+    """
+    if "§§" in citation:
+        return _citation_invalid(
+            "range citations (§§) are not supported; cite a single § section instead",
+        )
+    section_match = _CITATION_SECTION_ID.search(citation)
+    section_id = section_match.group(1) if section_match else None
+    citation_lower = citation.lower()
+    candidates = [slug for slug in slugs if _slug_token_in_citation(slug, citation_lower)]
+    matched_slug = max(candidates, key=len) if candidates else None
+    if matched_slug is None and section_id is None:
+        return _citation_invalid(
+            f"could not parse citation {citation!r}: no § id and no known slug found"
+            f"{_citation_hint_from(slugs, citation_lower)}",
+        )
+    if matched_slug is None:
+        return _citation_invalid(
+            f"ambiguous citation: § {section_id} found but no act "
+            f"identifier; many acts have a section by that id"
+            f"{_citation_hint_from(slugs, citation_lower)}",
+            section_id=section_id,
+        )
+    if section_id is None:
+        return {
+            "valid": True,
+            "slug": matched_slug,
+            "section_id": None,
+            "heading": None,
+            "reason": None,
+        }
+    resolved_id, section, reason = resolve(matched_slug, section_id)
+    if section is None:
+        return _citation_invalid(reason or "", slug=matched_slug, section_id=resolved_id)
+    return {
+        "valid": True,
+        "slug": matched_slug,
+        "section_id": resolved_id,
+        "heading": section["heading"],
+        "reason": None,
+    }
+
+
+def _resolve_cited_section_with(
+    get_section: Callable[[str, str], dict[str, Any]],
+    slug: str,
+    section_id: str,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Resolve a citation-extracted id via one state's ``get_section``.
+
+    Same longest-read-first / `` i``-tail fallback contract as the live
+    ``_resolve_cited_section`` (whose docstring holds the reasoning);
+    parameterized on the section lookup so a snapshot resolves against
+    its own state.
+    """
+    try:
+        return section_id, get_section(slug, section_id), None
+    except CorpusAmbiguousSectionError as exc:
+        return section_id, None, str(exc)
+    except CorpusNotFoundError as exc:
+        stripped = _CITATION_PROSE_TAIL.sub("", section_id)
+        if stripped == section_id:
+            return section_id, None, str(exc)
+        try:
+            return stripped, get_section(slug, stripped), None
+        except CorpusAmbiguousSectionError as ambiguous:
+            return stripped, None, str(ambiguous)
+        except CorpusNotFoundError:
+            return stripped, None, str(exc)
+
+
+class _QuoteQuery(NamedTuple):
+    """One ``verify_quote`` request, bundled to travel as a unit."""
+
+    slug: str
+    section_id: str
+    quote: str
+    occurrence: int | None
+
+
+def _quote_result(
+    verified: bool,
+    slug: str,
+    section_id: str,
+    reason: str | None,
+) -> dict[str, Any]:
+    """The ``verify_quote`` response shape, shared by both states."""
+    return {
+        "verified": verified,
+        "slug": slug,
+        "section_id": section_id,
+        "reason": reason,
+    }
+
+
+def _quote_verdict(
+    query: _QuoteQuery,
+    get_section: Callable[[str, str, int | None], dict[str, Any]],
+) -> dict[str, Any]:
+    """The whole ``verify_quote`` algorithm against one state's sections."""
+    section_id = _normalize_section_id(query.section_id)
+    if not query.quote.strip():
+        return _quote_result(False, query.slug, section_id, "quote is empty")
+    try:
+        section = get_section(query.slug, section_id, query.occurrence)
+    except (CorpusAmbiguousSectionError, CorpusNotFoundError) as exc:
+        return _quote_result(False, query.slug, section_id, str(exc))
+    section_normalized = _normalize_for_quote_match(section["body"])
+    quote_normalized = _normalize_for_quote_match(query.quote)
+    if quote_normalized in section_normalized:
+        return _quote_result(True, query.slug, section_id, None)
+    return _quote_result(
+        False,
+        query.slug,
+        section_id,
+        f"quote not found in § {section_id} of {query.slug!r} after case, "
+        f"whitespace and typographic-punctuation normalization. The quote "
+        f"may be from a different section, paraphrased rather than "
+        f"verbatim, or hallucinated. "
+        f"Call get_section({query.slug!r}, {section_id!r}) to read the actual text.",
+    )
+
+
+def _iter_search_docs(
+    documents: dict[str, ManifestRecord],
+    slug_index: dict[str, tuple[str, ManifestRecord]],
+    body_for: Callable[[str], str | None],
+) -> Iterator[tuple[str, ManifestRecord, str]]:
+    """Yield ``(doc_id, record, body)`` for one state's searchable docs.
+
+    Applies the shared eligibility rules — current status, a slug, the
+    slug-index owner on duplicates (otherwise one body reports once per
+    claiming record), a body the state can actually produce.
+    """
+    for doc_id, record in documents.items():
+        if record.status != "current" or record.slug is None:
+            continue
+        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
+            continue
+        body = body_for(record.slug)
+        if body is None:
+            continue
+        yield doc_id, record, body
+
+
+def _search_body_hits(
+    query: str,
+    docs: Iterator[tuple[str, ManifestRecord, str]],
+    dataset: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """The whole ``search_body`` algorithm over one state's doc stream."""
+    limit = _bounded_limit(limit)
+    if not query.strip():
+        return []
+    needle = query.lower()
+    tolerant = _marker_tolerant_query(needle) if len(needle) <= _MAX_MARKER_TOLERANT_QUERY else None
+    dataset_key = _resolve_dataset(dataset) if dataset is not None else None
+    results: list[dict[str, Any]] = []
+    for doc_id, record, body in docs:
+        if dataset_key is not None and record.source_dataset != dataset_key:
+            continue
+        summary = _body_match_summary(body, needle, tolerant)
+        if summary is None:
+            continue
+        count, snippet = summary
+        results.append(
+            {
+                "slug": record.slug,
+                "doc_id": doc_id,
+                "title": record.title,
+                "dataset": _subdir_for_dataset(record.source_dataset),
+                "match_count": count,
+                "snippet": snippet,
+            },
+        )
+    results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
+    return results[:limit]
 
 
 _QUOTE_FOLD_TABLE = str.maketrans(
