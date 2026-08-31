@@ -49,10 +49,13 @@ import re
 import shlex
 import subprocess
 import sys
+import tarfile
 import threading
 import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, NamedTuple, Self, TypedDict, final
 
@@ -89,6 +92,11 @@ from lovspor.headings import (
 )
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
+from lovspor.snapshot import (
+    CorpusSnapshot,
+    CorpusStateRef,
+    resolve_corpus_state,
+)
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.temporal import append_notice, build_notice, evaluation_date_today
 from lovspor.timetravel import (
@@ -473,6 +481,12 @@ class CorpusReader:
         # build the same ~45 MB / ~200 MB index. Reentrant because the
         # loaders acquire it while already holding it via ``self.manifest``.
         self._lock = threading.RLock()
+        # Resolved historical states (ADR-0011 ``recorded_at``), keyed by
+        # commit SHA. Deliberately NOT dropped by ``_refresh_if_stale``:
+        # a ``git pull`` adds commits but cannot change what an existing
+        # commit contains, so these caches can never go stale — only
+        # unused. Bounded FIFO (``_MAX_SNAPSHOT_STATES``).
+        self._snapshot_states: dict[str, _SnapshotData] = {}
 
     def _refresh_if_stale(self) -> None:
         """Drop all in-memory caches when ``manifest.json`` changed on disk.
@@ -747,6 +761,29 @@ class CorpusReader:
             )
         loaded: dict[str, Any] = json.loads(history_path.read_text(encoding="utf-8"))
         return loaded
+
+    def at_state(self, recorded_at: str) -> "_SnapshotState":
+        """Resolve ``recorded_at`` to a historical state view (ADR-0011).
+
+        ``recorded_at`` is a state selector, not a state identity: the
+        resolved commit is the identity, and the view stamps it into
+        every answer as ``corpus_commit`` so a bundle's members can prove
+        they share one state. Same axis, cutoff and refusal posture as
+        ``get_law_at`` (ADR-0002 semantics, ``_parse_recorded_at``).
+
+        Per-commit caches are shared across calls and dates that resolve
+        to the same commit; immutable state needs no epoch guard.
+        """
+        target = _parse_recorded_at(recorded_at)
+        ref = resolve_corpus_state(self.corpus_path, target)
+        with self._lock:
+            data = self._snapshot_states.get(ref.sha)
+            if data is None:
+                if len(self._snapshot_states) >= _MAX_SNAPSHOT_STATES:
+                    self._snapshot_states.pop(next(iter(self._snapshot_states)))
+                data = _SnapshotData(CorpusSnapshot(self.corpus_path, ref.sha), ref)
+                self._snapshot_states[ref.sha] = data
+        return _SnapshotState(data, target)
 
     def get_law_at(self, slug: str, target_date: str) -> str:
         """Return the rendered Markdown of ``slug`` as the corpus held it
@@ -3345,6 +3382,232 @@ def _with_quota(
             return await fn(**kwargs)
 
     return wrapper
+
+
+_MAX_SNAPSHOT_STATES = 4
+"""Bound on cached historical states. Each holds a parsed manifest and,
+after a historical ``search_body``, the state's whole body set (~200 MB on
+the production corpus) — a handful covers a session revisiting the same
+dates; an unbounded map would let a date-scanning client hold every state
+ever asked for."""
+
+
+def _parse_recorded_at(value: str) -> date:
+    """Parse and bound an ADR-0011 ``recorded_at`` value.
+
+    ISO calendar date, end-of-day semantics downstream; future dates are
+    refused — same typo-guard posture as ``get_law_at``'s ``target_date``.
+    """
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"recorded_at must be ISO date YYYY-MM-DD, got {value!r}",
+        ) from exc
+    today = datetime.now(UTC).date()
+    if parsed > today:
+        raise ValueError(
+            f"recorded_at {parsed.isoformat()} is in the future "
+            f"(today is {today.isoformat()}); "
+            f"omit recorded_at for the current corpus state",
+        )
+    return parsed
+
+
+@dataclass
+class _SnapshotData:
+    """Per-commit caches shared by every ``recorded_at`` resolving to one state.
+
+    Split from :class:`_SnapshotState` so two different dates that resolve
+    to the same commit share the expensive parts (manifest, bodies) while
+    each call still stamps the date it was actually asked for.
+    """
+
+    snapshot: CorpusSnapshot
+    ref: CorpusStateRef
+    bodies: dict[str, str | None] = field(default_factory=dict)
+    section_indexes: dict[str, SectionIndex] = field(default_factory=dict)
+    search_bodies: dict[str, str] | None = None
+
+
+class _SnapshotState:
+    """The four retrieval primitives against one resolved historical state.
+
+    Snapshot closure (ADR-0011 point 5): every lookup an answer depends on
+    — slug namespace, bodies, section indexes, citation resolution,
+    suggestions — reads the same resolved commit, never the working tree.
+    The algorithms themselves are the shared state-agnostic cores, so a
+    historical answer can differ from a live one only by state.
+
+    Answers are corpus statements, never legal-validity statements; no
+    ``in_force_at`` evaluation happens here (ADR-0011 points 7 and 9).
+    """
+
+    def __init__(self, data: _SnapshotData, recorded_at: date) -> None:
+        self._data = data
+        self._recorded_at = recorded_at
+
+    @property
+    def corpus_commit(self) -> str:
+        """The global state commit — the identity every answer reports."""
+        return self._data.ref.sha
+
+    def _slug_index(self) -> dict[str, tuple[str, ManifestRecord]]:
+        return self._data.snapshot.slug_index
+
+    def _unknown_slug_error(self, slug: str) -> CorpusNotFoundError:
+        """Outcome 3 of the ADR-0011 taxonomy: the state resolved fine and
+        the document is not in it — a historical negative, never a
+        boundary claim."""
+        suggestions = _slug_suggestions_from(self._slug_index(), slug)
+        hint = f"did you mean {', '.join(suggestions)}? " if suggestions else ""
+        return CorpusNotFoundError(
+            f"no law with slug {slug!r} in the corpus state at "
+            f"{self._recorded_at.isoformat()} (corpus_commit {self.corpus_commit}); "
+            f"{hint}the document may have entered the corpus later — "
+            f"call get_law_history({slug!r}) to see when it first appeared",
+        )
+
+    def _find_record(self, slug: str) -> ManifestRecord:
+        entry = self._slug_index().get(slug)
+        if entry is None:
+            raise self._unknown_slug_error(slug)
+        return entry[1]
+
+    def _body_for_slug(self, slug: str) -> str | None:
+        """Stripped body of one act at this state; ``None`` when the state
+        has no such document (or its blob is absent from the tree)."""
+        bodies = self._data.bodies
+        if slug not in bodies:
+            entry = self._slug_index().get(slug)
+            text = self._data.snapshot.read_text(entry[1].markdown_path) if entry else None
+            bodies[slug] = _strip_frontmatter_and_h1(text) if text is not None else None
+        return bodies[slug]
+
+    def _section_index_for(self, slug: str) -> SectionIndex:
+        indexes = self._data.section_indexes
+        if slug not in indexes:
+            indexes[slug] = _section_index_from_body(self._body_for_slug(slug) or "")
+        return indexes[slug]
+
+    def _stamp(self, result: dict[str, Any], xml_hash: str | None) -> dict[str, Any]:
+        """Attach the ADR-0011 evidence fields: the requested date, the
+        resolved state, and — only when a document version was actually
+        resolved — its ``xml_hash``."""
+        result["recorded_at"] = self._recorded_at.isoformat()
+        result["corpus_commit"] = self.corpus_commit
+        if xml_hash is not None:
+            result["xml_hash"] = xml_hash
+        return result
+
+    def get_section(
+        self,
+        slug: str,
+        section_id: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
+        """``get_section`` against this state — same algorithm, same error
+        shapes, cross-references validated against this state's own
+        indexes (never the current head)."""
+        section_id = _normalize_section_id(section_id)
+        record = self._find_record(slug)
+        body = self._body_for_slug(slug) or ""
+        section, _by_id = _section_from_body(slug, body, section_id, occurrence)
+        cross_references = _cross_references_for(
+            section["body"],
+            record.slug or "",
+            set(self._slug_index()),
+            self._section_index_for,
+        )
+        result = _section_result(record.slug, section_id, section, cross_references)
+        return self._stamp(result, record.xml_hash)
+
+    def validate_citation(self, citation: str) -> dict[str, Any]:
+        """``validate_citation`` against this state's slug namespace and
+        sections. ``valid`` means "resolved in the corpus state at the
+        requested date" — a corpus statement, not legal validity."""
+        verdict = _citation_verdict(citation, self._slug_index(), self._resolve_cited)
+        return self._stamp(verdict, None)
+
+    def _resolve_cited(
+        self,
+        slug: str,
+        section_id: str,
+    ) -> tuple[str, dict[str, Any] | None, str | None]:
+        return _resolve_cited_section_with(self.get_section, slug, section_id)
+
+    def verify_quote(
+        self,
+        slug: str,
+        section_id: str,
+        quote: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
+        """``verify_quote`` against this state's section text. ``verified``
+        means the wording appeared in the corpus text at the requested
+        date. ``xml_hash`` is stamped only when the document resolved."""
+        verdict = _quote_verdict(
+            _QuoteQuery(slug, section_id, quote, occurrence),
+            self.get_section,
+        )
+        entry = self._slug_index().get(slug)
+        return self._stamp(verdict, entry[1].xml_hash if entry else None)
+
+    def search_body(
+        self,
+        query: str,
+        dataset: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """``search_body`` against this state, in the ADR-0011 point 8
+        envelope — so even an empty result set carries the evidence
+        stamp a bare list cannot."""
+        docs = _iter_search_docs(
+            self._data.snapshot.manifest.documents,
+            self._slug_index(),
+            self._search_body_lookup,
+        )
+        hits = _search_body_hits(query, docs, dataset, limit)
+        return {
+            "recorded_at": self._recorded_at.isoformat(),
+            "corpus_commit": self.corpus_commit,
+            "results": hits,
+        }
+
+    def _search_body_lookup(self, slug: str) -> str | None:
+        if self._data.search_bodies is None:
+            self._data.search_bodies = self._load_search_bodies()
+        return self._data.search_bodies.get(slug)
+
+    def _load_search_bodies(self) -> dict[str, str]:
+        """Bulk-read every current doc's body at this state, in one pass.
+
+        Per-file ``git show`` would cost two subprocesses per document —
+        ~12,000 for one historical search on the production corpus.
+        ``git archive`` streams the whole tree once; members are read in
+        memory only, nothing touches the filesystem, so the tar
+        path-traversal class (CVE-2007-4559) has no surface here.
+        """
+        wanted = {
+            record.markdown_path: slug for slug, (_doc_id, record) in self._slug_index().items()
+        }
+        raw = subprocess.run(  # noqa: S603
+            ["git", "archive", "--format=tar", self._data.ref.sha],  # noqa: S607
+            cwd=self._data.snapshot.repo_path,
+            capture_output=True,
+            check=True,
+        )
+        bodies: dict[str, str] = {}
+        with tarfile.open(fileobj=BytesIO(raw.stdout)) as tar:
+            for member in tar:
+                slug = wanted.get(member.name)
+                if slug is None or not member.isfile():
+                    continue
+                blob = tar.extractfile(member)
+                if blob is None:
+                    continue
+                bodies[slug] = _strip_frontmatter_and_h1(blob.read().decode("utf-8"))
+        return bodies
 
 
 def _with_section_notice(result: dict[str, Any], evaluation_date: date) -> dict[str, Any]:
