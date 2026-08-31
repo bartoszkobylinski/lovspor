@@ -64,31 +64,27 @@ indent=2 because that path takes the other encoder branch.
 
 [[equivalent]]
 file = "src/lovspor/observatory/registry.py"
-symbol = "_host_matches"
-registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
+symbol = "normalised_domain"
+registered = "2026-08-31, PR #217, from run 33376430970"
 mutation = """
--    host = host.lower().rstrip(".")
-+    host = host.lower().rstrip("XX.XX")
+-    return domain.lower().rstrip(".")
++    return domain.lower().rstrip("XX.XX")
 """
 justification = """
 The argument to rstrip is a CHARACTER SET, so "XX.XX" is the set {X, .}. The
-string was lowercased on the same line, and str.lower never yields an uppercase
-ASCII X, so the X in the set can never match a character that is there — the set
-behaves exactly like {.}. Verified exhaustively over all lowercased strings up
-to 3 characters drawn from ascii_letters + ".æøåX": zero disagreements.
-"""
+string is lowercased on the same expression, and str.lower never yields an
+uppercase ASCII X, so the X in the set can never match a character that is
+there — the set behaves exactly like {.}. Verified exhaustively over all
+lowercased strings up to 3 characters drawn from ascii_letters + ".æøåX": zero
+disagreements.
 
-[[equivalent]]
-file = "src/lovspor/observatory/registry.py"
-symbol = "_host_matches"
-registered = "2026-08-18, PR #127, from PR #118 run 32118697389"
-mutation = """
--    domain = domain.lower().rstrip(".")
-+    domain = domain.lower().rstrip("XX.XX")
-"""
-justification = """
-The same mutation one line down, on `domain`, and equivalent for the same
-reason: lowercased input cannot contain the uppercase X the mutated set adds.
+This supersedes two entries registered for `_host_matches` in PR #127, which
+argued the identical point about the same two lines. PR #217 moved that
+normalisation into `normalised_domain` so the register's collision check and
+the capture gate could stop deriving it separately (issue #215), and those
+entries no longer match any code in the file. An entry that can never match is
+the drift this register warns about, so they are removed rather than left as
+decoration — the argument itself is unchanged and is restated above.
 """
 
 [[equivalent]]

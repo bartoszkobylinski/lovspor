@@ -22,6 +22,7 @@ from typer.testing import CliRunner
 
 import lovspor.observatory.commands as observatory_commands
 from lovspor.cli import app
+from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.commands import (
     _capture_candidates,
@@ -50,7 +51,15 @@ from lovspor.observatory.model import (
     RetrievalProvenance,
     Tombstone,
 )
-from lovspor.observatory.registry import SourceRegistry, read_registry
+from lovspor.observatory.registry import (
+    SourceRecord,
+    SourceRegistry,
+    activate,
+    read_access_policy_check,
+    read_registry,
+    registry_path,
+    write_registry,
+)
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
@@ -618,6 +627,295 @@ def _archive(root: Path, payload: bytes = b"first") -> ObservationLog:
     log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
     log.append_artifact(_observation(payload), payload)
     return log
+
+
+def _force_second_claim(
+    root: Path, authority_id: str, active: bool = False, domain: str = BAERUM_DOMAIN
+) -> None:
+    """Put two sources on one domain, going around the guard that forbids it.
+
+    The state exists in the live register (#215) and predates the guard, so a
+    test of what the engine does about it has to be able to construct it. This
+    is the one move the operator cannot make, which is why it lives here and
+    not in a helper the CLI shares.
+    """
+    path = registry_path(ObservatoryRoot(root, forbidden=[]))
+    registry = read_registry(path)
+    twin = SourceRecord(
+        authority_type="kommune",
+        authority_id=authority_id,
+        name="Tvilling",
+        canonical_domain=domain,
+    )
+    if active:
+        # The check is bound to the domain it was performed for (#166), so a
+        # twin on a subdomain needs its own — the same rule that makes a domain
+        # change withdraw clearance.
+        document = {
+            **_check_document(rate_limit_seconds=0.001),
+            "robots_txt_url": f"https://{domain}/robots.txt",
+        }
+        twin = activate(
+            twin,
+            read_access_policy_check(_write_check(root / f"claim-{authority_id}.json", document)),
+        )
+    write_registry(SourceRegistry(sources={**registry.sources, authority_id: twin}), path)
+
+
+class TestTwoSourcesCannotShareADomain:
+    """Issue #215. The register held `4202 Grimstad` on `arendal.kommune.no`,
+    the same domain as `4203 Arendal`. The gate returned the lower id, so
+    Arendal's pages were filed under Grimstad for 5,980 records while Grimstad
+    was never fetched and every report said 201 registered, 201 active."""
+
+    TWIN_ID = "3202"
+
+    def _twin(self, root: Path, domain: str = BAERUM_DOMAIN) -> Result:
+        return runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                self.TWIN_ID,
+                "--name",
+                "Tvilling",
+                "--domain",
+                domain,
+            ],
+        )
+
+    def _activate_twin(self, root: Path) -> None:
+        check = _write_check(root / "twin-check.json", _check_document(rate_limit_seconds=0.001))
+        result = runner.invoke(
+            app, ["observatory", "activate-source", "--id", self.TWIN_ID, "--check", str(check)]
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_registering_onto_a_claimed_domain_is_refused(self, root: Path) -> None:
+        _register()
+
+        result = self._twin(root)
+
+        assert result.exit_code == 1
+        assert "already claimed by 3201" in result.stderr
+
+    def test_register_refusal_lists_multiple_claimants_with_pinned_wording(
+        self, root: Path
+    ) -> None:
+        _register()
+        _force_second_claim(root, self.TWIN_ID)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                "3203",
+                "--name",
+                "Tredje",
+                "--domain",
+                BAERUM_DOMAIN,
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            f"Refused: {BAERUM_DOMAIN} is already claimed by 3201, {self.TWIN_ID}. "
+            "Two sources on one domain make an observation unable to name the authority "
+            "that published it, so the register may not hold that state.\n"
+        )
+
+    @pytest.mark.parametrize(
+        "spelling", ["BAERUM.KOMMUNE.NO", "baerum.kommune.no.", "Baerum.Kommune.No"]
+    )
+    def test_registering_an_equivalent_spelling_of_a_claimed_domain_is_refused(
+        self, root: Path, spelling: str
+    ) -> None:
+        """Otherwise the guard is a formality: a second spelling passes here,
+        `status` reports a clean register, and every capture on that host is
+        refused with nothing saying why."""
+        _register()
+
+        result = self._twin(root, domain=spelling)
+
+        assert result.exit_code == 1
+        assert "already claimed by 3201" in result.stderr
+
+    def test_the_claimed_domain_check_does_not_block_the_repair_path(self, root: Path) -> None:
+        """The one move that must keep working. `replace-source-domain` is the
+        only supported way out of the state, so a check that also refused it
+        would leave the register unfixable through any interface the engine
+        offers — which is why this is checked on writes and not on load."""
+        _register()
+        _force_second_claim(root, self.TWIN_ID)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                self.TWIN_ID,
+                "--domain",
+                "tvilling.kommune.no",
+                "--reason",
+                "wrong domain recorded at registration",
+                "--by",
+                "Reviewer",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "domains claimed twice" not in runner.invoke(app, ["observatory", "status"]).output
+
+    def test_moving_onto_someone_elses_domain_is_refused(self, root: Path) -> None:
+        _register()
+        assert self._twin(root, domain="tvilling.kommune.no").exit_code == 0
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                self.TWIN_ID,
+                "--domain",
+                BAERUM_DOMAIN,
+                "--reason",
+                "moved",
+                "--by",
+                "Reviewer",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "already claimed by 3201" in result.stderr
+
+    def test_a_refused_move_writes_neither_registry_nor_event(self, root: Path) -> None:
+        """A collision is rejected before either half of the audited domain
+        replacement is written; otherwise the refusal can still alter current
+        state or record an operator decision that never took effect."""
+        _register()
+        assert self._twin(root, domain="tvilling.kommune.no").exit_code == 0
+        path = registry_path(ObservatoryRoot(root, forbidden=[]))
+        before = path.read_bytes()
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                self.TWIN_ID,
+                "--domain",
+                BAERUM_DOMAIN,
+                "--reason",
+                "moved",
+                "--by",
+                "Reviewer",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert path.read_bytes() == before
+        assert list(read_source_events(source_events_path(ObservatoryRoot(root, ())))) == []
+
+    def test_status_names_the_contested_domain(self, root: Path) -> None:
+        """Nothing else reads the register as a whole. A sweep meets this one
+        source at a time, and only when it reaches a claimant."""
+        _register()
+        _force_second_claim(root, self.TWIN_ID)
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "domains claimed twice: 1" in result.output
+        assert f"{BAERUM_DOMAIN}: 3201 Bærum, {self.TWIN_ID} Tvilling" in result.output
+
+    def test_capture_refuses_without_a_traceback(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A refusal an operator can act on, not an exception (cf. #208).
+
+        `robots.txt` is read before the authorisation gate — it is the polite
+        prerequisite, not a capture — so the refusal costs that one request.
+        Nothing the register cannot attribute is fetched after it.
+        """
+        _activate(root)
+        _force_second_claim(root, self.TWIN_ID, active=True)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "more than one activated source" in result.stderr
+        assert "Traceback" not in result.output
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS_URL]
+
+    def test_a_candidate_on_a_contested_subdomain_refuses_without_a_traceback(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Discovery clears the source's own host; a candidate may still sit on
+        a subdomain a second source claims. That reaches `fetcher.capture`,
+        which is outside the guard around discovery — and arrived as a
+        traceback with an empty stderr, leaving the records already appended
+        unexplained.
+
+        The pass keeps what it captured before stopping. Those pages are in the
+        archive whatever the register says, so reporting zero would be a second
+        untruth.
+        """
+        contested_url = f"https://sub.{BAERUM_DOMAIN}/forskrift"
+        _activate(root)
+        _force_second_claim(root, self.TWIN_ID, active=True, domain=f"sub.{BAERUM_DOMAIN}")
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, contested_url))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "Refused:" in result.stderr
+        assert "more than one activated source" in result.stderr
+        assert "abandoned" in result.stderr
+        assert "captured: 1" in result.output
+        assert contested_url not in [str(r.url) for r in httpx_mock.get_requests()]
+
+    def test_a_sweep_refuses_that_source_and_keeps_going(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """One unreconcilable row must not cost the other two hundred
+        municipalities their night's observations — and must still move the
+        sweep's exit code, the way every other refusal does."""
+        _activate(root)
+        _activate_asker(root)
+        _force_second_claim(root, self.TWIN_ID, active=True)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        # The twin's clearance names the apex host, so the sweep reads that
+        # `robots.txt` too before the gate refuses either claimant.
+        httpx_mock.add_response(
+            url=f"https://{BAERUM_DOMAIN}/robots.txt",
+            text="User-agent: *\nAllow: /\n",
+            is_reusable=True,
+        )
+        httpx_mock.add_response(
+            url=ASKER_ROBOTS_URL,
+            text=f"User-agent: *\nAllow: /\nSitemap: {ASKER_SITEMAP_URL}\n",
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert "more than one activated source" in result.stderr
+        assert "captured: 1" in result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        # Both claimants refuse, not one: neither can say the pages are its
+        # own, and refusing only the newcomer would keep filing the domain
+        # under whichever row happens to sort first — the bug itself.
+        assert (run.status, run.sources_refused, run.captured) == ("degraded", 2, 1)
 
 
 class TestComposition:
@@ -2477,7 +2775,7 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
 
-        assert counts == (2, 0, 0, True, 0, 5)
+        assert counts == (2, 0, 0, True, False, 0, 5)
         assert fetcher.capture.call_count == 2
 
     def test_every_candidate_in_a_pass_uses_the_same_clock_read(
@@ -2531,7 +2829,7 @@ class TestCaptureAll:
             limit=1,
         )
 
-        assert counts == (1, 0, 1, False, 0, 0)
+        assert counts == (1, 0, 1, False, False, 0, 0)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
 
     def test_multiple_held_candidates_are_all_counted_as_deferred(
@@ -2569,7 +2867,53 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
-        assert counts == (1, 0, 0, True, 1, 0)
+        assert counts == (1, 0, 0, True, False, 1, 0)
+
+    def test_contested_counts_preserve_every_prior_outcome(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidates = tuple(
+            Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
+            for url in (
+                PAGE_URL,
+                OTHER_PAGE_URL,
+                THIRD_PAGE_URL,
+                "https://held.invalid",
+                "https://contested.invalid",
+            )
+        )
+        first = _observation(b"first", PAGE_URL).model_copy(
+            update={
+                "provenance": _observation(b"first", PAGE_URL).provenance.model_copy(
+                    update={"redirect_chain": (OTHER_PAGE_URL,)}
+                )
+            }
+        )
+        failure = FetchFailure(
+            authority_id=BAERUM_ID,
+            url=OTHER_PAGE_URL,
+            observed_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+            provenance=_observation(b"failed", OTHER_PAGE_URL).provenance.model_copy(
+                update={"redirect_chain": (PAGE_URL, THIRD_PAGE_URL)}
+            ),
+            outcome="http_404",
+            http_status=404,
+        )
+        fetcher = Mock()
+        fetcher.capture.side_effect = (first, failure, AmbiguousSourceError("two claimants"))
+        monkeypatch.setattr(
+            observatory_commands,
+            "worth_capturing",
+            lambda candidate, *_: candidate.url not in {THIRD_PAGE_URL, "https://held.invalid"},
+        )
+        state = CaptureState(
+            {THIRD_PAGE_URL: datetime(2026, 8, 24, tzinfo=UTC)},
+            {"https://held.invalid": FailureHold("http_404", 1, datetime(2026, 8, 24, tzinfo=UTC))},
+        )
+
+        counts = _capture_candidates(fetcher, candidates, state, limit=0)
+
+        assert counts == (1, 1, 1, False, True, 1, 3)
 
     def test_one_sweep_source_preserves_deferred_counts(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2586,6 +2930,30 @@ class TestCaptureAll:
         totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
 
         assert totals.deferred == 1
+
+    def test_contested_sweep_reports_to_stderr_and_preserves_counts(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        discovery = SimpleNamespace(documents_read=1, candidates=())
+        monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
+        discoverer = Mock()
+        discoverer.discover.return_value = discovery
+        monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
+        monkeypatch.setattr(
+            observatory_commands,
+            "_capture_candidates",
+            lambda *args: observatory_commands._CaptureCounts(2, 1, 3, False, True, 4, 5),
+        )
+        record = Mock(authority_id=BAERUM_ID)
+
+        totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
+
+        captured = capsys.readouterr()
+        assert captured.err == (
+            f"  refused: {BAERUM_ID} abandoned partway — a candidate's host "
+            "is claimed by more than one activated source\n"
+        )
+        assert totals == (1, 2, 1, 3, 0, 0, 4)
 
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""

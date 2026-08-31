@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from lovspor.atomic_io import atomic_write_text
-from lovspor.errors import ParseError, SourceNotActivatedError
+from lovspor.errors import AmbiguousSourceError, ParseError, SourceNotActivatedError
 from lovspor.observatory.model import AuthorityType, require_utc
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -56,9 +56,24 @@ def _host_matches(host: str, domain: str) -> bool:
     Compared label-wise, never as a string suffix: ``notbaerum.no`` must not
     match ``baerum.no``, and ``baerum.no.evil.example`` must not match either.
     """
-    host = host.lower().rstrip(".")
-    domain = domain.lower().rstrip(".")
+    host = normalised_domain(host)
+    domain = normalised_domain(domain)
     return host == domain or host.endswith(f".{domain}")
+
+
+def normalised_domain(domain: str) -> str:
+    """A domain in the one spelling every comparison in this module uses.
+
+    DNS is case-insensitive and a trailing dot is the absolute form of the same
+    name, so ``BAERUM.KOMMUNE.NO.`` and ``baerum.kommune.no`` are one host.
+
+    Named and shared rather than repeated inline, because repeating it is how
+    the two halves of #215 drifted apart: the capture gate normalised and the
+    register's own collision check did not, so two spellings of one domain
+    passed `register-source` without a word, were reported by nothing, and then
+    refused every capture while `status` called the register clean.
+    """
+    return domain.lower().rstrip(".")
 
 
 class AccessPolicyCheck(BaseModel):
@@ -409,7 +424,101 @@ def authorise_capture(registry: SourceRegistry, url: str) -> SourceRecord:
         raise SourceNotActivatedError(
             f"{host} has no recorded access-policy check permitting capture",
         )
+    if len(active) > 1:
+        raise AmbiguousSourceError(
+            f"{host} is covered by more than one activated source "
+            f"({_named(active)}); the register cannot say which authority "
+            "publishes it, and picking one would file its pages under the other"
+        )
     return active[0]
+
+
+def domains_overlap(one: str, other: str) -> bool:
+    """Whether two claims can cover the same host.
+
+    Equality is not the question. A source cleared for ``example.invalid``
+    covers every host under it, so it and a source cleared for
+    ``testby.example.invalid`` compete for the same pages — and the capture
+    gate, which matches by coverage, refuses them. Comparing the two claims
+    for equality would let exactly that pair be registered without a word and
+    then refuse every capture with `status` reporting a clean register.
+
+    Asked in both directions, because either row may be the broader one and
+    which was registered first decides nothing.
+    """
+    return _host_matches(one, other) or _host_matches(other, one)
+
+
+def domains_claimed_twice(registry: SourceRegistry) -> dict[str, list[SourceRecord]]:
+    """Domains more than one source can serve, keyed by the broadest of them.
+
+    Read from the register rather than discovered by a sweep: the sweep only
+    learns of it when it reaches one of the claimants, and by then it has
+    already spent a night filing one authority's pages under another's name.
+    """
+    records = [record for _, record in sorted(registry.sources.items())]
+    grouped: set[str] = set()
+    contested: dict[str, list[SourceRecord]] = {}
+    for record in records:
+        if record.authority_id in grouped:
+            continue
+        group = _overlap_group(record, records)
+        if len(group) > 1:
+            grouped.update(member.authority_id for member in group)
+            contested[_broadest(group)] = group
+    return contested
+
+
+def _overlap_group(start: SourceRecord, records: list[SourceRecord]) -> list[SourceRecord]:
+    """Every source whose claim can serve a host ``start``'s claim can serve.
+
+    A component, not a neighbourhood. One parent domain with two subdomain
+    claims is three rows an operator has to reconcile together, and the two
+    subdomains do not overlap *each other* — so collecting only what overlaps
+    one row reports two of the three and, keyed by the same parent, the shorter
+    answer replaces the fuller one.
+
+    Found in two passes rather than by walking a worklist, because coverage is
+    transitive: a claim on ``a.no`` covers ``x.a.no``, which covers ``y.x.a.no``,
+    and ``a.no`` covers that too. So the broadest claim in a component covers
+    every other, and asking what overlaps *it* is the whole component. The
+    worklist version computed the same answer and could be turned into an
+    infinite loop by mutating its single termination check — a function whose
+    termination rests on one membership test is one edit from hanging CI, and
+    the mutation gate said so before anybody else did.
+    """
+    reachable = [r for r in records if domains_overlap(r.canonical_domain, start.canonical_domain)]
+    broadest = min(reachable, key=lambda r: len(normalised_domain(r.canonical_domain)))
+    group = [r for r in records if domains_overlap(r.canonical_domain, broadest.canonical_domain)]
+    return sorted(group, key=lambda record: record.authority_id)
+
+
+def _broadest(group: list[SourceRecord]) -> str:
+    """The domain in ``group`` that covers the others, as the group's name.
+
+    Every member of an overlap group derives the same key from it, which is
+    what keeps one collision reported once rather than once per claimant.
+    """
+    return min((normalised_domain(r.canonical_domain) for r in group), key=len)
+
+
+def claimants(registry: SourceRegistry, domain: str, excluding: str | None = None) -> list[str]:
+    """Which other sources already claim ground ``domain`` would cover, by id.
+
+    Compared as DNS names and by coverage, not as strings and not for
+    equality: a claim spelled in another case is the same claim, and a claim
+    on a parent or a subdomain competes for the same hosts.
+    """
+    return [
+        authority_id
+        for authority_id, record in sorted(registry.sources.items())
+        if authority_id != excluding and domains_overlap(record.canonical_domain, domain)
+    ]
+
+
+def _named(records: list[SourceRecord]) -> str:
+    """The claimants, so the refusal names what an operator has to reconcile."""
+    return ", ".join(f"{record.authority_id} {record.name}" for record in records)
 
 
 def read_registry(path: Path) -> SourceRegistry:

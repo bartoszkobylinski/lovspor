@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lovspor.errors import ParseError, SourceNotActivatedError
+from lovspor.errors import AmbiguousSourceError, ParseError, SourceNotActivatedError
 from lovspor.observatory.registry import (
     AccessPolicyCheck,
     CaptureVerdict,
@@ -18,6 +18,9 @@ from lovspor.observatory.registry import (
     activate,
     authorise_capture,
     capture_host,
+    claimants,
+    domains_claimed_twice,
+    normalised_domain,
     read_access_policy_check,
     read_capture_verdict,
     read_registry,
@@ -172,6 +175,278 @@ class TestActivationCannotBeForged:
 
         with pytest.raises(ParseError, match="invalid source registry"):
             read_registry(path)
+
+
+def other_source(**overrides: object) -> SourceRecord:
+    """A second authority, on the same domain unless told otherwise."""
+    fields: dict[str, object] = {
+        "authority_type": "kommune",
+        "authority_id": "8888",
+        "name": "Annenby",
+        "canonical_domain": "testby.example.invalid",
+    }
+    return SourceRecord.model_validate({**fields, **overrides})
+
+
+class TestTwoSourcesCannotShareADomain:
+    """Issue #215. `4202 Grimstad` carried `arendal.kommune.no`, the same domain
+    as `4203 Arendal`; the gate sorted by id and returned the first, so 5,980
+    observations of Arendal's site were filed under Grimstad while Grimstad
+    itself was never fetched and every pass over it reported success."""
+
+    def _both_active(self) -> SourceRegistry:
+        return SourceRegistry(
+            sources={
+                "9999": activate(eligible_source(), check()),
+                "8888": activate(other_source(), check()),
+            }
+        )
+
+    def test_the_gate_refuses_rather_than_picking_one(self) -> None:
+        with pytest.raises(AmbiguousSourceError, match="more than one activated source"):
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+    def test_the_gate_refuses_overlapping_parent_and_subdomain_claims(self) -> None:
+        """The ambiguity is coverage, not just exact-domain duplication."""
+        parent = activate(
+            other_source(authority_id="8888", canonical_domain="example.invalid"),
+            check(robots_txt_url="https://example.invalid/robots.txt"),
+        )
+        child = activate(
+            eligible_source(),
+            check(robots_txt_url="https://testby.example.invalid/robots.txt"),
+        )
+        registry = SourceRegistry(sources={"8888": parent, "9999": child})
+
+        with pytest.raises(AmbiguousSourceError):
+            authorise_capture(registry, "https://testby.example.invalid/f")
+
+    def test_the_refusal_names_both_claimants(self) -> None:
+        """An operator has to reconcile two rows, so the message has to say
+        which two. A refusal that only says "ambiguous" sends them to grep."""
+        with pytest.raises(AmbiguousSourceError) as raised:
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+        assert "8888 Annenby" in str(raised.value)
+        assert "9999 Testby" in str(raised.value)
+
+    def test_the_refusal_message_names_and_separates_both_claimants(self) -> None:
+        with pytest.raises(AmbiguousSourceError) as raised:
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+        assert str(raised.value) == (
+            "testby.example.invalid is covered by more than one activated source "
+            "(8888 Annenby, 9999 Testby); the register cannot say which authority "
+            "publishes it, and picking one would file its pages under the other"
+        )
+
+    def test_an_inactive_second_claimant_is_not_an_ambiguity(self) -> None:
+        """Only activation authorises a fetch, so only activated sources can
+        compete for one. An eligible-but-inactive row claims nothing yet."""
+        registry = SourceRegistry(
+            sources={"9999": activate(eligible_source(), check()), "8888": other_source()}
+        )
+
+        assert (
+            authorise_capture(registry, "https://testby.example.invalid/f").authority_id == "9999"
+        )
+
+    def test_the_refusal_is_still_a_refusal_to_fetch(self) -> None:
+        """It subclasses `SourceNotActivatedError` on purpose: every existing
+        handler reads that as "do not fetch this", and that answer stays right
+        while the reason changes."""
+        with pytest.raises(SourceNotActivatedError):
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+
+class TestDomainsClaimedTwice:
+    def test_normalisation_removes_only_the_dns_root_dot(self) -> None:
+        assert normalised_domain("EXAMPLE.XX.") == "example.xx"
+
+    def test_a_register_with_no_collision_reports_none(self) -> None:
+        registry = SourceRegistry(
+            sources={
+                "9999": eligible_source(),
+                "8888": other_source(canonical_domain="annenby.example.invalid"),
+            }
+        )
+
+        assert domains_claimed_twice(registry) == {}
+
+    def test_a_collision_is_reported_with_both_records(self) -> None:
+        registry = SourceRegistry(sources={"9999": eligible_source(), "8888": other_source()})
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["testby.example.invalid"]
+        assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
+
+    @pytest.mark.parametrize(
+        "spelling", ["TESTBY.EXAMPLE.INVALID", "testby.example.invalid.", "Testby.Example.Invalid"]
+    )
+    def test_equivalent_dns_spellings_are_one_contested_domain(self, spelling: str) -> None:
+        """DNS is case-insensitive and the trailing dot is the absolute form of
+        the same name. Comparing the field as a string is how the two halves of
+        #215 drifted apart: the gate normalised, this did not, so a second
+        spelling passed `register-source` and was reported by nothing."""
+        registry = SourceRegistry(
+            sources={"9999": eligible_source(), "8888": other_source(canonical_domain=spelling)}
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["testby.example.invalid"]
+        assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
+
+    @pytest.mark.parametrize(
+        "spelling", ["TESTBY.EXAMPLE.INVALID", "testby.example.invalid.", "Testby.Example.Invalid"]
+    )
+    def test_a_claim_is_found_however_the_domain_is_spelled(self, spelling: str) -> None:
+        registry = SourceRegistry(sources={"9999": eligible_source()})
+
+        assert claimants(registry, spelling) == ["9999"]
+
+    @pytest.mark.parametrize(
+        ("existing", "requested"),
+        [
+            ("example.invalid", "testby.example.invalid"),
+            ("testby.example.invalid", "example.invalid"),
+        ],
+    )
+    def test_a_parent_and_a_subdomain_claim_the_same_ground(
+        self, existing: str, requested: str
+    ) -> None:
+        """Equality is not the question. A source cleared for a parent domain
+        covers every host under it, so it and a source on a subdomain compete
+        for the same pages — which the capture gate already refuses. Comparing
+        the claims for equality would let that pair be registered without a
+        word and then refuse every capture with `status` calling the register
+        clean. Asked in both directions: which row was registered first
+        decides nothing."""
+        registry = SourceRegistry(
+            sources={"9999": other_source(authority_id="9999", canonical_domain=existing)}
+        )
+
+        assert claimants(registry, requested) == ["9999"]
+
+    def test_an_overlap_is_reported_once_under_the_broader_domain(self) -> None:
+        """Every member of a group derives the same key from it, so one
+        collision is one line in the report rather than one per claimant."""
+        registry = SourceRegistry(
+            sources={
+                "9999": eligible_source(),
+                "8888": other_source(canonical_domain="sub.testby.example.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["testby.example.invalid"]
+        assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
+
+    def test_one_parent_with_two_subdomain_claims_reports_every_claimant(self) -> None:
+        """A component, not a neighbourhood. The two subdomains do not overlap
+        each other, so collecting what overlaps a single row finds two of the
+        three — and, keyed by the same parent, the last row written replaces
+        the fuller answer. An operator has to reconcile all three."""
+        registry = SourceRegistry(
+            sources={
+                "9999": other_source(authority_id="9999", canonical_domain="example.invalid"),
+                "8888": other_source(canonical_domain="a.example.invalid"),
+                "7777": other_source(authority_id="7777", canonical_domain="b.example.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["example.invalid"]
+        assert [r.authority_id for r in contested["example.invalid"]] == ["7777", "8888", "9999"]
+
+    def test_two_disjoint_overlap_groups_are_both_reported(self) -> None:
+        registry = SourceRegistry(
+            sources={
+                "1000": other_source(authority_id="1000", canonical_domain="one.invalid"),
+                "1001": other_source(authority_id="1001", canonical_domain="sub.one.invalid"),
+                "2000": other_source(authority_id="2000", canonical_domain="two.invalid"),
+                "2001": other_source(authority_id="2001", canonical_domain="sub.two.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["one.invalid", "two.invalid"]
+        assert [[r.authority_id for r in group] for group in contested.values()] == [
+            ["1000", "1001"],
+            ["2000", "2001"],
+        ]
+
+    def test_sibling_subdomains_without_a_parent_do_not_collide(self) -> None:
+        """The component only exists because something covers both. Two
+        subdomains alone compete for nothing."""
+        registry = SourceRegistry(
+            sources={
+                "8888": other_source(canonical_domain="a.example.invalid"),
+                "7777": other_source(authority_id="7777", canonical_domain="b.example.invalid"),
+            }
+        )
+
+        assert domains_claimed_twice(registry) == {}
+
+    def test_a_group_is_complete_however_the_authority_ids_sort(self) -> None:
+        """The component is walked from whichever row the scan reaches first,
+        and rows are visited in id order. With the broad domain holding the
+        lowest id, a walk that stopped at the first row it had already seen
+        would report the parent and one subdomain and drop the other — and,
+        keyed by the same parent, the shorter answer overwrites the fuller
+        one, so the loss is silent."""
+        registry = SourceRegistry(
+            sources={
+                "1000": other_source(authority_id="1000", canonical_domain="e.invalid"),
+                "2000": other_source(authority_id="2000", canonical_domain="a.e.invalid"),
+                "3000": other_source(authority_id="3000", canonical_domain="b.e.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert [r.authority_id for r in contested["e.invalid"]] == ["1000", "2000", "3000"]
+
+    def test_unrelated_domains_are_not_an_overlap(self) -> None:
+        """Coverage is label-wise. `notbaerum.no` must not read as a claim on
+        `baerum.no` merely because one is a string suffix of the other."""
+        registry = SourceRegistry(
+            sources={
+                "9999": other_source(authority_id="9999", canonical_domain="baerum.no"),
+                "8888": other_source(canonical_domain="notbaerum.no"),
+            }
+        )
+
+        assert domains_claimed_twice(registry) == {}
+
+    def test_an_inactive_row_still_counts_as_a_claim(self) -> None:
+        """It is a claim on the register, not on traffic. Reporting only the
+        activated ones would hide the collision until somebody activates the
+        second row, which is the moment it starts costing observations."""
+        registry = SourceRegistry(
+            sources={"9999": activate(eligible_source(), check()), "8888": other_source()}
+        )
+
+        assert list(domains_claimed_twice(registry)) == ["testby.example.invalid"]
+
+
+class TestClaimants:
+    def test_an_unclaimed_domain_has_none(self) -> None:
+        registry = SourceRegistry(sources={"9999": eligible_source()})
+
+        assert claimants(registry, "free.example.invalid") == []
+
+    def test_the_source_itself_can_be_excluded(self) -> None:
+        """The write paths ask "who else has this?", so re-declaring a source's
+        own current domain must not read as a collision with itself."""
+        registry = SourceRegistry(sources={"9999": eligible_source()})
+
+        assert claimants(registry, "testby.example.invalid") == ["9999"]
+        assert claimants(registry, "testby.example.invalid", excluding="9999") == []
 
 
 class TestCaptureGate:

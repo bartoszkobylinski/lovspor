@@ -284,6 +284,46 @@ thousands.
 A damaged log is refused before anything is fetched: appending thousands of
 records would bury the damage. Run `observatory verify` first.
 
+### One domain, one authority
+
+**Two activated sources on one domain make capture refuse, on both.** The archive's
+claim is that specific bytes came from a named authority (ADR-0010 §3), and a register
+that lists two authorities for a host cannot support it. `authorise_capture()` used to
+resolve that by sorting on authority id and returning the first, silently.
+
+It happened. `4202 Grimstad` carried `arendal.kommune.no` — Arendal's domain, not its
+own — so the lower id won every request: **5,980 observations of Arendal's site were
+filed under Grimstad, while Grimstad itself was never fetched once** and every pass over
+it reported success (issue #215). The register said 201 registered, 201 active, and
+nothing anywhere disagreed.
+
+Three things now hold that shut:
+
+- the gate refuses a contested host and names both claimants, so a sweep records the
+  source as refused and degrades — audible, and it costs the other two hundred
+  municipalities nothing. Both claimants refuse, not just the newcomer: refusing one
+  would keep filing the domain under whichever row sorts first, which is the bug.
+- `register-source` and `replace-source-domain` refuse a domain another source claims.
+- `observatory status` names any contested domain, because nothing else reads the
+  register as a whole and a sweep meets the state one source at a time.
+
+The check is on the write paths and not on registry load, deliberately. A load-time
+refusal would be stricter and would also be a trap: `replace-source-domain` is the only
+supported way out of the state and it has to read the register first, so a register that
+refuses to load is one nobody can repair through an interface this engine offers.
+
+Repairing an existing collision is a review, not an edit — the clearance was obtained for
+the wrong host:
+
+```bash
+uv run lovspor observatory replace-source-domain --id 4202 \
+  --domain grimstad.kommune.no --reason "..." --by "<reviewer>"
+uv run lovspor observatory activate-source --id 4202 --check <fresh-check>.json
+```
+
+Records already written under the wrong authority are a separate question: the log is
+append-only and its history is not rewritten.
+
 ### Reading the archive's failure rate: `observatory composition`
 
 **A followed redirect is recorded as `fetch_failure`, and it is not a
