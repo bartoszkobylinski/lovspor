@@ -3384,6 +3384,31 @@ def _with_quota(
     return wrapper
 
 
+_NOT_EVALUATED_NOTICE: dict[str, str] = {
+    "status": "not_evaluated",
+    "reason": (
+        "transaction-time retrieval: this answer describes corpus content "
+        "at recorded_at and no in-force evaluation was performed; "
+        "recorded_at is never used as a valid-time evaluation date "
+        "(ADR-0011 point 7). For today's in-force status call the tool "
+        "without recorded_at."
+    ),
+}
+"""The ``temporal_notice`` outcome for historical ``recorded_at`` calls.
+
+Explicit non-evaluation, not absence: composing the T0 notice (evaluated
+at today) with a historical body would mix a transaction-time body with a
+today-valued valid-time claim inside one response, and evaluating at
+``recorded_at`` would silently make it perform ``valid_at``'s job. Return
+a copy (``dict(...)``) — responses must not share one mutable object."""
+
+
+def _stamp_not_evaluated(result: dict[str, Any]) -> dict[str, Any]:
+    """Attach the non-evaluation notice to one historical response."""
+    result["temporal_notice"] = dict(_NOT_EVALUATED_NOTICE)
+    return result
+
+
 _MAX_SNAPSHOT_STATES = 4
 """Bound on cached historical states. Each holds a parsed manifest and,
 after a historical ``search_body``, the state's whole body set (~200 MB on
@@ -3699,6 +3724,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         slug: str,
         section_id: str,
         occurrence: int | None = None,
+        recorded_at: str | None = None,
     ) -> dict[str, Any]:
         """Return a single ``§`` section of a Norwegian law or regulation.
 
@@ -3758,10 +3784,28 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         (``pending_indeterminate``), or a provision never brought into
         force. Text listed there is not part of the law in force; do
         not present it as such (ADR-0009 §3b).
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): answer from the
+        corpus state at UTC end-of-day on that date — what the corpus
+        RECORDED then, never which law was in force then (the
+        legal-validity axis is a separate future capability). The
+        response then carries ``recorded_at``, ``corpus_commit`` (the
+        resolved global state — equal ``corpus_commit`` across calls
+        proves the answers share one state) and ``xml_hash``, and
+        ``temporal_notice`` becomes ``{"status": "not_evaluated", ...}``
+        — no in-force evaluation is performed against a historical
+        state. Dates before the corpus start fail with the boundary
+        outcome; future dates are refused.
         """
-        return _with_section_notice(
-            reader.get_section(slug, section_id, occurrence),
-            evaluation_date_today(),
+        return (
+            _stamp_not_evaluated(
+                reader.at_state(recorded_at).get_section(slug, section_id, occurrence),
+            )
+            if recorded_at is not None
+            else _with_section_notice(
+                reader.get_section(slug, section_id, occurrence),
+                evaluation_date_today(),
+            )
         )
 
     @_tool()
@@ -3955,7 +3999,8 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         query: str,
         dataset: str | None = None,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+        recorded_at: str | None = None,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Search the corpus body text (full Markdown) for ``query``.
 
         Complement to ``search_laws``: that tool matches manifest
@@ -3996,8 +4041,23 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         and every call after that is a full scan of that text —
         ~0.4 s, or ~0.5-0.6 s once the marker-tolerant pass runs over
         the 18.3% of documents that carry a footnote marker.
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): search the corpus
+        state at UTC end-of-day on that date — what the corpus RECORDED
+        then, never which law was in force then. The response is then an
+        envelope ``{recorded_at, corpus_commit, results}`` instead of a
+        bare list, so even zero matches carry the resolved state
+        (``corpus_commit``; equal values across calls prove a set of
+        answers shares one state). Dates before the corpus start fail
+        with the boundary outcome; future dates are refused. First
+        historical search per state bulk-loads that state's bodies —
+        comparable cost to this tool's own cold start.
         """
-        return reader.search_body(query, dataset=dataset, limit=limit)
+        return (
+            reader.at_state(recorded_at).search_body(query, dataset=dataset, limit=limit)
+            if recorded_at is not None
+            else reader.search_body(query, dataset=dataset, limit=limit)
+        )
 
     @_tool()
     def semantic_search(
@@ -4070,7 +4130,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         )
 
     @_tool()
-    def validate_citation(citation: str) -> dict[str, Any]:
+    def validate_citation(citation: str, recorded_at: str | None = None) -> dict[str, Any]:
         """Verify that a Norwegian-law citation string actually resolves.
 
         Use this before quoting a citation in a final answer to the
@@ -4098,8 +4158,24 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         Slug-only citations (``"skatteloven-sktl"``) are valid as long
         as the slug is known. ``§``-only citations (``"§ 5-12"``) are
         invalid because the section id is non-unique across acts.
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): validate against
+        the corpus state at UTC end-of-day on that date. ``valid`` then
+        means "resolved in the corpus state at that date" — a statement
+        about what the corpus RECORDED, never that the citation was
+        legally in force then (the legal-validity axis is a separate
+        future capability). The response then carries ``recorded_at``
+        and ``corpus_commit`` (the resolved global state). An act
+        ingested after that date is ``valid: false`` in that state —
+        a normal historical negative, not an error. Dates before the
+        corpus start fail with the boundary outcome; future dates are
+        refused.
         """
-        return reader.validate_citation(citation)
+        return (
+            reader.at_state(recorded_at).validate_citation(citation)
+            if recorded_at is not None
+            else reader.validate_citation(citation)
+        )
 
     @_tool()
     def verify_quote(
@@ -4107,6 +4183,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         section_id: str,
         quote: str,
         occurrence: int | None = None,
+        recorded_at: str | None = None,
     ) -> dict[str, Any]:
         """Verify a verbatim quote actually appears in a specific section.
 
@@ -4148,8 +4225,23 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         out-of-range occurrence likewise return ``verified=false`` with
         a recovery-oriented ``reason`` (the messages list available
         sections, candidate occurrences, or the valid occurrence range).
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): verify against
+        the corpus state at UTC end-of-day on that date. ``verified``
+        then means "this wording appeared in the corpus text of that
+        section at that date" — a statement about what the corpus
+        RECORDED, never that the wording was the law in force then (the
+        legal-validity axis is a separate future capability). The
+        response then carries ``recorded_at``, ``corpus_commit`` (the
+        resolved global state) and — only when the document actually
+        resolved in that state — ``xml_hash``. Dates before the corpus
+        start fail with the boundary outcome; future dates are refused.
         """
-        return reader.verify_quote(slug, section_id, quote, occurrence)
+        return (
+            reader.at_state(recorded_at).verify_quote(slug, section_id, quote, occurrence)
+            if recorded_at is not None
+            else reader.verify_quote(slug, section_id, quote, occurrence)
+        )
 
     @_tool()
     def get_eu_basis(slug: str) -> dict[str, Any]:

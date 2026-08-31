@@ -1,0 +1,25 @@
+{
+  "description": "Apparatus surface after ADR-0011 recorded_at: the tool names and schema hash the local `lovspor mcp` server serves once get_section, search_body, validate_citation and verify_quote accept an optional transaction-time `recorded_at` parameter (corpus state at UTC end-of-day; answers stamp the resolved global corpus_commit; get_section's temporal_notice becomes not_evaluated for historical calls; search_body returns an envelope under explicit recorded_at). Tool NAMES are unchanged from v3 — four input schemas and four descriptions differ, and both are served surface because the model reads them. Supersedes tool-surface-v3.json for FUTURE runs; v1, v2 and v3 stay committed untouched because the runs that recorded their hashes must remain verifiable (pass --surface-path for a re-check against any of them). Taken BEFORE the prereserved claude-fable-5 confirmatory pair starts, so no run spans the change; ANALYSIS-PLAN-fable5-v1.md binds the treatment arm to the committed apparatus document current at run time, which v4 now is. The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() on branch feat/recorded-at-primitives (the commit that added recorded_at to the four primitives; ADR-0011, lovspor-notebook PR #108)",
+  "python": "3.12",
+  "server": "lovverk",
+  "tool_schema_sha256": "3c4f0db824fd0dfffade372fa0220369c6b15b4aa1e14e915fa535b2eb3e9f98",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.mcp import CorpusNotFoundError, CorpusReader, _parse_recorded_at
+import lovspor.mcp as mcp_module
+from lovspor.mcp import (
+    CorpusNotFoundError,
+    CorpusReader,
+    _parse_recorded_at,
+    build_server,
+)
 from lovspor.snapshot import HistoryBoundaryError
 
 # ---------- fixture: a two-state corpus ----------
@@ -306,3 +312,93 @@ def test_search_finds_state_text_not_head_text(reader: CorpusReader) -> None:
     slugs = [hit["slug"] for hit in envelope["results"]]
     assert slugs == ["testloven"]
     assert reader.search_body("Testloven v1 tekst") == []
+
+
+# ---------- MCP tool layer (ADR-0011 point 7: T0 composition) ----------
+
+
+def _tool_fn(repo: Path, name: str):
+
+    return build_server(repo)._tool_manager._tools[name].fn
+
+
+def test_historical_tool_response_carries_not_evaluated_notice(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, sha1, _ = corpus
+
+    result = _tool_fn(repo, "get_section")(
+        slug="grunnloven-grl",
+        section_id="1-1",
+        recorded_at="2026-05-05",
+    )
+
+    assert result["corpus_commit"] == sha1
+    assert result["temporal_notice"]["status"] == "not_evaluated"
+    assert "recorded_at" in result["temporal_notice"]["reason"]
+
+
+def test_not_evaluated_notices_are_not_one_shared_object(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _, _ = corpus
+    fn = _tool_fn(repo, "get_section")
+
+    first = fn(slug="grunnloven-grl", section_id="1-1", recorded_at="2026-05-05")
+    second = fn(slug="testloven", section_id="9-9", recorded_at="2026-05-05")
+
+    assert first["temporal_notice"] is not second["temporal_notice"]
+
+
+def test_recorded_at_is_never_used_as_the_evaluation_date(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-0011 point 7: recorded_at must not reach build_notice, directly
+    # or by default. The live path still evaluates at today's date.
+    repo, _, _ = corpus
+    calls: list[date] = []
+    original = mcp_module.build_notice
+
+    def spy(body: str, evaluation_date: date, **kwargs: object):
+        calls.append(evaluation_date)
+        return original(body, evaluation_date, **kwargs)
+
+    monkeypatch.setattr(mcp_module, "build_notice", spy)
+    fn = _tool_fn(repo, "get_section")
+
+    fn(slug="grunnloven-grl", section_id="1-1", recorded_at="2026-05-05")
+    assert calls == []
+
+    fn(slug="grunnloven-grl", section_id="1-1")
+    assert calls == [datetime.now(UTC).date()]
+
+
+def test_search_body_tool_shape_is_conditional_on_recorded_at(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, sha1, _ = corpus
+    fn = _tool_fn(repo, "search_body")
+
+    live = fn(query="tekst")
+    historical = fn(query="tekst", recorded_at="2026-05-05")
+
+    assert isinstance(live, list)
+    assert historical["corpus_commit"] == sha1
+    assert [hit["slug"] for hit in historical["results"]] == [
+        hit["slug"] for hit in live if hit["slug"] != "nyloven"
+    ]
+
+
+def test_live_tool_responses_carry_no_state_evidence_fields(
+    corpus: tuple[Path, str, str],
+) -> None:
+    # Additivity: without recorded_at the response shape is unchanged —
+    # no corpus_commit, no recorded_at echo.
+    repo, _, _ = corpus
+
+    result = _tool_fn(repo, "get_section")(slug="grunnloven-grl", section_id="1-1")
+
+    assert "corpus_commit" not in result
+    assert "recorded_at" not in result
+    assert "temporal_notice" in result
