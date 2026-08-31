@@ -392,6 +392,25 @@ class TestDomainsClaimedTwice:
 
         assert domains_claimed_twice(registry) == {}
 
+    def test_a_group_is_complete_however_the_authority_ids_sort(self) -> None:
+        """The component is walked from whichever row the scan reaches first,
+        and rows are visited in id order. With the broad domain holding the
+        lowest id, a walk that stopped at the first row it had already seen
+        would report the parent and one subdomain and drop the other — and,
+        keyed by the same parent, the shorter answer overwrites the fuller
+        one, so the loss is silent."""
+        registry = SourceRegistry(
+            sources={
+                "1000": other_source(authority_id="1000", canonical_domain="e.invalid"),
+                "2000": other_source(authority_id="2000", canonical_domain="a.e.invalid"),
+                "3000": other_source(authority_id="3000", canonical_domain="b.e.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert [r.authority_id for r in contested["e.invalid"]] == ["1000", "2000", "3000"]
+
     def test_unrelated_domains_are_not_an_overlap(self) -> None:
         """Coverage is label-wise. `notbaerum.no` must not read as a claim on
         `baerum.no` merely because one is a string suffix of the other."""
