@@ -793,6 +793,35 @@ class TestTwoSourcesCannotShareADomain:
         assert result.exit_code == 1
         assert "already claimed by 3201" in result.stderr
 
+    def test_a_refused_move_writes_neither_registry_nor_event(self, root: Path) -> None:
+        """A collision is rejected before either half of the audited domain
+        replacement is written; otherwise the refusal can still alter current
+        state or record an operator decision that never took effect."""
+        _register()
+        assert self._twin(root, domain="tvilling.kommune.no").exit_code == 0
+        path = registry_path(ObservatoryRoot(root, forbidden=[]))
+        before = path.read_bytes()
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                self.TWIN_ID,
+                "--domain",
+                BAERUM_DOMAIN,
+                "--reason",
+                "moved",
+                "--by",
+                "Reviewer",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert path.read_bytes() == before
+        assert list(read_source_events(source_events_path(ObservatoryRoot(root, ())))) == []
+
     def test_status_names_the_contested_domain(self, root: Path) -> None:
         """Nothing else reads the register as a whole. A sweep meets this one
         source at a time, and only when it reaches a claimant."""
