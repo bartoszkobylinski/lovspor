@@ -315,6 +315,36 @@ class TestDomainsClaimedTwice:
         assert list(contested) == ["testby.example.invalid"]
         assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
 
+    def test_one_parent_with_two_subdomain_claims_reports_every_claimant(self) -> None:
+        """A component, not a neighbourhood. The two subdomains do not overlap
+        each other, so collecting what overlaps a single row finds two of the
+        three — and, keyed by the same parent, the last row written replaces
+        the fuller answer. An operator has to reconcile all three."""
+        registry = SourceRegistry(
+            sources={
+                "9999": other_source(authority_id="9999", canonical_domain="example.invalid"),
+                "8888": other_source(canonical_domain="a.example.invalid"),
+                "7777": other_source(authority_id="7777", canonical_domain="b.example.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["example.invalid"]
+        assert [r.authority_id for r in contested["example.invalid"]] == ["7777", "8888", "9999"]
+
+    def test_sibling_subdomains_without_a_parent_do_not_collide(self) -> None:
+        """The component only exists because something covers both. Two
+        subdomains alone compete for nothing."""
+        registry = SourceRegistry(
+            sources={
+                "8888": other_source(canonical_domain="a.example.invalid"),
+                "7777": other_source(authority_id="7777", canonical_domain="b.example.invalid"),
+            }
+        )
+
+        assert domains_claimed_twice(registry) == {}
+
     def test_unrelated_domains_are_not_an_overlap(self) -> None:
         """Coverage is label-wise. `notbaerum.no` must not read as a claim on
         `baerum.no` merely because one is a string suffix of the other."""

@@ -457,12 +457,38 @@ def domains_claimed_twice(registry: SourceRegistry) -> dict[str, list[SourceReco
     already spent a night filing one authority's pages under another's name.
     """
     records = [record for _, record in sorted(registry.sources.items())]
+    grouped: set[str] = set()
     contested: dict[str, list[SourceRecord]] = {}
     for record in records:
-        group = [r for r in records if domains_overlap(r.canonical_domain, record.canonical_domain)]
+        if record.authority_id in grouped:
+            continue
+        group = _overlap_group(record, records)
         if len(group) > 1:
+            grouped.update(member.authority_id for member in group)
             contested[_broadest(group)] = group
     return contested
+
+
+def _overlap_group(start: SourceRecord, records: list[SourceRecord]) -> list[SourceRecord]:
+    """Every source reachable from ``start`` through overlapping claims.
+
+    A component, not a neighbourhood. One parent domain with two subdomain
+    claims is three rows an operator has to reconcile together, but the two
+    subdomains do not overlap *each other* — so collecting only what overlaps
+    a single row reports two of the three and, keyed by the same parent, the
+    last one written silently replaces the fuller answer.
+    """
+    found = [start]
+    pending = [start]
+    while pending:
+        current = pending.pop()
+        for candidate in records:
+            if candidate in found:
+                continue
+            if domains_overlap(candidate.canonical_domain, current.canonical_domain):
+                found.append(candidate)
+                pending.append(candidate)
+    return sorted(found, key=lambda record: record.authority_id)
 
 
 def _broadest(group: list[SourceRecord]) -> str:
