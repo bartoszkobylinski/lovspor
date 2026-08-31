@@ -20,6 +20,7 @@ from lovspor.observatory.registry import (
     capture_host,
     claimants,
     domains_claimed_twice,
+    normalised_domain,
     read_access_policy_check,
     read_capture_verdict,
     read_registry,
@@ -229,6 +230,16 @@ class TestTwoSourcesCannotShareADomain:
         assert "8888 Annenby" in str(raised.value)
         assert "9999 Testby" in str(raised.value)
 
+    def test_the_refusal_message_names_and_separates_both_claimants(self) -> None:
+        with pytest.raises(AmbiguousSourceError) as raised:
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+        assert str(raised.value) == (
+            "testby.example.invalid is covered by more than one activated source "
+            "(8888 Annenby, 9999 Testby); the register cannot say which authority "
+            "publishes it, and picking one would file its pages under the other"
+        )
+
     def test_an_inactive_second_claimant_is_not_an_ambiguity(self) -> None:
         """Only activation authorises a fetch, so only activated sources can
         compete for one. An eligible-but-inactive row claims nothing yet."""
@@ -249,6 +260,9 @@ class TestTwoSourcesCannotShareADomain:
 
 
 class TestDomainsClaimedTwice:
+    def test_normalisation_removes_only_the_dns_root_dot(self) -> None:
+        assert normalised_domain("EXAMPLE.XX.") == "example.xx"
+
     def test_a_register_with_no_collision_reports_none(self) -> None:
         registry = SourceRegistry(
             sources={
@@ -347,6 +361,24 @@ class TestDomainsClaimedTwice:
 
         assert list(contested) == ["example.invalid"]
         assert [r.authority_id for r in contested["example.invalid"]] == ["7777", "8888", "9999"]
+
+    def test_two_disjoint_overlap_groups_are_both_reported(self) -> None:
+        registry = SourceRegistry(
+            sources={
+                "1000": other_source(authority_id="1000", canonical_domain="one.invalid"),
+                "1001": other_source(authority_id="1001", canonical_domain="sub.one.invalid"),
+                "2000": other_source(authority_id="2000", canonical_domain="two.invalid"),
+                "2001": other_source(authority_id="2001", canonical_domain="sub.two.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["one.invalid", "two.invalid"]
+        assert [[r.authority_id for r in group] for group in contested.values()] == [
+            ["1000", "1001"],
+            ["2000", "2001"],
+        ]
 
     def test_sibling_subdomains_without_a_parent_do_not_collide(self) -> None:
         """The component only exists because something covers both. Two

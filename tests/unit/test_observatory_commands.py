@@ -22,6 +22,7 @@ from typer.testing import CliRunner
 
 import lovspor.observatory.commands as observatory_commands
 from lovspor.cli import app
+from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.commands import (
     _capture_candidates,
@@ -698,6 +699,33 @@ class TestTwoSourcesCannotShareADomain:
 
         assert result.exit_code == 1
         assert "already claimed by 3201" in result.stderr
+
+    def test_register_refusal_lists_multiple_claimants_with_pinned_wording(
+        self, root: Path
+    ) -> None:
+        _register()
+        _force_second_claim(root, self.TWIN_ID)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                "3203",
+                "--name",
+                "Tredje",
+                "--domain",
+                BAERUM_DOMAIN,
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            f"Refused: {BAERUM_DOMAIN} is already claimed by 3201, {self.TWIN_ID}. "
+            "Two sources on one domain make an observation unable to name the authority "
+            "that published it, so the register may not hold that state.\n"
+        )
 
     @pytest.mark.parametrize(
         "spelling", ["BAERUM.KOMMUNE.NO", "baerum.kommune.no.", "Baerum.Kommune.No"]
@@ -2812,6 +2840,52 @@ class TestCaptureAll:
 
         assert counts == (1, 0, 0, True, False, 1, 0)
 
+    def test_contested_counts_preserve_every_prior_outcome(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidates = tuple(
+            Candidate(url=url, discovery_method="sitemap", found_in=SITEMAP_URL)
+            for url in (
+                PAGE_URL,
+                OTHER_PAGE_URL,
+                THIRD_PAGE_URL,
+                "https://held.invalid",
+                "https://contested.invalid",
+            )
+        )
+        first = _observation(b"first", PAGE_URL).model_copy(
+            update={
+                "provenance": _observation(b"first", PAGE_URL).provenance.model_copy(
+                    update={"redirect_chain": (OTHER_PAGE_URL,)}
+                )
+            }
+        )
+        failure = FetchFailure(
+            authority_id=BAERUM_ID,
+            url=OTHER_PAGE_URL,
+            observed_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+            provenance=_observation(b"failed", OTHER_PAGE_URL).provenance.model_copy(
+                update={"redirect_chain": (PAGE_URL, THIRD_PAGE_URL)}
+            ),
+            outcome="http_404",
+            http_status=404,
+        )
+        fetcher = Mock()
+        fetcher.capture.side_effect = (first, failure, AmbiguousSourceError("two claimants"))
+        monkeypatch.setattr(
+            observatory_commands,
+            "worth_capturing",
+            lambda candidate, *_: candidate.url not in {THIRD_PAGE_URL, "https://held.invalid"},
+        )
+        state = CaptureState(
+            {THIRD_PAGE_URL: datetime(2026, 8, 24, tzinfo=UTC)},
+            {"https://held.invalid": FailureHold("http_404", 1, datetime(2026, 8, 24, tzinfo=UTC))},
+        )
+
+        counts = _capture_candidates(fetcher, candidates, state, limit=0)
+
+        assert counts == (1, 1, 1, False, True, 1, 3)
+
     def test_one_sweep_source_preserves_deferred_counts(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2827,6 +2901,30 @@ class TestCaptureAll:
         totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
 
         assert totals.deferred == 1
+
+    def test_contested_sweep_reports_to_stderr_and_preserves_counts(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        discovery = SimpleNamespace(documents_read=1, candidates=())
+        monkeypatch.setattr(observatory_commands, "_entry_points", lambda *args: Mock())
+        discoverer = Mock()
+        discoverer.discover.return_value = discovery
+        monkeypatch.setattr(observatory_commands, "Discoverer", lambda *args: discoverer)
+        monkeypatch.setattr(
+            observatory_commands,
+            "_capture_candidates",
+            lambda *args: observatory_commands._CaptureCounts(2, 1, 3, False, True, 4, 5),
+        )
+        record = Mock(authority_id=BAERUM_ID)
+
+        totals = _sweep_one(Mock(), Mock(), record, CaptureState.empty(), limit=0)
+
+        captured = capsys.readouterr()
+        assert captured.err == (
+            f"  refused: {BAERUM_ID} abandoned partway — a candidate's host "
+            "is claimed by more than one activated source\n"
+        )
+        assert totals == (1, 2, 1, 3, 0, 0, 4)
 
     def test_using_the_whole_limit_on_the_final_candidate_is_not_capped(self) -> None:
         """A limit is truncation only when another fetch remains."""
