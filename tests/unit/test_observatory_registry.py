@@ -277,6 +277,56 @@ class TestDomainsClaimedTwice:
 
         assert claimants(registry, spelling) == ["9999"]
 
+    @pytest.mark.parametrize(
+        ("existing", "requested"),
+        [
+            ("example.invalid", "testby.example.invalid"),
+            ("testby.example.invalid", "example.invalid"),
+        ],
+    )
+    def test_a_parent_and_a_subdomain_claim_the_same_ground(
+        self, existing: str, requested: str
+    ) -> None:
+        """Equality is not the question. A source cleared for a parent domain
+        covers every host under it, so it and a source on a subdomain compete
+        for the same pages — which the capture gate already refuses. Comparing
+        the claims for equality would let that pair be registered without a
+        word and then refuse every capture with `status` calling the register
+        clean. Asked in both directions: which row was registered first
+        decides nothing."""
+        registry = SourceRegistry(
+            sources={"9999": other_source(authority_id="9999", canonical_domain=existing)}
+        )
+
+        assert claimants(registry, requested) == ["9999"]
+
+    def test_an_overlap_is_reported_once_under_the_broader_domain(self) -> None:
+        """Every member of a group derives the same key from it, so one
+        collision is one line in the report rather than one per claimant."""
+        registry = SourceRegistry(
+            sources={
+                "9999": eligible_source(),
+                "8888": other_source(canonical_domain="sub.testby.example.invalid"),
+            }
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["testby.example.invalid"]
+        assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
+
+    def test_unrelated_domains_are_not_an_overlap(self) -> None:
+        """Coverage is label-wise. `notbaerum.no` must not read as a claim on
+        `baerum.no` merely because one is a string suffix of the other."""
+        registry = SourceRegistry(
+            sources={
+                "9999": other_source(authority_id="9999", canonical_domain="baerum.no"),
+                "8888": other_source(canonical_domain="notbaerum.no"),
+            }
+        )
+
+        assert domains_claimed_twice(registry) == {}
+
     def test_an_inactive_row_still_counts_as_a_claim(self) -> None:
         """It is a claim on the register, not on traffic. Reporting only the
         activated ones would hide the collision until somebody activates the

@@ -433,30 +433,58 @@ def authorise_capture(registry: SourceRegistry, url: str) -> SourceRecord:
     return active[0]
 
 
+def domains_overlap(one: str, other: str) -> bool:
+    """Whether two claims can cover the same host.
+
+    Equality is not the question. A source cleared for ``example.invalid``
+    covers every host under it, so it and a source cleared for
+    ``testby.example.invalid`` compete for the same pages — and the capture
+    gate, which matches by coverage, refuses them. Comparing the two claims
+    for equality would let exactly that pair be registered without a word and
+    then refuse every capture with `status` reporting a clean register.
+
+    Asked in both directions, because either row may be the broader one and
+    which was registered first decides nothing.
+    """
+    return _host_matches(one, other) or _host_matches(other, one)
+
+
 def domains_claimed_twice(registry: SourceRegistry) -> dict[str, list[SourceRecord]]:
-    """Domains more than one source claims, so a report can say so.
+    """Domains more than one source can serve, keyed by the broadest of them.
 
     Read from the register rather than discovered by a sweep: the sweep only
     learns of it when it reaches one of the claimants, and by then it has
     already spent a night filing one authority's pages under another's name.
     """
-    claims: dict[str, list[SourceRecord]] = {}
-    for _, record in sorted(registry.sources.items()):
-        claims.setdefault(normalised_domain(record.canonical_domain), []).append(record)
-    return {domain: rs for domain, rs in claims.items() if len(rs) > 1}
+    records = [record for _, record in sorted(registry.sources.items())]
+    contested: dict[str, list[SourceRecord]] = {}
+    for record in records:
+        group = [r for r in records if domains_overlap(r.canonical_domain, record.canonical_domain)]
+        if len(group) > 1:
+            contested[_broadest(group)] = group
+    return contested
+
+
+def _broadest(group: list[SourceRecord]) -> str:
+    """The domain in ``group`` that covers the others, as the group's name.
+
+    Every member of an overlap group derives the same key from it, which is
+    what keeps one collision reported once rather than once per claimant.
+    """
+    return min((normalised_domain(r.canonical_domain) for r in group), key=len)
 
 
 def claimants(registry: SourceRegistry, domain: str, excluding: str | None = None) -> list[str]:
-    """Which other sources already claim ``domain``, by id.
+    """Which other sources already claim ground ``domain`` would cover, by id.
 
-    Compared as DNS names, not as strings: a claim spelled in another case, or
-    with the trailing dot, is the same claim.
+    Compared as DNS names and by coverage, not as strings and not for
+    equality: a claim spelled in another case is the same claim, and a claim
+    on a parent or a subdomain competes for the same hosts.
     """
-    wanted = normalised_domain(domain)
     return [
         authority_id
         for authority_id, record in sorted(registry.sources.items())
-        if normalised_domain(record.canonical_domain) == wanted and authority_id != excluding
+        if authority_id != excluding and domains_overlap(record.canonical_domain, domain)
     ]
 
 
