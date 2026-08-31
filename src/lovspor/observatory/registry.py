@@ -470,25 +470,27 @@ def domains_claimed_twice(registry: SourceRegistry) -> dict[str, list[SourceReco
 
 
 def _overlap_group(start: SourceRecord, records: list[SourceRecord]) -> list[SourceRecord]:
-    """Every source reachable from ``start`` through overlapping claims.
+    """Every source whose claim can serve a host ``start``'s claim can serve.
 
     A component, not a neighbourhood. One parent domain with two subdomain
-    claims is three rows an operator has to reconcile together, but the two
+    claims is three rows an operator has to reconcile together, and the two
     subdomains do not overlap *each other* — so collecting only what overlaps
-    a single row reports two of the three and, keyed by the same parent, the
-    last one written silently replaces the fuller answer.
+    one row reports two of the three and, keyed by the same parent, the shorter
+    answer replaces the fuller one.
+
+    Found in two passes rather than by walking a worklist, because coverage is
+    transitive: a claim on ``a.no`` covers ``x.a.no``, which covers ``y.x.a.no``,
+    and ``a.no`` covers that too. So the broadest claim in a component covers
+    every other, and asking what overlaps *it* is the whole component. The
+    worklist version computed the same answer and could be turned into an
+    infinite loop by mutating its single termination check — a function whose
+    termination rests on one membership test is one edit from hanging CI, and
+    the mutation gate said so before anybody else did.
     """
-    found = [start]
-    pending = [start]
-    while pending:
-        current = pending.pop()
-        for candidate in records:
-            if candidate in found:
-                continue
-            if domains_overlap(candidate.canonical_domain, current.canonical_domain):
-                found.append(candidate)
-                pending.append(candidate)
-    return sorted(found, key=lambda record: record.authority_id)
+    reachable = [r for r in records if domains_overlap(r.canonical_domain, start.canonical_domain)]
+    broadest = min(reachable, key=lambda r: len(normalised_domain(r.canonical_domain)))
+    group = [r for r in records if domains_overlap(r.canonical_domain, broadest.canonical_domain)]
+    return sorted(group, key=lambda record: record.authority_id)
 
 
 def _broadest(group: list[SourceRecord]) -> str:
