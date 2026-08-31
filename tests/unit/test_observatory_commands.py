@@ -50,7 +50,15 @@ from lovspor.observatory.model import (
     RetrievalProvenance,
     Tombstone,
 )
-from lovspor.observatory.registry import SourceRegistry, read_registry
+from lovspor.observatory.registry import (
+    SourceRecord,
+    SourceRegistry,
+    activate,
+    read_access_policy_check,
+    read_registry,
+    registry_path,
+    write_registry,
+)
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
@@ -618,6 +626,182 @@ def _archive(root: Path, payload: bytes = b"first") -> ObservationLog:
     log = ObservationLog(ObservatoryRoot(root, forbidden=[]))
     log.append_artifact(_observation(payload), payload)
     return log
+
+
+def _force_second_claim(root: Path, authority_id: str, active: bool = False) -> None:
+    """Put two sources on one domain, going around the guard that forbids it.
+
+    The state exists in the live register (#215) and predates the guard, so a
+    test of what the engine does about it has to be able to construct it. This
+    is the one move the operator cannot make, which is why it lives here and
+    not in a helper the CLI shares.
+    """
+    path = registry_path(ObservatoryRoot(root, forbidden=[]))
+    registry = read_registry(path)
+    twin = SourceRecord(
+        authority_type="kommune",
+        authority_id=authority_id,
+        name="Tvilling",
+        canonical_domain=BAERUM_DOMAIN,
+    )
+    if active:
+        twin = activate(
+            twin,
+            read_access_policy_check(
+                _write_check(
+                    root / f"claim-{authority_id}.json", _check_document(rate_limit_seconds=0.001)
+                )
+            ),
+        )
+    write_registry(SourceRegistry(sources={**registry.sources, authority_id: twin}), path)
+
+
+class TestTwoSourcesCannotShareADomain:
+    """Issue #215. The register held `4202 Grimstad` on `arendal.kommune.no`,
+    the same domain as `4203 Arendal`. The gate returned the lower id, so
+    Arendal's pages were filed under Grimstad for 5,980 records while Grimstad
+    was never fetched and every report said 201 registered, 201 active."""
+
+    TWIN_ID = "3202"
+
+    def _twin(self, root: Path, domain: str = BAERUM_DOMAIN) -> Result:
+        return runner.invoke(
+            app,
+            [
+                "observatory",
+                "register-source",
+                "--id",
+                self.TWIN_ID,
+                "--name",
+                "Tvilling",
+                "--domain",
+                domain,
+            ],
+        )
+
+    def _activate_twin(self, root: Path) -> None:
+        check = _write_check(root / "twin-check.json", _check_document(rate_limit_seconds=0.001))
+        result = runner.invoke(
+            app, ["observatory", "activate-source", "--id", self.TWIN_ID, "--check", str(check)]
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_registering_onto_a_claimed_domain_is_refused(self, root: Path) -> None:
+        _register()
+
+        result = self._twin(root)
+
+        assert result.exit_code == 1
+        assert "already claimed by 3201" in result.stderr
+
+    def test_the_claimed_domain_check_does_not_block_the_repair_path(self, root: Path) -> None:
+        """The one move that must keep working. `replace-source-domain` is the
+        only supported way out of the state, so a check that also refused it
+        would leave the register unfixable through any interface the engine
+        offers — which is why this is checked on writes and not on load."""
+        _register()
+        _force_second_claim(root, self.TWIN_ID)
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                self.TWIN_ID,
+                "--domain",
+                "tvilling.kommune.no",
+                "--reason",
+                "wrong domain recorded at registration",
+                "--by",
+                "Reviewer",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "domains claimed twice" not in runner.invoke(app, ["observatory", "status"]).output
+
+    def test_moving_onto_someone_elses_domain_is_refused(self, root: Path) -> None:
+        _register()
+        assert self._twin(root, domain="tvilling.kommune.no").exit_code == 0
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "replace-source-domain",
+                "--id",
+                self.TWIN_ID,
+                "--domain",
+                BAERUM_DOMAIN,
+                "--reason",
+                "moved",
+                "--by",
+                "Reviewer",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "already claimed by 3201" in result.stderr
+
+    def test_status_names_the_contested_domain(self, root: Path) -> None:
+        """Nothing else reads the register as a whole. A sweep meets this one
+        source at a time, and only when it reaches a claimant."""
+        _register()
+        _force_second_claim(root, self.TWIN_ID)
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert "domains claimed twice: 1" in result.output
+        assert f"{BAERUM_DOMAIN}: 3201 Bærum, {self.TWIN_ID} Tvilling" in result.output
+
+    def test_capture_refuses_without_a_traceback(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """A refusal an operator can act on, not an exception (cf. #208).
+
+        `robots.txt` is read before the authorisation gate — it is the polite
+        prerequisite, not a capture — so the refusal costs that one request.
+        Nothing the register cannot attribute is fetched after it.
+        """
+        _activate(root)
+        _force_second_claim(root, self.TWIN_ID, active=True)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "more than one activated source" in result.stderr
+        assert "Traceback" not in result.output
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS_URL]
+
+    def test_a_sweep_refuses_that_source_and_keeps_going(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """One unreconcilable row must not cost the other two hundred
+        municipalities their night's observations — and must still move the
+        sweep's exit code, the way every other refusal does."""
+        _activate(root)
+        _activate_asker(root)
+        _force_second_claim(root, self.TWIN_ID, active=True)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(
+            url=ASKER_ROBOTS_URL,
+            text=f"User-agent: *\nAllow: /\nSitemap: {ASKER_SITEMAP_URL}\n",
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=ASKER_SITEMAP_URL, content=_urlset(ASKER_PAGE_URL))
+        httpx_mock.add_response(url=ASKER_PAGE_URL, content=b"<html>baatplasser</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 1
+        assert "more than one activated source" in result.stderr
+        assert "captured: 1" in result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        # Both claimants refuse, not one: neither can say the pages are its
+        # own, and refusing only the newcomer would keep filing the domain
+        # under whichever row happens to sort first — the bug itself.
+        assert (run.status, run.sources_refused, run.captured) == ("degraded", 2, 1)
 
 
 class TestComposition:

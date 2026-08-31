@@ -25,6 +25,7 @@ import typer
 from pydantic import ValidationError
 
 from lovspor.errors import (
+    AmbiguousSourceError,
     ConfigError,
     LogIntegrityError,
     ParseError,
@@ -53,6 +54,8 @@ from lovspor.observatory.registry import (
     SourceRecord,
     SourceRegistry,
     activate,
+    claimants,
+    domains_claimed_twice,
     read_access_policy_check,
     read_capture_verdict,
     read_registry,
@@ -123,6 +126,29 @@ def _load(path: Path) -> SourceRegistry:
         raise typer.Exit(1) from exc
 
 
+def _refuse_a_claimed_domain(
+    registry: SourceRegistry, domain: str, excluding: str | None = None
+) -> None:
+    """Refuse a domain another source already claims (issue #215).
+
+    Checked where the state is written rather than where the register is read.
+    A load-time refusal would be stricter and would also be a trap: the only
+    supported way out of the state is `replace-source-domain`, which has to
+    read the register first, so a register that refuses to load is a register
+    nobody can repair through an interface this engine offers.
+    """
+    taken = claimants(registry, domain, excluding=excluding)
+    if not taken:
+        return
+    typer.echo(
+        f"Refused: {domain} is already claimed by {', '.join(taken)}. Two sources on "
+        "one domain make an observation unable to name the authority that published "
+        "it, so the register may not hold that state.",
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
 def _save(sources: dict[str, SourceRecord], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_registry(SourceRegistry(sources=sources), path)
@@ -145,6 +171,7 @@ def register_source(
     if authority_id in registry.sources:
         typer.echo(f"{authority_id} is already registered; refusing to overwrite it.", err=True)
         raise typer.Exit(1)
+    _refuse_a_claimed_domain(registry, domain, excluding=authority_id)
     try:
         record = SourceRecord.model_validate(
             {
@@ -439,6 +466,7 @@ def replace_source_domain(
     if record is None:
         typer.echo(f"{authority_id} is not registered; run register-source first.", err=True)
         raise typer.Exit(1)
+    _refuse_a_claimed_domain(registry, domain, excluding=authority_id)
     replaced, event = _plan_replacement(record, domain, reason, changed_by)
     _save({**registry.sources, authority_id: replaced}, path)
     _record_replacement(root, event)
@@ -856,8 +884,12 @@ def capture(
     log = ObservationLog(_root())
     state = _capture_state(log, record.authority_id)
     fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
-    starts = _entry_points(fetcher, record, None)
-    result = Discoverer(fetcher, log).discover(record, starts.urls)
+    try:
+        starts = _entry_points(fetcher, record, None)
+        result = Discoverer(fetcher, log).discover(record, starts.urls)
+    except AmbiguousSourceError as exc:
+        typer.echo(f"Refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
     _require_documents(record, result, starts.probed)
     typer.echo(f"candidates: {len(result.candidates)}")
     counts = _capture_candidates(fetcher, result.candidates, state, limit)
@@ -943,8 +975,16 @@ def _sweep_one(
     waits out only its own rate limit — but the refusal stays on stderr and
     moves the sweep's exit code.
     """
-    starts = _entry_points(fetcher, record, None)
-    result = Discoverer(fetcher, log).discover(record, starts.urls)
+    try:
+        starts = _entry_points(fetcher, record, None)
+        result = Discoverer(fetcher, log).discover(record, starts.urls)
+    except AmbiguousSourceError as exc:
+        # A refusal, not a crash. One unreconcilable row must not cost the
+        # other two hundred municipalities their night's observations — and it
+        # must not pass quietly either, so it moves the sweep's exit code the
+        # way every other refusal does.
+        typer.echo(f"  refused: {record.authority_id} {exc}", err=True)
+        return _SweepTotals(refused=1)
     if not result.documents_read:
         typer.echo(
             f"  refused: {record.authority_id} {_no_documents_reason(starts.probed)}", err=True
@@ -1121,7 +1161,25 @@ def _echo_sources(registry: SourceRegistry) -> None:
     typer.echo("Sources")
     typer.echo(f"  registered: {len(registry.sources)}")
     typer.echo(f"  active:     {active}")
+    _echo_contested_domains(registry)
     _echo_verdicts(registry)
+
+
+def _echo_contested_domains(registry: SourceRegistry) -> None:
+    """Domains claimed by more than one source, named rather than counted.
+
+    Nothing else looks at the register as a whole. A sweep meets this state one
+    source at a time and only when it reaches a claimant, which in #215 meant
+    five nights of filing one municipality's pages under another's name while
+    every report said 201 registered, 201 active.
+    """
+    contested = domains_claimed_twice(registry)
+    if not contested:
+        return
+    typer.echo(f"  domains claimed twice: {len(contested)}  (capture refused on each)")
+    for domain, records in sorted(contested.items()):
+        named = ", ".join(f"{r.authority_id} {r.name}" for r in records)
+        typer.echo(f"    {domain}: {named}")
 
 
 def _echo_verdicts(registry: SourceRegistry) -> None:

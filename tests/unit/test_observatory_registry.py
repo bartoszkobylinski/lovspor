@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lovspor.errors import ParseError, SourceNotActivatedError
+from lovspor.errors import AmbiguousSourceError, ParseError, SourceNotActivatedError
 from lovspor.observatory.registry import (
     AccessPolicyCheck,
     CaptureVerdict,
@@ -18,6 +18,8 @@ from lovspor.observatory.registry import (
     activate,
     authorise_capture,
     capture_host,
+    claimants,
+    domains_claimed_twice,
     read_access_policy_check,
     read_capture_verdict,
     read_registry,
@@ -172,6 +174,108 @@ class TestActivationCannotBeForged:
 
         with pytest.raises(ParseError, match="invalid source registry"):
             read_registry(path)
+
+
+def other_source(**overrides: object) -> SourceRecord:
+    """A second authority, on the same domain unless told otherwise."""
+    fields: dict[str, object] = {
+        "authority_type": "kommune",
+        "authority_id": "8888",
+        "name": "Annenby",
+        "canonical_domain": "testby.example.invalid",
+    }
+    return SourceRecord.model_validate({**fields, **overrides})
+
+
+class TestTwoSourcesCannotShareADomain:
+    """Issue #215. `4202 Grimstad` carried `arendal.kommune.no`, the same domain
+    as `4203 Arendal`; the gate sorted by id and returned the first, so 5,980
+    observations of Arendal's site were filed under Grimstad while Grimstad
+    itself was never fetched and every pass over it reported success."""
+
+    def _both_active(self) -> SourceRegistry:
+        return SourceRegistry(
+            sources={
+                "9999": activate(eligible_source(), check()),
+                "8888": activate(other_source(), check()),
+            }
+        )
+
+    def test_the_gate_refuses_rather_than_picking_one(self) -> None:
+        with pytest.raises(AmbiguousSourceError, match="more than one activated source"):
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+    def test_the_refusal_names_both_claimants(self) -> None:
+        """An operator has to reconcile two rows, so the message has to say
+        which two. A refusal that only says "ambiguous" sends them to grep."""
+        with pytest.raises(AmbiguousSourceError) as raised:
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+        assert "8888 Annenby" in str(raised.value)
+        assert "9999 Testby" in str(raised.value)
+
+    def test_an_inactive_second_claimant_is_not_an_ambiguity(self) -> None:
+        """Only activation authorises a fetch, so only activated sources can
+        compete for one. An eligible-but-inactive row claims nothing yet."""
+        registry = SourceRegistry(
+            sources={"9999": activate(eligible_source(), check()), "8888": other_source()}
+        )
+
+        assert (
+            authorise_capture(registry, "https://testby.example.invalid/f").authority_id == "9999"
+        )
+
+    def test_the_refusal_is_still_a_refusal_to_fetch(self) -> None:
+        """It subclasses `SourceNotActivatedError` on purpose: every existing
+        handler reads that as "do not fetch this", and that answer stays right
+        while the reason changes."""
+        with pytest.raises(SourceNotActivatedError):
+            authorise_capture(self._both_active(), "https://testby.example.invalid/f")
+
+
+class TestDomainsClaimedTwice:
+    def test_a_register_with_no_collision_reports_none(self) -> None:
+        registry = SourceRegistry(
+            sources={
+                "9999": eligible_source(),
+                "8888": other_source(canonical_domain="annenby.example.invalid"),
+            }
+        )
+
+        assert domains_claimed_twice(registry) == {}
+
+    def test_a_collision_is_reported_with_both_records(self) -> None:
+        registry = SourceRegistry(sources={"9999": eligible_source(), "8888": other_source()})
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["testby.example.invalid"]
+        assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
+
+    def test_an_inactive_row_still_counts_as_a_claim(self) -> None:
+        """It is a claim on the register, not on traffic. Reporting only the
+        activated ones would hide the collision until somebody activates the
+        second row, which is the moment it starts costing observations."""
+        registry = SourceRegistry(
+            sources={"9999": activate(eligible_source(), check()), "8888": other_source()}
+        )
+
+        assert list(domains_claimed_twice(registry)) == ["testby.example.invalid"]
+
+
+class TestClaimants:
+    def test_an_unclaimed_domain_has_none(self) -> None:
+        registry = SourceRegistry(sources={"9999": eligible_source()})
+
+        assert claimants(registry, "free.example.invalid") == []
+
+    def test_the_source_itself_can_be_excluded(self) -> None:
+        """The write paths ask "who else has this?", so re-declaring a source's
+        own current domain must not read as a collision with itself."""
+        registry = SourceRegistry(sources={"9999": eligible_source()})
+
+        assert claimants(registry, "testby.example.invalid") == ["9999"]
+        assert claimants(registry, "testby.example.invalid", excluding="9999") == []
 
 
 class TestCaptureGate:

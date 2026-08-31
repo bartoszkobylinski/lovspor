@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from lovspor.atomic_io import atomic_write_text
-from lovspor.errors import ParseError, SourceNotActivatedError
+from lovspor.errors import AmbiguousSourceError, ParseError, SourceNotActivatedError
 from lovspor.observatory.model import AuthorityType, require_utc
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -409,7 +409,40 @@ def authorise_capture(registry: SourceRegistry, url: str) -> SourceRecord:
         raise SourceNotActivatedError(
             f"{host} has no recorded access-policy check permitting capture",
         )
+    if len(active) > 1:
+        raise AmbiguousSourceError(
+            f"{host} is covered by more than one activated source "
+            f"({_named(active)}); the register cannot say which authority "
+            "publishes it, and picking one would file its pages under the other"
+        )
     return active[0]
+
+
+def domains_claimed_twice(registry: SourceRegistry) -> dict[str, list[SourceRecord]]:
+    """Domains more than one source claims, so a report can say so.
+
+    Read from the register rather than discovered by a sweep: the sweep only
+    learns of it when it reaches one of the claimants, and by then it has
+    already spent a night filing one authority's pages under another's name.
+    """
+    claims: dict[str, list[SourceRecord]] = {}
+    for _, record in sorted(registry.sources.items()):
+        claims.setdefault(record.canonical_domain, []).append(record)
+    return {domain: rs for domain, rs in claims.items() if len(rs) > 1}
+
+
+def claimants(registry: SourceRegistry, domain: str, excluding: str | None = None) -> list[str]:
+    """Which other sources already claim ``domain``, by id."""
+    return [
+        authority_id
+        for authority_id, record in sorted(registry.sources.items())
+        if record.canonical_domain == domain and authority_id != excluding
+    ]
+
+
+def _named(records: list[SourceRecord]) -> str:
+    """The claimants, so the refusal names what an operator has to reconcile."""
+    return ", ".join(f"{record.authority_id} {record.name}" for record in records)
 
 
 def read_registry(path: Path) -> SourceRegistry:

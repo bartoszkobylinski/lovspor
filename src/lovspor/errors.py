@@ -134,3 +134,21 @@ class SourceNotActivatedError(ObservatoryError):
     requires a recorded per-source check of ``robots.txt``, site terms and
     crawl constraints.
     """
+
+
+class AmbiguousSourceError(SourceNotActivatedError):
+    """More than one activated source covers the host being fetched.
+
+    A subclass, because every existing handler reads this exception as "do not
+    fetch that" and that answer stays right. Distinct, because the two say
+    different things to an operator and want different handling: an
+    unactivated source is a step not yet taken, while this is a register that
+    cannot say which authority publishes a host — and an archive whose whole
+    claim is that specific bytes came from a named authority must not resolve
+    that by sort order.
+
+    It happened. `4202 Grimstad` carried `arendal.kommune.no`, the same domain
+    as `4203 Arendal`, and the lowest id won every time: 5,980 observations of
+    Arendal's site were filed under Grimstad, while Grimstad itself was never
+    fetched once and every pass over it reported success (issue #215).
+    """
