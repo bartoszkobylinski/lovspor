@@ -628,7 +628,9 @@ def _archive(root: Path, payload: bytes = b"first") -> ObservationLog:
     return log
 
 
-def _force_second_claim(root: Path, authority_id: str, active: bool = False) -> None:
+def _force_second_claim(
+    root: Path, authority_id: str, active: bool = False, domain: str = BAERUM_DOMAIN
+) -> None:
     """Put two sources on one domain, going around the guard that forbids it.
 
     The state exists in the live register (#215) and predates the guard, so a
@@ -642,16 +644,19 @@ def _force_second_claim(root: Path, authority_id: str, active: bool = False) -> 
         authority_type="kommune",
         authority_id=authority_id,
         name="Tvilling",
-        canonical_domain=BAERUM_DOMAIN,
+        canonical_domain=domain,
     )
     if active:
+        # The check is bound to the domain it was performed for (#166), so a
+        # twin on a subdomain needs its own — the same rule that makes a domain
+        # change withdraw clearance.
+        document = {
+            **_check_document(rate_limit_seconds=0.001),
+            "robots_txt_url": f"https://{domain}/robots.txt",
+        }
         twin = activate(
             twin,
-            read_access_policy_check(
-                _write_check(
-                    root / f"claim-{authority_id}.json", _check_document(rate_limit_seconds=0.001)
-                )
-            ),
+            read_access_policy_check(_write_check(root / f"claim-{authority_id}.json", document)),
         )
     write_registry(SourceRegistry(sources={**registry.sources, authority_id: twin}), path)
 
@@ -789,6 +794,35 @@ class TestTwoSourcesCannotShareADomain:
         assert "Traceback" not in result.output
         assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS_URL]
 
+    def test_a_candidate_on_a_contested_subdomain_refuses_without_a_traceback(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Discovery clears the source's own host; a candidate may still sit on
+        a subdomain a second source claims. That reaches `fetcher.capture`,
+        which is outside the guard around discovery — and arrived as a
+        traceback with an empty stderr, leaving the records already appended
+        unexplained.
+
+        The pass keeps what it captured before stopping. Those pages are in the
+        archive whatever the register says, so reporting zero would be a second
+        untruth.
+        """
+        contested_url = f"https://sub.{BAERUM_DOMAIN}/forskrift"
+        _activate(root)
+        _force_second_claim(root, self.TWIN_ID, active=True, domain=f"sub.{BAERUM_DOMAIN}")
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL, contested_url))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "Refused:" in result.stderr
+        assert "more than one activated source" in result.stderr
+        assert "abandoned" in result.stderr
+        assert "captured: 1" in result.output
+        assert contested_url not in [str(r.url) for r in httpx_mock.get_requests()]
+
     def test_a_sweep_refuses_that_source_and_keeps_going(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
@@ -799,6 +833,13 @@ class TestTwoSourcesCannotShareADomain:
         _activate_asker(root)
         _force_second_claim(root, self.TWIN_ID, active=True)
         _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        # The twin's clearance names the apex host, so the sweep reads that
+        # `robots.txt` too before the gate refuses either claimant.
+        httpx_mock.add_response(
+            url=f"https://{BAERUM_DOMAIN}/robots.txt",
+            text="User-agent: *\nAllow: /\n",
+            is_reusable=True,
+        )
         httpx_mock.add_response(
             url=ASKER_ROBOTS_URL,
             text=f"User-agent: *\nAllow: /\nSitemap: {ASKER_SITEMAP_URL}\n",
@@ -2677,7 +2718,7 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
 
-        assert counts == (2, 0, 0, True, 0, 5)
+        assert counts == (2, 0, 0, True, False, 0, 5)
         assert fetcher.capture.call_count == 2
 
     def test_every_candidate_in_a_pass_uses_the_same_clock_read(
@@ -2731,7 +2772,7 @@ class TestCaptureAll:
             limit=1,
         )
 
-        assert counts == (1, 0, 1, False, 0, 0)
+        assert counts == (1, 0, 1, False, False, 0, 0)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
 
     def test_multiple_held_candidates_are_all_counted_as_deferred(
@@ -2769,7 +2810,7 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
-        assert counts == (1, 0, 0, True, 1, 0)
+        assert counts == (1, 0, 0, True, False, 1, 0)
 
     def test_one_sweep_source_preserves_deferred_counts(
         self, monkeypatch: pytest.MonkeyPatch

@@ -816,6 +816,11 @@ class _CaptureCounts(NamedTuple):
     failed: int
     unchanged: int
     capped: bool
+    #: The pass stopped because a candidate's host is claimed by more than one
+    #: activated source. Its own field rather than a kind of `capped`: both
+    #: leave the source's archive incomplete, but a limit was our choice and
+    #: this is a register that cannot name a publisher (#215).
+    contested: bool = False
     deferred: int = 0
     #: Redirect hops followed on the way to the records above. Reported rather
     #: than left implicit: they are 75% of everything the log files as a
@@ -847,8 +852,16 @@ def _capture_candidates(
             continue
         if limit and captured + failed >= limit:
             typer.echo(f"stopping at --limit {limit}")
-            return _CaptureCounts(captured, failed, skipped, True, deferred, hops)
-        record = fetcher.capture(candidate.url, candidate.discovery_method)
+            return _CaptureCounts(captured, failed, skipped, True, False, deferred, hops)
+        try:
+            record = fetcher.capture(candidate.url, candidate.discovery_method)
+        except AmbiguousSourceError as exc:
+            # Discovery cleared this source's own host, but a candidate may sit
+            # on a subdomain a second source also claims. Reaching that as a
+            # traceback would end the pass with an empty stderr and the records
+            # already appended unexplained (#208's shape, #215's cause).
+            typer.echo(f"Refused: {exc}", err=True)
+            return _CaptureCounts(captured, failed, skipped, False, True, deferred, hops)
         hops += len(record.provenance.redirect_chain)
         if isinstance(record, ArtifactObservation):
             captured += 1
@@ -856,7 +869,7 @@ def _capture_candidates(
         else:
             failed += 1
             typer.echo(f"  {record.outcome}  {candidate.url}")
-    return _CaptureCounts(captured, failed, skipped, False, deferred, hops)
+    return _CaptureCounts(captured, failed, skipped, False, False, deferred, hops)
 
 
 @observatory_app.command("capture")
@@ -894,6 +907,16 @@ def capture(
     typer.echo(f"candidates: {len(result.candidates)}")
     counts = _capture_candidates(fetcher, result.candidates, state, limit)
     typer.echo(_capture_summary(counts))
+    if counts.contested:
+        # The records already appended stay; what stopped is the rest of the
+        # pass. Saying so is the difference between an incomplete archive an
+        # operator knows about and one that reads as finished.
+        typer.echo(
+            f"  abandoned: {record.authority_id} partway — the archive for this source "
+            "is incomplete until the register names one authority for that host",
+            err=True,
+        )
+        raise typer.Exit(1)
 
 
 def _capture_summary(counts: _CaptureCounts) -> str:
@@ -998,7 +1021,17 @@ def _sweep_one(
         # truncated, and the whole point of #172 is that this is otherwise
         # indistinguishable from a source that simply ran out of pages.
         typer.echo(f"  capped: {record.authority_id} stopped at --limit {limit}", err=True)
+    if counts.contested:
+        # Counted as a refusal so the sweep degrades, but the counts it did
+        # collect are kept: those pages are in the archive whatever the
+        # register says, and reporting zero would be a second untruth.
+        typer.echo(
+            f"  refused: {record.authority_id} abandoned partway — a candidate's host "
+            "is claimed by more than one activated source",
+            err=True,
+        )
     return _SweepTotals(
+        refused=1 if counts.contested else 0,
         captured=counts.captured,
         failed=counts.failed,
         unchanged=counts.unchanged,
