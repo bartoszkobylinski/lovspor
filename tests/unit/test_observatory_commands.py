@@ -694,6 +694,22 @@ class TestTwoSourcesCannotShareADomain:
         assert result.exit_code == 1
         assert "already claimed by 3201" in result.stderr
 
+    @pytest.mark.parametrize(
+        "spelling", ["BAERUM.KOMMUNE.NO", "baerum.kommune.no.", "Baerum.Kommune.No"]
+    )
+    def test_registering_an_equivalent_spelling_of_a_claimed_domain_is_refused(
+        self, root: Path, spelling: str
+    ) -> None:
+        """Otherwise the guard is a formality: a second spelling passes here,
+        `status` reports a clean register, and every capture on that host is
+        refused with nothing saying why."""
+        _register()
+
+        result = self._twin(root, domain=spelling)
+
+        assert result.exit_code == 1
+        assert "already claimed by 3201" in result.stderr
+
     def test_the_claimed_domain_check_does_not_block_the_repair_path(self, root: Path) -> None:
         """The one move that must keep working. `replace-source-domain` is the
         only supported way out of the state, so a check that also refused it

@@ -56,9 +56,24 @@ def _host_matches(host: str, domain: str) -> bool:
     Compared label-wise, never as a string suffix: ``notbaerum.no`` must not
     match ``baerum.no``, and ``baerum.no.evil.example`` must not match either.
     """
-    host = host.lower().rstrip(".")
-    domain = domain.lower().rstrip(".")
+    host = normalised_domain(host)
+    domain = normalised_domain(domain)
     return host == domain or host.endswith(f".{domain}")
+
+
+def normalised_domain(domain: str) -> str:
+    """A domain in the one spelling every comparison in this module uses.
+
+    DNS is case-insensitive and a trailing dot is the absolute form of the same
+    name, so ``BAERUM.KOMMUNE.NO.`` and ``baerum.kommune.no`` are one host.
+
+    Named and shared rather than repeated inline, because repeating it is how
+    the two halves of #215 drifted apart: the capture gate normalised and the
+    register's own collision check did not, so two spellings of one domain
+    passed `register-source` without a word, were reported by nothing, and then
+    refused every capture while `status` called the register clean.
+    """
+    return domain.lower().rstrip(".")
 
 
 class AccessPolicyCheck(BaseModel):
@@ -427,16 +442,21 @@ def domains_claimed_twice(registry: SourceRegistry) -> dict[str, list[SourceReco
     """
     claims: dict[str, list[SourceRecord]] = {}
     for _, record in sorted(registry.sources.items()):
-        claims.setdefault(record.canonical_domain, []).append(record)
+        claims.setdefault(normalised_domain(record.canonical_domain), []).append(record)
     return {domain: rs for domain, rs in claims.items() if len(rs) > 1}
 
 
 def claimants(registry: SourceRegistry, domain: str, excluding: str | None = None) -> list[str]:
-    """Which other sources already claim ``domain``, by id."""
+    """Which other sources already claim ``domain``, by id.
+
+    Compared as DNS names, not as strings: a claim spelled in another case, or
+    with the trailing dot, is the same claim.
+    """
+    wanted = normalised_domain(domain)
     return [
         authority_id
         for authority_id, record in sorted(registry.sources.items())
-        if record.canonical_domain == domain and authority_id != excluding
+        if normalised_domain(record.canonical_domain) == wanted and authority_id != excluding
     ]
 
 

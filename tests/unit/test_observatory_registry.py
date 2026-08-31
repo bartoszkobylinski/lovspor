@@ -252,6 +252,31 @@ class TestDomainsClaimedTwice:
         assert list(contested) == ["testby.example.invalid"]
         assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
 
+    @pytest.mark.parametrize(
+        "spelling", ["TESTBY.EXAMPLE.INVALID", "testby.example.invalid.", "Testby.Example.Invalid"]
+    )
+    def test_equivalent_dns_spellings_are_one_contested_domain(self, spelling: str) -> None:
+        """DNS is case-insensitive and the trailing dot is the absolute form of
+        the same name. Comparing the field as a string is how the two halves of
+        #215 drifted apart: the gate normalised, this did not, so a second
+        spelling passed `register-source` and was reported by nothing."""
+        registry = SourceRegistry(
+            sources={"9999": eligible_source(), "8888": other_source(canonical_domain=spelling)}
+        )
+
+        contested = domains_claimed_twice(registry)
+
+        assert list(contested) == ["testby.example.invalid"]
+        assert [r.authority_id for r in contested["testby.example.invalid"]] == ["8888", "9999"]
+
+    @pytest.mark.parametrize(
+        "spelling", ["TESTBY.EXAMPLE.INVALID", "testby.example.invalid.", "Testby.Example.Invalid"]
+    )
+    def test_a_claim_is_found_however_the_domain_is_spelled(self, spelling: str) -> None:
+        registry = SourceRegistry(sources={"9999": eligible_source()})
+
+        assert claimants(registry, spelling) == ["9999"]
+
     def test_an_inactive_row_still_counts_as_a_claim(self) -> None:
         """It is a claim on the register, not on traffic. Reporting only the
         activated ones would hide the collision until somebody activates the
