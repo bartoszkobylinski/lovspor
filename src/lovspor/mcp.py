@@ -785,7 +785,12 @@ class CorpusReader:
                     self._snapshot_states.pop(next(iter(self._snapshot_states)))
                 data = _SnapshotData(CorpusSnapshot(self.corpus_path, ref.sha), ref)
                 self._snapshot_states[ref.sha] = data
-        return _SnapshotState(data, target, lambda slug: self._lineage_path_at(slug, target))
+        return _SnapshotState(
+            data,
+            target,
+            lambda slug: self._lineage_path_at(slug, target),
+            lambda: list(self._load_slug_index()),
+        )
 
     def _lineage_path_at(self, slug: str, target: date) -> str | None:
         """Path the CURRENT ``slug``'s document had at UTC end-of-day
@@ -3514,10 +3519,12 @@ class _SnapshotState:
         data: _SnapshotData,
         recorded_at: date,
         lineage_path: Callable[[str], str | None],
+        current_slugs: Callable[[], list[str]],
     ) -> None:
         self._data = data
         self._recorded_at = recorded_at
         self._lineage_path = lineage_path
+        self._current_slugs = current_slugs
 
     @property
     def corpus_commit(self) -> str:
@@ -3646,9 +3653,41 @@ class _SnapshotState:
     def validate_citation(self, citation: str) -> dict[str, Any]:
         """``validate_citation`` against this state's slug namespace and
         sections. ``valid`` means "resolved in the corpus state at the
-        requested date" — a corpus statement, not legal validity."""
-        verdict = _citation_verdict(citation, self._slug_index(), self._resolve_cited)
+        requested date" — a corpus statement, not legal validity.
+
+        A citation written with a document's CURRENT slug resolves
+        through the same unambiguous lineage mapping as ``get_section``
+        and ``verify_quote`` — the three guards must agree about one
+        document at one date. The verdict then reports the slug as it
+        stood at the date, plus ``mapped_from_slug``.
+        """
+        aliases = self._lineage_aliases_in(citation.lower())
+        namespace = set(self._slug_index()) | set(aliases)
+        verdict = _citation_verdict(citation, namespace, self._resolve_cited)
+        matched = verdict["slug"]
+        if matched in aliases:
+            verdict["mapped_from_slug"] = matched
+            verdict["slug"] = aliases[matched].slug
         return self._stamp(verdict, None)
+
+    def _lineage_aliases_in(self, citation_lower: str) -> dict[str, ManifestRecord]:
+        """Current slugs cited in the text that lineage-map into this state.
+
+        Only slugs actually token-present in the citation are considered,
+        and the (costly) follow-log walk runs only for those absent from
+        the state's own namespace — zero or one slug for any real
+        citation. Ambiguous or unreachable lineage is simply not an
+        alias, so the citation stays a historical negative.
+        """
+        state = self._slug_index()
+        aliases: dict[str, ManifestRecord] = {}
+        for slug in self._current_slugs():
+            if slug in state or not _slug_token_in_citation(slug, citation_lower):
+                continue
+            record = self._record_via_lineage(slug)
+            if record is not None:
+                aliases[slug] = record
+        return aliases
 
     def _resolve_cited(
         self,

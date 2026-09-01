@@ -546,3 +546,35 @@ def test_recorded_at_still_rejects_impossible_calendar_dates() -> None:
     # The lexical gate must not replace calendar validation.
     with pytest.raises(ValueError, match="ISO date YYYY-MM-DD"):
         _parse_recorded_at("2026-02-30")
+
+
+def test_validate_citation_resolves_through_the_same_lineage(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    # Authored by the independent codex-tests round on 41066fc: the three
+    # guards must agree — a current-slug citation resolves through the
+    # same unambiguous lineage as get_section and verify_quote.
+    repo, _, _, _ = corpus_with_rename
+
+    verdict = CorpusReader(repo).at_state("2026-05-05").validate_citation("testloven-tl § 9-9")
+
+    assert verdict["valid"] is True
+    assert verdict["slug"] == "testloven"
+    assert verdict["section_id"] == "9-9"
+    assert verdict["mapped_from_slug"] == "testloven-tl"
+
+
+def test_citation_lineage_never_overrides_the_state_namespace(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    # A slug the state itself knows resolves directly — no alias, no
+    # mapping field — and an unmappable current slug stays invalid.
+    repo, _, _, _ = corpus_with_rename
+    state = CorpusReader(repo).at_state("2026-05-05")
+
+    direct = state.validate_citation("testloven § 9-9")
+    unmappable = state.validate_citation("nyloven § 1")
+
+    assert direct["valid"] is True
+    assert "mapped_from_slug" not in direct
+    assert unmappable["valid"] is False
