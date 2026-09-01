@@ -523,3 +523,26 @@ def test_historical_search_refuses_an_inconsistent_state(
 
     with pytest.raises(StateIntegrityError, match="spokelsesloven"):
         state.search_body("tekst")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "20260501",  # compact ISO — fromisoformat accepts it, the contract does not
+        "2026-W18-5",  # ISO week date — same
+        "2026-05-01T00:00",  # datetime, not a calendar date
+        "2026-5-1",  # unpadded
+        "01-05-2026",  # wrong field order
+    ],
+)
+def test_recorded_at_rejects_non_canonical_iso_forms(value: str) -> None:
+    # The contract names exactly one wire form (YYYY-MM-DD); runtime must
+    # not accept the wider ISO-8601 grammar date.fromisoformat knows.
+    with pytest.raises(ValueError, match="ISO date YYYY-MM-DD"):
+        _parse_recorded_at(value)
+
+
+def test_recorded_at_still_rejects_impossible_calendar_dates() -> None:
+    # The lexical gate must not replace calendar validation.
+    with pytest.raises(ValueError, match="ISO date YYYY-MM-DD"):
+        _parse_recorded_at("2026-02-30")

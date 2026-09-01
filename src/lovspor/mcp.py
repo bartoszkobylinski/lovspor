@@ -3442,12 +3442,28 @@ dates; an unbounded map would let a date-scanning client hold every state
 ever asked for."""
 
 
+_RECORDED_AT_FORM = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+"""The one wire form ``recorded_at`` accepts: ``YYYY-MM-DD``, exactly.
+
+``date.fromisoformat`` alone is too permissive for a contract field —
+since Python 3.11 it also parses ``20260501``, ``2026-W18-5`` and other
+ISO-8601 representations the documented contract never promised. The
+lexical gate keeps runtime and contract identical; ``fromisoformat``
+then judges only calendar validity (2026-02-30 still fails)."""
+
+
 def _parse_recorded_at(value: str) -> date:
     """Parse and bound an ADR-0011 ``recorded_at`` value.
 
-    ISO calendar date, end-of-day semantics downstream; future dates are
-    refused — same typo-guard posture as ``get_law_at``'s ``target_date``.
+    Canonical ``YYYY-MM-DD`` only — the transaction-time identity
+    contract names one wire form, so runtime accepts exactly that form.
+    End-of-day semantics downstream; future dates are refused — same
+    typo-guard posture as ``get_law_at``'s ``target_date``.
     """
+    if not _RECORDED_AT_FORM.fullmatch(value):
+        raise ValueError(
+            f"recorded_at must be ISO date YYYY-MM-DD, got {value!r}",
+        )
     try:
         parsed = date.fromisoformat(value)
     except ValueError as exc:
