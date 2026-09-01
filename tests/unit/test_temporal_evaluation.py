@@ -90,7 +90,10 @@ def test_dated_event_in_effect_on_and_after_its_date() -> None:
         CommencementStatus.IN_EFFECT,
         None,
     )
-    assert evaluate_event(event, date(2030, 1, 1), HORIZON).status is (CommencementStatus.IN_EFFECT)
+    assert evaluate_event(event, date(2030, 1, 1), HORIZON) == Evaluation(
+        CommencementStatus.IN_EFFECT,
+        None,
+    )
 
 
 def test_dated_event_not_in_effect_before_its_date_even_past_horizon() -> None:
@@ -115,7 +118,7 @@ def test_pending_within_horizon_is_not_in_effect_by_the_sources_own_statement() 
 def test_pending_at_the_horizon_is_still_the_sources_statement() -> None:
     verdict = evaluate_event(_pending(), HORIZON, HORIZON)
 
-    assert verdict.status is CommencementStatus.NOT_IN_EFFECT
+    assert verdict == Evaluation(CommencementStatus.NOT_IN_EFFECT, None)
 
 
 def test_pending_beyond_horizon_is_indeterminate_with_the_named_reason() -> None:
@@ -147,6 +150,36 @@ def test_relative_marker_beyond_horizon_names_the_horizon() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("marker_class", "commencement_kind", "provenance"),
+    [
+        ("unrecognised", "ambiguous", "source_explicit"),
+        ("not_a_commencement_marker", "unknown", "deterministically_derived"),
+        ("absent", "unknown", "deterministically_derived"),
+    ],
+)
+def test_other_epistemic_marker_classes_obey_the_horizon(
+    marker_class: str,
+    commencement_kind: str,
+    provenance: str,
+) -> None:
+    event = _event(
+        marker_class=marker_class,
+        commencement_kind=commencement_kind,
+        provenance=provenance,
+        valid_from=None,
+    )
+
+    assert evaluate_event(event, HORIZON, HORIZON) == Evaluation(
+        CommencementStatus.INDETERMINATE,
+        None,
+    )
+    assert evaluate_event(event, date(2026, 6, 2), HORIZON) == Evaluation(
+        CommencementStatus.INDETERMINATE,
+        EvaluationReason.BEYOND_KNOWLEDGE_HORIZON,
+    )
+
+
 # ---------- never_in_force markers ----------
 
 
@@ -156,6 +189,15 @@ def test_never_in_force_within_horizon_binds() -> None:
     verdict = evaluate_never_in_force(marker, date(2026, 5, 1), HORIZON)
 
     assert verdict == Evaluation(CommencementStatus.NOT_IN_EFFECT, None)
+
+
+def test_never_in_force_at_horizon_still_binds() -> None:
+    marker = NeverInForceMarker(provision="§ 41", text="...", source_line=5)
+
+    assert evaluate_never_in_force(marker, HORIZON, HORIZON) == Evaluation(
+        CommencementStatus.NOT_IN_EFFECT,
+        None,
+    )
 
 
 def test_never_in_force_beyond_horizon_is_knowledge_limited() -> None:
