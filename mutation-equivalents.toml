@@ -332,3 +332,230 @@ justification = """
 The same mutation on the other operand, equivalent for the same reason:
 lowercased input cannot contain the uppercase X the mutated set adds.
 """
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_slug_suggestions_from"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, cutoff=0.6)
++    return difflib.get_close_matches(slug.lower(), list(slugs), cutoff=0.6)
+"""
+justification = """
+`difflib.get_close_matches` defaults n to 3, so dropping the explicit n=3
+selects the identical value. This argues from the stdlib's signature, not from
+Python semantics, so the default is pinned by the assumption test below — if a
+Python release ever changes it, that test goes red instead of this entry
+silently waiving a real behaviour change.
+"""
+assumption_test = "tests/unit/test_mcp_recorded_at.py::test_assumption_difflib_close_matches_defaults"
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_slug_suggestions_from"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, cutoff=0.6)
++    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, )
+"""
+justification = """
+Same shape as the n=3 entry: `get_close_matches` defaults cutoff to 0.6, so the
+explicit cutoff=0.6 and the default select the same threshold. Stdlib-signature
+argument, pinned by the same assumption test.
+"""
+assumption_test = "tests/unit/test_mcp_recorded_at.py::test_assumption_difflib_close_matches_defaults"
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_iter_search_docs"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
++        if slug_index.get(record.slug, None)[0] != doc_id:
+"""
+justification = """
+The default is unreachable. Both callers build `slug_index` from the very
+`documents` mapping this loop iterates, keeping exactly the records with
+status "current" and a non-None slug — the same two conditions the loop has
+already checked before this line. Every record that reaches the lookup
+therefore has its slug present in the index (first-wins on duplicates, which
+is what the comparison then detects), so the default value is never produced
+and any default — tuple, None, or absent — computes the same result.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_iter_search_docs"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
++        if slug_index.get(record.slug, )[0] != doc_id:
+"""
+justification = """
+Same unreachable default as the previous entry: the slug of every record that
+passes the current-status/slug guard is present in an index built from the
+same mapping, so `.get` never falls through to its default.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_search_body_hits"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
++    results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or "XXXX"))
+"""
+justification = """
+Every hit dict is built inside this function with "slug": record.slug, and the
+doc stream (`_iter_search_docs`) yields only records whose slug is non-None —
+so `hit["slug"]` is always a truthy string and the `or` fallback, whatever its
+value, is never evaluated into the sort key.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_section_index_for"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        indexes[slug] = _section_index_from_body(self._body_for_slug(slug) or "")
++        indexes[slug] = _section_index_from_body(self._body_for_slug(slug) or "XXXX")
+"""
+justification = """
+The fallback fires only when `_body_for_slug` returns None (slug absent from
+the state) or an empty body. `_section_index_from_body` derives section ids
+from `### § N` heading lines and completeness from heading-shaped lines; the
+strings "" and "XXXX" both contain no line matching either pattern, so both
+produce the identical SectionIndex(ids=set(), complete=True). Verified by
+direct evaluation of both inputs.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    body = self._body_for_slug(record.slug or "") or ""
++    body = self._body_for_slug(record.slug or "XXXX") or ""
+"""
+justification = """
+`record` comes from `_resolve_slug`, which returns only entries of the state's
+slug index or of its lineage mapping — both built by `CorpusSnapshot.slug_index`,
+which skips every manifest record whose slug is None. `record.slug` is therefore
+always a non-empty string and the `or` fallback is never evaluated.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    body = self._body_for_slug(record.slug or "") or ""
++    body = self._body_for_slug(record.slug or "") or "XXXX"
+"""
+justification = """
+The outer fallback fires only when the resolved record's stripped body is the
+empty string (a None body raises StateIntegrityError inside _body_for_slug
+before reaching it, and an absent slug raises in _resolve_slug earlier). An
+empty body contains no `### §` heading, and so does "XXXX" — for every
+section_id both inputs take the identical not-found path with the identical
+empty available-ids message. No section lookup can distinguish them.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    section, _by_id = _section_from_body(record.slug or "", body, section_id, occurrence)
++    section, _by_id = _section_from_body(record.slug or "XXXX", body, section_id, occurrence)
+"""
+justification = """
+Same non-None invariant as the body lookup above: `record.slug` from
+`_resolve_slug` is always a non-empty string, so the `or` fallback — used only
+inside error messages — is never evaluated.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        record.slug or "",
++        record.slug or "XXXX",
+"""
+justification = """
+Two call sites carry this line (the live reader's get_section and the snapshot
+state's get_section, both passing the current-act slug into cross-reference
+extraction), and the same invariant covers both: the record was resolved
+through a slug index that only admits records with a non-None slug, so the
+`or` fallback is dead on either path.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-    self._remember_section_ids(record.slug or "", set(by_id), epoch)
++    self._remember_section_ids(record.slug or "XXXX", set(by_id), epoch)
+"""
+justification = """
+`record` comes from `_resolve_current`, which resolves via `_find_current_by_slug`
+over the live slug index — the code comments at the call site already state the
+invariant: only records whose slug equals the queried slug are returned, so
+`record.slug` is non-None and the fallback key is never used.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_load_search_bodies"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-                continue
++                break
+"""
+justification = """
+The branch is defensive dead code: `tar.extractfile(member)` returns None only
+for non-regular members, and the loop has already skipped every member failing
+`member.isfile()` on the previous line. With the guard unreachable, `continue`
+and `break` are both never executed and the function computes the same body
+map either way. The assumption that regular members always yield a stream is
+exercised by the bulk-search tests, which read every member of a real archive;
+the named test fails loudly if a regular member ever came back None, because
+the missing-coverage check below it raises StateIntegrityError.
+"""
+assumption_test = "tests/unit/test_mcp_recorded_at.py::test_historical_search_respects_the_result_limit"
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_load_search_bodies"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-            bodies[slug] = _strip_frontmatter_and_h1(blob.read().decode("utf-8"))
++            bodies[slug] = _strip_frontmatter_and_h1(blob.read().decode("UTF-8"))
+"""
+justification = """
+Python's codec lookup normalises encoding names case-insensitively (and maps
+both spellings to the same codec object), so decode("utf-8") and
+decode("UTF-8") are the same call. This is documented language behaviour of
+`codecs.lookup`, not a third-party dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/snapshot.py"
+symbol = "_iter_state_log"
+registered = "2026-09-01, PR #222, from run 33536461680"
+mutation = """
+-        lines = [line for line in block.split("\\n") if line]
++        lines = [line for line in block.split(None) if line]
+"""
+justification = """
+Each block is produced by this module's own `--format=__COMMIT__%n%H%n%aI`:
+its only content lines are a 40-hex SHA and an ISO-8601 author date, neither
+of which can contain a space or tab. On input restricted to newline-separated
+space-free tokens, `split(None)` (any-whitespace split, empties dropped) and
+`split("\\n")` filtered by the same truthiness comprehension yield the
+identical list. The format string and this parser live three lines apart in
+the same function, so the invariant cannot drift apart from the code it
+covers.
+"""

@@ -7,10 +7,13 @@ historical negative), conditional ``xml_hash``, and the ``search_body``
 envelope.
 """
 
+import difflib
+import inspect
 import json
 import os
 import subprocess
 from datetime import UTC, date, datetime
+from datetime import time as dt_time
 from pathlib import Path
 
 import pytest
@@ -19,10 +22,13 @@ import lovspor.mcp as mcp_module
 from lovspor.mcp import (
     CorpusNotFoundError,
     CorpusReader,
+    _citation_hint_from,
+    _citation_verdict,
     _parse_recorded_at,
     build_server,
 )
 from lovspor.snapshot import HistoryBoundaryError, StateIntegrityError
+from lovspor.timetravel import _RevisionEntry
 
 # ---------- fixture: a two-state corpus ----------
 
@@ -88,7 +94,8 @@ def corpus(tmp_path: Path) -> tuple[Path, str, str]:
     (repo / "lover" / "grunnloven-grl.md").write_text(
         _doc(
             "Grunnloven",
-            "## Kapittel 1.\n\n### § 1-1. Formål\n\nGrunnloven v1 tekst, jf. testloven § 9-9.\n",
+            "## Kapittel 1.\n\n### § 1-1. Formål\n\n"
+            "Grunnloven v1 tekst, jf. testloven § 9-9. Se også § 1-1.\n",
         ),
     )
     (repo / "lover" / "testloven.md").write_text(
@@ -106,7 +113,8 @@ def corpus(tmp_path: Path) -> tuple[Path, str, str]:
     (repo / "lover" / "grunnloven-grl.md").write_text(
         _doc(
             "Grunnloven",
-            "## Kapittel 1.\n\n### § 1-1. Formål\n\nGrunnloven v2 tekst, jf. testloven § 9-9.\n",
+            "## Kapittel 1.\n\n### § 1-1. Formål\n\n"
+            "Grunnloven v2 tekst, jf. testloven § 9-9. Se også § 1-1.\n",
         ),
     )
     (repo / "lover" / "testloven.md").write_text(
@@ -609,3 +617,286 @@ def test_citation_lineage_never_overrides_the_state_namespace(
     assert direct["valid"] is True
     assert "mapped_from_slug" not in direct
     assert unmappable["valid"] is False
+
+
+# ---------- mutation-survivor kills (needs-human:mutation, PR #222) ----------
+
+
+def test_states_for_dates_resolving_to_one_commit_share_caches(
+    reader: CorpusReader,
+    corpus: tuple[Path, str, str],
+) -> None:
+    # The per-commit cache is the whole point of _SnapshotData: two dates
+    # resolving to one commit must share it, not rebuild it.
+    _, sha1, _ = corpus
+
+    a = reader.at_state("2026-05-05")
+    b = reader.at_state("2026-05-06")
+
+    assert a.corpus_commit == b.corpus_commit == sha1
+    assert a._data is b._data
+
+
+def test_snapshot_state_cache_is_bounded_fifo(reader: CorpusReader) -> None:
+    reader._snapshot_states.clear()
+    for i in range(4):
+        reader._snapshot_states[f"k{i}"] = object()  # type: ignore[assignment]
+
+    state = reader.at_state("2026-05-05")
+
+    assert len(reader._snapshot_states) == 4
+    assert "k0" not in reader._snapshot_states
+    assert state.corpus_commit in reader._snapshot_states
+
+
+def test_lineage_cutoff_is_end_of_day_inclusive(
+    reader: CorpusReader,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cutoff = datetime.combine(date(2026, 5, 5), dt_time.max).replace(tzinfo=UTC)
+    entry = _RevisionEntry("sha", cutoff, "lover/x.md")
+    monkeypatch.setattr(mcp_module, "_iter_follow_log", lambda *_: [entry])
+
+    assert reader._lineage_path_at("grunnloven-grl", date(2026, 5, 5)) == "lover/x.md"
+
+
+def test_parse_recorded_at_evaluates_today_in_utc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[object] = []
+    real = datetime
+
+    class _SpyDateTime:
+        @classmethod
+        def now(cls, tz: object = None) -> datetime:
+            seen.append(tz)
+            return real.now(UTC)
+
+    monkeypatch.setattr(mcp_module, "datetime", _SpyDateTime)
+
+    _parse_recorded_at("2020-01-01")
+
+    assert seen == [UTC]
+
+
+def test_citation_core_prefers_the_longest_matching_slug() -> None:
+    def resolve(_slug: str, section_id: str) -> tuple[str, dict[str, object], None]:
+        return section_id, {"heading": "h"}, None
+
+    verdict = _citation_verdict("a-lov lov § 1", {"a-lov", "lov"}, resolve)
+
+    # "lov" wins a plain lexicographic max; the longest token must win.
+    assert verdict["slug"] == "a-lov"
+
+
+def test_citation_core_keeps_an_empty_injected_reason_empty() -> None:
+    verdict = _citation_verdict(
+        "testloven § 9-9",
+        {"testloven"},
+        lambda _slug, section_id: (section_id, None, None),
+    )
+
+    assert verdict["valid"] is False
+    assert verdict["reason"] == ""
+
+
+def test_citation_hint_caps_at_three_suggestions() -> None:
+    slugs = ["lova1", "lova2", "lova3", "lovb1", "lovb2", "lovb3"]
+    hint = _citation_hint_from(slugs, "lova9 lovb9 § 5")
+
+    listed = hint.split("did you mean ")[1].split("?")[0].split(", ")
+    assert len(listed) == 3
+
+
+def test_assumption_difflib_close_matches_defaults() -> None:
+    # Pins the stdlib defaults two registered equivalent mutants argue from
+    # (mutation-equivalents.toml, issue #132): dropping n=3 or cutoff=0.6
+    # from a get_close_matches call changes nothing ONLY while these hold.
+    sig = inspect.signature(difflib.get_close_matches)
+    assert sig.parameters["n"].default == 3
+    assert sig.parameters["cutoff"].default == 0.6
+
+
+def test_historical_unknown_section_names_the_state_slug(reader: CorpusReader) -> None:
+    with pytest.raises(CorpusNotFoundError, match="in 'grunnloven-grl'"):
+        reader.at_state("2026-05-05").get_section("grunnloven-grl", "9-99")
+
+
+def test_historical_self_reference_targets_the_acts_own_slug(reader: CorpusReader) -> None:
+    result = reader.at_state("2026-05-05").get_section("grunnloven-grl", "1-1")
+
+    self_refs = [ref for ref in result["cross_references"] if ref["target_section_id"] == "1-1"]
+    assert self_refs
+    assert self_refs[0]["target_slug"] == "grunnloven-grl"
+    assert self_refs[0]["valid"] is True
+    assert result["section_id"] == "1-1"
+
+
+def test_live_same_act_reference_survives_the_section_id_cache(
+    reader: CorpusReader,
+) -> None:
+    # The live path seeds the per-act section-id cache from get_section's
+    # own parse; a poisoned seed breaks same-act cross-references on the
+    # cached read.
+    reader.get_section("grunnloven-grl", "1-1")
+    second = reader.get_section("grunnloven-grl", "1-1")
+
+    self_refs = [ref for ref in second["cross_references"] if ref["target_section_id"] == "1-1"]
+    assert self_refs
+    assert self_refs[0]["target_slug"] == "grunnloven-grl"
+    assert self_refs[0]["valid"] is True
+
+
+def test_state_slug_citation_never_gains_a_lineage_mapping(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    repo, _, _, _ = corpus_with_rename
+
+    verdict = CorpusReader(repo).at_state("2026-05-05").validate_citation("grunnloven-grl § 1-1")
+
+    assert verdict["valid"] is True
+    assert "mapped_from_slug" not in verdict
+
+
+def test_historical_archive_failure_is_loud(
+    reader: CorpusReader,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A failing `git archive` must surface as the subprocess error the
+    # check= contract promises — never limp on into tar parsing.
+    real_run = mcp_module.subprocess.run
+
+    def fake_run(cmd: list[str], **kwargs: object):
+        if cmd[:2] == ["git", "archive"]:
+            if kwargs.get("check"):
+                raise subprocess.CalledProcessError(128, cmd)
+            return subprocess.CompletedProcess(cmd, 128, stdout=b"", stderr=b"")
+        return real_run(cmd, **kwargs)  # type: ignore[arg-type]
+
+    state = reader.at_state("2026-05-05")
+    monkeypatch.setattr(mcp_module.subprocess, "run", fake_run)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        state.search_body("tekst")
+
+
+def _init_repo(repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "lover").mkdir(exist_ok=True)
+    _run_git(repo, "init", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "config", "commit.gpgsign", "false")
+
+
+@pytest.fixture
+def aux_corpus(tmp_path: Path) -> Path:
+    """Micro corpus for message/limit kills: two near-identical slugs, one
+    duplicate-§ act, and 25 docs sharing a common word."""
+    repo = tmp_path / "corpus"
+    _init_repo(repo)
+    records: dict[str, dict[str, object]] = {}
+    for slug in ("aloven", "alovene"):
+        (repo / "lover" / f"{slug}.md").write_text(
+            _doc(slug.capitalize(), "## Kapittel 1.\n\n### § 1. Regel\n\nTekst.\n"),
+        )
+        records[f"doc-{slug}"] = _record(slug, f"hash-{slug}")
+    (repo / "lover" / "dobbeltloven.md").write_text(
+        _doc(
+            "Dobbeltloven",
+            "## Kapittel 1.\n\n### § 1. Regel\n\nførste variant.\n\n"
+            "### § 1. Regel\n\nandre variant.\n",
+        ),
+    )
+    records["doc-dobbelt"] = _record("dobbeltloven", "hash-dobbelt")
+    for i in range(25):
+        slug = f"treff{i:02d}loven"
+        (repo / "lover" / f"{slug}.md").write_text(
+            _doc(slug, f"## Kapittel 1.\n\n### § 1. Regel\n\nfellesord nummer {i}.\n"),
+        )
+        records[f"doc-{slug}"] = _record(slug, f"hash-{i}")
+    (repo / "manifest.json").write_text(_manifest(records))
+    _commit_all(repo, "sync", "2026-05-01T12:00:00Z")
+    return repo
+
+
+def _ghost_corpus(tmp_path: Path, ghosts: int) -> Path:
+    repo = tmp_path / "corpus"
+    _init_repo(repo)
+    (repo / "lover" / "ekteloven.md").write_text(
+        _doc("Ekteloven", "## Kapittel 1.\n\n### § 1. Regel\n\nEkte tekst.\n"),
+    )
+    records = {"doc-real": _record("ekteloven", "hash-e1")}
+    for i in range(1, ghosts + 1):
+        records[f"doc-g{i}"] = _record(f"ghost{i}loven", f"hash-g{i}")
+    (repo / "manifest.json").write_text(_manifest(records))
+    _commit_all(repo, "sync with ghosts", "2026-05-01T12:00:00Z")
+    return repo
+
+
+def test_unknown_slug_hint_joins_suggestions_exactly(aux_corpus: Path) -> None:
+    state = CorpusReader(aux_corpus).at_state("2026-05-05")
+
+    with pytest.raises(CorpusNotFoundError) as excinfo:
+        state.get_section("alovenx", "1")
+
+    message = str(excinfo.value)
+    listed = message.split("did you mean ")[1].split("? ", maxsplit=1)[0]
+    assert set(listed.split(", ")) == {"aloven", "alovene"}
+
+
+def test_unknown_slug_without_near_miss_has_no_hint_filler(aux_corpus: Path) -> None:
+    state = CorpusReader(aux_corpus).at_state("2026-05-05")
+
+    with pytest.raises(CorpusNotFoundError) as excinfo:
+        state.get_section("zzz-qqq-www", "1")
+
+    message = str(excinfo.value)
+    assert "did you mean" not in message
+    assert "no law with slug 'zzz-qqq-www' in the corpus state at " in message
+
+
+def test_historical_occurrence_selects_the_duplicate_section(aux_corpus: Path) -> None:
+    state = CorpusReader(aux_corpus).at_state("2026-05-05")
+
+    section = state.get_section("dobbeltloven", "1", occurrence=2)
+    verdict = state.verify_quote("dobbeltloven", "1", "andre variant", occurrence=2)
+
+    assert "andre variant" in section["body"]
+    assert verdict["verified"] is True
+
+
+def test_historical_search_respects_the_result_limit(aux_corpus: Path) -> None:
+    state = CorpusReader(aux_corpus).at_state("2026-05-05")
+
+    envelope = state.search_body("fellesord")
+
+    assert len(envelope["results"]) == 20
+
+
+def test_historical_search_respects_the_dataset_filter(aux_corpus: Path) -> None:
+    state = CorpusReader(aux_corpus).at_state("2026-05-05")
+
+    envelope = state.search_body("fellesord", dataset="forskrifter")
+
+    assert envelope["results"] == []
+
+
+def test_integrity_error_names_five_missing_docs_then_elides(tmp_path: Path) -> None:
+    state = CorpusReader(_ghost_corpus(tmp_path, 7)).at_state("2026-05-05")
+
+    with pytest.raises(StateIntegrityError) as excinfo:
+        state.search_body("tekst")
+
+    shown = str(excinfo.value).split("tree: ")[1].split(" — ")[0]
+    assert shown == ("ghost1loven, ghost2loven, ghost3loven, ghost4loven, ghost5loven …")
+
+
+def test_integrity_error_does_not_elide_at_exactly_five(tmp_path: Path) -> None:
+    state = CorpusReader(_ghost_corpus(tmp_path, 5)).at_state("2026-05-05")
+
+    with pytest.raises(StateIntegrityError) as excinfo:
+        state.search_body("tekst")
+
+    shown = str(excinfo.value).split("tree: ")[1].split(" — ")[0]
+    assert shown == ("ghost1loven, ghost2loven, ghost3loven, ghost4loven, ghost5loven")

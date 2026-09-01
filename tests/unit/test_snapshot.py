@@ -323,3 +323,16 @@ def test_resolution_follows_ancestry_order_like_timetravel(tmp_path: Path) -> No
     # Cutoff satisfied only by the earlier-authored tip: same answer.
     assert resolve_corpus_state(repo, date(2026, 4, 25)).sha == sha_second
     assert sha_first != sha_second
+
+
+def test_shallow_no_history_message_is_verbatim(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("lovspor.snapshot._iter_state_log", lambda *_: [])
+    monkeypatch.setattr("lovspor.snapshot._is_shallow_repository", lambda *_: True)
+
+    with pytest.raises(ShallowHistoryError) as excinfo:
+        resolve_corpus_state(tmp_path, date(2026, 5, 1))
+
+    assert "checkout; no locally available history. Deepen" in str(excinfo.value)
