@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import lovspor.snapshot as snapshot_module
+from lovspor.errors import ParseError
 from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
@@ -248,6 +249,34 @@ def test_snapshot_manifest_and_slug_index(corpus_repo: tuple[Path, str, str]) ->
     doc_id, record = snapshot.slug_index["testloven"]
     assert doc_id == "doc-1"
     assert record.markdown_path == "lover/testloven.md"
+
+
+def test_snapshot_without_committed_manifest_fails_loudly(tmp_path: Path) -> None:
+    repo = tmp_path / "corpus"
+    repo.mkdir()
+    _run_git(repo, "init", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "config", "commit.gpgsign", "false")
+    (repo / "README.md").write_text("state before manifest support\n")
+    sha = _commit_all(repo, "pre-manifest state", "2026-05-01T12:00:00Z")
+
+    with pytest.raises(ParseError, match=r"carries no manifest\.json"):
+        _ = CorpusSnapshot(repo, sha).manifest
+
+
+def test_snapshot_with_malformed_committed_manifest_fails_loudly(tmp_path: Path) -> None:
+    repo = tmp_path / "corpus"
+    repo.mkdir()
+    _run_git(repo, "init", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "config", "commit.gpgsign", "false")
+    (repo / "manifest.json").write_text("{not-json}\n")
+    sha = _commit_all(repo, "broken manifest", "2026-05-01T12:00:00Z")
+
+    with pytest.raises(json.JSONDecodeError):
+        _ = CorpusSnapshot(repo, sha).manifest
 
 
 def test_slug_index_first_entry_wins_and_skips_non_current(tmp_path: Path) -> None:
