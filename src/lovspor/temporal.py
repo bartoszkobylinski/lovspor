@@ -128,6 +128,18 @@ Scope = Literal[
 ]
 
 
+TEMPORAL_PARSER_VERSION = 1
+"""Behaviour version of the temporal derivation and evaluation code.
+
+The ``RENDERER_VERSION`` precedent, for time instead of text: bump on ANY
+change to how events are derived from a body or evaluated against a date.
+Attestations (ADR-0012 point 2c) key on ``(corpus_commit, this constant)``
+— a behaviour change without a bump silently reuses attestations recorded
+for different behaviour, which is a named defect class.
+``TemporalLayer.schema_version`` is the OUTPUT FORMAT version and expressly
+does not identify behaviour; the two move independently."""
+
+
 class MarkerClass(StrEnum):
     """Structural classification of one commencement marker."""
 
@@ -145,6 +157,27 @@ class InForceStatus(StrEnum):
     IN_FORCE = "in_force"
     NOT_IN_FORCE = "not_in_force"
     INDETERMINATE = "indeterminate"
+
+
+class CommencementStatus(StrEnum):
+    """Served verdict of one horizon-aware evaluation (ADR-0012 point 4).
+
+    Deliberately NOT named ``in_force``: the proposition is event-level —
+    *had this source-described event taken effect by the evaluation
+    date?* — and for a repeal ``IN_EFFECT`` means the repeal operates,
+    which entails the provision does not. Provision/norm validity is the
+    T3 question and no field of this vocabulary may imply it.
+    """
+
+    IN_EFFECT = "in_effect"
+    NOT_IN_EFFECT = "not_in_effect"
+    INDETERMINATE = "indeterminate"
+
+
+class EvaluationReason(StrEnum):
+    """Why an evaluation stopped short of a verdict (ADR-0012 point 5)."""
+
+    BEYOND_KNOWLEDGE_HORIZON = "beyond_knowledge_horizon"
 
 
 class CommencementKind(StrEnum):
@@ -276,6 +309,67 @@ def in_force_at(event: AmendmentEvent, evaluation_date: date) -> InForceStatus:
     if event.marker_class is MarkerClass.PENDING_INDETERMINATE:
         return InForceStatus.NOT_IN_FORCE
     return InForceStatus.INDETERMINATE
+
+
+class Evaluation(NamedTuple):
+    """One horizon-aware verdict: the status and its optional reason."""
+
+    status: CommencementStatus
+    reason: EvaluationReason | None
+
+
+def evaluate_event(
+    event: AmendmentEvent,
+    valid_at: date,
+    horizon: date,
+) -> Evaluation:
+    """Horizon-aware event evaluation (ADR-0012 points 4-5). Total.
+
+    ``horizon`` is the transaction time of the state whose facts are being
+    evaluated. A source-stated date determines its own answer for any
+    ``valid_at``; an open-ended or epistemic fact is read per the source
+    only up to the horizon — past it, the state cannot know what happened
+    after it was taken, so the verdict is ``INDETERMINATE`` with the
+    ``BEYOND_KNOWLEDGE_HORIZON`` reason rather than false certainty.
+
+    The ``unrecognised`` class cannot reach serving (strict derivation
+    fails the document first — ADR-0012 point 3); if handed one anyway,
+    this function stays total and treats it as the epistemic no-verdict
+    it is.
+    """
+    if event.valid_from is not None:
+        if event.valid_from <= valid_at:
+            return Evaluation(CommencementStatus.IN_EFFECT, None)
+        return Evaluation(CommencementStatus.NOT_IN_EFFECT, None)
+    if valid_at > horizon:
+        return Evaluation(
+            CommencementStatus.INDETERMINATE,
+            EvaluationReason.BEYOND_KNOWLEDGE_HORIZON,
+        )
+    if event.marker_class is MarkerClass.PENDING_INDETERMINATE:
+        return Evaluation(CommencementStatus.NOT_IN_EFFECT, None)
+    return Evaluation(CommencementStatus.INDETERMINATE, None)
+
+
+def evaluate_never_in_force(
+    marker: NeverInForceMarker,
+    valid_at: date,
+    horizon: date,
+) -> Evaluation:
+    """Horizon-aware verdict for a never-brought-into-force body marker.
+
+    The source's statement — this provision was never brought into
+    force — binds as known to the serving state: ``NOT_IN_EFFECT`` for
+    ``valid_at`` at or before the horizon, ``INDETERMINATE`` with the
+    horizon reason past it, so a raw marker can never read as a timeless
+    assertion (ADR-0012 point 4).
+    """
+    if valid_at > horizon:
+        return Evaluation(
+            CommencementStatus.INDETERMINATE,
+            EvaluationReason.BEYOND_KNOWLEDGE_HORIZON,
+        )
+    return Evaluation(CommencementStatus.NOT_IN_EFFECT, None)
 
 
 def extract_events(markdown: str) -> list[AmendmentEvent]:
