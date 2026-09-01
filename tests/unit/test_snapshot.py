@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 from dataclasses import FrozenInstanceError
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -52,6 +52,27 @@ def test_resolve_picks_newest_commit_at_or_before_end_of_day(
     ref = resolve_corpus_state(tmp_path, cutoff_day)
 
     assert ref.sha == "edge"
+
+
+def test_resolve_compares_offset_author_dates_as_utc_instants(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entries = _refs(
+        (
+            "displayed-next-day-but-within-cutoff",
+            datetime(2026, 5, 2, 0, 30, tzinfo=timezone(timedelta(hours=14))),
+        ),
+        (
+            "displayed-cutoff-day-but-after-cutoff",
+            datetime(2026, 5, 1, 23, 30, tzinfo=timezone(-timedelta(hours=12))),
+        ),
+    )
+    monkeypatch.setattr("lovspor.snapshot._iter_state_log", lambda *_: entries)
+
+    ref = resolve_corpus_state(tmp_path, date(2026, 5, 1))
+
+    assert ref.sha == "displayed-next-day-but-within-cutoff"
 
 
 def test_resolve_pre_history_date_raises_boundary_error(
