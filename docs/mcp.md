@@ -206,7 +206,7 @@ source_license: NLOD 2.0
 
 The frontmatter carries the law's metadata and provenance; the body is the legal text rendered as Markdown.
 
-### `get_section(slug, section_id)`
+### `get_section(slug, section_id, occurrence=None, recorded_at=None)`
 
 Return a single ``§`` section of an act — the surgical alternative to `get_law` when the user wants just one paragraph (e.g. *"What does § 5-12 of Skatteloven say?"*). Cheaper for the AI's context window than fetching the whole law.
 
@@ -282,8 +282,11 @@ Text listed under `events` or `never_in_force` is **not part of the law in force
 present it as such (ADR-0009 §3b). The evaluation is made at serving time against the
 Norwegian calendar day; the date used is stated in the payload rather than left implicit.
 `get_law` carries the same information as a **Temporal notice** block appended after the
-legal text. No other tool is affected — in particular `get_law_at` is deliberately
-untouched, because a point-in-time query already names its own date.
+legal text. `get_law_at` is deliberately untouched, because a point-in-time query already
+names its own date. With `recorded_at` set (below), `temporal_notice` instead reads
+`{"status": "not_evaluated", ...}`: no in-force evaluation is performed against a
+historical corpus state, and `recorded_at` is never used as an evaluation date
+(ADR-0011 point 7).
 
 The `cross_references` field (Sprint 9 PR-B3.5) lists every `§ N-M` reference detected in the body, deduplicated by target, with each entry already validated against the manifest. `target_slug` defaults to the current act when no other slug appears within ~80 chars of the match (a same-act ref); a different slug means the resolver picked it up as a cross-act ref. `valid` is true only when the target section actually exists in the target act, and `reason` carries a short explanation when invalid.
 
@@ -292,6 +295,17 @@ Use this list to decide whether a referenced section is safe to quote without a 
 Limitations: descriptive name references (*"i lov om X"* without a canonical slug) silently fall back to same-act and may false-positive validate. Chapter references (`kapittel 4`) and paragraph qualifiers (`første ledd`) are not extracted. `validate_citation` remains the off-ramp for ambiguous cases.
 
 If the section is unknown the error message lists the act's available section ids in natural order (so `5-2` < `5-10`, not lexicographic) — the AI can recover without an extra `get_law` call.
+
+**`recorded_at`** *(optional, ISO `YYYY-MM-DD`, ADR-0011)* — answer from the corpus state
+at UTC end-of-day on that date instead of the current state. This is **transaction time**:
+what the corpus *recorded* then, never which law was legally in force then (the
+legal-validity axis is a separate future capability). The response then also carries
+`recorded_at`, `corpus_commit` — the resolved global state commit; equal `corpus_commit`
+values across calls prove a set of answers shares one state — and `xml_hash`.
+Cross-references are validated against that state's own indexes, never today's. Dates
+before the corpus start (2026-04-22) fail with an explicit boundary outcome; future dates
+are refused; an act ingested after the date is a plain not-found *in that state*, with a
+`get_law_history` hint.
 
 ### `list_sections(slug)`
 
@@ -481,7 +495,7 @@ List current laws ordered by most recent change first.
 ]
 ```
 
-### `search_body(query, dataset?, limit?)`
+### `search_body(query, dataset?, limit?, recorded_at?)`
 
 Search the **full Markdown body** of every current law for a substring (case-insensitive). Complement to `search_laws`: that one matches only manifest metadata (`slug` + `title`); `search_body` scans the actual legal text. Use it when the user asks about a topic that may not appear in any law's title — e.g. *"kryptovaluta"*, *"boligkjøpsmodeller"*, *"kunstig intelligens"*.
 
@@ -509,6 +523,13 @@ Search the **full Markdown body** of every current law for a substring (case-ins
 Sorted by `match_count` descending, then by `slug` for stable ordering. The snippet is a ~100-char window around the **first** match (whitespace collapsed, leading/trailing `...` if not at the document boundaries).
 
 **Footnote markers do not break the match.** The corpus reads `fra det tidspunktet[^1] Kongen bestemmer`; searching for that phrase without the marker still finds it. The snippet comes back as the corpus stores it, marker included. Above 2,000 characters the query is matched literally instead, so a marker inside a pasted-paragraph query does break it — that cap bounds the regex compile cost a caller can drive.
+
+**`recorded_at`** *(optional, ISO `YYYY-MM-DD`, ADR-0011)* — search the corpus state at
+UTC end-of-day on that date (transaction time: what the corpus *recorded*, not what was in
+force). The response is then an envelope `{"recorded_at": ..., "corpus_commit": ...,
+"results": [...]}` instead of a bare list, so even zero matches carry the resolved state.
+Without the parameter the bare-list shape is unchanged. The first historical search per
+state bulk-loads that state's bodies — comparable cost to the live index's own cold start.
 
 **Performance:** the body index is loaded lazily on the first call and stays resident. Measured 2026-07-29 on the renderer-5 corpus (5,913 docs, 113,457,896 characters): **~270 MB peak RSS** — four runs across two machines landed at 247, 271, 278 and 280 MB, so size a droplet from the top of that range, not the bottom. The body strings alone are ~209 MB (`sum(getsizeof)`) plus ~0.8 MB of dict and keys; the rest is the transient load-time peak, which is the part that actually decides whether a small droplet survives the warm-up. Cold load 1.3–1.9 s off a warm page cache. Every call after that is a full scan of that text — ~0.4 s, or ~0.5–0.6 s once the marker-tolerant pass runs over the 18.3% of documents that carry a footnote marker. Server startup stays fast for clients that only query metadata.
 
@@ -584,7 +605,7 @@ The provider is selectable via `LOVSPOR_EMBEDDING_*` (see [`docs/embeddings.md`]
 
 If the corpus has no `.bin` files (early bootstrap state) or every `.bin` is from an older model with a different dim (post-migration state), `semantic_search` raises with a remediation message — different errors for different states so the operator sees what to do.
 
-### `validate_citation(citation)`
+### `validate_citation(citation, recorded_at?)`
 
 Verify that a Norwegian-law citation string actually resolves in the corpus. **Citation-grounding guard** — call this before quoting a citation in a final answer to confirm both the act and the section exist.
 
@@ -618,7 +639,14 @@ Verify that a Norwegian-law citation string actually resolves in the corpus. **C
 
 The `reason` field is human-readable and the AI can quote it verbatim to explain to the user why the citation couldn't be confirmed. Slug match is **strict** — `"skatteloven"` does not fuzzy-match production slug `"skatteloven-sktl"`. When the citation contains a near-miss token, the `reason` appends an advisory `did you mean skatteloven-sktl?` hint (the same hint appears in `get_law`/`get_section` unknown-slug errors), but validation itself never fuzzy-matches: AI consumers should confirm via `search_laws` and re-validate with the canonical slug.
 
-### `verify_quote(slug, section_id, quote, occurrence=None)`
+**`recorded_at`** *(optional, ISO `YYYY-MM-DD`, ADR-0011)* — validate against the corpus
+state at UTC end-of-day on that date. `valid` then means *"resolved in the corpus state at
+that date"* — a statement about what the corpus recorded, never that the citation was
+legally in force then. The response also carries `recorded_at` and `corpus_commit`. An act
+ingested after the date is `valid: false` in that state — a normal historical negative,
+not an error.
+
+### `verify_quote(slug, section_id, quote, occurrence=None, recorded_at=None)`
 
 Anti-hallucination guard for verbatim citations. Before answering with text like *"§ 5-12 of Skatteloven says: 'Skattefradraget gis for...'"* call this with the verbatim quote you intend to attribute to that section. Returns `{verified, slug, section_id, reason}`.
 
@@ -658,6 +686,13 @@ Match is **case-insensitive, whitespace-tolerant, and typography-tolerant**: cur
 Catches the most common citation hallucination: AI quotes words that are NOT in the section it cites (often pulled from a different section, paraphrased from memory, or invented). Does NOT catch faithful paraphrases — for those fall back to `get_section` and quote the original Norwegian.
 
 Empty quote returns `verified=false` with a clear reason. Unknown slug or section returns `verified=false` with the `get_section` error message in `reason` (which already lists available sections).
+
+**`recorded_at`** *(optional, ISO `YYYY-MM-DD`, ADR-0011)* — verify against the corpus
+state at UTC end-of-day on that date. `verified` then means *"this wording appeared in the
+corpus text of that section at that date"* — never that it was the law in force then. The
+response also carries `recorded_at`, `corpus_commit`, and `xml_hash` only when the
+document actually resolved in that state (an unknown slug at that date carries no
+`xml_hash`).
 
 ### `get_eu_basis(slug)`
 

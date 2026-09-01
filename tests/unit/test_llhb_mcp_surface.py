@@ -292,16 +292,23 @@ class TestToolConfig:
         ANALYSIS-PLAN-fable5-v1.md binds the treatment arm to "the committed
         apparatus document current at run time", which v3 now is.
 
-        v1 and v2 stay committed untouched so the runs that recorded their
-        hashes remain verifiable (check_fairness --surface-path); this test
-        guards the CURRENT apparatus, which v3 describes."""
+        v3 -> v4 (2026-08-31): ADR-0011 recorded_at — get_section,
+        search_body, validate_citation and verify_quote accept an optional
+        transaction-time parameter; four input schemas and four
+        descriptions change, tool NAMES do not. Taken before the
+        prereserved claude-fable-5 confirmatory pair starts, so no run
+        spans the change.
+
+        v1, v2 and v3 stay committed untouched so the runs that recorded
+        their hashes remain verifiable (check_fairness --surface-path);
+        this test guards the CURRENT apparatus, which v4 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v3.json"
+                / "tool-surface-v4.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (

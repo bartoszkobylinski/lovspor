@@ -49,10 +49,13 @@ import re
 import shlex
 import subprocess
 import sys
+import tarfile
 import threading
 import unicodedata
-from collections.abc import Awaitable, Callable
-from datetime import UTC, date, datetime
+from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime, time
+from io import BytesIO
 from pathlib import Path
 from typing import Any, NamedTuple, Self, TypedDict, final
 
@@ -89,11 +92,18 @@ from lovspor.headings import (
 )
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
+from lovspor.snapshot import (
+    CorpusSnapshot,
+    CorpusStateRef,
+    StateIntegrityError,
+    resolve_corpus_state,
+)
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.temporal import append_notice, build_notice, evaluation_date_today
 from lovspor.timetravel import (
     RevisionNotFoundError,
     RevisionResult,
+    _iter_follow_log,
     get_law_at_revision,
     resolve_law_at_revision,
 )
@@ -473,6 +483,12 @@ class CorpusReader:
         # build the same ~45 MB / ~200 MB index. Reentrant because the
         # loaders acquire it while already holding it via ``self.manifest``.
         self._lock = threading.RLock()
+        # Resolved historical states (ADR-0011 ``recorded_at``), keyed by
+        # commit SHA. Deliberately NOT dropped by ``_refresh_if_stale``:
+        # a ``git pull`` adds commits but cannot change what an existing
+        # commit contains, so these caches can never go stale — only
+        # unused. Bounded FIFO (``_MAX_SNAPSHOT_STATES``).
+        self._snapshot_states: dict[str, _SnapshotData] = {}
 
     def _refresh_if_stale(self) -> None:
         """Drop all in-memory caches when ``manifest.json`` changed on disk.
@@ -602,38 +618,18 @@ class CorpusReader:
         # query slug, so record.slug is non-None here even though the
         # type annotation allows None.
         body = self._body_for_record(record, epoch)
-        by_id = _sections_by_id(_parse_sections(body))
-        matches = by_id.get(section_id)
-        if not matches:
-            raise CorpusNotFoundError(
-                f"section {section_id!r} not found in {slug!r}; "
-                f"available: {_available_ids_message(by_id)}",
-            )
-        section = _select_occurrence(slug, section_id, matches, occurrence)
+        section, by_id = _section_from_body(slug, body, section_id, occurrence)
         # The act's own section-id set is a free by-product of the
         # parse above — seed the cache so same-act cross-refs don't
         # re-parse the body.
         self._remember_section_ids(record.slug or "", set(by_id), epoch)
-        # Skip cross-ref resolution for sections with no ``§``
-        # patterns at all — most short sections have none.
-        cross_references: list[dict[str, Any]] = []
-        if _CROSS_REF_SECTION.search(section["body"]):
-            cross_references = _extract_cross_references(
-                section["body"],
-                record.slug or "",
-                set(self._load_slug_index()),
-                self._section_index_for,
-            )
-        return {
-            "slug": record.slug,
-            "section_id": section_id,
-            "occurrence": section["occurrence"],
-            "heading": section["heading"],
-            "parent_chapter": section["parent_chapter"],
-            "layer": section["layer"],
-            "body": section["body"],
-            "cross_references": cross_references,
-        }
+        cross_references = _cross_references_for(
+            section["body"],
+            record.slug or "",
+            set(self._load_slug_index()),
+            self._section_index_for,
+        )
+        return _section_result(record.slug, section_id, section, cross_references)
 
     def list_sections(self, slug: str) -> list[dict[str, Any]]:
         """Table of contents for one act, in document order.
@@ -715,90 +711,13 @@ class CorpusReader:
         validating one endpoint of a range as if it were the citation
         would confirm something the caller never cited.
         """
-        if "§§" in citation:
-            return {
-                "valid": False,
-                "slug": None,
-                "section_id": None,
-                "heading": None,
-                "reason": (
-                    "range citations (§§) are not supported; cite a single § section instead"
-                ),
-            }
-        section_match = _CITATION_SECTION_ID.search(citation)
-        section_id = section_match.group(1) if section_match else None
-
-        # Find slug-shaped TOKEN in citation (token = word-boundaried
-        # substring; not a substring inside a longer alphanumeric run).
-        # Plain ``record.slug in citation_lower`` is too lax: 'skatteloven-
-        # sktl' would match inside 'skatteloven-sktlX', contradicting the
-        # strict-match contract. _slug_token_in_citation rejects that.
-        # Pick the LONGEST among token-matching candidates so canonical
-        # 'skatteloven-sktl' wins over a hypothetical shorter slug that
-        # happens to also be a separate token in the same citation.
-        citation_lower = citation.lower()
-        candidates = [
-            slug
-            for slug in self._load_slug_index()
-            if _slug_token_in_citation(slug, citation_lower)
-        ]
-        matched_slug = max(candidates, key=len) if candidates else None
-
-        if matched_slug is None and section_id is None:
-            return {
-                "valid": False,
-                "slug": None,
-                "section_id": None,
-                "heading": None,
-                "reason": (
-                    f"could not parse citation {citation!r}: no § id and no known slug found"
-                    f"{self._citation_suggestion_hint(citation_lower)}"
-                ),
-            }
-
-        if matched_slug is None:
-            return {
-                "valid": False,
-                "slug": None,
-                "section_id": section_id,
-                "heading": None,
-                "reason": (
-                    f"ambiguous citation: § {section_id} found but no act "
-                    f"identifier; many acts have a section by that id"
-                    f"{self._citation_suggestion_hint(citation_lower)}"
-                ),
-            }
-
-        if section_id is None:
-            # Slug-only citation: valid if the slug is known (it is —
-            # we matched it from the manifest).
-            return {
-                "valid": True,
-                "slug": matched_slug,
-                "section_id": None,
-                "heading": None,
-                "reason": None,
-            }
-
-        # Both slug and section_id present — delegate to get_section
-        # for the section-existence check. Reuses its body-index cache
-        # and natural-order error message.
-        resolved_id, section, reason = self._resolve_cited_section(matched_slug, section_id)
-        if section is None:
-            return {
-                "valid": False,
-                "slug": matched_slug,
-                "section_id": resolved_id,
-                "heading": None,
-                "reason": reason,
-            }
-        return {
-            "valid": True,
-            "slug": matched_slug,
-            "section_id": resolved_id,
-            "heading": section["heading"],
-            "reason": None,
-        }
+        # Slug matching is token-based and longest-wins; the reasoning
+        # lives on ``_citation_verdict`` and ``_slug_token_in_citation``.
+        return _citation_verdict(
+            citation,
+            self._load_slug_index(),
+            self._resolve_cited_section,
+        )
 
     def _resolve_cited_section(
         self,
@@ -828,20 +747,7 @@ class CorpusReader:
         that path — the id exists; re-reading it would change what the
         caller cited.
         """
-        try:
-            return section_id, self.get_section(slug, section_id), None
-        except CorpusAmbiguousSectionError as exc:
-            return section_id, None, str(exc)
-        except CorpusNotFoundError as exc:
-            stripped = _CITATION_PROSE_TAIL.sub("", section_id)
-            if stripped == section_id:
-                return section_id, None, str(exc)
-            try:
-                return stripped, self.get_section(slug, stripped), None
-            except CorpusAmbiguousSectionError as ambiguous:
-                return stripped, None, str(ambiguous)
-            except CorpusNotFoundError:
-                return stripped, None, str(exc)
+        return _resolve_cited_section_with(self.get_section, slug, section_id)
 
     def get_law_history(self, slug: str) -> dict[str, Any]:
         """Return the parsed ``history/<slug>.json`` for ``slug``."""
@@ -857,6 +763,54 @@ class CorpusReader:
             )
         loaded: dict[str, Any] = json.loads(history_path.read_text(encoding="utf-8"))
         return loaded
+
+    def at_state(self, recorded_at: str) -> "_SnapshotState":
+        """Resolve ``recorded_at`` to a historical state view (ADR-0011).
+
+        ``recorded_at`` is a state selector, not a state identity: the
+        resolved commit is the identity, and the view stamps it into
+        every answer as ``corpus_commit`` so a bundle's members can prove
+        they share one state. Same axis, cutoff and refusal posture as
+        ``get_law_at`` (ADR-0002 semantics, ``_parse_recorded_at``).
+
+        Per-commit caches are shared across calls and dates that resolve
+        to the same commit; immutable state needs no epoch guard.
+        """
+        target = _parse_recorded_at(recorded_at)
+        ref = resolve_corpus_state(self.corpus_path, target)
+        with self._lock:
+            data = self._snapshot_states.get(ref.sha)
+            if data is None:
+                if len(self._snapshot_states) >= _MAX_SNAPSHOT_STATES:
+                    self._snapshot_states.pop(next(iter(self._snapshot_states)))
+                data = _SnapshotData(CorpusSnapshot(self.corpus_path, ref.sha), ref)
+                self._snapshot_states[ref.sha] = data
+        return _SnapshotState(
+            data,
+            target,
+            lambda slug: self._lineage_path_at(slug, target),
+            lambda: list(self._load_slug_index()),
+        )
+
+    def _lineage_path_at(self, slug: str, target: date) -> str | None:
+        """Path the CURRENT ``slug``'s document had at UTC end-of-day
+        ``target``, walking its rename lineage (``git log --follow``).
+
+        Feeds the ADR-0011 point 5 rename mapping: a caller holding
+        today's slug can reach the document's state-``target`` record
+        when the lineage is unambiguous. ``None`` when no current doc
+        carries the slug or its lineage does not reach the date — the
+        state view turns that into a historical negative, never a guess.
+        """
+        entry = self._load_slug_index().get(slug)
+        if entry is None:
+            return None
+        rel = self._safe_relative(entry[1].markdown_path)
+        cutoff = datetime.combine(target, time.max).replace(tzinfo=UTC)
+        for rev in _iter_follow_log(self.corpus_path, rel):
+            if rev.commit_date <= cutoff:
+                return rev.path
+        return None
 
     def get_law_at(self, slug: str, target_date: str) -> str:
         """Return the rendered Markdown of ``slug`` as the corpus held it
@@ -1157,47 +1111,9 @@ class CorpusReader:
         it is ~210 MB of strings, ~270 MB peak RSS, ~1 s to load off a
         warm page cache.
         """
-        limit = _bounded_limit(limit)
-        if not query.strip():
-            return []
-        needle = query.lower()
-        tolerant = (
-            _marker_tolerant_query(needle) if len(needle) <= _MAX_MARKER_TOLERANT_QUERY else None
-        )
-        dataset_key = _resolve_dataset(dataset) if dataset is not None else None
         index = self._load_body_index()
-        slug_index = self._load_slug_index()
-        results: list[dict[str, Any]] = []
-        for doc_id, record in self.manifest.documents.items():
-            if record.status != "current" or record.slug is None:
-                continue
-            # On a duplicate slug only the slug-index owner (first
-            # manifest entry) produces a hit — otherwise the same
-            # body would be reported once per claiming record, with
-            # doc_ids that point lookups cannot resolve.
-            if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
-                continue
-            if dataset_key is not None and record.source_dataset != dataset_key:
-                continue
-            body = index.get(record.slug)
-            if body is None:
-                continue
-            summary = _body_match_summary(body, needle, tolerant)
-            if summary is None:
-                continue
-            count, snippet = summary
-            results.append(
-                {
-                    "slug": record.slug,
-                    "doc_id": doc_id,
-                    "title": record.title,
-                    "dataset": _subdir_for_dataset(record.source_dataset),
-                    "match_count": count,
-                    "snippet": snippet,
-                },
-            )
-        results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
-        return results[:limit]
+        docs = _iter_search_docs(self.manifest.documents, self._load_slug_index(), index.get)
+        return _search_body_hits(query, docs, dataset, limit)
 
     def get_eu_basis(self, slug: str) -> dict[str, Any]:
         """Return the EU / EEA CELEX identifiers a Norwegian act implements.
@@ -1560,44 +1476,10 @@ class CorpusReader:
         section, ambiguous id, and out-of-range occurrence all return
         verified=False with a recovery-oriented reason.
         """
-        section_id = _normalize_section_id(section_id)
-        if not quote.strip():
-            return {
-                "verified": False,
-                "slug": slug,
-                "section_id": section_id,
-                "reason": "quote is empty",
-            }
-        try:
-            section = self.get_section(slug, section_id, occurrence)
-        except (CorpusAmbiguousSectionError, CorpusNotFoundError) as exc:
-            return {
-                "verified": False,
-                "slug": slug,
-                "section_id": section_id,
-                "reason": str(exc),
-            }
-        section_normalized = _normalize_for_quote_match(section["body"])
-        quote_normalized = _normalize_for_quote_match(quote)
-        if quote_normalized in section_normalized:
-            return {
-                "verified": True,
-                "slug": slug,
-                "section_id": section_id,
-                "reason": None,
-            }
-        return {
-            "verified": False,
-            "slug": slug,
-            "section_id": section_id,
-            "reason": (
-                f"quote not found in § {section_id} of {slug!r} after case, "
-                f"whitespace and typographic-punctuation normalization. The quote "
-                f"may be from a different section, paraphrased rather than "
-                f"verbatim, or hallucinated. "
-                f"Call get_section({slug!r}, {section_id!r}) to read the actual text."
-            ),
-        }
+        return _quote_verdict(
+            _QuoteQuery(slug, section_id, quote, occurrence),
+            self.get_section,
+        )
 
     def _load_embedding_index(self) -> EmbeddingIndex:
         """Lazy-build the per-section embedding index for ``semantic_search``.
@@ -2070,16 +1952,7 @@ class CorpusReader:
         nothing to suggest, so pinned exact-reason contracts stay
         intact for token-less citations.
         """
-        suggestions: list[str] = []
-        for token in _SLUG_TOKEN_PATTERN.findall(citation_lower):
-            if len(token) < _MIN_SUGGESTION_TOKEN_CHARS:
-                continue
-            for match in self._slug_suggestions(token):
-                if match not in suggestions:
-                    suggestions.append(match)
-        if not suggestions:
-            return ""
-        return f"; did you mean {', '.join(suggestions[:3])}? Use search_laws for canonical slugs"
+        return _citation_hint_from(self._load_slug_index(), citation_lower)
 
     def _slug_suggestions(self, slug: str) -> list[str]:
         """Up to three near-miss canonical slugs for an unknown input.
@@ -2090,12 +1963,7 @@ class CorpusReader:
         one step instead of a search_laws round trip. Suggestions
         are advisory — the strict-match contract is unchanged.
         """
-        return difflib.get_close_matches(
-            slug.lower(),
-            list(self._load_slug_index()),
-            n=3,
-            cutoff=0.6,
-        )
+        return _slug_suggestions_from(self._load_slug_index(), slug)
 
     def _safe_join(self, *parts: str) -> Path:
         """Join ``parts`` under ``corpus_path`` and refuse paths that escape it.
@@ -2876,6 +2744,305 @@ def _normalize_section_id(section_id: str) -> str:
     return canonical_section_id(section_id)
 
 
+# ---- state-agnostic primitive cores (ADR-0011) -------------------------
+#
+# The four retrieval primitives must give the same answer whether they
+# read the live working tree or a resolved historical corpus state
+# (snapshot closure, ADR-0011 point 5). These cores hold the one copy of
+# each algorithm; the live reader and the snapshot state both feed them
+# their own lookups. Anything reader-specific (epoch caches, disk reads,
+# git blobs) stays OUT of here.
+
+
+def _section_from_body(
+    slug: str,
+    body: str,
+    section_id: str,
+    occurrence: int | None,
+) -> tuple[ParsedSection, dict[str, list[ParsedSection]]]:
+    """Locate ``§ section_id`` in one act's body, or raise with the act's
+    available ids — the recovery message both states share."""
+    by_id = _sections_by_id(_parse_sections(body))
+    matches = by_id.get(section_id)
+    if not matches:
+        raise CorpusNotFoundError(
+            f"section {section_id!r} not found in {slug!r}; "
+            f"available: {_available_ids_message(by_id)}",
+        )
+    return _select_occurrence(slug, section_id, matches, occurrence), by_id
+
+
+def _section_result(
+    slug: str | None,
+    section_id: str,
+    section: ParsedSection,
+    cross_references: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The ``get_section`` response shape, shared by both states."""
+    return {
+        "slug": slug,
+        "section_id": section_id,
+        "occurrence": section["occurrence"],
+        "heading": section["heading"],
+        "parent_chapter": section["parent_chapter"],
+        "layer": section["layer"],
+        "body": section["body"],
+        "cross_references": cross_references,
+    }
+
+
+def _cross_references_for(
+    section_body: str,
+    slug: str,
+    known_slugs: set[str],
+    section_index_for: Callable[[str], SectionIndex],
+) -> list[dict[str, Any]]:
+    """Cross-references of one section, validated against the SAME state
+    the section came from — the caller supplies that state's slug set and
+    section indexes, never a mix (ADR-0011 point 5)."""
+    if not _CROSS_REF_SECTION.search(section_body):
+        return []
+    return _extract_cross_references(section_body, slug, known_slugs, section_index_for)
+
+
+def _section_index_from_body(body: str) -> SectionIndex:
+    """Parse one act's body into its ``SectionIndex``.
+
+    Snapshot counterpart of the live reader's cached
+    ``_section_ids_for`` / ``_section_index_is_complete`` pair — same
+    parse, same completeness rule, no cache to go stale.
+    """
+    ids = {section["section_id"] for section in _parse_sections(body)}
+    complete = not any(
+        _LOOKS_LIKE_SECTION_HEADING.match(line) and not _SECTION_HEADING.match(line)
+        for line in body.split("\n")
+    )
+    return SectionIndex(ids=ids, complete=complete)
+
+
+def _slug_suggestions_from(slugs: Iterable[str], slug: str) -> list[str]:
+    """Up to three near-miss canonical slugs from one state's namespace."""
+    return difflib.get_close_matches(slug.lower(), list(slugs), n=3, cutoff=0.6)
+
+
+def _citation_hint_from(slugs: Collection[str], citation_lower: str) -> str:
+    """Near-miss hint for a citation whose act token matched nothing,
+    drawn from one state's slug namespace."""
+    suggestions: list[str] = []
+    for token in _SLUG_TOKEN_PATTERN.findall(citation_lower):
+        if len(token) < _MIN_SUGGESTION_TOKEN_CHARS:
+            continue
+        for match in _slug_suggestions_from(slugs, token):
+            if match not in suggestions:
+                suggestions.append(match)
+    if not suggestions:
+        return ""
+    return f"; did you mean {', '.join(suggestions[:3])}? Use search_laws for canonical slugs"
+
+
+def _citation_invalid(
+    reason: str,
+    slug: str | None = None,
+    section_id: str | None = None,
+) -> dict[str, Any]:
+    """An invalid ``validate_citation`` verdict, in the pinned shape."""
+    return {
+        "valid": False,
+        "slug": slug,
+        "section_id": section_id,
+        "heading": None,
+        "reason": reason,
+    }
+
+
+def _citation_verdict(
+    citation: str,
+    slugs: Collection[str],
+    resolve: Callable[[str, str], tuple[str, dict[str, Any] | None, str | None]],
+) -> dict[str, Any]:
+    """The whole ``validate_citation`` algorithm against one state.
+
+    ``slugs`` is that state's slug namespace; ``resolve`` is that state's
+    cited-section resolution (the ``_resolve_cited_section`` contract).
+    """
+    if "§§" in citation:
+        return _citation_invalid(
+            "range citations (§§) are not supported; cite a single § section instead",
+        )
+    section_match = _CITATION_SECTION_ID.search(citation)
+    section_id = section_match.group(1) if section_match else None
+    citation_lower = citation.lower()
+    candidates = [slug for slug in slugs if _slug_token_in_citation(slug, citation_lower)]
+    matched_slug = max(candidates, key=len) if candidates else None
+    if matched_slug is None and section_id is None:
+        return _citation_invalid(
+            f"could not parse citation {citation!r}: no § id and no known slug found"
+            f"{_citation_hint_from(slugs, citation_lower)}",
+        )
+    if matched_slug is None:
+        return _citation_invalid(
+            f"ambiguous citation: § {section_id} found but no act "
+            f"identifier; many acts have a section by that id"
+            f"{_citation_hint_from(slugs, citation_lower)}",
+            section_id=section_id,
+        )
+    if section_id is None:
+        return {
+            "valid": True,
+            "slug": matched_slug,
+            "section_id": None,
+            "heading": None,
+            "reason": None,
+        }
+    resolved_id, section, reason = resolve(matched_slug, section_id)
+    if section is None:
+        return _citation_invalid(reason or "", slug=matched_slug, section_id=resolved_id)
+    return {
+        "valid": True,
+        "slug": matched_slug,
+        "section_id": resolved_id,
+        "heading": section["heading"],
+        "reason": None,
+    }
+
+
+def _resolve_cited_section_with(
+    get_section: Callable[[str, str], dict[str, Any]],
+    slug: str,
+    section_id: str,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Resolve a citation-extracted id via one state's ``get_section``.
+
+    Same longest-read-first / `` i``-tail fallback contract as the live
+    ``_resolve_cited_section`` (whose docstring holds the reasoning);
+    parameterized on the section lookup so a snapshot resolves against
+    its own state.
+    """
+    try:
+        return section_id, get_section(slug, section_id), None
+    except CorpusAmbiguousSectionError as exc:
+        return section_id, None, str(exc)
+    except CorpusNotFoundError as exc:
+        stripped = _CITATION_PROSE_TAIL.sub("", section_id)
+        if stripped == section_id:
+            return section_id, None, str(exc)
+        try:
+            return stripped, get_section(slug, stripped), None
+        except CorpusAmbiguousSectionError as ambiguous:
+            return stripped, None, str(ambiguous)
+        except CorpusNotFoundError:
+            return stripped, None, str(exc)
+
+
+class _QuoteQuery(NamedTuple):
+    """One ``verify_quote`` request, bundled to travel as a unit."""
+
+    slug: str
+    section_id: str
+    quote: str
+    occurrence: int | None
+
+
+def _quote_result(
+    verified: bool,
+    slug: str,
+    section_id: str,
+    reason: str | None,
+) -> dict[str, Any]:
+    """The ``verify_quote`` response shape, shared by both states."""
+    return {
+        "verified": verified,
+        "slug": slug,
+        "section_id": section_id,
+        "reason": reason,
+    }
+
+
+def _quote_verdict(
+    query: _QuoteQuery,
+    get_section: Callable[[str, str, int | None], dict[str, Any]],
+) -> dict[str, Any]:
+    """The whole ``verify_quote`` algorithm against one state's sections."""
+    section_id = _normalize_section_id(query.section_id)
+    if not query.quote.strip():
+        return _quote_result(False, query.slug, section_id, "quote is empty")
+    try:
+        section = get_section(query.slug, section_id, query.occurrence)
+    except (CorpusAmbiguousSectionError, CorpusNotFoundError) as exc:
+        return _quote_result(False, query.slug, section_id, str(exc))
+    section_normalized = _normalize_for_quote_match(section["body"])
+    quote_normalized = _normalize_for_quote_match(query.quote)
+    if quote_normalized in section_normalized:
+        return _quote_result(True, query.slug, section_id, None)
+    return _quote_result(
+        False,
+        query.slug,
+        section_id,
+        f"quote not found in § {section_id} of {query.slug!r} after case, "
+        f"whitespace and typographic-punctuation normalization. The quote "
+        f"may be from a different section, paraphrased rather than "
+        f"verbatim, or hallucinated. "
+        f"Call get_section({query.slug!r}, {section_id!r}) to read the actual text.",
+    )
+
+
+def _iter_search_docs(
+    documents: dict[str, ManifestRecord],
+    slug_index: dict[str, tuple[str, ManifestRecord]],
+    body_for: Callable[[str], str | None],
+) -> Iterator[tuple[str, ManifestRecord, str]]:
+    """Yield ``(doc_id, record, body)`` for one state's searchable docs.
+
+    Applies the shared eligibility rules — current status, a slug, the
+    slug-index owner on duplicates (otherwise one body reports once per
+    claiming record), a body the state can actually produce.
+    """
+    for doc_id, record in documents.items():
+        if record.status != "current" or record.slug is None:
+            continue
+        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
+            continue
+        body = body_for(record.slug)
+        if body is None:
+            continue
+        yield doc_id, record, body
+
+
+def _search_body_hits(
+    query: str,
+    docs: Iterator[tuple[str, ManifestRecord, str]],
+    dataset: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """The whole ``search_body`` algorithm over one state's doc stream."""
+    limit = _bounded_limit(limit)
+    if not query.strip():
+        return []
+    needle = query.lower()
+    tolerant = _marker_tolerant_query(needle) if len(needle) <= _MAX_MARKER_TOLERANT_QUERY else None
+    dataset_key = _resolve_dataset(dataset) if dataset is not None else None
+    results: list[dict[str, Any]] = []
+    for doc_id, record, body in docs:
+        if dataset_key is not None and record.source_dataset != dataset_key:
+            continue
+        summary = _body_match_summary(body, needle, tolerant)
+        if summary is None:
+            continue
+        count, snippet = summary
+        results.append(
+            {
+                "slug": record.slug,
+                "doc_id": doc_id,
+                "title": record.title,
+                "dataset": _subdir_for_dataset(record.source_dataset),
+                "match_count": count,
+                "snippet": snippet,
+            },
+        )
+    results.sort(key=lambda hit: (-hit["match_count"], hit["slug"] or ""))
+    return results[:limit]
+
+
 _QUOTE_FOLD_TABLE = str.maketrans(
     {
         "\u2018": "'",  # left single quotation mark
@@ -3244,6 +3411,379 @@ def _with_quota(
     return wrapper
 
 
+_NOT_EVALUATED_NOTICE: dict[str, str] = {
+    "status": "not_evaluated",
+    "reason": (
+        "transaction-time retrieval: this answer describes corpus content "
+        "at recorded_at and no in-force evaluation was performed; "
+        "recorded_at is never used as a valid-time evaluation date "
+        "(ADR-0011 point 7). For today's in-force status call the tool "
+        "without recorded_at."
+    ),
+}
+"""The ``temporal_notice`` outcome for historical ``recorded_at`` calls.
+
+Explicit non-evaluation, not absence: composing the T0 notice (evaluated
+at today) with a historical body would mix a transaction-time body with a
+today-valued valid-time claim inside one response, and evaluating at
+``recorded_at`` would silently make it perform ``valid_at``'s job. Return
+a copy (``dict(...)``) — responses must not share one mutable object."""
+
+
+def _stamp_not_evaluated(result: dict[str, Any]) -> dict[str, Any]:
+    """Attach the non-evaluation notice to one historical response."""
+    result["temporal_notice"] = dict(_NOT_EVALUATED_NOTICE)
+    return result
+
+
+_INTEGRITY_SAMPLE_SLUGS = 5
+"""How many offending slugs an integrity error names before eliding."""
+
+_MAX_SNAPSHOT_STATES = 4
+"""Bound on cached historical states. Each holds a parsed manifest and,
+after a historical ``search_body``, the state's whole body set (~200 MB on
+the production corpus) — a handful covers a session revisiting the same
+dates; an unbounded map would let a date-scanning client hold every state
+ever asked for."""
+
+
+_RECORDED_AT_FORM = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+"""The one wire form ``recorded_at`` accepts: ``YYYY-MM-DD``, exactly.
+
+``date.fromisoformat`` alone is too permissive for a contract field —
+since Python 3.11 it also parses ``20260501``, ``2026-W18-5`` and other
+ISO-8601 representations the documented contract never promised. The
+lexical gate keeps runtime and contract identical; ``fromisoformat``
+then judges only calendar validity (2026-02-30 still fails)."""
+
+
+def _parse_recorded_at(value: str) -> date:
+    """Parse and bound an ADR-0011 ``recorded_at`` value.
+
+    Canonical ``YYYY-MM-DD`` only — the transaction-time identity
+    contract names one wire form, so runtime accepts exactly that form.
+    End-of-day semantics downstream; future dates are refused — same
+    typo-guard posture as ``get_law_at``'s ``target_date``.
+    """
+    if not _RECORDED_AT_FORM.fullmatch(value):
+        raise ValueError(
+            f"recorded_at must be ISO date YYYY-MM-DD, got {value!r}",
+        )
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"recorded_at must be ISO date YYYY-MM-DD, got {value!r}",
+        ) from exc
+    today = datetime.now(UTC).date()
+    if parsed > today:
+        raise ValueError(
+            f"recorded_at {parsed.isoformat()} is in the future "
+            f"(today is {today.isoformat()}); "
+            f"omit recorded_at for the current corpus state",
+        )
+    return parsed
+
+
+@dataclass
+class _SnapshotData:
+    """Per-commit caches shared by every ``recorded_at`` resolving to one state.
+
+    Split from :class:`_SnapshotState` so two different dates that resolve
+    to the same commit share the expensive parts (manifest, bodies) while
+    each call still stamps the date it was actually asked for.
+    """
+
+    snapshot: CorpusSnapshot
+    ref: CorpusStateRef
+    bodies: dict[str, str | None] = field(default_factory=dict)
+    section_indexes: dict[str, SectionIndex] = field(default_factory=dict)
+    search_bodies: dict[str, str] | None = None
+
+
+class _SnapshotState:
+    """The four retrieval primitives against one resolved historical state.
+
+    Snapshot closure (ADR-0011 point 5): every lookup an answer depends on
+    — slug namespace, bodies, section indexes, citation resolution,
+    suggestions — reads the same resolved commit, never the working tree.
+    The algorithms themselves are the shared state-agnostic cores, so a
+    historical answer can differ from a live one only by state.
+
+    Answers are corpus statements, never legal-validity statements; no
+    ``in_force_at`` evaluation happens here (ADR-0011 points 7 and 9).
+    """
+
+    def __init__(
+        self,
+        data: _SnapshotData,
+        recorded_at: date,
+        lineage_path: Callable[[str], str | None],
+        current_slugs: Callable[[], list[str]],
+    ) -> None:
+        self._data = data
+        self._recorded_at = recorded_at
+        self._lineage_path = lineage_path
+        self._current_slugs = current_slugs
+
+    @property
+    def corpus_commit(self) -> str:
+        """The global state commit — the identity every answer reports."""
+        return self._data.ref.sha
+
+    def _slug_index(self) -> dict[str, tuple[str, ManifestRecord]]:
+        return self._data.snapshot.slug_index
+
+    def _unknown_slug_error(self, slug: str) -> CorpusNotFoundError:
+        """Outcome 3 of the ADR-0011 taxonomy: the state resolved fine and
+        the document is not in it — a historical negative, never a
+        boundary claim."""
+        suggestions = _slug_suggestions_from(self._slug_index(), slug)
+        hint = f"did you mean {', '.join(suggestions)}? " if suggestions else ""
+        return CorpusNotFoundError(
+            f"no law with slug {slug!r} in the corpus state at "
+            f"{self._recorded_at.isoformat()} (corpus_commit {self.corpus_commit}); "
+            f"{hint}the document may have entered the corpus later — "
+            f"call get_law_history({slug!r}) to see when it first appeared",
+        )
+
+    def _resolve_slug(self, slug: str) -> tuple[ManifestRecord, str | None]:
+        """Resolve a caller-supplied slug within this state's namespace.
+
+        The state's own namespace is authoritative (ADR-0011 point 5). A
+        current slug absent at this date MAY additionally map through
+        unambiguous document lineage to the slug it carried then; the
+        second element is then the caller's slug, so the response reports
+        the mapping it applied. An unmappable or ambiguous name is a
+        historical negative — never a silent fallback to today's
+        namespace.
+        """
+        entry = self._slug_index().get(slug)
+        if entry is not None:
+            return entry[1], None
+        record = self._record_via_lineage(slug)
+        if record is None:
+            raise self._unknown_slug_error(slug)
+        return record, slug
+
+    def _record_via_lineage(self, slug: str) -> ManifestRecord | None:
+        """The state's record for a CURRENT slug, via rename lineage.
+
+        The lineage gives the path the document had at the requested
+        date; that path is matched back against this state's own
+        manifest. Exactly one match is a mapping; zero or several is
+        ``None`` — ambiguity never resolves to a guess.
+        """
+        path = self._lineage_path(slug)
+        if path is None:
+            return None
+        matches = [
+            record
+            for _doc_id, record in self._slug_index().values()
+            if record.markdown_path == path
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _body_for_slug(self, slug: str) -> str | None:
+        """Stripped body of one act at this state; ``None`` when the
+        state's namespace has no such slug.
+
+        A slug the state's manifest DOES carry must produce a body: a
+        current record whose committed blob is missing is a
+        :class:`StateIntegrityError` (ADR-0011 point 6 outcome 2), never
+        a historical absence.
+        """
+        bodies = self._data.bodies
+        if slug not in bodies:
+            entry = self._slug_index().get(slug)
+            bodies[slug] = None if entry is None else self._read_record_body(entry[1])
+        return bodies[slug]
+
+    def _read_record_body(self, record: ManifestRecord) -> str:
+        text = self._data.snapshot.read_text(record.markdown_path)
+        if text is None:
+            raise StateIntegrityError(
+                f"corpus state {self.corpus_commit} is inconsistent: its "
+                f"manifest lists {record.slug!r} as current but "
+                f"{record.markdown_path!r} is not in the commit's tree — "
+                f"repository damage, not historical absence",
+            )
+        return _strip_frontmatter_and_h1(text)
+
+    def _section_index_for(self, slug: str) -> SectionIndex:
+        indexes = self._data.section_indexes
+        if slug not in indexes:
+            indexes[slug] = _section_index_from_body(self._body_for_slug(slug) or "")
+        return indexes[slug]
+
+    def _stamp(self, result: dict[str, Any], xml_hash: str | None) -> dict[str, Any]:
+        """Attach the ADR-0011 evidence fields: the requested date, the
+        resolved state, and — only when a document version was actually
+        resolved — its ``xml_hash``."""
+        result["recorded_at"] = self._recorded_at.isoformat()
+        result["corpus_commit"] = self.corpus_commit
+        if xml_hash is not None:
+            result["xml_hash"] = xml_hash
+        return result
+
+    def get_section(
+        self,
+        slug: str,
+        section_id: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
+        """``get_section`` against this state — same algorithm, same error
+        shapes, cross-references validated against this state's own
+        indexes (never the current head)."""
+        section_id = _normalize_section_id(section_id)
+        record, mapped_from = self._resolve_slug(slug)
+        body = self._body_for_slug(record.slug or "") or ""
+        section, _by_id = _section_from_body(record.slug or "", body, section_id, occurrence)
+        cross_references = _cross_references_for(
+            section["body"],
+            record.slug or "",
+            set(self._slug_index()),
+            self._section_index_for,
+        )
+        result = _section_result(record.slug, section_id, section, cross_references)
+        if mapped_from is not None:
+            result["mapped_from_slug"] = mapped_from
+        return self._stamp(result, record.xml_hash)
+
+    def validate_citation(self, citation: str) -> dict[str, Any]:
+        """``validate_citation`` against this state's slug namespace and
+        sections. ``valid`` means "resolved in the corpus state at the
+        requested date" — a corpus statement, not legal validity.
+
+        A citation written with a document's CURRENT slug resolves
+        through the same unambiguous lineage mapping as ``get_section``
+        and ``verify_quote`` — the three guards must agree about one
+        document at one date. The verdict then reports the slug as it
+        stood at the date, plus ``mapped_from_slug``.
+        """
+        aliases = self._lineage_aliases_in(citation.lower())
+        namespace = set(self._slug_index()) | set(aliases)
+        verdict = _citation_verdict(citation, namespace, self._resolve_cited)
+        matched = verdict["slug"]
+        if matched in aliases:
+            verdict["mapped_from_slug"] = matched
+            verdict["slug"] = aliases[matched].slug
+        return self._stamp(verdict, None)
+
+    def _lineage_aliases_in(self, citation_lower: str) -> dict[str, ManifestRecord]:
+        """Current slugs cited in the text that lineage-map into this state.
+
+        Only slugs actually token-present in the citation are considered,
+        and the (costly) follow-log walk runs only for those absent from
+        the state's own namespace — zero or one slug for any real
+        citation. Ambiguous or unreachable lineage is simply not an
+        alias, so the citation stays a historical negative.
+        """
+        state = self._slug_index()
+        aliases: dict[str, ManifestRecord] = {}
+        for slug in self._current_slugs():
+            if slug in state or not _slug_token_in_citation(slug, citation_lower):
+                continue
+            record = self._record_via_lineage(slug)
+            if record is not None:
+                aliases[slug] = record
+        return aliases
+
+    def _resolve_cited(
+        self,
+        slug: str,
+        section_id: str,
+    ) -> tuple[str, dict[str, Any] | None, str | None]:
+        return _resolve_cited_section_with(self.get_section, slug, section_id)
+
+    def verify_quote(
+        self,
+        slug: str,
+        section_id: str,
+        quote: str,
+        occurrence: int | None = None,
+    ) -> dict[str, Any]:
+        """``verify_quote`` against this state's section text. ``verified``
+        means the wording appeared in the corpus text at the requested
+        date. ``xml_hash`` is stamped only when the document resolved."""
+        verdict = _quote_verdict(
+            _QuoteQuery(slug, section_id, quote, occurrence),
+            self.get_section,
+        )
+        try:
+            record, _mapped = self._resolve_slug(slug)
+            xml_hash: str | None = record.xml_hash
+        except CorpusNotFoundError:
+            xml_hash = None
+        return self._stamp(verdict, xml_hash)
+
+    def search_body(
+        self,
+        query: str,
+        dataset: str | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """``search_body`` against this state, in the ADR-0011 point 8
+        envelope — so even an empty result set carries the evidence
+        stamp a bare list cannot."""
+        docs = _iter_search_docs(
+            self._data.snapshot.manifest.documents,
+            self._slug_index(),
+            self._search_body_lookup,
+        )
+        hits = _search_body_hits(query, docs, dataset, limit)
+        return {
+            "recorded_at": self._recorded_at.isoformat(),
+            "corpus_commit": self.corpus_commit,
+            "results": hits,
+        }
+
+    def _search_body_lookup(self, slug: str) -> str | None:
+        if self._data.search_bodies is None:
+            self._data.search_bodies = self._load_search_bodies()
+        return self._data.search_bodies.get(slug)
+
+    def _load_search_bodies(self) -> dict[str, str]:
+        """Bulk-read every current doc's body at this state, in one pass.
+
+        Per-file ``git show`` would cost two subprocesses per document —
+        ~12,000 for one historical search on the production corpus.
+        ``git archive`` streams the whole tree once; members are read in
+        memory only, nothing touches the filesystem, so the tar
+        path-traversal class (CVE-2007-4559) has no surface here.
+        """
+        wanted = {
+            record.markdown_path: slug for slug, (_doc_id, record) in self._slug_index().items()
+        }
+        raw = subprocess.run(  # noqa: S603
+            ["git", "archive", "--format=tar", self._data.ref.sha],  # noqa: S607
+            cwd=self._data.snapshot.repo_path,
+            capture_output=True,
+            check=True,
+        )
+        bodies: dict[str, str] = {}
+        with tarfile.open(fileobj=BytesIO(raw.stdout)) as tar:
+            for member in tar:
+                slug = wanted.get(member.name)
+                if slug is None or not member.isfile():
+                    continue
+                blob = tar.extractfile(member)
+                if blob is None:
+                    continue
+                bodies[slug] = _strip_frontmatter_and_h1(blob.read().decode("utf-8"))
+        missing = sorted(set(wanted.values()) - set(bodies))
+        if missing:
+            shown = ", ".join(missing[:_INTEGRITY_SAMPLE_SLUGS])
+            elided = " …" if len(missing) > _INTEGRITY_SAMPLE_SLUGS else ""
+            raise StateIntegrityError(
+                f"corpus state {self._data.ref.sha} is inconsistent: its "
+                f"manifest lists current documents whose committed files "
+                f"are not in the commit's tree: {shown}{elided} — "
+                f"repository damage, not historical absence",
+            )
+        return bodies
+
+
 def _with_section_notice(result: dict[str, Any], evaluation_date: date) -> dict[str, Any]:
     """Attach the ADR-0009 T0 notice to one ``get_section`` response.
 
@@ -3333,6 +3873,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         slug: str,
         section_id: str,
         occurrence: int | None = None,
+        recorded_at: str | None = None,
     ) -> dict[str, Any]:
         """Return a single ``§`` section of a Norwegian law or regulation.
 
@@ -3392,10 +3933,28 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         (``pending_indeterminate``), or a provision never brought into
         force. Text listed there is not part of the law in force; do
         not present it as such (ADR-0009 §3b).
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): answer from the
+        corpus state at UTC end-of-day on that date — what the corpus
+        RECORDED then, never which law was in force then (the
+        legal-validity axis is a separate future capability). The
+        response then carries ``recorded_at``, ``corpus_commit`` (the
+        resolved global state — equal ``corpus_commit`` across calls
+        proves the answers share one state) and ``xml_hash``, and
+        ``temporal_notice`` becomes ``{"status": "not_evaluated", ...}``
+        — no in-force evaluation is performed against a historical
+        state. Dates before the corpus start fail with the boundary
+        outcome; future dates are refused.
         """
-        return _with_section_notice(
-            reader.get_section(slug, section_id, occurrence),
-            evaluation_date_today(),
+        return (
+            _stamp_not_evaluated(
+                reader.at_state(recorded_at).get_section(slug, section_id, occurrence),
+            )
+            if recorded_at is not None
+            else _with_section_notice(
+                reader.get_section(slug, section_id, occurrence),
+                evaluation_date_today(),
+            )
         )
 
     @_tool()
@@ -3589,7 +4148,8 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         query: str,
         dataset: str | None = None,
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+        recorded_at: str | None = None,
+    ) -> list[dict[str, Any]] | dict[str, Any]:
         """Search the corpus body text (full Markdown) for ``query``.
 
         Complement to ``search_laws``: that tool matches manifest
@@ -3630,8 +4190,23 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         and every call after that is a full scan of that text —
         ~0.4 s, or ~0.5-0.6 s once the marker-tolerant pass runs over
         the 18.3% of documents that carry a footnote marker.
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): search the corpus
+        state at UTC end-of-day on that date — what the corpus RECORDED
+        then, never which law was in force then. The response is then an
+        envelope ``{recorded_at, corpus_commit, results}`` instead of a
+        bare list, so even zero matches carry the resolved state
+        (``corpus_commit``; equal values across calls prove a set of
+        answers shares one state). Dates before the corpus start fail
+        with the boundary outcome; future dates are refused. First
+        historical search per state bulk-loads that state's bodies —
+        comparable cost to this tool's own cold start.
         """
-        return reader.search_body(query, dataset=dataset, limit=limit)
+        return (
+            reader.at_state(recorded_at).search_body(query, dataset=dataset, limit=limit)
+            if recorded_at is not None
+            else reader.search_body(query, dataset=dataset, limit=limit)
+        )
 
     @_tool()
     def semantic_search(
@@ -3704,7 +4279,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         )
 
     @_tool()
-    def validate_citation(citation: str) -> dict[str, Any]:
+    def validate_citation(citation: str, recorded_at: str | None = None) -> dict[str, Any]:
         """Verify that a Norwegian-law citation string actually resolves.
 
         Use this before quoting a citation in a final answer to the
@@ -3732,8 +4307,24 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         Slug-only citations (``"skatteloven-sktl"``) are valid as long
         as the slug is known. ``§``-only citations (``"§ 5-12"``) are
         invalid because the section id is non-unique across acts.
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): validate against
+        the corpus state at UTC end-of-day on that date. ``valid`` then
+        means "resolved in the corpus state at that date" — a statement
+        about what the corpus RECORDED, never that the citation was
+        legally in force then (the legal-validity axis is a separate
+        future capability). The response then carries ``recorded_at``
+        and ``corpus_commit`` (the resolved global state). An act
+        ingested after that date is ``valid: false`` in that state —
+        a normal historical negative, not an error. Dates before the
+        corpus start fail with the boundary outcome; future dates are
+        refused.
         """
-        return reader.validate_citation(citation)
+        return (
+            reader.at_state(recorded_at).validate_citation(citation)
+            if recorded_at is not None
+            else reader.validate_citation(citation)
+        )
 
     @_tool()
     def verify_quote(
@@ -3741,6 +4332,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         section_id: str,
         quote: str,
         occurrence: int | None = None,
+        recorded_at: str | None = None,
     ) -> dict[str, Any]:
         """Verify a verbatim quote actually appears in a specific section.
 
@@ -3782,8 +4374,23 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         out-of-range occurrence likewise return ``verified=false`` with
         a recovery-oriented ``reason`` (the messages list available
         sections, candidate occurrences, or the valid occurrence range).
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): verify against
+        the corpus state at UTC end-of-day on that date. ``verified``
+        then means "this wording appeared in the corpus text of that
+        section at that date" — a statement about what the corpus
+        RECORDED, never that the wording was the law in force then (the
+        legal-validity axis is a separate future capability). The
+        response then carries ``recorded_at``, ``corpus_commit`` (the
+        resolved global state) and — only when the document actually
+        resolved in that state — ``xml_hash``. Dates before the corpus
+        start fail with the boundary outcome; future dates are refused.
         """
-        return reader.verify_quote(slug, section_id, quote, occurrence)
+        return (
+            reader.at_state(recorded_at).verify_quote(slug, section_id, quote, occurrence)
+            if recorded_at is not None
+            else reader.verify_quote(slug, section_id, quote, occurrence)
+        )
 
     @_tool()
     def get_eu_basis(slug: str) -> dict[str, Any]:
