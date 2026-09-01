@@ -197,3 +197,52 @@ def test_slug_index_first_entry_wins_and_skips_non_current(tmp_path: Path) -> No
 
     assert index["testloven"][0] == "doc-1"
     assert "borteloven" not in index
+
+
+# ---------- operational failure vs historical absence ----------
+
+
+def test_snapshot_invalid_commit_fails_loudly(corpus_repo: tuple[Path, str, str]) -> None:
+    # ADR-0011 point 6 outcome 2: an unresolvable state is an operational
+    # failure — it must never read as "the path was absent at that date".
+    repo, _, _ = corpus_repo
+
+    with pytest.raises(subprocess.CalledProcessError):
+        CorpusSnapshot(repo, "0" * 40).read_text("lover/testloven.md")
+
+
+def test_missing_path_in_valid_commit_still_reads_none(
+    corpus_repo: tuple[Path, str, str],
+) -> None:
+    # The commit re-check on a probe miss must not turn genuine absence
+    # into an error: valid commit + absent path stays a historical None.
+    repo, sha1, _ = corpus_repo
+
+    assert CorpusSnapshot(repo, sha1).read_text("lover/aldri-fantes.md") is None
+
+
+# ---------- ordering: author date vs ancestry order ----------
+
+
+def test_resolution_follows_ancestry_order_like_timetravel(tmp_path: Path) -> None:
+    """A commit authored EARLIER but committed LATER (ancestry tip) wins for
+    a cutoff both satisfy — the same convention as timetravel's follow-log
+    walk, so global and per-document resolution never pick opposite sides
+    of an author/ancestry divergence."""
+    repo = tmp_path / "corpus"
+    repo.mkdir()
+    _run_git(repo, "init", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "config", "commit.gpgsign", "false")
+    (repo / "a.md").write_text("first\n")
+    sha_first = _commit_all(repo, "first", "2026-05-01T12:00:00Z")
+    (repo / "a.md").write_text("second\n")
+    sha_second = _commit_all(repo, "second, authored before its parent", "2026-04-20T12:00:00Z")
+
+    # Cutoff satisfied by both: the ancestry tip (sha_second) wins even
+    # though sha_first carries the newer author date.
+    assert resolve_corpus_state(repo, date(2026, 5, 5)).sha == sha_second
+    # Cutoff satisfied only by the earlier-authored tip: same answer.
+    assert resolve_corpus_state(repo, date(2026, 4, 25)).sha == sha_second
+    assert sha_first != sha_second

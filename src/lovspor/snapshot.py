@@ -42,6 +42,16 @@ class HistoryBoundaryError(LovsporError):
     """
 
 
+class StateIntegrityError(LovsporError):
+    """A resolved state contradicts itself: its manifest names a current
+    document whose committed body cannot be read from the same commit.
+
+    This is a corpus/storage failure (ADR-0011 point 6 outcome 2), not a
+    historical fact — serving it as "the text was absent at that date"
+    would turn repository damage into a statement about legal history.
+    """
+
+
 @dataclass(frozen=True)
 class CorpusStateRef:
     """One resolved global corpus state: the commit and its author date."""
@@ -51,8 +61,15 @@ class CorpusStateRef:
 
 
 def resolve_corpus_state(repo_path: Path, target_date: date) -> CorpusStateRef:
-    """Resolve ``target_date`` to the newest corpus commit authored at or
-    before UTC end-of-day — the whole history, no path filter.
+    """Resolve ``target_date`` to one corpus commit: the first entry in
+    ``git log`` order (reverse-chronological ancestry) whose author date
+    is at or before UTC end-of-day — the whole history, no path filter.
+
+    When author dates and ancestry order disagree (a commit authored
+    earlier but committed later), ancestry order wins — deliberately the
+    SAME convention as ``timetravel._find_revision``, so the global state
+    resolution and the per-document lineage resolution can never pick
+    opposite sides of such a divergence. Pinned by a real-git test.
 
     Raises :class:`HistoryBoundaryError` when the date precedes the corpus
     start, or :class:`ShallowHistoryError` when this clone's truncated
@@ -146,9 +163,12 @@ class CorpusSnapshot:
         """Blob content of ``rel_path`` at this state, or ``None`` when the
         path does not exist in the commit's tree.
 
-        Existence is probed with ``git cat-file -e`` first so an absent
-        path — an expected historical negative — is distinguished from a
-        real git failure, which still raises.
+        ``None`` is a *historical* statement, so it is only returned once
+        the commit itself is proven resolvable: a probe miss re-checks the
+        commit (``<sha>^{commit}``) and lets an unresolvable state raise —
+        an invalid commit, a truncated object database or repository
+        corruption is an operational failure (ADR-0011 point 6 outcome 2)
+        and must never read as "the path was absent at that date".
         """
         spec = f"{self.sha}:{rel_path}"
         probe = subprocess.run(  # noqa: S603
@@ -158,6 +178,12 @@ class CorpusSnapshot:
             check=False,
         )
         if probe.returncode != 0:
+            subprocess.run(  # noqa: S603
+                ["git", "cat-file", "-e", f"{self.sha}^{{commit}}"],  # noqa: S607
+                cwd=self.repo_path,
+                capture_output=True,
+                check=True,
+            )
             return None
         result = subprocess.run(  # noqa: S603
             ["git", "-c", "core.quotePath=false", "show", spec],  # noqa: S607

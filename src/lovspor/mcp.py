@@ -54,7 +54,7 @@ import threading
 import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from io import BytesIO
 from pathlib import Path
 from typing import Any, NamedTuple, Self, TypedDict, final
@@ -95,6 +95,7 @@ from lovspor.settings import load_env
 from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
+    StateIntegrityError,
     resolve_corpus_state,
 )
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
@@ -102,6 +103,7 @@ from lovspor.temporal import append_notice, build_notice, evaluation_date_today
 from lovspor.timetravel import (
     RevisionNotFoundError,
     RevisionResult,
+    _iter_follow_log,
     get_law_at_revision,
     resolve_law_at_revision,
 )
@@ -783,7 +785,27 @@ class CorpusReader:
                     self._snapshot_states.pop(next(iter(self._snapshot_states)))
                 data = _SnapshotData(CorpusSnapshot(self.corpus_path, ref.sha), ref)
                 self._snapshot_states[ref.sha] = data
-        return _SnapshotState(data, target)
+        return _SnapshotState(data, target, lambda slug: self._lineage_path_at(slug, target))
+
+    def _lineage_path_at(self, slug: str, target: date) -> str | None:
+        """Path the CURRENT ``slug``'s document had at UTC end-of-day
+        ``target``, walking its rename lineage (``git log --follow``).
+
+        Feeds the ADR-0011 point 5 rename mapping: a caller holding
+        today's slug can reach the document's state-``target`` record
+        when the lineage is unambiguous. ``None`` when no current doc
+        carries the slug or its lineage does not reach the date — the
+        state view turns that into a historical negative, never a guess.
+        """
+        entry = self._load_slug_index().get(slug)
+        if entry is None:
+            return None
+        rel = self._safe_relative(entry[1].markdown_path)
+        cutoff = datetime.combine(target, time.max).replace(tzinfo=UTC)
+        for rev in _iter_follow_log(self.corpus_path, rel):
+            if rev.commit_date <= cutoff:
+                return rev.path
+        return None
 
     def get_law_at(self, slug: str, target_date: str) -> str:
         """Return the rendered Markdown of ``slug`` as the corpus held it
@@ -3409,6 +3431,9 @@ def _stamp_not_evaluated(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+_INTEGRITY_SAMPLE_SLUGS = 5
+"""How many offending slugs an integrity error names before eliding."""
+
 _MAX_SNAPSHOT_STATES = 4
 """Bound on cached historical states. Each holds a parsed manifest and,
 after a historical ``search_body``, the state's whole body set (~200 MB on
@@ -3468,9 +3493,15 @@ class _SnapshotState:
     ``in_force_at`` evaluation happens here (ADR-0011 points 7 and 9).
     """
 
-    def __init__(self, data: _SnapshotData, recorded_at: date) -> None:
+    def __init__(
+        self,
+        data: _SnapshotData,
+        recorded_at: date,
+        lineage_path: Callable[[str], str | None],
+    ) -> None:
         self._data = data
         self._recorded_at = recorded_at
+        self._lineage_path = lineage_path
 
     @property
     def corpus_commit(self) -> str:
@@ -3493,21 +3524,68 @@ class _SnapshotState:
             f"call get_law_history({slug!r}) to see when it first appeared",
         )
 
-    def _find_record(self, slug: str) -> ManifestRecord:
+    def _resolve_slug(self, slug: str) -> tuple[ManifestRecord, str | None]:
+        """Resolve a caller-supplied slug within this state's namespace.
+
+        The state's own namespace is authoritative (ADR-0011 point 5). A
+        current slug absent at this date MAY additionally map through
+        unambiguous document lineage to the slug it carried then; the
+        second element is then the caller's slug, so the response reports
+        the mapping it applied. An unmappable or ambiguous name is a
+        historical negative — never a silent fallback to today's
+        namespace.
+        """
         entry = self._slug_index().get(slug)
-        if entry is None:
+        if entry is not None:
+            return entry[1], None
+        record = self._record_via_lineage(slug)
+        if record is None:
             raise self._unknown_slug_error(slug)
-        return entry[1]
+        return record, slug
+
+    def _record_via_lineage(self, slug: str) -> ManifestRecord | None:
+        """The state's record for a CURRENT slug, via rename lineage.
+
+        The lineage gives the path the document had at the requested
+        date; that path is matched back against this state's own
+        manifest. Exactly one match is a mapping; zero or several is
+        ``None`` — ambiguity never resolves to a guess.
+        """
+        path = self._lineage_path(slug)
+        if path is None:
+            return None
+        matches = [
+            record
+            for _doc_id, record in self._slug_index().values()
+            if record.markdown_path == path
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     def _body_for_slug(self, slug: str) -> str | None:
-        """Stripped body of one act at this state; ``None`` when the state
-        has no such document (or its blob is absent from the tree)."""
+        """Stripped body of one act at this state; ``None`` when the
+        state's namespace has no such slug.
+
+        A slug the state's manifest DOES carry must produce a body: a
+        current record whose committed blob is missing is a
+        :class:`StateIntegrityError` (ADR-0011 point 6 outcome 2), never
+        a historical absence.
+        """
         bodies = self._data.bodies
         if slug not in bodies:
             entry = self._slug_index().get(slug)
-            text = self._data.snapshot.read_text(entry[1].markdown_path) if entry else None
-            bodies[slug] = _strip_frontmatter_and_h1(text) if text is not None else None
+            bodies[slug] = None if entry is None else self._read_record_body(entry[1])
         return bodies[slug]
+
+    def _read_record_body(self, record: ManifestRecord) -> str:
+        text = self._data.snapshot.read_text(record.markdown_path)
+        if text is None:
+            raise StateIntegrityError(
+                f"corpus state {self.corpus_commit} is inconsistent: its "
+                f"manifest lists {record.slug!r} as current but "
+                f"{record.markdown_path!r} is not in the commit's tree — "
+                f"repository damage, not historical absence",
+            )
+        return _strip_frontmatter_and_h1(text)
 
     def _section_index_for(self, slug: str) -> SectionIndex:
         indexes = self._data.section_indexes
@@ -3535,9 +3613,9 @@ class _SnapshotState:
         shapes, cross-references validated against this state's own
         indexes (never the current head)."""
         section_id = _normalize_section_id(section_id)
-        record = self._find_record(slug)
-        body = self._body_for_slug(slug) or ""
-        section, _by_id = _section_from_body(slug, body, section_id, occurrence)
+        record, mapped_from = self._resolve_slug(slug)
+        body = self._body_for_slug(record.slug or "") or ""
+        section, _by_id = _section_from_body(record.slug or "", body, section_id, occurrence)
         cross_references = _cross_references_for(
             section["body"],
             record.slug or "",
@@ -3545,6 +3623,8 @@ class _SnapshotState:
             self._section_index_for,
         )
         result = _section_result(record.slug, section_id, section, cross_references)
+        if mapped_from is not None:
+            result["mapped_from_slug"] = mapped_from
         return self._stamp(result, record.xml_hash)
 
     def validate_citation(self, citation: str) -> dict[str, Any]:
@@ -3575,8 +3655,12 @@ class _SnapshotState:
             _QuoteQuery(slug, section_id, quote, occurrence),
             self.get_section,
         )
-        entry = self._slug_index().get(slug)
-        return self._stamp(verdict, entry[1].xml_hash if entry else None)
+        try:
+            record, _mapped = self._resolve_slug(slug)
+            xml_hash: str | None = record.xml_hash
+        except CorpusNotFoundError:
+            xml_hash = None
+        return self._stamp(verdict, xml_hash)
 
     def search_body(
         self,
@@ -3632,6 +3716,16 @@ class _SnapshotState:
                 if blob is None:
                     continue
                 bodies[slug] = _strip_frontmatter_and_h1(blob.read().decode("utf-8"))
+        missing = sorted(set(wanted.values()) - set(bodies))
+        if missing:
+            shown = ", ".join(missing[:_INTEGRITY_SAMPLE_SLUGS])
+            elided = " …" if len(missing) > _INTEGRITY_SAMPLE_SLUGS else ""
+            raise StateIntegrityError(
+                f"corpus state {self._data.ref.sha} is inconsistent: its "
+                f"manifest lists current documents whose committed files "
+                f"are not in the commit's tree: {shown}{elided} — "
+                f"repository damage, not historical absence",
+            )
         return bodies
 
 

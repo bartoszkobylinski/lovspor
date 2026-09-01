@@ -22,7 +22,7 @@ from lovspor.mcp import (
     _parse_recorded_at,
     build_server,
 )
-from lovspor.snapshot import HistoryBoundaryError
+from lovspor.snapshot import HistoryBoundaryError, StateIntegrityError
 
 # ---------- fixture: a two-state corpus ----------
 
@@ -371,7 +371,10 @@ def test_recorded_at_is_never_used_as_the_evaluation_date(
     assert calls == []
 
     fn(slug="grunnloven-grl", section_id="1-1")
-    assert calls == [datetime.now(UTC).date()]
+    # The live path evaluates at the Norwegian calendar day, exactly as
+    # before this change — assert against the helper itself, not against
+    # UTC, which diverges from Europe/Oslo around midnight.
+    assert calls == [mcp_module.evaluation_date_today()]
 
 
 def test_search_body_tool_shape_is_conditional_on_recorded_at(
@@ -402,3 +405,121 @@ def test_live_tool_responses_carry_no_state_evidence_fields(
     assert "corpus_commit" not in result
     assert "recorded_at" not in result
     assert "temporal_notice" in result
+
+
+# ---------- rename lineage (ADR-0011 point 5, second half) ----------
+
+
+@pytest.fixture
+def corpus_with_rename(corpus: tuple[Path, str, str]) -> tuple[Path, str, str, str]:
+    """State 3 (2026-05-20): testloven renamed to testloven-tl (git mv +
+    manifest slug change) — the real rename fixture the ADR requires."""
+    repo, sha1, sha2 = corpus
+    _run_git(repo, "mv", "lover/testloven.md", "lover/testloven-tl.md")
+    (repo / "manifest.json").write_text(
+        _manifest(
+            {
+                "doc-a": _record("grunnloven-grl", "hash-a2"),
+                "doc-b": {**_record("testloven-tl", "hash-b3")},
+                "doc-c": _record("nyloven", "hash-c1"),
+            },
+        ),
+    )
+    sha3 = _commit_all(repo, "sync 3: rename", "2026-05-20T12:00:00Z")
+    return repo, sha1, sha2, sha3
+
+
+def test_current_slug_maps_through_lineage_to_the_state_slug(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    repo, sha1, _, _ = corpus_with_rename
+
+    result = CorpusReader(repo).at_state("2026-05-05").get_section("testloven-tl", "9-9")
+
+    assert result["slug"] == "testloven"
+    assert result["mapped_from_slug"] == "testloven-tl"
+    assert "Testloven v1 tekst" in result["body"]
+    assert result["corpus_commit"] == sha1
+    assert result["xml_hash"] == "hash-b1"
+
+
+def test_mapping_is_reported_only_when_applied(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    repo, _, _, _ = corpus_with_rename
+
+    result = CorpusReader(repo).at_state("2026-05-05").get_section("testloven", "9-9")
+
+    assert "mapped_from_slug" not in result
+
+
+def test_verify_quote_resolves_through_the_same_lineage(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    repo, _, _, _ = corpus_with_rename
+
+    verdict = (
+        CorpusReader(repo)
+        .at_state("2026-05-05")
+        .verify_quote("testloven-tl", "9-9", "Testloven v1 tekst")
+    )
+
+    assert verdict["verified"] is True
+    assert verdict["xml_hash"] == "hash-b1"
+
+
+def test_unmappable_current_slug_stays_a_historical_negative(
+    corpus_with_rename: tuple[Path, str, str, str],
+) -> None:
+    # nyloven exists now but its lineage does not reach 2026-05-05: the
+    # answer is the in-state negative, never a fallback to today's docs.
+    repo, _, _, _ = corpus_with_rename
+
+    with pytest.raises(CorpusNotFoundError, match="corpus state at 2026-05-05"):
+        CorpusReader(repo).at_state("2026-05-05").get_section("nyloven", "1")
+
+
+# ---------- state integrity (ADR-0011 point 6 outcome 2) ----------
+
+
+@pytest.fixture
+def inconsistent_corpus(tmp_path: Path) -> Path:
+    """A committed state whose manifest lists a current document with no
+    committed file behind it."""
+    repo = tmp_path / "corpus"
+    (repo / "lover").mkdir(parents=True)
+    _run_git(repo, "init", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "config", "commit.gpgsign", "false")
+    (repo / "lover" / "ekteloven.md").write_text(
+        _doc("Ekteloven", "## Kapittel 1.\n\n### § 1. Regel\n\nEkte tekst.\n"),
+    )
+    (repo / "manifest.json").write_text(
+        _manifest(
+            {
+                "doc-real": _record("ekteloven", "hash-e1"),
+                "doc-ghost": _record("spokelsesloven", "hash-g1"),
+            },
+        ),
+    )
+    _commit_all(repo, "sync with ghost", "2026-05-01T12:00:00Z")
+    return repo
+
+
+def test_manifest_record_without_committed_body_is_an_integrity_error(
+    inconsistent_corpus: Path,
+) -> None:
+    state = CorpusReader(inconsistent_corpus).at_state("2026-05-05")
+
+    with pytest.raises(StateIntegrityError, match="not historical absence"):
+        state.get_section("spokelsesloven", "1")
+
+
+def test_historical_search_refuses_an_inconsistent_state(
+    inconsistent_corpus: Path,
+) -> None:
+    state = CorpusReader(inconsistent_corpus).at_state("2026-05-05")
+
+    with pytest.raises(StateIntegrityError, match="spokelsesloven"):
+        state.search_body("tekst")
