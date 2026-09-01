@@ -854,6 +854,9 @@ def test_unknown_slug_without_near_miss_has_no_hint_filler(aux_corpus: Path) -> 
     message = str(excinfo.value)
     assert "did you mean" not in message
     assert "no law with slug 'zzz-qqq-www' in the corpus state at " in message
+    # With no suggestions the hint is EMPTY — the recovery sentence follows
+    # the corpus_commit directly, with no filler between them.
+    assert "); the document may have entered the corpus later" in message
 
 
 def test_historical_occurrence_selects_the_duplicate_section(aux_corpus: Path) -> None:

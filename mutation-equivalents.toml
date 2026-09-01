@@ -559,3 +559,23 @@ identical list. The format string and this parser live three lines apart in
 the same function, so the invariant cannot drift apart from the code it
 covers.
 """
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "get_section"
+registered = "2026-09-01, PR #222, from run 33539874826"
+mutation = """
+-    self._remember_section_ids(record.slug or "", set(by_id), epoch)
++    self._remember_section_ids(record.slug or "", None, epoch)
+"""
+justification = """
+Seeding the section-id cache with None is a behavioural no-op. The cache's
+only reader, `_section_ids_for`, guards its hit path with `is not None`, so a
+None entry is indistinguishable from an absent entry: every later lookup falls
+through to the same body parse the seed would have precomputed and yields the
+identical id set. `_remember_section_ids` writes via `setdefault`, so the None
+squats in the dict and later writes cannot replace it — but that too only
+means the recompute happens on every call. The mutant costs repeated parsing,
+never a different answer, and no observable contract distinguishes a cold
+cache from a warm one.
+"""
