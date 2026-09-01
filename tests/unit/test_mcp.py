@@ -97,6 +97,47 @@ _AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
 _PUBLIC_URL = "https://lovspor.bartoszkobylinski.com/mcp"
 
 
+def test_reader_initializes_mutable_caches_and_epoch(tmp_path: Path) -> None:
+    _seed_corpus(tmp_path, {})
+    reader = CorpusReader(tmp_path)
+
+    assert reader._excluded_bins == {}
+    assert reader._doc_bodies == {}
+    assert reader._section_ids_cache == {}
+    assert reader._epoch == 0
+
+
+def test_snapshot_section_index_reports_complete_and_suspicious_headings() -> None:
+    complete = mcp_module._section_index_from_body("### § 1. Regel\n\nTekst.\n")
+    incomplete = mcp_module._section_index_from_body(
+        "### § 1. Regel\n\nTekst.\n### § ??? Uleselig\n"
+    )
+
+    assert complete == SectionIndex(ids={"1"}, complete=True)
+    assert "1" in incomplete.ids
+    assert incomplete.complete is False
+
+
+def test_slug_suggestions_pin_cutoff_and_three_result_cap() -> None:
+    slugs = ["skatteloven", "skattelovena", "skattelovenb", "skattelovenc", "helt-ulik"]
+
+    assert mcp_module._slug_suggestions_from(slugs, "SKATTELOVENX") == [
+        "skatteloven",
+        "skattelovenc",
+        "skattelovenb",
+    ]
+    assert mcp_module._slug_suggestions_from(["abcdef"], "abcxyz") == []
+
+
+def test_citation_hint_includes_boundary_length_token_and_caps_suggestions() -> None:
+    boundary = "x" * mcp_module._MIN_SUGGESTION_TOKEN_CHARS
+    slugs = [boundary + suffix for suffix in ("a", "b", "c", "d")]
+
+    assert mcp_module._citation_hint_from(slugs, boundary) == (
+        f"; did you mean {slugs[3]}, {slugs[2]}, {slugs[1]}? Use search_laws for canonical slugs"
+    )
+
+
 class _FlushSpy(StringIO):
     """In-memory stderr that records the observable ``print(..., flush=True)`` call."""
 

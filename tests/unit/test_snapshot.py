@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import lovspor.snapshot as snapshot_module
 from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
@@ -77,6 +78,82 @@ def test_resolve_on_shallow_clone_raises_shallow_not_boundary(
 
     with pytest.raises(ShallowHistoryError):
         resolve_corpus_state(tmp_path, date(2026, 5, 1))
+
+
+def test_resolve_passes_repository_and_full_boundary_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    entries: list[CorpusStateRef] = []
+    monkeypatch.setattr(snapshot_module, "_iter_state_log", lambda path: entries)
+    seen: list[tuple[Path, datetime, list[CorpusStateRef]]] = []
+
+    def boundary(path: Path, cutoff: datetime, refs: list[CorpusStateRef]) -> Exception:
+        seen.append((path, cutoff, refs))
+        return RuntimeError("boundary")
+
+    monkeypatch.setattr(snapshot_module, "_pre_history_error", boundary)
+    with pytest.raises(RuntimeError, match="boundary"):
+        resolve_corpus_state(tmp_path, date(2026, 5, 1))
+    assert seen == [
+        (tmp_path, datetime.combine(date(2026, 5, 1), time.max).replace(tzinfo=UTC), entries),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("shallow", "entries", "expected"),
+    [
+        (True, [], "no locally available history"),
+        (
+            True,
+            _refs(("old", datetime(2026, 4, 22, tzinfo=UTC))),
+            "locally available history begins 2026-04-22",
+        ),
+        (False, [], "corpus history begins unknown"),
+    ],
+)
+def test_pre_history_error_preserves_actionable_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    shallow: bool,
+    entries: list[CorpusStateRef],
+    expected: str,
+) -> None:
+    seen: list[Path] = []
+    monkeypatch.setattr(
+        snapshot_module,
+        "_is_shallow_repository",
+        lambda path: seen.append(path) or shallow,
+    )
+    error = snapshot_module._pre_history_error(
+        tmp_path, datetime(2026, 4, 21, 23, 59, tzinfo=UTC), entries
+    )
+    assert seen == [tmp_path]
+    assert "2026-04-21" in str(error)
+    assert expected in str(error)
+    if shallow:
+        assert "git fetch --unshallow" in str(error)
+
+
+def test_iter_state_log_checks_git_and_skips_malformed_block(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    output = "__COMMIT__\nmalformed\n__COMMIT__\nsha-2\n2026-05-02T12:00:00+00:00\n"
+    seen: dict[str, object] = {}
+
+    def run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(args[0], 0, stdout=output)
+
+    monkeypatch.setattr(snapshot_module.subprocess, "run", run)
+    assert snapshot_module._iter_state_log(tmp_path) == [
+        CorpusStateRef("sha-2", datetime(2026, 5, 2, 12, tzinfo=UTC))
+    ]
+    assert seen["cwd"] == tmp_path
+    assert seen["capture_output"] is True
+    assert seen["text"] is True
+    assert seen["check"] is True
 
 
 # ---------- real-git fixture ----------
