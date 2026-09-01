@@ -138,6 +138,70 @@ def test_citation_hint_includes_boundary_length_token_and_caps_suggestions() -> 
     )
 
 
+def test_citation_verdict_preserves_range_diagnostic_and_longest_slug() -> None:
+    range_verdict = mcp_module._citation_verdict("skatteloven §§ 1-2", {"skatteloven"}, None)
+    assert range_verdict["reason"] == (
+        "range citations (§§) are not supported; cite a single § section instead"
+    )
+
+    calls: list[tuple[str, str]] = []
+
+    def resolve(slug: str, section_id: str) -> tuple[str, dict[str, str], None]:
+        calls.append((slug, section_id))
+        return section_id, {"heading": "§ 1"}, None
+
+    verdict = mcp_module._citation_verdict("mini-lov § 1", {"lov", "mini-lov"}, resolve)
+    assert calls == [("mini-lov", "1")]
+    assert verdict["slug"] == "mini-lov"
+
+
+def test_resolve_cited_section_preserves_both_failure_reasons() -> None:
+    first = CorpusNotFoundError("original lookup failed")
+
+    def missing(_slug: str, section_id: str) -> dict[str, object]:
+        if section_id.endswith(" i"):
+            raise first
+        raise CorpusNotFoundError("stripped lookup failed")
+
+    resolved, section, reason = mcp_module._resolve_cited_section_with(missing, "testloven", "1 i")
+    assert (resolved, section, reason) == ("1", None, "original lookup failed")
+
+    def ambiguous(_slug: str, section_id: str) -> dict[str, object]:
+        if section_id.endswith(" i"):
+            raise first
+        raise CorpusAmbiguousSectionError("stripped lookup ambiguous")
+
+    resolved, section, reason = mcp_module._resolve_cited_section_with(
+        ambiguous, "testloven", "1 i"
+    )
+    assert (resolved, section, reason) == ("1", None, "stripped lookup ambiguous")
+
+
+def test_iter_search_docs_requires_current_owned_slug_and_body() -> None:
+    current = _record(slug="current", title="Current")
+    removed = _record(slug="removed", title="Removed", status="removed")
+    duplicate = _record(slug="current", title="Duplicate")
+    documents = {"owner": current, "removed": removed, "duplicate": duplicate}
+    slug_index = {"current": ("owner", current), "removed": ("removed", removed)}
+    looked_up: list[str] = []
+
+    docs = list(
+        mcp_module._iter_search_docs(
+            documents,
+            slug_index,
+            lambda slug: looked_up.append(slug) or ("body" if slug == "current" else None),
+        )
+    )
+
+    assert docs == [("owner", current, "body")]
+    assert looked_up == ["current"]
+
+
+def test_parse_recorded_at_accepts_today_in_utc() -> None:
+    today = datetime.now(UTC).date()
+    assert mcp_module._parse_recorded_at(today.isoformat()) == today
+
+
 class _FlushSpy(StringIO):
     """In-memory stderr that records the observable ``print(..., flush=True)`` call."""
 
