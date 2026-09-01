@@ -525,6 +525,37 @@ def test_historical_search_refuses_an_inconsistent_state(
         state.search_body("tekst")
 
 
+def test_historical_search_never_follows_manifest_referenced_symlink(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Archive members are read only when they are regular files.
+
+    A committed symlink at a manifest path must be treated as corrupt state,
+    not followed to another archive member (or to a path outside the tree).
+    """
+    repo, _, _ = corpus
+    body_path = repo / "lover" / "testloven.md"
+    body_path.unlink()
+    body_path.symlink_to("grunnloven-grl.md")
+    (repo / "manifest.json").touch()
+    _commit_all(repo, "sync with unsafe body link", "2026-05-20T12:00:00Z")
+
+    with pytest.raises(StateIntegrityError, match="testloven"):
+        CorpusReader(repo).at_state("2026-05-20").search_body("tekst")
+
+
+def test_historical_search_fails_loudly_on_malformed_utf8(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _, _ = corpus
+    (repo / "lover" / "testloven.md").write_bytes(b"---\n---\n\n# Test\n\n\xff\n")
+    (repo / "manifest.json").touch()
+    _commit_all(repo, "sync with malformed utf8", "2026-05-20T12:00:00Z")
+
+    with pytest.raises(UnicodeDecodeError):
+        CorpusReader(repo).at_state("2026-05-20").search_body("tekst")
+
+
 @pytest.mark.parametrize(
     "value",
     [
