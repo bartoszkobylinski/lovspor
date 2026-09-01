@@ -156,6 +156,8 @@ ignore = [
     "PLR2004", # magic numbers fine in tests
     "S603",   # subprocess invocation fine in tests (we set up real git repos)
     "S607",   # partial path "git" fine in tests
+    "RUF043", # match= literals in tests are substring-intent; no autofix exists,
+              # and the codex-tests lint gate must not die on it (issue #224)
 ]
 
 [tool.ruff.format]
