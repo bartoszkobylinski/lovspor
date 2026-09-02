@@ -17,6 +17,8 @@ from lovspor.sync.git_commit import (
     commit,
     has_staged_changes,
     has_uncommitted_changes,
+    head_commit,
+    head_commit_or_none,
 )
 
 
@@ -266,6 +268,27 @@ def test_commit_message_with_multiline_body_preserved(repo: Path) -> None:
         text=True,
     )
     assert "Longer body explaining" in log.stdout
+
+
+def test_head_commit_or_none_returns_none_for_unborn_head(repo: Path) -> None:
+    assert head_commit_or_none(repo) is None
+
+
+def test_head_commit_helpers_return_full_sha_after_commit(repo: Path) -> None:
+    (repo / "a.txt").write_text("content\n", encoding="utf-8")
+    add(repo, ["a.txt"])
+    commit(repo, "initial")
+    expected = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    assert len(expected) == 40
+    assert head_commit(repo) == expected
+    assert head_commit_or_none(repo) == expected
 
 
 def test_run_error_message_preserves_command_cwd_code_and_stripped_stderr(

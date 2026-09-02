@@ -1586,6 +1586,7 @@ def test_run_sync_aborts_on_mass_removal(
         pytest.fail("mass-removal sync must not reach commit")
 
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", fail_commit)
+    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", fail_commit)
 
     with pytest.raises(MassRemovalError, match="30/30"):
         run_sync(settings)
@@ -1618,6 +1619,7 @@ def test_run_sync_noops_without_rewriting_manifest_or_committing(
         pytest.fail("no-op sync must not commit")
 
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", fail_commit)
+    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", fail_commit)
 
     report = run_sync(settings)
 
@@ -1651,6 +1653,7 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
         "lov-new": _upstream("lov-new", xml_hash="f" * 64, slug="new"),
     }
     captured: dict[str, object] = {}
+    attested: dict[str, object] = {}
     deleted: list[Path] = []
     retrieved_at_by_doc: dict[str, datetime | None] = {}
 
@@ -1676,6 +1679,18 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
     monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
     monkeypatch.setattr(orchestrator_module, "delete_document", deleted.append)
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+    heads = iter(["a" * 40, "b" * 40])
+    monkeypatch.setattr(orchestrator_module, "head_commit_or_none", lambda _repo: next(heads))
+
+    def capture_attestation(
+        repo: Path,
+        attestation_upstream: dict[str, _UpstreamDoc],
+        records: dict[str, ManifestRecord],
+        now: datetime,
+    ) -> None:
+        attested.update(repo=repo, upstream=attestation_upstream, records=records, now=now)
+
+    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", capture_attestation)
 
     report = run_sync(settings)
 
@@ -1689,6 +1704,10 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
     assert captured["repo"] == settings.lovverk_repo_path
     assert captured["is_sprint4_migration"] is False
     assert captured["force_bulk_commit"] is False
+    assert attested["repo"] == settings.lovverk_repo_path
+    assert attested["upstream"] == upstream
+    assert attested["records"] == captured["new_records"]
+    assert isinstance(attested["now"], datetime)
 
     actions = captured["actions"]
     assert isinstance(actions, list)
