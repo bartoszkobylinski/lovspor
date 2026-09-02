@@ -134,6 +134,22 @@ jobs:
       - name: Clone lovverk corpus
         run: git clone git@github.com:bartoszkobylinski/lovverk.git "$LOVVERK_PATH"
 
+      # A plain clone omits refs/notes/*. Without this fetch the first
+      # attestation write on a fresh runner would start a SECOND notes
+      # history and the push below would be rejected non-fast-forward —
+      # and any reader on such a clone would misread every remote
+      # attestation as a local absence (PR #227 review, blocker 1).
+      # ls-remote separates "ref not there yet" (bootstrap, fine) from a
+      # network failure (fails the job).
+      - name: Fetch attestation notes (plain clone omits notes refs)
+        working-directory: ${{ env.LOVVERK_PATH }}
+        run: |
+          if git ls-remote --exit-code origin refs/notes/temporal-attestations >/dev/null; then
+            git fetch origin '+refs/notes/temporal-attestations:refs/notes/temporal-attestations'
+          else
+            echo "No attestation ref on the remote yet (bootstrap)."
+          fi
+
       - name: Configure git author for sync commits
         working-directory: ${{ env.LOVVERK_PATH }}
         run: |

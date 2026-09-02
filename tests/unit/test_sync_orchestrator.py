@@ -1619,9 +1619,22 @@ def test_run_sync_noops_without_rewriting_manifest_or_committing(
         pytest.fail("no-op sync must not commit")
 
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", fail_commit)
-    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", fail_commit)
+    # PR #227 review, blocker 2: a no-op sync still ENSURES the current
+    # head is attested under the current parser version (a parser bump
+    # must earn a fresh attestation on an unchanged corpus). The
+    # codex-authored pin that a no-op run never attests froze the
+    # pre-review behaviour and is corrected here: no-op must not COMMIT,
+    # but it must still run the ensure step.
+    ensure_calls: list[object] = []
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_ensure_head_attested",
+        lambda *args: ensure_calls.append(args),
+    )
 
     report = run_sync(settings)
+
+    assert len(ensure_calls) == 1
 
     assert report == SyncReport(
         new_count=0,
@@ -1681,6 +1694,10 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
     heads = iter(["a" * 40, "b" * 40])
     monkeypatch.setattr(orchestrator_module, "head_commit_or_none", lambda _repo: next(heads))
+    # The presence check runs against the real registry; with a faked
+    # HEAD it must simply report "absent" so the ensure step proceeds to
+    # the captured attestation call below.
+    monkeypatch.setattr(orchestrator_module, "read_attestation", lambda *_args: None)
 
     def capture_attestation(
         repo: Path,

@@ -68,6 +68,51 @@ class TemporalAttestation(BaseModel):
     attested_at: datetime
 
 
+def fetch_attestations(repo: Path, remote: str = "origin") -> None:
+    """Fetch the attestation notes ref from ``remote`` into this clone.
+
+    A plain ``git clone`` does not fetch ``refs/notes/*``, so a fresh
+    clone would read every remote attestation as a false local absence —
+    and a writer starting from such a clone would create a second notes
+    history and fail the push non-fast-forward. Every reader and writer
+    calls this (or the equivalent fetch) before touching the registry.
+
+    A remote that has no attestation ref yet (bootstrap) is fine; any
+    other fetch failure is a channel failure and raises.
+    """
+    present = subprocess.run(  # noqa: S603
+        ["git", "ls-remote", "--exit-code", remote, ATTESTATION_NOTES_REF],  # noqa: S607
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if present.returncode == 2:  # noqa: PLR2004 — git: ref not found on remote
+        return
+    if present.returncode != 0:
+        raise AttestationError(
+            f"cannot reach {remote} to check the attestation ref: "
+            f"{present.stderr.strip()}",
+        )
+    result = subprocess.run(  # noqa: S603
+        [  # noqa: S607
+            "git",
+            "fetch",
+            remote,
+            f"+{ATTESTATION_NOTES_REF}:{ATTESTATION_NOTES_REF}",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AttestationError(
+            f"failed to fetch attestation notes from {remote}: "
+            f"{result.stderr.strip()}",
+        )
+
+
 class ReconciliationTotals(NamedTuple):
     """Corpus-wide evidence a passing gate records."""
 
@@ -174,7 +219,7 @@ def _read_entries(repo: Path, corpus_commit: str) -> list[TemporalAttestation]:
     failure and raises.
     """
     probe = subprocess.run(  # noqa: S603
-        ["git", "cat-file", "-e", f"{corpus_commit}^{{commit}}"],  # noqa: S607
+        ["git", "rev-parse", "--verify", f"{corpus_commit}^{{commit}}"],  # noqa: S607
         cwd=repo,
         capture_output=True,
         text=True,
@@ -189,6 +234,7 @@ def _read_entries(repo: Path, corpus_commit: str) -> list[TemporalAttestation]:
             f"attestation registry unreadable: {corpus_commit} is not a "
             f"commit this repository can resolve",
         )
+    resolved = probe.stdout.strip()
     result = subprocess.run(  # noqa: S603
         ["git", "notes", f"--ref={ATTESTATION_NOTES_REF}", "show", corpus_commit],  # noqa: S607
         cwd=repo,
@@ -205,9 +251,19 @@ def _read_entries(repo: Path, corpus_commit: str) -> list[TemporalAttestation]:
         )
     try:
         raw = json.loads(result.stdout)
-        return [TemporalAttestation.model_validate(item) for item in raw]
+        entries = [TemporalAttestation.model_validate(item) for item in raw]
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
         raise AttestationError(
             f"attestation note on {corpus_commit} is unparseable — a broken "
             f"evidence channel, not an absent attestation: {exc}",
         ) from exc
+    for entry in entries:
+        if entry.corpus_commit != resolved:
+            # A syntactically valid note anchored to the wrong commit is
+            # semantic corruption, not evidence: the entry claims a state
+            # it is not attached to.
+            raise AttestationError(
+                f"attestation note on {resolved} carries an entry for "
+                f"{entry.corpus_commit} — the evidence channel is corrupt",
+            )
+    return entries

@@ -11,14 +11,20 @@ from pathlib import Path
 
 import pytest
 
+import lovspor.sync.orchestrator as orchestrator_module
 from lovspor.errors import TemporalDerivationError
 from lovspor.storage.manifest import ManifestRecord
-from lovspor.sync.orchestrator import _attest_temporal_conformance, _UpstreamDoc
+from lovspor.sync.orchestrator import (
+    _attest_temporal_conformance,
+    _ensure_head_attested,
+    _UpstreamDoc,
+)
 from lovspor.temporal import TEMPORAL_PARSER_VERSION
 from lovspor.temporal_attestation import (
     ATTESTATION_NOTES_REF,
     AttestationError,
     TemporalAttestation,
+    fetch_attestations,
     read_attestation,
     reconcile_corpus,
     write_attestation,
@@ -211,3 +217,149 @@ def test_attest_hook_records_head_and_refuses_missing_xml(repo: tuple[Path, str]
 
     with pytest.raises(AttestationError, match="no upstream XML"):
         _attest_temporal_conformance(path, {}, {"doc-1": record}, now)
+
+
+# ---------- review round 1 (PR #227): trust-boundary fixes ----------
+
+
+def test_note_anchored_to_a_different_commit_is_corrupt(repo: tuple[Path, str]) -> None:
+    # MAJOR: a syntactically valid entry claiming another commit is
+    # semantic corruption, never evidence.
+    path, sha = repo
+    foreign = _attestation("f" * 40).model_dump(mode="json")
+    _run_git(
+        path,
+        "notes",
+        f"--ref={ATTESTATION_NOTES_REF}",
+        "add",
+        "-f",
+        "-m",
+        f"[{__import__('json').dumps(foreign)}]",
+        sha,
+    )
+
+    with pytest.raises(AttestationError, match="corrupt"):
+        read_attestation(path, sha, 1)
+
+
+def test_fetch_attestations_brings_remote_notes_into_a_plain_clone(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    # BLOCKER 1: a plain clone omits refs/notes/*; without the fetch a
+    # remote attestation reads as a false local absence, and a write
+    # from such a clone would fork the notes history.
+    origin_path, sha = repo
+    write_attestation(origin_path, _attestation(sha))
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", str(origin_path), str(clone)],
+        check=True,
+        capture_output=True,
+    )
+    assert read_attestation(clone, sha, 1) is None  # the trap the fetch closes
+
+    fetch_attestations(clone)
+
+    assert read_attestation(clone, sha, 1) is not None
+    # And a writer starting from the fetched ref appends fast-forward:
+    (clone / "b.md").write_text("y\n")
+    _run_git(clone, "add", "-A")
+    _run_git(clone, "commit", "-m", "sync 2")
+    sha2 = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    write_attestation(clone, _attestation(sha2))
+    _run_git(clone, "push", "origin", f"{ATTESTATION_NOTES_REF}:{ATTESTATION_NOTES_REF}")
+
+
+def test_fetch_attestations_tolerates_a_remote_without_the_ref(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    origin_path, _ = repo
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", str(origin_path), str(clone)],
+        check=True,
+        capture_output=True,
+    )
+
+    fetch_attestations(clone)  # bootstrap: no ref yet, no error
+
+
+def test_attest_hook_refuses_a_carried_forward_document(repo: tuple[Path, str]) -> None:
+    # BLOCKER 3: a failed render keeps the OLD Markdown while upstream
+    # serves NEW XML — a coincidental count match must not attest.
+    path, _ = repo
+    (path / "doc.md").write_text(_NOTE_MD, encoding="utf-8")
+    record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="old-hash",
+        markdown_path="doc.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 9, 2, tzinfo=UTC),
+        status="current",
+        slug="testloven",
+    )
+    upstream_doc = _UpstreamDoc(
+        doc_id="doc-1",
+        source_dataset="gjeldende-lover",
+        xml_bytes=_xml_with_notes(1),
+        xml_hash="new-hash",
+        slug="testloven",
+        title="Testloven",
+        eu_basis=(),
+    )
+
+    with pytest.raises(AttestationError, match="carried-forward"):
+        _attest_temporal_conformance(
+            path,
+            {"doc-1": upstream_doc},
+            {"doc-1": record},
+            datetime(2026, 9, 2, 4, 0, tzinfo=UTC),
+        )
+
+
+def test_ensure_head_attested_is_presence_based(repo: tuple[Path, str]) -> None:
+    # BLOCKER 2: the condition is a missing (HEAD, parser_version)
+    # attestation — so a parser bump re-attests an unchanged head, and a
+    # second run under the same version is a no-op.
+    path, sha = repo
+    (path / "doc.md").write_text(_NOTE_MD, encoding="utf-8")
+    record = ManifestRecord(
+        doc_type="lov",
+        xml_hash="h1",
+        markdown_path="doc.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 9, 2, tzinfo=UTC),
+        status="current",
+        slug="testloven",
+    )
+    upstream_doc = _UpstreamDoc(
+        doc_id="doc-1",
+        source_dataset="gjeldende-lover",
+        xml_bytes=_xml_with_notes(1),
+        xml_hash="h1",
+        slug="testloven",
+        title="Testloven",
+        eu_basis=(),
+    )
+    now = datetime(2026, 9, 2, 4, 0, tzinfo=UTC)
+    upstream = {"doc-1": upstream_doc}
+    records = {"doc-1": record}
+
+    _ensure_head_attested(path, upstream, records, now)
+    assert read_attestation(path, sha, TEMPORAL_PARSER_VERSION) is not None
+
+    _ensure_head_attested(path, upstream, records, now)  # idempotent
+
+    bumped = TEMPORAL_PARSER_VERSION + 1
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(orchestrator_module, "TEMPORAL_PARSER_VERSION", bumped)
+        _ensure_head_attested(path, upstream, records, now)
+    assert read_attestation(path, sha, bumped) is not None
