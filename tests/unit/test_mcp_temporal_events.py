@@ -504,3 +504,31 @@ def test_malformed_live_head_metadata_is_a_typed_evidence_failure(
 
     with pytest.raises(AttestationError, match="identity and knowledge horizon are unreadable"):
         _tool_fn(repo)(slug="testloven")
+
+
+def test_live_head_git_failure_is_a_typed_evidence_failure(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resolving HEAD must ask subprocess to raise on a non-zero git exit."""
+    repo, _sha1, _sha2 = corpus
+
+    def failed_git(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        assert kwargs["check"] is True
+        raise mcp_module.subprocess.CalledProcessError(128, args[0])
+
+    monkeypatch.setattr(mcp_module.subprocess, "run", failed_git)
+
+    with pytest.raises(AttestationError, match="identity and knowledge horizon are unreadable"):
+        _tool_fn(repo)(slug="testloven")
+
+
+def test_live_unknown_slug_names_the_current_head(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _sha1, sha2 = corpus
+
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        _tool_fn(repo)(slug="finnesikke")
+
+    assert f"at the current head (corpus_commit {sha2})" in str(exc_info.value)

@@ -475,6 +475,26 @@ def test_build_embedder_flushes_the_missing_key_warning(
     assert stderr.flush_calls == 1
 
 
+def test_build_embedder_reports_and_flushes_invalid_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configuration errors use the same immediate operator warning contract."""
+    stderr = _FlushSpy()
+
+    def invalid_config():  # type: ignore[no-untyped-def]
+        raise ConfigError("bad provider")
+
+    monkeypatch.setattr(mcp_module.EmbeddingConfig, "from_env", invalid_config)
+    monkeypatch.setattr(mcp_module.sys, "stderr", stderr)
+
+    assert _build_embedder() is None
+    assert stderr.getvalue() == (
+        "lovspor mcp: embedding provider not configured: bad provider "
+        "semantic_search will be disabled; the other sixteen tools work normally.\n"
+    )
+    assert stderr.flush_calls == 1
+
+
 def test_build_embedder_uses_tight_interactive_timeout_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -492,6 +512,27 @@ def test_build_embedder_uses_tight_interactive_timeout_budget(
     # Strictly tighter than the batch defaults it previously inherited.
     assert embedder._timeout_seconds < 180.0
     assert embedder._max_retries < 3
+
+
+def test_at_head_state_installs_callable_live_namespace_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinned HEAD has no lineage fallback and reads the live slug namespace."""
+    reader = object.__new__(CorpusReader)
+    ref = mcp_module.CorpusStateRef(
+        sha="a" * 40,
+        commit_date=datetime(2026, 9, 2, tzinfo=UTC),
+    )
+    data = object()
+    monkeypatch.setattr(reader, "_head_ref", lambda: ref)
+    monkeypatch.setattr(reader, "_state_data", lambda actual: data)
+    monkeypatch.setattr(reader, "_load_slug_index", lambda: ["a", "b"])
+
+    state = reader.at_head_state()
+
+    assert state._data is data
+    assert state._lineage_path("anything") is None
+    assert state._current_slugs() == ["a", "b"]
 
 
 def _hammer_cold_cache(

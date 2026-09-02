@@ -819,10 +819,47 @@ def test_refspec_transport_rejects_missing_or_one_sided_registry_coverage(
     assert not refspec_transports_registry(refspec)
 
 
+def test_refspec_transport_accepts_only_a_trailing_glob_prefix() -> None:
+    """Removing two characters from ``refs/notes/*`` must not still cover the ref."""
+    assert refspec_transports_registry("+refs/notes/*:refs/notes/*")
+    assert not refspec_transports_registry("+refs/notes/x*:refs/notes/*")
+
+
+def test_refspec_transport_rejects_an_extra_colon() -> None:
+    assert not refspec_transports_registry(
+        "+refs/notes/*:ignored:refs/notes/*",
+    )
+
+
 def test_a_repo_without_origin_is_its_own_registry_home(repo: tuple[Path, str]) -> None:
     path, _sha = repo
 
     assert registry_synchronised(path)
+
+
+def test_registry_probe_uses_git_option_spellings_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[1:4] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(argv, 0, "origin\n", "")
+        if argv[1:4] == ["config", "--get-all", "remote.origin.fetch"]:
+            return subprocess.CompletedProcess(argv, 1, "", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert registry_synchronised(tmp_path)
+    assert calls[-1][1:] == [
+        "rev-parse",
+        "--quiet",
+        "--verify",
+        ATTESTATION_NOTES_REF,
+    ]
 
 
 def test_a_one_shot_notes_fetch_counts_as_synchronised(

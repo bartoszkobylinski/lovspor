@@ -162,6 +162,17 @@ def test_fetch_corpus_clones_into_existing_empty_dir(tmp_path: Path) -> None:
     assert (dest / "manifest.json").is_file()
 
 
+def test_fetch_corpus_creates_missing_parent_directories(tmp_path: Path) -> None:
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    dest = tmp_path / "nested" / "parents" / "clone"
+
+    result = fetch_corpus(dest, repo_url=_url(origin))
+
+    assert result.path == dest.resolve()
+    assert (dest / "manifest.json").is_file()
+
+
 def test_fetch_corpus_raises_corpusfetcherror_on_bad_remote(tmp_path: Path) -> None:
     dest = tmp_path / "clone"
     with pytest.raises(CorpusFetchError):
@@ -191,6 +202,8 @@ def test_fetch_corpus_uses_git_argv_without_shell(
         ["git", "fetch", "origin"],
     ]
     assert all("shell" not in call["kwargs"] for call in calls)
+    assert calls[0]["kwargs"]["cwd"] == injected_dest.parent
+    assert calls[-1]["kwargs"]["cwd"] == injected_dest
     assert not (tmp_path / "injected").exists()
 
 

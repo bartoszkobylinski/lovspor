@@ -15,6 +15,7 @@ from datetime import date
 
 import pytest
 
+import lovspor.temporal_events as temporal_events_module
 from lovspor.temporal import TEMPORAL_PARSER_VERSION, TemporalDerivationError
 from lovspor.temporal_events import (
     TemporalEventsRequest,
@@ -141,6 +142,24 @@ def test_derivation_failure_serves_no_partial_layer() -> None:
 
     with pytest.raises(TemporalDerivationError):
         _serve(body)
+
+
+def test_served_derivation_forwards_document_identity_and_strict_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The serving wrapper supplies both provenance and fail-closed parsing."""
+    calls: list[tuple[str | None, bool]] = []
+    original = temporal_events_module.derive_temporal_layer
+
+    def spy(body: str, *, document_ref: str | None, strict: bool):  # type: ignore[no-untyped-def]
+        calls.append((document_ref, strict))
+        return original(body, document_ref=document_ref, strict=strict)
+
+    monkeypatch.setattr(temporal_events_module, "derive_temporal_layer", spy)
+
+    derive_served_layer(_doc(DATED_NOTE), "lov/identitet")
+
+    assert calls == [("lov/identitet", True)]
 
 
 # ---------- valid_at evaluation with the knowledge horizon ----------
@@ -274,3 +293,4 @@ def test_problems_are_never_narrowed() -> None:
 
     assert whole["problems"] != []
     assert narrowed["problems"] == whole["problems"]
+    assert all(type(problem["kind"]) is str for problem in narrowed["problems"])
