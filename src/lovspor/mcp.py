@@ -3654,8 +3654,7 @@ def _served_layer_for(data: "_SnapshotData", record: ManifestRecord) -> ServedTe
     the build-time gate's basis (review #230 blocker 3). A derivation
     failure is re-raised on every touch, never cached.
     """
-    slug = record.slug or ""
-    cached = data.temporal_layers.get(slug)
+    cached = data.temporal_layers.get(record.markdown_path)
     if cached is None:
         raw = data.snapshot.read_text(record.markdown_path)
         if raw is None:
@@ -3666,7 +3665,7 @@ def _served_layer_for(data: "_SnapshotData", record: ManifestRecord) -> ServedTe
                 f"historical absence",
             )
         cached = derive_served_layer(raw, record.slug)
-        data.temporal_layers[slug] = cached
+        data.temporal_layers[record.markdown_path] = cached
     return cached
 
 
@@ -3817,6 +3816,18 @@ class _SnapshotState:
         this state could know (ADR-0012 point 5)."""
         return self._data.ref.commit_date.astimezone(UTC).date()
 
+    def _canonical_section_or_raise(self, slug: str, target: str, section_id: str) -> str:
+        """Canonical section id, from a body this state must actually hold.
+
+        ``target`` came out of ``_resolve_slug``, so a missing body is not
+        "empty act" — it is the state's namespace disagreeing with itself,
+        and folding it to an empty inventory would misreport the act as
+        section-less (mutation survivor, PR #230)."""
+        body = self._body_for_slug(target)
+        if body is None:
+            raise self._unknown_slug_error(slug)
+        return _require_section_id(target, body, section_id)
+
     def get_temporal_events(
         self,
         slug: str,
@@ -3841,7 +3852,7 @@ class _SnapshotState:
         canonical = (
             None
             if section_id is None
-            else _require_section_id(target, self._body_for_slug(target) or "", section_id)
+            else self._canonical_section_or_raise(slug, target, section_id)
         )
         request = TemporalEventsRequest(
             horizon=self.knowledge_horizon,

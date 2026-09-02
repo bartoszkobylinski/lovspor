@@ -9,6 +9,7 @@ composition rules live in ``test_temporal_events.py``.
 """
 
 import json
+import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import pytest
 import lovspor.mcp as mcp_module
 import lovspor.temporal_events as temporal_events_module
 from lovspor.errors import TemporalDerivationError
-from lovspor.mcp import CorpusNotFoundError, TemporalScopeError, build_server
+from lovspor.mcp import CorpusNotFoundError, CorpusReader, TemporalScopeError, build_server
 from lovspor.temporal import TEMPORAL_PARSER_VERSION
 from lovspor.temporal_attestation import (
     ATTESTATION_NOTES_REF,
@@ -631,3 +632,36 @@ def test_live_unknown_slug_names_the_current_head(
         _tool_fn(repo)(slug="finnesikke")
 
     assert f"at the current head (corpus_commit {sha2})" in str(exc_info.value)
+
+
+def test_head_ref_takes_the_sha_verbatim_from_the_wire(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The serving-state identity is the wire's first line as-is: the sha
+    keys the attestation lookup, so no character trimming may mangle it
+    (mutation survivor, PR #230)."""
+    repo, _sha1, _sha2 = corpus
+
+    class FakeGitResult:
+        stdout = "XdeadbeefX\n2026-09-02T12:00:00+00:00\n"
+
+    monkeypatch.setattr(mcp_module.subprocess, "run", lambda *args, **kwargs: FakeGitResult())
+    ref = CorpusReader(repo)._head_ref()
+
+    assert ref.sha == "XdeadbeefX"
+    assert ref.commit_date == datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
+
+
+def test_assumption_git_head_wire_is_bare_sha_and_iso_date(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Pins the wire shape the strip(None) equivalent entry argues from
+    (mutation-equivalents.toml, _head_ref): `git log -1 --format=%H%n%aI`
+    emits a bare 40-hex sha and a tz-aware ISO date with no padding."""
+    repo, _sha1, sha2 = corpus
+    ref = CorpusReader(repo)._head_ref()
+
+    assert ref.sha == sha2
+    assert re.fullmatch(r"[0-9a-f]{40}", ref.sha)
+    assert ref.commit_date.tzinfo is not None
