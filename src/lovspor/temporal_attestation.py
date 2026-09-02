@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from lovspor.errors import LovsporError, TemporalDerivationError
 from lovspor.temporal import count_source_amendment_notes, derive_temporal_layer
@@ -61,10 +61,13 @@ class TemporalAttestation(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     corpus_commit: str
-    parser_version: int
-    documents_reconciled: int
-    notes_total: int
-    events_total: int
+    # Impossible values are channel corruption at read time, not data:
+    # versions start at 1 and counts cannot be negative, so a note
+    # carrying them fails validation and surfaces as AttestationError.
+    parser_version: int = Field(ge=1)
+    documents_reconciled: int = Field(ge=0)
+    notes_total: int = Field(ge=0)
+    events_total: int = Field(ge=0)
     attested_at: datetime
 
 

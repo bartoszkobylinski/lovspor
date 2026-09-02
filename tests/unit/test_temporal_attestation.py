@@ -264,6 +264,9 @@ def test_fetch_attestations_brings_remote_notes_into_a_plain_clone(
 
     assert read_attestation(clone, sha, 1) is not None
     # And a writer starting from the fetched ref appends fast-forward:
+    _run_git(clone, "config", "user.email", "test@example.com")
+    _run_git(clone, "config", "user.name", "Test")
+    _run_git(clone, "config", "commit.gpgsign", "false")
     (clone / "b.md").write_text("y\n")
     _run_git(clone, "add", "-A")
     _run_git(clone, "commit", "-m", "sync 2")
@@ -376,4 +379,39 @@ def test_duplicate_parser_version_in_one_note_is_corrupt(repo: tuple[Path, str])
     _run_git(path, "notes", f"--ref={ATTESTATION_NOTES_REF}", "add", "-f", "-m", payload, sha)
 
     with pytest.raises(AttestationError, match="duplicate"):
+        read_attestation(path, sha, 1)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("parser_version", 0),
+        ("documents_reconciled", -1),
+        ("notes_total", -1),
+        ("events_total", -1),
+    ],
+)
+def test_attestation_rejects_impossible_versions_and_counts(
+    repo: tuple[Path, str],
+    field: str,
+    value: int,
+) -> None:
+    # Codex round on 46df456: a note carrying an impossible value is
+    # channel corruption at read time — versions start at 1, counts are
+    # never negative.
+    path, sha = repo
+    entry = _attestation(sha).model_dump(mode="json")
+    entry[field] = value
+    _run_git(
+        path,
+        "notes",
+        f"--ref={ATTESTATION_NOTES_REF}",
+        "add",
+        "-f",
+        "-m",
+        json.dumps([entry]),
+        sha,
+    )
+
+    with pytest.raises(AttestationError):
         read_attestation(path, sha, 1)
