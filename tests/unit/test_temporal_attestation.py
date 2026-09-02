@@ -4,6 +4,7 @@ The evidence channel has exactly three answers — entry / absent /
 broken — and no pair may share a shape; entries are immutable.
 """
 
+import json
 import os
 import subprocess
 from datetime import UTC, datetime
@@ -234,7 +235,7 @@ def test_note_anchored_to_a_different_commit_is_corrupt(repo: tuple[Path, str]) 
         "add",
         "-f",
         "-m",
-        f"[{__import__('json').dumps(foreign)}]",
+        f"[{json.dumps(foreign)}]",
         sha,
     )
 
@@ -363,3 +364,16 @@ def test_ensure_head_attested_is_presence_based(repo: tuple[Path, str]) -> None:
         mp.setattr(orchestrator_module, "TEMPORAL_PARSER_VERSION", bumped)
         _ensure_head_attested(path, upstream, records, now)
     assert read_attestation(path, sha, bumped) is not None
+
+
+def test_duplicate_parser_version_in_one_note_is_corrupt(repo: tuple[Path, str]) -> None:
+    # Review round 2: two entries under one (commit, parser_version) key
+    # cannot both be the immutable record — picking the first would
+    # silently prefer one of them.
+    path, sha = repo
+    entry = _attestation(sha).model_dump(mode="json")
+    payload = json.dumps([entry, entry])
+    _run_git(path, "notes", f"--ref={ATTESTATION_NOTES_REF}", "add", "-f", "-m", payload, sha)
+
+    with pytest.raises(AttestationError, match="duplicate"):
+        read_attestation(path, sha, 1)

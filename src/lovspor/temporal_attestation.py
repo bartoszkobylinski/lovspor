@@ -91,8 +91,7 @@ def fetch_attestations(repo: Path, remote: str = "origin") -> None:
         return
     if present.returncode != 0:
         raise AttestationError(
-            f"cannot reach {remote} to check the attestation ref: "
-            f"{present.stderr.strip()}",
+            f"cannot reach {remote} to check the attestation ref: {present.stderr.strip()}",
         )
     result = subprocess.run(  # noqa: S603
         [  # noqa: S607
@@ -108,8 +107,7 @@ def fetch_attestations(repo: Path, remote: str = "origin") -> None:
     )
     if result.returncode != 0:
         raise AttestationError(
-            f"failed to fetch attestation notes from {remote}: "
-            f"{result.stderr.strip()}",
+            f"failed to fetch attestation notes from {remote}: {result.stderr.strip()}",
         )
 
 
@@ -257,6 +255,7 @@ def _read_entries(repo: Path, corpus_commit: str) -> list[TemporalAttestation]:
             f"attestation note on {corpus_commit} is unparseable — a broken "
             f"evidence channel, not an absent attestation: {exc}",
         ) from exc
+    seen_versions: set[int] = set()
     for entry in entries:
         if entry.corpus_commit != resolved:
             # A syntactically valid note anchored to the wrong commit is
@@ -266,4 +265,15 @@ def _read_entries(repo: Path, corpus_commit: str) -> list[TemporalAttestation]:
                 f"attestation note on {resolved} carries an entry for "
                 f"{entry.corpus_commit} — the evidence channel is corrupt",
             )
+        if entry.parser_version in seen_versions:
+            # Two entries under one (commit, parser_version) key cannot
+            # both be the immutable record — whichever is wrong, the
+            # channel is corrupt and picking the first would silently
+            # prefer one of them.
+            raise AttestationError(
+                f"attestation note on {resolved} carries duplicate entries "
+                f"for parser version {entry.parser_version} — the evidence "
+                f"channel is corrupt",
+            )
+        seen_versions.add(entry.parser_version)
     return entries
