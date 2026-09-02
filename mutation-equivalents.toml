@@ -579,3 +579,66 @@ means the recompute happens on every call. The mutant costs repeated parsing,
 never a different answer, and no observable contract distinguishes a cold
 cache from a warm one.
 """
+
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_read_entries"
+registered = "2026-09-02, PR #227, from run 33619976486"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+`subprocess.run` tests `check` for truth, and None is falsy, so None and
+False select the same no-raise behaviour — the register's ensure_ascii
+precedent, on the same stdlib truthiness contract. Matches both
+`check=False` call sites in this function (the commit probe and the
+notes read); each is followed by an explicit returncode branch, which is
+the behaviour the flag's falsiness preserves.
+"""
+
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "_read_entries"
+registered = "2026-09-02, PR #227, from run 33619976486"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`, so removing the explicit
+`check=False` selects the identical default. The explicit spelling
+exists for the reader (this module's contract is that non-zero exits are
+classified, never raised here); dropping it changes no behaviour.
+Matches both call sites in this function.
+"""
+
+[[equivalent]]
+file = "src/lovspor/sync/git_commit.py"
+symbol = "head_commit_or_none"
+registered = "2026-09-02, PR #227, from run 33619976486"
+mutation = """
+-        check=False,
++        check=None,
+"""
+justification = """
+Same falsy-None equivalence as the _read_entries entries: `subprocess.run`
+tests `check` for truth, and the function classifies the returncode
+itself on the next line.
+"""
+
+[[equivalent]]
+file = "src/lovspor/sync/git_commit.py"
+symbol = "head_commit_or_none"
+registered = "2026-09-02, PR #227, from run 33619976486"
+mutation = """
+-        check=False,
+-    )
++        )
+"""
+justification = """
+Same default-selection equivalence as the _read_entries entry: `check`
+defaults to False, so the explicit spelling and its removal are the same
+call.
+"""

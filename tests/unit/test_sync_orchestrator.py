@@ -1,3 +1,4 @@
+import inspect
 import subprocess
 from collections import Counter
 from dataclasses import FrozenInstanceError
@@ -137,6 +138,13 @@ def test_sync_report_is_immutable() -> None:
 
     with pytest.raises(ValidationError):
         report.new_count = 99
+
+
+def test_run_sync_mass_reembed_requires_explicit_opt_in() -> None:
+    """Scheduled callers must not implicitly authorize a corpus-wide re-embed."""
+    parameter = inspect.signature(run_sync).parameters["allow_mass_reembed"]
+
+    assert parameter.default is False
 
 
 def test_upstream_doc_is_immutable() -> None:
@@ -1586,6 +1594,7 @@ def test_run_sync_aborts_on_mass_removal(
         pytest.fail("mass-removal sync must not reach commit")
 
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", fail_commit)
+    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", fail_commit)
 
     with pytest.raises(MassRemovalError, match="30/30"):
         run_sync(settings)
@@ -1618,8 +1627,27 @@ def test_run_sync_noops_without_rewriting_manifest_or_committing(
         pytest.fail("no-op sync must not commit")
 
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", fail_commit)
+    # PR #227 review, blocker 2: a no-op sync still ENSURES the current
+    # head is attested under the current parser version (a parser bump
+    # must earn a fresh attestation on an unchanged corpus). The
+    # codex-authored pin that a no-op run never attests froze the
+    # pre-review behaviour and is corrected here: no-op must not COMMIT,
+    # but it must still run the ensure step.
+    ensure_calls: list[object] = []
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_ensure_head_attested",
+        lambda *args: ensure_calls.append(args),
+    )
 
     report = run_sync(settings)
+
+    assert len(ensure_calls) == 1
+    ensured_repo, ensured_upstream, ensured_records, ensured_at = ensure_calls[0]
+    assert ensured_repo == settings.lovverk_repo_path
+    assert ensured_upstream == {"lov-same": _upstream("lov-same", xml_hash="a" * 64, slug="same")}
+    assert ensured_records == prior.documents
+    assert ensured_at.tzinfo is UTC
 
     assert report == SyncReport(
         new_count=0,
@@ -1651,6 +1679,7 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
         "lov-new": _upstream("lov-new", xml_hash="f" * 64, slug="new"),
     }
     captured: dict[str, object] = {}
+    attested: dict[str, object] = {}
     deleted: list[Path] = []
     retrieved_at_by_doc: dict[str, datetime | None] = {}
 
@@ -1676,6 +1705,22 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
     monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
     monkeypatch.setattr(orchestrator_module, "delete_document", deleted.append)
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
+    heads = iter(["a" * 40, "b" * 40])
+    monkeypatch.setattr(orchestrator_module, "head_commit_or_none", lambda _repo: next(heads))
+    # The presence check runs against the real registry; with a faked
+    # HEAD it must simply report "absent" so the ensure step proceeds to
+    # the captured attestation call below.
+    monkeypatch.setattr(orchestrator_module, "read_attestation", lambda *_args: None)
+
+    def capture_attestation(
+        repo: Path,
+        attestation_upstream: dict[str, _UpstreamDoc],
+        records: dict[str, ManifestRecord],
+        now: datetime,
+    ) -> None:
+        attested.update(repo=repo, upstream=attestation_upstream, records=records, now=now)
+
+    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", capture_attestation)
 
     report = run_sync(settings)
 
@@ -1689,6 +1734,10 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
     assert captured["repo"] == settings.lovverk_repo_path
     assert captured["is_sprint4_migration"] is False
     assert captured["force_bulk_commit"] is False
+    assert attested["repo"] == settings.lovverk_repo_path
+    assert attested["upstream"] == upstream
+    assert attested["records"] == captured["new_records"]
+    assert isinstance(attested["now"], datetime)
 
     actions = captured["actions"]
     assert isinstance(actions, list)

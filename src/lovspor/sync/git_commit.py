@@ -166,6 +166,27 @@ def commit(repo: Path, message: str) -> None:
     _run(["commit", "-m", message], cwd=repo)
 
 
+def head_commit(repo: Path) -> str:
+    """The full SHA of the repository's current HEAD commit."""
+    result = _run(["rev-parse", "HEAD"], cwd=repo)
+    return result.stdout.strip()
+
+
+def head_commit_or_none(repo: Path) -> str | None:
+    """``head_commit``, or ``None`` on an unborn HEAD (fresh repo,
+    no commits yet) — the state every bootstrap sync starts from."""
+    probe = subprocess.run(
+        ["git", "rev-parse", "--quiet", "--verify", "HEAD"],  # noqa: S607
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        return None
+    return probe.stdout.strip()
+
+
 def has_uncommitted_changes(repo: Path) -> bool:
     """True if the worktree or index is dirty (any modified, staged,
     deleted, or untracked-and-unignored path).

@@ -106,7 +106,20 @@ from lovspor.sync.document_io import (
 )
 from lovspor.sync.git_commit import add as git_add
 from lovspor.sync.git_commit import commit as git_commit_msg
-from lovspor.sync.git_commit import has_staged_changes, has_uncommitted_changes
+from lovspor.sync.git_commit import (
+    has_staged_changes,
+    has_uncommitted_changes,
+    head_commit,
+    head_commit_or_none,
+)
+from lovspor.temporal import TEMPORAL_PARSER_VERSION
+from lovspor.temporal_attestation import (
+    AttestationError,
+    TemporalAttestation,
+    read_attestation,
+    reconcile_corpus,
+    write_attestation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +333,17 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # change: their commit must be the history-exempt migration subject.
     rerender_ids = set(changes.changed) - real_changed
     if not (changes.new or changes.changed or changes.removed or renamed):
+        # A no-op run still ensures the CURRENT head is attested under the
+        # CURRENT parser version: a TEMPORAL_PARSER_VERSION bump must earn
+        # a fresh attestation even on a night the law did not change, and
+        # the bootstrap head is covered the first time this runs
+        # (ADR-0012 point 2a; review of PR #227, blocker 2).
+        _ensure_head_attested(
+            settings.lovverk_repo_path,
+            upstream,
+            prior.documents,
+            datetime.now(UTC),
+        )
         return SyncReport(
             new_count=0,
             changed_count=0,
@@ -605,6 +629,15 @@ def run_sync(  # noqa: PLR0912, PLR0915
             force_bulk_commit=_has_rename_path_overlap(actions),
             rerender_ids=rerender_ids,
         )
+
+    # ADR-0012 point 2a: every state this run leaves at HEAD must carry
+    # its counted-conformance attestation BEFORE the workflow pushes
+    # anything. Presence-based, not head-move-based: a parser version
+    # bump re-attests an unchanged head, and a failing gate aborts here —
+    # the commit exists only locally, so "fails that build and records
+    # nothing" holds literally and no unattested gate-era state is ever
+    # published.
+    _ensure_head_attested(settings.lovverk_repo_path, upstream, new_records, now)
 
     # A byte-identical re-render wrote nothing, so report it as unchanged. Of the
     # docs that DID write, separate real upstream content changes (changed_count)
@@ -2076,4 +2109,76 @@ def _single_message(actions: list[_DocAction]) -> str:
     return (
         f"sync: {counts['add']} new, {counts['update']} changed, "
         f"{counts['rename']} renamed, {counts['remove']} removed"
+    )
+
+
+def _ensure_head_attested(
+    repo: Path,
+    upstream: dict[str, _UpstreamDoc],
+    records: dict[str, ManifestRecord],
+    now: datetime,
+) -> None:
+    """Attest the current HEAD under the current parser version, once.
+
+    No-op when HEAD is unborn (nothing to attest) or when the
+    ``(HEAD, TEMPORAL_PARSER_VERSION)`` attestation already exists —
+    presence, not head movement, is the condition, so a parser bump
+    earns a fresh attestation even when the corpus did not change.
+    """
+    head = head_commit_or_none(repo)
+    if head is None:
+        return
+    if read_attestation(repo, head, TEMPORAL_PARSER_VERSION) is not None:
+        return
+    _attest_temporal_conformance(repo, upstream, records, now)
+
+
+def _attest_temporal_conformance(
+    repo: Path,
+    upstream: dict[str, _UpstreamDoc],
+    records: dict[str, ManifestRecord],
+    now: datetime,
+) -> None:
+    """Prove and record counted conformance for the state just committed.
+
+    Corpus-wide by construction: every current record must have upstream
+    XML in this run (placeholders are tombstoned before change detection,
+    so a current record without XML is a pipeline invariant violation,
+    not a skippable document). Raises before anything is pushed — a
+    failing gate publishes nothing (ADR-0012 point 2a).
+    """
+    docs: list[tuple[str, str, bytes]] = []
+    for doc_id, record in records.items():
+        if record.status != "current" or record.slug is None:
+            continue
+        upstream_doc = upstream.get(doc_id)
+        if upstream_doc is None:
+            raise AttestationError(
+                f"cannot attest corpus-wide: current document {doc_id} has "
+                f"no upstream XML in this run",
+            )
+        if upstream_doc.xml_hash != record.xml_hash:
+            # A failed render carries the OLD Markdown forward while
+            # upstream already serves NEW XML. Counting the old rendering
+            # against the new source can match by coincidence — a false
+            # attestation (review of PR #227, blocker 3). The state
+            # cannot be proven against a source it was not rendered from.
+            raise AttestationError(
+                f"cannot attest corpus-wide: {doc_id} carries xml_hash "
+                f"{record.xml_hash[:12]}… but upstream serves "
+                f"{upstream_doc.xml_hash[:12]}… — a carried-forward "
+                f"document cannot be counted against a different source",
+            )
+        docs.append((doc_id, record.markdown_path, upstream_doc.xml_bytes))
+    totals = reconcile_corpus(repo, docs)
+    write_attestation(
+        repo,
+        TemporalAttestation(
+            corpus_commit=head_commit(repo),
+            parser_version=TEMPORAL_PARSER_VERSION,
+            documents_reconciled=totals.documents,
+            notes_total=totals.notes,
+            events_total=totals.events,
+            attested_at=now,
+        ),
     )
