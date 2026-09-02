@@ -3246,7 +3246,7 @@ def _build_embedder() -> EmbeddingModel | None:
     this function used to re-implement provider-side knowledge of.
 
     Returns None rather than raising in every failure mode, because the server
-    hosts fifteen tools that need no embedding provider at all: a missing
+    hosts sixteen tools that need no embedding provider at all: a missing
     credential or a misconfigured provider must cost ``semantic_search`` and
     nothing else. The reason is printed once at startup and repeated in
     ``semantic_search``'s own error, so it is not lost in a scrollback.
@@ -3263,7 +3263,7 @@ def _build_embedder() -> EmbeddingModel | None:
     except ConfigError as exc:
         print(
             f"lovspor mcp: embedding provider not configured: {exc} "
-            "semantic_search will be disabled; the other fifteen tools work normally.",
+            "semantic_search will be disabled; the other sixteen tools work normally.",
             file=sys.stderr,
             flush=True,
         )
@@ -3271,7 +3271,7 @@ def _build_embedder() -> EmbeddingModel | None:
     if embedder is None:
         print(
             "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-            "but the other fifteen tools work normally. Set OPENAI_API_KEY "
+            "but the other sixteen tools work normally. Set OPENAI_API_KEY "
             "and restart to enable semantic search.",
             file=sys.stderr,
             flush=True,
@@ -3958,7 +3958,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     the OpenAI embedder at startup (so a malformed key surfaces
     immediately, not on the first tool call); if it is not set we
     log a warning and disable ``semantic_search`` with a clear
-    runtime error. The other fourteen tools do not need the embedder
+    runtime error. The other sixteen tools do not need the embedder
     so they continue to work without an OpenAI key — refusing to
     start the whole server over one optional dependency would be
     user-hostile.

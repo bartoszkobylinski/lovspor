@@ -443,11 +443,11 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", FakeOpenAIEmbedder)
 
     assert _build_embedder() is None
-    # Whole string: this is the operator's only signal that one of the sixteen
+    # Whole string: this is the operator's only signal that one of the seventeen
     # tools is silently unavailable, and the remediation is the point of it.
     assert capsys.readouterr().err == (
         "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-        "but the other fifteen tools work normally. Set OPENAI_API_KEY "
+        "but the other sixteen tools work normally. Set OPENAI_API_KEY "
         "and restart to enable semantic search.\n"
     )
 

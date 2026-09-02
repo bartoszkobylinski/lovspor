@@ -1,6 +1,6 @@
 # MCP server — lovverk for AI assistants
 
-`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets sixteen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
+`lovspor mcp` is a stdio MCP (Model Context Protocol) server that exposes the [`lovverk`](https://github.com/bartoszkobylinski/lovverk) Norwegian-law corpus to AI assistants — Claude Desktop, Claude Code, or any other client that speaks MCP. The assistant gets seventeen read-only tools and uses them to answer real legal-research questions from the live corpus instead of stale training data.
 
 > **Distribution (updated 2026-08-03).** The engine is AGPL-3.0-licensed open infrastructure, public on GitHub, and **Lovspor is distributed on PyPI** as [`lovspor`](https://pypi.org/project/lovspor/) — publishing resumed at `0.4.0`, the earlier `0.2.0`–`0.3.0` releases having been withdrawn during a July 2026 pivot. The commands below use the on-demand `uvx lovspor …` form, which resolves the latest release from PyPI — versioned and immutable, and `uvx lovspor@0.4.0 …` pins one; to run unreleased changes, use `uv run --project /path/to/lovspor lovspor …` from a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout). Local stdio is a first-class, fully supported path either way. A hosted MCP endpoint (live since 2026-07-18) is an optional operated access layer — see [§ Streamable HTTP transport](#streamable-http-transport).
 
@@ -14,14 +14,14 @@ This document covers the full setup: prerequisites, configuration for two common
 
 - **Transport:** stdio by default (`lovspor mcp`) — each user runs their own copy locally; no inbound network surface, no shared infrastructure, no auth needed. The sole outbound call is [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) embedding your query via OpenAI — see its **Privacy** note. A Streamable HTTP transport (`lovspor mcp-http`) serves the hosted instance, live since 2026-07-18 — see [§ Streamable HTTP transport](#streamable-http-transport).
 - **Data path:** the server reads a local clone of the `lovverk` Markdown corpus. The lovspor scheduled workflow keeps `lovverk` current; the user re-runs `lovspor fetch-corpus` (which fast-forwards the cache) to pick up updates.
-- **Tools:** sixteen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the sixteen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history. They answer corpus history — what the corpus contained at the end of a UTC date — never which provisions were legally in force on that date (ADR-0002; see the temporal contract under `get_law_at`).
+- **Tools:** seventeen read-only, manifest-and-filesystem-only (one of them, `semantic_search`, additionally calls the OpenAI embeddings API at query time — see the tool's section below). Three of the seventeen (`get_law_at`, `list_law_versions`, `diff_law_versions`) are time-machine tools that read past versions of acts directly from the corpus's git history. They answer corpus history — what the corpus contained at the end of a UTC date — never which provisions were legally in force on that date (ADR-0002; see the temporal contract under `get_law_at`).
 - **Engine sync:** untouched. MCP is a *consumer* of `lovverk`; the producer is the `.github/workflows/sync.yml` cron in `lovspor`. They're decoupled by design ([`docs/decisions.md` §1](decisions.md)).
 
 ---
 
 ## Streamable HTTP transport
 
-`lovspor mcp-http` serves the same sixteen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs:
+`lovspor mcp-http` serves the same seventeen read-only tools to remote clients over the MCP Streamable HTTP transport. It is what the hosted instance runs:
 
 > ✅ **Live since 2026-07-18; the endpoint is `https://lovspor.no/mcp`** (the original `lovspor.bartoszkobylinski.com` still resolves as an alias, but may be retired without notice — use the canonical name). TLS is terminated by Caddy (automatic Let's Encrypt) on a dedicated DigitalOcean droplet provisioned from `deploy/digitalocean/`. **Every request requires authentication** — anonymous and invalid-token calls return 401. Both credential modes are active there (verified against production 2026-08-02): operator-issued opaque bearer tokens (`lovspor tokens issue`), and WorkOS AuthKit OAuth — the AuthKit pair is configured, so `/.well-known/oauth-protected-resource/mcp` serves RFC 9728 discovery. Access provisioning is operator-managed; whether AuthKit accepts new self-service sign-ups at any given time is an operator-side WorkOS setting, not a commitment of these docs. Per-credential quotas and rate limiting are enforced in both modes.
 >
@@ -110,7 +110,7 @@ Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_
 
    Contributors, and anyone running unreleased changes, use a checkout instead — see [§ Running from a local checkout](#running-from-a-local-checkout) below.
 
-3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other fifteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
+3. **Optional: `OPENAI_API_KEY`** in the environment if you want the `semantic_search` tool. Missing key disables only that one tool — the other sixteen keep working without it. See [`semantic_search`](#semantic_searchquery-dataset-limit-min_score) below for the trade-off and cost.
 
 ---
 
@@ -147,7 +147,7 @@ claude mcp add lovverk -- uvx lovspor mcp
 
 ## Tools
 
-All sixteen are read-only. None mutate the corpus or trigger a sync. Fifteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
+All seventeen are read-only. None mutate the corpus or trigger a sync. Sixteen are pure local (manifest + filesystem + git on the local clone); `semantic_search` additionally calls the OpenAI embeddings API at query time to embed the user's query — see its section for details.
 
 ### `get_law(slug)`
 
@@ -368,6 +368,89 @@ Return the per-act change history as structured JSON. Each event has `date`, `co
       "lines_added": 1284
     }
   ]
+}
+```
+
+### `get_temporal_events(slug, section_id?, recorded_at?, valid_at?)`
+
+Return the source-derived temporal events of one act — amendments, insertions and repeals with their commencement facts, plus never-brought-into-force markers and the parser's non-fatal `problems` residue (ADR-0012). This is the event-level layer: it answers *"what amendment events does the source state for this act, and had each taken effect by a given date?"* It does **not** answer *"was this provision in force at date X?"* — that requires composing events into norm-identity-aware validity intervals, which no tool on this surface supports yet.
+
+- **`slug`** — the act's slug, same as `get_law`.
+- **`section_id`** (optional) — narrow to events the parser attributed to that provision label: "events attributed to § X", *not* "all temporal events affecting § X". Events at enclosing scopes (chapters, parts) are never expanded into their provisions, and `problems` are never narrowed. An unknown section fails with the act's available ids.
+- **`recorded_at`** (optional, ISO `YYYY-MM-DD`) — derive from the corpus state at UTC end-of-day on that date: the events the corpus *knew* then. The response then carries `recorded_at`, `corpus_commit` and `xml_hash`, same contract as the other tools' historical mode. This is the one tool where a historical state *is* evaluated — because `valid_at` is a separate, explicit parameter, `recorded_at` never has to double as an evaluation date.
+- **`valid_at`** (optional, ISO `YYYY-MM-DD`) — evaluate every served event and marker at that date. Each then carries `commencement_status: in_effect | not_in_effect | indeterminate` and a nullable `status_reason` — *did this event take effect by `valid_at`?* For a repeal, `in_effect` means the repeal operates, which entails the provision does not. `indeterminate` is a verdict: the source supports no answer. Future dates are legal (see the horizon below). Both dates may be supplied together; each drives exactly one axis.
+
+**Knowledge horizon (ADR-0012).** Evaluation is bounded by the serving state's knowledge horizon — the author date of its corpus commit (HEAD's for a live call), echoed as `knowledge_horizon` whenever `valid_at` is present. A source-dated event answers for any `valid_at`; an open-ended fact (pending delegated commencement, relative or absent markers, never-in-force statements) evaluated *past* the horizon is `indeterminate` with `status_reason: beyond_knowledge_horizon` — an old state never certifies what was decided after it. Without `valid_at` no evaluation is performed and no clock is consulted.
+
+**Reconciliation.** Every successful response carries `reconciliation: attested | unattested`. `attested` means the build-time gate proved the parser-visible note count against the source XML for exactly this corpus state and parser version (the attestation registry travels as git notes under `refs/notes/temporal-attestations` in the corpus clone — fetch that ref to see `attested` locally). `unattested` means no such proof exists for this state — typically one predating the gate; the events are still the exact deterministic parse of that state's body.
+
+**Outcomes stay distinct:** unknown act (naming the requested date and `corpus_commit` when historical); unknown section (listing the act's inventory); `events: []` as a *successful* answer ("no amendment facts attributed"); and a typed derivation failure for a document whose commencement marker the parser does not recognise — never a partial or guessed answer.
+
+**Sample call:** `get_temporal_events("advokatloven", section_id="73", valid_at="2026-08-15")`
+
+**Sample output** (real output against `lovverk` HEAD of 2026-08-19; note the mixed note serving two events — an insertion with no commencement marker, evaluated `indeterminate`, and an announced pending amendment, `not_in_effect` within the horizon — while `problems` stay corpus-wide despite the narrowing):
+
+```json
+{
+  "slug": "advokatloven",
+  "section_id": "73",
+  "temporal_parser_version": 1,
+  "events": [
+    {
+      "provision": "§ 73",
+      "scope": "provision",
+      "kind": "inserted",
+      "announced": false,
+      "amending_act": "21 juni 2024 nr. 46",
+      "amending_act_ref": "lov/2024-06-21-46",
+      "marker_class": "absent",
+      "commencement_kind": "unknown",
+      "commencement_instrument": null,
+      "provenance": "deterministically_derived",
+      "valid_from": null,
+      "raw_marker": null,
+      "source_note": "Tilføyd ved lov [21 juni 2024 nr. 46](lov/2024-06-21-46). **Endres** ved lov [20 juni 2025 nr. 82](lov/2025-06-20-82) (i kraft fra den tid Kongen bestemmer).",
+      "source_line": 682,
+      "commencement_status": "indeterminate",
+      "status_reason": null
+    },
+    {
+      "provision": "§ 73",
+      "scope": "provision",
+      "kind": "amended",
+      "announced": true,
+      "amending_act": "20 juni 2025 nr. 82",
+      "amending_act_ref": "lov/2025-06-20-82",
+      "marker_class": "pending_indeterminate",
+      "commencement_kind": "pending_indeterminate",
+      "commencement_instrument": null,
+      "provenance": "source_explicit",
+      "valid_from": null,
+      "raw_marker": "(i kraft fra den tid Kongen bestemmer)",
+      "source_note": "Tilføyd ved lov [21 juni 2024 nr. 46](lov/2024-06-21-46). **Endres** ved lov [20 juni 2025 nr. 82](lov/2025-06-20-82) (i kraft fra den tid Kongen bestemmer).",
+      "source_line": 682,
+      "commencement_status": "not_in_effect",
+      "status_reason": null
+    }
+  ],
+  "never_in_force": [],
+  "problems": [
+    {
+      "kind": "mixed_kind_note",
+      "provision": "§ 73",
+      "source_line": 682,
+      "raw_value": "Tilføyd ved lov [21 juni 2024 nr. 46](lov/2024-06-21-46). **Endres** ved lov [20 juni 2025 nr. 82](lov/2025-06-20-82) (i kraft fra den tid Kongen bestemmer)."
+    },
+    {
+      "kind": "non_commencement_marker",
+      "provision": "§ 74",
+      "source_line": 688,
+      "raw_value": "(tidligere § 73)"
+    }
+  ],
+  "valid_at": "2026-08-15",
+  "knowledge_horizon": "2026-08-19",
+  "reconciliation": "unattested"
 }
 ```
 
@@ -595,11 +678,11 @@ Score is cosine similarity in `[-1, 1]`; useful matches are usually `> 0.4`. `ci
 
 When `results` is empty the `notice` says why — the AI is expected to report "no strong match" instead of substituting training-data memory.
 
-**Requires** an embedding credential — `OPENAI_API_KEY` — in the environment when the MCP server starts. The adapter (OpenAI `text-embedding-3-large`, 3072-dim, the default and currently only supported provider) is built eagerly at startup, so a malformed key fails fast rather than on the first tool call. A missing key, or a misconfigured provider, disables only this one tool with a clear runtime error naming the cause; the other fifteen keep working without any embedding configuration at all.
+**Requires** an embedding credential — `OPENAI_API_KEY` — in the environment when the MCP server starts. The adapter (OpenAI `text-embedding-3-large`, 3072-dim, the default and currently only supported provider) is built eagerly at startup, so a malformed key fails fast rather than on the first tool call. A missing key, or a misconfigured provider, disables only this one tool with a clear runtime error naming the cause; the other sixteen keep working without any embedding configuration at all.
 
 The provider is selectable via `LOVSPOR_EMBEDDING_*` (see [`docs/embeddings.md`](embeddings.md)). `semantic_search` only searches documents whose recorded **embedding space** matches the configured one: a document embedded by a different model, or one written before the space was recorded, is excluded rather than compared, because comparing vectors across two spaces returns plausible-looking nonsense instead of an error. Exclusions are reported — partial coverage comes back in the `notice` field, and a corpus with no usable document fails with an explanation. A document with no recorded space stays excluded until it is re-embedded through the normal keyed sync lifecycle; in the published corpus every current document has carried the recorded identity since the 2026-08-04 regeneration. See [`docs/embeddings.md`](embeddings.md) for the identity rules, the binary corpus format, and the model choice rationale.
 
-**Privacy:** unlike the other fifteen tools, `semantic_search` is **not fully local** — the query text you pass is sent to the OpenAI embeddings API to be embedded (the corpus vectors were computed once at sync time; only your live query leaves the machine, per call). The Norwegian-law corpus is public, but your *question* is not — avoid pasting confidential or client-identifying text into a `semantic_search` query. Every other tool (`get_law`, `get_section`, `search_body`, …) is filesystem-and-git only and never leaves your machine.
+**Privacy:** unlike the other sixteen tools, `semantic_search` is **not fully local** — the query text you pass is sent to the OpenAI embeddings API to be embedded (the corpus vectors were computed once at sync time; only your live query leaves the machine, per call). The Norwegian-law corpus is public, but your *question* is not — avoid pasting confidential or client-identifying text into a `semantic_search` query. Every other tool (`get_law`, `get_section`, `search_body`, …) is filesystem-and-git only and never leaves your machine.
 
 **Performance:** the embedding index is loaded lazily on the first call (~5-10 s for the production corpus, ~200 MB resident at 3072-dim int8). Each query embeds via OpenAI (~100-300 ms round-trip) and runs a vectorized brute-force cosine scan (well under 100 ms). Per-call OpenAI cost is fractions of a cent.
 
@@ -873,7 +956,7 @@ A typical AI-assistant interaction with this server follows the same pattern:
 11. **`search_eu_implementations(eu_doc_id)`** — reverse direction: when the user asks which Norwegian laws implement a given EU document ("which Norwegian laws implement GDPR?"), use the CELEX as the lookup key.
 12. **`corpus_status()`** — sanity check. AI assistants should call this when the other tools return unexpectedly empty results, or when the user explicitly asks "is my corpus current?". The `notice` field is human-readable; the `refresh_command` is a copy-pasteable git command the user can run to update.
 
-The sixteen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) extend the same surface to corpus-history research: the AI can answer "what did this corpus hold for Skatteloven on 2026-05-01?" — or "how did the corpus record of Skatteloven change since then?" via `diff_law_versions` — by walking the corpus's git history without any extra plumbing. Per ADR-0002, these answers describe corpus states at UTC dates, never which provisions were legally in force.
+The seventeen tools compose: an assistant can stitch together a research workflow without ever needing direct filesystem or git access to `lovverk`. Sprint 9's anti-hallucination layer (`semantic_search` + `cross_references` field on `get_section` + `verify_quote` + `validate_citation`) is designed to make the *fuzzy* retrieval path safe — score-based similarity hits are always followed by verbatim-text reads and verbatim-quote checks before the AI quotes anything. The time-machine tools (`get_law_at`, `list_law_versions`, `diff_law_versions`) extend the same surface to corpus-history research: the AI can answer "what did this corpus hold for Skatteloven on 2026-05-01?" — or "how did the corpus record of Skatteloven change since then?" via `diff_law_versions` — by walking the corpus's git history without any extra plumbing. Per ADR-0002, these answers describe corpus states at UTC dates, never which provisions were legally in force. `get_temporal_events` adds the temporal-events layer on the same surface: what the source *states* about amendments and commencements — at the current state or a historical one — with an explicit, horizon-bounded evaluation date kept strictly separate from the state-selection date (ADR-0012).
 
 ---
 

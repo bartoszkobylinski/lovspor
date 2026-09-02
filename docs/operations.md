@@ -124,7 +124,7 @@ The `LOVSPOR_OUTPUT_REPO_PATH` must point at a clone of [`lovverk`](https://gith
 OPENAI_API_KEY=sk-...        # also accepts OPENAI_APIKEY for legacy configs
 ```
 
-Required for `lovspor sync` to write per-section embedding `.bin` files (Sprint 9), and for the MCP `semantic_search` tool to embed user queries at runtime. Without a key the engine still produces Markdown and runs the rest of the sync pipeline normally — the only casualty is that `.bin` files for documents added or changed in this run will not be written, and the next sync with a key set picks them up via the Sprint 9 backfill migration. Missing key in the MCP server disables only `semantic_search` and leaves the other fifteen tools working normally. Cost is fractions of a cent per query and ~$5-15/year for the production sync cadence — see [`docs/embeddings.md`](embeddings.md) for the model choice rationale.
+Required for `lovspor sync` to write per-section embedding `.bin` files (Sprint 9), and for the MCP `semantic_search` tool to embed user queries at runtime. Without a key the engine still produces Markdown and runs the rest of the sync pipeline normally — the only casualty is that `.bin` files for documents added or changed in this run will not be written, and the next sync with a key set picks them up via the Sprint 9 backfill migration. Missing key in the MCP server disables only `semantic_search` and leaves the other sixteen tools working normally. Cost is fractions of a cent per query and ~$5-15/year for the production sync cadence — see [`docs/embeddings.md`](embeddings.md) for the model choice rationale.
 
 ## Observatory: registering a capture source (ADR-0010)
 
@@ -824,6 +824,24 @@ Shallow clones remain supported only where the reduced temporal reach is
 explicitly acceptable (e.g. local current-law lookup, keyword search, CI
 smoke tests). `list_law_versions` and `get_law_history` read committed
 `history/<slug>.json` files and are unaffected by clone depth.
+
+**Operational requirement: `reconciliation: attested` answers need the
+attestation notes ref.** `get_temporal_events` reports `reconciliation:
+attested` only when the serving clone carries the attestation registry —
+git notes under `refs/notes/temporal-attestations`, written by the sync
+gate (ADR-0012 point 2). A plain clone, fetch or pull does not transfer
+notes refs. Configure the refspec once per checkout so every later fetch
+brings the registry along:
+
+```bash
+git -C <corpus-path> config --add remote.origin.fetch \
+  '+refs/notes/temporal-attestations:refs/notes/temporal-attestations'
+git -C <corpus-path> fetch origin
+```
+
+Without the ref every response is `unattested` — honest (the local clone
+holds no evidence) but weaker than the corpus actually supports. The
+hosted droplet's corpus-refresh path must include this refspec.
 
 ## Idempotency
 
