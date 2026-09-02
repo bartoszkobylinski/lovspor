@@ -529,9 +529,11 @@ def test_attest_hook_refuses_a_carried_forward_document(repo: tuple[Path, str]) 
     # serves NEW XML — a coincidental count match must not attest.
     path, _ = repo
     (path / "doc.md").write_text(_NOTE_MD, encoding="utf-8")
+    old_hash = "a1b2c3d4e5f6a7b8" * 4
+    new_hash = "0f1e2d3c4b5a6978" * 4
     record = ManifestRecord(
         doc_type="lov",
-        xml_hash="old-hash",
+        xml_hash=old_hash,
         markdown_path="doc.md",
         source_dataset="gjeldende-lover",
         last_seen=datetime(2026, 9, 2, tzinfo=UTC),
@@ -542,19 +544,28 @@ def test_attest_hook_refuses_a_carried_forward_document(repo: tuple[Path, str]) 
         doc_id="doc-1",
         source_dataset="gjeldende-lover",
         xml_bytes=_xml_with_notes(1),
-        xml_hash="new-hash",
+        xml_hash=new_hash,
         slug="testloven",
         title="Testloven",
         eu_basis=(),
     )
 
-    with pytest.raises(AttestationError, match="carried-forward"):
+    with pytest.raises(AttestationError) as excinfo:
         _attest_temporal_conformance(
             path,
             {"doc-1": upstream_doc},
             {"doc-1": record},
             datetime(2026, 9, 2, 4, 0, tzinfo=UTC),
         )
+
+    message = str(excinfo.value)
+    assert "carried-forward" in message
+    # Exactly twelve characters of each hash, then the ellipsis — the
+    # truncation width is part of the pinned message.
+    assert f"{old_hash[:12]}…" in message
+    assert old_hash[:13] not in message
+    assert f"{new_hash[:12]}…" in message
+    assert new_hash[:13] not in message
 
 
 def test_ensure_head_attested_is_presence_based(repo: tuple[Path, str]) -> None:
@@ -722,3 +733,52 @@ def test_attestation_rejects_impossible_versions_and_counts(
 
     with pytest.raises(AttestationError):
         read_attestation(path, sha, 1)
+
+
+def test_attest_hook_skips_non_current_records_without_stopping(
+    repo: tuple[Path, str],
+) -> None:
+    # A tombstone iterated BEFORE a current record must be skipped, not
+    # end the loop — otherwise the attestation would quietly cover zero
+    # documents.
+    path, sha = repo
+    (path / "doc.md").write_text(_NOTE_MD, encoding="utf-8")
+    tombstone = ManifestRecord(
+        doc_type="lov",
+        xml_hash="h0",
+        markdown_path="gone.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 9, 2, tzinfo=UTC),
+        status="removed",
+        slug="borteloven",
+    )
+    current = ManifestRecord(
+        doc_type="lov",
+        xml_hash="h1",
+        markdown_path="doc.md",
+        source_dataset="gjeldende-lover",
+        last_seen=datetime(2026, 9, 2, tzinfo=UTC),
+        status="current",
+        slug="testloven",
+    )
+    upstream_doc = _UpstreamDoc(
+        doc_id="doc-1",
+        source_dataset="gjeldende-lover",
+        xml_bytes=_xml_with_notes(1),
+        xml_hash="h1",
+        slug="testloven",
+        title="Testloven",
+        eu_basis=(),
+    )
+    records = {"doc-0": tombstone, "doc-1": current}
+
+    _attest_temporal_conformance(
+        path,
+        {"doc-1": upstream_doc},
+        records,
+        datetime(2026, 9, 2, 4, 0, tzinfo=UTC),
+    )
+
+    recorded = read_attestation(path, sha, TEMPORAL_PARSER_VERSION)
+    assert recorded is not None
+    assert recorded.documents_reconciled == 1
