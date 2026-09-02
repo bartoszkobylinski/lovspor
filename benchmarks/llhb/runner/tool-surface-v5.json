@@ -1,0 +1,26 @@
+{
+  "description": "Apparatus surface after ADR-0012 slice C: the tool names and schema hash the local `lovspor mcp` server serves once get_temporal_events exists — the first tool NAME change since v1 (sixteen tools become seventeen). The new tool serves the source-derived temporal events of one act (amendments, insertions, repeals, never-in-force markers, non-fatal parser problems), optionally narrowed to one provision label, optionally derived from a historical corpus state (recorded_at) and optionally evaluated at an explicit valid_at bounded by the serving state's knowledge horizon; every successful response carries reconciliation: attested|unattested backed by the slice-B attestation registry. No existing tool's name, schema or description changes — the addition is the only delta from v4. Supersedes tool-surface-v4.json for FUTURE runs; v1-v4 stay committed untouched because the runs that recorded their hashes must remain verifiable (pass --surface-path for a re-check against any of them). Taken WITH the slice C implementation, before any benchmark run that would straddle the surface change (ADR-0012 point 11 / ADR-0007 discipline). The surface is corpus-independent (the schemas come from build_server, not the documents) but interpreter-dependent: tool descriptions come from docstrings, and CPython 3.13 dedents docstrings at compile time, so the hash is only defined together with the `python` field below. A unit test regenerates this document from the code on every run — names on every interpreter, hash on the apparatus interpreter; if the served surface changes, that test fails and changing this file is an explicit apparatus decision, not drift. check_fairness.py reads this document as the expectation the declared tool_config is compared against.",
+  "generated_by": "lovspor.llhb.mcp_surface.tool_surface()/allowed_tools() on branch feat/temporal-events-tool (the commit that added get_temporal_events; ADR-0012, lovspor-notebook PR #118)",
+  "python": "3.12",
+  "server": "lovverk",
+  "tool_schema_sha256": "ffbc5aa40d2db06ad65e2ab3c2b11feb93b73630f47a00b2dd9fa65bc3ac61a3",
+  "tools": [
+    "mcp__lovverk__corpus_status",
+    "mcp__lovverk__diff_law_versions",
+    "mcp__lovverk__get_eu_basis",
+    "mcp__lovverk__get_law",
+    "mcp__lovverk__get_law_at",
+    "mcp__lovverk__get_law_history",
+    "mcp__lovverk__get_section",
+    "mcp__lovverk__get_temporal_events",
+    "mcp__lovverk__list_law_versions",
+    "mcp__lovverk__list_recent_changes",
+    "mcp__lovverk__list_sections",
+    "mcp__lovverk__search_body",
+    "mcp__lovverk__search_eu_implementations",
+    "mcp__lovverk__search_laws",
+    "mcp__lovverk__semantic_search",
+    "mcp__lovverk__validate_citation",
+    "mcp__lovverk__verify_quote"
+  ]
+}

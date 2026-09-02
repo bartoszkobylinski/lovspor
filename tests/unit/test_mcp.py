@@ -4897,7 +4897,7 @@ def test_serve_loads_dotenv_before_building_server(
     assert calls == ["load_env", "run"]
 
 
-def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
+def test_build_server_registers_seventeen_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -4913,6 +4913,7 @@ def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
             "get_section",
             "list_sections",
             "get_law_history",
+            "get_temporal_events",
             "list_recent_changes",
             "search_laws",
             "search_body",
@@ -5180,7 +5181,7 @@ def test_http_mode_registers_offloaded_async_tools_with_intact_schemas(
     server = build_server(tmp_path, http=HttpConfig(host="127.0.0.1", port=9999))
 
     tools = server._tool_manager._tools
-    assert len(tools) == 16
+    assert len(tools) == 17
     assert all(tool.is_async for tool in tools.values())
     get_law = tools["get_law"]
     assert get_law.parameters["required"] == ["slug"]
@@ -5195,7 +5196,7 @@ def test_stdio_mode_registers_inline_sync_tools(tmp_path: Path) -> None:
     server = build_server(tmp_path)
 
     tools = server._tool_manager._tools
-    assert len(tools) == 16
+    assert len(tools) == 17
     assert not any(tool.is_async for tool in tools.values())
 
 

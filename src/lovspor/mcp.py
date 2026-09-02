@@ -1,6 +1,6 @@
 """Stdio MCP server exposing the lovverk corpus to AI consumers.
 
-Bundles sixteen read-only tools over a local clone of the lovverk
+Bundles seventeen read-only tools over a local clone of the lovverk
 Markdown corpus (produced by the lovspor sync engine). Each tool
 answers a class of question an AI agent would naturally ask about
 Norwegian law:
@@ -12,6 +12,7 @@ Norwegian law:
     get_section(slug, "5-12")           -> "Show me just § 5-12 of Skatteloven"
     list_sections(slug)                 -> "Which sections does Skatteloven have?"
     get_law_history(slug)               -> "What changed in Skatteloven recently?"
+    get_temporal_events(slug, ...)      -> "What amendment events does the source state?"
     list_recent_changes(...)            -> "Which laws changed last week?"
     search_laws(query, ...)             -> "Are there laws about jernbane?" (metadata)
     search_body(query, ...)             -> "Which laws mention boligkjøpsmodeller?"
@@ -99,7 +100,14 @@ from lovspor.snapshot import (
     resolve_corpus_state,
 )
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
-from lovspor.temporal import append_notice, build_notice, evaluation_date_today
+from lovspor.temporal import (
+    TEMPORAL_PARSER_VERSION,
+    append_notice,
+    build_notice,
+    evaluation_date_today,
+)
+from lovspor.temporal_attestation import AttestationError, read_attestation
+from lovspor.temporal_events import TemporalEventsRequest, compose_temporal_events
 from lovspor.timetravel import (
     RevisionNotFoundError,
     RevisionResult,
@@ -763,6 +771,54 @@ class CorpusReader:
             )
         loaded: dict[str, Any] = json.loads(history_path.read_text(encoding="utf-8"))
         return loaded
+
+    def _head_state(self) -> tuple[str, date]:
+        """Full sha and author date (UTC day) of the live corpus HEAD.
+
+        The live serving state's identity — the attestation key — and its
+        knowledge horizon (ADR-0012 point 5: "for a live call, of the
+        current head"). An unreadable HEAD is a broken evidence channel:
+        typed failure, never a guessed horizon or a silent ``unattested``.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "log", "-1", "--format=%H%n%aI"],  # noqa: S607
+                cwd=self.corpus_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            raise AttestationError(
+                f"cannot resolve the live corpus HEAD under {self.corpus_path}: "
+                f"the serving state's identity and knowledge horizon are unreadable",
+            ) from exc
+        sha, author_iso = result.stdout.strip("\n").split("\n", maxsplit=1)
+        return sha, datetime.fromisoformat(author_iso).astimezone(UTC).date()
+
+    def get_temporal_events(
+        self,
+        slug: str,
+        section_id: str | None = None,
+        valid_at: date | None = None,
+    ) -> dict[str, Any]:
+        """The served temporal layer of one act at the live corpus state."""
+        record, epoch = self._resolve_current(slug)
+        body = self._body_for_record(record, epoch)
+        canonical = None if section_id is None else _require_section_id(slug, body, section_id)
+        head_sha, horizon = self._head_state()
+        request = TemporalEventsRequest(
+            horizon=horizon,
+            document_ref=record.slug,
+            section_id=canonical,
+            valid_at=valid_at,
+        )
+        result: dict[str, Any] = {"slug": record.slug}
+        if canonical is not None:
+            result["section_id"] = canonical
+        result.update(compose_temporal_events(body, request))
+        result["reconciliation"] = _reconciliation_for(self.corpus_path, head_sha)
+        return result
 
     def at_state(self, recorded_at: str) -> "_SnapshotState":
         """Resolve ``recorded_at`` to a historical state view (ADR-0011).
@@ -3485,6 +3541,53 @@ def _parse_recorded_at(value: str) -> date:
     return parsed
 
 
+def _parse_valid_at(value: str) -> date:
+    """Parse an ADR-0012 ``valid_at`` evaluation date.
+
+    Same one wire form as ``recorded_at``, but future dates are legal:
+    evaluating past the serving state's knowledge horizon is exactly the
+    bounded ``indeterminate``/``beyond_knowledge_horizon`` answer of
+    ADR-0012 point 5, not a typo to refuse. No clock is consulted.
+    """
+    if not _RECORDED_AT_FORM.fullmatch(value):
+        raise ValueError(f"valid_at must be ISO date YYYY-MM-DD, got {value!r}")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"valid_at must be ISO date YYYY-MM-DD, got {value!r}") from exc
+
+
+def _require_section_id(slug: str, body: str, section_id: str) -> str:
+    """Require ``section_id`` to exist in the act (ADR-0012 point 6 outcome 2).
+
+    Presence only — no occurrence disambiguation: temporal narrowing is
+    label matching, and duplicate ``§`` ids share one label. The recovery
+    message is ``get_section``'s own, so both tools name the act's
+    inventory the same way.
+    """
+    canonical = _normalize_section_id(section_id)
+    by_id = _sections_by_id(_parse_sections(body))
+    if canonical not in by_id:
+        raise CorpusNotFoundError(
+            f"section {section_id!r} not found in {slug!r}; "
+            f"available: {_available_ids_message(by_id)}",
+        )
+    return canonical
+
+
+def _reconciliation_for(repo: Path, corpus_commit: str) -> str:
+    """The ADR-0012 point 2 response field for one served state.
+
+    ``attested`` exactly when a recorded attestation covers
+    ``corpus_commit`` under the serving parser version; a readable
+    registry with no entry is ``unattested``. An unreadable or corrupt
+    registry raises :class:`AttestationError` — a broken evidence channel
+    must never impersonate absence of evidence.
+    """
+    entry = read_attestation(repo, corpus_commit, TEMPORAL_PARSER_VERSION)
+    return "attested" if entry is not None else "unattested"
+
+
 @dataclass
 class _SnapshotData:
     """Per-commit caches shared by every ``recorded_at`` resolving to one state.
@@ -3615,6 +3718,47 @@ class _SnapshotState:
         if slug not in indexes:
             indexes[slug] = _section_index_from_body(self._body_for_slug(slug) or "")
         return indexes[slug]
+
+    @property
+    def knowledge_horizon(self) -> date:
+        """Author date (UTC day) of the resolved commit — the latest fact
+        this state could know (ADR-0012 point 5)."""
+        return self._data.ref.commit_date.astimezone(UTC).date()
+
+    def get_temporal_events(
+        self,
+        slug: str,
+        section_id: str | None = None,
+        valid_at: date | None = None,
+    ) -> dict[str, Any]:
+        """``get_temporal_events`` against this state: the events the
+        corpus knew at ``recorded_at``, optionally evaluated at
+        ``valid_at`` within THIS state's knowledge horizon.
+
+        The one historical answer that IS evaluated (ADR-0012 point 8):
+        each date drives exactly one axis — ``recorded_at`` selected the
+        state, ``valid_at`` is only ever the evaluation date — so the
+        ``not_evaluated`` notice of the four primitives does not apply.
+        """
+        record, mapped_from = self._resolve_slug(slug)
+        body = self._body_for_slug(record.slug or "") or ""
+        target = record.slug or slug
+        canonical = None if section_id is None else _require_section_id(target, body, section_id)
+        request = TemporalEventsRequest(
+            horizon=self.knowledge_horizon,
+            document_ref=record.slug,
+            section_id=canonical,
+            valid_at=valid_at,
+        )
+        result: dict[str, Any] = {"slug": record.slug}
+        if mapped_from is not None:
+            result["mapped_from_slug"] = mapped_from
+        if canonical is not None:
+            result["section_id"] = canonical
+        result.update(compose_temporal_events(body, request))
+        repo = self._data.snapshot.repo_path
+        result["reconciliation"] = _reconciliation_for(repo, self.corpus_commit)
+        return self._stamp(result, record.xml_hash)
 
     def _stamp(self, result: dict[str, Any], xml_hash: str | None) -> dict[str, Any]:
         """Attach the ADR-0011 evidence fields: the requested date, the
@@ -3819,8 +3963,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     start the whole server over one optional dependency would be
     user-hostile.
     """
-    embedder = _build_embedder()
-    reader = CorpusReader(corpus_path, embedder=embedder)
+    reader = CorpusReader(corpus_path, embedder=_build_embedder())
     if http is not None:
         reader.warm()
     bind = http or HttpConfig()
@@ -3990,6 +4133,80 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         event first.
         """
         return reader.get_law_history(slug)
+
+    @_tool()
+    def get_temporal_events(
+        slug: str,
+        section_id: str | None = None,
+        recorded_at: str | None = None,
+        valid_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Return the source-derived temporal events of one act: amendments,
+        insertions and repeals with their commencement facts, plus
+        never-brought-into-force markers and the parser's non-fatal
+        ``problems`` residue (ADR-0012).
+
+        Answers *"what amendment events does the source state for this
+        act, and had each taken effect by a given date?"* — event-level
+        questions. It does NOT answer *"was this provision in force at
+        date X?"*: that requires composing events into norm-identity-aware
+        validity intervals, which no tool on this surface supports yet.
+
+        ``section_id`` (optional): narrow to events the parser attributed
+        to that provision label — "events attributed to § X", NOT "all
+        temporal events affecting § X". Events at enclosing scopes
+        (chapters, parts) are never expanded into their provisions, and
+        ``problems`` are never narrowed. An unknown section fails with
+        the act's available ids.
+
+        ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): derive from the
+        corpus state at UTC end-of-day on that date — the events the
+        corpus KNEW then. The response then carries ``recorded_at``,
+        ``corpus_commit`` and ``xml_hash``, same contract as the other
+        tools' historical mode.
+
+        ``valid_at`` (optional, ISO ``YYYY-MM-DD``): additionally
+        evaluate every served event and marker at that date. Each then
+        carries ``commencement_status: in_effect | not_in_effect |
+        indeterminate`` — did THIS event (amendment, insertion, repeal)
+        take effect by ``valid_at``? For a repeal, ``in_effect`` means
+        the repeal operates, which entails the provision does not.
+        ``indeterminate`` is a verdict: the source supports no answer.
+        Both dates may be supplied together; each drives exactly one axis
+        — ``recorded_at`` selects WHICH events exist in the answer,
+        ``valid_at`` is only ever the evaluation date, and neither ever
+        substitutes for the other.
+
+        Evaluation respects the serving state's knowledge horizon (the
+        author date of its corpus commit, echoed as
+        ``knowledge_horizon`` whenever ``valid_at`` is present): a
+        source-dated event answers for any ``valid_at``, but an
+        open-ended fact (pending delegated commencement, relative or
+        absent markers, never-in-force statements) evaluated past the
+        horizon is ``indeterminate`` with ``status_reason:
+        beyond_knowledge_horizon`` — an old state never certifies what
+        was decided after it. Without ``valid_at`` no evaluation is
+        performed and no clock is consulted.
+
+        Every successful response carries ``reconciliation: attested |
+        unattested``: ``attested`` means the build-time gate proved the
+        parser-visible note count against the source XML for exactly this
+        corpus state and parser version; ``unattested`` means no such
+        proof exists for this state (typically one predating the gate) —
+        the events are still the exact deterministic parse of the state's
+        body, with full provenance. ``events: []`` is a successful answer
+        ("no amendment facts attributed"), distinct from the typed
+        failures: unknown act, unknown section, and a document whose
+        derivation fails loudly (an unrecognised commencement marker is
+        an error naming its line, never a partial or guessed answer).
+        """
+        return (
+            reader if recorded_at is None else reader.at_state(recorded_at)
+        ).get_temporal_events(
+            slug,
+            section_id,
+            None if valid_at is None else _parse_valid_at(valid_at),
+        )
 
     @_tool()
     def get_law_at(slug: str, target_date: str) -> str:

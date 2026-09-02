@@ -83,8 +83,9 @@ class TestToolSurface:
 
         assert "get_section" in surface.names
         assert "semantic_search" in surface.names
+        assert "get_temporal_events" in surface.names
         assert list(surface.names) == sorted(surface.names)
-        assert len(surface.names) == 16
+        assert len(surface.names) == 17
 
     def test_schema_hash_is_hex_and_reproducible(self, corpus: Path) -> None:
         first = tool_surface(corpus)
@@ -254,7 +255,7 @@ class TestToolConfig:
         assert names and all(re.match(pattern, name) for name in names)
 
     def test_the_frozen_surface_document_is_what_the_code_serves(self, tmp_path: Path) -> None:
-        """tool-surface-v3.json is the expectation check_fairness compares a
+        """tool-surface-v5.json is the expectation check_fairness compares a
         run's declaration against, so it must be the code's own account,
         re-derived here on every run. Two corpora with disjoint content are
         the witness that the surface comes from build_server, not from the
@@ -299,16 +300,23 @@ class TestToolConfig:
         prereserved claude-fable-5 confirmatory pair starts, so no run
         spans the change.
 
-        v1, v2 and v3 stay committed untouched so the runs that recorded
+        v4 -> v5 (2026-09-02): ADR-0012 slice C — get_temporal_events is
+        added, the first tool-NAME change since v1 (sixteen tools become
+        seventeen). No existing tool's name, schema or description
+        changes; the addition is the only delta. Taken with the slice C
+        implementation itself, before any benchmark run that would
+        straddle the surface change (ADR-0012 point 11).
+
+        v1 through v4 stay committed untouched so the runs that recorded
         their hashes remain verifiable (check_fairness --surface-path);
-        this test guards the CURRENT apparatus, which v4 describes."""
+        this test guards the CURRENT apparatus, which v5 describes."""
         committed = json.loads(
             (
                 Path(__file__).resolve().parents[2]
                 / "benchmarks"
                 / "llhb"
                 / "runner"
-                / "tool-surface-v4.json"
+                / "tool-surface-v5.json"
             ).read_text(encoding="utf-8")
         )
         corpora = (
