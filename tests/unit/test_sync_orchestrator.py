@@ -1,3 +1,4 @@
+import inspect
 import subprocess
 from collections import Counter
 from dataclasses import FrozenInstanceError
@@ -137,6 +138,13 @@ def test_sync_report_is_immutable() -> None:
 
     with pytest.raises(ValidationError):
         report.new_count = 99
+
+
+def test_run_sync_mass_reembed_requires_explicit_opt_in() -> None:
+    """Scheduled callers must not implicitly authorize a corpus-wide re-embed."""
+    parameter = inspect.signature(run_sync).parameters["allow_mass_reembed"]
+
+    assert parameter.default is False
 
 
 def test_upstream_doc_is_immutable() -> None:
@@ -1635,6 +1643,11 @@ def test_run_sync_noops_without_rewriting_manifest_or_committing(
     report = run_sync(settings)
 
     assert len(ensure_calls) == 1
+    ensured_repo, ensured_upstream, ensured_records, ensured_at = ensure_calls[0]
+    assert ensured_repo == settings.lovverk_repo_path
+    assert ensured_upstream == {"lov-same": _upstream("lov-same", xml_hash="a" * 64, slug="same")}
+    assert ensured_records == prior.documents
+    assert ensured_at.tzinfo is UTC
 
     assert report == SyncReport(
         new_count=0,

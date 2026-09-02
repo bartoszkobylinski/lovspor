@@ -231,6 +231,51 @@ def test_reconcile_passes_document_identity_and_non_strict_policy(
     ]
 
 
+def test_reconcile_reads_committed_markdown_explicitly_as_utf8(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The corpus format is UTF-8, independent of the runner's locale."""
+    encodings: list[str | None] = []
+
+    class MarkdownPath:
+        def read_text(self, *, encoding: str | None = None) -> str:
+            encodings.append(encoding)
+            return "body"
+
+    class RepoPath:
+        def __truediv__(self, _relative: str) -> MarkdownPath:
+            return MarkdownPath()
+
+    class Layer:
+        notes_seen = 0
+        events: tuple[()] = ()
+
+    monkeypatch.setattr(attestation_module, "count_source_amendment_notes", lambda _xml: 0)
+    monkeypatch.setattr(attestation_module, "derive_temporal_layer", lambda *_a, **_kw: Layer())
+
+    reconcile_corpus(RepoPath(), [("doc", "doc.md", b"<root/>")])  # type: ignore[arg-type]
+
+    assert encodings == ["utf-8"]
+
+
+def test_write_attestation_skips_unrelated_versions_before_matching_entry(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registry lookup must inspect all versions, not stop at the first mismatch."""
+    path, sha = repo
+    wanted = _attestation(sha, version=2)
+    conflicting = _attestation(sha, version=2, documents=99)
+    monkeypatch.setattr(
+        attestation_module,
+        "_read_entries",
+        lambda *_args: [_attestation(sha, version=1), conflicting],
+    )
+
+    with pytest.raises(AttestationError, match="immutable"):
+        write_attestation(path, wanted)
+
+
 # ---------- the sync hook ----------
 
 
