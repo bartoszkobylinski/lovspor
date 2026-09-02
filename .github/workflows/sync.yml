@@ -193,6 +193,14 @@ jobs:
         run: |
           if git log origin/main..HEAD --oneline | grep -q .; then
             echo "Commits ahead of origin — pushing..."
+            # Attestation notes travel FIRST (ADR-0012 point 2a): a note
+            # push carries only the notes ref, so no reader can observe a
+            # gate-era corpus commit without its attestation. The sync
+            # itself guarantees the note exists for any new HEAD — a
+            # failed gate aborts the job before this step.
+            if git rev-parse --verify refs/notes/temporal-attestations >/dev/null 2>&1; then
+              git push origin refs/notes/temporal-attestations
+            fi
             git push origin main
           else
             echo "No new commits — nothing to push."
