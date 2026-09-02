@@ -825,23 +825,27 @@ explicitly acceptable (e.g. local current-law lookup, keyword search, CI
 smoke tests). `list_law_versions` and `get_law_history` read committed
 `history/<slug>.json` files and are unaffected by clone depth.
 
-**Operational requirement: `reconciliation: attested` answers need the
-attestation notes ref.** `get_temporal_events` reports `reconciliation:
-attested` only when the serving clone carries the attestation registry —
-git notes under `refs/notes/temporal-attestations`, written by the sync
-gate (ADR-0012 point 2). A plain clone, fetch or pull does not transfer
-notes refs. Configure the refspec once per checkout so every later fetch
-brings the registry along:
+**Operational requirement: the attestation registry is part of corpus
+acquisition.** `get_temporal_events` reads `reconciliation` from git
+notes under `refs/notes/temporal-attestations`, written by the sync gate
+(ADR-0012 point 2). A plain clone, fetch or pull does not transfer notes
+refs — and `unattested` means "no proof was recorded for this state",
+never "this checkout did not fetch the proof". So a checkout whose
+registry was never synchronised **fails closed with a typed
+`AttestationError`** rather than serving a false `unattested`.
+
+`lovspor fetch-corpus` satisfies the contract on every supported clone
+and update: it configures the notes refspec (glob form, so a pre-gate
+origin without the ref does not break fetch/pull) and fetches it. A
+checkout acquired some other way — the hosted droplet's refresh path
+included — must be synchronised once by hand; every later fetch/pull
+then carries the registry:
 
 ```bash
 git -C <corpus-path> config --add remote.origin.fetch \
-  '+refs/notes/temporal-attestations:refs/notes/temporal-attestations'
+  '+refs/notes/temporal-attestations*:refs/notes/temporal-attestations*'
 git -C <corpus-path> fetch origin
 ```
-
-Without the ref every response is `unattested` — honest (the local clone
-holds no evidence) but weaker than the corpus actually supports. The
-hosted droplet's corpus-refresh path must include this refspec.
 
 ## Idempotency
 

@@ -375,20 +375,24 @@ Return the per-act change history as structured JSON. Each event has `date`, `co
 
 Return the source-derived temporal events of one act — amendments, insertions and repeals with their commencement facts, plus never-brought-into-force markers and the parser's non-fatal `problems` residue (ADR-0012). This is the event-level layer: it answers *"what amendment events does the source state for this act, and had each taken effect by a given date?"* It does **not** answer *"was this provision in force at date X?"* — that requires composing events into norm-identity-aware validity intervals, which no tool on this surface supports yet.
 
+**Scope:** acts (`lover`) only — the dataset ADR-0012's feasibility measurement covered. Asking about a forskrift is a typed unsupported-scope error, not an answer; regulation serving (T5) follows its own measurement.
+
+**One pinned state.** Every answer is derived from ONE resolved corpus commit — the committed HEAD for a live call, never the working tree — and names it: `corpus_commit` and `xml_hash` are always present, so the facts, the horizon and the reconciliation verdict all speak for the same immutable state. Derivation reads that commit's **raw** Markdown (frontmatter and heading included), so every event's `source_line` is a line of the corpus file itself.
+
 - **`slug`** — the act's slug, same as `get_law`.
 - **`section_id`** (optional) — narrow to events the parser attributed to that provision label: "events attributed to § X", *not* "all temporal events affecting § X". Events at enclosing scopes (chapters, parts) are never expanded into their provisions, and `problems` are never narrowed. An unknown section fails with the act's available ids.
-- **`recorded_at`** (optional, ISO `YYYY-MM-DD`) — derive from the corpus state at UTC end-of-day on that date: the events the corpus *knew* then. The response then carries `recorded_at`, `corpus_commit` and `xml_hash`, same contract as the other tools' historical mode. This is the one tool where a historical state *is* evaluated — because `valid_at` is a separate, explicit parameter, `recorded_at` never has to double as an evaluation date.
+- **`recorded_at`** (optional, ISO `YYYY-MM-DD`) — derive from the corpus state at UTC end-of-day on that date: the events the corpus *knew* then. The response then also echoes `recorded_at`. This is the one tool where a historical state *is* evaluated — because `valid_at` is a separate, explicit parameter, `recorded_at` never has to double as an evaluation date.
 - **`valid_at`** (optional, ISO `YYYY-MM-DD`) — evaluate every served event and marker at that date. Each then carries `commencement_status: in_effect | not_in_effect | indeterminate` and a nullable `status_reason` — *did this event take effect by `valid_at`?* For a repeal, `in_effect` means the repeal operates, which entails the provision does not. `indeterminate` is a verdict: the source supports no answer. Future dates are legal (see the horizon below). Both dates may be supplied together; each drives exactly one axis.
 
 **Knowledge horizon (ADR-0012).** Evaluation is bounded by the serving state's knowledge horizon — the author date of its corpus commit (HEAD's for a live call), echoed as `knowledge_horizon` whenever `valid_at` is present. A source-dated event answers for any `valid_at`; an open-ended fact (pending delegated commencement, relative or absent markers, never-in-force statements) evaluated *past* the horizon is `indeterminate` with `status_reason: beyond_knowledge_horizon` — an old state never certifies what was decided after it. Without `valid_at` no evaluation is performed and no clock is consulted.
 
-**Reconciliation.** Every successful response carries `reconciliation: attested | unattested`. `attested` means the build-time gate proved the parser-visible note count against the source XML for exactly this corpus state and parser version (the attestation registry travels as git notes under `refs/notes/temporal-attestations` in the corpus clone — fetch that ref to see `attested` locally). `unattested` means no such proof exists for this state — typically one predating the gate; the events are still the exact deterministic parse of that state's body.
+**Reconciliation.** Every successful response carries `reconciliation: attested | unattested`. `attested` means the build-time gate proved the parser-visible note count against the source XML for exactly this corpus state and parser version. `unattested` means **no recorded proof exists for this state** — typically one predating the gate; the events are still the exact deterministic parse of that state's body. The registry travels as git notes (`refs/notes/temporal-attestations`), which a plain `git clone`/`pull` never fetches — so a checkout whose registry was never synchronised gets a **typed error**, never a false `unattested`. `lovspor fetch-corpus` configures and fetches the ref on every supported clone and update (see `operations.md`).
 
-**Outcomes stay distinct:** unknown act (naming the requested date and `corpus_commit` when historical); unknown section (listing the act's inventory); `events: []` as a *successful* answer ("no amendment facts attributed"); and a typed derivation failure for a document whose commencement marker the parser does not recognise — never a partial or guessed answer.
+**Outcomes stay distinct:** unknown act (naming the requested date and `corpus_commit` when historical); unknown section (listing the act's inventory); `events: []` as a *successful* answer ("no amendment facts attributed"); a typed derivation failure for a document whose commencement marker the parser does not recognise — never a partial or guessed answer; and the scope error above for a forskrift.
 
 **Sample call:** `get_temporal_events("advokatloven", section_id="73", valid_at="2026-08-15")`
 
-**Sample output** (real output against `lovverk` HEAD of 2026-08-19; note the mixed note serving two events — an insertion with no commencement marker, evaluated `indeterminate`, and an announced pending amendment, `not_in_effect` within the horizon — while `problems` stay corpus-wide despite the narrowing):
+**Sample output** (real output against `lovverk` commit `ada6d5fa`, HEAD of a local clone from 2026-08-19; note the mixed note serving two events — an insertion with no commencement marker, evaluated `indeterminate`, and an announced pending amendment, `not_in_effect` within the horizon — while `problems` stay corpus-wide despite the narrowing, and `source_line` 710 is the actual line of `lover/advokatloven.md`):
 
 ```json
 {
@@ -410,7 +414,7 @@ Return the source-derived temporal events of one act — amendments, insertions 
       "valid_from": null,
       "raw_marker": null,
       "source_note": "Tilføyd ved lov [21 juni 2024 nr. 46](lov/2024-06-21-46). **Endres** ved lov [20 juni 2025 nr. 82](lov/2025-06-20-82) (i kraft fra den tid Kongen bestemmer).",
-      "source_line": 682,
+      "source_line": 710,
       "commencement_status": "indeterminate",
       "status_reason": null
     },
@@ -428,7 +432,7 @@ Return the source-derived temporal events of one act — amendments, insertions 
       "valid_from": null,
       "raw_marker": "(i kraft fra den tid Kongen bestemmer)",
       "source_note": "Tilføyd ved lov [21 juni 2024 nr. 46](lov/2024-06-21-46). **Endres** ved lov [20 juni 2025 nr. 82](lov/2025-06-20-82) (i kraft fra den tid Kongen bestemmer).",
-      "source_line": 682,
+      "source_line": 710,
       "commencement_status": "not_in_effect",
       "status_reason": null
     }
@@ -438,19 +442,21 @@ Return the source-derived temporal events of one act — amendments, insertions 
     {
       "kind": "mixed_kind_note",
       "provision": "§ 73",
-      "source_line": 682,
+      "source_line": 710,
       "raw_value": "Tilføyd ved lov [21 juni 2024 nr. 46](lov/2024-06-21-46). **Endres** ved lov [20 juni 2025 nr. 82](lov/2025-06-20-82) (i kraft fra den tid Kongen bestemmer)."
     },
     {
       "kind": "non_commencement_marker",
       "provision": "§ 74",
-      "source_line": 688,
+      "source_line": 716,
       "raw_value": "(tidligere § 73)"
     }
   ],
   "valid_at": "2026-08-15",
   "knowledge_horizon": "2026-08-19",
-  "reconciliation": "unattested"
+  "reconciliation": "unattested",
+  "corpus_commit": "ada6d5fa1d78fb84fe35d5a76b999af01ed5fc05",
+  "xml_hash": "82fb01e512dfb370a2a15be4fc7a6be0eb1f3ae164929dd10d85d4ca40334a91"
 }
 ```
 
