@@ -107,7 +107,11 @@ from lovspor.temporal import (
     evaluation_date_today,
 )
 from lovspor.temporal_attestation import AttestationError, read_attestation
-from lovspor.temporal_events import TemporalEventsRequest, compose_temporal_events
+from lovspor.temporal_events import (
+    TemporalEventsRequest,
+    compose_temporal_events,
+    derive_served_layer,
+)
 from lovspor.timetravel import (
     RevisionNotFoundError,
     RevisionResult,
@@ -809,14 +813,13 @@ class CorpusReader:
         head_sha, horizon = self._head_state()
         request = TemporalEventsRequest(
             horizon=horizon,
-            document_ref=record.slug,
             section_id=canonical,
             valid_at=valid_at,
         )
         result: dict[str, Any] = {"slug": record.slug}
         if canonical is not None:
             result["section_id"] = canonical
-        result.update(compose_temporal_events(body, request))
+        result.update(compose_temporal_events(derive_served_layer(body, record.slug), request))
         result["reconciliation"] = _reconciliation_for(self.corpus_path, head_sha)
         return result
 
@@ -3746,7 +3749,6 @@ class _SnapshotState:
         canonical = None if section_id is None else _require_section_id(target, body, section_id)
         request = TemporalEventsRequest(
             horizon=self.knowledge_horizon,
-            document_ref=record.slug,
             section_id=canonical,
             valid_at=valid_at,
         )
@@ -3755,7 +3757,7 @@ class _SnapshotState:
             result["mapped_from_slug"] = mapped_from
         if canonical is not None:
             result["section_id"] = canonical
-        result.update(compose_temporal_events(body, request))
+        result.update(compose_temporal_events(derive_served_layer(body, record.slug), request))
         repo = self._data.snapshot.repo_path
         result["reconciliation"] = _reconciliation_for(repo, self.corpus_commit)
         return self._stamp(result, record.xml_hash)

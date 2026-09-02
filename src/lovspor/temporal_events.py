@@ -1,14 +1,20 @@
 """Serving composition for the ``get_temporal_events`` tool (ADR-0012).
 
-Composes, from one raw corpus state body, the served temporal answer:
-:func:`~lovspor.temporal.derive_temporal_layer` (strict — an unrecognised
-marker is a typed derivation failure, never a partial layer) together with
-:func:`~lovspor.temporal.extract_never_in_force`, an optional mechanical
-``section_id`` narrowing, and an optional ``valid_at`` evaluation bounded
-by the serving state's knowledge horizon.
+Two pure steps, split so the first is cacheable per corpus state (M1:
+parse cost is first touch per document per state):
+
+* :func:`derive_served_layer` — strict
+  :func:`~lovspor.temporal.derive_temporal_layer` (an unrecognised marker
+  is a typed derivation failure, never a partial layer) composed with
+  :func:`~lovspor.temporal.extract_never_in_force`, from the **raw corpus
+  Markdown of the selected state** (ADR-0012 point 1) — so every
+  ``source_line`` is a line of the committed file;
+* :func:`compose_temporal_events` — per-request mechanical ``section_id``
+  narrowing and optional ``valid_at`` evaluation bounded by the serving
+  state's knowledge horizon, applied to a derived layer.
 
 The module is pure: no clock, no git, no corpus access. The caller
-resolves the state, supplies its body and horizon, and owns the
+resolves the state, supplies its raw body and horizon, and owns the
 state-level response fields (identifiers, evidence, ``reconciliation``).
 
 Narrowing is label matching, nothing else (ADR-0012 point 7): an event is
@@ -32,17 +38,38 @@ from lovspor.temporal import (
     AmendmentEvent,
     Evaluation,
     NeverInForceMarker,
+    TemporalProblem,
     derive_temporal_layer,
     evaluate_event,
     evaluate_never_in_force,
     extract_never_in_force,
 )
 
-__all__ = ["TemporalEventsRequest", "compose_temporal_events"]
+__all__ = [
+    "ServedTemporalLayer",
+    "TemporalEventsRequest",
+    "compose_temporal_events",
+    "derive_served_layer",
+]
+
+
+class ServedTemporalLayer(BaseModel):
+    """The evaluation-independent canonical composition for one state body.
+
+    Everything here is ``f(corpus_state)``: derived events, never-in-force
+    markers and the non-fatal problem residue, before any per-request
+    narrowing or evaluation — the unit the M1 per-state cache holds.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    events: list[AmendmentEvent]
+    never_in_force: list[NeverInForceMarker]
+    problems: list[TemporalProblem]
 
 
 class TemporalEventsRequest(BaseModel):
-    """One composition request against one resolved corpus state body.
+    """One composition request against one resolved corpus state.
 
     ``section_id`` is the canonical lookup form (``"8-7a"``), already
     validated by the caller to exist in the document. ``horizon`` is the
@@ -54,20 +81,36 @@ class TemporalEventsRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     horizon: date
-    document_ref: str | None = None
     section_id: str | None = None
     valid_at: date | None = None
 
 
-def compose_temporal_events(body: str, request: TemporalEventsRequest) -> dict[str, Any]:
-    """The served temporal answer for one state body.
+def derive_served_layer(body: str, document_ref: str | None = None) -> ServedTemporalLayer:
+    """Strictly derive the full served layer from one raw state body.
 
-    Raises :class:`~lovspor.errors.TemporalDerivationError` when strict
-    derivation fails — no partial layer is ever served (ADR-0012 point 3).
+    ``body`` must be the raw corpus Markdown of the selected state —
+    frontmatter and heading included, exactly the committed bytes — so the
+    derived ``source_line`` provenance points at the corpus file and the
+    input matches the build-time reconciliation gate's basis (ADR-0012
+    points 1 and 3). Raises
+    :class:`~lovspor.errors.TemporalDerivationError` when strict
+    derivation fails — no partial layer is ever served.
     """
-    layer = derive_temporal_layer(body, document_ref=request.document_ref, strict=True)
+    layer = derive_temporal_layer(body, document_ref=document_ref, strict=True)
+    return ServedTemporalLayer(
+        events=layer.events,
+        never_in_force=extract_never_in_force(body),
+        problems=layer.problems,
+    )
+
+
+def compose_temporal_events(
+    layer: ServedTemporalLayer,
+    request: TemporalEventsRequest,
+) -> dict[str, Any]:
+    """The served temporal answer for one derived layer and one request."""
     events = _narrowed(layer.events, request.section_id)
-    markers = _narrowed(extract_never_in_force(body), request.section_id)
+    markers = _narrowed(layer.never_in_force, request.section_id)
     result: dict[str, Any] = {
         "temporal_parser_version": TEMPORAL_PARSER_VERSION,
         "events": [_payload(event, evaluate_event, request) for event in events],
