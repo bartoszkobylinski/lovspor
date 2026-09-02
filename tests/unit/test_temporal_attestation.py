@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import lovspor.sync.orchestrator as orchestrator_module
+import lovspor.temporal_attestation as attestation_module
 from lovspor.errors import TemporalDerivationError
 from lovspor.storage.manifest import ManifestRecord
 from lovspor.sync.orchestrator import (
@@ -294,6 +295,89 @@ def test_fetch_attestations_tolerates_a_remote_without_the_ref(
     )
 
     fetch_attestations(clone)  # bootstrap: no ref yet, no error
+
+
+def test_fetch_attestations_fails_closed_when_remote_probe_fails(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _ = repo
+    monkeypatch.setattr(
+        attestation_module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            128,
+            stdout="",
+            stderr="authentication failed\n",
+        ),
+    )
+
+    with pytest.raises(AttestationError, match="cannot reach origin.*authentication failed"):
+        fetch_attestations(path)
+
+
+def test_fetch_attestations_fails_closed_when_fetch_fails(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _ = repo
+    results = iter(
+        [
+            subprocess.CompletedProcess([], 0, stdout="ref exists\n", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr="non-fast-forward\n"),
+        ],
+    )
+    monkeypatch.setattr(
+        attestation_module.subprocess,
+        "run",
+        lambda *args, **kwargs: next(results),
+    )
+
+    with pytest.raises(AttestationError, match="failed to fetch.*non-fast-forward"):
+        fetch_attestations(path)
+
+
+def test_write_attestation_surfaces_git_notes_failure(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, sha = repo
+    monkeypatch.setattr(attestation_module, "_read_entries", lambda *_args: [])
+    monkeypatch.setattr(
+        attestation_module.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            1,
+            stdout="",
+            stderr="cannot lock ref\n",
+        ),
+    )
+
+    with pytest.raises(AttestationError, match="failed to record.*cannot lock ref"):
+        write_attestation(path, _attestation(sha))
+
+
+def test_read_attestation_surfaces_unexpected_git_notes_failure(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, sha = repo
+    results = iter(
+        [
+            subprocess.CompletedProcess([], 0, stdout=f"{sha}\n", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr="bad notes ref\n"),
+        ],
+    )
+    monkeypatch.setattr(
+        attestation_module.subprocess,
+        "run",
+        lambda *args, **kwargs: next(results),
+    )
+
+    with pytest.raises(AttestationError, match="registry unreadable.*bad notes ref"):
+        read_attestation(path, sha, 1)
 
 
 def test_attest_hook_refuses_a_carried_forward_document(repo: tuple[Path, str]) -> None:
