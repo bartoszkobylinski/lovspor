@@ -29,6 +29,7 @@ from lovspor.temporal_attestation import (
     fetch_attestations,
     read_attestation,
     reconcile_corpus,
+    registry_synchronised,
     write_attestation,
 )
 
@@ -782,3 +783,38 @@ def test_attest_hook_skips_non_current_records_without_stopping(
     recorded = read_attestation(path, sha, TEMPORAL_PARSER_VERSION)
     assert recorded is not None
     assert recorded.documents_reconciled == 1
+
+
+# ---------- registry_synchronised (ADR-0012 point 2c, review #230) ----------
+
+
+def test_a_repo_without_origin_is_its_own_registry_home(repo: tuple[Path, str]) -> None:
+    path, _sha = repo
+
+    assert registry_synchronised(path)
+
+
+def test_a_one_shot_notes_fetch_counts_as_synchronised(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    path, sha = repo
+    write_attestation(
+        path,
+        TemporalAttestation(
+            corpus_commit=sha,
+            parser_version=1,
+            documents_reconciled=1,
+            notes_total=0,
+            events_total=0,
+            attested_at=datetime(2026, 9, 2, 12, 0, tzinfo=UTC),
+        ),
+    )
+    clone = tmp_path / "clone"
+    _run_git(tmp_path, "clone", str(path), str(clone))
+    assert not registry_synchronised(clone)
+
+    fetch_attestations(clone)
+
+    assert registry_synchronised(clone)
+    assert read_attestation(clone, sha, 1) is not None

@@ -6,16 +6,25 @@ same posture as the sync tests, so clone/pull behaviour is tested for real.
 
 import json
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from lovspor.corpus_fetch import (
+    ATTESTATION_FETCH_REFSPEC,
     CorpusFetchError,
     FetchResult,
     default_corpus_path,
     fetch_corpus,
+)
+from lovspor.temporal_attestation import (
+    ATTESTATION_NOTES_REF,
+    TemporalAttestation,
+    read_attestation,
+    registry_synchronised,
+    write_attestation,
 )
 
 
@@ -165,9 +174,9 @@ def test_fetch_corpus_uses_git_argv_without_shell(
 ) -> None:
     calls: list[dict[str, object]] = []
 
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append({"args": args, "kwargs": kwargs})
-        return subprocess.CompletedProcess(args=["git"], returncode=0)
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
@@ -175,17 +184,13 @@ def test_fetch_corpus_uses_git_argv_without_shell(
     injected_remote = "https://example.invalid/lovverk.git;touch injected"
     fetch_corpus(injected_dest, repo_url=injected_remote)
 
-    assert calls == [
-        {
-            "args": (["git", "clone", "--depth", "1", injected_remote, str(injected_dest)],),
-            "kwargs": {
-                "cwd": tmp_path,
-                "capture_output": True,
-                "text": True,
-                "check": True,
-            },
-        },
+    assert [call["args"][0] for call in calls] == [
+        ["git", "clone", "--depth", "1", injected_remote, str(injected_dest)],
+        ["git", "config", "--get-all", "remote.origin.fetch"],
+        ["git", "config", "--add", "remote.origin.fetch", ATTESTATION_FETCH_REFSPEC],
+        ["git", "fetch", "origin"],
     ]
+    assert all("shell" not in call["kwargs"] for call in calls)
     assert not (tmp_path / "injected").exists()
 
 
@@ -286,3 +291,98 @@ def test_fetch_corpus_full_history_on_already_full_clone_is_plain_update(
     assert result.action == "updated"
     assert _is_shallow_clone(dest) is False
     assert _commit_count(dest) == 2
+
+
+# --- attestation registry transport (ADR-0012 point 2c) ---
+
+
+def _origin_head(path: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True, text=True
+    )
+    return result.stdout.strip()
+
+
+def _attest_head(origin: Path) -> str:
+    head = _origin_head(origin)
+    write_attestation(
+        origin,
+        TemporalAttestation(
+            corpus_commit=head,
+            parser_version=1,
+            documents_reconciled=1,
+            notes_total=0,
+            events_total=0,
+            attested_at=datetime(2026, 9, 2, 12, 0, tzinfo=UTC),
+        ),
+    )
+    return head
+
+
+def _has_notes_ref(clone: Path) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--quiet", "--verify", ATTESTATION_NOTES_REF],
+        cwd=clone,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def test_fetch_corpus_clone_carries_the_attestation_registry(tmp_path: Path) -> None:
+    """The review-#230 acceptance test: an attested origin, cloned through
+    the actual fetch_corpus API, must serve its proof — never read a real
+    remote attestation as a false local absence."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    head = _attest_head(origin)
+    dest = tmp_path / "clone"
+
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    assert registry_synchronised(dest)
+    assert _has_notes_ref(dest)
+    assert read_attestation(dest, head, 1) is not None
+
+
+def test_fetch_corpus_update_synchronises_a_legacy_clone(tmp_path: Path) -> None:
+    """A pre-refspec clone gains the registry on its next supported update."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    dest = tmp_path / "clone"
+    _git(["clone", _url(origin), str(dest)], cwd=tmp_path)
+    assert not registry_synchronised(dest)
+
+    head = _attest_head(origin)
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    assert registry_synchronised(dest)
+    assert read_attestation(dest, head, 1) is not None
+
+
+def test_fetch_corpus_survives_an_origin_without_the_notes_ref(tmp_path: Path) -> None:
+    """Bootstrap safety: the configured refspec must not brick fetch/pull
+    against an origin that has no attestation ref yet (the glob form)."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    dest = tmp_path / "clone"
+
+    cloned = fetch_corpus(dest, repo_url=_url(origin))
+    updated = fetch_corpus(dest, repo_url=_url(origin))
+
+    assert cloned.action == "cloned"
+    assert updated.action == "unchanged"
+    assert registry_synchronised(dest)
+    assert not _has_notes_ref(dest)
+
+
+def test_plain_clone_is_not_registry_synchronised(tmp_path: Path) -> None:
+    """A clone made outside the supported path must fail closed, not read
+    the remote's proof as unattested (ADR-0012 point 2c)."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    _attest_head(origin)
+    dest = tmp_path / "clone"
+    _git(["clone", _url(origin), str(dest)], cwd=tmp_path)
+
+    assert not registry_synchronised(dest)

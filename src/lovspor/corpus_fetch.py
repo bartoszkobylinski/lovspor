@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.errors import LovsporError
+from lovspor.temporal_attestation import ATTESTATION_FETCH_REFSPEC, ATTESTATION_NOTES_REF
 
 LOVVERK_REPO_URL = "https://github.com/bartoszkobylinski/lovverk.git"
 
@@ -123,6 +124,21 @@ def _is_shallow(dest: Path) -> bool:
     return _git_capture(["rev-parse", "--is-shallow-repository"], dest) == "true"
 
 
+def _ensure_attestation_refspec(dest: Path) -> None:
+    """Make every future fetch/pull transport the attestation registry.
+
+    ADR-0012 point 2c: the registry travels as git notes, which a plain
+    clone or pull never fetches — so without this refspec a real remote
+    attestation reads as a false local absence. Configuring it here makes
+    registry synchronisation part of the supported acquisition contract
+    (idempotent: the refspec is added once). The glob form is deliberate —
+    see ``ATTESTATION_FETCH_REFSPEC``.
+    """
+    existing = _git_capture(["config", "--get-all", "remote.origin.fetch"], dest) or ""
+    if ATTESTATION_NOTES_REF not in existing:
+        _git(["config", "--add", "remote.origin.fetch", ATTESTATION_FETCH_REFSPEC], cwd=dest)
+
+
 def fetch_corpus(
     dest: Path,
     *,
@@ -137,6 +153,12 @@ def fetch_corpus(
     The result reports ``cloned``, ``updated`` (a pull moved HEAD), or
     ``unchanged`` (already current).
 
+    Both paths make the temporal attestation registry part of the supported
+    acquisition contract (ADR-0012 point 2c): the notes refspec is
+    configured so every fetch/pull transports ``refs/notes/
+    temporal-attestations``, and a fresh clone fetches it immediately —
+    a real remote attestation must never read as a false local absence.
+
     By default the clone is shallow (``--depth 1``) to keep the download
     small — sufficient for current-law tools, but the git-log-based
     time-machine tools (``get_law_at``, ``diff_law_versions``) then reach
@@ -149,6 +171,7 @@ def fetch_corpus(
     if _is_corpus_clone(dest, repo_url):
         if full_history and _is_shallow(dest):
             _git(["fetch", "--unshallow"], cwd=dest)
+        _ensure_attestation_refspec(dest)
         before = _git_capture(["rev-parse", "HEAD"], dest)
         _git(["pull", "--ff-only"], cwd=dest)
         after = _git_capture(["rev-parse", "HEAD"], dest)
@@ -163,4 +186,6 @@ def fetch_corpus(
     if not full_history:
         clone_args[1:1] = ["--depth", "1"]
     _git(clone_args, cwd=dest.parent)
+    _ensure_attestation_refspec(dest)
+    _git(["fetch", "origin"], cwd=dest)
     return FetchResult(path=dest.resolve(), action="cloned")
