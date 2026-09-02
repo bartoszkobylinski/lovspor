@@ -17,7 +17,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.errors import LovsporError
-from lovspor.temporal_attestation import ATTESTATION_FETCH_REFSPEC, ATTESTATION_NOTES_REF
+from lovspor.temporal_attestation import (
+    ATTESTATION_FETCH_REFSPEC,
+    ATTESTATION_NOTES_REF,
+    refspec_transports_registry,
+)
 
 LOVVERK_REPO_URL = "https://github.com/bartoszkobylinski/lovverk.git"
 
@@ -133,9 +137,24 @@ def _ensure_attestation_refspec(dest: Path) -> None:
     registry synchronisation part of the supported acquisition contract
     (idempotent: the refspec is added once). The glob form is deliberate —
     see ``ATTESTATION_FETCH_REFSPEC``.
+
+    Repairs, not merely adds: a refspec that only MENTIONS the notes ref
+    on one side (an unrelated branch mapped into the notes namespace, or
+    the notes ref fetched out to a branch) does not transport the
+    registry, and its bare form breaks every later fetch/pull against an
+    origin lacking its source ref. Such lines are removed as
+    misconfigurations of this contract's namespace before the canonical
+    refspec is installed (codex-tests, PR #230).
     """
     existing = _git_capture(["config", "--get-all", "remote.origin.fetch"], dest) or ""
-    if ATTESTATION_NOTES_REF not in existing:
+    lines = existing.splitlines()
+    for line in lines:
+        if ATTESTATION_NOTES_REF in line and not refspec_transports_registry(line):
+            _git(
+                ["config", "--fixed-value", "--unset-all", "remote.origin.fetch", line],
+                cwd=dest,
+            )
+    if not any(refspec_transports_registry(line) for line in lines):
         _git(["config", "--add", "remote.origin.fetch", ATTESTATION_FETCH_REFSPEC], cwd=dest)
 
 

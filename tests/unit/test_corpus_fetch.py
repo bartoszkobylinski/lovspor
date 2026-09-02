@@ -360,6 +360,39 @@ def test_fetch_corpus_update_synchronises_a_legacy_clone(tmp_path: Path) -> None
     assert read_attestation(dest, head, 1) is not None
 
 
+@pytest.mark.parametrize(
+    "misleading_refspec",
+    [
+        "+refs/heads/attestations:refs/notes/temporal-attestations",
+        "+refs/notes/temporal-attestations:refs/heads/attestation-copy",
+    ],
+)
+def test_fetch_corpus_repairs_refspec_that_only_mentions_attestation_ref(
+    tmp_path: Path,
+    misleading_refspec: str,
+) -> None:
+    """A legacy clone is synchronised only when both refspec sides cover notes.
+
+    A destination-only or source-only textual mention must not prevent the
+    supported fetch path from installing its canonical transport refspec.
+    """
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    head = _attest_head(origin)
+    dest = tmp_path / "clone"
+    _git(["clone", _url(origin), str(dest)], cwd=tmp_path)
+    _git(
+        ["config", "--add", "remote.origin.fetch", misleading_refspec],
+        cwd=dest,
+    )
+    assert not registry_synchronised(dest)
+
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    assert registry_synchronised(dest)
+    assert read_attestation(dest, head, 1) is not None
+
+
 def test_fetch_corpus_survives_an_origin_without_the_notes_ref(tmp_path: Path) -> None:
     """Bootstrap safety: the configured refspec must not brick fetch/pull
     against an origin that has no attestation ref yet (the glob form)."""

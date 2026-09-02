@@ -114,13 +114,13 @@ def registry_synchronised(repo: Path) -> bool:
         return True
     refspecs = _read(["config", "--get-all", "remote.origin.fetch"])
     if refspecs.returncode == 0 and any(
-        _refspec_transports_registry(line) for line in refspecs.stdout.splitlines()
+        refspec_transports_registry(line) for line in refspecs.stdout.splitlines()
     ):
         return True
     return _read(["rev-parse", "--quiet", "--verify", ATTESTATION_NOTES_REF]).returncode == 0
 
 
-def _refspec_transports_registry(spec: str) -> bool:
+def refspec_transports_registry(spec: str) -> bool:
     """True when one fetch refspec really transports the attestation ref.
 
     Both sides must cover it: the SOURCE side is what gets fetched from
