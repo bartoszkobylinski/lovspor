@@ -270,7 +270,39 @@ def test_section_narrowing_filters_and_never_expands_scopes(
 
     assert result["section_id"] == "1-1"
     assert [event["provision"] for event in result["events"]] == ["§ 1-1"]
+
     assert result["never_in_force"] == []
+
+
+def test_historical_renamed_slug_uses_and_reports_the_state_slug(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """A current alias resolves section text and events in the old state."""
+    repo, _sha1, _sha2 = corpus
+    _run_git(repo, "mv", "lover/testloven.md", "lover/testloven-tl.md")
+    manifest = json.loads((repo / "manifest.json").read_text())
+    manifest["documents"]["doc-a"]["slug"] = "testloven-tl"
+    manifest["documents"]["doc-a"]["markdown_path"] = "lover/testloven-tl.md"
+    (repo / "manifest.json").write_text(json.dumps(manifest))
+    _commit_all(repo, "rename testloven", "2026-05-20T12:00:00Z")
+
+    result = _tool_fn(repo)(
+        slug="testloven-tl",
+        section_id="1-1",
+        recorded_at="2026-05-05",
+    )
+
+    assert result["slug"] == "testloven"
+    assert result["mapped_from_slug"] == "testloven-tl"
+    assert result["section_id"] == "1-1"
+    assert [event["provision"] for event in result["events"]] == ["§ 1-1"]
+
+    with pytest.raises(CorpusNotFoundError, match="section '5-12' not found in 'testloven'"):
+        _tool_fn(repo)(
+            slug="testloven-tl",
+            section_id="5-12",
+            recorded_at="2026-05-05",
+        )
 
 
 # ---------- the two axes (ADR-0012 point 8) ----------
@@ -482,6 +514,48 @@ def test_derivation_runs_once_per_document_per_state(
     assert calls == ["testloven"]
 
 
+def test_derivation_cache_is_keyed_by_document_slug(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _sha1, _sha2 = corpus
+    calls: list[str | None] = []
+    original = mcp_module.derive_served_layer
+
+    def spy(body: str, document_ref: str | None = None):  # type: ignore[no-untyped-def]
+        calls.append(document_ref)
+        return original(body, document_ref)
+
+    monkeypatch.setattr(mcp_module, "derive_served_layer", spy)
+    fn = _tool_fn(repo)
+
+    testloven = fn(slug="testloven")
+    tomloven = fn(slug="tomloven")
+    repeated = fn(slug="testloven")
+
+    assert calls == ["testloven", "tomloven"]
+    assert testloven["events"]
+    assert tomloven["events"] == []
+    assert repeated["events"] == testloven["events"]
+
+
+def test_temporal_events_missing_committed_body_reports_state_damage(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _sha1, _sha2 = corpus
+    _run_git(repo, "rm", "lover/testloven.md")
+    damaged_sha = _commit_all(repo, "remove manifest body", "2026-05-20T12:00:00Z")
+
+    with pytest.raises(mcp_module.StateIntegrityError) as exc_info:
+        _tool_fn(repo)(slug="testloven")
+
+    message = str(exc_info.value)
+    assert damaged_sha in message
+    assert "'testloven' as current" in message
+    assert "'lover/testloven.md' is not in the commit's tree" in message
+    assert "repository damage, not historical absence" in message
+
+
 def test_valid_at_rejects_invalid_calendar_date(corpus: tuple[Path, str, str]) -> None:
     repo, _sha1, _sha2 = corpus
 
@@ -501,6 +575,31 @@ def test_malformed_live_head_metadata_is_a_typed_evidence_failure(
         stdout = "sha-without-author-date\n"
 
     monkeypatch.setattr(mcp_module.subprocess, "run", lambda *args, **kwargs: MalformedGitResult())
+
+    with pytest.raises(AttestationError, match="identity and knowledge horizon are unreadable"):
+        _tool_fn(repo)(slug="testloven")
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        "deadbeef 2026-05-10T12:00:00+00:00\n",
+        "deadbeef\nunexpected-third-line\n2026-05-10T12:00:00+00:00\n",
+    ],
+)
+def test_live_head_rejects_non_two_line_git_wire_format(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+) -> None:
+    repo, _sha1, _sha2 = corpus
+
+    class MalformedGitResult:
+        pass
+
+    result = MalformedGitResult()
+    result.stdout = stdout
+    monkeypatch.setattr(mcp_module.subprocess, "run", lambda *args, **kwargs: result)
 
     with pytest.raises(AttestationError, match="identity and knowledge horizon are unreadable"):
         _tool_fn(repo)(slug="testloven")
