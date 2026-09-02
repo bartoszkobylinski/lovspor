@@ -17,15 +17,28 @@ import pytest
 import lovspor.mcp as mcp_module
 import lovspor.temporal_events as temporal_events_module
 from lovspor.errors import TemporalDerivationError
-from lovspor.mcp import CorpusNotFoundError, build_server
+from lovspor.mcp import CorpusNotFoundError, TemporalScopeError, build_server
 from lovspor.temporal import TEMPORAL_PARSER_VERSION
 from lovspor.temporal_attestation import (
     ATTESTATION_NOTES_REF,
     AttestationError,
     TemporalAttestation,
+    fetch_attestations,
     write_attestation,
 )
+from lovspor.temporal_events import derive_served_layer
 from tests.unit.test_mcp_recorded_at import _commit_all, _doc, _manifest, _record, _run_git
+
+
+def _forskrift_record(slug: str, xml_hash: str) -> dict[str, object]:
+    """A central-regulation record — outside ADR-0012's measured scope."""
+    return {
+        **_record(slug, xml_hash),
+        "doc_type": "forskrift",
+        "source_dataset": "gjeldende-sentrale-forskrifter",
+        "markdown_path": f"forskrifter/{slug}.md",
+    }
+
 
 PENDING_NOTE = (
     "> **Vert endra** ved lov [19 juni 2026 nr. 48](lov/2026-06-19-48) "
@@ -90,12 +103,15 @@ def corpus(tmp_path: Path) -> tuple[Path, str, str]:
     sha1 = _commit_all(repo, "sync 1", "2026-05-01T12:00:00Z")
     (repo / "lover" / "testloven.md").write_text(_doc("Testloven", TESTLOVEN_STATE_2))
     (repo / "lover" / "feilloven.md").write_text(_doc("Feilloven", FEILLOVEN))
+    (repo / "forskrifter").mkdir()
+    (repo / "forskrifter" / "testforskriften.md").write_text(_doc("Testforskriften", TOMLOVEN))
     (repo / "manifest.json").write_text(
         _manifest(
             {
                 "doc-a": _record("testloven", "hash-t2"),
                 "doc-b": _record("tomloven", "hash-o1"),
                 "doc-c": _record("feilloven", "hash-f1"),
+                "doc-d": _forskrift_record("testforskriften", "hash-fs1"),
             },
         ),
     )
@@ -129,8 +145,11 @@ def _pending_events(result: dict) -> list[dict]:  # type: ignore[type-arg]
 
 
 def test_live_serves_events_markers_and_reconciliation(corpus: tuple[Path, str, str]) -> None:
-    repo, _sha1, _sha2 = corpus
+    repo, _sha1, sha2 = corpus
     result = _tool_fn(repo)(slug="testloven")
+
+    assert result["corpus_commit"] == sha2
+    assert result["xml_hash"] == "hash-t2"
 
     assert result["slug"] == "testloven"
     assert result["temporal_parser_version"] == TEMPORAL_PARSER_VERSION
@@ -141,7 +160,6 @@ def test_live_serves_events_markers_and_reconciliation(corpus: tuple[Path, str, 
     assert [marker["provision"] for marker in result["never_in_force"]] == ["§ 8-7 a"]
     assert result["reconciliation"] == "unattested"
     assert "recorded_at" not in result
-    assert "corpus_commit" not in result
 
 
 def test_attested_head_serves_attested(corpus: tuple[Path, str, str]) -> None:
@@ -357,3 +375,132 @@ def test_evaluation_receives_valid_at_and_the_states_horizon(
     calls.clear()
     fn(slug="testloven")
     assert calls == []
+
+
+# ---------- review #230: state identity, provenance, scope, transport ----------
+
+
+def test_live_serves_the_committed_state_not_the_worktree(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Blocker 2 reproducer: a dirty worktree must not leak into an answer
+    whose reconciliation speaks for the committed HEAD."""
+    repo, _sha1, sha2 = corpus
+    dirty = _doc("Testloven", TESTLOVEN_STATE_2 + f"\n### § 9-1. Ny\n\nTekst.\n\n{DATED_NOTE}")
+    (repo / "lover" / "testloven.md").write_text(dirty)
+
+    result = _tool_fn(repo)(slug="testloven")
+
+    assert result["corpus_commit"] == sha2
+    assert all(event["provision"] != "§ 9-1" for event in result["events"])
+
+
+def test_live_missing_worktree_file_still_serves_the_committed_facts(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """The worse variant from the review: a deleted worktree file must not
+    become a successful empty answer under an attested HEAD."""
+    repo, _sha1, _sha2 = corpus
+    (repo / "lover" / "testloven.md").unlink()
+
+    result = _tool_fn(repo)(slug="testloven")
+
+    assert {event["provision"] for event in result["events"]} == {
+        "Kapittel 1. Innleiande føresegner",
+        "§ 1-1",
+    }
+
+
+def test_source_line_is_the_committed_file_line(corpus: tuple[Path, str, str]) -> None:
+    """Blocker 3: derivation reads the raw committed Markdown, so the served
+    source_line provenance is a line of the corpus file — frontmatter and
+    H1 included — and matches direct derivation from the raw blob."""
+    repo, _sha1, _sha2 = corpus
+    raw = _doc("Testloven", TESTLOVEN_STATE_2)
+    dated_line = raw.splitlines().index(DATED_NOTE.rstrip("\n")) + 1
+
+    result = _tool_fn(repo)(slug="testloven", section_id="1-1")
+
+    assert [event["source_line"] for event in result["events"]] == [dated_line]
+    direct = derive_served_layer(raw, "testloven")
+    assert [e.source_line for e in direct.events if e.provision == "§ 1-1"] == [dated_line]
+
+
+def test_forskrift_is_a_loud_unsupported_scope_outcome(
+    corpus: tuple[Path, str, str],
+) -> None:
+    """Blocker 4: T5 is unmeasured — a regulation must be refused with the
+    scope stated, on both axes, never silently served."""
+    repo, _sha1, _sha2 = corpus
+    fn = _tool_fn(repo)
+
+    with pytest.raises(TemporalScopeError, match="T5"):
+        fn(slug="testforskriften")
+    with pytest.raises(TemporalScopeError, match="gjeldende-lover"):
+        fn(slug="testforskriften", recorded_at="2026-05-10")
+
+
+def test_unsynchronised_clone_fails_closed_not_unattested(
+    corpus: tuple[Path, str, str],
+    tmp_path: Path,
+) -> None:
+    """Blocker 1, serving side: a plain clone of an attested origin must not
+    read the remote proof as a false local absence."""
+    repo, _sha1, sha2 = corpus
+    _attest(repo, sha2)
+    clone = tmp_path / "plain-clone"
+    _run_git(tmp_path, "clone", str(repo), str(clone))
+
+    with pytest.raises(AttestationError, match="not synchronised"):
+        _tool_fn(clone)(slug="testloven")
+
+    fetch_attestations(clone)
+    assert _tool_fn(clone)(slug="testloven")["reconciliation"] == "attested"
+
+
+def test_derivation_runs_once_per_document_per_state(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M1 (review major 5): parse cost is first touch per document per
+    state — repeat calls, on either axis, hit the per-state cache."""
+    repo, _sha1, _sha2 = corpus
+    calls: list[str | None] = []
+    original = mcp_module.derive_served_layer
+
+    def spy(body: str, document_ref: str | None = None):  # type: ignore[no-untyped-def]
+        calls.append(document_ref)
+        return original(body, document_ref)
+
+    monkeypatch.setattr(mcp_module, "derive_served_layer", spy)
+    fn = _tool_fn(repo)
+
+    fn(slug="testloven")
+    fn(slug="testloven", valid_at="2026-05-09")
+    fn(slug="testloven", recorded_at="2026-05-10", valid_at="2026-05-09")
+
+    assert calls == ["testloven"]
+
+
+def test_valid_at_rejects_invalid_calendar_date(corpus: tuple[Path, str, str]) -> None:
+    repo, _sha1, _sha2 = corpus
+
+    with pytest.raises(ValueError, match="valid_at must be ISO date"):
+        _tool_fn(repo)(slug="testloven", valid_at="2026-02-30")
+
+
+def test_malformed_live_head_metadata_is_a_typed_evidence_failure(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful git invocation with an invalid wire shape is still an
+    unreadable serving-state identity, never an implementation exception."""
+    repo, _sha1, _sha2 = corpus
+
+    class MalformedGitResult:
+        stdout = "sha-without-author-date\n"
+
+    monkeypatch.setattr(mcp_module.subprocess, "run", lambda *args, **kwargs: MalformedGitResult())
+
+    with pytest.raises(AttestationError, match="identity and knowledge horizon are unreadable"):
+        _tool_fn(repo)(slug="testloven")

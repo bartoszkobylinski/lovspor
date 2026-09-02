@@ -106,8 +106,14 @@ from lovspor.temporal import (
     build_notice,
     evaluation_date_today,
 )
-from lovspor.temporal_attestation import AttestationError, read_attestation
+from lovspor.temporal_attestation import (
+    ATTESTATION_NOTES_REF,
+    AttestationError,
+    read_attestation,
+    registry_synchronised,
+)
 from lovspor.temporal_events import (
+    ServedTemporalLayer,
     TemporalEventsRequest,
     compose_temporal_events,
     derive_served_layer,
@@ -776,13 +782,14 @@ class CorpusReader:
         loaded: dict[str, Any] = json.loads(history_path.read_text(encoding="utf-8"))
         return loaded
 
-    def _head_state(self) -> tuple[str, date]:
-        """Full sha and author date (UTC day) of the live corpus HEAD.
+    def _head_ref(self) -> CorpusStateRef:
+        """The live corpus HEAD as a resolved state: full sha + author date.
 
         The live serving state's identity — the attestation key — and its
         knowledge horizon (ADR-0012 point 5: "for a live call, of the
-        current head"). An unreadable HEAD is a broken evidence channel:
-        typed failure, never a guessed horizon or a silent ``unattested``.
+        current head"). A HEAD that cannot be read, or whose metadata does
+        not parse, is a broken evidence channel: typed failure, never a
+        guessed horizon or a silent ``unattested``.
         """
         try:
             result = subprocess.run(
@@ -792,13 +799,32 @@ class CorpusReader:
                 text=True,
                 check=True,
             )
-        except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+            sha, author_iso = result.stdout.strip("\n").split("\n", maxsplit=1)
+            commit_date = datetime.fromisoformat(author_iso.strip())
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as exc:
             raise AttestationError(
                 f"cannot resolve the live corpus HEAD under {self.corpus_path}: "
                 f"the serving state's identity and knowledge horizon are unreadable",
             ) from exc
-        sha, author_iso = result.stdout.strip("\n").split("\n", maxsplit=1)
-        return sha, datetime.fromisoformat(author_iso).astimezone(UTC).date()
+        return CorpusStateRef(sha=sha, commit_date=commit_date)
+
+    def at_head_state(self) -> "_SnapshotState":
+        """The committed HEAD as a pinned state view, for live temporal serving.
+
+        Live ``get_temporal_events`` must bind facts, horizon and
+        attestation to ONE immutable commit; the working tree can be
+        dirty, mid-refresh, or missing a file, and none of that may leak
+        into an evidence-bearing answer (review #230 blocker 2). HEAD is
+        re-resolved per call so a corpus refresh is picked up; the
+        per-commit state cache makes the repeat visits cheap.
+        """
+        ref = self._head_ref()
+        return _SnapshotState(
+            self._state_data(ref),
+            None,
+            lambda slug: None,
+            lambda: list(self._load_slug_index()),
+        )
 
     def get_temporal_events(
         self,
@@ -806,22 +832,8 @@ class CorpusReader:
         section_id: str | None = None,
         valid_at: date | None = None,
     ) -> dict[str, Any]:
-        """The served temporal layer of one act at the live corpus state."""
-        record, epoch = self._resolve_current(slug)
-        body = self._body_for_record(record, epoch)
-        canonical = None if section_id is None else _require_section_id(slug, body, section_id)
-        head_sha, horizon = self._head_state()
-        request = TemporalEventsRequest(
-            horizon=horizon,
-            section_id=canonical,
-            valid_at=valid_at,
-        )
-        result: dict[str, Any] = {"slug": record.slug}
-        if canonical is not None:
-            result["section_id"] = canonical
-        result.update(compose_temporal_events(derive_served_layer(body, record.slug), request))
-        result["reconciliation"] = _reconciliation_for(self.corpus_path, head_sha)
-        return result
+        """The served temporal layer of one act at the committed HEAD state."""
+        return self.at_head_state().get_temporal_events(slug, section_id, valid_at)
 
     def at_state(self, recorded_at: str) -> "_SnapshotState":
         """Resolve ``recorded_at`` to a historical state view (ADR-0011).
@@ -837,6 +849,15 @@ class CorpusReader:
         """
         target = _parse_recorded_at(recorded_at)
         ref = resolve_corpus_state(self.corpus_path, target)
+        return _SnapshotState(
+            self._state_data(ref),
+            target,
+            lambda slug: self._lineage_path_at(slug, target),
+            lambda: list(self._load_slug_index()),
+        )
+
+    def _state_data(self, ref: CorpusStateRef) -> "_SnapshotData":
+        """Per-commit caches, shared by every view resolving to ``ref``."""
         with self._lock:
             data = self._snapshot_states.get(ref.sha)
             if data is None:
@@ -844,12 +865,7 @@ class CorpusReader:
                     self._snapshot_states.pop(next(iter(self._snapshot_states)))
                 data = _SnapshotData(CorpusSnapshot(self.corpus_path, ref.sha), ref)
                 self._snapshot_states[ref.sha] = data
-        return _SnapshotState(
-            data,
-            target,
-            lambda slug: self._lineage_path_at(slug, target),
-            lambda: list(self._load_slug_index()),
-        )
+        return data
 
     def _lineage_path_at(self, slug: str, target: date) -> str | None:
         """Path the CURRENT ``slug``'s document had at UTC end-of-day
@@ -3582,13 +3598,76 @@ def _reconciliation_for(repo: Path, corpus_commit: str) -> str:
     """The ADR-0012 point 2 response field for one served state.
 
     ``attested`` exactly when a recorded attestation covers
-    ``corpus_commit`` under the serving parser version; a readable
-    registry with no entry is ``unattested``. An unreadable or corrupt
-    registry raises :class:`AttestationError` — a broken evidence channel
-    must never impersonate absence of evidence.
+    ``corpus_commit`` under the serving parser version; a readable,
+    synchronised registry with no entry is ``unattested``. Two channel
+    conditions fail closed as :class:`AttestationError` instead: an
+    unreadable or corrupt registry, and a checkout whose registry was
+    never synchronised (a plain clone does not fetch ``refs/notes/*``,
+    so its local absence says nothing about the remote proof) — neither
+    may impersonate absence of evidence (ADR-0012 point 2c).
     """
+    if not registry_synchronised(repo):
+        raise AttestationError(
+            f"attestation registry is not synchronised in this checkout "
+            f"({repo}): plain clones do not fetch {ATTESTATION_NOTES_REF}, so "
+            f"a local read cannot tell 'no proof recorded' from 'proof never "
+            f"fetched'. Acquire the corpus with 'lovspor fetch-corpus' (which "
+            f"configures the notes refspec), or fetch the ref once, and retry.",
+        )
     entry = read_attestation(repo, corpus_commit, TEMPORAL_PARSER_VERSION)
     return "attested" if entry is not None else "unattested"
+
+
+_TEMPORAL_MEASURED_DATASET = "gjeldende-lover"
+"""The dataset ADR-0012's feasibility measurement covered (``lover/``)."""
+
+
+class TemporalScopeError(LovsporError):
+    """``get_temporal_events`` asked for a document outside the measured scope."""
+
+
+def _require_temporal_scope(record: ManifestRecord) -> None:
+    """Refuse temporal serving outside the measured dataset (ADR-0012 T5).
+
+    The accepted decision covers ``lover/`` only: the classification
+    feasibility was measured there, and the ADR's Out of Scope names
+    ``forskrifter`` serving as following its own measurement, not this
+    ADR. Slice B's corpus-wide COUNT reconciliation is not that semantic
+    measurement, so widening the scope here would silently outrun the
+    decision (review #230 blocker 4).
+    """
+    if record.source_dataset != _TEMPORAL_MEASURED_DATASET:
+        raise TemporalScopeError(
+            f"get_temporal_events serves acts from the measured "
+            f"{_TEMPORAL_MEASURED_DATASET!r} dataset only; {record.slug!r} "
+            f"belongs to {record.source_dataset!r}. Serving forskrifter (T5) "
+            f"requires its own feasibility measurement and decision "
+            f"(ADR-0012 Out of Scope).",
+        )
+
+
+def _served_layer_for(data: "_SnapshotData", record: ManifestRecord) -> ServedTemporalLayer:
+    """The M1 per-state cache: parse cost is first touch per document per
+    state (ADR-0012 M1). Derivation reads the RAW committed Markdown of
+    the resolved commit — frontmatter and heading included — so
+    ``source_line`` is a line of the corpus file and the input matches
+    the build-time gate's basis (review #230 blocker 3). A derivation
+    failure is re-raised on every touch, never cached.
+    """
+    slug = record.slug or ""
+    cached = data.temporal_layers.get(slug)
+    if cached is None:
+        raw = data.snapshot.read_text(record.markdown_path)
+        if raw is None:
+            raise StateIntegrityError(
+                f"corpus state {data.ref.sha} is inconsistent: its manifest "
+                f"lists {record.slug!r} as current but {record.markdown_path!r} "
+                f"is not in the commit's tree — repository damage, not "
+                f"historical absence",
+            )
+        cached = derive_served_layer(raw, record.slug)
+        data.temporal_layers[slug] = cached
+    return cached
 
 
 @dataclass
@@ -3605,6 +3684,7 @@ class _SnapshotData:
     bodies: dict[str, str | None] = field(default_factory=dict)
     section_indexes: dict[str, SectionIndex] = field(default_factory=dict)
     search_bodies: dict[str, str] | None = None
+    temporal_layers: dict[str, ServedTemporalLayer] = field(default_factory=dict)
 
 
 class _SnapshotState:
@@ -3623,10 +3703,14 @@ class _SnapshotState:
     def __init__(
         self,
         data: _SnapshotData,
-        recorded_at: date,
+        recorded_at: date | None,
         lineage_path: Callable[[str], str | None],
         current_slugs: Callable[[], list[str]],
     ) -> None:
+        """``recorded_at`` is the caller's requested date, stamped into
+        every answer; ``None`` marks the pinned-HEAD view ``at_head_state``
+        builds for live ``get_temporal_events`` — same snapshot closure,
+        no transaction-time date to echo."""
         self._data = data
         self._recorded_at = recorded_at
         self._lineage_path = lineage_path
@@ -3646,9 +3730,14 @@ class _SnapshotState:
         boundary claim."""
         suggestions = _slug_suggestions_from(self._slug_index(), slug)
         hint = f"did you mean {', '.join(suggestions)}? " if suggestions else ""
+        when = (
+            f"at {self._recorded_at.isoformat()} "
+            if self._recorded_at is not None
+            else "at the current head "
+        )
         return CorpusNotFoundError(
-            f"no law with slug {slug!r} in the corpus state at "
-            f"{self._recorded_at.isoformat()} (corpus_commit {self.corpus_commit}); "
+            f"no law with slug {slug!r} in the corpus state {when}"
+            f"(corpus_commit {self.corpus_commit}); "
             f"{hint}the document may have entered the corpus later — "
             f"call get_law_history({slug!r}) to see when it first appeared",
         )
@@ -3742,11 +3831,18 @@ class _SnapshotState:
         each date drives exactly one axis — ``recorded_at`` selected the
         state, ``valid_at`` is only ever the evaluation date — so the
         ``not_evaluated`` notice of the four primitives does not apply.
+        Facts, horizon and attestation all bind to ONE resolved commit:
+        derivation reads that commit's raw Markdown (via the per-state
+        layer cache), never the working tree (review #230 blocker 2).
         """
         record, mapped_from = self._resolve_slug(slug)
-        body = self._body_for_slug(record.slug or "") or ""
+        _require_temporal_scope(record)
         target = record.slug or slug
-        canonical = None if section_id is None else _require_section_id(target, body, section_id)
+        canonical = (
+            None
+            if section_id is None
+            else _require_section_id(target, self._body_for_slug(target) or "", section_id)
+        )
         request = TemporalEventsRequest(
             horizon=self.knowledge_horizon,
             section_id=canonical,
@@ -3757,7 +3853,7 @@ class _SnapshotState:
             result["mapped_from_slug"] = mapped_from
         if canonical is not None:
             result["section_id"] = canonical
-        result.update(compose_temporal_events(derive_served_layer(body, record.slug), request))
+        result.update(compose_temporal_events(_served_layer_for(self._data, record), request))
         repo = self._data.snapshot.repo_path
         result["reconciliation"] = _reconciliation_for(repo, self.corpus_commit)
         return self._stamp(result, record.xml_hash)
@@ -3766,7 +3862,8 @@ class _SnapshotState:
         """Attach the ADR-0011 evidence fields: the requested date, the
         resolved state, and — only when a document version was actually
         resolved — its ``xml_hash``."""
-        result["recorded_at"] = self._recorded_at.isoformat()
+        if self._recorded_at is not None:
+            result["recorded_at"] = self._recorded_at.isoformat()
         result["corpus_commit"] = self.corpus_commit
         if xml_hash is not None:
             result["xml_hash"] = xml_hash
@@ -3878,8 +3975,10 @@ class _SnapshotState:
             self._search_body_lookup,
         )
         hits = _search_body_hits(query, docs, dataset, limit)
+        recorded_at = self._recorded_at
+        assert recorded_at is not None  # noqa: S101 — only at_state views serve the primitives
         return {
-            "recorded_at": self._recorded_at.isoformat(),
+            "recorded_at": recorded_at.isoformat(),
             "corpus_commit": self.corpus_commit,
             "results": hits,
         }
@@ -4154,6 +4253,11 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         date X?"*: that requires composing events into norm-identity-aware
         validity intervals, which no tool on this surface supports yet.
 
+        Scope: acts (``lover``) only — the dataset the ADR-0012
+        feasibility measurement covered. Asking about a forskrift is a
+        typed unsupported-scope error, not an answer; regulation serving
+        (T5) needs its own measurement first.
+
         ``section_id`` (optional): narrow to events the parser attributed
         to that provision label — "events attributed to § X", NOT "all
         temporal events affecting § X". Events at enclosing scopes
@@ -4161,11 +4265,17 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         ``problems`` are never narrowed. An unknown section fails with
         the act's available ids.
 
+        Every answer is derived from ONE resolved corpus commit — never
+        the working tree — and names it: ``corpus_commit`` and
+        ``xml_hash`` are always present (the committed HEAD for a live
+        call), so the facts, the horizon and the reconciliation verdict
+        all speak for the same immutable state, and ``source_line``
+        points into that commit's own Markdown file.
+
         ``recorded_at`` (optional, ISO ``YYYY-MM-DD``): derive from the
         corpus state at UTC end-of-day on that date — the events the
-        corpus KNEW then. The response then carries ``recorded_at``,
-        ``corpus_commit`` and ``xml_hash``, same contract as the other
-        tools' historical mode.
+        corpus KNEW then. The response then also echoes ``recorded_at``,
+        same contract as the other tools' historical mode.
 
         ``valid_at`` (optional, ISO ``YYYY-MM-DD``): additionally
         evaluate every served event and marker at that date. Each then
@@ -4194,9 +4304,12 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
         unattested``: ``attested`` means the build-time gate proved the
         parser-visible note count against the source XML for exactly this
         corpus state and parser version; ``unattested`` means no such
-        proof exists for this state (typically one predating the gate) —
-        the events are still the exact deterministic parse of the state's
-        body, with full provenance. ``events: []`` is a successful answer
+        proof was recorded for this state (typically one predating the
+        gate) — the events are still the exact deterministic parse of the
+        state's body, with full provenance. A checkout that never
+        synchronised the attestation registry (a plain clone; use
+        ``lovspor fetch-corpus``) gets a typed error instead — a missing
+        evidence channel is never reported as ``unattested``. ``events: []`` is a successful answer
         ("no amendment facts attributed"), distinct from the typed
         failures: unknown act, unknown section, and a document whose
         derivation fails loudly (an unrecognised commencement marker is
