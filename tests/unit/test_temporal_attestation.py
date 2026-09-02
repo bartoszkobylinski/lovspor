@@ -29,6 +29,7 @@ from lovspor.temporal_attestation import (
     fetch_attestations,
     read_attestation,
     reconcile_corpus,
+    refspec_transports_registry,
     registry_synchronised,
     write_attestation,
 )
@@ -786,6 +787,36 @@ def test_attest_hook_skips_non_current_records_without_stopping(
 
 
 # ---------- registry_synchronised (ADR-0012 point 2c, review #230) ----------
+
+
+@pytest.mark.parametrize(
+    "refspec",
+    [
+        "+refs/notes/*:refs/notes/*",
+        "refs/notes/temporal-attestations:refs/notes/temporal-attestations",
+        "+refs/notes/*:refs/notes/temporal-attestations",
+        "+refs/notes/temporal-attestations:refs/notes/*",
+    ],
+)
+def test_refspec_transport_requires_both_sides_to_cover_registry(refspec: str) -> None:
+    assert refspec_transports_registry(refspec)
+
+
+@pytest.mark.parametrize(
+    "refspec",
+    [
+        "",
+        "refs/notes/temporal-attestations",
+        "+refs/heads/*:refs/notes/*",
+        "+refs/notes/*:refs/heads/*",
+        "+refs/notes/other:refs/notes/temporal-attestations",
+        "+refs/notes/temporal-attestations:refs/notes/other",
+    ],
+)
+def test_refspec_transport_rejects_missing_or_one_sided_registry_coverage(
+    refspec: str,
+) -> None:
+    assert not refspec_transports_registry(refspec)
 
 
 def test_a_repo_without_origin_is_its_own_registry_home(repo: tuple[Path, str]) -> None:
