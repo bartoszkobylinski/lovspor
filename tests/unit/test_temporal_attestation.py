@@ -184,6 +184,53 @@ def test_reconcile_tolerates_unrecognised_markers(repo: tuple[Path, str]) -> Non
     assert totals.notes == 1
 
 
+def test_reconcile_accumulates_totals_across_documents(repo: tuple[Path, str]) -> None:
+    path, _ = repo
+    (path / "one.md").write_text(_NOTE_MD, encoding="utf-8")
+    (path / "two.md").write_text(_NOTE_MD, encoding="utf-8")
+
+    totals = reconcile_corpus(
+        path,
+        [
+            ("doc-1", "one.md", _xml_with_notes(1)),
+            ("doc-2", "two.md", _xml_with_notes(1)),
+        ],
+    )
+
+    assert totals == (2, 2, 2)
+
+
+def test_reconcile_passes_document_identity_and_non_strict_policy(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _ = repo
+    (path / "doc.md").write_text("body", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    class Layer:
+        notes_seen = 0
+        events: tuple[()] = ()
+
+    def derive(markdown: str, **kwargs: object) -> Layer:
+        assert markdown == "body"
+        calls.append(kwargs)
+        return Layer()
+
+    monkeypatch.setattr(attestation_module, "derive_temporal_layer", derive)
+    monkeypatch.setattr(attestation_module, "count_source_amendment_notes", lambda _xml: 0)
+
+    reconcile_corpus(path, [("doc-identity", "doc.md", b"<root/>")])
+
+    assert calls == [
+        {
+            "document_ref": "doc-identity",
+            "expected_note_count": 0,
+            "strict": False,
+        },
+    ]
+
+
 # ---------- the sync hook ----------
 
 
@@ -338,6 +385,31 @@ def test_fetch_attestations_fails_closed_when_fetch_fails(
         fetch_attestations(path)
 
 
+def test_fetch_attestations_invokes_git_with_non_raising_text_capture(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _ = repo
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(attestation_module.subprocess, "run", run)
+
+    fetch_attestations(path, "upstream")
+
+    assert len(calls) == 2
+    for _, kwargs in calls:
+        assert kwargs == {
+            "cwd": path,
+            "capture_output": True,
+            "text": True,
+            "check": False,
+        }
+
+
 def test_write_attestation_surfaces_git_notes_failure(
     repo: tuple[Path, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -357,6 +429,33 @@ def test_write_attestation_surfaces_git_notes_failure(
 
     with pytest.raises(AttestationError, match="failed to record.*cannot lock ref"):
         write_attestation(path, _attestation(sha))
+
+
+def test_write_attestation_uses_stable_json_and_non_raising_text_capture(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, sha = repo
+    monkeypatch.setattr(attestation_module, "_read_entries", lambda *_args: [])
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(attestation_module.subprocess, "run", run)
+
+    entry = _attestation(sha)
+    write_attestation(path, entry)
+
+    args, kwargs = calls[0]
+    assert args[-2] == json.dumps([entry.model_dump(mode="json")], sort_keys=True)
+    assert kwargs == {
+        "cwd": path,
+        "capture_output": True,
+        "text": True,
+        "check": False,
+    }
 
 
 def test_read_attestation_surfaces_unexpected_git_notes_failure(
@@ -451,6 +550,85 @@ def test_ensure_head_attested_is_presence_based(repo: tuple[Path, str]) -> None:
         mp.setattr(orchestrator_module, "TEMPORAL_PARSER_VERSION", bumped)
         _ensure_head_attested(path, upstream, records, now)
     assert read_attestation(path, sha, bumped) is not None
+
+
+def test_ensure_head_attested_queries_the_current_parser_version(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, sha = repo
+    queries: list[tuple[Path, str, int]] = []
+    monkeypatch.setattr(orchestrator_module, "head_commit_or_none", lambda _repo: sha)
+
+    def read(repo_path: Path, commit: str, version: int) -> TemporalAttestation:
+        queries.append((repo_path, commit, version))
+        return _attestation(commit, version=version)
+
+    monkeypatch.setattr(orchestrator_module, "read_attestation", read)
+
+    _ensure_head_attested(path, {}, {}, datetime(2026, 9, 2, tzinfo=UTC))
+
+    assert queries == [(path, sha, TEMPORAL_PARSER_VERSION)]
+
+
+def test_attest_hook_skips_every_ineligible_record_and_keeps_scanning(
+    repo: tuple[Path, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _ = repo
+    skipped = _attestation("a" * 40)
+    records = {
+        "removed": ManifestRecord(
+            doc_type="lov",
+            xml_hash="old",
+            markdown_path="removed.md",
+            source_dataset="gjeldende-lover",
+            last_seen=datetime(2026, 9, 2, tzinfo=UTC),
+            status="removed",
+            slug="removed",
+        ),
+        "missing-slug": ManifestRecord(
+            doc_type="lov",
+            xml_hash="old",
+            markdown_path="missing.md",
+            source_dataset="gjeldende-lover",
+            last_seen=datetime(2026, 9, 2, tzinfo=UTC),
+            status="current",
+            slug=None,
+        ),
+    }
+    reconciled: list[list[tuple[str, str, bytes]]] = []
+    monkeypatch.setattr(
+        orchestrator_module, "head_commit_or_none", lambda _repo: skipped.corpus_commit
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "reconcile_corpus",
+        lambda _repo, docs: (
+            reconciled.append(list(docs)) or attestation_module.ReconciliationTotals(0, 0, 0)
+        ),
+    )
+    monkeypatch.setattr(orchestrator_module, "write_attestation", lambda *_args: None)
+
+    _attest_temporal_conformance(
+        path,
+        {
+            doc_id: _UpstreamDoc(
+                doc_id=doc_id,
+                source_dataset="gjeldende-lover",
+                xml_bytes=b"<root/>",
+                xml_hash="old",
+                slug=doc_id,
+                title=doc_id,
+                eu_basis=(),
+            )
+            for doc_id in records
+        },
+        records,
+        datetime(2026, 9, 2, tzinfo=UTC),
+    )
+
+    assert reconciled == [[]]
 
 
 def test_duplicate_parser_version_in_one_note_is_corrupt(repo: tuple[Path, str]) -> None:
