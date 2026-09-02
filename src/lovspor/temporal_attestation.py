@@ -89,9 +89,9 @@ def registry_synchronised(repo: Path) -> bool:
 
     * the repo has no ``origin`` remote — it IS the registry's home (the
       sync engine's working repo, a test fixture): nothing exists to fetch;
-    * the ``origin`` fetch refspecs include the notes ref, so every
-      ``git fetch``/``git pull`` transports the registry — what
-      ``fetch_corpus`` configures on clone and update;
+    * an ``origin`` fetch refspec genuinely transports the notes ref —
+      source AND destination side — so every ``git fetch``/``git pull``
+      carries the registry; what ``fetch_corpus`` configures;
     * the notes ref exists locally (a one-shot ``fetch_attestations``).
 
     Anything else is an unsynchronised clone: a proof may exist on the
@@ -113,9 +113,33 @@ def registry_synchronised(repo: Path) -> bool:
     if _read(["remote", "get-url", "origin"]).returncode != 0:
         return True
     refspecs = _read(["config", "--get-all", "remote.origin.fetch"])
-    if refspecs.returncode == 0 and ATTESTATION_NOTES_REF in refspecs.stdout:
+    if refspecs.returncode == 0 and any(
+        _refspec_transports_registry(line) for line in refspecs.stdout.splitlines()
+    ):
         return True
     return _read(["rev-parse", "--quiet", "--verify", ATTESTATION_NOTES_REF]).returncode == 0
+
+
+def _refspec_transports_registry(spec: str) -> bool:
+    """True when one fetch refspec really transports the attestation ref.
+
+    Both sides must cover it: the SOURCE side is what gets fetched from
+    the remote, the DESTINATION side is what ``read_attestation`` reads
+    locally. A refspec that merely mentions the ref on one side — e.g.
+    mapping an unrelated branch INTO the notes namespace, or the notes
+    ref out to a branch — fetches something else and would recreate the
+    false ``unattested`` this guard exists to prevent (codex-tests,
+    PR #230). A side covers the ref exactly, or via a trailing-glob
+    prefix (``refs/notes/*``, the canonical glob form both included).
+    """
+
+    def covers(side: str) -> bool:
+        if side.endswith("*"):
+            return ATTESTATION_NOTES_REF.startswith(side[:-1])
+        return side == ATTESTATION_NOTES_REF
+
+    source, colon, destination = spec.strip().removeprefix("+").partition(":")
+    return bool(colon) and covers(source) and covers(destination)
 
 
 def fetch_attestations(repo: Path, remote: str = "origin") -> None:

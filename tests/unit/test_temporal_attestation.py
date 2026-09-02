@@ -818,3 +818,47 @@ def test_a_one_shot_notes_fetch_counts_as_synchronised(
 
     assert registry_synchronised(clone)
     assert read_attestation(clone, sha, 1) is not None
+
+
+def test_destination_only_refspec_does_not_count_as_registry_synchronised(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    """A textual mention is insufficient: the source side must fetch notes.
+
+    Otherwise an unrelated remote ref can be mapped into the registry namespace
+    while the actual remote attestation ref remains unfetched, recreating the
+    false ``unattested`` result that the synchronization guard must prevent.
+    """
+    path, _sha = repo
+    clone = tmp_path / "clone"
+    _run_git(tmp_path, "clone", str(path), str(clone))
+    _run_git(
+        clone,
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        "+refs/heads/attestations:refs/notes/temporal-attestations",
+    )
+
+    assert not registry_synchronised(clone)
+
+
+def test_source_only_refspec_does_not_count_as_registry_synchronised(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    """The mirror hole: fetching the notes ref to somewhere read_attestation
+    never looks is not synchronisation either."""
+    path, _sha = repo
+    clone = tmp_path / "clone"
+    _run_git(tmp_path, "clone", str(path), str(clone))
+    _run_git(
+        clone,
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        "+refs/notes/temporal-attestations:refs/heads/attestation-copy",
+    )
+
+    assert not registry_synchronised(clone)
