@@ -1096,3 +1096,20 @@ class TestTailScans:
 
         assert scan.incomplete_final_record
         assert scan.clean_through == anchor
+
+    def test_blank_lines_before_a_tear_stay_inside_the_anchor(self, tmp_path: Path) -> None:
+        """A blank line is not damage; the resume point must include it, or
+        a tail scan would re-read (and a torn line would mis-anchor) from
+        the wrong byte (mutation survivors, PR #233)."""
+        log = make_log(tmp_path)
+        log.append(observation(b"a", url="https://example.invalid/a"))
+        with log.log_path.open("ab") as handle:
+            handle.write(b"\n\n")
+        expected = log.log_path.stat().st_size
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind": "artifa')
+
+        scan = log.scan_into(lambda record: None)
+
+        assert scan.incomplete_final_record
+        assert scan.clean_through == expected

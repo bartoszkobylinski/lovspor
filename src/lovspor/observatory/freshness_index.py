@@ -132,10 +132,12 @@ def _load_index(path: Path) -> FreshnessIndex | None:
     """The stored index, or None for ANY doubt — a derived artifact is
     discarded, never repaired (deleting it costs one slow round)."""
     try:
-        raw = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+        raw = path.read_bytes()
+    except OSError:
         return None
     try:
+        # Bytes straight into pydantic: undecodable content is exactly as
+        # doubtful as unparseable JSON, and one gate answers both.
         index = FreshnessIndex.model_validate_json(raw)
     except ValidationError:
         return None

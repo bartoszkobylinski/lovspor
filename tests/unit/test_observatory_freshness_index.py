@@ -6,6 +6,7 @@ capture state — the indexed answer must equal the full re-fold, or the
 index must be discarded and rebuilt. The log stays primary (ADR-0010 §7).
 """
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,10 @@ from lovspor.observatory.commands import _capture_state
 from lovspor.observatory.freshness import CaptureState, collect_capture_state
 from lovspor.observatory.freshness_index import (
     INDEX_DERIVATION_VERSION,
+    FreshnessIndex,
+    StoredHold,
+    _prefix_digest,
+    _state_binding,
     freshness_index_path,
     indexed_capture_state,
 )
@@ -361,3 +366,55 @@ class TestTheSweepPathReachesTheIndex:
 
         assert state.observed
         assert not freshness_index_path(log).exists()
+
+
+class TestTheBindingIsPinnedByItsBytes:
+    """The binding writer and verifier are one function, so a mutation of
+    that function cancels itself out in every round-trip test. Only an
+    exact, hand-anchored digest can see it (mutation survivors, PR #233):
+    key names, key order, separators and the empty-prefix digest are all
+    part of what the recorded value MEANS."""
+
+    def test_the_state_binding_digest_is_exactly_its_specification(self) -> None:
+        index = FreshnessIndex(
+            derivation_version=1,
+            log_offset=844,
+            prefix_sha256="a" * 64,
+            state_sha256="0" * 64,
+            observed={
+                "https://example.invalid/b": datetime(2026, 9, 3, 8, 0, tzinfo=UTC),
+                "https://example.invalid/a": datetime(2026, 9, 3, 9, 0, tzinfo=UTC),
+            },
+            holds={
+                "https://example.invalid/h": StoredHold(
+                    outcome="http_404",
+                    consecutive=2,
+                    last_failed_at=datetime(2026, 9, 3, 7, 0, tzinfo=UTC),
+                )
+            },
+        )
+
+        assert _state_binding(index) == (
+            "70c5a9341e4d168950b8cea8fc25a7f2577628f04ee3046da2871754a094042f"
+        )
+
+    def test_an_empty_log_records_the_empty_prefix_digest(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.log_path.write_bytes(b"")
+        indexed_capture_state(log)
+
+        doc = json.loads(freshness_index_path(log).read_text())
+
+        assert doc["prefix_sha256"] == hashlib.sha256(b"").hexdigest()
+        assert doc["log_offset"] == 0
+
+    def test_the_prefix_digest_covers_only_the_bytes_the_file_holds(self, tmp_path: Path) -> None:
+        """A file shorter than the asked-for offset (a shrink racing the
+        stat) digests what exists — a hex answer, never a silent None."""
+        log = make_log(tmp_path)
+        log.append(_observation("https://example.invalid/a"))
+        payload = log.log_path.read_bytes()
+
+        digest = _prefix_digest(log.log_path, len(payload) + 100)
+
+        assert digest == hashlib.sha256(payload).hexdigest()
