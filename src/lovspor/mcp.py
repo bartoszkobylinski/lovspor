@@ -3652,20 +3652,24 @@ def _served_layer_for(data: "_SnapshotData", record: ManifestRecord) -> ServedTe
     the resolved commit — frontmatter and heading included — so
     ``source_line`` is a line of the corpus file and the input matches
     the build-time gate's basis (review #230 blocker 3). A derivation
-    failure is re-raised on every touch, never cached.
+    failure is re-raised on every touch, never cached. The per-state lock
+    serialises cold-cache derivation: hosted mode runs tool bodies on
+    worker threads, and two workers racing one first touch must not both
+    derive (codex-tests, PR #230).
     """
-    cached = data.temporal_layers.get(record.markdown_path)
-    if cached is None:
-        raw = data.snapshot.read_text(record.markdown_path)
-        if raw is None:
-            raise StateIntegrityError(
-                f"corpus state {data.ref.sha} is inconsistent: its manifest "
-                f"lists {record.slug!r} as current but {record.markdown_path!r} "
-                f"is not in the commit's tree — repository damage, not "
-                f"historical absence",
-            )
-        cached = derive_served_layer(raw, record.slug)
-        data.temporal_layers[record.markdown_path] = cached
+    with data.temporal_lock:
+        cached = data.temporal_layers.get(record.markdown_path)
+        if cached is None:
+            raw = data.snapshot.read_text(record.markdown_path)
+            if raw is None:
+                raise StateIntegrityError(
+                    f"corpus state {data.ref.sha} is inconsistent: its manifest "
+                    f"lists {record.slug!r} as current but {record.markdown_path!r} "
+                    f"is not in the commit's tree — repository damage, not "
+                    f"historical absence",
+                )
+            cached = derive_served_layer(raw, record.slug)
+            data.temporal_layers[record.markdown_path] = cached
     return cached
 
 
@@ -3684,6 +3688,7 @@ class _SnapshotData:
     section_indexes: dict[str, SectionIndex] = field(default_factory=dict)
     search_bodies: dict[str, str] | None = None
     temporal_layers: dict[str, ServedTemporalLayer] = field(default_factory=dict)
+    temporal_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class _SnapshotState:

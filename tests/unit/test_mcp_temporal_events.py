@@ -8,8 +8,11 @@ by the slice-B attestation registry, and the outcome taxonomy. The pure
 composition rules live in ``test_temporal_events.py``.
 """
 
+import contextlib
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -513,6 +516,37 @@ def test_derivation_runs_once_per_document_per_state(
     fn(slug="testloven", recorded_at="2026-05-10", valid_at="2026-05-09")
 
     assert calls == ["testloven"]
+
+
+def test_concurrent_first_touch_derives_document_once_per_state(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M1 also holds for concurrent HTTP workers racing on a cold cache."""
+    repo, _sha1, _sha2 = corpus
+    calls = 0
+    calls_lock = threading.Lock()
+    simultaneous_misses = threading.Barrier(2)
+    original = mcp_module.derive_served_layer
+
+    def spy(body: str, document_ref: str | None = None):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        # A correctly serialised cache admits only one derivation, so no
+        # second worker reaches this rendezvous.
+        with contextlib.suppress(threading.BrokenBarrierError):
+            simultaneous_misses.wait(timeout=0.25)
+        return original(body, document_ref)
+
+    monkeypatch.setattr(mcp_module, "derive_served_layer", spy)
+    reader = CorpusReader(repo)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(reader.get_temporal_events, ["testloven"] * 2))
+
+    assert results[0] == results[1]
+    assert calls == 1
 
 
 def test_derivation_cache_is_keyed_by_document_slug(
