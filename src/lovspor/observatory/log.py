@@ -66,6 +66,11 @@ class LogScan(BaseModel):
     #: that folded the log rather than keeping it still has to be able to say
     #: how much it read (issue #199).
     records_read: int = 0
+    #: Byte offset just past the last line that read cleanly — the position a
+    #: later scan can resume from, and the anchor a derived freshness index
+    #: stamps itself with (issue #201). Frozen at the first malformed line:
+    #: nothing past damage is a safe resume point.
+    clean_through: int = 0
 
     @property
     def complete(self) -> bool:
@@ -241,8 +246,19 @@ class ObservationLog:
         except ValidationError as exc:
             raise LogIntegrityError(f"{self.log_path}:{number}: unreadable record: {exc}") from exc
 
-    def scan_into(self, collect: Callable[[ObservationRecord], None]) -> LogScan:
+    def scan_into(
+        self,
+        collect: Callable[[ObservationRecord], None],
+        *,
+        start: int = 0,
+    ) -> LogScan:
         """Stream every line past ``collect`` and report what would not parse.
+
+        ``start`` resumes the read at a byte offset a previous scan reported
+        as ``clean_through`` (issue #201) — the caller owns proving the
+        prefix before it is skipped (the freshness index does so with an
+        offset-anchored fingerprint). With a non-zero ``start``, line numbers
+        in ``malformed_lines`` are relative to the tail, not the file.
 
         The reading every other scan is built on. Records are handed over one
         at a time and never retained, so a caller that folds the log — the
@@ -276,9 +292,17 @@ class ObservationLog:
         malformed: list[int] = []
         read = 0
         torn_tail = False
+        damaged = False
+        offset = start
+        clean_through = start
         with self.log_path.open("rb") as handle:
+            if start:
+                handle.seek(start)
             for number, raw in enumerate(handle, start=1):
+                offset += len(raw)
                 if not raw.strip():
+                    if not damaged:
+                        clean_through = offset
                     continue
                 try:
                     record = _RECORD_ADAPTER.validate_json(raw)
@@ -289,13 +313,17 @@ class ObservationLog:
                     # finished. A malformed line that has one is corruption,
                     # and says so by setting this back to false.
                     torn_tail = not raw.endswith(b"\n")
+                    damaged = True
                     continue
                 read += 1
+                if not damaged:
+                    clean_through = offset
                 collect(record)
         return LogScan(
             incomplete_final_record=torn_tail,
             malformed_lines=tuple(malformed[:-1] if torn_tail else malformed),
             records_read=read,
+            clean_through=clean_through,
         )
 
     def scan(self) -> LogScan:

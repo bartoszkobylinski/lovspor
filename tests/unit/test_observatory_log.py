@@ -1016,3 +1016,73 @@ class TestScanningWithoutHoldingTheLog:
         scan = make_log(tmp_path).scan_into(lambda _record: None)
 
         assert (scan.records_read, scan.complete) == (0, True)
+
+
+class TestTailScans:
+    """Issue #201: a scan can resume at a byte offset a previous scan proved.
+
+    ``clean_through`` is the resume anchor — just past the last cleanly read
+    line, frozen at the first damage, because nothing past damage is a safe
+    place to resume from.
+    """
+
+    def test_clean_through_is_the_file_size_after_a_clean_scan(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(observation(b"a", url="https://example.invalid/a"))
+        log.append(observation(b"b", url="https://example.invalid/b"))
+
+        scan = log.scan_into(lambda record: None)
+
+        assert scan.complete
+        assert scan.clean_through == log.log_path.stat().st_size
+
+    def test_a_tail_scan_reads_only_the_records_past_start(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(observation(b"a", url="https://example.invalid/a"))
+        anchor = log.scan_into(lambda record: None).clean_through
+        log.append(observation(b"b", url="https://example.invalid/b"))
+        log.append(observation(b"c", url="https://example.invalid/c"))
+
+        seen: list[str] = []
+        scan = log.scan_into(lambda record: seen.append(record.url), start=anchor)
+
+        assert seen == ["https://example.invalid/b", "https://example.invalid/c"]
+        assert scan.records_read == 2
+        assert scan.complete
+        assert scan.clean_through == log.log_path.stat().st_size
+
+    def test_resuming_at_clean_through_after_no_growth_reads_nothing(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(observation(b"a", url="https://example.invalid/a"))
+        anchor = log.scan_into(lambda record: None).clean_through
+
+        scan = log.scan_into(lambda record: None, start=anchor)
+
+        assert scan.records_read == 0
+        assert scan.complete
+        assert scan.clean_through == anchor
+
+    def test_clean_through_freezes_at_the_first_damage(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(observation(b"a", url="https://example.invalid/a"))
+        anchor = log.scan_into(lambda record: None).clean_through
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind": "artifact", "torn\n')
+        log.append(observation(b"b", url="https://example.invalid/b"))
+
+        scan = log.scan_into(lambda record: None)
+
+        assert not scan.complete
+        assert scan.clean_through == anchor
+
+    def test_a_torn_tail_scan_does_not_advance_past_the_tear(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(observation(b"a", url="https://example.invalid/a"))
+        anchor = log.scan_into(lambda record: None).clean_through
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind": "artifa')
+
+        scan = log.scan_into(lambda record: None, start=anchor)
+
+        assert scan.incomplete_final_record
+        assert scan.clean_through == anchor
