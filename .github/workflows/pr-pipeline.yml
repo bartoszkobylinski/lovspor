@@ -205,7 +205,7 @@ jobs:
             echo ""
             echo "Tests + log: artifact \`codex-tests-${{ github.event.pull_request.head.sha }}\` (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           } > "$RUNNER_TEMP/escalation.md"
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/escalation.md"
+          scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/escalation.md"
 
       - name: Commit and push test additions
         id: push
@@ -270,7 +270,7 @@ jobs:
             echo ""
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > "$RUNNER_TEMP/pipeline-escalation.md"
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/pipeline-escalation.md"
+          scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/pipeline-escalation.md"
 
   # Issue #193. Both escalations in `codex-tests` are steps of that job, and a
   # step cannot run on a runner that no longer exists — so no in-job condition
@@ -291,6 +291,18 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      # The PR head, not the default branch: this job reports on a `pull_request`
+      # run, so it holds no elevated context the head could abuse, and
+      # `codex-tests` already executes that same head. Off the default branch, a
+      # PR that *introduces* the helper would have none to call here and the
+      # reporter would die on a missing file — the silent BLOCKED of issue #193.
+      - name: Check out the escalation helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+
       - name: Report a codex-tests job that never reached its own escalation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -321,7 +333,7 @@ jobs:
             echo ""
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > "$RUNNER_TEMP/lane-escalation.md"
-          gh pr comment "$PR" --body-file "$RUNNER_TEMP/lane-escalation.md"
+          scripts/ci/pr_sticky_comment.sh pipeline "$PR" "$RUNNER_TEMP/lane-escalation.md"
 
   mutation:
     # Runs only when fast CI is green, Codex finished, and Codex did NOT just push —

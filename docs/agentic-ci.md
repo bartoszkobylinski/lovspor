@@ -183,6 +183,26 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
   remediation failure escalates itself: `needs-human:mutation` + a comment linking the
   failed run. A remediation run never dies silently (issue #67).
 
+- **Every escalation of a workflow lands in that workflow's one sticky comment**,
+  appended round by round, via `scripts/ci/pr_sticky_comment.sh <marker> <pr> <file>`.
+  GitHub mails the PR author when a comment is *created*, not when one is edited:
+  PR #230 sent ten notification mails carrying nine escalations, and the escalations
+  are load-bearing, so the appending is what changed and not the content. The two
+  workflows own separate markers (`pipeline`, `mutation`) because both can be in
+  flight at once and a shared comment would let one round overwrite the other's.
+  Rounds are appended, never overwritten; at GitHub's 65,536-character body limit
+  the *oldest* rounds are dropped, so the escalation a human is being paged about
+  is the last thing that can ever be lost. `remediate` checks the helper out from
+  the **default branch**: it runs on `workflow_run` with a write token, and a job
+  with that context must not run an escalation script the PR under review can
+  rewrite. `codex-tests-report` takes the **PR head** instead — it runs on
+  `pull_request`, where `codex-tests` already executes that head, and off the
+  default branch the PR that *introduces* the helper would have none to call,
+  leaving the reporter to die on a missing file: issue #193's silence again.
+- A remediation **cycle notice** ("cycle 1/2 pushed test-only changes") applies no
+  label and asks nothing of a human, so it goes to the run summary, not to a PR
+  comment. It was two of PR #230's ten mails.
+
 **Every failure escalates, not only a failing test.** Twice on 2026-08-24 a job
 ended red and silent because the failure happened outside the one step the
 escalation was watching: an unfixable lint (`RUF007`) in agent output failed the

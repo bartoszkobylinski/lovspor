@@ -42,6 +42,18 @@ jobs:
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
     steps:
+      # The escalation helper has to exist before the first step that can
+      # escalate, and the budget-exceeded path below runs ahead of the full
+      # checkout. Pinned to the default branch, not the PR head: this job holds
+      # a write token, so the script that reports on a PR is never a script
+      # that PR can rewrite.
+      - name: Check out the escalation helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+
       - name: Download mutation artifact for this SHA
         id: artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -89,8 +101,10 @@ jobs:
           pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
           [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
           gh pr edit "$pr" --add-label "needs-human:mutation"
-          gh pr comment "$pr" --body \
-            "Mutation gate: per-file wall-clock budget exceeded — the changed surface was not fully measured (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Human decision required."
+          {
+            echo "Mutation gate: per-file wall-clock budget exceeded — the changed surface was not fully measured (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Human decision required."
+          } > "$RUNNER_TEMP/budget-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "$pr" "$RUNNER_TEMP/budget-escalation.md"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.run == 'true'
@@ -131,8 +145,10 @@ jobs:
         if: steps.gate.outputs.run == 'true' && steps.cycle.outputs.blocked == 'true'
         run: |
           gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
-          gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
-            "Mutation remediation BLOCKED after 2 cycles. Human decision required. Artifact: mutation-result-$HEAD_SHA (run: ${{ github.event.workflow_run.html_url }})."
+          {
+            echo "Mutation remediation BLOCKED after 2 cycles. Human decision required. Artifact: mutation-result-$HEAD_SHA (run: ${{ github.event.workflow_run.html_url }})."
+          } > "$RUNNER_TEMP/limit-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}" "$RUNNER_TEMP/limit-escalation.md"
 
       - name: Sync dependencies
         if: steps.cycle.outputs.run == 'true'
@@ -209,8 +225,10 @@ jobs:
         run: |
           if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
             gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
-            gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
-              "Mutation remediation made no safe test-only change (survivors classified non-killable). Human review required. Artifact: mutation-result-$HEAD_SHA."
+            {
+              echo "Mutation remediation made no safe test-only change (survivors classified non-killable). Human review required. Artifact: mutation-result-$HEAD_SHA."
+            } > "$RUNNER_TEMP/nochange-escalation.md"
+            scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}" "$RUNNER_TEMP/nochange-escalation.md"
             exit 0
           fi
           # One marker commit, even if Codex committed on its own.
@@ -232,8 +250,10 @@ jobs:
             fi
             exit 1
           fi
-          gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
-            "Mutation gate failed; remediation cycle $(( ${{ steps.cycle.outputs.count }} + 1 ))/2 pushed test-only changes; pipeline rerunning."
+          # Progress, not an escalation: no label is applied and no human acts on
+          # it, so it belongs in the run summary rather than in a PR comment that
+          # mails the author on every remediation cycle.
+          echo "Mutation gate failed; remediation cycle $(( ${{ steps.cycle.outputs.count }} + 1 ))/2 pushed test-only changes; pipeline rerunning." >> "$GITHUB_STEP_SUMMARY"
 
       # Issue #67: a remediation job that dies mid-run must never fail silently —
       # the escalation contract (label + comment) applies to the failure itself.
@@ -243,5 +263,7 @@ jobs:
         if: (failure() || cancelled()) && steps.cycle.outputs.pr != ''
         run: |
           gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
-          gh pr comment "${{ steps.cycle.outputs.pr }}" --body \
-            "Mutation remediation run FAILED before completing its escalation path. Human review required: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "Mutation remediation run FAILED before completing its escalation path. Human review required: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "$RUNNER_TEMP/failure-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}" "$RUNNER_TEMP/failure-escalation.md"
