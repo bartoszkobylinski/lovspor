@@ -219,6 +219,32 @@ class TestAnyDoubtRebuilds:
         assert old_url not in state.observed
         assert state == _full_fold(log)
 
+    def test_valid_but_altered_cached_state_is_not_treated_as_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        """The prefix digest proves the log bytes, not the cached fold.
+
+        A derived artifact whose state no longer agrees with those bytes must
+        cost a rebuild rather than inventing a sighting that can suppress a
+        future fetch.
+        """
+        log = make_log(tmp_path)
+        real_url = "https://example.invalid/real"
+        invented_url = "https://example.invalid/invented"
+        log.append(_observation(real_url))
+        indexed_capture_state(log)
+        path = freshness_index_path(log)
+        doc = json.loads(path.read_text())
+        doc["observed"] = {invented_url: (NOW + timedelta(days=1)).isoformat()}
+        path.write_text(json.dumps(doc))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert state == _full_fold(log)
+        assert real_url in state.observed
+        assert invented_url not in state.observed
+
 
 class TestDamageNeverAdvancesTheIndex:
     def test_a_torn_tail_refuses_and_keeps_the_old_anchor(self, tmp_path: Path) -> None:
@@ -245,6 +271,20 @@ class TestDamageNeverAdvancesTheIndex:
 
         assert not scan.complete
         assert not freshness_index_path(log).exists()
+
+    def test_a_newline_terminated_malformed_tail_keeps_the_old_anchor(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(_observation("https://example.invalid/a"))
+        indexed_capture_state(log)
+        before = freshness_index_path(log).read_bytes()
+        with log.log_path.open("ab") as handle:
+            handle.write(b'{"kind": "artifact", "malformed": true}\n')
+
+        _state, scan = indexed_capture_state(log)
+
+        assert not scan.complete
+        assert scan.malformed_lines == (1,)
+        assert freshness_index_path(log).read_bytes() == before
 
     def test_an_absent_log_folds_to_nothing_and_writes_an_empty_index(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)

@@ -35,6 +35,7 @@ scan that did not complete never advances the index.
 """
 
 import hashlib
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -85,6 +86,12 @@ class FreshnessIndex(BaseModel):
     derivation_version: int
     log_offset: int = Field(ge=0)
     prefix_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    #: Binds the cached fold to the anchor it claims to derive from: the
+    #: digest proves the LOG bytes, not the cached state, and a hand-altered
+    #: state under a valid anchor would invent sightings that suppress
+    #: fetches — the silent-zero class. Recomputed and compared on load;
+    #: any mismatch is doubt, and doubt rebuilds (codex-tests, PR #233).
+    state_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     observed: dict[str, datetime]
     holds: dict[str, StoredHold]
 
@@ -134,6 +141,8 @@ def _load_index(path: Path) -> FreshnessIndex | None:
         return None
     if index.derivation_version != INDEX_DERIVATION_VERSION:
         return None
+    if index.state_sha256 != _state_binding(index):
+        return None
     return index
 
 
@@ -146,6 +155,24 @@ def _prefix_proven(log: ObservationLog, index: FreshnessIndex) -> bool:
     if index.log_offset > size:
         return False
     return _prefix_digest(log.log_path, index.log_offset) == index.prefix_sha256
+
+
+def _state_binding(index: FreshnessIndex) -> str:
+    """The fold bound to its anchor — one digest over both, order-fixed."""
+    canonical = json.dumps(
+        {
+            "derivation_version": index.derivation_version,
+            "log_offset": index.log_offset,
+            "prefix_sha256": index.prefix_sha256,
+            "observed": {url: when.isoformat() for url, when in sorted(index.observed.items())},
+            "holds": {
+                url: hold.model_dump(mode="json") for url, hold in sorted(index.holds.items())
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _prefix_digest(log_path: Path, offset: int) -> str:
@@ -173,10 +200,11 @@ def _state_from_index(index: FreshnessIndex) -> CaptureState:
 
 
 def _index_from_state(log: ObservationLog, state: CaptureState, offset: int) -> FreshnessIndex:
-    return FreshnessIndex(
+    unbound = FreshnessIndex(
         derivation_version=INDEX_DERIVATION_VERSION,
         log_offset=offset,
         prefix_sha256=_prefix_digest(log.log_path, offset) if offset else _empty_digest(),
+        state_sha256=_empty_digest(),
         # Sorted so the document is byte-identical for a given log state —
         # the ADR-0010 §7 determinism the whole derivation family carries.
         observed=dict(sorted(state.observed.items())),
@@ -189,6 +217,7 @@ def _index_from_state(log: ObservationLog, state: CaptureState, offset: int) -> 
             for url, hold in sorted(state.holds.items())
         },
     )
+    return unbound.model_copy(update={"state_sha256": _state_binding(unbound)})
 
 
 def _empty_digest() -> str:
