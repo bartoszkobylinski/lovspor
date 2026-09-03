@@ -418,3 +418,15 @@ class TestTheBindingIsPinnedByItsBytes:
         digest = _prefix_digest(log.log_path, len(payload) + 100)
 
         assert digest == hashlib.sha256(payload).hexdigest()
+
+    def test_the_prefix_digest_covers_bytes_beyond_one_read_chunk(self, tmp_path: Path) -> None:
+        """A large archive's anchor must bind every chunk, including the
+        bytes immediately beyond the bounded first read."""
+        payload = b"a" * (1 << 20) + b"tail"
+        path = tmp_path / "large-prefix.jsonl"
+        path.write_bytes(payload)
+
+        digest = _prefix_digest(path, len(payload))
+
+        assert digest == hashlib.sha256(payload).hexdigest()
+        assert digest != hashlib.sha256(payload[: 1 << 20]).hexdigest()
