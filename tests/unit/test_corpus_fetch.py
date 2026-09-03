@@ -434,6 +434,30 @@ def test_fetch_corpus_repairs_asymmetric_wildcard_refspec(
     assert read_attestation(dest, head, 1) is not None
 
 
+def test_fetch_corpus_repairs_duplicate_invalid_attestation_refspecs(
+    tmp_path: Path,
+) -> None:
+    """Repair remains safe when a legacy config repeats one bad value.
+
+    ``git config --fixed-value --unset-all`` removes every matching entry in
+    one invocation.  The repair path must therefore not attempt to remove the
+    same original value again when it appeared more than once.
+    """
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    head = _attest_head(origin)
+    dest = tmp_path / "clone"
+    _git(["clone", _url(origin), str(dest)], cwd=tmp_path)
+    invalid = "+refs/notes/*:refs/notes/temporal-attestations"
+    _git(["config", "--add", "remote.origin.fetch", invalid], cwd=dest)
+    _git(["config", "--add", "remote.origin.fetch", invalid], cwd=dest)
+
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    assert registry_synchronised(dest)
+    assert read_attestation(dest, head, 1) is not None
+
+
 def test_fetch_corpus_survives_an_origin_without_the_notes_ref(tmp_path: Path) -> None:
     """Bootstrap safety: the configured refspec must not brick fetch/pull
     against an origin that has no attestation ref yet (the glob form)."""

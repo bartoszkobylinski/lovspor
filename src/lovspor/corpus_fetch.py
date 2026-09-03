@@ -155,7 +155,9 @@ def _ensure_attestation_refspec(dest: Path) -> None:
     """
     existing = _git_capture(["config", "--get-all", "remote.origin.fetch"], dest) or ""
     lines = existing.splitlines()
-    for line in lines:
+    # unset-all removes every copy of a repeated value in one call, so a
+    # second call on the same value would fail on nothing left to remove.
+    for line in dict.fromkeys(lines):
         if ATTESTATION_NOTES_REF in line and not refspec_transports_registry(line):
             _git(
                 ["config", "--fixed-value", "--unset-all", "remote.origin.fetch", line],
