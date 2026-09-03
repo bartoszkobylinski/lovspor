@@ -642,3 +642,117 @@ Same default-selection equivalence as the _read_entries entry: `check`
 defaults to False, so the explicit spelling and its removal are the same
 call.
 """
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_head_ref"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=1)
++        sha, author_iso = result.stdout.strip("\\n").split("\\n", )
+"""
+justification = """
+The wire is `git log -1 --format=%H%n%aI`: after the strip, a well-formed
+payload holds exactly one newline, where maxsplit=1 and the default split
+produce the identical pair. A payload with more newlines fails either way
+inside the same try block — the two-name unpack raises ValueError on three
+parts, and with maxsplit=1 the second part carries the embedded newline into
+`datetime.fromisoformat`, which rejects it (stdlib semantics) — so both
+variants land in the identical typed AttestationError. No input separates
+them observably.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_head_ref"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=1)
++        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=2)
+"""
+justification = """
+Same argument as the maxsplit-removal entry one up: one-newline payloads are
+identical under maxsplit=1 and maxsplit=2, and multi-newline payloads reach
+the same AttestationError through the unpack/fromisoformat pair.
+"""
+
+[[equivalent]]
+file = "src/lovspor/mcp.py"
+symbol = "_head_ref"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-        sha, author_iso = result.stdout.strip("\\n").split("\\n", maxsplit=1)
++        sha, author_iso = result.stdout.strip(None).split("\\n", maxsplit=1)
+"""
+justification = """
+strip(None) widens the stripped set from newlines to all whitespace; the two
+differ only when the wire carries non-newline whitespace at its ends. The
+format string `%H%n%aI` emits a bare hex sha and an ISO-8601 date joined and
+terminated by newlines — no such whitespace exists to strip. This argues from
+git's wire format (a dependency), so the assumption is pinned by the test
+below: the verbatim-sha wire test plus the real-repo head test go red if the
+channel ever grows padding.
+"""
+assumption_test = "tests/unit/test_mcp_temporal_events.py::test_assumption_git_head_wire_is_bare_sha_and_iso_date"
+
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "registry_synchronised"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` truth-tests `check`; None and False select the identical
+no-raise behaviour. Same falsy-None equivalence as the PR #227
+`_read_entries` entries.
+"""
+
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "registry_synchronised"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+Same default-selection equivalence as the PR #227 entries: `check` defaults
+to False, so the explicit spelling and its removal are the same call.
+"""
+
+[[equivalent]]
+file = "src/lovspor/temporal_attestation.py"
+symbol = "refspec_transports_registry"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-    source, colon, destination = spec.strip().removeprefix("+").partition(":")
++    source, colon, destination = spec.strip().removeprefix("+").rpartition(":")
+"""
+justification = """
+Pure Python semantics. Zero colons: partition puts the falsy separator in the
+middle either way (('s','','') vs ('','','s')), and the guard on the
+separator returns False for both. One colon: partition and rpartition are
+identical. Two or more colons: one side of either split necessarily retains a
+colon, and covers() can never accept a side containing ':' — the target ref
+has no colon, and neither exact equality nor a trailing-glob prefix of it can
+— so both variants return False. No refspec separates them.
+"""
+
+[[equivalent]]
+file = "src/lovspor/corpus_fetch.py"
+symbol = "_ensure_attestation_refspec"
+registered = "2026-09-02, PR #230, from run 33657305303"
+mutation = """
+-    existing = _git_capture(["config", "--get-all", "remote.origin.fetch"], dest) or ""
++    existing = _git_capture(["config", "--get-all", "remote.origin.fetch"], dest) or "XXXX"
+"""
+justification = """
+The fallback constant is consumed only by splitlines() and the notes-ref
+scan. Neither "" (no lines) nor "XXXX" (one line that does not name the
+notes ref and transports nothing) triggers a removal, and both leave the
+transports-check False so the canonical refspec is added — the observable
+git calls are identical for every value the capture can return.
+"""

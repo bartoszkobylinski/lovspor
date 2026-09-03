@@ -40,6 +40,16 @@ from lovspor.temporal import count_source_amendment_notes, derive_temporal_layer
 ATTESTATION_NOTES_REF = "refs/notes/temporal-attestations"
 """The git-notes ref holding attestation entries, one note per commit."""
 
+ATTESTATION_FETCH_REFSPEC = f"+{ATTESTATION_NOTES_REF}*:{ATTESTATION_NOTES_REF}*"
+"""The fetch refspec ``fetch_corpus`` configures on a consumer clone.
+
+The trailing glob is load-bearing: a *bare* refspec for a ref the remote
+does not have yet makes every ``git fetch``/``git pull`` fail with
+``couldn't find remote ref`` (verified empirically), which would brick
+plain corpus updates against a pre-gate origin. A glob that matches
+nothing is silently fine, and transports the registry the moment the
+origin gains it."""
+
 _NO_NOTE_MARKERS = ("no note found", "No note found")
 """Git's message when a commit has no note — the ABSENT answer, which is
 the only non-zero outcome allowed to read as anything but an error."""
@@ -69,6 +79,77 @@ class TemporalAttestation(BaseModel):
     notes_total: int = Field(ge=0)
     events_total: int = Field(ge=0)
     attested_at: datetime
+
+
+def registry_synchronised(repo: Path) -> bool:
+    """True when local registry reads are backed by the acquisition contract.
+
+    A local read of the registry is only meaningful when this checkout
+    actually carries it. Three ways it can (any one suffices):
+
+    * the repo has no ``origin`` remote — it IS the registry's home (the
+      sync engine's working repo, a test fixture): nothing exists to fetch;
+    * an ``origin`` fetch refspec genuinely transports the notes ref —
+      source AND destination side — so every ``git fetch``/``git pull``
+      carries the registry; what ``fetch_corpus`` configures;
+    * the notes ref exists locally (a one-shot ``fetch_attestations``).
+
+    Anything else is an unsynchronised clone: a proof may exist on the
+    remote that this checkout never fetched, and ADR-0012 point 2c forbids
+    reading that as ``unattested`` — absence of the evidence channel must
+    never impersonate absence of evidence. Callers fail closed instead.
+    """
+
+    def _read(args: list[str]) -> subprocess.CompletedProcess[str]:
+        # S603/S607: trusted git command, list args, no shell.
+        return subprocess.run(  # noqa: S603
+            ["git", *args],  # noqa: S607
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    # Pure config read: `git remote get-url` fatals on a syntactically
+    # invalid fetch refspec anywhere in the remote's config, which would
+    # make a poisoned clone read as "no origin" — its own registry home.
+    if _read(["config", "--get", "remote.origin.url"]).returncode != 0:
+        return True
+    refspecs = _read(["config", "--get-all", "remote.origin.fetch"])
+    if refspecs.returncode == 0 and any(
+        refspec_transports_registry(line) for line in refspecs.stdout.splitlines()
+    ):
+        return True
+    return _read(["rev-parse", "--quiet", "--verify", ATTESTATION_NOTES_REF]).returncode == 0
+
+
+def refspec_transports_registry(spec: str) -> bool:
+    """True when one fetch refspec really transports the attestation ref.
+
+    Both sides must cover it: the SOURCE side is what gets fetched from
+    the remote, the DESTINATION side is what ``read_attestation`` reads
+    locally. A refspec that merely mentions the ref on one side — e.g.
+    mapping an unrelated branch INTO the notes namespace, or the notes
+    ref out to a branch — fetches something else and would recreate the
+    false ``unattested`` this guard exists to prevent (codex-tests,
+    PR #230). A side covers the ref exactly, or via a trailing-glob
+    prefix (``refs/notes/*``, the canonical glob form both included).
+    """
+
+    def covers(side: str) -> bool:
+        if side.endswith("*"):
+            return ATTESTATION_NOTES_REF.startswith(side[:-1])
+        return side == ATTESTATION_NOTES_REF
+
+    source, colon, destination = spec.strip().removeprefix("+").partition(":")
+    if not colon or source.endswith("*") != destination.endswith("*"):
+        # A wildcard on only one side is not a lesser refspec — git refuses
+        # it outright (`fatal: invalid refspec`, verified empirically), and
+        # while it sits in the config it poisons `git remote get-url` and
+        # every fetch/pull. It transports nothing; the repair path removes
+        # it (codex-tests round 5, PR #230).
+        return False
+    return covers(source) and covers(destination)
 
 
 def fetch_attestations(repo: Path, remote: str = "origin") -> None:

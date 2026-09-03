@@ -43,7 +43,7 @@ Other MCP clients (Claude Desktop's `claude_desktop_config.json`, etc.):
 }
 ```
 
-Restart the client and `lovverk` appears in its MCP list. Fifteen of the sixteen tools
+Restart the client and `lovverk` appears in its MCP list. Sixteen of the seventeen tools
 work immediately — no key, and no network access beyond your local corpus clone.
 
 **The point-in-time tools need the full history.** `fetch-corpus` clones shallow
@@ -58,7 +58,7 @@ uvx lovspor fetch-corpus --full-history
 The same flag deepens an existing shallow clone in place (`git fetch --unshallow`), so this
 is not a decision you have to get right the first time.
 
-Full setup guide, all sixteen tools with examples, troubleshooting and limitations:
+Full setup guide, all seventeen tools with examples, troubleshooting and limitations:
 [`docs/mcp.md`](docs/mcp.md).
 
 ## What's inside — and what's not
@@ -90,7 +90,7 @@ server's `env`:
 ```
 
 It's your key in your own local config file — keep that file private and never commit
-it. Without a key, `semantic_search` is simply disabled; the other fifteen tools are
+it. Without a key, `semantic_search` is simply disabled; the other sixteen tools are
 unaffected. Details: [`docs/embeddings.md`](docs/embeddings.md).
 
 ## Optional: hosted endpoint

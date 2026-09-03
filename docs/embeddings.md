@@ -200,7 +200,7 @@ query vectors.
 
 Lovspor core requires **no embedding provider at all**. Without one the sync
 renders Markdown, history and manifest exactly as usual, simply skipping
-sidecars, and fifteen of the sixteen MCP tools work untouched — only
+sidecars, and sixteen of the seventeen MCP tools work untouched — only
 `semantic_search` is unavailable. Credentials are always operator-supplied;
 nothing is bundled.
 

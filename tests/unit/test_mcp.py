@@ -443,11 +443,11 @@ def test_build_embedder_reads_supported_env_names_and_warns_when_absent(
     monkeypatch.setattr("lovspor.embeddings.model.OpenAIEmbedder", FakeOpenAIEmbedder)
 
     assert _build_embedder() is None
-    # Whole string: this is the operator's only signal that one of the sixteen
+    # Whole string: this is the operator's only signal that one of the seventeen
     # tools is silently unavailable, and the remediation is the point of it.
     assert capsys.readouterr().err == (
         "lovspor mcp: OPENAI_API_KEY not set; semantic_search will be disabled "
-        "but the other fifteen tools work normally. Set OPENAI_API_KEY "
+        "but the other sixteen tools work normally. Set OPENAI_API_KEY "
         "and restart to enable semantic search.\n"
     )
 
@@ -475,6 +475,26 @@ def test_build_embedder_flushes_the_missing_key_warning(
     assert stderr.flush_calls == 1
 
 
+def test_build_embedder_reports_and_flushes_invalid_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Configuration errors use the same immediate operator warning contract."""
+    stderr = _FlushSpy()
+
+    def invalid_config():  # type: ignore[no-untyped-def]
+        raise ConfigError("bad provider")
+
+    monkeypatch.setattr(mcp_module.EmbeddingConfig, "from_env", invalid_config)
+    monkeypatch.setattr(mcp_module.sys, "stderr", stderr)
+
+    assert _build_embedder() is None
+    assert stderr.getvalue() == (
+        "lovspor mcp: embedding provider not configured: bad provider "
+        "semantic_search will be disabled; the other sixteen tools work normally.\n"
+    )
+    assert stderr.flush_calls == 1
+
+
 def test_build_embedder_uses_tight_interactive_timeout_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -492,6 +512,27 @@ def test_build_embedder_uses_tight_interactive_timeout_budget(
     # Strictly tighter than the batch defaults it previously inherited.
     assert embedder._timeout_seconds < 180.0
     assert embedder._max_retries < 3
+
+
+def test_at_head_state_installs_callable_live_namespace_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pinned HEAD has no lineage fallback and reads the live slug namespace."""
+    reader = object.__new__(CorpusReader)
+    ref = mcp_module.CorpusStateRef(
+        sha="a" * 40,
+        commit_date=datetime(2026, 9, 2, tzinfo=UTC),
+    )
+    data = object()
+    monkeypatch.setattr(reader, "_head_ref", lambda: ref)
+    monkeypatch.setattr(reader, "_state_data", lambda actual: data)
+    monkeypatch.setattr(reader, "_load_slug_index", lambda: ["a", "b"])
+
+    state = reader.at_head_state()
+
+    assert state._data is data
+    assert state._lineage_path("anything") is None
+    assert state._current_slugs() == ["a", "b"]
 
 
 def _hammer_cold_cache(
@@ -4897,7 +4938,7 @@ def test_serve_loads_dotenv_before_building_server(
     assert calls == ["load_env", "run"]
 
 
-def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
+def test_build_server_registers_seventeen_tools(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
     server = build_server(tmp_path)
     # FastMCP exposes registered tools via list_tools(); the wrapper is
@@ -4913,6 +4954,7 @@ def test_build_server_registers_sixteen_tools(tmp_path: Path) -> None:
             "get_section",
             "list_sections",
             "get_law_history",
+            "get_temporal_events",
             "list_recent_changes",
             "search_laws",
             "search_body",
@@ -5180,7 +5222,7 @@ def test_http_mode_registers_offloaded_async_tools_with_intact_schemas(
     server = build_server(tmp_path, http=HttpConfig(host="127.0.0.1", port=9999))
 
     tools = server._tool_manager._tools
-    assert len(tools) == 16
+    assert len(tools) == 17
     assert all(tool.is_async for tool in tools.values())
     get_law = tools["get_law"]
     assert get_law.parameters["required"] == ["slug"]
@@ -5195,7 +5237,7 @@ def test_stdio_mode_registers_inline_sync_tools(tmp_path: Path) -> None:
     server = build_server(tmp_path)
 
     tools = server._tool_manager._tools
-    assert len(tools) == 16
+    assert len(tools) == 17
     assert not any(tool.is_async for tool in tools.values())
 
 

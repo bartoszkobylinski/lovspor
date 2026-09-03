@@ -40,11 +40,11 @@ from lovspor.llhb.schema import load_schema, validate_case
 LLHB_DIR = Path(__file__).resolve().parents[1]
 RUNS_ROOT = LLHB_DIR / "results" / "runs"
 SCHEMA_DIR = LLHB_DIR / "schema"
-# v2 is the post-T0 apparatus (ADR-0009 serving-side notice changed the
-# get_law/get_section descriptions). The committed LLHB v1 pair recorded the
-# v1 hash — re-verifying it needs ``--surface-path`` pointed at v1, which
-# stays committed untouched.
-SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v4.json"
+# v5 is the post-ADR-0012 apparatus (get_temporal_events added — the first
+# tool-name change since v1). Earlier runs recorded earlier hashes —
+# re-verifying one needs ``--surface-path`` pointed at its own version,
+# which stays committed untouched.
+SURFACE_PATH = LLHB_DIR / "runner" / "tool-surface-v5.json"
 FROZEN_DIR = LLHB_DIR / "dataset" / "frozen"
 FROZEN_CASES_PATH = FROZEN_DIR / "llhb-v1.jsonl"
 FROZEN_LOCK_PATH = FROZEN_DIR / "llhb-v1.lock.json"

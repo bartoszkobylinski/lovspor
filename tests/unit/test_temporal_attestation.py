@@ -29,6 +29,8 @@ from lovspor.temporal_attestation import (
     fetch_attestations,
     read_attestation,
     reconcile_corpus,
+    refspec_transports_registry,
+    registry_synchronised,
     write_attestation,
 )
 
@@ -782,3 +784,177 @@ def test_attest_hook_skips_non_current_records_without_stopping(
     recorded = read_attestation(path, sha, TEMPORAL_PARSER_VERSION)
     assert recorded is not None
     assert recorded.documents_reconciled == 1
+
+
+# ---------- registry_synchronised (ADR-0012 point 2c, review #230) ----------
+
+
+@pytest.mark.parametrize(
+    "refspec",
+    [
+        "+refs/notes/*:refs/notes/*",
+        "refs/notes/temporal-attestations:refs/notes/temporal-attestations",
+    ],
+)
+def test_refspec_transport_requires_both_sides_to_cover_registry(refspec: str) -> None:
+    assert refspec_transports_registry(refspec)
+
+
+@pytest.mark.parametrize(
+    "refspec",
+    [
+        "",
+        "refs/notes/temporal-attestations",
+        "+refs/heads/*:refs/notes/*",
+        "+refs/notes/*:refs/heads/*",
+        "+refs/notes/other:refs/notes/temporal-attestations",
+        "+refs/notes/temporal-attestations:refs/notes/other",
+        # A wildcard on only one side is not a transporting refspec — git
+        # refuses it outright (`fatal: invalid refspec`) and it poisons
+        # every fetch/pull and `git remote get-url` while configured. The
+        # first draft of these tests expected the opposite; the round-5
+        # repair test proved that expectation wrong against real git.
+        "+refs/notes/*:refs/notes/temporal-attestations",
+        "+refs/notes/temporal-attestations:refs/notes/*",
+    ],
+)
+def test_refspec_transport_rejects_missing_or_one_sided_registry_coverage(
+    refspec: str,
+) -> None:
+    assert not refspec_transports_registry(refspec)
+
+
+def test_refspec_transport_accepts_only_a_trailing_glob_prefix() -> None:
+    """Removing two characters from ``refs/notes/*`` must not still cover the ref."""
+    assert refspec_transports_registry("+refs/notes/*:refs/notes/*")
+    assert not refspec_transports_registry("+refs/notes/x*:refs/notes/*")
+
+
+def test_refspec_transport_rejects_an_extra_colon() -> None:
+    assert not refspec_transports_registry(
+        "+refs/notes/*:ignored:refs/notes/*",
+    )
+
+
+def test_a_repo_without_origin_is_its_own_registry_home(repo: tuple[Path, str]) -> None:
+    path, _sha = repo
+
+    assert registry_synchronised(path)
+
+
+def test_registry_probe_uses_git_option_spellings_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[1:4] == ["remote", "get-url", "origin"]:
+            return subprocess.CompletedProcess(argv, 0, "origin\n", "")
+        if argv[1:4] == ["config", "--get-all", "remote.origin.fetch"]:
+            return subprocess.CompletedProcess(argv, 1, "", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert registry_synchronised(tmp_path)
+    assert calls[-1][1:] == [
+        "rev-parse",
+        "--quiet",
+        "--verify",
+        ATTESTATION_NOTES_REF,
+    ]
+
+
+def test_origin_without_refspec_or_local_registry_is_not_synchronised(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A configured remote alone is not evidence that its notes were fetched."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[1:] == ["config", "--get", "remote.origin.url"]:
+            return subprocess.CompletedProcess(argv, 0, "origin\n", "")
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert not registry_synchronised(tmp_path)
+    assert [call[1:] for call in calls] == [
+        ["config", "--get", "remote.origin.url"],
+        ["config", "--get-all", "remote.origin.fetch"],
+        ["rev-parse", "--quiet", "--verify", ATTESTATION_NOTES_REF],
+    ]
+
+
+def test_a_one_shot_notes_fetch_counts_as_synchronised(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    path, sha = repo
+    write_attestation(
+        path,
+        TemporalAttestation(
+            corpus_commit=sha,
+            parser_version=1,
+            documents_reconciled=1,
+            notes_total=0,
+            events_total=0,
+            attested_at=datetime(2026, 9, 2, 12, 0, tzinfo=UTC),
+        ),
+    )
+    clone = tmp_path / "clone"
+    _run_git(tmp_path, "clone", str(path), str(clone))
+    assert not registry_synchronised(clone)
+
+    fetch_attestations(clone)
+
+    assert registry_synchronised(clone)
+    assert read_attestation(clone, sha, 1) is not None
+
+
+def test_destination_only_refspec_does_not_count_as_registry_synchronised(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    """A textual mention is insufficient: the source side must fetch notes.
+
+    Otherwise an unrelated remote ref can be mapped into the registry namespace
+    while the actual remote attestation ref remains unfetched, recreating the
+    false ``unattested`` result that the synchronization guard must prevent.
+    """
+    path, _sha = repo
+    clone = tmp_path / "clone"
+    _run_git(tmp_path, "clone", str(path), str(clone))
+    _run_git(
+        clone,
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        "+refs/heads/attestations:refs/notes/temporal-attestations",
+    )
+
+    assert not registry_synchronised(clone)
+
+
+def test_source_only_refspec_does_not_count_as_registry_synchronised(
+    repo: tuple[Path, str],
+    tmp_path: Path,
+) -> None:
+    """The mirror hole: fetching the notes ref to somewhere read_attestation
+    never looks is not synchronisation either."""
+    path, _sha = repo
+    clone = tmp_path / "clone"
+    _run_git(tmp_path, "clone", str(path), str(clone))
+    _run_git(
+        clone,
+        "config",
+        "--add",
+        "remote.origin.fetch",
+        "+refs/notes/temporal-attestations:refs/heads/attestation-copy",
+    )
+
+    assert not registry_synchronised(clone)

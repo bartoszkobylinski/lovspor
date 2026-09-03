@@ -204,14 +204,14 @@ def test_frozen_finding_fails_the_gate_even_when_the_pair_itself_is_fair(
     assert "treatment is off the frozen pin" in output
 
 
-def test_surface_path_default_is_the_v4_document_and_it_loads(tmp_path: Path) -> None:
-    """SURFACE_PATH moved to v4 with the ADR-0011 recorded_at surface; a stale or missing
+def test_surface_path_default_is_the_v5_document_and_it_loads(tmp_path: Path) -> None:
+    """SURFACE_PATH moved to v5 with the ADR-0012 get_temporal_events surface; a stale or missing
 
     pointer would only surface at CLI runtime (--surface-path defaults to
     it), since every other test here mocks ``load_expected_surface`` away.
     This reads the real, unmocked default file the way `main()` does.
     """
-    assert check_fairness.SURFACE_PATH.name == "tool-surface-v4.json"
+    assert check_fairness.SURFACE_PATH.name == "tool-surface-v5.json"
 
     committed = json.loads(check_fairness.SURFACE_PATH.read_text(encoding="utf-8"))
     expected = check_fairness.load_expected_surface(check_fairness.SURFACE_PATH)
