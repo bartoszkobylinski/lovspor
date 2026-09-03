@@ -640,6 +640,26 @@ def test_live_head_rejects_non_two_line_git_wire_format(
         _tool_fn(repo)(slug="testloven")
 
 
+def test_live_head_rejects_timezone_naive_author_date(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The UTC knowledge horizon must not depend on the server's timezone."""
+    repo, _sha1, _sha2 = corpus
+
+    class NaiveDateGitResult:
+        stdout = f"{'a' * 40}\n2026-05-10T23:30:00\n"
+
+    monkeypatch.setattr(
+        mcp_module.subprocess,
+        "run",
+        lambda *args, **kwargs: NaiveDateGitResult(),
+    )
+
+    with pytest.raises(AttestationError, match="identity and knowledge horizon are unreadable"):
+        CorpusReader(repo)._head_ref()
+
+
 def test_live_head_git_failure_is_a_typed_evidence_failure(
     corpus: tuple[Path, str, str],
     monkeypatch: pytest.MonkeyPatch,

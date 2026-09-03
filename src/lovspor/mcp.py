@@ -801,6 +801,11 @@ class CorpusReader:
             )
             sha, author_iso = result.stdout.strip("\n").split("\n", maxsplit=1)
             commit_date = datetime.fromisoformat(author_iso.strip())
+            if commit_date.tzinfo is None:
+                # %aI always carries an offset; a naive date is a malformed
+                # wire, and folding it through astimezone() would make the
+                # knowledge horizon depend on the server's own timezone.
+                raise ValueError("author date lacks a UTC offset")
         except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as exc:
             raise AttestationError(
                 f"cannot resolve the live corpus HEAD under {self.corpus_path}: "
