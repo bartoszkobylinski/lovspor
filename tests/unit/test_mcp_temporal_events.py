@@ -656,8 +656,14 @@ def test_live_head_rejects_timezone_naive_author_date(
         lambda *args, **kwargs: NaiveDateGitResult(),
     )
 
-    with pytest.raises(AttestationError, match="identity and knowledge horizon are unreadable"):
+    with pytest.raises(
+        AttestationError,
+        match="identity and knowledge horizon are unreadable",
+    ) as exc_info:
         CorpusReader(repo)._head_ref()
+
+    assert isinstance(exc_info.value.__cause__, ValueError)
+    assert str(exc_info.value.__cause__) == "author date lacks a UTC offset"
 
 
 def test_live_head_git_failure_is_a_typed_evidence_failure(
@@ -686,6 +692,23 @@ def test_live_unknown_slug_names_the_current_head(
         _tool_fn(repo)(slug="finnesikke")
 
     assert f"at the current head (corpus_commit {sha2})" in str(exc_info.value)
+
+
+def test_temporal_section_missing_state_body_names_requested_slug(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An inconsistent resolved namespace reports the caller's slug."""
+    repo, _sha1, _sha2 = corpus
+    state = CorpusReader(repo).at_state("2026-05-05")
+    monkeypatch.setattr(state, "_body_for_slug", lambda _slug: None)
+
+    with pytest.raises(CorpusNotFoundError) as exc_info:
+        state.get_temporal_events("testloven", section_id="1-1")
+
+    message = str(exc_info.value)
+    assert "no law with slug 'testloven'" in message
+    assert "get_law_history('testloven')" in message
 
 
 def test_head_ref_takes_the_sha_verbatim_from_the_wire(
