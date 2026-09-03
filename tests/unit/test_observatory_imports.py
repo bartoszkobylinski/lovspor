@@ -28,6 +28,7 @@ _MODULES = (
     "lovspor.observatory.events",
     "lovspor.observatory.fetch",
     "lovspor.observatory.freshness",
+    "lovspor.observatory.freshness_index",
     "lovspor.observatory.heartbeat",
     "lovspor.observatory.listing",
     "lovspor.observatory.log",

@@ -223,3 +223,32 @@ class TestDamageNeverAdvancesTheIndex:
 
         assert scan.complete
         assert state == CaptureState.empty()
+
+
+class TestTheSweepPathReachesTheIndex:
+    """The operator's question: the supported register-wide fold — what
+    capture-all and nightly call — must be the indexed one, and a narrowed
+    capture must not be (a different function of the log)."""
+
+    def test_the_register_wide_fold_writes_and_reuses_the_index(self, tmp_path: Path) -> None:
+        from lovspor.observatory.commands import _capture_state
+
+        log = make_log(tmp_path)
+        log.append(_observation("https://example.invalid/a"))
+        first = _capture_state(log, None)
+        assert freshness_index_path(log).exists()
+
+        second = _capture_state(log, None)
+
+        assert first == second == _full_fold(log)
+
+    def test_a_narrowed_fold_stays_on_the_direct_read(self, tmp_path: Path) -> None:
+        from lovspor.observatory.commands import _capture_state
+
+        log = make_log(tmp_path)
+        log.append(_observation("https://example.invalid/a"))
+
+        state = _capture_state(log, "3201")
+
+        assert state.observed
+        assert not freshness_index_path(log).exists()

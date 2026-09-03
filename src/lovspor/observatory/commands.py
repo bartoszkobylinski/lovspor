@@ -45,6 +45,7 @@ from lovspor.observatory.freshness import (
     collect_capture_state,
     worth_capturing,
 )
+from lovspor.observatory.freshness_index import indexed_capture_state
 from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
 from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
 from lovspor.observatory.model import ArtifactObservation
@@ -950,9 +951,18 @@ def _capture_state(log: ObservationLog, authority_id: str | None) -> CaptureStat
     must make it identically: a fold that quietly skipped unreadable lines
     would answer "never seen" for pages the archive holds, and every one of
     them would be re-fetched as though the observation had never happened.
+
+    The register-wide fold (None) goes through the derived freshness index
+    (issue #201) so a sweep's cost stops growing with the archive; the
+    index path returns the identical fold and the identical damage verdict,
+    or rebuilds. A narrowed fold is a different function of the log and
+    stays on the direct read.
     """
-    state = CaptureState.empty()
-    scan = log.scan_into(collect_capture_state(state, authority_id))
+    if authority_id is None:
+        state, scan = indexed_capture_state(log)
+    else:
+        state = CaptureState.empty()
+        scan = log.scan_into(collect_capture_state(state, authority_id))
     if not scan.complete:
         typer.echo(
             "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
