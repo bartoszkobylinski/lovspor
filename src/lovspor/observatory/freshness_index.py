@@ -11,13 +11,22 @@ derivation_version)`` — an accelerant for ``worth_capturing``'s decision,
 never authoritative, never evidence, never read by ``verify``. The log is
 unconditionally primary. It is consulted only when its anchor proves the
 skipped prefix is the same bytes it was built from: the recorded offset
-must not exceed the log, and the fingerprint of the bytes just before the
+must not exceed the log, and the SHA-256 of the whole prefix up to the
 offset must match. Any doubt — missing file, unparseable content, another
-derivation version, a shrunken log, a mismatched fingerprint — costs one
-full re-fold and a fresh index, never a wrong answer. The invariant issue
-#201 names: divergence may only ever cost a redundant fetch, never a
-skipped one — and with a proven prefix plus a damage-checked tail, the
-indexed fold IS the full fold.
+derivation version, a shrunken log, a mismatched digest — costs one full
+re-fold and a fresh index, never a wrong answer. The invariant issue #201
+names: divergence may only ever cost a redundant fetch, never a skipped
+one — and with a proven prefix plus a damage-checked tail, the indexed
+fold IS the full fold.
+
+The proof is the WHOLE prefix, not a window: a windowed anchor would let
+a same-size rewrite (or bit rot) deeper in the file serve a fold of bytes
+the log no longer holds — the silent-zero class, and a narrowing of the
+damage-refusal guarantee the full read gives. The price is honest: each
+open re-reads the prefix as raw bytes to hash it, so the linear component
+drops from parse cost to raw-IO cost (roughly an order of magnitude)
+rather than to zero. Any byte change anywhere forces the full re-fold,
+whose parse surfaces damage exactly as before.
 
 The tail read reuses :meth:`ObservationLog.scan_into`, so torn or
 malformed tail lines surface in the returned ``LogScan`` exactly as they
@@ -48,13 +57,8 @@ precedent: an index written by other fold semantics must rebuild, never be
 silently reused.
 """
 
-_FINGERPRINT_BYTES = 4096
-"""How much of the prefix's tail anchors the index to the exact bytes.
-
-The log is append-only, so a stale index can only fall behind — unless the
-file was rewritten in place, which an offset comparison alone cannot see.
-Hashing the last bytes before the offset catches that at O(1) cost.
-"""
+_DIGEST_CHUNK = 1 << 20
+"""Read size for hashing the prefix — bounded memory at any archive size."""
 
 
 class StoredHold(BaseModel):
@@ -80,7 +84,7 @@ class FreshnessIndex(BaseModel):
     schema_version: Literal[1] = 1
     derivation_version: int
     log_offset: int = Field(ge=0)
-    prefix_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    prefix_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     observed: dict[str, datetime]
     holds: dict[str, StoredHold]
 
@@ -122,7 +126,7 @@ def _load_index(path: Path) -> FreshnessIndex | None:
     discarded, never repaired (deleting it costs one slow round)."""
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return None
     try:
         index = FreshnessIndex.model_validate_json(raw)
@@ -141,15 +145,21 @@ def _prefix_proven(log: ObservationLog, index: FreshnessIndex) -> bool:
         return False
     if index.log_offset > size:
         return False
-    return _fingerprint(log.log_path, index.log_offset) == index.prefix_fingerprint
+    return _prefix_digest(log.log_path, index.log_offset) == index.prefix_sha256
 
 
-def _fingerprint(log_path: Path, offset: int) -> str:
-    """SHA-256 of the last :data:`_FINGERPRINT_BYTES` before ``offset``."""
-    window = max(0, offset - _FINGERPRINT_BYTES)
+def _prefix_digest(log_path: Path, offset: int) -> str:
+    """SHA-256 of the log's first ``offset`` bytes, read in bounded chunks."""
+    digest = hashlib.sha256()
+    remaining = offset
     with log_path.open("rb") as handle:
-        handle.seek(window)
-        return hashlib.sha256(handle.read(offset - window)).hexdigest()
+        while remaining:
+            chunk = handle.read(min(_DIGEST_CHUNK, remaining))
+            if not chunk:
+                break
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest()
 
 
 def _state_from_index(index: FreshnessIndex) -> CaptureState:
@@ -166,7 +176,7 @@ def _index_from_state(log: ObservationLog, state: CaptureState, offset: int) -> 
     return FreshnessIndex(
         derivation_version=INDEX_DERIVATION_VERSION,
         log_offset=offset,
-        prefix_fingerprint=_fingerprint(log.log_path, offset) if offset else _empty_digest(),
+        prefix_sha256=_prefix_digest(log.log_path, offset) if offset else _empty_digest(),
         # Sorted so the document is byte-identical for a given log state —
         # the ADR-0010 §7 determinism the whole derivation family carries.
         observed=dict(sorted(state.observed.items())),

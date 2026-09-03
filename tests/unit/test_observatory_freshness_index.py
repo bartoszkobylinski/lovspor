@@ -145,6 +145,16 @@ class TestAnyDoubtRebuilds:
         assert scan.complete
         assert state == _full_fold(log)
 
+    def test_non_utf8_index_content_is_discarded_and_rebuilt(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(_observation("https://example.invalid/a"))
+        freshness_index_path(log).write_bytes(b"\xff\xfe not utf-8")
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.complete
+        assert state == _full_fold(log)
+
     def test_another_derivation_version_is_discarded_and_rebuilt(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         log.append(_observation("https://example.invalid/a"))
@@ -172,9 +182,7 @@ class TestAnyDoubtRebuilds:
         assert scan.records_read == 1
         assert state == _full_fold(log)
 
-    def test_a_same_size_in_place_rewrite_is_caught_by_the_fingerprint(
-        self, tmp_path: Path
-    ) -> None:
+    def test_a_same_size_in_place_rewrite_is_caught_by_the_digest(self, tmp_path: Path) -> None:
         """The append-only assumption's one blind spot: same length,
         different bytes. The offset alone cannot see it; the anchor must."""
         log = make_log(tmp_path)
@@ -188,6 +196,27 @@ class TestAnyDoubtRebuilds:
         assert scan.records_read == 1
         assert "https://example.invalid/bbbb" in state.observed
         assert "https://example.invalid/aaaa" not in state.observed
+        assert state == _full_fold(log)
+
+    def test_a_same_size_rewrite_before_the_fingerprint_window_forces_a_rebuild(
+        self, tmp_path: Path
+    ) -> None:
+        log = make_log(tmp_path)
+        old_url = "https://example.invalid/aaaa"
+        new_url = "https://example.invalid/bbbb"
+        log.append(_observation(old_url))
+        for number in range(30):
+            log.append(_observation(f"https://example.invalid/padding/{number:02d}/" + "x" * 160))
+        indexed_capture_state(log)
+        original = log.log_path.read_bytes()
+        assert original.index(old_url.encode()) < len(original) - 4096
+        log.log_path.write_bytes(original.replace(old_url.encode(), new_url.encode(), 1))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 31
+        assert new_url in state.observed
+        assert old_url not in state.observed
         assert state == _full_fold(log)
 
 
