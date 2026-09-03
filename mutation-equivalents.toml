@@ -784,3 +784,24 @@ Codec names resolve through codecs.lookup, which normalises case: "utf-8"
 and "UTF-8" select the same codec and produce identical bytes, hence an
 identical digest. Python's own codec-registry semantics.
 """
+
+[[equivalent]]
+file = "src/lovspor/rendering/markdown_renderer.py"
+symbol = "_is_not_in_force"
+registered = "2026-09-03, PR #237, from run 33786146543"
+mutation = """
+-    classes = (elem.get("class") or "").split()
++    classes = (elem.get("class") or "XXXX").split()
+"""
+justification = """
+The fallback is evaluated whenever an element has no class attribute (or an
+empty one) — a common case — so the argument is about the result, not
+reachability. `"".split()` yields `[]`; `"XXXX".split()` yields `["XXXX"]`.
+The function then intersects with `_NOT_IN_FORCE_CLASSES`, a module-level
+frozenset of exactly {"futuretitle", "futureLegalArticle",
+"futureLegalArticleHeader"} defined 130 lines above, and "XXXX" is not a
+member, so the intersection is empty under both spellings and the function
+returns False for every such element. Elements that do carry a class never
+evaluate the fallback at all. Identical output on every input; no test can
+distinguish the two.
+"""

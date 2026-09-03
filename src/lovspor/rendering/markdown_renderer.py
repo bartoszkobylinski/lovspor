@@ -80,7 +80,7 @@ _DROPPED_TEXT_SAMPLE = 60
 # tracks law as *currently* in force, so the subtrees are elided before the walk
 # rather than rendered as body text. Lovdata's own en-dash elision marks already
 # stand where content is omitted.
-_NOT_IN_FORCE_CLASSES = frozenset(
+NOT_IN_FORCE_CLASSES = frozenset(
     {"futuretitle", "futureLegalArticle", "futureLegalArticleHeader"},
 )
 
@@ -217,7 +217,7 @@ def _elide_not_in_force(root: etree._Element) -> None:
 
 def _is_not_in_force(elem: etree._Element) -> bool:
     classes = (elem.get("class") or "").split()
-    return bool(_NOT_IN_FORCE_CLASSES.intersection(classes))
+    return bool(NOT_IN_FORCE_CLASSES.intersection(classes))
 
 
 def _remove_preserving_tail(elem: etree._Element) -> None:

@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from lovspor import temporal
-from lovspor.rendering.markdown_renderer import render_markdown
+from lovspor.rendering.markdown_renderer import NOT_IN_FORCE_CLASSES, render_markdown
 from lovspor.temporal import (
     AmendmentEvent,
     CommencementKind,
@@ -425,6 +425,111 @@ class TestTemporalLayer:
 """
 
         assert count_source_amendment_notes(xml) == 2
+
+    @pytest.mark.parametrize(
+        "elided_class", ["futureLegalArticle", "futuretitle", "futureLegalArticleHeader"]
+    )
+    def test_source_note_count_skips_notes_inside_elided_future_markup(
+        self, elided_class: str
+    ) -> None:
+        """A changesToParent inside not-yet-in-force markup annotates the
+        PARENT act's proposed text, which the renderer deliberately elides
+        before the walk — so the independent count must live in the same
+        universe the corpus publishes, or every endringslov carrying one
+        fails the reconciliation gate (issue #235: 7 acts, 9 such notes,
+        the first production gate failure)."""
+        xml = (
+            b"<html><body><main>"
+            b'<article class="' + elided_class.encode() + b'" id="kapittel-1-fp-1">'
+            b'<article class="legalP">Proposed text for the parent act.</article>'
+            b'<article class="changesToParent">Endret ved lov inside.</article>'
+            b"</article>"
+            b'<article class="changesToParent">Endret ved lov outside.</article>'
+            b"</main></body></html>"
+        )
+
+        assert count_source_amendment_notes(xml) == 1
+
+    def test_source_note_count_universe_is_the_renderers_elision_set(self) -> None:
+        """One definition, imported — a class added to the renderer's
+        elision set must narrow the count with no second edit (the
+        shared-definition lesson of PR #230's refspec parser)."""
+        assert temporal._ELIDED_SOURCE_CLASSES is NOT_IN_FORCE_CLASSES
+
+    def test_source_note_count_skips_note_that_is_itself_future_markup(self) -> None:
+        xml = b"""\
+<html><body>
+  <article class="changesToParent futureLegalArticle">Future note</article>
+  <article class="changesToParent">Published note</article>
+</body></html>
+"""
+
+        assert count_source_amendment_notes(xml) == 1
+
+    def test_source_note_count_skips_note_below_nested_future_wrapper(self) -> None:
+        xml = b"""\
+<html><body>
+  <section class="section futuretitle highlighted">
+    <div class="wrapper">
+      <article class="legalArticle changesToParent selected">Future note</article>
+    </div>
+  </section>
+  <article class="legalArticle changesToParent selected">Published note</article>
+</body></html>
+"""
+
+        assert count_source_amendment_notes(xml) == 1
+
+    def test_gate_in_miniature_future_note_reconciles_against_own_render(self) -> None:
+        """The issue #235 shape end to end: source XML whose only extra
+        note is future-markup must reconcile strictly against its own
+        render — the exact question the sync gate asks per document."""
+        xml = (
+            "<html><body><main>"
+            '<section class="section" id="kapittel-1">'
+            '<article class="legalArticle" id="kapittel-1-paragraf-1">'
+            '<h2 class="legalArticleHeader">§ 1. Endringer</h2>'
+            '<article class="legalP">I lov gjøres endringer.</article>'
+            "</article>"
+            '<article class="futureLegalArticle" id="kapittel-1-fp-1">'
+            '<article class="legalP">Foreslått tekst.</article>'
+            '<article class="changesToParent">Endret ved '
+            '<a href="lov/2015-04-10-17">lov 10 apr 2015 nr. 17</a> (ikr. 1 jan 2016).'
+            "</article></article>"
+            "</section></main></body></html>"
+        ).encode()
+
+        markdown = render_markdown(xml)
+
+        layer = derive_temporal_layer_from_source(xml, markdown, strict=True)
+
+        assert layer.notes_seen == 0
+
+    def test_source_reconciliation_keeps_published_note_beside_future_note(self) -> None:
+        xml = (
+            b"<html><body><main>\n"
+            b'  <article class="legalArticle">\n'
+            b'    <h2 class="legalArticleHeader">&#167; 1. Endringer</h2>\n'
+            b'    <article class="changesToParent">Endret ved lov '
+            b'<a href="lov/2020-01-01-1">1 januar 2020 nr. 1</a> '
+            b"(ikr. 2 januar 2020).</article>\n"
+            b"  </article>\n"
+            b'  <article class="futureLegalArticle">\n'
+            b'    <article class="changesToParent">Endret ved lov '
+            b'<a href="lov/2027-01-01-2">1 januar 2027 nr. 2</a>.</article>\n'
+            b"  </article>\n"
+            b"</main></body></html>\n"
+        )
+
+        markdown = render_markdown(xml)
+        layer = derive_temporal_layer_from_source(xml, markdown)
+
+        assert count_source_amendment_notes(xml) == 1
+        assert layer.notes_seen == 1
+        assert [event.amending_act_ref for event in layer.events] == ["lov/2020-01-01-1"]
+
+    def test_temporal_parser_version_marks_note_universe_change(self) -> None:
+        assert temporal.TEMPORAL_PARSER_VERSION == 2
 
     def test_source_note_count_rejects_malformed_xml(self) -> None:
         with pytest.raises(TemporalDerivationError, match="malformed XML"):

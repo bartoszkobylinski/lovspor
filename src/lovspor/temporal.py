@@ -39,6 +39,11 @@ from pydantic import BaseModel, model_validator
 
 from lovspor.errors import TemporalDerivationError
 from lovspor.parsing.xml_normalizer import safe_parser
+from lovspor.rendering.markdown_renderer import NOT_IN_FORCE_CLASSES
+
+_ELIDED_SOURCE_CLASSES = NOT_IN_FORCE_CLASSES
+"""The renderer's elision universe, shared by name — see
+:func:`count_source_amendment_notes`."""
 
 _DOCUMENT_LEVEL = "(document)"
 
@@ -128,7 +133,7 @@ Scope = Literal[
 ]
 
 
-TEMPORAL_PARSER_VERSION = 1
+TEMPORAL_PARSER_VERSION = 2
 """Behaviour version of the temporal derivation and evaluation code.
 
 The ``RENDERER_VERSION`` precedent, for time instead of text: bump on ANY
@@ -426,8 +431,37 @@ def derive_temporal_layer(
     )
 
 
+def _class_tokens(element: etree._Element) -> set[str]:
+    value = element.get("class")
+    return set(value.split()) if value else set()
+
+
+def _inside_elided_markup(element: etree._Element) -> bool:
+    """Whether the renderer's walk would never reach this element.
+
+    Not-yet-in-force subtrees are elided before rendering, so a note in
+    one annotates text the corpus does not publish.
+    """
+    if _ELIDED_SOURCE_CLASSES.intersection(_class_tokens(element)):
+        return True
+    return any(
+        _ELIDED_SOURCE_CLASSES.intersection(_class_tokens(ancestor))
+        for ancestor in element.iterancestors()
+    )
+
+
 def count_source_amendment_notes(xml_bytes: bytes) -> int:
-    """Count ``changesToParent`` elements independently in source XML."""
+    """Count ``changesToParent`` elements independently in source XML.
+
+    Counted in the universe the corpus publishes: a note inside
+    not-yet-in-force markup annotates the PARENT act's text as proposed
+    by an endringslov, and the renderer deliberately elides that subtree
+    before the walk — counting it fails the reconciliation gate for
+    every endringslov quoting an already-amended provision (issue #235,
+    the first production gate failure: 7 acts, 9 such notes). The class
+    set is the renderer's own (``NOT_IN_FORCE_CLASSES``), imported, so
+    the counted and the published universe cannot drift apart.
+    """
     try:
         tree = etree.parse(BytesIO(xml_bytes), parser=safe_parser())
     except etree.XMLSyntaxError as exc:
@@ -436,11 +470,11 @@ def count_source_amendment_notes(xml_bytes: bytes) -> int:
         ) from exc
     count = 0
     for element in tree.iter():
-        class_names = element.get("class")
-        if class_names is None:
+        if "changesToParent" not in _class_tokens(element):
             continue
-        if "changesToParent" in class_names.split():
-            count += 1
+        if _inside_elided_markup(element):
+            continue
+        count += 1
     return count
 
 
