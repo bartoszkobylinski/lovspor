@@ -867,6 +867,29 @@ def test_registry_probe_uses_git_option_spellings_exactly(
     ]
 
 
+def test_origin_without_refspec_or_local_registry_is_not_synchronised(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A configured remote alone is not evidence that its notes were fetched."""
+    calls: list[list[str]] = []
+
+    def fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if argv[1:] == ["config", "--get", "remote.origin.url"]:
+            return subprocess.CompletedProcess(argv, 0, "origin\n", "")
+        return subprocess.CompletedProcess(argv, 1, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert not registry_synchronised(tmp_path)
+    assert [call[1:] for call in calls] == [
+        ["config", "--get", "remote.origin.url"],
+        ["config", "--get-all", "remote.origin.fetch"],
+        ["rev-parse", "--quiet", "--verify", ATTESTATION_NOTES_REF],
+    ]
+
+
 def test_a_one_shot_notes_fetch_counts_as_synchronised(
     repo: tuple[Path, str],
     tmp_path: Path,
