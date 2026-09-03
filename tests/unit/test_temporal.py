@@ -456,6 +456,30 @@ class TestTemporalLayer:
         shared-definition lesson of PR #230's refspec parser)."""
         assert temporal._ELIDED_SOURCE_CLASSES is NOT_IN_FORCE_CLASSES
 
+    def test_source_note_count_skips_note_that_is_itself_future_markup(self) -> None:
+        xml = b"""\
+<html><body>
+  <article class="changesToParent futureLegalArticle">Future note</article>
+  <article class="changesToParent">Published note</article>
+</body></html>
+"""
+
+        assert count_source_amendment_notes(xml) == 1
+
+    def test_source_note_count_skips_note_below_nested_future_wrapper(self) -> None:
+        xml = b"""\
+<html><body>
+  <section class="section futuretitle highlighted">
+    <div class="wrapper">
+      <article class="legalArticle changesToParent selected">Future note</article>
+    </div>
+  </section>
+  <article class="legalArticle changesToParent selected">Published note</article>
+</body></html>
+"""
+
+        assert count_source_amendment_notes(xml) == 1
+
     def test_gate_in_miniature_future_note_reconciles_against_own_render(self) -> None:
         """The issue #235 shape end to end: source XML whose only extra
         note is future-markup must reconcile strictly against its own
