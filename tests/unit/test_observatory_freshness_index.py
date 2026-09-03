@@ -10,6 +10,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from lovspor.observatory.commands import _capture_state
 from lovspor.observatory.freshness import CaptureState, collect_capture_state
 from lovspor.observatory.freshness_index import (
     INDEX_DERIVATION_VERSION,
@@ -231,8 +232,6 @@ class TestTheSweepPathReachesTheIndex:
     capture must not be (a different function of the log)."""
 
     def test_the_register_wide_fold_writes_and_reuses_the_index(self, tmp_path: Path) -> None:
-        from lovspor.observatory.commands import _capture_state
-
         log = make_log(tmp_path)
         log.append(_observation("https://example.invalid/a"))
         first = _capture_state(log, None)
@@ -243,8 +242,6 @@ class TestTheSweepPathReachesTheIndex:
         assert first == second == _full_fold(log)
 
     def test_a_narrowed_fold_stays_on_the_direct_read(self, tmp_path: Path) -> None:
-        from lovspor.observatory.commands import _capture_state
-
         log = make_log(tmp_path)
         log.append(_observation("https://example.invalid/a"))
 
