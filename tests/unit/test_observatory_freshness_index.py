@@ -122,6 +122,20 @@ class TestIndexedFoldEqualsTheFullFold:
         assert state.holds["https://example.invalid/x"].consecutive == 3
         assert state == _full_fold(log)
 
+    def test_an_observation_in_the_tail_clears_a_cached_failure_hold(self, tmp_path: Path) -> None:
+        url = "https://example.invalid/x"
+        log = make_log(tmp_path)
+        log.append(_failure(url))
+        indexed_capture_state(log)
+        log.append(_observation(url, NOW + timedelta(hours=1)))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert url in state.observed
+        assert url not in state.holds
+        assert state == _full_fold(log)
+
     def test_the_written_index_is_byte_identical_for_one_log_state(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         log.append(_observation("https://example.invalid/b"))
@@ -181,6 +195,19 @@ class TestAnyDoubtRebuilds:
 
         assert scan.records_read == 1
         assert state == _full_fold(log)
+
+    def test_a_deleted_log_discards_all_cached_sightings(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        url = "https://example.invalid/a"
+        log.append(_observation(url))
+        indexed_capture_state(log)
+        log.log_path.unlink()
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.complete
+        assert state == CaptureState.empty()
+        assert url not in state.observed
 
     def test_a_same_size_in_place_rewrite_is_caught_by_the_digest(self, tmp_path: Path) -> None:
         """The append-only assumption's one blind spot: same length,
@@ -247,6 +274,22 @@ class TestAnyDoubtRebuilds:
 
 
 class TestDamageNeverAdvancesTheIndex:
+    def test_damage_in_a_rewritten_prefix_refuses_and_does_not_advance_the_index(
+        self, tmp_path: Path
+    ) -> None:
+        log = make_log(tmp_path)
+        log.append(_observation("https://example.invalid/a"))
+        indexed_capture_state(log)
+        before = freshness_index_path(log).read_bytes()
+        original = log.log_path.read_bytes()
+        log.log_path.write_bytes(b"!" + original[1:])
+
+        _state, scan = indexed_capture_state(log)
+
+        assert not scan.complete
+        assert scan.malformed_lines == (1,)
+        assert freshness_index_path(log).read_bytes() == before
+
     def test_a_torn_tail_refuses_and_keeps_the_old_anchor(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         log.append(_observation("https://example.invalid/a"))
