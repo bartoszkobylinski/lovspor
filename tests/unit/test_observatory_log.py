@@ -1036,6 +1036,16 @@ class TestTailScans:
         assert scan.complete
         assert scan.clean_through == log.log_path.stat().st_size
 
+    def test_retaining_records_preserves_the_clean_through_anchor(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(observation(b"a", url="https://example.invalid/a"))
+        log.append(observation(b"b", url="https://example.invalid/b"))
+
+        scan = log.scan()
+
+        assert len(scan.records) == 2
+        assert scan.clean_through == log.log_path.stat().st_size
+
     def test_a_tail_scan_reads_only_the_records_past_start(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         log.append(observation(b"a", url="https://example.invalid/a"))

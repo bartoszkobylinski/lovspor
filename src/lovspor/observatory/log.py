@@ -336,12 +336,7 @@ class ObservationLog:
         """
         records: list[ObservationRecord] = []
         scan = self.scan_into(records.append)
-        return LogScan(
-            records=tuple(records),
-            incomplete_final_record=scan.incomplete_final_record,
-            malformed_lines=scan.malformed_lines,
-            records_read=scan.records_read,
-        )
+        return scan.model_copy(update={"records": tuple(records)})
 
     def scan_damage(self) -> LogScan:
         """Whether the log reads to the end, and how much of it did.
