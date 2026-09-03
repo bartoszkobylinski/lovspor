@@ -756,3 +756,31 @@ notes ref and transports nothing) triggers a removal, and both leave the
 transports-check False so the canonical refspec is added — the observable
 git calls are identical for every value the capture can return.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/log.py"
+symbol = "scan_into"
+registered = "2026-09-03, PR #233, from run 33746106302"
+mutation = """
+-    damaged = False
++    damaged = None
+"""
+justification = """
+The flag is only ever truth-tested (`if not damaged:`) and only ever
+reassigned to True; None and False are both falsy, so every path computes
+identically. The register's falsy-None precedent, on Python's own truthiness.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/freshness_index.py"
+symbol = "_state_binding"
+registered = "2026-09-03, PR #233, from run 33746106302"
+mutation = """
+-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++    return hashlib.sha256(canonical.encode("UTF-8")).hexdigest()
+"""
+justification = """
+Codec names resolve through codecs.lookup, which normalises case: "utf-8"
+and "UTF-8" select the same codec and produce identical bytes, hence an
+identical digest. Python's own codec-registry semantics.
+"""
