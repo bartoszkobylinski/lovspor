@@ -97,8 +97,15 @@ def _git_capture(args: Sequence[str], cwd: Path) -> str | None:
 
 
 def _origin_url(path: Path) -> str | None:
-    """The clone's ``origin`` remote URL, or None if it cannot be read."""
-    return _git_capture(["remote", "get-url", "origin"], path)
+    """The clone's ``origin`` remote URL, or None if it cannot be read.
+
+    Read from config directly: ``git remote get-url`` fatals when ANY
+    fetch refspec in the remote's config is syntactically invalid (e.g.
+    a wildcard on one side only), and that must not make a real lovverk
+    clone unrecognisable — recognising it is exactly what lets the
+    update path repair the bad refspec (codex-tests round 5, PR #230).
+    """
+    return _git_capture(["config", "--get", "remote.origin.url"], path)
 
 
 def _same_repo(left: str, right: str) -> bool:

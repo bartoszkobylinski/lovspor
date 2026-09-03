@@ -406,6 +406,34 @@ def test_fetch_corpus_repairs_refspec_that_only_mentions_attestation_ref(
     assert read_attestation(dest, head, 1) is not None
 
 
+@pytest.mark.parametrize(
+    "invalid_refspec",
+    [
+        "+refs/notes/*:refs/notes/temporal-attestations",
+        "+refs/notes/temporal-attestations:refs/notes/*",
+    ],
+)
+def test_fetch_corpus_repairs_asymmetric_wildcard_refspec(
+    tmp_path: Path,
+    invalid_refspec: str,
+) -> None:
+    """Git rejects a fetch refspec with a wildcard on only one side."""
+    origin = tmp_path / "origin"
+    _make_origin(origin)
+    head = _attest_head(origin)
+    dest = tmp_path / "clone"
+    _git(["clone", _url(origin), str(dest)], cwd=tmp_path)
+    _git(
+        ["config", "--add", "remote.origin.fetch", invalid_refspec],
+        cwd=dest,
+    )
+
+    fetch_corpus(dest, repo_url=_url(origin))
+
+    assert registry_synchronised(dest)
+    assert read_attestation(dest, head, 1) is not None
+
+
 def test_fetch_corpus_survives_an_origin_without_the_notes_ref(tmp_path: Path) -> None:
     """Bootstrap safety: the configured refspec must not brick fetch/pull
     against an origin that has no attestation ref yet (the glob form)."""

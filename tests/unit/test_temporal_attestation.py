@@ -794,8 +794,6 @@ def test_attest_hook_skips_non_current_records_without_stopping(
     [
         "+refs/notes/*:refs/notes/*",
         "refs/notes/temporal-attestations:refs/notes/temporal-attestations",
-        "+refs/notes/*:refs/notes/temporal-attestations",
-        "+refs/notes/temporal-attestations:refs/notes/*",
     ],
 )
 def test_refspec_transport_requires_both_sides_to_cover_registry(refspec: str) -> None:
@@ -811,6 +809,13 @@ def test_refspec_transport_requires_both_sides_to_cover_registry(refspec: str) -
         "+refs/notes/*:refs/heads/*",
         "+refs/notes/other:refs/notes/temporal-attestations",
         "+refs/notes/temporal-attestations:refs/notes/other",
+        # A wildcard on only one side is not a transporting refspec — git
+        # refuses it outright (`fatal: invalid refspec`) and it poisons
+        # every fetch/pull and `git remote get-url` while configured. The
+        # first draft of these tests expected the opposite; the round-5
+        # repair test proved that expectation wrong against real git.
+        "+refs/notes/*:refs/notes/temporal-attestations",
+        "+refs/notes/temporal-attestations:refs/notes/*",
     ],
 )
 def test_refspec_transport_rejects_missing_or_one_sided_registry_coverage(

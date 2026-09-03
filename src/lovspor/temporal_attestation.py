@@ -110,7 +110,10 @@ def registry_synchronised(repo: Path) -> bool:
             check=False,
         )
 
-    if _read(["remote", "get-url", "origin"]).returncode != 0:
+    # Pure config read: `git remote get-url` fatals on a syntactically
+    # invalid fetch refspec anywhere in the remote's config, which would
+    # make a poisoned clone read as "no origin" — its own registry home.
+    if _read(["config", "--get", "remote.origin.url"]).returncode != 0:
         return True
     refspecs = _read(["config", "--get-all", "remote.origin.fetch"])
     if refspecs.returncode == 0 and any(
@@ -139,7 +142,14 @@ def refspec_transports_registry(spec: str) -> bool:
         return side == ATTESTATION_NOTES_REF
 
     source, colon, destination = spec.strip().removeprefix("+").partition(":")
-    return bool(colon) and covers(source) and covers(destination)
+    if not colon or source.endswith("*") != destination.endswith("*"):
+        # A wildcard on only one side is not a lesser refspec — git refuses
+        # it outright (`fatal: invalid refspec`, verified empirically), and
+        # while it sits in the config it poisons `git remote get-url` and
+        # every fetch/pull. It transports nothing; the repair path removes
+        # it (codex-tests round 5, PR #230).
+        return False
+    return covers(source) and covers(destination)
 
 
 def fetch_attestations(repo: Path, remote: str = "origin") -> None:
