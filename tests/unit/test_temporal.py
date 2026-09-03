@@ -505,6 +505,32 @@ class TestTemporalLayer:
 
         assert layer.notes_seen == 0
 
+    def test_source_reconciliation_keeps_published_note_beside_future_note(self) -> None:
+        xml = (
+            b"<html><body><main>\n"
+            b'  <article class="legalArticle">\n'
+            b'    <h2 class="legalArticleHeader">&#167; 1. Endringer</h2>\n'
+            b'    <article class="changesToParent">Endret ved lov '
+            b'<a href="lov/2020-01-01-1">1 januar 2020 nr. 1</a> '
+            b"(ikr. 2 januar 2020).</article>\n"
+            b"  </article>\n"
+            b'  <article class="futureLegalArticle">\n'
+            b'    <article class="changesToParent">Endret ved lov '
+            b'<a href="lov/2027-01-01-2">1 januar 2027 nr. 2</a>.</article>\n'
+            b"  </article>\n"
+            b"</main></body></html>\n"
+        )
+
+        markdown = render_markdown(xml)
+        layer = derive_temporal_layer_from_source(xml, markdown)
+
+        assert count_source_amendment_notes(xml) == 1
+        assert layer.notes_seen == 1
+        assert [event.amending_act_ref for event in layer.events] == ["lov/2020-01-01-1"]
+
+    def test_temporal_parser_version_marks_note_universe_change(self) -> None:
+        assert temporal.TEMPORAL_PARSER_VERSION == 2
+
     def test_source_note_count_rejects_malformed_xml(self) -> None:
         with pytest.raises(TemporalDerivationError, match="malformed XML"):
             count_source_amendment_notes(b"<html><article></html>")
