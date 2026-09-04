@@ -76,6 +76,7 @@ class DocumentPlan(BaseModel):
     route: Route
     title: str | None
     markdown_path: str
+    source_dataset: str
     language: str
     ref_id: str
     retrieved_at: str
@@ -176,6 +177,7 @@ def _plan_document(
         route=route,
         title=record.title,
         markdown_path=record.markdown_path,
+        source_dataset=record.source_dataset,
         language=fields["language"],
         ref_id=fields["ref_id"],
         retrieved_at=fields["retrieved_at"],

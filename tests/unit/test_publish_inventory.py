@@ -251,6 +251,7 @@ class TestBuildInventory:
 
         plan = inventory.documents[0]
         assert plan.language == "nb"
+        assert plan.source_dataset == "gjeldende-lover"
         assert plan.ref_id == "lov/2024-12-20-96"
         assert plan.retrieved_at == "2026-07-30T18:17:57.344275+00:00"
         assert plan.date_in_force == "2025-06-01"
