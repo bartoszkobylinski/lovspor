@@ -68,6 +68,11 @@ Tekst.
 
 
 class TestBuildInventory:
+    def test_empty_manifest_produces_empty_inventory(self) -> None:
+        inventory = build_inventory(_manifest({}), lambda _path: None)
+
+        assert inventory.documents == ()
+
     def test_reads_current_records_only(self) -> None:
         manifest = _manifest(
             {
@@ -90,6 +95,11 @@ class TestBuildInventory:
         plan = inventory.documents[0]
         assert [p.pid for p in plan.provisions] == ["1", "2", "35a"]
         assert [p.heading_id for p in plan.provisions] == ["1", "2", "35 a"]
+        assert [p.title for p in plan.provisions] == [
+            "Formål",
+            "Virkeområde",
+            "Unntak",
+        ]
         assert plan.duplicate_pids == {}
 
     def test_route_follows_doc_type(self) -> None:
@@ -184,6 +194,21 @@ class TestBuildInventory:
         body = BODY.replace('retrieved_at: "2026-07-30T18:17:57.344275+00:00"\n', "")
         manifest = _manifest({"doc-1": _record()})
         with pytest.raises(PublishError, match="retrieved_at"):
+            build_inventory(manifest, lambda _path: body)
+
+    @pytest.mark.parametrize("field", ["language", "ref_id", "retrieved_at"])
+    def test_null_required_provenance_fails_closed(self, field: str) -> None:
+        body = BODY.replace(f'{field}: "', f"{field}: null # ", 1)
+        manifest = _manifest({"doc-1": _record()})
+
+        with pytest.raises(PublishError, match=field):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_unclosed_front_matter_fails_closed(self) -> None:
+        body = BODY.replace("---\n\n# Lov om abort", "# Lov om abort", 1)
+        manifest = _manifest({"doc-1": _record()})
+
+        with pytest.raises(PublishError, match="language"):
             build_inventory(manifest, lambda _path: body)
 
     def test_unreadable_body_fails_closed(self) -> None:

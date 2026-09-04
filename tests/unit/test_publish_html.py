@@ -25,6 +25,15 @@ def render(text: str) -> str:
 
 
 class TestBlocks:
+    def test_rendering_is_byte_deterministic(self) -> None:
+        source = (
+            "### § 35 a. Unntak\n\n"
+            "Se [abortloven § 3](lov/2024-12-20-96/§3).\n\n"
+            "| Vilkår | Verdi |\n| --- | --- |\n| **type** | <ingen> |"
+        )
+
+        assert render(source).encode("utf-8") == render(source).encode("utf-8")
+
     def test_heading_levels_map_to_html(self) -> None:
         html = render("## Kapittel 1. Alminnelige bestemmelser")
         assert html == "<h2>Kapittel 1. Alminnelige bestemmelser</h2>"
@@ -156,6 +165,15 @@ class TestSafety:
         html = render("[<b>fet</b>](lov/2024-12-20-96)")
         assert "<b>" not in html
         assert "&lt;b&gt;fet&lt;/b&gt;" in html
+
+    def test_resolved_href_is_attribute_escaped(self) -> None:
+        html = render_body_html(
+            ["[klikk](lov/2024-12-20-96)"],
+            lambda _target: '/lov/x/" onmouseover="alert(1)',
+        )
+
+        assert html == ('<p><a href="/lov/x/&quot; onmouseover=&quot;alert(1)">klikk</a></p>')
+        assert 'href="/lov/x/"' not in html
 
     def test_escaping_applies_inside_table_cells(self) -> None:
         html = render("| A |\n| --- |\n| <i>x</i> |")
