@@ -31,6 +31,8 @@ def _plan(**overrides: object) -> DocumentPlan:
         "title": "Lov om abort (abortloven)",
         "markdown_path": "lover/abortloven.md",
         "source_dataset": "gjeldende-lover",
+        "xml_hash": "c" * 64,
+        "renderer_version": 8,
         "language": "nb",
         "ref_id": "lov/2024-12-20-96",
         "retrieved_at": "2026-07-30T18:17:57+00:00",

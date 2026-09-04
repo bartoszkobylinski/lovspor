@@ -77,6 +77,8 @@ class DocumentPlan(BaseModel):
     title: str | None
     markdown_path: str
     source_dataset: str
+    xml_hash: str
+    renderer_version: int | None
     language: str
     ref_id: str
     retrieved_at: str
@@ -178,6 +180,8 @@ def _plan_document(
         title=record.title,
         markdown_path=record.markdown_path,
         source_dataset=record.source_dataset,
+        xml_hash=record.xml_hash,
+        renderer_version=record.renderer_version,
         language=fields["language"],
         ref_id=fields["ref_id"],
         retrieved_at=fields["retrieved_at"],
@@ -277,7 +281,7 @@ def _check_provenance_shapes(doc_id: str, fields: dict[str, str]) -> None:
 def _provisions_of(body: str) -> tuple[ProvisionRef, ...]:
     """Section headings of a rendered body, in document order."""
     refs: list[ProvisionRef] = []
-    for line in _body_lines(body):
+    for line in body_lines(body):
         parsed = parse_section_heading(line)
         if parsed is not None:
             heading_id, title = parsed
@@ -291,7 +295,7 @@ def _provisions_of(body: str) -> tuple[ProvisionRef, ...]:
     return tuple(refs)
 
 
-def _body_lines(body: str) -> list[str]:
+def body_lines(body: str) -> list[str]:
     """Lines of the body with the YAML front matter block removed."""
     lines = body.split("\n")
     if lines and lines[0] == "---":
