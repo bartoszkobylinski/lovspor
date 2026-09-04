@@ -145,6 +145,12 @@ class TestRendererEscapes:
     ) -> None:
         assert render(text) == expected
 
+    def test_escaped_pipe_in_a_table_cell_is_content(self) -> None:
+        html = render("| a \\| b | c |\n| --- | --- |\n| x | y |")
+        assert "<th>a | b</th>" in html
+        assert "<th>c</th>" in html
+        assert "<td>x</td><td>y</td>" in html
+
     def test_escaped_char_is_still_html_escaped(self) -> None:
         assert render(r"\>") == "<p>&gt;</p>"
 

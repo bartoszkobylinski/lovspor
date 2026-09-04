@@ -31,6 +31,7 @@ _LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 _STRONG = re.compile(r"\*\*(.+?)\*\*")
 _EMPHASIS = re.compile(r"\*(.+?)\*")
 _TABLE_RULE = re.compile(r"^\|?[\s:|-]+\|?$")
+_CELL_BOUNDARY = re.compile(r"(?<!\\)\|")
 _ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _PLACEHOLDER = re.compile("\x00(\\d+)\x00")
 
@@ -171,7 +172,11 @@ def _render_table(
 
 
 def _table_cells(line: str, resolve: LinkResolver) -> list[str]:
-    cells = line.strip().strip("|").split("|")
+    """Split on unescaped pipes only: ``\\|`` is cell content, not a
+    boundary — the escape itself is then unwrapped by ``_inline``."""
+    trimmed = line.strip()
+    trimmed = trimmed.removeprefix("|").removesuffix("|")
+    cells = _CELL_BOUNDARY.split(trimmed)
     return [_inline(cell.strip(), resolve) for cell in cells]
 
 
