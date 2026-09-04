@@ -78,7 +78,7 @@ def _render_block(
     if _UNORDERED_ITEM.match(line):
         return _render_list(lines, index, resolve, ordered=False)
     if line.startswith(">"):
-        return _render_blockquote(lines, index, resolve)
+        return _render_blockquote(lines, index, resolve, suppressed_anchor_pids)
     return _render_paragraph(lines, index, resolve)
 
 
@@ -149,12 +149,15 @@ def _render_blockquote(
     lines: list[str],
     index: int,
     resolve: LinkResolver,
+    suppressed_anchor_pids: frozenset[str],
 ) -> tuple[str, int]:
     quoted: list[str] = []
     while index < len(lines) and lines[index].startswith(">"):
         quoted.append(lines[index].removeprefix(">").strip())
         index += 1
-    inner = render_body_html(quoted, resolve)
+    # The suppression set must survive the recursion: a section heading
+    # quoted inside a blockquote is still an anchor claim on the page.
+    inner = render_body_html(quoted, resolve, suppressed_anchor_pids)
     return f"<blockquote>{inner}</blockquote>", index
 
 

@@ -88,6 +88,11 @@ class TestAnchorSuppression:
         assert "§ 1. En" in html
         assert "§ 1. To" in html
 
+    def test_suppression_survives_blockquote_recursion(self) -> None:
+        lines = ["### § 1. Ute", "", "> ### § 1. Inne"]
+        html = render_body_html(lines, lambda _t: None, frozenset({"1"}))
+        assert 'id="paragraf-1"' not in html
+
     def test_default_is_unsuppressed(self) -> None:
         html = render_body_html(["### § 1. En"], lambda _t: None)
         assert 'id="paragraf-1"' in html
