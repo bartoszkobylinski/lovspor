@@ -128,6 +128,32 @@ def test_second_escalation_appends_rather_than_creating_a_second_comment(
     assert body.index("round A") < body.index("round B")
 
 
+def test_append_preserves_markdown_unicode_and_string_like_values(tmp_path: Path) -> None:
+    seeded = _MARKER.format(key="pipeline") + "\n\nfirst round"
+    state = _workspace(tmp_path, [{"id": 42, "body": seeded}])
+    new_round = "true\n\n- `utf-8`: æøå — 🚨\n- [run](https://example.test/run)"
+
+    result = _escalate(state, new_round)
+
+    assert result.returncode == 0, result.stderr
+    assert _comments(state) == [{"id": 42, "body": f"{seeded}\n\n---\n\n{new_round}"}]
+
+
+def test_duplicate_sticky_comments_update_only_the_first_match(tmp_path: Path) -> None:
+    marker = _MARKER.format(key="pipeline")
+    first = {"id": 41, "body": f"{marker}\n\nfirst copy"}
+    duplicate = {"id": 42, "body": f"{marker}\n\nracing copy"}
+    state = _workspace(tmp_path, [first, duplicate])
+
+    result = _escalate(state, "new round")
+
+    assert result.returncode == 0, result.stderr
+    assert _comments(state) == [
+        {"id": 41, "body": f"{marker}\n\nfirst copy\n\n---\n\nnew round"},
+        duplicate,
+    ]
+
+
 def test_an_unrelated_comment_never_becomes_the_sticky_one(tmp_path: Path) -> None:
     state = _workspace(tmp_path, [{"id": 11, "body": "a human review comment"}])
 
