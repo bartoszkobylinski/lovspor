@@ -122,6 +122,11 @@ def corpus(tmp_path: Path) -> tuple[Path, str]:
     _run_git(repo, "add", "-A")
     _run_git(repo, "commit", "-q", "-m", "one")
     (repo / "forskrifter/testforskriften.md").write_text(REGULATION, encoding="utf-8")
+    nn_doc = DOC.replace('"Testloven"', '"Vimpelføringloven"').replace(
+        "lov/2020-01-01-1",
+        "lov/1933-04-04-4",
+    )
+    (repo / "lover/vimpel-føring.md").write_text(nn_doc, encoding="utf-8")
     (repo / "lover/dobbeltloven.md").write_text(DUP, encoding="utf-8")
     manifest["documents"] = {
         "doc-1": _record("lov", "lover/testloven.md", "testloven", "Testloven"),
@@ -132,6 +137,7 @@ def corpus(tmp_path: Path) -> tuple[Path, str]:
             "Testforskriften",
         ),
         "doc-3": _record("lov", "lover/dobbeltloven.md", "dobbeltloven", "Dobbelt"),
+        "doc-4": _record("lov", "lover/vimpel-føring.md", "vimpel-føring", "Vimpel"),
     }
     (repo / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     _run_git(repo, "add", "-A")
@@ -160,6 +166,21 @@ class TestEmitSite:
         assert (out / "lov/testloven/index.json").is_file()
         assert (out / "lov/testloven/paragraf/1/index.html").is_file()
         assert (out / "forskrift/testforskriften/paragraf/2/index.json").is_file()
+
+    def test_non_ascii_markdown_path_gets_its_source_revision(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        # git octal-escapes non-ASCII paths in --name-only output unless
+        # core.quotePath=false; a quoted path never matches the manifest
+        # and the whole build dies on the lookup.
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+
+        doc = json.loads((out / "lov/vimpel-føring/index.json").read_text())
+        assert doc["provenance"]["source_revision"] == sha
 
     def test_duplicate_pid_document_publishes_no_provision_pages(
         self,

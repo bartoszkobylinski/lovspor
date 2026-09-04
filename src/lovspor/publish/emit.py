@@ -154,8 +154,18 @@ def _deep_url(plan: DocumentPlan, deep: str) -> str:
 
 def _source_revisions(corpus: Path, sha: str) -> dict[str, str]:
     """``path -> last commit touching it`` in one newest-first log walk."""
+    # core.quotePath=false: without it git octal-escapes non-ASCII paths
+    # (lover/forbud-paa-vimpel-føring.md) and the manifest lookup misses.
     result = subprocess.run(  # noqa: S603
-        ["git", "log", "--format=%x00%H", "--name-only", sha],  # noqa: S607
+        [  # noqa: S607
+            "git",
+            "-c",
+            "core.quotePath=false",
+            "log",
+            "--format=%x00%H",
+            "--name-only",
+            sha,
+        ],
         cwd=corpus,
         capture_output=True,
         text=True,
