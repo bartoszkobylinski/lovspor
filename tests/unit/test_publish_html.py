@@ -8,6 +8,8 @@ link becomes an ``<a>`` only when the resolver maps its ref target to an
 emitted canonical URL — everything else renders as visible text.
 """
 
+import pytest
+
 from lovspor.publish.html import render_body_html
 
 
@@ -71,6 +73,47 @@ class TestInline:
 
     def test_strong_and_emphasis(self) -> None:
         assert render("**sterk** og *svak*") == ("<p><strong>sterk</strong> og <em>svak</em></p>")
+
+
+class TestRendererEscapes:
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            (r"\# ordlyd", "<p># ordlyd</p>"),
+            (r"\- ordlyd", "<p>- ordlyd</p>"),
+            (r"\> ordlyd", "<p>&gt; ordlyd</p>"),
+            (r"\| ordlyd", "<p>| ordlyd</p>"),
+            (r"1\. ordlyd", "<p>1. ordlyd</p>"),
+        ],
+    )
+    def test_escaped_leading_tokens_stay_literal_paragraphs(
+        self,
+        line: str,
+        expected: str,
+    ) -> None:
+        assert render(line) == expected
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            (r"Vanlig \*tekst\*.", "<p>Vanlig *tekst*.</p>"),
+            (
+                r"Kall \`verdien\` og \\stien.",
+                "<p>Kall `verdien` og \\stien.</p>",
+            ),
+            (r"stoff]\(2,2,3)", "<p>stoff](2,2,3)</p>"),
+            (r"\[ikke lenke](lov/2024-12-20-96)", "<p>[ikke lenke](lov/2024-12-20-96)</p>"),
+        ],
+    )
+    def test_escapes_removed_without_creating_markup(
+        self,
+        text: str,
+        expected: str,
+    ) -> None:
+        assert render(text) == expected
+
+    def test_escaped_char_is_still_html_escaped(self) -> None:
+        assert render(r"\>") == "<p>&gt;</p>"
 
 
 class TestSafety:

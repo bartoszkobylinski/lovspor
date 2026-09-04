@@ -31,6 +31,8 @@ _LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 _STRONG = re.compile(r"\*\*(.+?)\*\*")
 _EMPHASIS = re.compile(r"\*(.+?)\*")
 _TABLE_RULE = re.compile(r"^\|?[\s:|-]+\|?$")
+_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+_PLACEHOLDER = re.compile("\x00(\\d+)\x00")
 
 
 def render_body_html(lines: list[str], resolve: LinkResolver) -> str:
@@ -167,24 +169,46 @@ def _table_html(rows: list[list[str]]) -> str:
 def _inline(text: str, resolve: LinkResolver) -> str:
     """Escape text, then assemble the closed set of inline elements.
 
-    Links are cut out of the raw text first so their pieces are escaped
-    individually — target resolution sees the raw target, readers see only
-    escaped text, and an unresolvable link degrades to its visible text.
+    Renderer escape sequences (``1\\.``, ``\\*``, ``\\(`` — 506 corpus
+    documents carry them) are stashed behind NUL placeholders first, so an
+    escaped character can never open a link or emphasis; NUL itself cannot
+    occur in corpus text, which comes from XML. Links are then cut out of
+    the stashed text so their pieces are escaped individually — target
+    resolution sees the raw target, readers see only escaped text, and an
+    unresolvable link degrades to its visible text.
     """
+    stashed, literals = _stash_escapes(text)
     parts: list[str] = []
     cursor = 0
-    for match in _LINK.finditer(text):
-        parts.append(_plain(text[cursor : match.start()]))
-        parts.append(_link_html(match.group(1), match.group(2), resolve))
+    for match in _LINK.finditer(stashed):
+        parts.append(_plain(stashed[cursor : match.start()], literals))
+        parts.append(
+            _link_html(match.group(1), match.group(2), resolve, literals),
+        )
         cursor = match.end()
-    parts.append(_plain(text[cursor:]))
+    parts.append(_plain(stashed[cursor:], literals))
     return "".join(parts)
 
 
-def _plain(text: str) -> str:
+def _stash_escapes(text: str) -> tuple[str, list[str]]:
+    """Replace ``\\<punct>`` with a placeholder; return (text, literals)."""
+    literals: list[str] = []
+
+    def stash(match: re.Match[str]) -> str:
+        literals.append(match.group(1))
+        return f"\x00{len(literals) - 1}\x00"
+
+    return _ESCAPE.sub(stash, text), literals
+
+
+def _plain(text: str, literals: list[str]) -> str:
     escaped = html.escape(text, quote=True)
     escaped = _STRONG.sub(r"<strong>\1</strong>", escaped)
-    return _EMPHASIS.sub(r"<em>\1</em>", escaped)
+    escaped = _EMPHASIS.sub(r"<em>\1</em>", escaped)
+    return _PLACEHOLDER.sub(
+        lambda m: html.escape(literals[int(m.group(1))], quote=True),
+        escaped,
+    )
 
 
 def _is_site_relative(path: str) -> bool:
@@ -197,7 +221,12 @@ def _is_site_relative(path: str) -> bool:
     return path.startswith("/") and not path.startswith(("//", "/\\"))
 
 
-def _link_html(label: str, target: str, resolve: LinkResolver) -> str:
+def _link_html(
+    label: str,
+    target: str,
+    resolve: LinkResolver,
+    literals: list[str],
+) -> str:
     """An ``<a>`` only for a resolved, site-relative target; text otherwise.
 
     The path check is a second, independent gate: even a resolver that
@@ -206,5 +235,6 @@ def _link_html(label: str, target: str, resolve: LinkResolver) -> str:
     """
     resolved = resolve(target)
     if resolved is None or not _is_site_relative(resolved):
-        return _plain(label)
-    return f'<a href="{html.escape(resolved, quote=True)}">{_plain(label)}</a>'
+        return _plain(label, literals)
+    href = html.escape(resolved, quote=True)
+    return f'<a href="{href}">{_plain(label, literals)}</a>'
