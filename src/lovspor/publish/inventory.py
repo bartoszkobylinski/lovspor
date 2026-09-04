@@ -125,8 +125,13 @@ def _plan_document(
             f"current record {doc_id} has doc_type {record.doc_type!r}: "
             f"no publication route exists for it (ADR-0013 Decision 1)",
         )
-    if record.slug is None:
+    if record.slug is None or not record.slug.strip():
         raise PublishError(f"current record {doc_id} has no slug")
+    if "/" in record.slug:
+        raise PublishError(
+            f"current record {doc_id} slug {record.slug!r} contains '/': "
+            f"it would nest the canonical path",
+        )
     body = read_text(record.markdown_path)
     if body is None:
         raise PublishError(

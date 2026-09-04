@@ -161,6 +161,17 @@ class TestBuildInventory:
         with pytest.raises(PublishError, match="no slug"):
             build_inventory(manifest, lambda _path: BODY)
 
+    def test_empty_or_whitespace_slug_fails_closed(self) -> None:
+        for bad in ("", "   "):
+            manifest = _manifest({"doc-1": _record(slug=bad)})
+            with pytest.raises(PublishError, match="no slug"):
+                build_inventory(manifest, lambda _path: BODY)
+
+    def test_slug_with_slash_fails_closed(self) -> None:
+        manifest = _manifest({"doc-1": _record(slug="a/b")})
+        with pytest.raises(PublishError, match="nest"):
+            build_inventory(manifest, lambda _path: BODY)
+
     def test_front_matter_fields_land_on_the_plan(self) -> None:
         manifest = _manifest({"doc-1": _record()})
         inventory = build_inventory(manifest, {"lover/abortloven.md": BODY}.get)
