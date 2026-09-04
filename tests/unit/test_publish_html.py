@@ -92,6 +92,23 @@ class TestSafety:
         assert "<a" not in html
         assert "klikk" in html
 
+    def test_protocol_relative_href_renders_as_text_even_if_resolver_lies(
+        self,
+    ) -> None:
+        html = render_body_html(
+            ["[klikk](lov/2024-12-20-96)"],
+            lambda _t: "//evil.example/x",
+        )
+        assert "<a" not in html
+        assert "klikk" in html
+
+    def test_backslash_relative_href_refused(self) -> None:
+        html = render_body_html(
+            ["[klikk](lov/2024-12-20-96)"],
+            lambda _t: "/\\evil.example/x",
+        )
+        assert "<a" not in html
+
     def test_link_text_is_escaped(self) -> None:
         html = render("[<b>fet</b>](lov/2024-12-20-96)")
         assert "<b>" not in html

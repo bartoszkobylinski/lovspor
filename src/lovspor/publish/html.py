@@ -187,6 +187,16 @@ def _plain(text: str) -> str:
     return _EMPHASIS.sub(r"<em>\1</em>", escaped)
 
 
+def _is_site_relative(path: str) -> bool:
+    """A single leading slash and nothing sneakier.
+
+    ``//host/x`` is protocol-relative — a browser resolves it to another
+    origin — and ``/\\`` is its backslash spelling in some parsers, so
+    both are refused along with anything not starting at the site root.
+    """
+    return path.startswith("/") and not path.startswith(("//", "/\\"))
+
+
 def _link_html(label: str, target: str, resolve: LinkResolver) -> str:
     """An ``<a>`` only for a resolved, site-relative target; text otherwise.
 
@@ -195,6 +205,6 @@ def _link_html(label: str, target: str, resolve: LinkResolver) -> str:
     policy admits site-relative canonical paths and nothing else.
     """
     resolved = resolve(target)
-    if resolved is None or not resolved.startswith("/"):
+    if resolved is None or not _is_site_relative(resolved):
         return _plain(label)
     return f'<a href="{html.escape(resolved, quote=True)}">{_plain(label)}</a>'
