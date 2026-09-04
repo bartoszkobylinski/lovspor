@@ -35,15 +35,27 @@ _ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 _PLACEHOLDER = re.compile("\x00(\\d+)\x00")
 
 
-def render_body_html(lines: list[str], resolve: LinkResolver) -> str:
-    """Render body lines to HTML blocks joined by newlines."""
+def render_body_html(
+    lines: list[str],
+    resolve: LinkResolver,
+    suppressed_anchor_pids: frozenset[str] = frozenset(),
+) -> str:
+    """Render body lines to HTML blocks joined by newlines.
+
+    ``suppressed_anchor_pids`` carries the document's duplicate pids
+    (``DocumentPlan.duplicate_pids``): a section heading whose normalised
+    pid is in the set renders without an ``id`` attribute, because a
+    duplicated anchor is invalid HTML and would misdirect citations
+    (ADR-0013 Decision 1) — the pid's identity is ambiguous, so no anchor
+    may claim it.
+    """
     blocks: list[str] = []
     index = 0
     while index < len(lines):
         if not lines[index].strip():
             index += 1
             continue
-        block, index = _render_block(lines, index, resolve)
+        block, index = _render_block(lines, index, resolve, suppressed_anchor_pids)
         blocks.append(block)
     return "\n".join(blocks)
 
@@ -52,11 +64,12 @@ def _render_block(
     lines: list[str],
     index: int,
     resolve: LinkResolver,
+    suppressed_anchor_pids: frozenset[str] = frozenset(),
 ) -> tuple[str, int]:
     """Render the block starting at ``index``; return (html, next index)."""
     line = lines[index]
     if _HEADING.match(line):
-        return _render_heading(line, resolve), index + 1
+        return _render_heading(line, resolve, suppressed_anchor_pids), index + 1
     if line.startswith("|"):
         return _render_table(lines, index, resolve)
     if _ORDERED_ITEM.match(line):
@@ -68,7 +81,11 @@ def _render_block(
     return _render_paragraph(lines, index, resolve)
 
 
-def _render_heading(line: str, resolve: LinkResolver) -> str:
+def _render_heading(
+    line: str,
+    resolve: LinkResolver,
+    suppressed_anchor_pids: frozenset[str],
+) -> str:
     match = _HEADING.match(line)
     assert match is not None  # noqa: S101 — guarded by caller
     level = len(match.group(1))
@@ -76,7 +93,8 @@ def _render_heading(line: str, resolve: LinkResolver) -> str:
     section = parse_section_heading(line)
     if section is not None:
         pid = normalise_pid(section[0])
-        return f'<h{level} id="paragraf-{pid}">{text}</h{level}>'
+        if pid not in suppressed_anchor_pids:
+            return f'<h{level} id="paragraf-{pid}">{text}</h{level}>'
     return f"<h{level}>{text}</h{level}>"
 
 

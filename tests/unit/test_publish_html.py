@@ -69,6 +69,30 @@ class TestBlocks:
         )
 
 
+class TestAnchorSuppression:
+    def test_duplicate_pids_render_without_any_anchor(self) -> None:
+        lines = [
+            "### § 1. En",
+            "",
+            "A.",
+            "",
+            "### § 1. To",
+            "",
+            "B.",
+            "",
+            "### § 2. Tre",
+        ]
+        html = render_body_html(lines, lambda _t: None, frozenset({"1"}))
+        assert 'id="paragraf-1"' not in html
+        assert html.count('id="paragraf-2"') == 1
+        assert "§ 1. En" in html
+        assert "§ 1. To" in html
+
+    def test_default_is_unsuppressed(self) -> None:
+        html = render_body_html(["### § 1. En"], lambda _t: None)
+        assert 'id="paragraf-1"' in html
+
+
 class TestInline:
     def test_resolvable_link_becomes_internal_anchor(self) -> None:
         html = render("Se [abortloven § 3](lov/2024-12-20-96/§3).")
