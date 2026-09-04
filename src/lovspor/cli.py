@@ -1,5 +1,6 @@
 """lovspor command-line interface."""
 
+import subprocess
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -23,6 +24,8 @@ from lovspor.mcp import HttpConfig
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.commands import observatory_app
+from lovspor.publish.emit import emit_site
+from lovspor.publish.inventory import PublishError
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.storage.manifest import read_manifest
@@ -138,6 +141,45 @@ def main(
     # serve() — is too late: the option is resolved during arg parsing and
     # a value living only in .env would be missed, exiting with code 2.
     load_env()
+
+
+@app.command(name="publish-site")
+def publish_site(
+    corpus: Annotated[
+        Path,
+        typer.Option(help="Path to a lovverk checkout (any state; reads via git)."),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(help="Directory to write the site tree into."),
+    ],
+    ref: Annotated[
+        str | None,
+        typer.Option(
+            help="Corpus commit to build from; defaults to the checkout's HEAD, "
+            "resolved to a full SHA so the build input is always recorded exactly.",
+        ),
+    ] = None,
+) -> None:
+    """Build the ADR-0013 static site from one pinned corpus commit."""
+    try:
+        resolved = subprocess.run(  # noqa: S603
+            ["git", "rev-parse", ref or "HEAD"],  # noqa: S607
+            cwd=corpus,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError) as error:
+        raise typer.BadParameter(
+            f"{corpus} is not a readable git corpus checkout",
+        ) from error
+    try:
+        emit_site(corpus, resolved, out)
+    except PublishError as error:
+        typer.echo(f"publish refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(f"site built from corpus commit {resolved[:12]} into {out}")
 
 
 @app.command()
