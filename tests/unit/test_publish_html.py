@@ -61,6 +61,19 @@ class TestBlocks:
     def test_blockquote(self) -> None:
         assert render("> sitat") == "<blockquote><p>sitat</p></blockquote>"
 
+    def test_blockquote_lazy_continuation_stays_in_the_quote(self) -> None:
+        assert render("> Line\n\\- endret") == ("<blockquote><p>Line\n- endret</p></blockquote>")
+
+    def test_blank_line_ends_the_quote(self) -> None:
+        assert render("> sitat\n\nUtenfor.") == (
+            "<blockquote><p>sitat</p></blockquote>\n<p>Utenfor.</p>"
+        )
+
+    def test_structural_line_ends_the_quote(self) -> None:
+        assert render("> sitat\n## Kapittel 2") == (
+            "<blockquote><p>sitat</p></blockquote>\n<h2>Kapittel 2</h2>"
+        )
+
     def test_pipe_table(self) -> None:
         html = render("| A | B |\n| --- | --- |\n| en | to |")
         assert html == (

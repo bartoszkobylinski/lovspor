@@ -152,13 +152,25 @@ def _render_blockquote(
     suppressed_anchor_pids: frozenset[str],
 ) -> tuple[str, int]:
     quoted: list[str] = []
-    while index < len(lines) and lines[index].startswith(">"):
-        quoted.append(lines[index].removeprefix(">").strip())
+    while index < len(lines) and _continues_quote(lines[index], quoted):
+        line = lines[index]
+        quoted.append(line.removeprefix(">").strip() if line.startswith(">") else line)
         index += 1
     # The suppression set must survive the recursion: a section heading
     # quoted inside a blockquote is still an anchor claim on the page.
     inner = render_body_html(quoted, resolve, suppressed_anchor_pids)
     return f"<blockquote>{inner}</blockquote>", index
+
+
+def _continues_quote(line: str, quoted: list[str]) -> bool:
+    """A ``>`` line always; a bare line only as CommonMark lazy paragraph
+    continuation — non-blank, non-structural, after at least one quoted
+    line. The corpus writes this shape (22 cases: change notes and the
+    translated-act preambles), and dropping the continuation would leak
+    quoted text out of its quote."""
+    if line.startswith(">"):
+        return True
+    return bool(quoted) and bool(line.strip()) and not _is_structural(line)
 
 
 def _render_table(
