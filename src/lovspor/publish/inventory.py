@@ -9,6 +9,7 @@ the generator withholds its provision pages, so the count lives here for
 `site-manifest.json` to record.
 """
 
+import re
 from collections import Counter
 from collections.abc import Callable
 from typing import Literal
@@ -22,6 +23,13 @@ from lovspor.storage.manifest import Manifest, ManifestRecord
 Route = Literal["lov", "forskrift"]
 
 _ROUTES: dict[str, Route] = {"lov": "lov", "forskrift": "forskrift"}
+
+_LANGUAGES = frozenset({"nb", "nn", "no"})
+"""Every language value the corpus carries today (measured 2026-09-04:
+nb 1,504 / nn 134 / no 4,240, none missing). A value outside this set is
+a schema change to notice, not a default to guess (ADR-0013 Decision 4)."""
+
+_FRONT_MATTER_FIELD = re.compile(r'^([a-z_]+):\s*(?:"([^"]*)"|null)\s*$')
 
 
 class PublishError(LovsporError):
@@ -48,6 +56,11 @@ class DocumentPlan(BaseModel):
     route: Route
     title: str | None
     markdown_path: str
+    language: str
+    ref_id: str
+    retrieved_at: str
+    date_in_force: str | None
+    last_change_in_force: str | None
     provisions: tuple[ProvisionRef, ...]
     duplicate_pids: dict[str, int]
 
@@ -122,15 +135,48 @@ def _plan_document(
         )
     provisions = _provisions_of(body)
     counts = Counter(provision.pid for provision in provisions)
+    fields = _front_matter_fields(doc_id, body)
     return DocumentPlan(
         doc_id=doc_id,
         slug=record.slug,
         route=route,
         title=record.title,
         markdown_path=record.markdown_path,
+        language=fields["language"],
+        ref_id=fields["ref_id"],
+        retrieved_at=fields["retrieved_at"],
+        date_in_force=fields.get("date_in_force"),
+        last_change_in_force=fields.get("last_change_in_force"),
         provisions=provisions,
         duplicate_pids={pid: n for pid, n in counts.items() if n > 1},
     )
+
+
+def _front_matter_fields(doc_id: str, body: str) -> dict[str, str]:
+    """Provenance fields from the front matter, failing closed.
+
+    The renderer writes front matter deterministically as ``key: "value"``
+    (or ``key: null``) lines, so a closed line parser suffices — pyyaml is
+    deliberately not a runtime dependency of the engine.
+    """
+    fields: dict[str, str] = {}
+    for line in _front_matter_lines(body):
+        match = _FRONT_MATTER_FIELD.match(line)
+        if match is not None and match.group(2) is not None:
+            fields.setdefault(match.group(1), match.group(2))
+    for required in ("language", "ref_id", "retrieved_at"):
+        if required not in fields:
+            raise PublishError(
+                f"document {doc_id} front matter carries no {required}; "
+                f"publication cannot guess provenance (ADR-0013 Decision 4)",
+            )
+    if fields["language"] not in _LANGUAGES:
+        raise PublishError(
+            f"document {doc_id} carries language "
+            f"{fields['language']!r}, outside the corpus set "
+            f"{sorted(_LANGUAGES)}; refusing to publish a wrong lang",
+        )
+    return fields
 
 
 def _provisions_of(body: str) -> tuple[ProvisionRef, ...]:
@@ -158,3 +204,13 @@ def _body_lines(body: str) -> list[str]:
             if line == "---":
                 return lines[index + 1 :]
     return lines
+
+
+def _front_matter_lines(body: str) -> list[str]:
+    """Lines of the front matter block, empty when there is none."""
+    lines = body.split("\n")
+    if lines and lines[0] == "---":
+        for index, line in enumerate(lines[1:], start=1):
+            if line == "---":
+                return lines[1:index]
+    return []

@@ -42,6 +42,11 @@ def _manifest(documents: dict[str, ManifestRecord]) -> Manifest:
 BODY = """---
 title: "Lov om abort (abortloven)"
 weird: "# not a heading"
+language: "nb"
+ref_id: "lov/2024-12-20-96"
+retrieved_at: "2026-07-30T18:17:57.344275+00:00"
+date_in_force: "2025-06-01"
+last_updated: null
 ---
 
 # Lov om abort (abortloven)
@@ -146,6 +151,41 @@ class TestBuildInventory:
         with pytest.raises(PublishError, match="no slug"):
             build_inventory(manifest, lambda _path: BODY)
 
+    def test_front_matter_fields_land_on_the_plan(self) -> None:
+        manifest = _manifest({"doc-1": _record()})
+        inventory = build_inventory(manifest, {"lover/abortloven.md": BODY}.get)
+
+        plan = inventory.documents[0]
+        assert plan.language == "nb"
+        assert plan.ref_id == "lov/2024-12-20-96"
+        assert plan.retrieved_at == "2026-07-30T18:17:57.344275+00:00"
+        assert plan.date_in_force == "2025-06-01"
+        assert plan.last_change_in_force is None
+
+    def test_missing_language_fails_closed(self) -> None:
+        body = BODY.replace('language: "nb"\n', "")
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="language"):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_invalid_language_fails_closed(self) -> None:
+        body = BODY.replace('language: "nb"', 'language: "xx"')
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="language"):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_missing_ref_id_fails_closed(self) -> None:
+        body = BODY.replace('ref_id: "lov/2024-12-20-96"\n', "")
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="ref_id"):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_missing_retrieved_at_fails_closed(self) -> None:
+        body = BODY.replace('retrieved_at: "2026-07-30T18:17:57.344275+00:00"\n', "")
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="retrieved_at"):
+            build_inventory(manifest, lambda _path: body)
+
     def test_unreadable_body_fails_closed(self) -> None:
         manifest = _manifest({"doc-1": _record()})
         with pytest.raises(PublishError, match="cannot be read"):
@@ -153,7 +193,8 @@ class TestBuildInventory:
 
     def test_duplicate_pids_measured_not_fatal(self) -> None:
         body = (
-            "---\nx: y\n---\n\n# T\n\n"
+            '---\nlanguage: "nb"\nref_id: "lov/2020-01-01-1"\n'
+            'retrieved_at: "2026-01-01T00:00:00+00:00"\n---\n\n# T\n\n'
             "## Kapittel 1\n\n### § 1. En\n\nTekst.\n\n"
             "## Kapittel 2\n\n### § 1. To\n\nTekst.\n\n### § 2. Tre\n\nTekst.\n"
         )
@@ -166,7 +207,8 @@ class TestBuildInventory:
 
     def test_normalisation_collision_counts_as_duplicate(self) -> None:
         body = (
-            "---\nx: y\n---\n\n# T\n\n"
+            '---\nlanguage: "nb"\nref_id: "lov/2020-01-01-1"\n'
+            'retrieved_at: "2026-01-01T00:00:00+00:00"\n---\n\n# T\n\n'
             "## Kapittel 1\n\n### § 35 a. En\n\nTekst.\n\n### § 35a. To\n\nTekst.\n"
         )
         manifest = _manifest({"doc-1": _record()})
