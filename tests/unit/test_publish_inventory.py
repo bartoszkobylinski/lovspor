@@ -267,6 +267,40 @@ class TestBuildInventory:
         with pytest.raises(PublishError, match="ref_id"):
             build_inventory(manifest, lambda _path: body)
 
+    @pytest.mark.parametrize("field", ["ref_id", "retrieved_at"])
+    def test_empty_required_provenance_fails_closed(self, field: str) -> None:
+        body = BODY.replace(f'{field}: "', f'{field}: ""  # "', 1)
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match=field):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_malformed_ref_id_fails_closed(self) -> None:
+        body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "urn:lex:nonsense"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="ref_id"):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_pre1850_ref_id_without_number_passes(self) -> None:
+        body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "lov/1687-04-15"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        plan = build_inventory(manifest, lambda _path: body).documents[0]
+        assert plan.ref_id == "lov/1687-04-15"
+
+    def test_unparseable_retrieved_at_fails_closed(self) -> None:
+        body = BODY.replace(
+            'retrieved_at: "2026-07-30T18:17:57.344275+00:00"',
+            'retrieved_at: "yesterday"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="retrieved_at"):
+            build_inventory(manifest, lambda _path: body)
+
     def test_identical_repeated_provenance_key_is_tolerated(self) -> None:
         body = BODY.replace(
             'ref_id: "lov/2024-12-20-96"',
@@ -319,6 +353,7 @@ class TestNormalisePid:
             ("3-4 A", "3-4a"),
             ("10-4-1", "10-4-1"),
             ("x-1", "x-1"),
+            ("35\ta", "35a"),
         ],
     )
     def test_lowercases_and_strips_spaces(self, raw: str, expected: str) -> None:

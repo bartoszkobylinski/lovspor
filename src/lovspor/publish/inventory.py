@@ -12,6 +12,7 @@ the generator withholds its provision pages, so the count lives here for
 import re
 from collections import Counter
 from collections.abc import Callable
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -32,6 +33,10 @@ a schema change to notice, not a default to guess (ADR-0013 Decision 4)."""
 _FRONT_MATTER_FIELD = re.compile(r'^([a-z_]+):\s*(?:"([^"]*)"|null)\s*$')
 
 _CANONICAL_SLUG = re.compile(r"^[a-z0-9æøåü]+(?:-[a-z0-9æøåü]+)*$")
+
+_CANONICAL_REF_ID = re.compile(r"^(?:lov|forskrift)/\d{4}-\d{2}-\d{2}(?:-[\dx]+)?$")
+"""Both attested ref_id shapes: type/date-number, and type/date alone for
+the eight pre-1850 acts (norske lov 1687 through vekselloven 1845)."""
 """The slug grammar the corpus actually uses, measured 2026-09-05 over
 every current record: lowercase Latin plus the attested æ ø å ü, digit
 groups, single hyphens between groups. Anything else — uppercase,
@@ -90,9 +95,11 @@ def normalise_pid(heading_id: str) -> str:
     """ASCII-safe path form of a section id: lowercased, spaces removed.
 
     Collisions introduced by this mapping (``35 a`` vs ``35a``) are real
-    URL collisions and are counted as duplicates by the inventory.
+    URL collisions and are counted as duplicates by the inventory. All
+    whitespace is removed, not just spaces — a tab in a heading id must
+    not survive into a URL path segment.
     """
-    return heading_id.replace(" ", "").lower()
+    return "".join(heading_id.split()).lower()
 
 
 def build_inventory(
@@ -198,18 +205,35 @@ def _front_matter_fields(doc_id: str, body: str) -> dict[str, str]:
         if value is not None:
             fields.setdefault(key, value)
     for required in ("language", "ref_id", "retrieved_at"):
-        if required not in fields:
+        if not fields.get(required, "").strip():
             raise PublishError(
                 f"document {doc_id} front matter carries no {required}; "
                 f"publication cannot guess provenance (ADR-0013 Decision 4)",
             )
+    _check_provenance_shapes(doc_id, fields)
+    return fields
+
+
+def _check_provenance_shapes(doc_id: str, fields: dict[str, str]) -> None:
+    """Grammar checks on the required values, all measured on the corpus."""
     if fields["language"] not in _LANGUAGES:
         raise PublishError(
             f"document {doc_id} carries language "
             f"{fields['language']!r}, outside the corpus set "
             f"{sorted(_LANGUAGES)}; refusing to publish a wrong lang",
         )
-    return fields
+    if not _CANONICAL_REF_ID.match(fields["ref_id"]):
+        raise PublishError(
+            f"document {doc_id} ref_id {fields['ref_id']!r} matches neither "
+            f"attested shape (type/date or type/date-number)",
+        )
+    try:
+        datetime.fromisoformat(fields["retrieved_at"])
+    except ValueError as error:
+        raise PublishError(
+            f"document {doc_id} retrieved_at {fields['retrieved_at']!r} "
+            f"is not an ISO-8601 timestamp",
+        ) from error
 
 
 def _provisions_of(body: str) -> tuple[ProvisionRef, ...]:
