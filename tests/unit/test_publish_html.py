@@ -64,6 +64,11 @@ class TestBlocks:
     def test_blockquote_lazy_continuation_stays_in_the_quote(self) -> None:
         assert render("> Line\n\\- endret") == ("<blockquote><p>Line\n- endret</p></blockquote>")
 
+    def test_quoted_blank_line_ends_lazy_continuation(self) -> None:
+        assert render("> Line\n>\nUtenfor.") == (
+            "<blockquote><p>Line</p></blockquote>\n<p>Utenfor.</p>"
+        )
+
     def test_blank_line_ends_the_quote(self) -> None:
         assert render("> sitat\n\nUtenfor.") == (
             "<blockquote><p>sitat</p></blockquote>\n<p>Utenfor.</p>"

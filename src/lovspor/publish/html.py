@@ -164,13 +164,15 @@ def _render_blockquote(
 
 def _continues_quote(line: str, quoted: list[str]) -> bool:
     """A ``>`` line always; a bare line only as CommonMark lazy paragraph
-    continuation — non-blank, non-structural, after at least one quoted
-    line. The corpus writes this shape (22 cases: change notes and the
-    translated-act preambles), and dropping the continuation would leak
-    quoted text out of its quote."""
+    continuation — non-blank, non-structural, and only while a quoted
+    paragraph is open (the last quoted line is non-blank; a quoted blank
+    ``>`` closes it). The corpus writes this shape (22 cases: change notes
+    and the translated-act preambles), and dropping the continuation would
+    leak quoted text out of its quote."""
     if line.startswith(">"):
         return True
-    return bool(quoted) and bool(line.strip()) and not _is_structural(line)
+    paragraph_open = bool(quoted) and bool(quoted[-1].strip())
+    return paragraph_open and bool(line.strip()) and not _is_structural(line)
 
 
 def _render_table(
