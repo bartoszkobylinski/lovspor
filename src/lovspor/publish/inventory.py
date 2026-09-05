@@ -12,7 +12,7 @@ the generator withholds its provision pages, so the count lives here for
 import re
 from collections import Counter
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -228,14 +228,17 @@ def _check_provenance_shapes(doc_id: str, fields: dict[str, str]) -> None:
             f"attested shape (type/date or type/date-number)",
         )
     try:
-        datetime.fromisoformat(fields["retrieved_at"])
+        instant = datetime.fromisoformat(fields["retrieved_at"])
         if "T" not in fields["retrieved_at"]:
             raise ValueError("date without time")
+        if instant.utcoffset() != timedelta(0):
+            raise ValueError("not an explicit UTC instant")
     except ValueError as error:
         raise PublishError(
             f"document {doc_id} retrieved_at {fields['retrieved_at']!r} "
-            f"is not an ISO-8601 timestamp (a bare date is not a "
-            f"retrieval instant)",
+            f"is not an explicit UTC ISO-8601 timestamp — the shape the "
+            f"engine writes; a naive or offset time is not the corpus's "
+            f"retrieval instant",
         ) from error
 
 

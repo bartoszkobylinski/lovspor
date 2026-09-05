@@ -301,6 +301,28 @@ class TestBuildInventory:
         with pytest.raises(PublishError, match="retrieved_at"):
             build_inventory(manifest, lambda _path: body)
 
+    @pytest.mark.parametrize(
+        "value",
+        ["2026-07-30T18:17:57.344275", "2026-07-30T20:17:57.344275+02:00"],
+    )
+    def test_retrieved_at_must_be_an_explicit_utc_instant(self, value: str) -> None:
+        body = BODY.replace(
+            'retrieved_at: "2026-07-30T18:17:57.344275+00:00"',
+            f'retrieved_at: "{value}"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="retrieved_at"):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_z_suffixed_utc_retrieved_at_passes(self) -> None:
+        body = BODY.replace(
+            'retrieved_at: "2026-07-30T18:17:57.344275+00:00"',
+            'retrieved_at: "2026-07-30T18:17:57Z"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        plan = build_inventory(manifest, lambda _path: body).documents[0]
+        assert plan.retrieved_at == "2026-07-30T18:17:57Z"
+
     def test_unparseable_retrieved_at_fails_closed(self) -> None:
         body = BODY.replace(
             'retrieved_at: "2026-07-30T18:17:57.344275+00:00"',
