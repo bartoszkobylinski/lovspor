@@ -222,6 +222,24 @@ class TestBuildInventory:
         with pytest.raises(PublishError, match="language"):
             build_inventory(manifest, lambda _path: body)
 
+    def test_conflicting_repeated_provenance_key_fails_closed(self) -> None:
+        body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "lov/2024-12-20-96"\nref_id: "lov/1999-01-01-1"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="ref_id"):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_identical_repeated_provenance_key_is_tolerated(self) -> None:
+        body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "lov/2024-12-20-96"\nref_id: "lov/2024-12-20-96"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        plan = build_inventory(manifest, lambda _path: body).documents[0]
+        assert plan.ref_id == "lov/2024-12-20-96"
+
     def test_unreadable_body_fails_closed(self) -> None:
         manifest = _manifest({"doc-1": _record()})
         with pytest.raises(PublishError, match="cannot be read"):

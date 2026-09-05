@@ -31,6 +31,12 @@ a schema change to notice, not a default to guess (ADR-0013 Decision 4)."""
 
 _FRONT_MATTER_FIELD = re.compile(r'^([a-z_]+):\s*(?:"([^"]*)"|null)\s*$')
 
+_PROVENANCE_KEYS = frozenset(
+    {"language", "ref_id", "retrieved_at", "date_in_force", "last_change_in_force"},
+)
+"""Front-matter keys this layer consumes; a conflicting repeat of any of
+them is malformed provenance, never a first-wins choice."""
+
 
 class PublishError(LovsporError):
     """The snapshot cannot be published as-is; nothing may be emitted."""
@@ -167,8 +173,16 @@ def _front_matter_fields(doc_id: str, body: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in _front_matter_lines(body):
         match = _FRONT_MATTER_FIELD.match(line)
-        if match is not None and match.group(2) is not None:
-            fields.setdefault(match.group(1), match.group(2))
+        if match is None or match.group(2) is None:
+            continue
+        key, value = match.group(1), match.group(2)
+        if key in _PROVENANCE_KEYS and fields.get(key, value) != value:
+            raise PublishError(
+                f"document {doc_id} front matter repeats {key} with "
+                f"conflicting values; silently picking one would publish "
+                f"wrong provenance",
+            )
+        fields.setdefault(key, value)
     for required in ("language", "ref_id", "retrieved_at"):
         if required not in fields:
             raise PublishError(
