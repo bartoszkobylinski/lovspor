@@ -420,6 +420,19 @@ class TestBuildInventory:
         plan = build_inventory(manifest, lambda _path: body).documents[0]
         assert plan.retrieved_at == "2026-07-30T18:17:57Z"
 
+    @pytest.mark.parametrize(
+        "field",
+        ["language", "ref_id", "retrieved_at", "date_in_force", "last_change_in_force"],
+    )
+    def test_malformed_provenance_line_syntax_fails_closed(self, field: str) -> None:
+        body = BODY.replace(
+            'date_in_force: "2025-06-01"',
+            f"{field}: unquoted junk",
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match=field):
+            build_inventory(manifest, lambda _path: body)
+
     @pytest.mark.parametrize("field", ["date_in_force", "last_change_in_force"])
     def test_malformed_optional_date_fails_closed(self, field: str) -> None:
         body = BODY.replace(

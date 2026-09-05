@@ -198,6 +198,14 @@ def _front_matter_fields(doc_id: str, body: str) -> dict[str, str]:
     for line in _front_matter_lines(body):
         match = _FRONT_MATTER_FIELD.match(line)
         if match is None:
+            # A malformed line naming a provenance key must not vanish:
+            # a silently skipped line is how a field disappears without a
+            # trace (the mcp.py continue-truncation class).
+            key = line.split(":", 1)[0].strip()
+            if key in _PROVENANCE_KEYS:
+                raise PublishError(
+                    f"document {doc_id} front matter line for {key} is malformed: {line!r}",
+                )
             continue
         key, value = match.group(1), match.group(2)
         if key in _PROVENANCE_KEYS:
