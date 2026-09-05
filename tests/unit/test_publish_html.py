@@ -36,6 +36,10 @@ class TestBlocks:
 
         assert render(source).encode("utf-8") == render(source).encode("utf-8")
 
+    def test_empty_and_blank_only_bodies_emit_no_markup(self) -> None:
+        assert render("") == ""
+        assert render("\n \n\t") == ""
+
     def test_heading_levels_map_to_html(self) -> None:
         html = render("## Kapittel 1. Alminnelige bestemmelser")
         assert html == "<h2>Kapittel 1. Alminnelige bestemmelser</h2>"
@@ -168,6 +172,18 @@ class TestInline:
         html = render("Se [abortloven § 3](lov/2024-12-20-96/§3).")
         assert html == ('<p>Se <a href="/lov/abortloven/paragraf/3/">abortloven § 3</a>.</p>')
 
+    def test_resolver_receives_unescaped_target(self) -> None:
+        targets: list[str] = []
+
+        def resolve(target: str) -> str:
+            targets.append(target)
+            return "/lov/abortloven/"
+
+        html = render_body_html(["[A & B](lov/2024-12-20-96?x=1&y=2)"], resolve)
+
+        assert targets == ["lov/2024-12-20-96?x=1&y=2"]
+        assert html == '<p><a href="/lov/abortloven/">A &amp; B</a></p>'
+
     def test_unresolvable_link_renders_as_text(self) -> None:
         assert render("Jf. [direktivet](eu/32006L0123).") == ("<p>Jf. direktivet.</p>")
 
@@ -292,6 +308,15 @@ class TestSafety:
         )
         assert "<a" not in html
         assert "klikk" in html
+
+    @pytest.mark.parametrize("resolved", ["", "lov/abortloven/", "./lov/abortloven/"])
+    def test_non_root_relative_href_renders_as_text(self, resolved: str) -> None:
+        html = render_body_html(
+            ["[klikk](lov/2024-12-20-96)"],
+            lambda _target: resolved,
+        )
+
+        assert html == "<p>klikk</p>"
 
     def test_protocol_relative_href_renders_as_text_even_if_resolver_lies(
         self,

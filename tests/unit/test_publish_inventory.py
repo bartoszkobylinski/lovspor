@@ -90,6 +90,18 @@ class TestBuildInventory:
 
         assert [plan.doc_id for plan in inventory.documents] == ["doc-1"]
 
+    def test_inventory_preserves_manifest_order(self) -> None:
+        manifest = _manifest(
+            {
+                "second": _record(slug="andre", markdown_path="lover/andre.md"),
+                "first": _record(slug="forste", markdown_path="lover/forste.md"),
+            },
+        )
+
+        inventory = build_inventory(manifest, lambda _path: BODY)
+
+        assert [plan.doc_id for plan in inventory.documents] == ["second", "first"]
+
     def test_removed_record_does_not_hide_later_current_record(self) -> None:
         manifest = _manifest(
             {
