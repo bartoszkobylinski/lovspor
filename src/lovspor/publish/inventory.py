@@ -171,18 +171,24 @@ def _front_matter_fields(doc_id: str, body: str) -> dict[str, str]:
     deliberately not a runtime dependency of the engine.
     """
     fields: dict[str, str] = {}
+    seen: dict[str, str | None] = {}
     for line in _front_matter_lines(body):
         match = _FRONT_MATTER_FIELD.match(line)
-        if match is None or match.group(2) is None:
+        if match is None:
             continue
         key, value = match.group(1), match.group(2)
-        if key in _PROVENANCE_KEYS and fields.get(key, value) != value:
-            raise PublishError(
-                f"document {doc_id} front matter repeats {key} with "
-                f"conflicting values; silently picking one would publish "
-                f"wrong provenance",
-            )
-        fields.setdefault(key, value)
+        if key in _PROVENANCE_KEYS:
+            # null counts as a recorded value: null beside a string (either
+            # order) is the same conflict as two different strings.
+            if key in seen and seen[key] != value:
+                raise PublishError(
+                    f"document {doc_id} front matter repeats {key} with "
+                    f"conflicting values; silently picking one would "
+                    f"publish wrong provenance",
+                )
+            seen[key] = value
+        if value is not None:
+            fields.setdefault(key, value)
     for required in ("language", "ref_id", "retrieved_at"):
         if required not in fields:
             raise PublishError(

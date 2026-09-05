@@ -231,6 +231,19 @@ class TestBuildInventory:
         with pytest.raises(PublishError, match="ref_id"):
             build_inventory(manifest, lambda _path: body)
 
+    @pytest.mark.parametrize(
+        "pair",
+        [
+            'ref_id: null\nref_id: "lov/2024-12-20-96"',
+            'ref_id: "lov/2024-12-20-96"\nref_id: null',
+        ],
+    )
+    def test_null_beside_a_value_for_one_key_fails_closed(self, pair: str) -> None:
+        body = BODY.replace('ref_id: "lov/2024-12-20-96"', pair)
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="ref_id"):
+            build_inventory(manifest, lambda _path: body)
+
     def test_identical_repeated_provenance_key_is_tolerated(self) -> None:
         body = BODY.replace(
             'ref_id: "lov/2024-12-20-96"',
