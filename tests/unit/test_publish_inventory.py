@@ -342,8 +342,10 @@ class TestBuildInventory:
             'retrieved_at: "2026-07-30"',
         )
         manifest = _manifest({"doc-1": _record()})
-        with pytest.raises(PublishError, match="retrieved_at"):
+        with pytest.raises(PublishError, match="retrieved_at") as caught:
             build_inventory(manifest, lambda _path: body)
+
+        assert str(caught.value.__cause__) == "date without time"
 
     @pytest.mark.parametrize(
         "value",
@@ -355,8 +357,10 @@ class TestBuildInventory:
             f'retrieved_at: "{value}"',
         )
         manifest = _manifest({"doc-1": _record()})
-        with pytest.raises(PublishError, match="retrieved_at"):
+        with pytest.raises(PublishError, match="retrieved_at") as caught:
             build_inventory(manifest, lambda _path: body)
+
+        assert str(caught.value.__cause__) == "not an explicit UTC instant"
 
     def test_z_suffixed_utc_retrieved_at_passes(self) -> None:
         body = BODY.replace(
@@ -448,3 +452,13 @@ class TestFrontMatterBoundaries:
             'language: "nb"',
             'ref_id: "lov/2024-12-20-96"',
         ]
+
+    def test_later_delimiter_without_opening_delimiter_is_body_content(self) -> None:
+        source = "Innledning\n---\n### § 1. Første\nTekst."
+
+        assert _body_lines(source) == source.split("\n")
+
+    def test_later_delimiter_without_opening_delimiter_is_not_front_matter(self) -> None:
+        source = 'Innledning\n---\nlanguage: "nb"\n---\nBody'
+
+        assert _front_matter_lines(source) == []
