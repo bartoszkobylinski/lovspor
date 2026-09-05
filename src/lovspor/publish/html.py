@@ -53,7 +53,13 @@ def render_body_html(
     """
     blocks: list[str] = []
     index = 0
-    while index < len(lines):
+    # A for-range bound instead of an open while: every iteration consumes
+    # at least one line, so len(lines) steps always suffice — a defect (or
+    # a mutant) that stops progress produces wrong output or trips the
+    # guard below instead of hanging the whole publish run.
+    for _ in range(len(lines)):
+        if index >= len(lines):
+            break
         if not lines[index].strip():
             index += 1
             continue
@@ -64,8 +70,6 @@ def render_body_html(
             suppressed_anchor_pids,
         )
         if next_index <= index:
-            # A renderer that fails to advance must fail loudly: silently
-            # looping forever is how a publish run hangs a whole build.
             raise PublishError(
                 f"renderer stalled at line {index}: {lines[index]!r}",
             )
@@ -119,14 +123,12 @@ def _render_paragraph(
 ) -> tuple[str, int]:
     """Consecutive non-blank, non-structural lines form one paragraph."""
     collected: list[str] = []
-    while index < len(lines):
-        line = lines[index]
+    for line in lines[index:]:
         if not line.strip() or _is_structural(line):
             break
         collected.append(line)
-        index += 1
     text = _inline("\n".join(collected), resolve)
-    return f"<p>{text}</p>", index
+    return f"<p>{text}</p>", index + len(collected)
 
 
 def _is_structural(line: str) -> bool:
@@ -147,15 +149,14 @@ def _render_list(
 ) -> tuple[str, int]:
     pattern = _ORDERED_ITEM if ordered else _UNORDERED_ITEM
     items: list[str] = []
-    while index < len(lines):
-        match = pattern.match(lines[index])
+    for line in lines[index:]:
+        match = pattern.match(line)
         if match is None:
             break
         items.append(f"<li>{_inline(match.group(1), resolve)}</li>")
-        index += 1
     tag = "ol" if ordered else "ul"
     body = "\n".join(items)
-    return f"<{tag}>\n{body}\n</{tag}>", index
+    return f"<{tag}>\n{body}\n</{tag}>", index + len(items)
 
 
 def _render_blockquote(
@@ -165,14 +166,14 @@ def _render_blockquote(
     suppressed_anchor_pids: frozenset[str],
 ) -> tuple[str, int]:
     quoted: list[str] = []
-    while index < len(lines) and _continues_quote(lines[index], quoted):
-        line = lines[index]
+    for line in lines[index:]:
+        if not _continues_quote(line, quoted):
+            break
         quoted.append(line.removeprefix(">").strip() if line.startswith(">") else line)
-        index += 1
     # The suppression set must survive the recursion: a section heading
     # quoted inside a blockquote is still an anchor claim on the page.
     inner = render_body_html(quoted, resolve, suppressed_anchor_pids)
-    return f"<blockquote>{inner}</blockquote>", index
+    return f"<blockquote>{inner}</blockquote>", index + len(quoted)
 
 
 def _continues_quote(line: str, quoted: list[str]) -> bool:
@@ -194,11 +195,14 @@ def _render_table(
     resolve: LinkResolver,
 ) -> tuple[str, int]:
     rows: list[list[str]] = []
-    while index < len(lines) and lines[index].startswith("|"):
-        if not _TABLE_RULE.match(lines[index]):
-            rows.append(_table_cells(lines[index], resolve))
-        index += 1
-    return _table_html(rows), index
+    consumed = 0
+    for line in lines[index:]:
+        if not line.startswith("|"):
+            break
+        if not _TABLE_RULE.match(line):
+            rows.append(_table_cells(line, resolve))
+        consumed += 1
+    return _table_html(rows), index + consumed
 
 
 def _table_cells(line: str, resolve: LinkResolver) -> list[str]:
