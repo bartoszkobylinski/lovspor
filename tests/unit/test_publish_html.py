@@ -10,7 +10,7 @@ emitted canonical URL — everything else renders as visible text.
 
 import pytest
 
-from lovspor.publish.html import render_body_html
+from lovspor.publish.html import _inline, _plain, _table_html, render_body_html
 
 
 def _resolve(target: str) -> str | None:
@@ -86,6 +86,51 @@ class TestBlocks:
             "<tbody>\n<tr><td>en</td><td>to</td></tr>\n</tbody>\n</table>"
         )
 
+    def test_each_structural_block_preserves_links_and_following_blocks(self) -> None:
+        target = "lov/2024-12-20-96"
+        source = (
+            f"## [Heading]({target})\n"
+            f"1. [Ordered]({target})\n"
+            f"- [Unordered]({target})\n"
+            f"> [Quote]({target})\n\n"
+            f"| [Column]({target}) |\n| --- |\n| [Cell]({target}) |\n\n"
+            "Tail"
+        )
+
+        html = render(source)
+
+        for label in ("Heading", "Ordered", "Unordered", "Quote", "Column", "Cell"):
+            assert f'<a href="/lov/abortloven/">{label}</a>' in html
+        assert html.endswith("<p>Tail</p>")
+
+    def test_structural_tokens_end_a_preceding_paragraph(self) -> None:
+        assert render("Intro\n1. ordered") == "<p>Intro</p>\n<ol>\n<li>ordered</li>\n</ol>"
+        assert render("Intro\n- unordered") == "<p>Intro</p>\n<ul>\n<li>unordered</li>\n</ul>"
+        assert render("Intro\n| cell |") == (
+            "<p>Intro</p>\n<table>\n<thead><tr><th>cell</th></tr></thead>\n"
+            "<tbody>\n\n</tbody>\n</table>"
+        )
+        assert render("Intro\n> quote") == "<p>Intro</p>\n<blockquote><p>quote</p></blockquote>"
+
+    def test_list_stops_before_following_paragraph(self) -> None:
+        assert render("1. item\nFollowing") == ("<ol>\n<li>item</li>\n</ol>\n<p>Following</p>")
+
+    def test_table_keeps_all_rows_and_stops_before_following_paragraph(self) -> None:
+        assert render("| H |\n| --- |\n| one |\n| two |\nFollowing") == (
+            "<table>\n<thead><tr><th>H</th></tr></thead>\n<tbody>\n"
+            "<tr><td>one</td></tr>\n<tr><td>two</td></tr>\n</tbody>\n</table>\n"
+            "<p>Following</p>"
+        )
+
+    def test_rule_only_table_has_canonical_empty_markup(self) -> None:
+        assert render("| --- |") == "<table></table>"
+
+    def test_table_rows_are_joined_with_plain_newlines(self) -> None:
+        assert _table_html([["H"], ["one"], ["two"]]) == (
+            "<table>\n<thead><tr><th>H</th></tr></thead>\n<tbody>\n"
+            "<tr><td>one</td></tr>\n<tr><td>two</td></tr>\n</tbody>\n</table>"
+        )
+
 
 class TestAnchorSuppression:
     def test_duplicate_pids_render_without_any_anchor(self) -> None:
@@ -135,6 +180,16 @@ class TestInline:
 
     def test_strong_and_emphasis(self) -> None:
         assert render("**sterk** og *svak*") == ("<p><strong>sterk</strong> og <em>svak</em></p>")
+
+    def test_escaped_literals_survive_around_resolved_and_plain_links(self) -> None:
+        assert _inline(r"\" [\"linked](lov/2024-12-20-96) \"", _resolve) == (
+            '&quot; <a href="/lov/abortloven/">&quot;linked</a> &quot;'
+        )
+        assert _inline(r"[\"plain](missing)", _resolve) == "&quot;plain"
+
+    def test_plain_text_and_escaped_literals_escape_attribute_quotes(self) -> None:
+        assert _plain('a"b', []) == "a&quot;b"
+        assert _plain("\x000\x00", ['"']) == "&quot;"
 
 
 class TestRendererEscapes:

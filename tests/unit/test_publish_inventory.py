@@ -13,6 +13,8 @@ import pytest
 
 from lovspor.publish.inventory import (
     PublishError,
+    _body_lines,
+    _front_matter_lines,
     build_inventory,
     normalise_pid,
 )
@@ -87,6 +89,18 @@ class TestBuildInventory:
         inventory = build_inventory(manifest, {"lover/abortloven.md": BODY}.get)
 
         assert [plan.doc_id for plan in inventory.documents] == ["doc-1"]
+
+    def test_removed_record_does_not_hide_later_current_record(self) -> None:
+        manifest = _manifest(
+            {
+                "removed": _record(status="removed"),
+                "current": _record(),
+            },
+        )
+
+        inventory = build_inventory(manifest, {"lover/abortloven.md": BODY}.get)
+
+        assert [plan.doc_id for plan in inventory.documents] == ["current"]
 
     def test_provisions_parsed_in_order_with_normalised_pids(self) -> None:
         manifest = _manifest({"doc-1": _record()})
@@ -216,6 +230,25 @@ class TestBuildInventory:
         assert plan.retrieved_at == "2026-07-30T18:17:57.344275+00:00"
         assert plan.date_in_force == "2025-06-01"
         assert plan.last_change_in_force is None
+
+    def test_manifest_title_and_last_change_land_on_the_plan(self) -> None:
+        body = BODY.replace(
+            "last_updated: null",
+            'last_updated: null\nlast_change_in_force: "2026-08-15"',
+        )
+        manifest = _manifest({"doc-1": _record(title="Manifestens tittel")})
+
+        plan = build_inventory(manifest, lambda _path: body).documents[0]
+
+        assert plan.title == "Manifestens tittel"
+        assert plan.last_change_in_force == "2026-08-15"
+
+    def test_document_id_is_preserved_in_provenance_error(self) -> None:
+        body = BODY.replace('language: "nb"', 'language: "xx"')
+        manifest = _manifest({"specific-doc-id": _record()})
+
+        with pytest.raises(PublishError, match=r"document specific-doc-id carries language"):
+            build_inventory(manifest, lambda _path: body)
 
     def test_missing_language_fails_closed(self) -> None:
         body = BODY.replace('language: "nb"\n', "")
@@ -400,3 +433,18 @@ class TestNormalisePid:
     )
     def test_lowercases_and_strips_spaces(self, raw: str, expected: str) -> None:
         assert normalise_pid(raw) == expected
+
+
+class TestFrontMatterBoundaries:
+    def test_body_starts_immediately_after_closing_delimiter(self) -> None:
+        source = '---\nlanguage: "nb"\n---\n### § 1. Første\nTekst.'
+
+        assert _body_lines(source) == ["### § 1. Første", "Tekst."]
+
+    def test_front_matter_excludes_both_delimiters(self) -> None:
+        source = '---\nlanguage: "nb"\nref_id: "lov/2024-12-20-96"\n---\nBody'
+
+        assert _front_matter_lines(source) == [
+            'language: "nb"',
+            'ref_id: "lov/2024-12-20-96"',
+        ]
