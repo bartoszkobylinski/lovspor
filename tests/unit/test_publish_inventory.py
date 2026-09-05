@@ -389,6 +389,23 @@ class TestBuildInventory:
         plan = build_inventory(manifest, lambda _path: body).documents[0]
         assert plan.ref_id == "lov/2024-12-20-96"
 
+    def test_front_matter_is_never_stolen_from_the_body(self) -> None:
+        # A body that does NOT open with --- has no front matter, even when
+        # provenance-shaped lines and a --- rule appear later in the text.
+        # Treating them as front matter would publish provenance quoted
+        # from the document's own prose.
+        body = (
+            "Innledning.\n"
+            'language: "nb"\n'
+            'ref_id: "lov/2020-01-01-1"\n'
+            'retrieved_at: "2026-01-01T00:00:00+00:00"\n'
+            "---\n"
+            "# T\n"
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="language"):
+            build_inventory(manifest, lambda _path: body)
+
     def test_unreadable_body_fails_closed(self) -> None:
         manifest = _manifest({"doc-1": _record()})
         with pytest.raises(PublishError, match="cannot be read"):

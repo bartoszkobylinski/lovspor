@@ -805,3 +805,85 @@ returns False for every such element. Elements that do carry a class never
 evaluate the fallback at all. Identical output on every input; no test can
 distinguish the two.
 """
+
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_render_block"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-        return _render_list(lines, index, resolve, ordered=False)
++        return _render_list(lines, index, resolve, ordered=None)
+"""
+justification = """
+`ordered` is tested for truth twice and never compared to False: the
+pattern pick (`_ORDERED_ITEM if ordered else _UNORDERED_ITEM`) and the
+tag pick (`"ol" if ordered else "ul"`). None and False are both falsy,
+so every input renders the identical unordered list — the register's
+check=False/None precedent on this project's own code.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_inline"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-    cursor = 0
++    cursor = None
+"""
+justification = """
+Python slicing defines a None start as 0 (language semantics, not a
+library default): `s[None:x] == s[0:x]` and `s[None:] == s[0:]`. The
+initial cursor is only ever used as a slice start; after the first link
+match it is rebound to `match.end()`, an int. Both the linkless path and
+the pre-first-link slice therefore compute identical strings for every
+input.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_plain"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-    escaped = html.escape(text, quote=True)
++    escaped = html.escape(text, )
+"""
+justification = """
+`html.escape`'s signature defaults `quote` to True, so dropping the
+explicit argument selects the identical escaping. This argues from the
+stdlib's signature rather than Python semantics, so the default is
+pinned by the assumption test below — a changed default turns this
+entry red instead of silently waiving a quoting regression.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_plain"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-        lambda m: html.escape(literals[int(m.group(1))], quote=True),
++        lambda m: html.escape(literals[int(m.group(1))], ),
+"""
+justification = """
+Same stdlib-default selection as the other _plain entry, on the
+placeholder-restore path: quote defaults to True, so the explicit and
+implicit spellings escape identically. Pinned by the same assumption
+test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_link_html"
+registered = "2026-09-05, PR #244, from run 33990449196"
+mutation = """
+-    href = html.escape(resolved, quote=True)
++    href = html.escape(resolved, )
+"""
+justification = """
+Same stdlib-default selection, on the href path — the one place where
+quote=True matters most, which is exactly why the assumption test pins
+the default: if a Python release ever stopped quoting by default, this
+entry must go red, not keep waiving it.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"

@@ -239,6 +239,21 @@ class TestRendererEscapes:
         assert render(r"\>") == "<p>&gt;</p>"
 
 
+def test_assumption_html_escape_quotes_by_default() -> None:
+    """Pins the stdlib default the equivalents register argues from:
+    ``html.escape`` quotes attribute characters unless told otherwise, so
+    dropping an explicit ``quote=True`` selects identical behaviour. If a
+    Python release ever changes the default, this goes red instead of the
+    register silently waiving a real quoting regression."""
+    import html as html_stdlib
+
+    assert html_stdlib.escape("\"'<>&") == html_stdlib.escape(
+        "\"'<>&",
+        quote=True,
+    )
+    assert html_stdlib.escape('"') == "&quot;"
+
+
 class TestSafety:
     def test_raw_html_is_escaped_not_executed(self) -> None:
         html = render('<script>alert("x")</script>')
