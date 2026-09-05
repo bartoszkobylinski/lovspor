@@ -204,6 +204,7 @@ class TestBuildInventory:
             "-abortloven",
             "abortloven-",
             "abort--loven",
+            "abortloven\n",
         ],
     )
     def test_noncanonical_slug_fails_closed(self, bad: str) -> None:
@@ -316,6 +317,15 @@ class TestBuildInventory:
         body = BODY.replace(f'{field}: "', f'{field}: ""  # "', 1)
         manifest = _manifest({"doc-1": _record()})
         with pytest.raises(PublishError, match=field):
+            build_inventory(manifest, lambda _path: body)
+
+    def test_ref_id_with_trailing_newline_fails_closed(self) -> None:
+        body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "lov/2024-12-20-96\n"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="ref_id"):
             build_inventory(manifest, lambda _path: body)
 
     def test_malformed_ref_id_fails_closed(self) -> None:

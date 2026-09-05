@@ -32,9 +32,11 @@ a schema change to notice, not a default to guess (ADR-0013 Decision 4)."""
 
 _FRONT_MATTER_FIELD = re.compile(r'^([a-z_]+):\s*(?:"([^"]*)"|null)\s*$')
 
-_CANONICAL_SLUG = re.compile(r"^[a-z0-9æøåü]+(?:-[a-z0-9æøåü]+)*$")
+# fullmatch, never match-with-$: `$` matches before a trailing newline,
+# so "abortloven\n" would pass an anchored match.
+_CANONICAL_SLUG = re.compile(r"[a-z0-9æøåü]+(?:-[a-z0-9æøåü]+)*")
 
-_CANONICAL_REF_ID = re.compile(r"^(?:lov|forskrift)/\d{4}-\d{2}-\d{2}(?:-[\dx]+)?$")
+_CANONICAL_REF_ID = re.compile(r"(?:lov|forskrift)/\d{4}-\d{2}-\d{2}(?:-[\dx]+)?")
 """Both attested ref_id shapes: type/date-number, and type/date alone for
 the eight pre-1850 acts (norske lov 1687 through vekselloven 1845)."""
 """The slug grammar the corpus actually uses, measured 2026-09-05 over
@@ -147,7 +149,7 @@ def _plan_document(
         )
     if record.slug is None or not record.slug.strip():
         raise PublishError(f"current record {doc_id} has no slug")
-    if not _CANONICAL_SLUG.match(record.slug):
+    if not _CANONICAL_SLUG.fullmatch(record.slug):
         raise PublishError(
             f"current record {doc_id} slug {record.slug!r} is not a "
             f"canonical URL segment (lowercase [a-z0-9æøåü] groups joined "
@@ -222,7 +224,7 @@ def _check_provenance_shapes(doc_id: str, fields: dict[str, str]) -> None:
             f"{fields['language']!r}, outside the corpus set "
             f"{sorted(_LANGUAGES)}; refusing to publish a wrong lang",
         )
-    if not _CANONICAL_REF_ID.match(fields["ref_id"]):
+    if not _CANONICAL_REF_ID.fullmatch(fields["ref_id"]):
         raise PublishError(
             f"document {doc_id} ref_id {fields['ref_id']!r} matches neither "
             f"attested shape (type/date or type/date-number)",
