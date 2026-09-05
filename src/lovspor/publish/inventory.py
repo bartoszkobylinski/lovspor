@@ -31,6 +31,13 @@ a schema change to notice, not a default to guess (ADR-0013 Decision 4)."""
 
 _FRONT_MATTER_FIELD = re.compile(r'^([a-z_]+):\s*(?:"([^"]*)"|null)\s*$')
 
+_CANONICAL_SLUG = re.compile(r"^[a-z0-9æøåü]+(?:-[a-z0-9æøåü]+)*$")
+"""The slug grammar the corpus actually uses, measured 2026-09-05 over
+every current record: lowercase Latin plus the attested æ ø å ü, digit
+groups, single hyphens between groups. Anything else — uppercase,
+whitespace, underscores, query characters, slashes, leading/trailing
+hyphens — is not a canonical URL segment and fails the build."""
+
 _PROVENANCE_KEYS = frozenset(
     {"language", "ref_id", "retrieved_at", "date_in_force", "last_change_in_force"},
 )
@@ -133,10 +140,11 @@ def _plan_document(
         )
     if record.slug is None or not record.slug.strip():
         raise PublishError(f"current record {doc_id} has no slug")
-    if "/" in record.slug:
+    if not _CANONICAL_SLUG.match(record.slug):
         raise PublishError(
-            f"current record {doc_id} slug {record.slug!r} contains '/': "
-            f"it would nest the canonical path",
+            f"current record {doc_id} slug {record.slug!r} is not a "
+            f"canonical URL segment (lowercase [a-z0-9æøåü] groups joined "
+            f"by single hyphens)",
         )
     body = read_text(record.markdown_path)
     if body is None:

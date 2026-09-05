@@ -167,10 +167,33 @@ class TestBuildInventory:
             with pytest.raises(PublishError, match="no slug"):
                 build_inventory(manifest, lambda _path: BODY)
 
-    def test_slug_with_slash_fails_closed(self) -> None:
-        manifest = _manifest({"doc-1": _record(slug="a/b")})
-        with pytest.raises(PublishError, match="nest"):
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "a/b",
+            "Abortloven",
+            " abortloven",
+            "abortloven ",
+            "abort_loven",
+            "abortloven?utgave=1",
+            "-abortloven",
+            "abortloven-",
+            "abort--loven",
+        ],
+    )
+    def test_noncanonical_slug_fails_closed(self, bad: str) -> None:
+        manifest = _manifest({"doc-1": _record(slug=bad)})
+        with pytest.raises(PublishError, match="canonical URL segment"):
             build_inventory(manifest, lambda _path: BODY)
+
+    @pytest.mark.parametrize(
+        "good",
+        ["abortloven", "forskrift-om-sassen-bünsow-land-nasjonalpark", "nl-2"],
+    )
+    def test_attested_slug_shapes_pass(self, good: str) -> None:
+        manifest = _manifest({"doc-1": _record(slug=good)})
+        inventory = build_inventory(manifest, lambda _path: BODY)
+        assert inventory.documents[0].slug == good
 
     def test_front_matter_fields_land_on_the_plan(self) -> None:
         manifest = _manifest({"doc-1": _record()})
