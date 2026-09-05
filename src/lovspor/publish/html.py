@@ -271,18 +271,22 @@ def _plain(text: str, literals: list[str]) -> str:
     )
 
 
-def _is_site_relative(path: str) -> bool:
-    """A single leading slash and nothing sneakier.
+_CANONICAL_HREF = re.compile(
+    r"/(?:lov|forskrift)/[a-z0-9æøåü-]+/(?:paragraf/[a-z0-9æøåü-]+/)?",
+)
+"""Every internal href the site can legitimately emit: a document page or
+a provision page, exactly as the URL grammar defines them."""
 
-    ``//host/x`` is protocol-relative — a browser resolves it to another
-    origin — and ``/\\`` is its backslash spelling in some parsers, so
-    both are refused along with anything not starting at the site root.
+
+def _is_site_relative(path: str) -> bool:
+    """Whitelist, not blacklist: an href is either one of the two
+    canonical page shapes or it does not render as a link at all.
+
+    The refused universe needs no enumeration this way — protocol-relative
+    ``//host``, backslash spellings, dot segments, schemes, queries and
+    every future variant fail the fullmatch together.
     """
-    if not path.startswith("/") or path.startswith(("//", "/\\")):
-        return False
-    # Dot segments re-resolve in the browser: /lov/../admin/ escapes the
-    # canonical namespace entirely. Canonical paths never contain them.
-    return not any(segment in {".", ".."} for segment in path.split("/"))
+    return _CANONICAL_HREF.fullmatch(path) is not None
 
 
 def _link_html(

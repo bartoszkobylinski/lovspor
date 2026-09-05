@@ -355,9 +355,20 @@ class TestSafety:
 
     @pytest.mark.parametrize(
         "path",
-        ["/lov/../admin/", "/lov/./abortloven/", "/../x/", "/lov/abortloven/.."],
+        [
+            "/lov/../admin/",
+            "/lov/./abortloven/",
+            "/../x/",
+            "/lov/abortloven/..",
+            "/lov/..\\admin/",
+            "/lov/.\\abortloven/",
+            "/lov/abortloven",
+            "/docs/",
+            "/lov/abortloven/?q=1",
+            "/lov/abortloven/paragraf/3",
+        ],
     )
-    def test_dot_segment_href_is_refused(self, path: str) -> None:
+    def test_noncanonical_href_is_refused(self, path: str) -> None:
         html = render_body_html(
             ["[klikk](lov/2024-12-20-96)"],
             lambda _t, p=path: p,
@@ -370,14 +381,17 @@ class TestSafety:
         assert "<b>" not in html
         assert "&lt;b&gt;fet&lt;/b&gt;" in html
 
-    def test_resolved_href_is_attribute_escaped(self) -> None:
+    def test_attribute_breaking_href_is_refused_outright(self) -> None:
+        # Under the canonical-href whitelist a quote-carrying path is not
+        # merely escaped — it is not a link at all, which is strictly
+        # stronger than the attribute-escaping this test originally pinned.
         html = render_body_html(
             ["[klikk](lov/2024-12-20-96)"],
             lambda _target: '/lov/x/" onmouseover="alert(1)',
         )
 
-        assert html == ('<p><a href="/lov/x/&quot; onmouseover=&quot;alert(1)">klikk</a></p>')
-        assert 'href="/lov/x/"' not in html
+        assert "<a" not in html
+        assert html == "<p>klikk</p>"
 
     def test_escaping_applies_inside_table_cells(self) -> None:
         html = render("| A |\n| --- |\n| <i>x</i> |")
