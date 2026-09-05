@@ -102,6 +102,17 @@ class TestBuildInventory:
         ]
         assert plan.duplicate_pids == {}
 
+    def test_section_shaped_front_matter_value_is_not_a_provision(self) -> None:
+        body = BODY.replace(
+            'weird: "# not a heading"',
+            'weird: "ignored"\n### § 999. Not body content',
+        )
+        manifest = _manifest({"doc-1": _record()})
+
+        plan = build_inventory(manifest, lambda _path: body).documents[0]
+
+        assert [provision.pid for provision in plan.provisions] == ["1", "2", "35a"]
+
     def test_route_follows_doc_type(self) -> None:
         manifest = _manifest(
             {

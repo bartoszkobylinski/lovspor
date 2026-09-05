@@ -195,6 +195,26 @@ class TestSafety:
         assert "<img" not in html
         assert "&lt;img src=x onerror=alert(1)&gt;" in html
 
+    @pytest.mark.parametrize(
+        ("source", "escaped_text"),
+        [
+            ("## <img src=x onerror=alert(1)>", "&lt;img src=x onerror=alert(1)&gt;"),
+            ("- <script>alert(1)</script>", "&lt;script&gt;alert(1)&lt;/script&gt;"),
+            ("> <svg onload=alert(1)>", "&lt;svg onload=alert(1)&gt;"),
+        ],
+    )
+    def test_raw_html_is_escaped_in_every_structural_block(
+        self,
+        source: str,
+        escaped_text: str,
+    ) -> None:
+        html = render(source)
+
+        assert escaped_text in html
+        assert "<img" not in html
+        assert "<script" not in html
+        assert "<svg" not in html
+
     def test_unsafe_scheme_link_renders_as_text_even_if_resolver_lies(self) -> None:
         html = render_body_html(
             ["[klikk](lov/2024-12-20-96)"],
