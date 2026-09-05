@@ -150,9 +150,13 @@ class TestBuildInventory:
                 ),
             },
         )
+        forskrift_body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "forskrift/2024-12-20-96"',
+        )
         reader = {
             "lover/abortloven.md": BODY,
-            "forskrifter/pantelovforskriften.md": BODY,
+            "forskrifter/pantelovforskriften.md": forskrift_body,
         }.get
         inventory = build_inventory(manifest, reader)
 
@@ -184,7 +188,15 @@ class TestBuildInventory:
                 ),
             },
         )
-        inventory = build_inventory(manifest, lambda _path: BODY)
+        forskrift_body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "forskrift/2024-12-20-96"',
+        )
+        reader = {
+            "lover/abortloven.md": BODY,
+            "forskrifter/bergverksordning-for-svalbard.md": forskrift_body,
+        }.get
+        inventory = build_inventory(manifest, reader)
 
         assert len(inventory.documents) == 2
 
@@ -348,6 +360,21 @@ class TestBuildInventory:
         manifest = _manifest({"doc-1": _record()})
         with pytest.raises(PublishError, match="ref_id"):
             build_inventory(manifest, lambda _path: body)
+
+    @pytest.mark.parametrize(
+        ("doc_type", "ref"),
+        [("lov", "forskrift/2024-12-20-96"), ("forskrift", "lov/2024-12-20-96")],
+    )
+    def test_ref_id_type_must_match_publication_route(
+        self,
+        doc_type: str,
+        ref: str,
+    ) -> None:
+        body = BODY.replace('ref_id: "lov/2024-12-20-96"', f'ref_id: "{ref}"')
+        path = "lover/abortloven.md"
+        manifest = _manifest({"doc-1": _record(doc_type=doc_type)})
+        with pytest.raises(PublishError, match="different type"):
+            build_inventory(manifest, {path: body}.get if doc_type == "lov" else (lambda _p: body))
 
     def test_pre1850_ref_id_without_number_passes(self) -> None:
         body = BODY.replace(

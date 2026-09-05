@@ -164,6 +164,12 @@ def _plan_document(
     provisions = _provisions_of(body)
     counts = Counter(provision.pid for provision in provisions)
     fields = _front_matter_fields(doc_id, body)
+    if not fields["ref_id"].startswith(f"{route}/"):
+        raise PublishError(
+            f"document {doc_id} ref_id {fields['ref_id']!r} names a "
+            f"different type than its route '{route}': the manifest and "
+            f"the front matter disagree about what this document is",
+        )
     return DocumentPlan(
         doc_id=doc_id,
         slug=record.slug,
