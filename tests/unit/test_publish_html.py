@@ -366,6 +366,10 @@ class TestSafety:
             "/docs/",
             "/lov/abortloven/?q=1",
             "/lov/abortloven/paragraf/3",
+            "/lov/-abortloven/",
+            "/lov/abortloven-/",
+            "/lov/abort--loven/",
+            "/lov/abortloven/paragraf/-3/",
         ],
     )
     def test_noncanonical_href_is_refused(self, path: str) -> None:

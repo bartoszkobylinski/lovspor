@@ -271,8 +271,12 @@ def _plain(text: str, literals: list[str]) -> str:
     )
 
 
+_SEGMENT = r"[a-z0-9æøåü]+(?:-[a-z0-9æøåü]+)*"
+"""One canonical path segment — the same hyphen-joined-groups grammar the
+inventory enforces for slugs, so the two layers cannot drift apart."""
+
 _CANONICAL_HREF = re.compile(
-    r"/(?:lov|forskrift)/[a-z0-9æøåü-]+/(?:paragraf/[a-z0-9æøåü-]+/)?",
+    rf"/(?:lov|forskrift)/{_SEGMENT}/(?:paragraf/{_SEGMENT}/)?",
 )
 """Every internal href the site can legitimately emit: a document page or
 a provision page, exactly as the URL grammar defines them."""
