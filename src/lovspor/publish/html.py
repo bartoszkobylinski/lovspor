@@ -278,7 +278,11 @@ def _is_site_relative(path: str) -> bool:
     origin — and ``/\\`` is its backslash spelling in some parsers, so
     both are refused along with anything not starting at the site root.
     """
-    return path.startswith("/") and not path.startswith(("//", "/\\"))
+    if not path.startswith("/") or path.startswith(("//", "/\\")):
+        return False
+    # Dot segments re-resolve in the browser: /lov/../admin/ escapes the
+    # canonical namespace entirely. Canonical paths never contain them.
+    return not any(segment in {".", ".."} for segment in path.split("/"))
 
 
 def _link_html(

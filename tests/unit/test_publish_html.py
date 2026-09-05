@@ -353,6 +353,18 @@ class TestSafety:
         )
         assert "<a" not in html
 
+    @pytest.mark.parametrize(
+        "path",
+        ["/lov/../admin/", "/lov/./abortloven/", "/../x/", "/lov/abortloven/.."],
+    )
+    def test_dot_segment_href_is_refused(self, path: str) -> None:
+        html = render_body_html(
+            ["[klikk](lov/2024-12-20-96)"],
+            lambda _t, p=path: p,
+        )
+        assert "<a" not in html
+        assert "klikk" in html
+
     def test_link_text_is_escaped(self) -> None:
         html = render("[<b>fet</b>](lov/2024-12-20-96)")
         assert "<b>" not in html

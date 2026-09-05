@@ -12,7 +12,7 @@ the generator withholds its provision pages, so the count lives here for
 import re
 from collections import Counter
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -235,6 +235,14 @@ def _check_provenance_shapes(doc_id: str, fields: dict[str, str]) -> None:
             f"document {doc_id} ref_id {fields['ref_id']!r} matches neither "
             f"attested shape (type/date or type/date-number)",
         )
+    for key in ("date_in_force", "last_change_in_force"):
+        if key in fields:
+            try:
+                date.fromisoformat(fields[key])
+            except ValueError as error:
+                raise PublishError(
+                    f"document {doc_id} {key} {fields[key]!r} is not an ISO-8601 date",
+                ) from error
     try:
         instant = datetime.fromisoformat(fields["retrieved_at"])
         if "T" not in fields["retrieved_at"]:
