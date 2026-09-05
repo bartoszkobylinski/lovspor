@@ -12,7 +12,9 @@ import html as html_stdlib
 
 import pytest
 
+from lovspor.publish import html as html_module
 from lovspor.publish.html import _inline, _plain, _table_html, render_body_html
+from lovspor.publish.inventory import PublishError
 
 
 def _resolve(target: str) -> str | None:
@@ -255,6 +257,22 @@ class TestRendererEscapes:
 
     def test_escaped_char_is_still_html_escaped(self) -> None:
         assert render(r"\>") == "<p>&gt;</p>"
+
+
+def test_a_stalled_block_renderer_raises_instead_of_hanging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The progress guard: a block renderer returning a non-advancing
+    index is a hang in production, so it must raise. Pins the guard that
+    turns would-be infinite-loop defects into loud failures."""
+
+    monkeypatch.setattr(
+        html_module,
+        "_render_block",
+        lambda lines, index, resolve, suppressed: ("<p>x</p>", index),
+    )
+    with pytest.raises(PublishError, match="stalled"):
+        render_body_html(["tekst"], lambda _t: None)
 
 
 def test_assumption_html_escape_quotes_by_default() -> None:

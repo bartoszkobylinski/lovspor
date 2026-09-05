@@ -18,7 +18,7 @@ import re
 from collections.abc import Callable
 
 from lovspor.headings import parse_section_heading
-from lovspor.publish.inventory import normalise_pid
+from lovspor.publish.inventory import PublishError, normalise_pid
 
 LinkResolver = Callable[[str], str | None]
 """Maps a body link target (e.g. ``lov/2024-12-20-96/§3``) to a canonical
@@ -57,7 +57,19 @@ def render_body_html(
         if not lines[index].strip():
             index += 1
             continue
-        block, index = _render_block(lines, index, resolve, suppressed_anchor_pids)
+        block, next_index = _render_block(
+            lines,
+            index,
+            resolve,
+            suppressed_anchor_pids,
+        )
+        if next_index <= index:
+            # A renderer that fails to advance must fail loudly: silently
+            # looping forever is how a publish run hangs a whole build.
+            raise PublishError(
+                f"renderer stalled at line {index}: {lines[index]!r}",
+            )
+        index = next_index
         blocks.append(block)
     return "\n".join(blocks)
 
