@@ -229,10 +229,13 @@ def _check_provenance_shapes(doc_id: str, fields: dict[str, str]) -> None:
         )
     try:
         datetime.fromisoformat(fields["retrieved_at"])
+        if "T" not in fields["retrieved_at"]:
+            raise ValueError("date without time")
     except ValueError as error:
         raise PublishError(
             f"document {doc_id} retrieved_at {fields['retrieved_at']!r} "
-            f"is not an ISO-8601 timestamp",
+            f"is not an ISO-8601 timestamp (a bare date is not a "
+            f"retrieval instant)",
         ) from error
 
 

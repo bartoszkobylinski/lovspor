@@ -292,6 +292,15 @@ class TestBuildInventory:
         plan = build_inventory(manifest, lambda _path: body).documents[0]
         assert plan.ref_id == "lov/1687-04-15"
 
+    def test_date_without_time_is_not_a_retrieval_timestamp(self) -> None:
+        body = BODY.replace(
+            'retrieved_at: "2026-07-30T18:17:57.344275+00:00"',
+            'retrieved_at: "2026-07-30"',
+        )
+        manifest = _manifest({"doc-1": _record()})
+        with pytest.raises(PublishError, match="retrieved_at"):
+            build_inventory(manifest, lambda _path: body)
+
     def test_unparseable_retrieved_at_fails_closed(self) -> None:
         body = BODY.replace(
             'retrieved_at: "2026-07-30T18:17:57.344275+00:00"',
