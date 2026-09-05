@@ -165,7 +165,7 @@ def test_remediation_failure_escalates_only_after_pr_resolution() -> None:
     assert (
         'gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"' in command
     )
-    assert 'gh pr comment "${{ steps.cycle.outputs.pr }}"' in command
+    assert 'scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}"' in command
     run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
     assert run_url in command
 
@@ -205,10 +205,14 @@ def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
     names = [step.get("name") for step in steps]
     assert names.index(blocked["name"]) < names.index("Resolve PR number and remediation cycle")
 
-    checkout = next(
-        step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+    working_checkout = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+        and step.get("with", {}).get("ref") == "${{ github.event.workflow_run.head_branch }}"
     )
-    assert checkout["if"] == "steps.gate.outputs.run == 'true'"
+    assert working_checkout["if"] == "steps.gate.outputs.run == 'true'"
+    assert names.index(blocked["name"]) < names.index(working_checkout.get("name"))
 
 
 @pytest.mark.parametrize(
@@ -350,8 +354,8 @@ def test_codex_test_failure_escalates_on_the_current_pr() -> None:
         '--add-label "needs-implementation-fix"' in command
     )
     assert (
-        'gh pr comment "${{ github.event.pull_request.number }}" '
-        '--body-file "$RUNNER_TEMP/escalation.md"' in command
+        'scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" '
+        '"$RUNNER_TEMP/escalation.md"' in command
     )
     assert "codex-tests BLOCKED: Codex-authored tests fail against this head." in command
     assert "grep -E '^FAILED ' \"$RUNNER_TEMP/codex-pytest.log\" | head -10" in command
@@ -461,7 +465,7 @@ class TestEscalationCoversEveryFailure:
 
         assert fallback["if"] == "failure() && steps.codex-pytest.outcome != 'failure'"
         assert "needs-human:pipeline" in fallback["run"]
-        assert "gh pr comment" in fallback["run"]
+        assert "scripts/ci/pr_sticky_comment.sh pipeline" in fallback["run"]
 
     def test_agent_work_survives_a_failure_before_the_tests(self) -> None:
         """Issue #160, second half: the independent author's whole run was
@@ -514,8 +518,9 @@ class TestEscalationCoversEveryFailure:
         assert fallback["env"] == {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
         assert "agent-work-${{ github.event.pull_request.head.sha }}" in command
         assert (
-            'gh pr comment "${{ github.event.pull_request.number }}" '
-            '--body-file "$RUNNER_TEMP/pipeline-escalation.md"' in command
+            "scripts/ci/pr_sticky_comment.sh pipeline "
+            '"${{ github.event.pull_request.number }}" '
+            '"$RUNNER_TEMP/pipeline-escalation.md"' in command
         )
         run_url = (
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -669,7 +674,7 @@ class TestAJobThatDiesWithItsRunnerStillReports:
         command = self._step()["run"]
 
         assert '--add-label "needs-human:pipeline"' in command
-        assert "gh pr comment" in command
+        assert "scripts/ci/pr_sticky_comment.sh pipeline" in command
         assert (
             "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             in command
@@ -686,3 +691,93 @@ class TestAJobThatDiesWithItsRunnerStillReports:
         pipeline defect would label every external contribution."""
         assert "needs.codex-tests.result == 'failure'" in self._job()["if"]
         assert "!= 'skipped'" not in self._job()["if"]
+
+
+class TestEscalationsShareOneCommentPerWorkflow:
+    """A new comment mails the PR author; an edit does not. PR #230 sent ten
+    mails carrying nine escalations, so the rounds are appended to one sticky
+    comment per workflow. The escalations themselves are unchanged."""
+
+    @staticmethod
+    def _sticky_jobs() -> list[tuple[str, str]]:
+        return [
+            ("pr-pipeline.yml", "codex-tests"),
+            ("pr-pipeline.yml", "codex-tests-report"),
+            ("mutation-remediation.yml", "remediate"),
+        ]
+
+    @pytest.mark.parametrize("workflow_name", ["pr-pipeline.yml", "mutation-remediation.yml"])
+    def test_no_workflow_creates_a_fresh_comment_per_round(self, workflow_name: str) -> None:
+        text = (_WORKFLOWS / workflow_name).read_text(encoding="utf-8")
+
+        assert "gh pr comment" not in text
+
+    @pytest.mark.parametrize(("workflow_name", "job_name"), _sticky_jobs())
+    def test_the_helper_is_checked_out_before_it_is_called(
+        self, workflow_name: str, job_name: str
+    ) -> None:
+        steps = _steps(workflow_name, job_name)
+        first_call = next(
+            i for i, step in enumerate(steps) if "pr_sticky_comment.sh" in str(step.get("run", ""))
+        )
+        checkouts = [
+            i
+            for i, step in enumerate(steps)
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        ]
+
+        assert checkouts, f"{job_name} calls the helper with nothing checked out"
+        assert min(checkouts) < first_call
+
+    @pytest.mark.parametrize(
+        ("workflow_name", "job_name", "ref"),
+        [
+            (
+                "pr-pipeline.yml",
+                "codex-tests-report",
+                "${{ github.event.pull_request.head.sha }}",
+            ),
+            (
+                "mutation-remediation.yml",
+                "remediate",
+                "${{ github.event.repository.default_branch }}",
+            ),
+        ],
+    )
+    def test_the_helper_checkout_is_unconditional_and_pinned(
+        self, workflow_name: str, job_name: str, ref: str
+    ) -> None:
+        """`remediate` runs on `workflow_run` holding a write token, so it takes
+        the helper from the default branch: a PR must not rewrite the script that
+        reports on it. `codex-tests-report` runs on `pull_request` with no such
+        context and takes the head — off the default branch, the PR that
+        introduces the helper would have none to call and the reporter would die
+        on a missing file, which is the silent BLOCKED of issue #193."""
+        helper = _named_step(_steps(workflow_name, job_name), "Check out the escalation helper")
+
+        assert "if" not in helper, "an escalation helper that may be absent is not a helper"
+        assert helper["with"]["ref"] == ref
+        assert helper["with"]["sparse-checkout"] == "scripts/ci"
+        assert helper["with"]["persist-credentials"] is False
+
+    def test_a_remediation_cycle_reports_progress_without_mailing_the_author(self) -> None:
+        """The cycle notice carries no label and asks nothing of a human, so it
+        belongs in the run summary. It was two of PR #230's ten mails."""
+        steps = _steps("mutation-remediation.yml", "remediate")
+        push = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
+
+        assert "pipeline rerunning." in push
+        assert '>> "$GITHUB_STEP_SUMMARY"' in push
+        assert "pr_sticky_comment.sh mutation" in push, "the BLOCKED path still escalates"
+
+    @pytest.mark.parametrize(
+        ("workflow_name", "marker"),
+        [("pr-pipeline.yml", "pipeline"), ("mutation-remediation.yml", "mutation")],
+    )
+    def test_each_workflow_owns_its_marker(self, workflow_name: str, marker: str) -> None:
+        """Both workflows can be in flight at once. A shared comment would let
+        one workflow's read-modify-write drop the other's round."""
+        text = (_WORKFLOWS / workflow_name).read_text(encoding="utf-8")
+        used = set(re.findall(r"pr_sticky_comment\.sh (\w+)", text))
+
+        assert used == {marker}
