@@ -28,6 +28,7 @@ _HEADING = re.compile(r"^(#{1,6}) (.+?)\s*$")
 _ORDERED_ITEM = re.compile(r"^\d+\.\s+(.*)$")
 _UNORDERED_ITEM = re.compile(r"^[-*]\s+(.*)$")
 _LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+_STRONG_EM = re.compile(r"\*\*\*(.+?)\*\*\*")
 _STRONG = re.compile(r"\*\*(.+?)\*\*")
 _EMPHASIS = re.compile(r"\*(.+?)\*")
 _TABLE_RULE = re.compile(r"^\|?[\s:|-]+\|?$")
@@ -243,6 +244,9 @@ def _stash_escapes(text: str) -> tuple[str, list[str]]:
 
 def _plain(text: str, literals: list[str]) -> str:
     escaped = html.escape(text, quote=True)
+    # Triple stars first: letting ** and * match independently interleaves
+    # their tags (<strong><em>x</strong></em>) — mal-nested HTML.
+    escaped = _STRONG_EM.sub(r"<strong><em>\1</em></strong>", escaped)
     escaped = _STRONG.sub(r"<strong>\1</strong>", escaped)
     escaped = _EMPHASIS.sub(r"<em>\1</em>", escaped)
     return _PLACEHOLDER.sub(

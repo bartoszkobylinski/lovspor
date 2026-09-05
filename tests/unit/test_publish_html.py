@@ -127,6 +127,12 @@ class TestInline:
     def test_external_http_link_renders_as_text(self) -> None:
         assert render("Se [siden](https://example.com/x).") == "<p>Se siden.</p>"
 
+    def test_triple_star_nests_well(self) -> None:
+        assert render("***viktig***") == ("<p><strong><em>viktig</em></strong></p>")
+
+    def test_emphasis_inside_strong_nests_well(self) -> None:
+        assert render("**a *b* c**") == ("<p><strong>a <em>b</em> c</strong></p>")
+
     def test_strong_and_emphasis(self) -> None:
         assert render("**sterk** og *svak*") == ("<p><strong>sterk</strong> og <em>svak</em></p>")
 
