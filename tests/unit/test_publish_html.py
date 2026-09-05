@@ -8,6 +8,8 @@ link becomes an ``<a>`` only when the resolver maps its ref target to an
 emitted canonical URL — everything else renders as visible text.
 """
 
+import html as html_stdlib
+
 import pytest
 
 from lovspor.publish.html import _inline, _plain, _table_html, render_body_html
@@ -245,8 +247,6 @@ def test_assumption_html_escape_quotes_by_default() -> None:
     dropping an explicit ``quote=True`` selects identical behaviour. If a
     Python release ever changes the default, this goes red instead of the
     register silently waiving a real quoting regression."""
-    import html as html_stdlib
-
     assert html_stdlib.escape("\"'<>&") == html_stdlib.escape(
         "\"'<>&",
         quote=True,
