@@ -43,7 +43,34 @@ lovspor is always an OAuth **resource server** — it verifies tokens, it never 
 | Who it serves | developer clients that have a paste-a-token field (Claude Code, Cursor) | chat-app connectors that require OAuth 2.1 and have no such field (ChatGPT, Claude.ai) — **plus** everything the default mode serves |
 | Credential | `lovspor tokens issue --label ...` → an `lsp_…` token | the user logs in through WorkOS; no manual step |
 | Discovery | none — no `.well-known`, no `/authorize`, no `/token` | `GET /.well-known/oauth-protected-resource/mcp` advertises WorkOS as the authorization server (RFC 9728) |
-| Quota bucket | per-credential `Limits` from the store | one shared default bucket for self-service users, keyed `workos:<sub>` |
+| Quota bucket | per-credential `Limits` from the store | own counters per user, keyed `workos:<sub>`, against the shared self-service defaults |
+| Instance ceiling | none — the operator bounds the aggregate by choosing how many tokens to issue | a server-wide in-flight and daily cap, because sign-up makes the identity count no longer the operator's to control |
+
+### Limits
+
+Two layers, both enforced on every tool call.
+
+**Per caller.** Hand-issued credentials carry their own `Limits` in the store, editable per credential with no deploy. Self-service users get their own counters against one shared set of defaults — deliberately tighter than the hand-issued ones, because an anonymous sign-up and a named tester are different risk:
+
+| | in flight | per minute | burst | per day |
+|---|---|---|---|---|
+| Hand-issued default | 4 | 120 | 30 | 5 000 |
+| Self-service default | 2 | 60 | 20 | 1 000 |
+
+The in-flight number is the one that matters. Tool bodies run on `asyncio.to_thread`, whose pool is `min(32, cpu_count + 4)` — **five** threads on the production droplet — so a self-service caller allowed four of them could stall every other client without exceeding any documented limit.
+
+**Per instance** (hosted-OAuth mode only): **4** calls in flight and **20 000** calls per day across all users. Every per-caller brake multiplies by the number of identities, and with self-service sign-up nobody bounds that number; the ceiling is what the box and the embedding budget are actually protected by — `semantic_search` embeds each query through the operator's OpenAI key, so the bill scales with total calls, not per-user calls.
+
+All of it is overridable from the environment, so retuning a live service is an edit and a restart rather than a release:
+
+```
+LOVSPOR_SELF_SERVICE_MAX_IN_FLIGHT   LOVSPOR_SERVICE_MAX_IN_FLIGHT
+LOVSPOR_SELF_SERVICE_RATE_PER_MINUTE LOVSPOR_SERVICE_DAILY_QUOTA
+LOVSPOR_SELF_SERVICE_RATE_BURST
+LOVSPOR_SELF_SERVICE_DAILY_QUOTA
+```
+
+An unset or empty variable keeps the default; anything that is not a positive integer is a startup refusal, so a typo in a deployment env file cannot silently serve the built-in value instead of the one the operator meant. Counters are per process and in memory: a restart forgives the day, and the numbers are placeholders until real self-service traffic replaces the guesswork.
 
 Enabling hosted OAuth:
 

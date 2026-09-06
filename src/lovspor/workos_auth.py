@@ -23,7 +23,7 @@ from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientError, PyJWTError
 from mcp.server.auth.provider import AccessToken
 
-from lovspor.access import CredentialStore, Limits
+from lovspor.access import SELF_SERVICE_LIMITS, CredentialStore, Limits
 
 # A WorkOS identity is namespaced so the quota layer can tell it apart from a
 # hand-issued ``credential_id`` without ambiguity — a revoked credential and an
@@ -40,10 +40,14 @@ _REQUIRED_CLAIMS = ["exp", "iat", "sub", "aud", "iss"]
 # (``lsp_…``) has none, so the dot count routes a bearer to the right verifier.
 _JWT_DOT_COUNT = 2
 
-# Self-service WorkOS users have no hand-issued credential, so they share one
-# default quota bucket — the same generous runaway-loop brakes a hand-issued
-# credential gets (``Limits()`` defaults). Tune once real beta traffic lands.
-DEFAULT_WORKOS_LIMITS = Limits()
+# Self-service WorkOS users have no hand-issued credential, so they share one set
+# of default limits — their own counters, keyed by ``workos:<sub>``, but the same
+# numbers. Those numbers are deliberately NOT the hand-issued defaults: a named
+# beta tester and an anonymous sign-up are different risk, and at the hand-issued
+# ``max_in_flight`` of 4 one self-service user could hold four of the production
+# droplet's five worker threads. See ``access.SELF_SERVICE_LIMITS``; the operator
+# overrides them from the environment without a release.
+DEFAULT_WORKOS_LIMITS = SELF_SERVICE_LIMITS
 
 
 class WorkOSTokenVerifier:

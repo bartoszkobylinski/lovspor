@@ -37,7 +37,7 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol
 
-from lovspor.access import Limits
+from lovspor.access import Limits, ServiceLimits
 from lovspor.errors import LovsporError
 
 
@@ -55,6 +55,14 @@ class LimitsSource(Protocol):
 # An in-flight rejection cannot say when a slot frees — that depends on a call
 # still running. One second is a hint, not a promise.
 _IN_FLIGHT_RETRY_SECONDS = 1
+
+# Sweep only once the map is big enough to be worth walking: below this the
+# hot path should not pay for a scan that would free a few hundred bytes.
+_EVICTION_THRESHOLD = 512
+
+# How long a counter set must be untouched before it is a candidate. Well past
+# any client's think-time, so an idle-but-returning user keeps their bucket.
+_EVICTION_IDLE_SECONDS = 3600.0
 
 
 class QuotaExceededError(LovsporError):
@@ -140,6 +148,21 @@ class _State:
         self.in_flight = 0
         self.bucket = _Bucket(monotonic)
         self.daily = _Daily(utc_now)
+        # Only used to decide eviction; never to admit or refuse a call.
+        self.last_seen = monotonic()
+
+
+class _ServiceState:
+    """The instance's own counters: a daily total and a live in-flight count.
+
+    No token bucket. A server-wide rate limit would refuse a caller because of
+    *other* callers' timing, which is what ``max_in_flight`` already expresses
+    honestly — the pool is the scarce thing, not the minute.
+    """
+
+    def __init__(self, utc_now: Callable[[], datetime]) -> None:
+        self.in_flight = 0
+        self.daily = _Daily(utc_now)
 
 
 class QuotaEnforcer:
@@ -167,11 +190,20 @@ class QuotaEnforcer:
         store: LimitsSource,
         monotonic: Callable[[], float] = time.monotonic,
         utc_now: Callable[[], datetime] = _utc_now,
+        service_limits: ServiceLimits | None = None,
+        eviction_threshold: int = _EVICTION_THRESHOLD,
+        eviction_idle_seconds: float = _EVICTION_IDLE_SECONDS,
     ) -> None:
         self._store = store
         self._monotonic = monotonic
         self._utc_now = utc_now
         self._states: dict[str, _State] = {}
+        # None keeps the pre-self-service behaviour: per-credential brakes only,
+        # which is correct when the operator controls how many credentials exist.
+        self._service_limits = service_limits
+        self._service = _ServiceState(utc_now)
+        self._eviction_threshold = eviction_threshold
+        self._eviction_idle_seconds = eviction_idle_seconds
         # Guards only _states' shape. Tool calls enter from the event loop
         # thread, but stdio and tests call in directly, and dict insertion
         # racing a read is cheap to rule out.
@@ -190,13 +222,66 @@ class QuotaEnforcer:
         state.daily.roll()
         return state.daily.used
 
+    def service_daily_used(self) -> int:
+        """Calls billed to the instance today. For tests and diagnostics."""
+        self._service.daily.roll()
+        return self._service.daily.used
+
+    def tracked_credentials(self) -> int:
+        """How many credentials currently hold counters. For tests and diagnostics."""
+        with self._lock:
+            return len(self._states)
+
+    def _evict_idle(self) -> None:
+        """Drop counter sets that can be forgotten without forgiving anything.
+
+        A state is only removed when it is idle, holds no in-flight slot, and has
+        spent nothing *today* — ``roll()`` first, so a state whose day has turned
+        qualifies on its own. Evicting a state that has spent part of today's
+        quota would hand that quota back, which under self-service sign-up is a
+        bypass anyone could drive by pausing for the idle window.
+
+        Called with the lock held.
+        """
+        now = self._monotonic()
+        for credential_id, state in list(self._states.items()):
+            if state.in_flight:
+                continue
+            if now - state.last_seen < self._eviction_idle_seconds:
+                continue
+            state.daily.roll()
+            if state.daily.used == 0:
+                del self._states[credential_id]
+
     def _state_for(self, credential_id: str) -> _State:
         with self._lock:
             state = self._states.get(credential_id)
             if state is None:
+                if len(self._states) >= self._eviction_threshold:
+                    self._evict_idle()
                 state = _State(self._monotonic, self._utc_now)
                 self._states[credential_id] = state
+            state.last_seen = self._monotonic()
             return state
+
+    def _admit_service(self) -> None:
+        """Check the instance ceiling. Charges nothing; raises if it is reached."""
+        ceiling = self._service_limits
+        if ceiling is None:
+            return
+        self._service.daily.roll()
+        if self._service.daily.used >= ceiling.daily_quota:
+            raise QuotaExceededError(
+                f"this server has reached its daily ceiling of {ceiling.daily_quota} "
+                "calls across all users",
+                _seconds_to_utc_midnight(self._utc_now()),
+            )
+        if self._service.in_flight >= ceiling.max_in_flight:
+            raise QuotaExceededError(
+                f"this server is at capacity ({ceiling.max_in_flight} calls in flight "
+                "across all users)",
+                _IN_FLIGHT_RETRY_SECONDS,
+            )
 
     def _admit(self, state: _State, limits: Limits) -> None:
         """Charge one call against every brake, or raise having charged none."""
@@ -211,6 +296,9 @@ class QuotaEnforcer:
                 f"{limits.max_in_flight} calls already in flight for this credential",
                 _IN_FLIGHT_RETRY_SECONDS,
             )
+        # The caller's own brakes are checked first so a user over their own
+        # limit is told that, rather than blaming a busy server for their loop.
+        self._admit_service()
         # Consume last: the bucket mutates, and a call refused above must not
         # spend a token it never got to use.
         wait = state.bucket.try_consume(limits)
@@ -221,6 +309,9 @@ class QuotaEnforcer:
             )
         state.daily.used += 1
         state.in_flight += 1
+        if self._service_limits is not None:
+            self._service.daily.used += 1
+            self._service.in_flight += 1
 
     @contextmanager
     def guard(self, credential_id: str) -> Iterator[None]:
@@ -244,3 +335,5 @@ class QuotaEnforcer:
             yield
         finally:
             state.in_flight -= 1
+            if self._service_limits is not None:
+                self._service.in_flight -= 1

@@ -20,13 +20,16 @@ from pydantic import ValidationError
 from lovspor.access import (
     _TOKEN_PREFIX,
     CREDENTIALS_SCHEMA_VERSION,
+    SELF_SERVICE_LIMITS,
     Credential,
     CredentialStore,
     Limits,
+    ServiceLimits,
     default_credentials_path,
     generate_token,
     hash_token,
     issue_credential,
+    self_service_limits_from_env,
     write_credential_file,
 )
 from lovspor.errors import ConfigError
@@ -652,3 +655,55 @@ def test_a_store_with_a_zero_rate_fails_closed_instead_of_crashing(tmp_path: Pat
 
     with pytest.raises(ConfigError):
         CredentialStore(store_path)
+
+
+# --- self-service and instance limits from the environment ------------------
+
+
+def test_self_service_defaults_are_tighter_than_hand_issued() -> None:
+    """An anonymous sign-up and a named beta tester are different risk. The one
+    that matters is in-flight: the production droplet's thread pool is five, so
+    the hand-issued default of 4 would let one stranger hold four of them."""
+    assert SELF_SERVICE_LIMITS.max_in_flight < Limits().max_in_flight
+    assert SELF_SERVICE_LIMITS.daily_quota < Limits().daily_quota
+
+
+def test_self_service_limits_read_overrides_from_the_environment() -> None:
+    limits = self_service_limits_from_env(
+        {
+            "LOVSPOR_SELF_SERVICE_MAX_IN_FLIGHT": "3",
+            "LOVSPOR_SELF_SERVICE_DAILY_QUOTA": "250",
+        }
+    )
+
+    assert limits.max_in_flight == 3
+    assert limits.daily_quota == 250
+    # Untouched fields keep the shipped default rather than resetting to Limits().
+    assert limits.rate_per_minute == SELF_SERVICE_LIMITS.rate_per_minute
+
+
+def test_absent_or_empty_settings_keep_the_defaults() -> None:
+    """`VAR=` is how a commented-out value looks in a deployment env file, and
+    must mean "unset", not "zero"."""
+    assert self_service_limits_from_env({}) == SELF_SERVICE_LIMITS
+    assert self_service_limits_from_env({"LOVSPOR_SELF_SERVICE_RATE_BURST": "  "}) == (
+        SELF_SERVICE_LIMITS
+    )
+    assert ServiceLimits.from_env({}) == ServiceLimits()
+
+
+def test_service_limits_read_the_ceiling_from_the_environment() -> None:
+    ceiling = ServiceLimits.from_env(
+        {"LOVSPOR_SERVICE_MAX_IN_FLIGHT": "3", "LOVSPOR_SERVICE_DAILY_QUOTA": "9000"}
+    )
+
+    assert (ceiling.max_in_flight, ceiling.daily_quota) == (3, 9000)
+
+
+@pytest.mark.parametrize("value", ["nope", "4.5", "0", "-1"])
+def test_an_unusable_setting_refuses_to_start(value: str) -> None:
+    """Fail closed: an operator who set a ceiling and silently got the built-in
+    default has an unapplied intention, which is the failure mode this module
+    exists to prevent."""
+    with pytest.raises(ConfigError):
+        ServiceLimits.from_env({"LOVSPOR_SERVICE_DAILY_QUOTA": value})
