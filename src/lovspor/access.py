@@ -19,12 +19,15 @@ that module (docs/decisions.md §9a), and security logic is exactly what we
 want mutation coverage on.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import secrets
 import sys
 import threading
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -75,6 +78,135 @@ class Limits(BaseModel):
     # ~5x a heavy researcher's day (20 calls x 50 questions). Approximate by
     # construction: counters live in memory and reset on restart.
     daily_quota: int = Field(default=5000, ge=1)
+    # Fifteen of the sixteen tools read files and git; one, semantic_search,
+    # embeds the caller's query through the operator's OpenAI key. Metering them
+    # on one counter prices the free tools as if they cost money and the paid one
+    # as if it did not. This is the counter that bounds spend, so it is separate
+    # and much smaller — a research session that reads a hundred sections still
+    # only asks a handful of semantic questions to find them.
+    paid_daily_quota: int = Field(default=500, ge=1)
+
+
+class ServiceLimits(BaseModel):
+    """Instance-wide ceiling, above the per-credential brakes.
+
+    Every field in :class:`Limits` is per credential, so with self-service
+    sign-up the aggregate is ``users x limit`` and nothing bounds it: the
+    operator no longer controls how many identities exist. This ceiling is what
+    the box and the embedding budget are actually protected by.
+
+    ``max_in_flight`` is a hardware number, not a policy one. Tool bodies run on
+    ``asyncio.to_thread``, whose pool is ``min(32, cpu_count + 4)`` — five
+    threads on the production droplet (1 vCPU, measured 2026-09-06). The default
+    below leaves one thread of headroom so a saturated instance still serves the
+    cheap tools rather than queueing everything behind the pool.
+
+    ``daily_quota`` is wallet protection, not load protection: ``semantic_search``
+    embeds each query through the operator's OpenAI key, so total calls, not
+    per-user calls, is what the bill scales with.
+
+    Both are placeholders in the same sense as the ``Limits`` defaults — chosen
+    from measurement and expected to be replaced once real self-service traffic
+    exists. Both are settable from the environment, so replacing them is an edit
+    and a restart, not a release.
+    """
+
+    max_in_flight: int = Field(default=4, ge=1)
+    daily_quota: int = Field(default=20_000, ge=1)
+    # The wallet bound, and the only number here denominated in money rather than
+    # threads. With the query cap at 256 tokens, 8 000 paid calls is at most
+    # ~2M embedding tokens a day — about $0.27 at text-embedding-3-large rates,
+    # so roughly $8 a month even if every single one is a cache miss at full
+    # length. Raise it when real traffic justifies a bigger bill, not before.
+    paid_daily_quota: int = Field(default=8_000, ge=1)
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> ServiceLimits:
+        """Build from ``LOVSPOR_SERVICE_*``, falling back to the defaults."""
+        env = os.environ if environ is None else environ
+        return cls(
+            **_int_fields_from_env(
+                env,
+                {
+                    "max_in_flight": "LOVSPOR_SERVICE_MAX_IN_FLIGHT",
+                    "daily_quota": "LOVSPOR_SERVICE_DAILY_QUOTA",
+                    "paid_daily_quota": "LOVSPOR_SERVICE_PAID_DAILY_QUOTA",
+                },
+            )
+        )
+
+
+# Anonymous sign-ups are not hand-vetted testers, so they do not inherit the
+# hand-issued defaults. max_in_flight is the one that matters: at the Limits
+# default of 4, a single self-service user can hold four of the droplet's five
+# worker threads without exceeding any documented limit.
+SELF_SERVICE_LIMITS = Limits(
+    max_in_flight=2,
+    rate_per_minute=60,
+    rate_burst=20,
+    daily_quota=1_000,
+    # 100 semantic questions a day is a working day of real research and, at the
+    # 256-token query cap, at most ~$0.0033 of embedding spend per user per day.
+    paid_daily_quota=100,
+)
+
+
+def self_service_limits_from_env(environ: Mapping[str, str] | None = None) -> Limits:
+    """Per-user limits for self-service OAuth users, from ``LOVSPOR_SELF_SERVICE_*``.
+
+    Unset variables keep :data:`SELF_SERVICE_LIMITS`; the hand-issued path is
+    untouched, because a named tester and an anonymous sign-up are different risk.
+    """
+    env = os.environ if environ is None else environ
+    overrides = _int_fields_from_env(
+        env,
+        {
+            "max_in_flight": "LOVSPOR_SELF_SERVICE_MAX_IN_FLIGHT",
+            "rate_per_minute": "LOVSPOR_SELF_SERVICE_RATE_PER_MINUTE",
+            "rate_burst": "LOVSPOR_SELF_SERVICE_RATE_BURST",
+            "daily_quota": "LOVSPOR_SELF_SERVICE_DAILY_QUOTA",
+            "paid_daily_quota": "LOVSPOR_SELF_SERVICE_PAID_DAILY_QUOTA",
+        },
+    )
+    return SELF_SERVICE_LIMITS.model_copy(update=overrides)
+
+
+def int_setting_from_env(
+    variable: str,
+    default: int,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    """One integer deployment setting, or ``default`` when unset or empty.
+
+    Same fail-closed parse as the limit blocks: a value that is present but
+    unusable is a startup refusal, never a silent fallback to the built-in.
+    """
+    env = os.environ if environ is None else environ
+    return _int_fields_from_env(env, {"value": variable}).get("value", default)
+
+
+def _int_fields_from_env(env: Mapping[str, str], mapping: dict[str, str]) -> dict[str, int]:
+    """Read the named integer settings, failing closed on anything unusable.
+
+    A typo in a deployment env file must not silently serve the default: an
+    operator who set a ceiling and got the built-in one has an unapplied
+    intention, which is the same failure mode the credential store's live reload
+    exists to prevent. Present-but-empty counts as unset (a commented-out value
+    left as ``VAR=`` is a common shape in these files), anything else that is not
+    a positive integer is a startup refusal.
+    """
+    values: dict[str, int] = {}
+    for field, variable in mapping.items():
+        raw = env.get(variable, "").strip()
+        if not raw:
+            continue
+        try:
+            values[field] = int(raw)
+        except ValueError:
+            raise ConfigError(f"{variable} must be an integer, got {raw!r}") from None
+        if values[field] < 1:
+            raise ConfigError(f"{variable} must be at least 1, got {raw!r}")
+    return values
 
 
 class Credential(BaseModel):

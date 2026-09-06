@@ -1170,3 +1170,79 @@ formats produce byte-identical strings. Pinned by the assumption test
 below, which round-trips both spellings.
 """
 assumption_test = "tests/unit/test_publish_emit.py::test_assumption_fromisoformat_parses_gits_ci_format"
+
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-    return encoding.decode_bytes(tokens[:max_tokens]).decode("utf-8", errors="ignore"), True
++    return encoding.decode_bytes(tokens[:max_tokens]).decode(errors="ignore"), True
+"""
+justification = """
+`bytes.decode` documents `encoding="utf-8"` as its default, so passing it and
+omitting it select the same codec. The mutant and the original differ only in
+whether the default is written down. No input can distinguish them: any byte
+sequence that decodes one way under an explicit "utf-8" decodes identically
+under the default, because they are the same codec object after lookup.
+"""
+
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-    return encoding.decode_bytes(tokens[:max_tokens]).decode("utf-8", errors="ignore"), True
++    return encoding.decode_bytes(tokens[:max_tokens]).decode("UTF-8", errors="ignore"), True
+"""
+justification = """
+Codec names are normalised before lookup — case is folded and separators are
+equalised — so "utf-8" and "UTF-8" resolve to one codec. `codecs.lookup` is
+documented to do this, and `"utf-8" != "UTF-8"` is the only difference the
+mutant introduces; it never reaches behaviour.
+"""
+
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "OpenAIEmbedder._truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-        "utf-8", errors="ignore"
++        errors="ignore"
+"""
+justification = """
+Same argument as the module-level `truncate_to_tokens` entry above: "utf-8" is
+`bytes.decode`'s documented default, so writing it and omitting it select the
+same codec. This call site was corrected in the same commit and carries the same
+mutation.
+"""
+
+[[equivalent]]
+file = "src/lovspor/embeddings/model.py"
+symbol = "OpenAIEmbedder._truncate_to_tokens"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-        "utf-8", errors="ignore"
++        "UTF-8", errors="ignore"
+"""
+justification = """
+Codec-name lookup normalises case, so "utf-8" and "UTF-8" are one codec. Same
+argument as the module-level entry; same line, other call site.
+"""
+
+[[equivalent]]
+file = "src/lovspor/embeddings/query.py"
+symbol = "QueryEmbedder.encode"
+registered = "2026-09-06, PR #252, from PR #252 run 34059471495"
+mutation = """
+-            self._cache.popitem(last=False)
++            self._cache.popitem(last=None)
+"""
+justification = """
+`OrderedDict.popitem` tests `last` for truth, and `None` is falsy, so `False`
+and `None` both pop the OLDEST entry — the LRU eviction this line performs.
+A mutant that popped the newest would be caught by
+`test_the_cache_is_bounded_and_evicts_the_coldest_entry`, which asserts the
+recently-used key survives and the cold one is re-embedded; that test passes
+under both spellings because both evict the same entry.
+"""

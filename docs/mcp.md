@@ -43,7 +43,57 @@ lovspor is always an OAuth **resource server** — it verifies tokens, it never 
 | Who it serves | developer clients that have a paste-a-token field (Claude Code, Cursor) | chat-app connectors that require OAuth 2.1 and have no such field (ChatGPT, Claude.ai) — **plus** everything the default mode serves |
 | Credential | `lovspor tokens issue --label ...` → an `lsp_…` token | the user logs in through WorkOS; no manual step |
 | Discovery | none — no `.well-known`, no `/authorize`, no `/token` | `GET /.well-known/oauth-protected-resource/mcp` advertises WorkOS as the authorization server (RFC 9728) |
-| Quota bucket | per-credential `Limits` from the store | one shared default bucket for self-service users, keyed `workos:<sub>` |
+| Quota bucket | per-credential `Limits` from the store | own counters per user, keyed `workos:<sub>`, against the shared self-service defaults |
+| Instance ceiling | none — the operator bounds the aggregate by choosing how many tokens to issue | a server-wide in-flight and daily cap, because sign-up makes the identity count no longer the operator's to control |
+
+### Limits
+
+Two layers, both enforced on every tool call.
+
+**Per caller.** Hand-issued credentials carry their own `Limits` in the store, editable per credential with no deploy. Self-service users get their own counters against one shared set of defaults — deliberately tighter than the hand-issued ones, because an anonymous sign-up and a named tester are different risk:
+
+| | in flight | per minute | burst | per day | semantic searches/day |
+|---|---|---|---|---|---|
+| Hand-issued default | 4 | 120 | 30 | 5 000 | 500 |
+| Self-service default | 2 | 60 | 20 | 1 000 | 100 |
+
+The in-flight number is the one that matters. Tool bodies run on `asyncio.to_thread`, whose pool is `min(32, cpu_count + 4)` — **five** threads on the production droplet — so a self-service caller allowed four of them could stall every other client without exceeding any documented limit.
+
+**Per instance** (hosted-OAuth mode only): **4** calls in flight, **20 000** calls per day, and **8 000 semantic searches** per day across all users. Every per-caller brake multiplies by the number of identities, and with self-service sign-up nobody bounds that number; the ceiling is what the box and the embedding budget are actually protected by — `semantic_search` embeds each query through the operator's OpenAI key, so the bill scales with total calls, not per-user calls.
+
+All of it is overridable from the environment, so retuning a live service is an edit and a restart rather than a release:
+
+```
+LOVSPOR_SELF_SERVICE_MAX_IN_FLIGHT     LOVSPOR_SERVICE_MAX_IN_FLIGHT
+LOVSPOR_SELF_SERVICE_RATE_PER_MINUTE   LOVSPOR_SERVICE_DAILY_QUOTA
+LOVSPOR_SELF_SERVICE_RATE_BURST        LOVSPOR_SERVICE_PAID_DAILY_QUOTA
+LOVSPOR_SELF_SERVICE_DAILY_QUOTA       LOVSPOR_SEMANTIC_QUERY_MAX_TOKENS
+LOVSPOR_SELF_SERVICE_PAID_DAILY_QUOTA  LOVSPOR_SEMANTIC_QUERY_CACHE_ENTRIES
+```
+
+An unset or empty variable keeps the default; anything that is not a positive integer is a startup refusal, so a typo in a deployment env file cannot silently serve the built-in value instead of the one the operator meant. Counters are per process and in memory: a restart forgives the day, and the numbers are placeholders until real self-service traffic replaces the guesswork.
+
+### What the hosted endpoint costs to run
+
+Fifteen of the sixteen tools read files and git: they cost the operator nothing per call. `semantic_search` is the exception — it embeds the caller's query through the operator's OpenAI key. The *corpus* vectors are not part of that: they are computed once during sync and shipped as int8 sidecars inside `lovverk`, so a search re-reads them from disk and pays only for the question.
+
+Two mechanisms bound that payment, and they answer different halves of it.
+
+**A query is not a document.** `OpenAIEmbedder` truncates at the model's own 8 191-token ceiling, which is right for a section of law and three orders of magnitude more than a question needs. `semantic_search` caps the *query* at **256 tokens** before embedding, and says so in `notice` when it bites. That cap is what fixes the unit price: counting calls cannot, because the price of a call is set by its length.
+
+**The same questions repeat.** Query vectors are cached in-process (1 024 entries, LRU, keyed on the NFKC-folded query), so the second and later askings of a common question cost nothing at all.
+
+At `text-embedding-3-large` rates of **$0.13 / 1M tokens**:
+
+| | worst case | typical (a ~20-token question) |
+|---|---|---|
+| One semantic search | $0.000033 | $0.0000026 |
+| One self-service user, full daily budget | $0.0033/day | $0.0003/day |
+| **The whole instance, ceiling saturated** | **$0.27/day ≈ $8/month** | pennies |
+
+The last row is a hard bound, not a projection: it holds regardless of how many people sign up, because the instance ceiling is not per user. At the default budgets it accommodates 80 users a day each spending their full personal allowance.
+
+For comparison, the same endpoint without these bounds — an 8 000-token query, 5 000 calls a day, no instance ceiling — costs **$5.20 per user per day**, and ten motivated users would be $1 560 a month.
 
 Enabling hosted OAuth:
 
