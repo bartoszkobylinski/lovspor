@@ -18,6 +18,7 @@ from functools import partial
 from pathlib import Path
 
 import lovspor
+from lovspor.publish.browse import BROWSE_ROUTES, browse_index_html
 from lovspor.publish.companion import (
     SCHEMA_VERSION,
     companion_json_bytes,
@@ -52,6 +53,8 @@ def emit_site(corpus: Path, sha: str, out: Path) -> None:
     _clear_previous_build(out)
     for plan in inventory.documents:
         _emit_document(plan, (snapshot, revisions), out, resolve)
+    for route in BROWSE_ROUTES:
+        _write(out / route / "index.html", browse_index_html(route, inventory).encode("utf-8"))
     _write(out / "site-manifest.json", _site_manifest_bytes(corpus, sha, inventory))
 
 

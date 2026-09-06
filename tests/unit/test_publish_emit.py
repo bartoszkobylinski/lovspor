@@ -528,3 +528,20 @@ class TestEmitSite:
         assert "SENERE COMMIT" not in html
         assert companion["provenance"]["source_revision"] != later_sha
         assert manifest["corpus_commit"] == pinned_sha
+
+
+class TestBrowseIndexes:
+    def test_emit_writes_one_browse_index_per_route(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        lov = (out / "lov" / "index.html").read_text(encoding="utf-8")
+        forskrift = (out / "forskrift" / "index.html").read_text(encoding="utf-8")
+        assert '<a href="/lov/testloven/">Testloven</a>' in lov
+        assert lov.count("<li>") == 3
+        assert '<a href="/forskrift/testforskriften/">Testforskriften</a>' in forskrift
+        assert forskrift.count("<li>") == 1
