@@ -13,8 +13,8 @@ import pytest
 
 from lovspor.publish.inventory import (
     PublishError,
-    _body_lines,
     _front_matter_lines,
+    body_lines,
     build_inventory,
     normalise_pid,
 )
@@ -548,7 +548,7 @@ class TestFrontMatterBoundaries:
     def test_body_starts_immediately_after_closing_delimiter(self) -> None:
         source = '---\nlanguage: "nb"\n---\n### § 1. Første\nTekst.'
 
-        assert _body_lines(source) == ["### § 1. Første", "Tekst."]
+        assert body_lines(source) == ["### § 1. Første", "Tekst."]
 
     def test_front_matter_excludes_both_delimiters(self) -> None:
         source = '---\nlanguage: "nb"\nref_id: "lov/2024-12-20-96"\n---\nBody'
@@ -561,7 +561,7 @@ class TestFrontMatterBoundaries:
     def test_later_delimiter_without_opening_delimiter_is_body_content(self) -> None:
         source = "Innledning\n---\n### § 1. Første\nTekst."
 
-        assert _body_lines(source) == source.split("\n")
+        assert body_lines(source) == source.split("\n")
 
     def test_later_delimiter_without_opening_delimiter_is_not_front_matter(self) -> None:
         source = 'Innledning\n---\nlanguage: "nb"\n---\nBody'
