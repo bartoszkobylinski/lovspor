@@ -50,6 +50,28 @@ class TestPublishSiteCommand:
         manifest = json.loads((out / "site-manifest.json").read_text())
         assert manifest["corpus_commit"] == sha
 
+    def test_ref_resolving_to_a_blob_is_refused(
+        self,
+        corpus: tuple[Path, str],  # noqa: F811
+        tmp_path: Path,
+    ) -> None:
+        repo, _sha = corpus
+        result = runner.invoke(
+            app,
+            [
+                "publish-site",
+                "--corpus",
+                str(repo),
+                "--ref",
+                "HEAD:manifest.json",
+                "--out",
+                str(tmp_path / "site"),
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "not a readable corpus commit" in result.output
+
     def test_refuses_a_directory_that_is_not_a_git_repo(
         self,
         tmp_path: Path,

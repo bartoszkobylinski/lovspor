@@ -163,8 +163,11 @@ def publish_site(
 ) -> None:
     """Build the ADR-0013 static site from one pinned corpus commit."""
     try:
+        # ^{commit} refuses refs that resolve to blobs or trees
+        # (HEAD:manifest.json rev-parses happily to a blob sha, and the
+        # emitter would then crash mid-build instead of failing here).
         resolved = subprocess.run(  # noqa: S603
-            ["git", "rev-parse", ref or "HEAD"],  # noqa: S607
+            ["git", "rev-parse", "--verify", f"{ref or 'HEAD'}^{{commit}}"],  # noqa: S607
             cwd=corpus,
             capture_output=True,
             text=True,
@@ -172,7 +175,7 @@ def publish_site(
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError, NotADirectoryError) as error:
         raise typer.BadParameter(
-            f"{corpus} is not a readable git corpus checkout",
+            f"not a readable corpus commit: {ref or 'HEAD'} in {corpus}",
         ) from error
     try:
         emit_site(corpus, resolved, out)
