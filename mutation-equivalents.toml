@@ -887,3 +887,63 @@ the default: if a Python release ever stopped quoting by default, this
 entry must go red, not keep waiving it.
 """
 assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/publish/inventory.py"
+symbol = "_front_matter_fields"
+registered = "2026-09-06, PR #244, from run on d0e1597"
+mutation = """
+-            key = line.split(":", 1)[0].strip()
++            key = line.split(":", )[0].strip()
+"""
+justification = """
+Only element [0] of the split is used, and the first element is the text
+before the first ":" under every maxsplit value — dropping the limit
+changes how the REST of the line is divided, never the head. Identical
+result for every input line.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/inventory.py"
+symbol = "_front_matter_fields"
+registered = "2026-09-06, PR #244, from run on d0e1597"
+mutation = """
+-            key = line.split(":", 1)[0].strip()
++            key = line.split(":", 2)[0].strip()
+"""
+justification = """
+Same head-element argument as the maxsplit-dropped entry: [0] is the
+text before the first ":" for maxsplit 1, 2 or unbounded alike.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_link_html"
+registered = "2026-09-06, PR #244, from run on d0e1597"
+mutation = """
+-    href = html.escape(resolved, quote=True)
++    href = html.escape(resolved, quote=None)
+"""
+justification = """
+The href reaching this line has passed _is_site_relative, whose
+_CANONICAL_HREF fullmatch admits only [a-z0-9æøåü-] segments joined by
+slashes — no quote, ampersand or angle bracket can be present, so
+html.escape is an identity function on every reachable input and its
+quote flag selects nothing. The escape call stays as defence in depth;
+the flag's value is unobservable behind the whitelist invariant of the
+same module.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/html.py"
+symbol = "_link_html"
+registered = "2026-09-06, PR #244, from run on d0e1597"
+mutation = """
+-    href = html.escape(resolved, quote=True)
++    href = html.escape(resolved, quote=False)
+"""
+justification = """
+Same whitelist-invariant argument as the quote=None entry: the
+canonical charset contains nothing html.escape would rewrite, so both
+flag values produce the identical href for every input the gate admits.
+"""
