@@ -666,3 +666,21 @@ class TestRedirectArtifacts:
         emit_site(repo, sha, out)
         assert "gammel" not in (out / "redirect-map.json").read_text(encoding="utf-8")
         assert "gammel" not in (out / "redirects.caddy").read_text(encoding="utf-8")
+
+
+class TestRevisionLogParser:
+    def test_a_path_line_before_any_commit_header_is_dropped(self) -> None:
+        """A path with no preceding commit header has no attributable
+        revision; it must vanish rather than carry a fabricated one."""
+        stdout = "orphan.md\n\x00abc 2026-02-01T00:00:00+00:00\nlover/a.md"
+        revisions = publish_emit._parse_revision_log(stdout)
+        assert "orphan.md" not in revisions
+        assert revisions["lover/a.md"].sha == "abc"
+
+    def test_the_sha_is_everything_before_the_first_space(self) -> None:
+        """fromisoformat accepts a space date-time separator, so only a
+        first-space split keeps the sha and the timestamp apart."""
+        stdout = "\x00abc 2026-02-01 00:00:00+00:00\nlover/a.md"
+        revisions = publish_emit._parse_revision_log(stdout)
+        assert revisions["lover/a.md"].sha == "abc"
+        assert revisions["lover/a.md"].committed_at == "2026-02-01T00:00:00+00:00"

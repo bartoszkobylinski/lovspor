@@ -15,9 +15,12 @@ from pathlib import Path
 import pytest
 
 from lovspor.publish import redirects as publish_redirects
-from lovspor.publish.inventory import PublishError, build_inventory
+from lovspor.publish.inventory import DocumentPlan, PublishError, build_inventory
 from lovspor.publish.redirects import (
     RedirectMap,
+    _Edge,
+    _parse_edges,
+    _terminal_plan,
     build_redirect_map,
     caddy_snippet,
     redirect_map_json,
@@ -489,3 +492,42 @@ class TestRedirectInternals:
         )
         with pytest.raises(PublishError, match="dangling redirect target"):
             validate_redirect_targets(dangling, inventory)
+
+
+class TestParserContracts:
+    def test_an_orphan_rename_line_before_any_header_keeps_an_empty_sha(self) -> None:
+        """git log always emits the commit header first; a headerless
+        name-status line must parse fail-open with an empty sha, never
+        crash and never inherit an invented commit."""
+        edges = _parse_edges("R100\tlover/a.md\tlover/b.md\n\x00abc\nD\tlover/c.md")
+        assert [(e.sha, e.old, e.new) for e in edges] == [
+            ("", "lover/a.md", "lover/b.md"),
+            ("abc", "lover/c.md", None),
+        ]
+
+    def test_an_event_at_the_same_index_is_never_its_own_successor(self) -> None:
+        """The walk follows strictly later events only: an event at the
+        same position must not be treated as the file's next hop."""
+        plan = DocumentPlan.model_validate(
+            {
+                "doc_id": "doc-1",
+                "slug": "a",
+                "route": "lov",
+                "title": "A",
+                "markdown_path": "lover/a.md",
+                "source_dataset": "gjeldende-lover",
+                "xml_hash": "a" * 64,
+                "renderer_version": 8,
+                "language": "nb",
+                "ref_id": "lov/2020-01-01-1",
+                "retrieved_at": "2026-01-01T00:00:00+00:00",
+                "date_in_force": None,
+                "last_change_in_force": None,
+                "provisions": (),
+                "duplicate_pids": {},
+            },
+        )
+        start = _Edge(index=1, sha="s1", old="lover/x.md", new="lover/a.md")
+        same_index = _Edge(index=1, sha="s1", old="lover/a.md", new=None)
+        result = _terminal_plan(start, {"lover/a.md": [same_index]}, {"lover/a.md": plan})
+        assert result is plan
