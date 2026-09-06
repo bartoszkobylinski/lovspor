@@ -2041,6 +2041,29 @@ def test_semantic_search_returns_grounded_hits_with_metadata(tmp_path: Path) -> 
     assert [row["slug"] for row in rows] == ["husleieloven"]
 
 
+def test_semantic_search_discloses_query_truncation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="husleieloven", title="Husleieloven")})
+    _write_embedding_file(
+        tmp_path,
+        "lover",
+        "husleieloven",
+        [("2-10", [10, 0, 0])],
+    )
+    monkeypatch.setenv("LOVSPOR_SEMANTIC_QUERY_MAX_TOKENS", "2")
+    embedder = _FakeEmbedder([1.0, 0.0, 0.0])
+
+    out = CorpusReader(tmp_path, embedder=embedder).semantic_search(
+        "dette spørsmålet er langt",
+        min_score=0.0,
+    )
+
+    assert embedder.queries != ["dette spørsmålet er langt"]
+    assert out["notice"] is not None
+    assert "Query truncated to the first 2 tokens" in out["notice"]
+
+
 def test_semantic_search_excludes_a_removed_but_slugged_record(tmp_path: Path) -> None:
     # semantic_search builds its candidate list straight from the on-disk
     # embedding files, so the status filter is the only guard between a removed
@@ -7210,6 +7233,27 @@ def test_hosted_tools_are_metered_against_the_callers_credential(tmp_path: Path)
 
     with pytest.raises(ToolError, match="daily quota"):
         _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
+
+
+def test_only_semantic_search_is_marked_as_a_paid_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    creds = _quota_corpus(tmp_path, Limits())
+    registrations: list[tuple[str, bool]] = []
+    real_with_quota = mcp_module._with_quota
+
+    def recording_with_quota(
+        fn: Callable[..., object], enforcer: QuotaEnforcer, *, paid: bool = False
+    ) -> Callable[..., object]:
+        registrations.append((fn.__name__, paid))
+        return real_with_quota(fn, enforcer, paid=paid)
+
+    monkeypatch.setattr(mcp_module, "_with_quota", recording_with_quota)
+    build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    paid_tools = {name for name, paid in registrations if paid}
+    assert paid_tools == {"semantic_search"}
+    assert all(not paid for name, paid in registrations if name == "get_law")
 
 
 def test_metering_is_per_credential_not_global(tmp_path: Path) -> None:
