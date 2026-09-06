@@ -42,10 +42,13 @@ _FOLDER_ROUTES: dict[str, Route] = {"lover": "lov", "forskrifter": "forskrift"}
 
 _DOC_TYPE_ROUTES: dict[str, Route] = {"lov": "lov", "forskrift": "forskrift"}
 
-_UNSAFE_SLUG = re.compile(r'[\s"{}*]')
-"""A historical name with whitespace, quotes, braces or a wildcard was
-never a servable URL segment and would break the Caddy snippet's
-tokenisation — such a path is skipped, not escaped."""
+_UNSAFE_SLUG = re.compile(r'[\s"{}*?#]')
+"""A historical name with whitespace, quotes, braces, a wildcard or a
+URL delimiter was never a servable URL path segment — `?` starts the
+query string and `#` never reaches the server — and would break the
+Caddy snippet's tokenisation or match nothing. Such a path is skipped,
+not escaped: a 301 is an identity claim about a URL, and these names
+never were one."""
 
 
 class _Edge(BaseModel):

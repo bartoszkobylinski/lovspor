@@ -280,6 +280,30 @@ class TestDocumentLineage:
         assert redirect_map.gone == ()
         assert unsafe_slug.encode() not in caddy_snippet(redirect_map)
 
+    @pytest.mark.parametrize("url_delimiter", ("?", "#"))
+    def test_a_historical_slug_with_a_url_delimiter_emits_no_rule(
+        self,
+        tmp_path: Path,
+        url_delimiter: str,
+    ) -> None:
+        unsafe_slug = f"gammel{url_delimiter}navn"
+        repo = _repo(tmp_path)
+        old_path = f"lover/{unsafe_slug}.md"
+        (repo / old_path).write_text(_doc("G", "lov/2020-01-01-1", ("1",)))
+        _write_manifest(repo, {"doc-1": _record("lov", old_path, unsafe_slug)})
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "one", day=1)
+        _git(repo, "mv", old_path, "lover/trygg.md")
+        _write_manifest(repo, {"doc-1": _record("lov", "lover/trygg.md", "trygg")})
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "two", day=2)
+
+        redirect_map = _map_at_head(repo)
+
+        assert redirect_map.redirects == ()
+        assert redirect_map.gone == ()
+        assert unsafe_slug.encode() not in caddy_snippet(redirect_map)
+
 
 class TestArtifacts:
     MAP = RedirectMap(
