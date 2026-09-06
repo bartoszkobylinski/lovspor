@@ -357,6 +357,7 @@ class TestRedirectInternals:
         assert command[0:2] == ["git", "-c"]
         assert command[2].lower() == "core.quotepath=false"
         assert "-M" in command
+        assert "--first-parent" in command
         assert "-m" not in command
         assert "--format=%x00%H" in command
         assert kwargs["check"] is True

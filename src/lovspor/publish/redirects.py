@@ -11,7 +11,9 @@ cannot prove. Every retired ``(route, slug)`` gets a 410 namespace
 entry; a previously published slug with no successor is 410 outright.
 
 The walk reads renames and deletions from one ``git log`` pass over the
-pinned commit's first-parent history (the corpus history is linear).
+pinned commit's first-parent history — enforced with ``--first-parent``,
+which also diffs a merge against its first parent, so a rename arriving
+via a merge is seen at the merge commit on the mainline.
 When one path name was retired more than once, the newest retirement
 wins: that is the content the URL last served, so it carries the URL's
 identity.
@@ -141,6 +143,7 @@ def _lineage_edges(corpus: Path, sha: str) -> list[_Edge]:
             "core.quotePath=false",
             "log",
             "-M",
+            "--first-parent",
             "--diff-filter=RD",
             "--name-status",
             "--format=%x00%H",
