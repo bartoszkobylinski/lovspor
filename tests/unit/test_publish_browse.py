@@ -6,6 +6,7 @@ Norwegian alphabetical order (æ ø å after z) must never depend on the
 build machine's locale tables, so the key function itself is under test.
 """
 
+from lovspor.publish import browse as publish_browse
 from lovspor.publish.browse import (
     BROWSE_ROUTES,
     browse_index_html,
@@ -40,6 +41,10 @@ def _plan(slug: str, title: str | None, route: str = "lov") -> DocumentPlan:
 
 
 class TestCollation:
+    def test_alphabet_letters_have_the_documented_key_tag(self) -> None:
+        assert collation_key("a") == ((1, 0),)
+        assert collation_key("å") == ((1, 28),)
+
     def test_norwegian_letters_collate_after_z(self) -> None:
         names = ["Åloven", "Ærloven", "Zloven", "Østloven", "Bloven"]
         assert sorted(names, key=collation_key) == [
@@ -71,6 +76,12 @@ class TestDisplayName:
 
 
 class TestBrowseIndex:
+    def test_group_template_escapes_quotes_and_newline_separates_entries(self) -> None:
+        group = publish_browse._group_html('A"', [_plan("en", "En"), _plan("to", "To")])
+        assert '<section aria-label="A&quot;">' in group
+        assert "</li>\n<li>" in group
+        assert "XX" not in group
+
     def test_routes_are_the_two_canonical_prefixes(self) -> None:
         assert BROWSE_ROUTES == ("lov", "forskrift")
         assert browse_index_url("lov") == "/lov/"

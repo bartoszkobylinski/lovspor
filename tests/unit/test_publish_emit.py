@@ -391,6 +391,26 @@ class TestEmitSite:
 
         assert not manifest.exists()
 
+    @pytest.mark.parametrize(
+        "artifact",
+        ("sitemap.xml", "robots.txt", "redirect-map.json", "redirects.caddy"),
+    )
+    def test_clear_previous_build_removes_each_root_artifact(
+        self, tmp_path: Path, artifact: str
+    ) -> None:
+        target = tmp_path / artifact
+        target.write_text("stale", encoding="utf-8")
+
+        publish_emit._clear_previous_build(tmp_path)
+
+        assert not target.exists()
+
+    def test_revision_parser_does_not_create_entries_for_separator_lines(self) -> None:
+        revisions = publish_emit._parse_revision_log(
+            "\x00abc 2026-02-01T00:00:00+00:00\n\nlover/a.md\n"
+        )
+        assert set(revisions) == {"lover/a.md"}
+
     def test_companions_preserve_exact_document_and_section_text(
         self, corpus: tuple[Path, str], tmp_path: Path
     ) -> None:

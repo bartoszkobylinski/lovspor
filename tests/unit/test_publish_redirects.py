@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.publish import redirects as publish_redirects
 from lovspor.publish.inventory import PublishError, build_inventory
 from lovspor.publish.redirects import (
     RedirectMap,
@@ -23,6 +24,7 @@ from lovspor.publish.redirects import (
     validate_redirect_targets,
 )
 from lovspor.snapshot import CorpusSnapshot
+from lovspor.storage.manifest import Manifest
 
 _STAMP = {
     "GIT_AUTHOR_NAME": "t",
@@ -334,6 +336,140 @@ class TestValidation:
         )
         with pytest.raises(PublishError, match="dangling redirect target"):
             validate_redirect_targets(dangling, inventory)
+
+
+class TestRedirectInternals:
+    def test_lineage_git_walk_requests_rename_detection_full_shas_and_checked_exit(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls.append((command, kwargs))
+            return subprocess.CompletedProcess(command, 0, stdout="")
+
+        monkeypatch.setattr(publish_redirects.subprocess, "run", fake_run)
+        assert publish_redirects._lineage_edges(tmp_path, "abc") == []
+        command, kwargs = calls[0]
+        assert command[0:2] == ["git", "-c"]
+        assert command[2].lower() == "core.quotepath=false"
+        assert "-M" in command
+        assert "-m" not in command
+        assert "--format=%x00%H" in command
+        assert kwargs["check"] is True
+
+    def test_edge_parser_accepts_only_well_formed_rename_and_delete_records(self) -> None:
+        parsed = publish_redirects._parse_edges(
+            "\x00fullsha\n"
+            "R100\tlover/a.md\tlover/b.md\n"
+            "D\tlover/c.md\n"
+            "X\tlover/ignored.md\n"
+            "R100\tmissing-new.md\n"
+            "D\ttoo\tmany.md\n"
+        )
+        assert [(edge.sha, edge.old, edge.new) for edge in parsed] == [
+            ("fullsha", "lover/a.md", "lover/b.md"),
+            ("fullsha", "lover/c.md", None),
+        ]
+
+    def test_newest_retirement_skips_unusable_and_live_edges_without_stopping(self) -> None:
+        edge = publish_redirects._Edge(index=2, sha="s", old="lover/gone.md", new=None)
+        retired = publish_redirects._newest_retirement_per_key(
+            [
+                publish_redirects._Edge(index=0, sha="s", old="not-a-route", new=None),
+                publish_redirects._Edge(index=1, sha="s", old="lover/live.md", new=None),
+                edge,
+            ],
+            {("lov", "live")},
+        )
+        assert retired == {("lov", "gone"): edge}
+
+    def test_terminal_walk_chooses_the_nearest_later_event(self) -> None:
+        start = publish_redirects._Edge(index=5, sha="s", old="lover/a.md", new="lover/b.md")
+        older = publish_redirects._Edge(index=3, sha="s", old="lover/b.md", new="lover/c.md")
+        nearer = publish_redirects._Edge(index=4, sha="s", old="lover/b.md", new="lover/d.md")
+        plan = build_inventory(
+            Manifest.model_validate(
+                {
+                    "generated_at": "2026-01-01T00:00:00Z",
+                    "documents": {"doc": _record("lov", "lover/d.md", "d")},
+                }
+            ),
+            lambda _path: _doc("D", "lov/2020-01-01-1", ("1",)),
+        ).documents[0]
+        assert (
+            publish_redirects._terminal_plan(
+                start, {"lover/b.md": [older, nearer]}, {"lover/d.md": plan}
+            )
+            == plan
+        )
+
+    def test_retired_pid_lookup_treats_an_unreadable_blob_as_no_evidence(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            calls.append((command, kwargs))
+            return subprocess.CompletedProcess(command, 128, stdout="")
+
+        monkeypatch.setattr(publish_redirects.subprocess, "run", fake_run)
+        edge = publish_redirects._Edge(index=0, sha="abc", old="lover/gone.md", new=None)
+        assert publish_redirects._retired_pids(tmp_path, edge) == set()
+        command, kwargs = calls[0]
+        assert command[0:2] == ["git", "-c"]
+        assert command[2].lower() == "core.quotepath=false"
+        assert command[3:] == ["show", "abc^:lover/gone.md"]
+        assert kwargs["check"] is False
+
+    def test_removed_manifest_scan_continues_past_current_unknown_and_live_records(self) -> None:
+        manifest = Manifest.model_validate(
+            {
+                "generated_at": "2026-01-01T00:00:00Z",
+                "documents": {
+                    "current": _record("lov", "lover/current.md", "current"),
+                    "unknown": _record("other", "other/x.md", "x", status="removed"),
+                    "live": _record("lov", "lover/live.md", "live", status="removed"),
+                    "fallback": _record("lov", "lover/fallback.md", "", status="removed"),
+                    "gone": _record("lov", "lover/path.md", "explicit", status="removed"),
+                },
+            }
+        )
+        assert publish_redirects._removed_record_prefixes(manifest, {("lov", "live")}) == {
+            "/lov/fallback/",
+            "/lov/explicit/",
+        }
+
+    @pytest.mark.parametrize(
+        "path",
+        ("unknown/name.md", "lover/nested/name.md", "lover/name.txt", "lover/.md"),
+    )
+    def test_route_slug_rejects_noncanonical_paths(self, path: str) -> None:
+        assert publish_redirects._route_slug(path) is None
+
+    def test_emitted_urls_continue_after_a_duplicate_pid_document(self) -> None:
+        duplicate = build_inventory(
+            Manifest.model_validate(
+                {
+                    "generated_at": "2026-01-01T00:00:00Z",
+                    "documents": {"dup": _record("lov", "lover/dup.md", "dup")},
+                }
+            ),
+            lambda _path: _doc("D", "lov/2020-01-01-1", ("1", "1")),
+        ).documents[0]
+        ordinary = build_inventory(
+            Manifest.model_validate(
+                {
+                    "generated_at": "2026-01-01T00:00:00Z",
+                    "documents": {"ok": _record("lov", "lover/ok.md", "ok")},
+                }
+            ),
+            lambda _path: _doc("O", "lov/2020-01-01-2", ("2",)),
+        ).documents[0]
+        urls = publish_redirects._emitted_urls(
+            publish_redirects.PublishInventory(documents=(duplicate, ordinary))
+        )
+        assert "/lov/ok/paragraf/2/" in urls
 
     def test_the_built_map_passes_its_own_target_validation(self, renamed: Path) -> None:
         sha = _head(renamed)
