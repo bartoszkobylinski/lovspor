@@ -12,6 +12,7 @@ two builds of the same snapshot are byte-identical.
 import hashlib
 import json
 import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,7 @@ import pytest
 import lovspor.publish.emit as publish_emit
 from lovspor.publish.emit import _committer_time, _deep_url, _resolver, _source_revisions, emit_site
 from lovspor.publish.inventory import PublishError, PublishInventory, build_inventory
+from lovspor.publish.sitemaps import SourceRevision
 from lovspor.snapshot import CorpusSnapshot
 
 DOC = """---
@@ -220,7 +222,14 @@ class TestEmitSite:
 
         publish_emit._emit_document(
             plan,
-            (EmptySnapshot(), {plan.markdown_path: sha}),  # type: ignore[arg-type]
+            (
+                EmptySnapshot(),
+                {
+                    plan.markdown_path: SourceRevision(
+                        sha=sha, committed_at="2026-02-01T00:00:00+00:00"
+                    )
+                },
+            ),  # type: ignore[arg-type]
             tmp_path,
             lambda _target: None,
         )
@@ -545,3 +554,66 @@ class TestBrowseIndexes:
         assert lov.count("<li>") == 3
         assert '<a href="/forskrift/testforskriften/">Testforskriften</a>' in forskrift
         assert forskrift.count("<li>") == 1
+
+
+class TestSitemapArtifacts:
+    def test_sitemap_set_equals_the_emitted_indexable_page_set(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        loc = re.compile(r"<loc>https://lovspor\.no(/[^<]+)</loc>")
+        shards = loc.findall((out / "sitemap.xml").read_text(encoding="utf-8"))
+        locs: set[str] = set()
+        for shard in shards:
+            locs.update(loc.findall((out / shard.lstrip("/")).read_text(encoding="utf-8")))
+        emitted = {
+            f"/{page.parent.relative_to(out).as_posix()}/" for page in out.rglob("index.html")
+        }
+        assert locs == emitted
+
+    def test_document_lastmod_is_corpus_commit_time_not_build_time(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        lover = (out / "sitemaps" / "lover-1.xml").read_text(encoding="utf-8")
+        assert lover.count("<lastmod>2026-02-01T00:00:00+00:00</lastmod>") == 3
+        paragrafer = (out / "sitemaps" / "paragrafer-1.xml").read_text(encoding="utf-8")
+        assert "<lastmod>" not in paragrafer
+
+    def test_robots_txt_lands_at_the_site_root(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        robots = (out / "robots.txt").read_text(encoding="utf-8")
+        assert robots.startswith("User-agent: *\n")
+        assert "Disallow: /mcp\n" in robots
+        assert "Sitemap: https://lovspor.no/sitemap.xml\n" in robots
+
+    def test_rebuild_clears_stale_sitemap_and_robots_artifacts(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        stale_shard = out / "sitemaps" / "lover-9.xml"
+        stale_shard.parent.mkdir(parents=True)
+        stale_shard.write_text("gammel", encoding="utf-8")
+        (out / "sitemap.xml").write_text("gammel", encoding="utf-8")
+        (out / "robots.txt").write_text("gammel", encoding="utf-8")
+        emit_site(repo, sha, out)
+        assert not stale_shard.exists()
+        assert "gammel" not in (out / "sitemap.xml").read_text(encoding="utf-8")
+        assert "gammel" not in (out / "robots.txt").read_text(encoding="utf-8")
