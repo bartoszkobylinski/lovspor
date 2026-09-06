@@ -41,6 +41,7 @@ from lovspor.publish.pages import (
     provision_url,
     section_slices,
 )
+from lovspor.publish.redirects import build_redirect_map, caddy_snippet, redirect_map_json
 from lovspor.publish.sitemaps import SourceRevision, robots_txt, sitemap_files
 from lovspor.snapshot import CorpusSnapshot
 
@@ -50,6 +51,7 @@ def emit_site(corpus: Path, sha: str, out: Path) -> None:
     snapshot = CorpusSnapshot(corpus, sha)
     inventory = build_inventory(snapshot.manifest, snapshot.read_text)
     revisions = _source_revisions(corpus, sha)
+    redirect_map = build_redirect_map(corpus, sha, inventory, snapshot.manifest)
     resolve = _resolver(inventory)
     _clear_previous_build(out)
     for plan in inventory.documents:
@@ -59,6 +61,8 @@ def emit_site(corpus: Path, sha: str, out: Path) -> None:
     for name, data in sitemap_files(inventory, revisions).items():
         _write(out / name, data)
     _write(out / "robots.txt", robots_txt())
+    _write(out / "redirect-map.json", redirect_map_json(redirect_map))
+    _write(out / "redirects.caddy", caddy_snippet(redirect_map))
     _write(out / "site-manifest.json", _site_manifest_bytes(corpus, sha, inventory))
 
 
@@ -240,7 +244,13 @@ def _clear_previous_build(out: Path) -> None:
     sitemaps = out / "sitemaps"
     if sitemaps.exists():
         shutil.rmtree(sitemaps)
-    for artifact in ("site-manifest.json", "sitemap.xml", "robots.txt"):
+    for artifact in (
+        "site-manifest.json",
+        "sitemap.xml",
+        "robots.txt",
+        "redirect-map.json",
+        "redirects.caddy",
+    ):
         target = out / artifact
         if target.exists():
             target.unlink()
