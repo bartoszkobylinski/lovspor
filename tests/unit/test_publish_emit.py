@@ -224,7 +224,7 @@ class TestEmitSite:
 
         manifest = json.loads((out / "site-manifest.json").read_text())
         assert manifest["corpus_commit"] == sha
-        assert manifest["corpus_commit_time"] == "2026-02-01T00:00:00Z"
+        assert manifest["corpus_commit_time"] == "2026-02-01T00:00:00+00:00"
         assert manifest["site_schema_version"] == "1"
         assert "build_timestamp" not in manifest
 
@@ -256,6 +256,21 @@ class TestEmitSite:
         assert '<a href="/forskrift/testforskriften/paragraf/2/">' in html
         assert "direktivet" in html
         assert 'href="eu/' not in html
+
+    def test_rebuild_drops_artifacts_of_retired_documents(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        stale = out / "lov" / "opphevet-lov" / "index.html"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("gammel", encoding="utf-8")
+        emit_site(repo, sha, out)
+
+        assert not stale.exists()
+        assert (out / "lov/testloven/index.html").is_file()
 
     def test_two_builds_are_byte_identical(
         self,

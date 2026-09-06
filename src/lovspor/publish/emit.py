@@ -10,8 +10,10 @@ the pinned commit's committer time.
 """
 
 import hashlib
+import shutil
 import subprocess
 from collections.abc import Callable
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -47,6 +49,7 @@ def emit_site(corpus: Path, sha: str, out: Path) -> None:
     inventory = build_inventory(snapshot.manifest, snapshot.read_text)
     revisions = _source_revisions(corpus, sha)
     resolve = _resolver(inventory)
+    _clear_previous_build(out)
     for plan in inventory.documents:
         _emit_document(plan, (snapshot, revisions), out, resolve)
     _write(out / "site-manifest.json", _site_manifest_bytes(corpus, sha, inventory))
@@ -201,7 +204,30 @@ def _site_manifest_bytes(corpus: Path, sha: str, inventory: PublishInventory) ->
     return companion_json_bytes(manifest)
 
 
+def _clear_previous_build(out: Path) -> None:
+    """Drop the corpus namespaces of any earlier build in ``out``.
+
+    A rebuild must not leave artifacts of documents the new snapshot no
+    longer publishes — a stale page would serve retired content as
+    current. Only this generator's own namespaces are touched.
+    """
+    for name in ("lov", "forskrift"):
+        target = out / name
+        if target.exists():
+            shutil.rmtree(target)
+    manifest = out / "site-manifest.json"
+    if manifest.exists():
+        manifest.unlink()
+
+
 def _committer_time(corpus: Path, sha: str) -> str:
+    """The pinned commit's committer time, normalised through datetime.
+
+    git's %cI spelling of UTC differs between versions (Z vs +00:00);
+    passing it through fromisoformat/isoformat makes the emitted value
+    identical on every machine — the ADR's cross-machine byte-identity
+    depends on it.
+    """
     result = subprocess.run(  # noqa: S603
         ["git", "show", "-s", "--format=%cI", sha],  # noqa: S607
         cwd=corpus,
@@ -209,4 +235,4 @@ def _committer_time(corpus: Path, sha: str) -> str:
         text=True,
         check=True,
     )
-    return result.stdout.strip()
+    return datetime.fromisoformat(result.stdout.strip()).isoformat()
