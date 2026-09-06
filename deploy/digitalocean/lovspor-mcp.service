@@ -26,7 +26,11 @@ Environment=LOVVERK_CORPUS_PATH=/opt/lovspor/.cache/lovverk
 # anything else = startup refusal): LOVSPOR_SELF_SERVICE_{MAX_IN_FLIGHT,
 # RATE_PER_MINUTE,RATE_BURST,DAILY_QUOTA} tune what every self-service OAuth user
 # gets; LOVSPOR_SERVICE_{MAX_IN_FLIGHT,DAILY_QUOTA} cap the whole instance across
-# all users. See docs/mcp.md § Limits.
+# all users, including LOVSPOR_SERVICE_PAID_DAILY_QUOTA, the wallet bound on
+# semantic_search. LOVSPOR_SEMANTIC_QUERY_MAX_TOKENS caps the query before it is
+# embedded (this is what fixes the price of one call) and
+# LOVSPOR_SEMANTIC_QUERY_CACHE_ENTRIES sizes the in-process query-vector cache.
+# See docs/mcp.md § Limits and § What the hosted endpoint costs to run.
 # Read ONLY at start — run `systemctl restart lovspor-mcp` after editing it.
 EnvironmentFile=/etc/lovspor/lovspor.env
 WorkingDirectory=/opt/lovspor/app

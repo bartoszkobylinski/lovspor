@@ -78,6 +78,13 @@ class Limits(BaseModel):
     # ~5x a heavy researcher's day (20 calls x 50 questions). Approximate by
     # construction: counters live in memory and reset on restart.
     daily_quota: int = Field(default=5000, ge=1)
+    # Fifteen of the sixteen tools read files and git; one, semantic_search,
+    # embeds the caller's query through the operator's OpenAI key. Metering them
+    # on one counter prices the free tools as if they cost money and the paid one
+    # as if it did not. This is the counter that bounds spend, so it is separate
+    # and much smaller — a research session that reads a hundred sections still
+    # only asks a handful of semantic questions to find them.
+    paid_daily_quota: int = Field(default=500, ge=1)
 
 
 class ServiceLimits(BaseModel):
@@ -106,6 +113,12 @@ class ServiceLimits(BaseModel):
 
     max_in_flight: int = Field(default=4, ge=1)
     daily_quota: int = Field(default=20_000, ge=1)
+    # The wallet bound, and the only number here denominated in money rather than
+    # threads. With the query cap at 256 tokens, 8 000 paid calls is at most
+    # ~2M embedding tokens a day — about $0.27 at text-embedding-3-large rates,
+    # so roughly $8 a month even if every single one is a cache miss at full
+    # length. Raise it when real traffic justifies a bigger bill, not before.
+    paid_daily_quota: int = Field(default=8_000, ge=1)
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> ServiceLimits:
@@ -117,6 +130,7 @@ class ServiceLimits(BaseModel):
                 {
                     "max_in_flight": "LOVSPOR_SERVICE_MAX_IN_FLIGHT",
                     "daily_quota": "LOVSPOR_SERVICE_DAILY_QUOTA",
+                    "paid_daily_quota": "LOVSPOR_SERVICE_PAID_DAILY_QUOTA",
                 },
             )
         )
@@ -131,6 +145,9 @@ SELF_SERVICE_LIMITS = Limits(
     rate_per_minute=60,
     rate_burst=20,
     daily_quota=1_000,
+    # 100 semantic questions a day is a working day of real research and, at the
+    # 256-token query cap, at most ~$0.0033 of embedding spend per user per day.
+    paid_daily_quota=100,
 )
 
 
@@ -148,9 +165,24 @@ def self_service_limits_from_env(environ: Mapping[str, str] | None = None) -> Li
             "rate_per_minute": "LOVSPOR_SELF_SERVICE_RATE_PER_MINUTE",
             "rate_burst": "LOVSPOR_SELF_SERVICE_RATE_BURST",
             "daily_quota": "LOVSPOR_SELF_SERVICE_DAILY_QUOTA",
+            "paid_daily_quota": "LOVSPOR_SELF_SERVICE_PAID_DAILY_QUOTA",
         },
     )
     return SELF_SERVICE_LIMITS.model_copy(update=overrides)
+
+
+def int_setting_from_env(
+    variable: str,
+    default: int,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    """One integer deployment setting, or ``default`` when unset or empty.
+
+    Same fail-closed parse as the limit blocks: a value that is present but
+    unusable is a startup refusal, never a silent fallback to the built-in.
+    """
+    env = os.environ if environ is None else environ
+    return _int_fields_from_env(env, {"value": variable}).get("value", default)
 
 
 def _int_fields_from_env(env: Mapping[str, str], mapping: dict[str, str]) -> dict[str, int]:

@@ -148,8 +148,14 @@ class _State:
         self.in_flight = 0
         self.bucket = _Bucket(monotonic)
         self.daily = _Daily(utc_now)
+        self.paid_daily = _PaidDaily(utc_now)
         # Only used to decide eviction; never to admit or refuse a call.
         self.last_seen = monotonic()
+
+
+class _PaidDaily(_Daily):
+    """Calls that spent money today. Same shape as ``_Daily``, named apart so a
+    reader is never left wondering which of two identical counters is which."""
 
 
 class _ServiceState:
@@ -163,6 +169,7 @@ class _ServiceState:
     def __init__(self, utc_now: Callable[[], datetime]) -> None:
         self.in_flight = 0
         self.daily = _Daily(utc_now)
+        self.paid_daily = _PaidDaily(utc_now)
 
 
 class QuotaEnforcer:
@@ -250,7 +257,8 @@ class QuotaEnforcer:
             if now - state.last_seen < self._eviction_idle_seconds:
                 continue
             state.daily.roll()
-            if state.daily.used == 0:
+            state.paid_daily.roll()
+            if state.daily.used == 0 and state.paid_daily.used == 0:
                 del self._states[credential_id]
 
     def _state_for(self, credential_id: str) -> _State:
@@ -264,12 +272,19 @@ class QuotaEnforcer:
             state.last_seen = self._monotonic()
             return state
 
-    def _admit_service(self) -> None:
+    def _admit_service(self, *, paid: bool) -> None:
         """Check the instance ceiling. Charges nothing; raises if it is reached."""
         ceiling = self._service_limits
         if ceiling is None:
             return
         self._service.daily.roll()
+        self._service.paid_daily.roll()
+        if paid and self._service.paid_daily.used >= ceiling.paid_daily_quota:
+            raise QuotaExceededError(
+                "this server has reached its daily ceiling of "
+                f"{ceiling.paid_daily_quota} semantic searches across all users",
+                _seconds_to_utc_midnight(self._utc_now()),
+            )
         if self._service.daily.used >= ceiling.daily_quota:
             raise QuotaExceededError(
                 f"this server has reached its daily ceiling of {ceiling.daily_quota} "
@@ -283,9 +298,16 @@ class QuotaEnforcer:
                 _IN_FLIGHT_RETRY_SECONDS,
             )
 
-    def _admit(self, state: _State, limits: Limits) -> None:
+    def _admit(self, state: _State, limits: Limits, *, paid: bool) -> None:
         """Charge one call against every brake, or raise having charged none."""
         state.daily.roll()
+        state.paid_daily.roll()
+        if paid and state.paid_daily.used >= limits.paid_daily_quota:
+            raise QuotaExceededError(
+                f"daily limit of {limits.paid_daily_quota} semantic searches is "
+                "exhausted; the other fifteen tools are unaffected",
+                _seconds_to_utc_midnight(self._utc_now()),
+            )
         if state.daily.used >= limits.daily_quota:
             raise QuotaExceededError(
                 f"daily quota of {limits.daily_quota} calls is exhausted",
@@ -298,7 +320,7 @@ class QuotaEnforcer:
             )
         # The caller's own brakes are checked first so a user over their own
         # limit is told that, rather than blaming a busy server for their loop.
-        self._admit_service()
+        self._admit_service(paid=paid)
         # Consume last: the bucket mutates, and a call refused above must not
         # spend a token it never got to use.
         wait = state.bucket.try_consume(limits)
@@ -309,13 +331,37 @@ class QuotaEnforcer:
             )
         state.daily.used += 1
         state.in_flight += 1
+        if paid:
+            state.paid_daily.used += 1
         if self._service_limits is not None:
             self._service.daily.used += 1
             self._service.in_flight += 1
+            if paid:
+                self._service.paid_daily.used += 1
+
+    def paid_daily_used(self, credential_id: str) -> int:
+        """Paid calls billed to ``credential_id`` today. For tests and diagnostics."""
+        with self._lock:
+            state = self._states.get(credential_id)
+        if state is None:
+            return 0
+        state.paid_daily.roll()
+        return state.paid_daily.used
+
+    def service_paid_daily_used(self) -> int:
+        """Paid calls billed to the instance today. For tests and diagnostics."""
+        self._service.paid_daily.roll()
+        return self._service.paid_daily.used
 
     @contextmanager
-    def guard(self, credential_id: str) -> Iterator[None]:
+    def guard(self, credential_id: str, *, paid: bool = False) -> Iterator[None]:
         """Admit one call for ``credential_id``, or raise :class:`QuotaExceededError`.
+
+        ``paid`` marks a call that spends money downstream — today only
+        ``semantic_search``, which embeds the caller's query through the
+        operator's OpenAI key. It is charged against a separate, much smaller
+        counter at both layers, so reading the corpus stays as free to the caller
+        as it is to the operator.
 
         Wrap the tool body: the in-flight slot is held for the duration and
         released even if the body raises, so a credential that hits N errors is
@@ -330,7 +376,7 @@ class QuotaEnforcer:
                 _IN_FLIGHT_RETRY_SECONDS,
             )
         state = self._state_for(credential_id)
-        self._admit(state, limits)
+        self._admit(state, limits, paid=paid)
         try:
             yield
         finally:

@@ -85,6 +85,7 @@ from lovspor.embeddings import (
     read_embeddings,
     space_id_of,
 )
+from lovspor.embeddings.query import QueryEmbedder
 from lovspor.errors import ConfigError, CorpusStateError, LovsporError
 from lovspor.headings import (
     ANY_HEADING,
@@ -437,6 +438,10 @@ class CorpusReader:
         # vector and a stale .bin disagree on dim, taking the whole
         # search down for one orphan file from a prior model migration.
         self._expected_dim: int | None = embedder.get_dimension() if embedder else None
+        # The paid path never touches the raw embedder: every query goes through
+        # the cap and the cache, so the unit price of a call is bounded and a
+        # repeated question costs nothing.
+        self._query_embedder = QueryEmbedder.from_env(embedder) if embedder else None
         # Which vector space this embedder speaks. Dimension cannot stand in
         # for it: two unrelated models agree on 3072 all the time, and cosine
         # similarity across their spaces returns confident nonsense instead of
@@ -1366,7 +1371,17 @@ class CorpusReader:
                 "notice": f"{bootstrap} {coverage}" if coverage else bootstrap,
             }
 
-        query_vector = self._embedder.encode([query])[0]
+        assert self._query_embedder is not None  # noqa: S101 - built with _embedder
+        query_vector, truncated = self._query_embedder.encode(query)
+        if truncated:
+            # A shortened query is a different question from the one that was
+            # asked, so the answer says so rather than quietly ranking against
+            # the part that fitted.
+            cut = (
+                f"Query truncated to the first {self._query_embedder.max_tokens} tokens "
+                "before matching; results reflect that opening portion only."
+            )
+            coverage = f"{cut} {coverage}" if coverage else cut
         hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
         kept = [hit for hit in hits if hit.score >= min_score]
         if not kept:
@@ -3493,7 +3508,7 @@ def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
 
 
 def _with_quota(
-    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer
+    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer, *, paid: bool = False
 ) -> Callable[..., Awaitable[Any]]:
     """Charge a tool call against its credential's limits before it runs.
 
@@ -3512,7 +3527,7 @@ def _with_quota(
             # it ever is: an unidentified caller cannot be metered, so refuse
             # rather than serve one client's quota to everybody.
             raise QuotaExceededError("request carries no identified credential", 1)
-        with enforcer.guard(token.client_id):
+        with enforcer.guard(token.client_id, paid=paid):
             return await fn(**kwargs)
 
     return wrapper
@@ -4123,18 +4138,25 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     # serve_http already refuses that combination unless it was asked for.
     enforcer = _build_enforcer(bind, metering)
 
-    def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def _tool(*, paid: bool = False) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a tool, offloading its blocking body to a worker thread
         in hosted mode (see ``_offload_to_thread``) and metering it against the
         caller's credential (see ``_with_quota``). stdio keeps the direct sync
-        call: one tool at a time, no thread hop, one local user to meter."""
+        call: one tool at a time, no thread hop, one local user to meter.
+
+        ``paid=True`` marks a tool that spends money downstream. Exactly one does
+        — ``semantic_search``, which embeds the caller's query through the
+        operator's OpenAI key — and it is charged against a separate, smaller
+        counter so the fifteen filesystem tools are not priced as if they cost
+        anything. stdio ignores it: there is no operator paying for someone else.
+        """
 
         def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             if http is None:
                 mcp.add_tool(fn)
                 return fn
             hosted = _offload_to_thread(fn)
-            mcp.add_tool(hosted if enforcer is None else _with_quota(hosted, enforcer))
+            mcp.add_tool(hosted if enforcer is None else _with_quota(hosted, enforcer, paid=paid))
             return fn
 
         return decorator
@@ -4588,7 +4610,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
             else reader.search_body(query, dataset=dataset, limit=limit)
         )
 
-    @_tool()
+    @_tool(paid=True)
     def semantic_search(
         query: str,
         dataset: str | None = None,

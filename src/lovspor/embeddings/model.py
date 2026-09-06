@@ -129,6 +129,29 @@ def _encoding_for(model_name: str) -> tiktoken.Encoding:
     return _resolve_encoding(model_name)
 
 
+def truncate_to_tokens(
+    text: str,
+    max_tokens: int,
+    model_name: str = DEFAULT_MODEL_NAME,
+) -> tuple[str, bool]:
+    """Cut ``text`` to ``max_tokens`` -> ``(text, was_truncated)``.
+
+    The public counterpart to ``OpenAIEmbedder._truncate_to_tokens``, which cuts
+    at the model's own 8191-token ceiling. Callers that pay per token need a
+    *lower* bound than the model's, and need to know whether it bit: a search
+    query silently shortened is a different question from the one the user
+    asked, and the answer has to say so.
+
+    Decoding a truncated token sequence yields valid UTF-8 because BPE tokens are
+    whole byte sequences.
+    """
+    encoding = _encoding_for(model_name)
+    tokens = encoding.encode(text)
+    if len(tokens) <= max_tokens:
+        return text, False
+    return encoding.decode(tokens[:max_tokens]), True
+
+
 def count_input_tokens(
     text: str,
     model_name: str = DEFAULT_MODEL_NAME,
