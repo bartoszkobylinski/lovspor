@@ -135,7 +135,29 @@ def build_inventory(
             )
         seen.add((plan.route, plan.slug))
         plans.append(plan)
+    _check_ref_id_editions(plans)
     return PublishInventory(documents=tuple(plans))
+
+
+def _check_ref_id_editions(plans: list[DocumentPlan]) -> None:
+    """One ref_id may name several documents only as language editions.
+
+    The corpus carries exactly one such pair today — grunnloven's bokmål
+    and nynorsk editions share lov/1814-05-17 — so a shared ref_id with
+    distinct languages is real structure. Two current documents with one
+    ref_id AND one language are the same source published twice: that is
+    an identity error, not an edition.
+    """
+    editions: dict[tuple[str, str], str] = {}
+    for plan in plans:
+        key = (plan.ref_id, plan.language)
+        if key in editions:
+            raise PublishError(
+                f"documents {editions[key]} and {plan.doc_id} both publish "
+                f"ref_id {plan.ref_id!r} in language {plan.language!r}: "
+                f"duplicate editions are an identity error",
+            )
+        editions[key] = plan.doc_id
 
 
 def _plan_document(

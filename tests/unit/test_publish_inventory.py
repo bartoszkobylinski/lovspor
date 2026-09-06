@@ -97,8 +97,16 @@ class TestBuildInventory:
                 "first": _record(slug="forste", markdown_path="lover/forste.md"),
             },
         )
+        second_body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "lov/2021-01-01-2"',
+        )
+        reader = {
+            "lover/andre.md": second_body,
+            "lover/forste.md": BODY,
+        }.get
 
-        inventory = build_inventory(manifest, lambda _path: BODY)
+        inventory = build_inventory(manifest, reader)
 
         assert [plan.doc_id for plan in inventory.documents] == ["second", "first"]
 
@@ -388,6 +396,39 @@ class TestBuildInventory:
         )
         with pytest.raises(PublishError, match="ref_id"):
             build_inventory(manifest, lambda _path: body)
+
+    def test_duplicate_ref_id_same_language_fails_closed(self) -> None:
+        manifest = _manifest(
+            {
+                "doc-1": _record(),
+                "doc-2": _record(
+                    slug="abortloven-kopi",
+                    markdown_path="lover/abortloven-kopi.md",
+                ),
+            },
+        )
+        with pytest.raises(PublishError, match="identity error"):
+            build_inventory(manifest, lambda _path: BODY)
+
+    def test_language_editions_may_share_a_ref_id(self) -> None:
+        # The corpus's real shape: grunnloven exists as bokmål and nynorsk
+        # editions under one ref_id.
+        nn_body = BODY.replace('language: "nb"', 'language: "nn"')
+        manifest = _manifest(
+            {
+                "doc-1": _record(slug="grunnloven-bokmål-grl"),
+                "doc-2": _record(
+                    slug="grunnlova-nynorsk-grl",
+                    markdown_path="lover/grunnlova.md",
+                ),
+            },
+        )
+        reader = {
+            "lover/abortloven.md": BODY,
+            "lover/grunnlova.md": nn_body,
+        }.get
+        inventory = build_inventory(manifest, reader)
+        assert len(inventory.documents) == 2
 
     def test_pre1850_ref_id_without_number_passes(self) -> None:
         body = BODY.replace(
