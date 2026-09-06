@@ -103,6 +103,26 @@ class TestProvisionCompanion:
         assert doc["links"] == {"parent": "https://lovspor.no/lov/abortloven/"}
         assert doc["provenance"]["representation_hash"] == "e" * 64
 
+    def test_envelope_has_the_exact_public_schema_keys(self) -> None:
+        plan = _plan()
+        doc = provision_companion((plan, plan.provisions[0]), "Tekst.", PROVENANCE, "e" * 64)
+        assert set(doc) == {
+            "schema_version",
+            "canonical_id",
+            "canonical_url",
+            "type",
+            "ref_id",
+            "slug",
+            "title",
+            "heading_id",
+            "language",
+            "text",
+            "source",
+            "provenance",
+            "temporal",
+            "links",
+        }
+
 
 class TestSerialisation:
     def test_bytes_are_deterministic_and_utf8(self) -> None:
@@ -117,3 +137,6 @@ class TestSerialisation:
         doc = document_companion(_plan(), "Tekst.", PROVENANCE, "d" * 64)
         parsed = json.loads(companion_json_bytes(doc))
         assert list(parsed) == sorted(parsed)
+
+    def test_serialisation_has_canonical_unicode_and_one_space_indent(self) -> None:
+        assert companion_json_bytes({"ø": {"b": 1}}) == b'{\n "\xc3\xb8": {\n  "b": 1\n }\n}\n'

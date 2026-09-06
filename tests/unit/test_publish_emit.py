@@ -17,8 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.publish.emit import emit_site
-from lovspor.publish.inventory import PublishError
+from lovspor.publish.emit import _committer_time, _deep_url, _resolver, _source_revisions, emit_site
+from lovspor.publish.inventory import PublishError, PublishInventory, build_inventory
+from lovspor.snapshot import CorpusSnapshot
 
 DOC = """---
 title: "Testloven"
@@ -227,6 +228,16 @@ class TestEmitSite:
         assert manifest["corpus_commit"] == sha
         assert manifest["corpus_commit_time"] == "2026-02-01T00:00:00+00:00"
         assert manifest["site_schema_version"] == "1"
+        assert manifest["engine_version"]
+        assert manifest["documents"] == 4
+        assert set(manifest) == {
+            "corpus_commit",
+            "corpus_commit_time",
+            "engine_version",
+            "site_schema_version",
+            "documents",
+            "exclusions",
+        }
         assert "build_timestamp" not in manifest
 
     def test_representation_hash_matches_emitted_html_bytes(
@@ -258,6 +269,17 @@ class TestEmitSite:
         assert "direktivet" in html
         assert 'href="eu/' not in html
 
+    def test_resolver_uses_document_for_base_and_non_section_deep_links(
+        self, corpus: tuple[Path, str]
+    ) -> None:
+        repo, sha = corpus
+        snapshot = CorpusSnapshot(repo, sha)
+        plan = build_inventory(snapshot.manifest, snapshot.read_text).documents[0]
+        resolve = _resolver(PublishInventory(documents=(plan,)))
+        assert resolve(plan.ref_id) == "/lov/testloven/"
+        assert _deep_url(plan, "x1") == "/lov/testloven/"
+        assert _deep_url(plan, "§999") == "/lov/testloven/"
+
     def test_rebuild_drops_artifacts_of_retired_documents(
         self,
         corpus: tuple[Path, str],
@@ -268,10 +290,37 @@ class TestEmitSite:
         stale = out / "lov" / "opphevet-lov" / "index.html"
         stale.parent.mkdir(parents=True)
         stale.write_text("gammel", encoding="utf-8")
+        stale_regulation = out / "forskrift" / "opphevet" / "index.html"
+        stale_regulation.parent.mkdir(parents=True)
+        stale_regulation.write_text("gammel", encoding="utf-8")
+        stale_manifest = out / "site-manifest.json"
+        stale_manifest.write_text("gammel", encoding="utf-8")
         emit_site(repo, sha, out)
 
         assert not stale.exists()
+        assert not stale_regulation.exists()
+        assert stale_manifest.read_text(encoding="utf-8") != "gammel"
         assert (out / "lov/testloven/index.html").is_file()
+
+    def test_companions_preserve_exact_document_and_section_text(
+        self, corpus: tuple[Path, str], tmp_path: Path
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        document = json.loads((out / "lov/testloven/index.json").read_text())
+        section = json.loads((out / "lov/testloven/paragraf/1/index.json").read_text())
+        assert "### § 1. Formål\n\nSe [forskriften" in document["text"]
+        assert section["text"].startswith("### § 1. Formål\n\nSe [forskriften")
+        assert "XX\nXX" not in document["text"] + section["text"]
+        assert document["provenance"]["renderer_version"] == 8
+
+    def test_invalid_git_revision_fails_loudly(self, corpus: tuple[Path, str]) -> None:
+        repo, _ = corpus
+        with pytest.raises(subprocess.CalledProcessError):
+            _source_revisions(repo, "not-a-revision")
+        with pytest.raises(subprocess.CalledProcessError):
+            _committer_time(repo, "not-a-revision")
 
     def test_rebuild_preserves_assets_outside_generated_namespaces(
         self,

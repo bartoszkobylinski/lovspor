@@ -11,6 +11,7 @@ pids).
 from lovspor.publish.inventory import DocumentPlan, ProvisionRef
 from lovspor.publish.pages import (
     PageProvenance,
+    _layout,
     document_page_html,
     provision_page_html,
     section_slices,
@@ -96,6 +97,23 @@ class TestDocumentPage:
         plan = _plan(duplicate_pids={"1": 2})
         html = document_page_html(plan, BODY_LINES, PROVENANCE, lambda t: None)
         assert "/paragraf/" not in html
+        assert "XXXX" not in html
+
+    def test_empty_provision_list_gets_no_toc(self) -> None:
+        html = _document(_plan(provisions=()))
+        assert '<nav class="toc"' not in html
+        assert "XXXX" not in html
+
+    def test_toc_has_exact_separator_and_omits_missing_title(self) -> None:
+        plan = _plan(
+            provisions=(
+                ProvisionRef(pid="1", heading_id="1", title=None),
+                ProvisionRef(pid="2", heading_id="2", title="Virkeområde"),
+            )
+        )
+        html = _document(plan)
+        assert "§ 1</a></li>\n<li" in html
+        assert "§ 1XXXX" not in html
 
     def test_duplicate_pid_document_suppresses_only_ambiguous_anchors(self) -> None:
         plan = _plan(duplicate_pids={"1": 2})
@@ -111,6 +129,10 @@ class TestDocumentPage:
         assert "ab388cbdead" in html
         assert "cccccccccc" in html
         assert "ikke offisiell kunngj" in html
+
+    def test_last_change_provenance_label_is_exact(self) -> None:
+        html = _document(_plan(last_change_in_force="2026-08-15"))
+        assert "<dt>Siste endring i kraft</dt><dd>2026-08-15</dd>" in html
 
     def test_no_script_and_no_inline_handlers(self) -> None:
         html = _document()
@@ -149,6 +171,10 @@ class TestSectionSlices:
         slices = section_slices(lines)
         assert "A." in slices["1"]
 
+    def test_final_section_extends_to_end_of_document(self) -> None:
+        lines = ["### § 9. Siste", "", "Siste linje."]
+        assert section_slices(lines)["9"] == lines
+
 
 class TestProvisionPage:
     def test_core_content_and_identity(self) -> None:
@@ -175,3 +201,41 @@ class TestProvisionPage:
             plan, plan.provisions[0], PROVENANCE, ["### § 1. Formål", "Tekst."], lambda t: None
         )
         assert "forrige" not in html.lower() or "paragraf/0" not in html
+
+    def test_untitled_provision_title_has_no_trailing_punctuation(self) -> None:
+        plan = _plan(provisions=(ProvisionRef(pid="1", heading_id="1", title=None),))
+        html = provision_page_html(
+            plan, plan.provisions[0], PROVENANCE, ["### § 1"], lambda t: None
+        )
+        assert "<title>§ 1 — Lov om abort (abortloven)</title>" in html
+
+    def test_provision_title_preserves_trailing_x(self) -> None:
+        plan = _plan(provisions=(ProvisionRef(pid="1", heading_id="1", title="Vedlegg X"),))
+        html = provision_page_html(
+            plan, plan.provisions[0], PROVENANCE, ["### § 1. Vedlegg X"], lambda t: None
+        )
+        assert "<title>§ 1. Vedlegg X — Lov om abort (abortloven)</title>" in html
+
+    def test_middle_provision_links_to_immediate_neighbours(self) -> None:
+        provisions = tuple(
+            ProvisionRef(pid=str(i), heading_id=str(i), title=f"Del {i}") for i in range(1, 4)
+        )
+        plan = _plan(provisions=provisions)
+        html = provision_page_html(plan, provisions[1], PROVENANCE, ["### § 2"], lambda t: None)
+        assert (
+            '<a href="/lov/abortloven/paragraf/1/" rel="prev">Forrige paragraf</a>'
+            " · "
+            '<a href="/lov/abortloven/paragraf/3/" rel="next">Neste paragraf</a>'
+        ) in html
+
+    def test_head_values_escape_quotes(self) -> None:
+        plan = _plan(language='nb" onload="bad', title='A "quoted" law')
+        html = document_page_html(plan, BODY_LINES, PROVENANCE, lambda t: None)
+        assert '<html lang="nb&quot; onload=&quot;bad">' in html
+        assert "<title>A &quot;quoted&quot; law</title>" in html
+        assert 'onload="bad"' not in html
+
+    def test_canonical_attribute_escapes_quotes(self) -> None:
+        html = _layout("nb", "Tittel", '/lov/a" onclick="bad/', "Tekst")
+        assert 'href="https://lovspor.no/lov/a&quot; onclick=&quot;bad/"' in html
+        assert 'onclick="bad"' not in html

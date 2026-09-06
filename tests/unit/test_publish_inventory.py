@@ -264,6 +264,7 @@ class TestBuildInventory:
         assert plan.retrieved_at == "2026-07-30T18:17:57.344275+00:00"
         assert plan.date_in_force == "2025-06-01"
         assert plan.last_change_in_force is None
+        assert plan.renderer_version == 8
 
     def test_manifest_title_and_last_change_land_on_the_plan(self) -> None:
         body = BODY.replace(
