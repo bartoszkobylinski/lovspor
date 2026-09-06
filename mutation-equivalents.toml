@@ -1170,3 +1170,129 @@ formats produce byte-identical strings. Pinned by the assumption test
 below, which round-trips both spellings.
 """
 assumption_test = "tests/unit/test_publish_emit.py::test_assumption_fromisoformat_parses_gits_ci_format"
+
+[[equivalent]]
+file = "src/lovspor/publish/browse.py"
+symbol = "_group_html"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-    safe = html_escape.escape(letter, quote=True)
++    safe = html_escape.escape(letter, )
+"""
+justification = """
+Same stdlib-default selection as the html.py and pages.py entries:
+`html.escape` defaults `quote` to True, so dropping the explicit
+argument escapes identically. Pinned by the same assumption test — a
+changed default turns this entry red instead of waiving a quoting
+regression on the group label.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "caddy_snippet"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-    return ("\\n".join(lines) + "\\n").encode("utf-8")
++    return ("\\n".join(lines) + "\\n").encode("UTF-8")
+"""
+justification = """
+Same codec-registry case-insensitivity as every encode/decode entry in
+this register: codecs.lookup normalises both spellings to "utf-8", so
+the same encoder produces the same bytes for the Caddy snippet.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "emit_site"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-        _write(out / route / "index.html", browse_index_html(route, inventory).encode("utf-8"))
++        _write(out / route / "index.html", browse_index_html(route, inventory).encode("UTF-8"))
+"""
+justification = """
+Same codec-registry case-insensitivity as every encode/decode entry in
+this register: both spellings reach the same encoder, so the browse
+index bytes on disk are identical.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_lineage_edges"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-            "core.quotePath=false",
++            "core.quotepath=false",
+"""
+justification = """
+git config variable names are case-insensitive, so both spellings
+select the same quoting behaviour for the lineage log walk. Argues
+from git's behaviour, not Python's, so it is pinned by the assumption
+test below against a real repository with a non-ASCII path.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_lineage_edges"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-            "core.quotePath=false",
++            "CORE.QUOTEPATH=FALSE",
+"""
+justification = """
+Section names and boolean values are case-insensitive in git config as
+well, so the fully uppercased spelling selects the same behaviour for
+the lineage log walk. Pinned by the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_retired_pids"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-        ["git", "-c", "core.quotePath=false", "show", f"{edge.sha}^:{edge.old}"],  # noqa: S607
++        ["git", "-c", "core.quotepath=false", "show", f"{edge.sha}^:{edge.old}"],  # noqa: S607
+"""
+justification = """
+git config variable names are case-insensitive, so both spellings
+select the same quoting behaviour for the historical blob read. Pinned
+by the same real-git assumption test as the other quotePath entries.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_retired_pids"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-        ["git", "-c", "core.quotePath=false", "show", f"{edge.sha}^:{edge.old}"],  # noqa: S607
++        ["git", "-c", "CORE.QUOTEPATH=FALSE", "show", f"{edge.sha}^:{edge.old}"],  # noqa: S607
+"""
+justification = """
+Section names and boolean values are case-insensitive in git config as
+well, so the fully uppercased spelling reads the same blob the same
+way. Pinned by the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/publish/redirects.py"
+symbol = "_route_slug"
+registered = "2026-09-06, PR #250, from run 34043053218"
+mutation = """
+-    folder, _, name = path.partition("/")
++    folder, _, name = path.rpartition("/")
+"""
+justification = """
+Pure Python case analysis over the guard chain. Exactly one slash:
+partition and rpartition split at the same (only) slash, so folder and
+name are identical. Two or more slashes: partition leaves a slash in
+`name` and the `"/" in name` guard refuses; rpartition puts the slash
+in `folder`, which is then not in _FOLDER_ROUTES and the route guard
+refuses — both return None. No slash: partition yields empty `name`
+(fails the .md check), rpartition yields empty `folder` (fails the
+route lookup) — both return None. Every input class returns the same
+value, so no test can distinguish the spellings.
+"""
