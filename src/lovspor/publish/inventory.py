@@ -243,6 +243,12 @@ def _check_provenance_shapes(doc_id: str, fields: dict[str, str]) -> None:
             f"document {doc_id} ref_id {fields['ref_id']!r} matches neither "
             f"attested shape (type/date or type/date-number)",
         )
+    try:
+        date.fromisoformat(fields["ref_id"].split("/")[1][:10])
+    except ValueError as error:
+        raise PublishError(
+            f"document {doc_id} ref_id {fields['ref_id']!r} names an impossible calendar date",
+        ) from error
     for key in ("date_in_force", "last_change_in_force"):
         if key in fields:
             try:

@@ -376,6 +376,18 @@ class TestBuildInventory:
         with pytest.raises(PublishError, match="different type"):
             build_inventory(manifest, {path: body}.get if doc_type == "lov" else (lambda _p: body))
 
+    @pytest.mark.parametrize(
+        "ref",
+        ["lov/2024-02-30-1", "lov/2024-13-01-1", "forskrift/2024-00-10-2"],
+    )
+    def test_ref_id_requires_a_real_calendar_date(self, ref: str) -> None:
+        body = BODY.replace('ref_id: "lov/2024-12-20-96"', f'ref_id: "{ref}"')
+        manifest = _manifest(
+            {"doc-1": _record(doc_type=ref.split("/", maxsplit=1)[0])},
+        )
+        with pytest.raises(PublishError, match="ref_id"):
+            build_inventory(manifest, lambda _path: body)
+
     def test_pre1850_ref_id_without_number_passes(self) -> None:
         body = BODY.replace(
             'ref_id: "lov/2024-12-20-96"',
