@@ -6,6 +6,7 @@ resolve HEAD itself, and refuse a non-corpus directory.
 """
 
 import json
+import subprocess
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -88,3 +89,50 @@ class TestPublishSiteCommand:
         )
 
         assert result.exit_code != 0
+
+    def test_publish_error_is_reported_without_erasing_last_good_site(
+        self,
+        corpus: tuple[Path, str],  # noqa: F811
+        tmp_path: Path,
+    ) -> None:
+        repo, _sha = corpus
+        out = tmp_path / "site"
+        previous_page = out / "lov" / "last-good" / "index.html"
+        previous_page.parent.mkdir(parents=True)
+        previous_page.write_text("last good build", encoding="utf-8")
+
+        manifest_path = repo / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["documents"]["doc-1"]["slug"] = "../outside"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "manifest.json"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-m",
+                "invalid corpus",
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+
+        result = runner.invoke(
+            app,
+            ["publish-site", "--corpus", str(repo), "--out", str(out)],
+        )
+
+        assert result.exit_code == 1
+        assert "publish refused:" in result.output
+        assert "canonical URL segment" in result.output
+        assert previous_page.read_text(encoding="utf-8") == "last good build"
