@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,39 @@ def corpus(tmp_path: Path) -> tuple[Path, str]:
         text=True,
     ).stdout.strip()
     return repo, sha
+
+
+def test_assumption_git_config_keys_are_case_insensitive(
+    corpus: tuple[Path, str],
+) -> None:
+    """Pins the git behaviour two equivalents entries argue from: config
+    section and key names are case-insensitive and boolean values case-fold,
+    so -c core.quotepath=false and -c CORE.QUOTEPATH=FALSE select the same
+    behaviour as core.quotePath=false. If git ever changed this, these
+    asserts go red instead of the register waiving a real quoting change."""
+    repo, sha = corpus
+    outputs = []
+    for spelling in ("core.quotePath=false", "core.quotepath=false", "CORE.QUOTEPATH=FALSE"):
+        result = subprocess.run(
+            ["git", "-c", spelling, "log", "--format=%H", "--name-only", sha],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        outputs.append(result.stdout)
+    assert outputs[0] == outputs[1] == outputs[2]
+    assert "vimpel-føring" in outputs[0]
+
+
+def test_assumption_fromisoformat_parses_gits_ci_format() -> None:
+    """Pins the stdlib behaviour the %cI equivalents entry argues from:
+    datetime.fromisoformat (3.11+) parses git's %ci spelling
+    ('YYYY-MM-DD HH:MM:SS +0000') and isoformat() normalises it to the
+    exact string %cI would have produced after the same round-trip."""
+    ci = datetime.fromisoformat("2026-02-01 00:00:00 +0000")
+    c_i = datetime.fromisoformat("2026-02-01T00:00:00+00:00")
+    assert ci.isoformat() == c_i.isoformat() == "2026-02-01T00:00:00+00:00"
 
 
 class TestEmitSite:
