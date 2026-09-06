@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from lovspor.publish.emit import emit_site
+from lovspor.publish.inventory import PublishError
 
 DOC = """---
 title: "Testloven"
@@ -272,6 +273,54 @@ class TestEmitSite:
         assert not stale.exists()
         assert (out / "lov/testloven/index.html").is_file()
 
+    def test_rebuild_preserves_assets_outside_generated_namespaces(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        asset = out / "assets" / "site.css"
+        asset.parent.mkdir(parents=True)
+        asset.write_text("body { color: black; }", encoding="utf-8")
+
+        emit_site(repo, sha, out)
+
+        assert asset.read_text(encoding="utf-8") == "body { color: black; }"
+
+    def test_invalid_snapshot_does_not_erase_the_last_good_build(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, good_sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, good_sha, out)
+        before = {
+            path.relative_to(out): path.read_bytes() for path in out.rglob("*") if path.is_file()
+        }
+
+        manifest = json.loads((repo / "manifest.json").read_text(encoding="utf-8"))
+        manifest["documents"]["doc-1"]["slug"] = "../outside"
+        (repo / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        _run_git(repo, "add", "manifest.json")
+        _run_git(repo, "commit", "-q", "-m", "invalid snapshot")
+        bad_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+        with pytest.raises(PublishError, match="canonical URL segment"):
+            emit_site(repo, bad_sha, out)
+
+        after = {
+            path.relative_to(out): path.read_bytes() for path in out.rglob("*") if path.is_file()
+        }
+        assert after == before
+
     def test_two_builds_are_byte_identical(
         self,
         corpus: tuple[Path, str],
@@ -317,3 +366,36 @@ class TestEmitSite:
         }
         assert dirty_files == clean_files
         assert b"UREGISTRERT ENDRING" not in b"".join(dirty_files.values())
+
+    def test_pinned_build_ignores_later_committed_changes(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, pinned_sha = corpus
+        (repo / "lover/testloven.md").write_text(
+            DOC.replace("Tekst to.", "SENERE COMMIT"),
+            encoding="utf-8",
+        )
+        _run_git(repo, "add", "lover/testloven.md")
+        _run_git(repo, "commit", "-q", "-m", "later corpus state")
+        later_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        out = tmp_path / "site"
+
+        emit_site(repo, pinned_sha, out)
+
+        html = (out / "lov/testloven/index.html").read_text(encoding="utf-8")
+        companion = json.loads(
+            (out / "lov/testloven/index.json").read_text(encoding="utf-8"),
+        )
+        manifest = json.loads((out / "site-manifest.json").read_text(encoding="utf-8"))
+        assert "Tekst to." in html
+        assert "SENERE COMMIT" not in html
+        assert companion["provenance"]["source_revision"] != later_sha
+        assert manifest["corpus_commit"] == pinned_sha
