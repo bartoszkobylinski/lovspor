@@ -252,6 +252,29 @@ class TestDocumentLineage:
         assert ("/lov/regel/", "/forskrift/regel/") in redirect_map.redirects
         assert "/lov/regel/" in redirect_map.gone
 
+    @pytest.mark.parametrize("unsafe_slug", ("ikke trygg", 'ikke"trygg', "ikke{trygg}", "ikke*"))
+    def test_an_unservable_historical_slug_emits_no_caddy_rule(
+        self,
+        tmp_path: Path,
+        unsafe_slug: str,
+    ) -> None:
+        repo = _repo(tmp_path)
+        old_path = f"lover/{unsafe_slug}.md"
+        (repo / old_path).write_text(_doc("G", "lov/2020-01-01-1", ("1",)))
+        _write_manifest(repo, {"doc-1": _record("lov", old_path, unsafe_slug)})
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "one", day=1)
+        _git(repo, "mv", old_path, "lover/trygg.md")
+        _write_manifest(repo, {"doc-1": _record("lov", "lover/trygg.md", "trygg")})
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "two", day=2)
+
+        redirect_map = _map_at_head(repo)
+
+        assert redirect_map.redirects == ()
+        assert redirect_map.gone == ()
+        assert unsafe_slug.encode() not in caddy_snippet(redirect_map)
+
 
 class TestArtifacts:
     MAP = RedirectMap(
