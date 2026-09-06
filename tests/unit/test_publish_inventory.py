@@ -439,10 +439,13 @@ class TestBuildInventory:
     def test_malformed_provenance_line_syntax_fails_closed(self, field: str) -> None:
         body = BODY.replace(
             'date_in_force: "2025-06-01"',
-            f"{field}: unquoted junk",
+            f"{field}: unquoted: junk",
         )
         manifest = _manifest({"doc-1": _record()})
-        with pytest.raises(PublishError, match=field):
+        with pytest.raises(
+            PublishError,
+            match=rf"front matter line for {field} is malformed",
+        ):
             build_inventory(manifest, lambda _path: body)
 
     @pytest.mark.parametrize("field", ["date_in_force", "last_change_in_force"])
