@@ -9,7 +9,11 @@ deterministic bytes.
 
 import json
 
-from lovspor.publish.companion import companion_json_bytes, document_companion
+from lovspor.publish.companion import (
+    companion_json_bytes,
+    document_companion,
+    provision_companion,
+)
 from lovspor.publish.inventory import DocumentPlan, ProvisionRef
 from lovspor.publish.pages import PageProvenance
 
@@ -76,6 +80,28 @@ class TestDocumentCompanion:
     def test_no_fabricated_source_url(self) -> None:
         doc = document_companion(_plan(), "Tekst.", PROVENANCE, "d" * 64)
         assert "url" not in doc["source"]
+
+
+class TestProvisionCompanion:
+    def test_identity_text_and_parent_match_the_provision_page(self) -> None:
+        plan = _plan()
+        provision = plan.provisions[0]
+
+        doc = provision_companion(
+            (plan, provision),
+            "### § 1. Formål\n\nTekst.",
+            PROVENANCE,
+            "e" * 64,
+        )
+
+        assert doc["canonical_id"] == "nl-20241220-096#paragraf-1"
+        assert doc["canonical_url"] == ("https://lovspor.no/lov/abortloven/paragraf/1/")
+        assert doc["type"] == "paragraf"
+        assert doc["heading_id"] == "1"
+        assert doc["title"] == "Formål"
+        assert doc["text"] == "### § 1. Formål\n\nTekst."
+        assert doc["links"] == {"parent": "https://lovspor.no/lov/abortloven/"}
+        assert doc["provenance"]["representation_hash"] == "e" * 64
 
 
 class TestSerialisation:

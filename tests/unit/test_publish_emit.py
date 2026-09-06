@@ -283,8 +283,37 @@ class TestEmitSite:
         emit_site(repo, sha, first)
         emit_site(repo, sha, second)
 
-        first_files = sorted(p.relative_to(first) for p in first.rglob("index.*"))
-        second_files = sorted(p.relative_to(second) for p in second.rglob("index.*"))
+        first_files = sorted(p.relative_to(first) for p in first.rglob("*") if p.is_file())
+        second_files = sorted(p.relative_to(second) for p in second.rglob("*") if p.is_file())
         assert first_files == second_files
         for rel in first_files:
             assert (first / rel).read_bytes() == (second / rel).read_bytes()
+
+    def test_pinned_build_ignores_working_tree_changes(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        clean = tmp_path / "clean"
+        dirty = tmp_path / "dirty"
+        emit_site(repo, sha, clean)
+
+        (repo / "lover/testloven.md").write_text(
+            DOC.replace("Tekst to.", "UREGISTRERT ENDRING"),
+            encoding="utf-8",
+        )
+        emit_site(repo, sha, dirty)
+
+        clean_files = {
+            path.relative_to(clean): path.read_bytes()
+            for path in clean.rglob("*")
+            if path.is_file()
+        }
+        dirty_files = {
+            path.relative_to(dirty): path.read_bytes()
+            for path in dirty.rglob("*")
+            if path.is_file()
+        }
+        assert dirty_files == clean_files
+        assert b"UREGISTRERT ENDRING" not in b"".join(dirty_files.values())
