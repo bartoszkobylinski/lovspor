@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+import lovspor.publish.emit as publish_emit
 from lovspor.publish.emit import _committer_time, _deep_url, _resolver, _source_revisions, emit_site
 from lovspor.publish.inventory import PublishError, PublishInventory, build_inventory
 from lovspor.snapshot import CorpusSnapshot
@@ -155,6 +156,43 @@ def corpus(tmp_path: Path) -> tuple[Path, str]:
 
 
 class TestEmitSite:
+    def test_empty_snapshot_body_is_emitted_as_empty_text(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        repo, sha = corpus
+        snapshot = CorpusSnapshot(repo, sha)
+        plan = build_inventory(snapshot.manifest, snapshot.read_text).documents[0]
+        emitted_html: list[str] = []
+
+        class EmptySnapshot:
+            @staticmethod
+            def read_text(_path: str) -> str:
+                return ""
+
+        monkeypatch.setattr(
+            publish_emit,
+            "document_page_html",
+            lambda _plan, lines, _provenance, _resolve: "\n".join(lines),
+        )
+        monkeypatch.setattr(
+            publish_emit,
+            "_write_page",
+            lambda _directory, html, _companion: emitted_html.append(html),
+        )
+        monkeypatch.setattr(publish_emit, "_emit_provisions", lambda *_args: None)
+
+        publish_emit._emit_document(
+            plan,
+            (EmptySnapshot(), {plan.markdown_path: sha}),  # type: ignore[arg-type]
+            tmp_path,
+            lambda _target: None,
+        )
+
+        assert emitted_html == [""]
+
     def test_emits_document_and_provision_pages_with_twins(
         self,
         corpus: tuple[Path, str],
@@ -301,6 +339,14 @@ class TestEmitSite:
         assert not stale_regulation.exists()
         assert stale_manifest.read_text(encoding="utf-8") != "gammel"
         assert (out / "lov/testloven/index.html").is_file()
+
+    def test_clear_previous_build_removes_site_manifest(self, tmp_path: Path) -> None:
+        manifest = tmp_path / "site-manifest.json"
+        manifest.write_text("stale", encoding="utf-8")
+
+        publish_emit._clear_previous_build(tmp_path)
+
+        assert not manifest.exists()
 
     def test_companions_preserve_exact_document_and_section_text(
         self, corpus: tuple[Path, str], tmp_path: Path

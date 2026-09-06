@@ -408,8 +408,10 @@ class TestBuildInventory:
                 ),
             },
         )
-        with pytest.raises(PublishError, match="identity error"):
+        with pytest.raises(PublishError, match="identity error") as exc_info:
             build_inventory(manifest, lambda _path: BODY)
+
+        assert "documents doc-1 and doc-2" in str(exc_info.value)
 
     def test_language_editions_may_share_a_ref_id(self) -> None:
         # The corpus's real shape: grunnloven exists as bokmål and nynorsk
