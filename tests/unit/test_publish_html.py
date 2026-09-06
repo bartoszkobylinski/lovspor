@@ -327,6 +327,22 @@ class TestSafety:
         assert "<a" not in html
         assert "klikk" in html
 
+    @pytest.mark.parametrize(
+        "resolved",
+        [
+            "/lov/nl-2/",
+            "/forskrift/forskrift-om-sassen-bünsow-land-nasjonalpark/",
+            "/forskrift/forskrift-2026/paragraf/20-7ca/",
+        ],
+    )
+    def test_each_canonical_href_shape_is_admitted(self, resolved: str) -> None:
+        html = render_body_html(
+            ["[klikk](lov/2024-12-20-96)"],
+            lambda _target: resolved,
+        )
+
+        assert html == f'<p><a href="{resolved}">klikk</a></p>'
+
     @pytest.mark.parametrize("resolved", ["", "lov/abortloven/", "./lov/abortloven/"])
     def test_non_root_relative_href_renders_as_text(self, resolved: str) -> None:
         html = render_body_html(
@@ -370,6 +386,8 @@ class TestSafety:
             "/lov/abortloven-/",
             "/lov/abort--loven/",
             "/lov/abortloven/paragraf/-3/",
+            "/lov/%2e%2e/admin/",
+            "/lov/abortloven%2f..%2fadmin/",
         ],
     )
     def test_noncanonical_href_is_refused(self, path: str) -> None:
