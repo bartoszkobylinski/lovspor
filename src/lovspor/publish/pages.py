@@ -75,7 +75,8 @@ def document_page_html(
         render_body_html(body_lines, resolve, frozenset(plan.duplicate_pids)),
         _provenance_html(plan, provenance),
     ]
-    return _layout(plan.language, title, document_url(plan), "\n".join(parts))
+    content = "\n".join(part for part in parts if part)
+    return _layout(plan.language, title, document_url(plan), content)
 
 
 def provision_page_html(
@@ -98,7 +99,7 @@ def provision_page_html(
         plan.language,
         f"{title} — {doc_title}",
         provision_url(plan, provision.pid),
-        "\n".join(parts),
+        "\n".join(part for part in parts if part),
     )
 
 
