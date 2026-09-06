@@ -947,3 +947,226 @@ Same whitelist-invariant argument as the quote=None entry: the
 canonical charset contains nothing html.escape would rewrite, so both
 flag values produce the identical href for every input the gate admits.
 """
+
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_section_spans"
+registered = "2026-09-06, PR #249"
+mutation = """
+-        end = next((b for b in boundaries if b > start), len(body_lines))
++        end = next((b for b in boundaries if b > start), None)
+"""
+justification = """
+The default fires only when no boundary follows the section start, and
+the value is used solely as a slice end: `body_lines[start:None]` and
+`body_lines[start:len(body_lines)]` are the same slice by Python's
+slicing semantics. Identical output for every input.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_layout"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    safe_title = html_escape.escape(title, quote=True)
++    safe_title = html_escape.escape(title, )
+"""
+justification = """
+html.escape defaults quote to True; dropping the explicit argument
+selects identical escaping. Pinned by the existing assumption test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_layout"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    canonical = html_escape.escape(f"{SITE_ORIGIN}{path}", quote=True)
++    canonical = html_escape.escape(f"{SITE_ORIGIN}{path}", )
+"""
+justification = """
+Same stdlib-default selection on the canonical URL; pinned by the same
+assumption test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_layout"
+registered = "2026-09-06, PR #249"
+mutation = """
+-        f'<html lang="{html_escape.escape(lang, quote=True)}">\\n'
++        f'<html lang="{html_escape.escape(lang, )}">\\n'
+"""
+justification = """
+Same stdlib-default selection on the lang attribute; pinned by the same
+assumption test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/publish/companion.py"
+symbol = "companion_json_bytes"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    return (json.dumps(envelope, sort_keys=True, ensure_ascii=False, indent=1) + "\\n").encode(
++    return (json.dumps(envelope, sort_keys=True, ensure_ascii=None, indent=1) + "\\n").encode(
+"""
+justification = """
+json.dumps tests ensure_ascii for truth and None is falsy — the
+register's oldest precedent (record_to_json_line), verified again here
+by the golden companion test carrying non-ASCII text through this call.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/companion.py"
+symbol = "companion_json_bytes"
+registered = "2026-09-06, PR #249"
+mutation = """
+-        "utf-8"
++        "UTF-8"
+"""
+justification = """
+Codec names are looked up case-insensitively through Python's codec
+registry (codecs.lookup normalisation) — the register's established
+encode/decode precedent; both spellings select the same encoder.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_emit_document"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    body = snapshot.read_text(plan.markdown_path) or ""
++    body = snapshot.read_text(plan.markdown_path) or "XXXX"
+"""
+justification = """
+The fallback is unreachable: build_inventory has already read this
+exact path through the same immutable CorpusSnapshot and failed the
+whole build if it was unreadable, and a snapshot's answer cannot change
+between the two reads (it reads the pinned commit's tree). A document
+that reaches _emit_document therefore always has a non-None body.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_write_page"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    html_bytes = html.encode("utf-8")
++    html_bytes = html.encode("UTF-8")
+"""
+justification = """
+Same codec-registry case-insensitivity as every encode/decode entry in
+this register: both spellings reach the same encoder and produce the
+same bytes, so the representation hash and the written file are
+identical.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_source_revisions"
+registered = "2026-09-06, PR #249"
+mutation = """
+-            "core.quotePath=false",
++            "core.quotepath=false",
+"""
+justification = """
+git config variable names are case-insensitive, so core.quotepath and
+core.quotePath select the same setting. This argues from git's
+behaviour, not Python's, so it is pinned by the assumption test below
+against a real repository with a non-ASCII path.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_source_revisions"
+registered = "2026-09-06, PR #249"
+mutation = """
+-            "core.quotePath=false",
++            "CORE.QUOTEPATH=FALSE",
+"""
+justification = """
+Section names and boolean values are case-insensitive in git config as
+well, so the fully uppercased spelling selects the same behaviour.
+Pinned by the same real-git assumption test.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_source_revisions"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    current = ""
++    current = None
+"""
+justification = """
+The initial value is dead: git log with --format=%x00%H emits the
+NUL-prefixed commit line before any file name, so `current` is
+reassigned before the first setdefault can read it. No line ever sees
+the initial value, whatever it is.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_source_revisions"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    current = ""
++    current = "XXXX"
+"""
+justification = """
+Same dead initial value as the None variant: the format string
+guarantees a commit line precedes every name line.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_clear_previous_build"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    manifest = out / "site-manifest.json"
++    manifest = out / "XXsite-manifest.jsonXX"
+"""
+justification = """
+The unlink is redundant with the same build's final step: emit_site
+unconditionally rewrites site-manifest.json at the same path after
+emitting the pages, so whether the stale file was removed first is
+unobservable in any completed build. The unlink exists only to avoid a
+stale manifest surviving a crash mid-build, which no deterministic test
+can exercise.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_clear_previous_build"
+registered = "2026-09-06, PR #249"
+mutation = """
+-    manifest = out / "site-manifest.json"
++    manifest = out / "SITE-MANIFEST.JSON"
+"""
+justification = """
+Same redundant-unlink argument as the XX-wrapped variant (with the
+aside that on a case-insensitive filesystem the mutated name even
+unlinks the real file — either way the final write settles the state).
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/emit.py"
+symbol = "_committer_time"
+registered = "2026-09-06, PR #249"
+mutation = """
+-        ["git", "show", "-s", "--format=%cI", sha],  # noqa: S607
++        ["git", "show", "-s", "--format=%ci", sha],  # noqa: S607
+"""
+justification = """
+The output is normalised through datetime.fromisoformat/isoformat
+before it is emitted, and fromisoformat (3.11+) parses git's %ci
+spelling to the same instant %cI names — after normalisation the two
+formats produce byte-identical strings. Pinned by the assumption test
+below, which round-trips both spellings.
+"""
+assumption_test = "tests/unit/test_publish_emit.py::test_assumption_fromisoformat_parses_gits_ci_format"

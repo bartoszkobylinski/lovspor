@@ -13,8 +13,8 @@ import pytest
 
 from lovspor.publish.inventory import (
     PublishError,
-    _body_lines,
     _front_matter_lines,
+    body_lines,
     build_inventory,
     normalise_pid,
 )
@@ -97,8 +97,16 @@ class TestBuildInventory:
                 "first": _record(slug="forste", markdown_path="lover/forste.md"),
             },
         )
+        second_body = BODY.replace(
+            'ref_id: "lov/2024-12-20-96"',
+            'ref_id: "lov/2021-01-01-2"',
+        )
+        reader = {
+            "lover/andre.md": second_body,
+            "lover/forste.md": BODY,
+        }.get
 
-        inventory = build_inventory(manifest, lambda _path: BODY)
+        inventory = build_inventory(manifest, reader)
 
         assert [plan.doc_id for plan in inventory.documents] == ["second", "first"]
 
@@ -251,10 +259,12 @@ class TestBuildInventory:
 
         plan = inventory.documents[0]
         assert plan.language == "nb"
+        assert plan.source_dataset == "gjeldende-lover"
         assert plan.ref_id == "lov/2024-12-20-96"
         assert plan.retrieved_at == "2026-07-30T18:17:57.344275+00:00"
         assert plan.date_in_force == "2025-06-01"
         assert plan.last_change_in_force is None
+        assert plan.renderer_version == 8
 
     def test_manifest_title_and_last_change_land_on_the_plan(self) -> None:
         body = BODY.replace(
@@ -387,6 +397,41 @@ class TestBuildInventory:
         )
         with pytest.raises(PublishError, match="ref_id"):
             build_inventory(manifest, lambda _path: body)
+
+    def test_duplicate_ref_id_same_language_fails_closed(self) -> None:
+        manifest = _manifest(
+            {
+                "doc-1": _record(),
+                "doc-2": _record(
+                    slug="abortloven-kopi",
+                    markdown_path="lover/abortloven-kopi.md",
+                ),
+            },
+        )
+        with pytest.raises(PublishError, match="identity error") as exc_info:
+            build_inventory(manifest, lambda _path: BODY)
+
+        assert "documents doc-1 and doc-2" in str(exc_info.value)
+
+    def test_language_editions_may_share_a_ref_id(self) -> None:
+        # The corpus's real shape: grunnloven exists as bokmål and nynorsk
+        # editions under one ref_id.
+        nn_body = BODY.replace('language: "nb"', 'language: "nn"')
+        manifest = _manifest(
+            {
+                "doc-1": _record(slug="grunnloven-bokmål-grl"),
+                "doc-2": _record(
+                    slug="grunnlova-nynorsk-grl",
+                    markdown_path="lover/grunnlova.md",
+                ),
+            },
+        )
+        reader = {
+            "lover/abortloven.md": BODY,
+            "lover/grunnlova.md": nn_body,
+        }.get
+        inventory = build_inventory(manifest, reader)
+        assert len(inventory.documents) == 2
 
     def test_pre1850_ref_id_without_number_passes(self) -> None:
         body = BODY.replace(
@@ -547,7 +592,7 @@ class TestFrontMatterBoundaries:
     def test_body_starts_immediately_after_closing_delimiter(self) -> None:
         source = '---\nlanguage: "nb"\n---\n### § 1. Første\nTekst.'
 
-        assert _body_lines(source) == ["### § 1. Første", "Tekst."]
+        assert body_lines(source) == ["### § 1. Første", "Tekst."]
 
     def test_front_matter_excludes_both_delimiters(self) -> None:
         source = '---\nlanguage: "nb"\nref_id: "lov/2024-12-20-96"\n---\nBody'
@@ -560,7 +605,7 @@ class TestFrontMatterBoundaries:
     def test_later_delimiter_without_opening_delimiter_is_body_content(self) -> None:
         source = "Innledning\n---\n### § 1. Første\nTekst."
 
-        assert _body_lines(source) == source.split("\n")
+        assert body_lines(source) == source.split("\n")
 
     def test_later_delimiter_without_opening_delimiter_is_not_front_matter(self) -> None:
         source = 'Innledning\n---\nlanguage: "nb"\n---\nBody'
