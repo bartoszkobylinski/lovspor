@@ -88,6 +88,31 @@ def test_trivial_variants_share_one_paid_embedding() -> None:
     assert len(embedder.calls) == 1
 
 
+@pytest.mark.parametrize(
+    ("first", "equivalent"),
+    [
+        # Fullwidth forms and a decomposed a-ring: what a copy-paste out of a PDF
+        # or a Japanese IME produces. RUF001 flags the fullwidth letters as
+        # ambiguous, which is exactly why they belong in a test about folding
+        # them — the rule cannot be auto-fixed away without deleting the subject.
+        ("lovens § 1", "ＬＯＶＥＮＳ § １"),  # noqa: RUF001
+        ("blåbær", "bla\u030abær"),
+    ],
+)
+def test_unicode_compatibility_variants_share_one_paid_embedding(
+    first: str, equivalent: str
+) -> None:
+    """NFKC-equivalent copy/paste forms are the same query, so they are one paid
+    embedding. Authored by the CI test author on PR #252."""
+    embedder = _CountingEmbedder()
+    subject = QueryEmbedder(embedder)
+
+    subject.encode(first)
+    subject.encode(equivalent)
+
+    assert len(embedder.calls) == 1
+
+
 def test_different_questions_never_collide() -> None:
     embedder = _CountingEmbedder()
     subject = QueryEmbedder(embedder)
@@ -112,6 +137,8 @@ def test_the_cache_is_bounded_and_evicts_the_coldest_entry() -> None:
     assert subject.cached_queries() == 2
     subject.encode("first")
     assert len(embedder.calls) == 3  # "first" survived; only three distinct paid
+    subject.encode("second")
+    assert len(embedder.calls) == 4  # "second" was the cold entry and was evicted
 
 
 def test_truncation_is_reported_on_a_cache_hit_too() -> None:

@@ -3508,7 +3508,7 @@ def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
 
 
 def _with_quota(
-    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer, *, paid: bool = False
+    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer, *, paid: bool
 ) -> Callable[..., Awaitable[Any]]:
     """Charge a tool call against its credential's limits before it runs.
 

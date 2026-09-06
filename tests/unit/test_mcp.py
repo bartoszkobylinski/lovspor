@@ -7405,7 +7405,7 @@ def test_quota_guard_holds_slot_before_thread_hop_under_concurrency(
         assert release.wait(timeout=5)
         return value
 
-    wrapped = _with_quota(_offload_to_thread(blocking_tool), enforcer)
+    wrapped = _with_quota(_offload_to_thread(blocking_tool), enforcer, paid=False)
 
     async def run() -> str:
         user = AuthenticatedUser(
