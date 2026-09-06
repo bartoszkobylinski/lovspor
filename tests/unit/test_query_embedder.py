@@ -7,9 +7,19 @@ the cache stops the same question being paid for twice.
 
 from __future__ import annotations
 
-import numpy as np
+from unittest.mock import patch
 
-from lovspor.embeddings.model import count_input_tokens, truncate_to_tokens
+import numpy as np
+import pytest
+
+from lovspor.embeddings import model as model_module
+from lovspor.embeddings.model import (
+    DEFAULT_MODEL_NAME,
+    OpenAIEmbedder,
+    _encoding_for,
+    count_input_tokens,
+    truncate_to_tokens,
+)
 from lovspor.embeddings.query import (
     DEFAULT_CACHE_ENTRIES,
     DEFAULT_MAX_QUERY_TOKENS,
@@ -131,3 +141,32 @@ def test_truncate_to_tokens_reports_whether_it_cut() -> None:
     cut_text, was_cut = truncate_to_tokens("ord " * 1000, 32)
     assert was_cut
     assert count_input_tokens(cut_text) <= 32
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "🇳🇴 norsk lov",  # flag: one codepoint pair, several tokens
+        "ååå 😀😀 spørsmål",
+        "日本語のテキスト",
+    ],
+)
+def test_truncation_never_leaves_half_a_character(query: str) -> None:
+    """A BPE token is a byte sequence, not a character, so a cut can land inside
+    a multi-byte one. Decoding that fragment normally yields U+FFFD — which would
+    put a character the user never wrote into the text that gets embedded and
+    billed. Found by the CI test author on this PR, not by review here."""
+    for max_tokens in range(1, 8):
+        text, _ = truncate_to_tokens(query, max_tokens)
+        assert "�" not in text
+        text.encode("utf-8")  # round-trips: the tail was dropped, not mangled
+
+
+def test_the_embedder_truncation_path_has_the_same_guarantee() -> None:
+    """The same defect lived in OpenAIEmbedder's own 8191-token cut, where it is
+    rarer but not less wrong: a section ending in an emoji would embed a
+    replacement character."""
+    embedder = OpenAIEmbedder.__new__(OpenAIEmbedder)
+    embedder._encoding = _encoding_for(DEFAULT_MODEL_NAME)
+    with patch.object(model_module, "_MAX_INPUT_TOKENS", 3):
+        assert "�" not in embedder._truncate_to_tokens("日本語のテキスト")

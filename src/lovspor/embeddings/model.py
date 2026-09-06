@@ -142,14 +142,19 @@ def truncate_to_tokens(
     query silently shortened is a different question from the one the user
     asked, and the answer has to say so.
 
-    Decoding a truncated token sequence yields valid UTF-8 because BPE tokens are
-    whole byte sequences.
+    A BPE token is a byte sequence, not a character, so a cut can land inside a
+    multi-byte character: truncating "🇳🇴 norsk" to one token leaves half a
+    codepoint. ``Encoding.decode`` renders that half as U+FFFD, which would put a
+    replacement character into the text that gets embedded and billed. Decoding
+    the bytes with ``errors="ignore"`` drops the incomplete tail instead — losing
+    a character the caller cannot see anyway is strictly better than inventing
+    one they never wrote. On a cut that lands cleanly this is a no-op.
     """
     encoding = _encoding_for(model_name)
     tokens = encoding.encode(text)
     if len(tokens) <= max_tokens:
         return text, False
-    return encoding.decode(tokens[:max_tokens]), True
+    return encoding.decode_bytes(tokens[:max_tokens]).decode("utf-8", errors="ignore"), True
 
 
 def count_input_tokens(
@@ -358,15 +363,19 @@ class OpenAIEmbedder:
     def _truncate_to_tokens(self, text: str) -> str:
         """Encode, truncate to ``_MAX_INPUT_TOKENS``, decode back.
 
-        Decoding a truncated token sequence yields valid UTF-8 text
-        because BPE tokens are full byte sequences. This is the
-        canonical approach OpenAI documents for handling the input
-        token limit.
+        A BPE token is a byte sequence, not a character, so the cut can land
+        inside a multi-byte one. ``decode`` would render the fragment as U+FFFD
+        and embed a replacement character that is not in the source; decoding the
+        bytes with ``errors="ignore"`` drops the incomplete tail instead. Same
+        correction as :func:`truncate_to_tokens`, which is where the defect was
+        found (Codex-authored test, PR #252).
         """
         tokens = self._encoding.encode(text)
         if len(tokens) <= _MAX_INPUT_TOKENS:
             return text
-        return self._encoding.decode(tokens[:_MAX_INPUT_TOKENS])
+        return self._encoding.decode_bytes(tokens[:_MAX_INPUT_TOKENS]).decode(
+            "utf-8", errors="ignore"
+        )
 
     def _encode_batch(self, client: httpx.Client, batch: list[str]) -> list[list[float]]:
         """Send a batch with retry on transient errors. Token truncation
