@@ -147,6 +147,58 @@ sudo systemctl restart lovspor-mcp
 sudo journalctl -u lovspor-mcp -n 40 --no-pager
 ```
 
+**Publish the corpus site** (ADR-0013) — build, validate, switch atomically:
+
+```bash
+sudo systemctl start lovspor-publish          # HEAD of the corpus clone
+sudo journalctl -u lovspor-publish -n 60 --no-pager
+```
+
+The unit runs `publish-release.sh`, which never writes into the tree Caddy is
+serving. A release is built off-path under `/var/www/lovspor-releases/<id>/`,
+populated with `rsync --checksum --link-dest=<live>` so unchanged pages become
+hard links that keep their old mtimes (Caddy's `ETag`/`Last-Modified` stay
+truthful per page), validated by `lovspor publish-check` and `caddy validate`,
+and only then made live by one rename of the `/var/www/lovspor-current` symlink
+followed by a Caddy reload for the release's 301/410 map. Any failure before the
+rename leaves the live release untouched; a reload failure after it puts the
+previous release back. `~4 min` to build ~93k pages, then rsync and a hash of
+every page.
+
+Rollback is the same rename in the other direction — one previous release is
+retained for exactly this:
+
+```bash
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --rollback
+```
+
+Publish a specific corpus commit, or see what is live:
+
+```bash
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --ref <sha>
+readlink -f /var/www/lovspor-current
+curl -fsS https://lovspor.no/lov/ | head -c 300
+```
+
+On a box provisioned before this existed, enable it once — `provision.sh` does
+this on a fresh box, but is not re-run on a live one:
+
+```bash
+sudo install -m644 /opt/lovspor/app/deploy/digitalocean/lovspor-publish.service /etc/systemd/system/
+sudo install -d -o lovspor -g lovspor -m 755 /var/www/lovspor-releases
+sudo install -m644 /opt/lovspor/app/deploy/digitalocean/Caddyfile /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+sudo systemctl daemon-reload
+```
+
+The new Caddyfile is safe to load before any release exists: the corpus paths
+answer 404 from an absent symlink until the first publish, and everything else
+(`/`, `/observatory`, `/mcp`) is unchanged.
+
+The unit `Conflicts=` with `lovspor-fetch-corpus.service`: a build must not read
+a clone mid-fetch. There is no timer yet — publishing is an operator command
+until the first releases have shown what a rebuild costs on this box.
+
 **Corpus refresh** is automatic — `lovspor-fetch-corpus.timer` runs daily at
 05:30 UTC and the running server picks up changes on the next query (no restart).
 Force one now: `sudo systemctl start lovspor-fetch-corpus`.

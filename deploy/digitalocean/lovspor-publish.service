@@ -1,0 +1,19 @@
+[Unit]
+Description=Publish the lovverk corpus as the ADR-0013 static site (build, validate, atomic switch)
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
+# The build reads the corpus clone; publishing a half-fetched clone would
+# validate fine and still be wrong, so never overlap the two.
+After=lovspor-fetch-corpus.service
+Conflicts=lovspor-fetch-corpus.service
+
+[Service]
+Type=oneshot
+# Root: the script reloads Caddy and owns the release symlink. The build itself
+# is run as the lovspor user inside the script.
+User=root
+ExecStart=/opt/lovspor/app/deploy/digitalocean/publish-release.sh
+# A full build is ~4 min for ~93k pages, then rsync and a hash of every page.
+# Bounded so a wedged build cannot hold the unit forever; generous so a slow
+# disk does not abort a good release mid-rsync (nothing public changes until
+# the very last step, so an abort here costs time, not correctness).
+TimeoutStartSec=1800

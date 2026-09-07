@@ -24,6 +24,7 @@ from lovspor.mcp import HttpConfig
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
 from lovspor.observatory.commands import observatory_app
+from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
@@ -183,6 +184,28 @@ def publish_site(
         typer.echo(f"publish refused: {error}", err=True)
         raise typer.Exit(code=1) from error
     typer.echo(f"site built from corpus commit {resolved[:12]} into {out}")
+
+
+@app.command(name="publish-check")
+def publish_check(
+    release: Annotated[
+        Path,
+        typer.Argument(help="A release tree as written by publish-site."),
+    ],
+) -> None:
+    """Refuse to serve a release tree that is not complete and self-consistent.
+
+    The gate the release script runs before the symlink moves (ADR-0013
+    Decision 8): manifest present and of this engine's schema, every page's
+    JSON twin hashing to its HTML, every sitemap URL and redirect target
+    served by a file in the tree. Exit 1 names the first offending path.
+    """
+    try:
+        report = check_release(release)
+    except PublishError as error:
+        typer.echo(f"release refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(report.summary())
 
 
 @app.command()

@@ -180,12 +180,15 @@ log "Installing systemd units and Caddyfile"
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-mcp.service" /etc/systemd/system/
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.service" /etc/systemd/system/
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.timer" /etc/systemd/system/
+install -m644 "$APP_DIR/deploy/digitalocean/lovspor-publish.service" /etc/systemd/system/
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
 # Every file under site/, not just the landing page. The crawler's User-Agent
 # advertises /observatory as its contact address, so a deploy that ships only
 # index.html leaves that promise pointing at a 404 on every site we visit.
 install -d /var/www/lovspor
+# ADR-0013 release trees; the build runs as the app user, Caddy only reads.
+install -d -o "$APP_USER" -g "$APP_USER" -m 755 /var/www/lovspor-releases
 while IFS= read -r -d "" page; do
 	rel="${page#"$APP_DIR/deploy/digitalocean/site/"}"
 	install -d "/var/www/lovspor/$(dirname "$rel")"

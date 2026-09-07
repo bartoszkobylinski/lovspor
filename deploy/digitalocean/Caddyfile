@@ -41,6 +41,23 @@
 		}
 	}
 
+	# The published corpus (ADR-0013) → the atomically-switched release symlink.
+	#
+	# Everything under these paths comes from ONE release tree, including the
+	# 301/410 map the generator emitted alongside the pages, so a request can
+	# never see pages from one build under redirects from another. The env
+	# placeholder exists so publish-release.sh can `caddy validate` the NEXT
+	# release's map before the symlink moves; at runtime it is unset and the
+	# default applies. A glob import matches nothing on a box that has not
+	# published yet, which is what lets provision.sh install this file before
+	# the first release exists.
+	@corpus path /lov /lov/* /forskrift /forskrift/* /sitemap.xml /sitemaps/* /robots.txt
+	handle @corpus {
+		import {$LOVSPOR_SITE_ROOT:/var/www/lovspor-current}/redirects*.caddy
+		root * {$LOVSPOR_SITE_ROOT:/var/www/lovspor-current}
+		file_server
+	}
+
 	# Everything else → the static landing page.
 	handle {
 		root * /var/www/lovspor
