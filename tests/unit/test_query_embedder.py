@@ -26,6 +26,7 @@ from lovspor.embeddings.query import (
     DEFAULT_CACHE_ENTRIES,
     DEFAULT_MAX_QUERY_TOKENS,
     QueryEmbedder,
+    _InFlight,
 )
 
 
@@ -60,6 +61,10 @@ class _BlockingEmbedder(_CountingEmbedder):
         self.started.set()
         assert self.release.wait(timeout=5), "test did not release the embedding call"
         return super().encode(texts)
+
+
+def test_a_new_in_flight_call_has_no_vector() -> None:
+    assert _InFlight().vector is None
 
 
 def test_a_short_query_is_passed_through_untouched() -> None:
@@ -114,6 +119,17 @@ def test_concurrent_duplicate_questions_are_embedded_once() -> None:
 
     assert len(embedder.calls) == 1
     assert np.array_equal(first_result[0], second_result[0])
+
+
+def test_the_leader_publishes_its_vector_to_waiters() -> None:
+    subject = QueryEmbedder(_CountingEmbedder())
+    flight = _InFlight()
+    subject._inflight["question"] = flight
+
+    vector = subject._lead("question", "question", flight)
+
+    assert flight.vector is vector
+    assert flight.done.is_set()
 
 
 def test_trivial_variants_share_one_paid_embedding() -> None:

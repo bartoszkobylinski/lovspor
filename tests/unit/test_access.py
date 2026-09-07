@@ -707,3 +707,10 @@ def test_an_unusable_setting_refuses_to_start(value: str) -> None:
     exists to prevent."""
     with pytest.raises(ConfigError):
         ServiceLimits.from_env({"LOVSPOR_SERVICE_DAILY_QUOTA": value})
+
+
+def test_a_non_positive_environment_setting_names_the_variable_and_floor() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        ServiceLimits.from_env({"LOVSPOR_SERVICE_DAILY_QUOTA": "0"})
+
+    assert str(excinfo.value) == ("LOVSPOR_SERVICE_DAILY_QUOTA must be at least 1, got '0'")

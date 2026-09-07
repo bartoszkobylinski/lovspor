@@ -1971,6 +1971,10 @@ def test_search_body_ignores_frontmatter_and_title_heading(tmp_path: Path) -> No
 # ---------- semantic_search ----------
 
 
+def test_semantic_search_default_limit_is_twenty() -> None:
+    assert inspect.signature(CorpusReader.semantic_search).parameters["limit"].default == 20
+
+
 def test_semantic_search_requires_embedder(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
 
@@ -2060,8 +2064,10 @@ def test_semantic_search_discloses_query_truncation(
     )
 
     assert embedder.queries != ["dette spørsmålet er langt"]
-    assert out["notice"] is not None
-    assert "Query truncated to the first 2 tokens" in out["notice"]
+    assert out["notice"] == (
+        "Query truncated to the first 2 tokens before matching; results reflect "
+        "that opening portion only."
+    )
 
 
 def test_semantic_search_excludes_a_removed_but_slugged_record(tmp_path: Path) -> None:
@@ -2130,6 +2136,32 @@ def test_semantic_search_all_hits_below_min_score_returns_explicit_notice(
     assert "0.25" in notice  # the default min_score
     assert "0.00" in notice  # best candidate score, so the AI can judge the miss
     assert "do not cite" in notice.lower()
+
+
+def test_semantic_search_handles_an_index_returning_no_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The empty-results contract also covers a loaded index whose top-k query
+    returns no candidates; absence of a best score must not become an exception."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
+
+    class _EmptyIndex:
+        unique_slugs = frozenset({"skatteloven"})
+
+        def __bool__(self) -> bool:
+            return True
+
+        def top_k(self, *args: object, **kwargs: object) -> list[object]:
+            return []
+
+    monkeypatch.setattr(reader, "_load_embedding_index", _EmptyIndex)
+
+    out = reader.semantic_search("noe helt annet")
+
+    assert out["results"] == []
+    assert out["notice"] is not None
+    assert "no candidates were scored" in out["notice"]
 
 
 def test_semantic_search_grounding_fields_are_null_for_stale_embedding(

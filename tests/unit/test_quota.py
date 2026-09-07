@@ -668,6 +668,49 @@ def test_a_call_in_flight_is_never_evicted(tmp_path: Path, clock: _Clock) -> Non
         assert enforcer.tracked_credentials() == 2
 
 
+def test_eviction_continues_past_an_in_flight_credential(tmp_path: Path, clock: _Clock) -> None:
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("active", "idle", "new"), Limits())
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=2,
+        eviction_idle_seconds=60.0,
+    )
+
+    with enforcer.guard("active"):
+        with enforcer.guard("idle"):
+            pass
+        clock.now = clock.now.replace(day=clock.now.day + 1)
+        clock.advance(120)
+        with enforcer.guard("new"):
+            pass
+        assert enforcer.tracked_credentials() == 2
+
+
+def test_eviction_continues_past_a_recent_credential(tmp_path: Path, clock: _Clock) -> None:
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("recent", "idle", "new"), Limits())
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=2,
+        eviction_idle_seconds=60.0,
+    )
+
+    _saturate(enforcer, ("recent", "idle"))
+    clock.now = clock.now.replace(day=clock.now.day + 1)
+    clock.advance(120)
+    with enforcer.guard("recent"):
+        pass
+    with enforcer.guard("new"):
+        pass
+
+    assert enforcer.tracked_credentials() == 2
+
+
 # --- the one tool that costs money ------------------------------------------
 
 
