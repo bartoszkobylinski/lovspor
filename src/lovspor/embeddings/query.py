@@ -42,6 +42,7 @@ import numpy as np
 
 from lovspor.access import int_setting_from_env
 from lovspor.embeddings.model import DEFAULT_MODEL_NAME, EmbeddingModel, truncate_to_tokens
+from lovspor.errors import NetworkError
 
 # A legal question is a sentence or two. Measured against the corpus's own
 # example queries this is far above what any of them need, and 31x below the
@@ -52,6 +53,16 @@ DEFAULT_MAX_QUERY_TOKENS = 256
 # Bounded so a stream of distinct queries cannot grow it without limit. 3072
 # float32 per entry is ~12 KB, so this is ~12 MB at capacity on a 2 GB box.
 DEFAULT_CACHE_ENTRIES = 1024
+
+_JOIN_TIMEOUT_SECONDS = 10.0
+"""How long a duplicate waits for the in-flight call before failing loudly.
+
+By construction the leader always wakes its waiters (``_lead``'s finally),
+so tripping this means a leadership defect, not a slow network — and a
+bounded loud failure is diagnosable where an unbounded silent wait is a
+hung request. 10s is far above any healthy embedding round-trip, and far
+below the CI mutation budget, which is what makes a leadership defect
+mutation-visible as a killed mutant instead of an uncreditable timeout."""
 
 
 class _InFlight:
@@ -123,7 +134,12 @@ class QueryEmbedder:
             if leads:
                 return self._lead(key, text, flight), truncated
             # Outside the lock: waiting must not serialize other keys' reads.
-            flight.done.wait()
+            if not flight.done.wait(_JOIN_TIMEOUT_SECONDS):
+                raise NetworkError(
+                    "query embedding join timed out: the in-flight call "
+                    "neither published nor failed within "
+                    f"{_JOIN_TIMEOUT_SECONDS:.0f}s",
+                )
             if flight.vector is not None:
                 return flight.vector, truncated
             # The leader's call failed; loop and claim leadership ourselves.

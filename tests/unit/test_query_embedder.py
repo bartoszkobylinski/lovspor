@@ -329,3 +329,17 @@ def test_a_finished_flight_without_a_vector_is_a_retry_not_a_result(
     assert len(embedder.calls) == 1
     assert vector.shape == (4,)
     assert not truncated
+
+
+def test_the_first_claim_leads_and_the_second_joins() -> None:
+    """Exactly one caller per key leads the paid call; everyone after joins
+    the same flight until it resolves. This is the invariant the bounded
+    join timeout turns into a loud failure when broken."""
+    subject = QueryEmbedder(_CountingEmbedder())
+    cached, flight, leads = subject._claim("nøkkel")
+    assert cached is None
+    assert leads is True
+    cached2, flight2, leads2 = subject._claim("nøkkel")
+    assert cached2 is None
+    assert leads2 is False
+    assert flight2 is flight
