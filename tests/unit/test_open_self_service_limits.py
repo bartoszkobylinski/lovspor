@@ -669,9 +669,9 @@ def test_only_semantic_search_is_registered_as_a_paid_tool(
     seen: dict[str, bool] = {}
     original = mcp_module._with_quota
 
-    def _recording(fn, enforcer, *, paid):  # type: ignore[no-untyped-def]
+    def _recording(fn, enforcer, *, paid, paid_when=None):  # type: ignore[no-untyped-def]
         seen[fn.__name__] = paid
-        return original(fn, enforcer, paid=paid)
+        return original(fn, enforcer, paid=paid, paid_when=paid_when)
 
     monkeypatch.setattr(mcp_module, "_with_quota", _recording)
     _seed_corpus(tmp_path)
