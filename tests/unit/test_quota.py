@@ -730,6 +730,32 @@ def test_instance_paid_ceiling_bounds_the_embedding_bill(tmp_path: Path, clock: 
     assert enforcer.service_paid_daily_used() == 1
 
 
+def test_paid_quotas_reset_at_the_utc_day_boundary(tmp_path: Path, clock: _Clock) -> None:
+    """Both new spend counters are daily limits, so yesterday's semantic
+    search must not consume either today's user allowance or today's shared
+    service allowance."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits(daily_quota=10, paid_daily_quota=1))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=10, paid_daily_quota=1),
+    )
+
+    with enforcer.guard("a", paid=True):
+        pass
+    with pytest.raises(QuotaExceededError), enforcer.guard("a", paid=True):
+        pass  # pragma: no cover - guard raises before the body
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+
+    with enforcer.guard("a", paid=True):
+        pass
+    assert enforcer.paid_daily_used("a") == 1
+    assert enforcer.service_paid_daily_used() == 1
+
+
 def test_eviction_never_forgives_a_paid_quota_spent_today(tmp_path: Path, clock: _Clock) -> None:
     """A credential that spent only paid calls has daily.used > 0 too, but the
     check is written against both counters so the invariant cannot be broken by
