@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from lovspor.embeddings import model as model_module
+from lovspor.embeddings import query as query_module
 from lovspor.embeddings.model import (
     DEFAULT_MODEL_NAME,
     OpenAIEmbedder,
@@ -28,6 +29,7 @@ from lovspor.embeddings.query import (
     QueryEmbedder,
     _InFlight,
 )
+from lovspor.errors import NetworkError
 
 
 class _CountingEmbedder:
@@ -343,3 +345,18 @@ def test_the_first_claim_leads_and_the_second_joins() -> None:
     assert cached2 is None
     assert leads2 is False
     assert flight2 is flight
+
+
+def test_an_unresolved_join_fails_loudly_after_the_bounded_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    subject = QueryEmbedder(_CountingEmbedder())
+    flight = _InFlight()
+    subject._inflight["question"] = flight
+    monkeypatch.setattr(query_module, "_JOIN_TIMEOUT_SECONDS", 0.0)
+
+    with pytest.raises(
+        NetworkError,
+        match=r"query embedding join timed out:.*within 0s",
+    ):
+        subject.encode("question")
