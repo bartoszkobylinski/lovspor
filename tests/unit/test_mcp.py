@@ -1975,6 +1975,35 @@ def test_semantic_search_default_limit_is_twenty() -> None:
     assert inspect.signature(CorpusReader.semantic_search).parameters["limit"].default == 20
 
 
+def test_semantic_search_passes_the_default_limit_to_the_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Omitting ``limit`` must bound the actual search to twenty candidates."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0]))
+
+    class _RecordingIndex:
+        unique_slugs = frozenset({"x"})
+
+        def __bool__(self) -> bool:
+            return True
+
+        def top_k(
+            self,
+            vector: object,
+            *,
+            k: int,
+            allowed_slugs: object,
+        ) -> list[object]:
+            del vector, allowed_slugs
+            assert k == 20
+            return []
+
+    monkeypatch.setattr(reader, "_load_embedding_index", _RecordingIndex)
+
+    assert reader.semantic_search("query")["results"] == []
+
+
 def test_semantic_search_requires_embedder(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="x", title="X")})
 

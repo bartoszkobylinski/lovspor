@@ -101,6 +101,17 @@ def test_the_same_question_is_embedded_once() -> None:
     assert np.array_equal(first, second)
 
 
+def test_a_cache_hit_does_not_claim_single_flight_leadership() -> None:
+    """A populated cache entry is a completed result, never a new paid call."""
+    subject = QueryEmbedder(_CountingEmbedder())
+    subject.encode("question")
+
+    cached, _, leads = subject._claim("question")
+
+    assert cached is not None
+    assert not leads
+
+
 def test_concurrent_duplicate_questions_are_embedded_once() -> None:
     """The cache is a spend control, so overlapping duplicates must not both
     reach the paid provider before either has populated the cache."""
