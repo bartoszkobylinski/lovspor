@@ -7387,6 +7387,31 @@ def test_semantic_search_zero_limit_noop_does_not_consume_paid_quota(
     assert embedder.queries == []
 
 
+def test_cached_semantic_search_does_not_consume_paid_quota_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The query cache is a spend control: once a query vector is cached, an
+    identical search does not reach the paid provider and must not consume
+    the caller's final paid allowance a second time. Exercised through the
+    real registration wiring — the paid decision is the reader's
+    ``semantic_search_will_spend``, which peeks the cache."""
+    creds = _quota_corpus(
+        tmp_path,
+        Limits(daily_quota=10, paid_daily_quota=1, max_in_flight=9, rate_burst=9),
+    )
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("1", [10, 0])])
+    embedder = _FakeEmbedder([1.0, 0.0])
+    monkeypatch.setattr(mcp_module, "_build_embedder", lambda: embedder)
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    first = _authed_call(server, "beta-001", "semantic_search", {"query": "skatt"})
+    second = _authed_call(server, "beta-001", "semantic_search", {"query": "skatt"})
+
+    assert embedder.queries == ["skatt"]
+    assert first == second
+    assert first["results"]
+
+
 def test_metering_is_per_credential_not_global(tmp_path: Path) -> None:
     """One tester burning their quota must not brake everyone else."""
     _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
@@ -8196,3 +8221,17 @@ def test_semantic_search_fails_loudly_on_an_unsupported_future_version(
 
     with pytest.raises(UnsupportedSidecarVersionError, match="version 3"):
         CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0])).semantic_search("query")
+
+
+def test_the_will_spend_predicate_consults_the_cache(tmp_path: Path) -> None:
+    """True only for a call that will actually reach the provider: real
+    query, no cached vector, an embedder present."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    _write_embedding_file(tmp_path, "lover", "skatteloven", [("1", [10, 0])])
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0]))
+    assert reader.semantic_search_will_spend(query="skatt") is True
+    assert reader.semantic_search_will_spend(query="   ") is False
+    assert reader.semantic_search_will_spend(query="skatt", limit=0) is False
+    reader.semantic_search("skatt")
+    assert reader.semantic_search_will_spend(query="skatt") is False
+    assert CorpusReader(tmp_path).semantic_search_will_spend(query="skatt") is False

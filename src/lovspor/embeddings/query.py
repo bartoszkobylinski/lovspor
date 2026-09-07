@@ -179,6 +179,17 @@ class QueryEmbedder:
                 self._inflight.pop(key, None)
             flight.done.set()
 
+    def knows(self, query: str) -> bool:
+        """Whether this exact question is already answered in cache.
+
+        A read-only peek for the paid meter: no recency refresh (metering
+        must not perturb the LRU), no provider call, no truncation notice.
+        """
+        text, _ = truncate_to_tokens(query, self._max_tokens, self._model_name)
+        key = self._key(text)
+        with self._lock:
+            return key in self._cache
+
     @property
     def max_tokens(self) -> int:
         return self._max_tokens

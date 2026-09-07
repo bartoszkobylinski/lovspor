@@ -1303,6 +1303,26 @@ class CorpusReader:
         results.sort(key=lambda hit: hit["slug"] or "")
         return results
 
+    def semantic_search_will_spend(
+        self,
+        query: str = "",
+        limit: int = 20,
+        **_: object,
+    ) -> bool:
+        """Whether a semantic_search with these arguments will reach the
+        paid provider: not an argument-decidable no-op, not served by the
+        query-vector cache, and an embedder actually configured (without
+        one the tool raises before any spend). One conservative edge: two
+        concurrent identical cache misses both answer True while
+        single-flight places one provider call — the meter may overcount a
+        burst by one, never undercount a spend.
+        """
+        if not _semantic_search_spends(query=query, limit=limit):
+            return False
+        if self._query_embedder is None:
+            return False
+        return not self._query_embedder.knows(query)
+
     def semantic_search(
         self,
         query: str,
@@ -4637,7 +4657,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
             else reader.search_body(query, dataset=dataset, limit=limit)
         )
 
-    @_tool(paid=True, paid_when=_semantic_search_spends)
+    @_tool(paid=True, paid_when=reader.semantic_search_will_spend)
     def semantic_search(
         query: str,
         dataset: str | None = None,

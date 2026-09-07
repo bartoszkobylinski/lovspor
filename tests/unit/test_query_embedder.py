@@ -403,3 +403,28 @@ def test_a_silent_flight_trips_the_bounded_join(
         "query embedding join timed out: the in-flight call neither published nor failed within 0s"
     )
     assert embedder.calls == []
+
+
+def test_knows_is_a_side_effect_free_peek() -> None:
+    """The paid meter's peek: answers from the cache alone, pays nothing,
+    and shares the normalised key with encode."""
+    embedder = _CountingEmbedder()
+    subject = QueryEmbedder(embedder)
+    assert subject.knows("skatt") is False
+    assert embedder.calls == []
+    subject.encode("skatt")
+    assert subject.knows("skatt") is True
+    assert subject.knows("  SKATT  ") is True
+    assert len(embedder.calls) == 1
+
+
+def test_knows_does_not_refresh_recency() -> None:
+    """A metering peek must not perturb eviction: peeking the oldest entry
+    does not save it from the LRU."""
+    subject = QueryEmbedder(_CountingEmbedder(), cache_entries=2)
+    subject.encode("a")
+    subject.encode("b")
+    assert subject.knows("a") is True
+    subject.encode("c")
+    assert subject.knows("a") is False
+    assert subject.knows("b") is True
