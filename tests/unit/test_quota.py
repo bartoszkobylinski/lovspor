@@ -539,6 +539,31 @@ def test_service_daily_ceiling_refuses_a_user_still_inside_their_own_quota(
     assert enforcer.daily_used("a") == 1  # own quota untouched by the refusal
 
 
+def test_service_daily_ceiling_resets_at_the_utc_day_boundary(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """Yesterday's aggregate traffic must not permanently close the service."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=1),
+    )
+
+    with enforcer.guard("a"):
+        pass
+    with pytest.raises(QuotaExceededError, match="across all users"), enforcer.guard("b"):
+        pass  # pragma: no cover - guard raises before the body
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+
+    with enforcer.guard("b"):
+        pass
+    assert enforcer.service_daily_used() == 1
+
+
 def test_service_in_flight_ceiling_counts_across_different_users(
     tmp_path: Path, clock: _Clock
 ) -> None:
