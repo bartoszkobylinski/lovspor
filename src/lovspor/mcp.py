@@ -259,6 +259,20 @@ clamped (not rejected), so one call cannot amplify into a corpus-wide scan
 or return; the per-tool default stays 20."""
 
 
+def _semantic_search_spends(query: str = "", limit: int = 20, **_: object) -> bool:
+    """Whether a semantic_search call will actually reach the paid provider.
+
+    The paid counter tracks provider spend, not requests: the two no-ops the
+    tool documents (empty query, zero limit) return before any embedding call
+    and must not exhaust the caller's next real search. Only argument-decidable
+    no-ops are exempt — a dataset filter that matches nothing also skips the
+    provider, but deciding that requires reading the index, which the meter
+    must not do; such calls still charge. The free counter always charges:
+    a no-op is still a request the server had to serve.
+    """
+    return bool(query.strip()) and _bounded_limit(limit) != 0
+
+
 def _bounded_limit(limit: int) -> int:
     """Validate and clamp a tool's ``limit``.
 
@@ -3508,7 +3522,11 @@ def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
 
 
 def _with_quota(
-    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer, *, paid: bool
+    fn: Callable[..., Awaitable[Any]],
+    enforcer: QuotaEnforcer,
+    *,
+    paid: bool,
+    paid_when: Callable[..., bool] | None = None,
 ) -> Callable[..., Awaitable[Any]]:
     """Charge a tool call against its credential's limits before it runs.
 
@@ -3527,7 +3545,8 @@ def _with_quota(
             # it ever is: an unidentified caller cannot be metered, so refuse
             # rather than serve one client's quota to everybody.
             raise QuotaExceededError("request carries no identified credential", 1)
-        with enforcer.guard(token.client_id, paid=paid):
+        charge_paid = paid and (paid_when is None or paid_when(**kwargs))
+        with enforcer.guard(token.client_id, paid=charge_paid):
             return await fn(**kwargs)
 
     return wrapper
@@ -4138,7 +4157,11 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     # serve_http already refuses that combination unless it was asked for.
     enforcer = _build_enforcer(bind, metering)
 
-    def _tool(*, paid: bool = False) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def _tool(
+        *,
+        paid: bool = False,
+        paid_when: Callable[..., bool] | None = None,
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a tool, offloading its blocking body to a worker thread
         in hosted mode (see ``_offload_to_thread``) and metering it against the
         caller's credential (see ``_with_quota``). stdio keeps the direct sync
@@ -4156,7 +4179,11 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
                 mcp.add_tool(fn)
                 return fn
             hosted = _offload_to_thread(fn)
-            mcp.add_tool(hosted if enforcer is None else _with_quota(hosted, enforcer, paid=paid))
+            mcp.add_tool(
+                hosted
+                if enforcer is None
+                else _with_quota(hosted, enforcer, paid=paid, paid_when=paid_when)
+            )
             return fn
 
         return decorator
@@ -4610,7 +4637,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
             else reader.search_body(query, dataset=dataset, limit=limit)
         )
 
-    @_tool(paid=True)
+    @_tool(paid=True, paid_when=_semantic_search_spends)
     def semantic_search(
         query: str,
         dataset: str | None = None,

@@ -7304,10 +7304,14 @@ def test_only_semantic_search_is_marked_as_a_paid_tool(
     real_with_quota = mcp_module._with_quota
 
     def recording_with_quota(
-        fn: Callable[..., object], enforcer: QuotaEnforcer, *, paid: bool = False
+        fn: Callable[..., object],
+        enforcer: QuotaEnforcer,
+        *,
+        paid: bool = False,
+        paid_when: Callable[..., bool] | None = None,
     ) -> Callable[..., object]:
         registrations.append((fn.__name__, paid))
-        return real_with_quota(fn, enforcer, paid=paid)
+        return real_with_quota(fn, enforcer, paid=paid, paid_when=paid_when)
 
     monkeypatch.setattr(mcp_module, "_with_quota", recording_with_quota)
     build_server(tmp_path, http=HttpConfig(credentials_path=creds))
@@ -7315,6 +7319,61 @@ def test_only_semantic_search_is_marked_as_a_paid_tool(
     paid_tools = {name for name, paid in registrations if paid}
     assert paid_tools == {"semantic_search"}
     assert all(not paid for name, paid in registrations if name == "get_law")
+
+
+def test_semantic_search_noop_does_not_consume_paid_quota(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The paid counter tracks provider spend, not calls that return before
+    embedding. An empty query is explicitly a no-op and must not exhaust the
+    caller's next real semantic search before any provider request is made."""
+    creds = _quota_corpus(
+        tmp_path,
+        Limits(daily_quota=10, paid_daily_quota=1, max_in_flight=9, rate_burst=9),
+    )
+    embedder = _FakeEmbedder([1.0, 0.0])
+    monkeypatch.setattr(mcp_module, "_build_embedder", lambda: embedder)
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    first = _authed_call(server, "beta-001", "semantic_search", {"query": ""})
+    second = _authed_call(server, "beta-001", "semantic_search", {"query": ""})
+
+    assert (
+        first
+        == second
+        == {
+            "results": [],
+            "notice": "query is empty; nothing was searched.",
+        }
+    )
+    assert embedder.queries == []
+
+
+def test_semantic_search_zero_limit_noop_does_not_consume_paid_quota(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The zero-limit no-op is the empty-query rule's twin: both return
+    before any provider request, so neither may spend the paid counter."""
+    creds = _quota_corpus(
+        tmp_path,
+        Limits(daily_quota=10, paid_daily_quota=1, max_in_flight=9, rate_burst=9),
+    )
+    embedder = _FakeEmbedder([1.0, 0.0])
+    monkeypatch.setattr(mcp_module, "_build_embedder", lambda: embedder)
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    first = _authed_call(server, "beta-001", "semantic_search", {"query": "husleie", "limit": 0})
+    second = _authed_call(server, "beta-001", "semantic_search", {"query": "husleie", "limit": 0})
+
+    assert (
+        first
+        == second
+        == {
+            "results": [],
+            "notice": "limit is 0; nothing was searched.",
+        }
+    )
+    assert embedder.queries == []
 
 
 def test_metering_is_per_credential_not_global(tmp_path: Path) -> None:
