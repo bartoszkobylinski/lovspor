@@ -7,6 +7,8 @@ the cache stops the same question being paid for twice.
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
 import numpy as np
@@ -43,6 +45,23 @@ class _CountingEmbedder:
         return self._dim
 
 
+class _BlockingEmbedder(_CountingEmbedder):
+    """Keep the first request in flight while a duplicate enters the cache."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.duplicate_started = threading.Event()
+        self.release = threading.Event()
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        if self.started.is_set():
+            self.duplicate_started.set()
+        self.started.set()
+        assert self.release.wait(timeout=5), "test did not release the embedding call"
+        return super().encode(texts)
+
+
 def test_a_short_query_is_passed_through_untouched() -> None:
     embedder = _CountingEmbedder()
     query = "hvilke rettigheter har jeg som leietaker"
@@ -75,6 +94,26 @@ def test_the_same_question_is_embedded_once() -> None:
 
     assert len(embedder.calls) == 1
     assert np.array_equal(first, second)
+
+
+def test_concurrent_duplicate_questions_are_embedded_once() -> None:
+    """The cache is a spend control, so overlapping duplicates must not both
+    reach the paid provider before either has populated the cache."""
+    embedder = _BlockingEmbedder()
+    subject = QueryEmbedder(embedder)
+    query = "når trådte husleieloven i kraft"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(subject.encode, query)
+        assert embedder.started.wait(timeout=5), "first embedding call did not start"
+        second = pool.submit(subject.encode, query)
+        embedder.duplicate_started.wait(timeout=1)
+        embedder.release.set()
+        first_result = first.result(timeout=5)
+        second_result = second.result(timeout=5)
+
+    assert len(embedder.calls) == 1
+    assert np.array_equal(first_result[0], second_result[0])
 
 
 def test_trivial_variants_share_one_paid_embedding() -> None:
@@ -197,3 +236,42 @@ def test_the_embedder_truncation_path_has_the_same_guarantee() -> None:
     embedder._encoding = _encoding_for(DEFAULT_MODEL_NAME)
     with patch.object(model_module, "_MAX_INPUT_TOKENS", 3):
         assert "�" not in embedder._truncate_to_tokens("日本語のテキスト")
+
+
+class _FailOnceEmbedder(_CountingEmbedder):
+    """First call blocks then fails; every later call succeeds."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self._failed = False
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        if not self._failed:
+            self._failed = True
+            self.started.set()
+            assert self.release.wait(timeout=5), "test did not release the failing call"
+            raise RuntimeError("provider down")
+        return super().encode(texts)
+
+
+def test_a_waiting_duplicate_retries_when_the_leading_call_fails() -> None:
+    """An error is not a vector: it must not be cached, must not strand the
+    waiting duplicate, and the retry pays exactly once."""
+    embedder = _FailOnceEmbedder()
+    subject = QueryEmbedder(embedder)
+    query = "når trådte husleieloven i kraft"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(subject.encode, query)
+        assert embedder.started.wait(timeout=5), "leading call did not start"
+        second = pool.submit(subject.encode, query)
+        embedder.release.set()
+        with pytest.raises(RuntimeError, match="provider down"):
+            first.result(timeout=5)
+        vector, truncated = second.result(timeout=5)
+
+    assert len(embedder.calls) == 1
+    assert not truncated
+    assert vector.shape == (4,)

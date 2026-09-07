@@ -23,6 +23,13 @@ the answer.
 
 The cache is per process and in memory, like the quota counters: a restart
 forgets it, which costs one re-embed per distinct query and nothing else.
+
+Duplicates that overlap in time are single-flighted: the cache is a spend
+control, so a second asking of a question whose vector is already being paid
+for must wait for that call, not place a second one. The first caller leads
+and pays; the duplicates get the same vector the moment it lands. If the
+leader's call fails, a waiter retries as the new leader — an error must not
+poison the key or leave anyone hanging.
 """
 
 from __future__ import annotations
@@ -47,8 +54,20 @@ DEFAULT_MAX_QUERY_TOKENS = 256
 DEFAULT_CACHE_ENTRIES = 1024
 
 
+class _InFlight:
+    """One paid call in progress: waiters block on ``done``; ``vector`` is
+    set before ``done`` fires, and stays ``None`` when the call failed."""
+
+    __slots__ = ("done", "vector")
+
+    def __init__(self) -> None:
+        self.done = threading.Event()
+        self.vector: np.ndarray | None = None
+
+
 class QueryEmbedder:
-    """Embed one search query: capped, cached, and honest about the cap."""
+    """Embed one search query: capped, cached, single-flighted, and honest
+    about the cap."""
 
     def __init__(
         self,
@@ -63,6 +82,7 @@ class QueryEmbedder:
         self._cache_entries = cache_entries
         self._model_name = model_name
         self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._inflight: dict[str, _InFlight] = {}
         self._lock = threading.Lock()
 
     @classmethod
@@ -96,22 +116,52 @@ class QueryEmbedder:
         """
         text, truncated = truncate_to_tokens(query, self._max_tokens, self._model_name)
         key = self._key(text)
+        while True:
+            cached, flight, leads = self._claim(key)
+            if cached is not None:
+                return cached, truncated
+            if leads:
+                return self._lead(key, text, flight), truncated
+            # Outside the lock: waiting must not serialize other keys' reads.
+            flight.done.wait()
+            if flight.vector is not None:
+                return flight.vector, truncated
+            # The leader's call failed; loop and claim leadership ourselves.
+
+    def _claim(self, key: str) -> tuple[np.ndarray | None, _InFlight, bool]:
+        """Cache hit, join the in-flight call, or lead one — one lock."""
         with self._lock:
             cached = self._cache.get(key)
             if cached is not None:
                 # Refresh recency inside the same lock: a hit that did not move
                 # the entry would let the hottest query age out.
                 self._cache.move_to_end(key)
-                return cached, truncated
-        # Outside the lock: the network call must not serialize every other
-        # caller's cache read behind one slow round-trip.
-        vector = self._embedder.encode([text])[0]
-        with self._lock:
-            self._cache[key] = vector
-            self._cache.move_to_end(key)
-            while len(self._cache) > self._cache_entries:
-                self._cache.popitem(last=False)
-        return vector, truncated
+                return cached, _InFlight(), False
+            flight = self._inflight.get(key)
+            if flight is not None:
+                return None, flight, False
+            flight = _InFlight()
+            self._inflight[key] = flight
+            return None, flight, True
+
+    def _lead(self, key: str, text: str, flight: _InFlight) -> np.ndarray:
+        """Place the one paid call and publish it to cache and waiters."""
+        try:
+            vector: np.ndarray = self._embedder.encode([text])[0]
+            with self._lock:
+                self._cache[key] = vector
+                self._cache.move_to_end(key)
+                while len(self._cache) > self._cache_entries:
+                    self._cache.popitem(last=False)
+            flight.vector = vector
+            return vector
+        finally:
+            # Success or failure, the key must leave the in-flight map and the
+            # waiters must wake: vector stays None on failure, which tells
+            # them to retry rather than hang or cache an error.
+            with self._lock:
+                self._inflight.pop(key, None)
+            flight.done.set()
 
     @property
     def max_tokens(self) -> int:
