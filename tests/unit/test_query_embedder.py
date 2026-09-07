@@ -302,3 +302,30 @@ def test_a_waiting_duplicate_retries_when_the_leading_call_fails() -> None:
     assert len(embedder.calls) == 1
     assert not truncated
     assert vector.shape == (4,)
+
+
+def test_a_finished_flight_without_a_vector_is_a_retry_not_a_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A flight that ended with no vector is a failed call, and joining it
+    late must mean retrying — never handing the caller the nothing."""
+    embedder = _CountingEmbedder()
+    subject = QueryEmbedder(embedder)
+    failed_flight = _InFlight()
+    failed_flight.done.set()
+
+    real_claim = subject._claim
+    handed_out = []
+
+    def fake_claim(key: str) -> object:
+        if not handed_out:
+            handed_out.append(key)
+            return None, failed_flight, False
+        return real_claim(key)
+
+    monkeypatch.setattr(subject, "_claim", fake_claim)
+    vector, truncated = subject.encode("når trådte husleieloven i kraft")
+
+    assert len(embedder.calls) == 1
+    assert vector.shape == (4,)
+    assert not truncated
