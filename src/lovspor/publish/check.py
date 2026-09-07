@@ -161,13 +161,38 @@ def _check_twin(root: Path, page: Path) -> None:
 
 
 def _path_for(url: str) -> str | None:
-    """Map a canonical URL to the file that serves it, or ``None`` if foreign."""
+    """Map a canonical URL to the tree-relative file that serves it, or ``None``
+    if the URL is foreign."""
     if not url.startswith(SITE_ORIGIN + "/"):
         return None
-    path = url[len(SITE_ORIGIN) :]
-    if path.endswith("/"):
-        return path.lstrip("/") + "index.html"
-    return path.lstrip("/")
+    return _relative_file(url[len(SITE_ORIGIN) :])
+
+
+def _relative_file(site_path: str) -> str:
+    """The file Caddy would serve for a site-relative path."""
+    if site_path.endswith("/"):
+        return site_path.lstrip("/") + "index.html"
+    return site_path.lstrip("/")
+
+
+def _served_file(root: Path, relative: str | None) -> Path | None:
+    """The file inside ``root`` that ``relative`` names, or ``None`` when it does
+    not exist *within the tree*.
+
+    A path that resolves outside the release — ``/../outside/`` — is refused
+    even when something exists there. The sitemap and the redirect map are
+    inputs to Caddy; a release must not be able to point crawlers or clients
+    at a file it does not own, and the check must not be satisfiable by a file
+    that merely happens to sit beside the tree. Found by the CI test author on
+    PR #257.
+    """
+    if relative is None:
+        return None
+    candidate = (root / relative).resolve()
+    base = root.resolve()
+    if candidate != base and base not in candidate.parents:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 def _check_sitemaps(root: Path) -> int:
@@ -183,13 +208,13 @@ def _check_sitemaps(root: Path) -> int:
         raise PublishError("sitemap.xml lists no sitemaps")
     total = 0
     for sitemap_url in listed:
-        relative = _path_for(sitemap_url)
-        if relative is None or not (root / relative).is_file():
+        sitemap = _served_file(root, _path_for(sitemap_url))
+        if sitemap is None:
             raise PublishError(f"sitemap.xml lists {sitemap_url}, which is not in the tree")
-        for url in _LOC.findall((root / relative).read_text(encoding="utf-8")):
-            target = _path_for(url)
-            if target is None or not (root / target).is_file():
-                raise PublishError(f"{relative} lists {url}, which is not in the tree")
+        name = sitemap.relative_to(root.resolve())
+        for url in _LOC.findall(sitemap.read_text(encoding="utf-8")):
+            if _served_file(root, _path_for(url)) is None:
+                raise PublishError(f"{name} lists {url}, which is not in the tree")
             total += 1
     return total
 
@@ -212,10 +237,8 @@ def _check_redirects(root: Path) -> int:
         target = entry.get("to") if isinstance(entry, dict) else None
         if not isinstance(target, str):
             raise PublishError(f"redirect-map.json has an entry without a target: {entry!r}")
-        served = target if target.startswith("/") else None
-        if served is None:
+        if not target.startswith("/"):
             raise PublishError(f"redirect target {target!r} is not a site-relative path")
-        file = root / (served.lstrip("/") + "index.html" if served.endswith("/") else served)
-        if not file.is_file():
+        if _served_file(root, _relative_file(target)) is None:
             raise PublishError(f"redirect target {target} is not in the tree")
     return len(redirects)

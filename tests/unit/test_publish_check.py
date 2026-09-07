@@ -217,3 +217,51 @@ def test_the_cli_reports_and_exits_nonzero_on_refusal(release: Path, tmp_path: P
     assert "release ok" in ok.output
     assert bad.exit_code == 1
     assert "release refused" in bad.output
+
+
+# Authored by the CI test author on PR #257 and adopted verbatim: the resolver
+# joined the sitemap/redirect path onto the root without confining the result,
+# so a release could point at — and the check be satisfied by — a file beside
+# the tree rather than inside it.
+
+
+def test_a_sitemap_path_cannot_escape_the_release_tree(release: Path) -> None:
+    outside = release.parent / "outside.xml"
+    outside.write_text("<urlset />", encoding="utf-8")
+    (release / "sitemap.xml").write_text(
+        "<sitemapindex><sitemap><loc>https://lovspor.no/../outside.xml</loc></sitemap>"
+        "</sitemapindex>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="which is not in the tree"):
+        check_release(release)
+
+
+def test_a_redirect_target_cannot_escape_the_release_tree(release: Path) -> None:
+    outside = release.parent / "outside"
+    outside.mkdir()
+    (outside / "index.html").write_text("not part of the release", encoding="utf-8")
+    path = release / "redirect-map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["redirects"].append({"from": "/lov/borte/", "to": "/../outside/"})
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="is not in the tree"):
+        check_release(release)
+
+
+def test_a_page_url_inside_a_sitemap_cannot_escape_either(release: Path) -> None:
+    """The per-page URLs are the larger surface: ninety thousand of them, all
+    read straight from XML the build wrote."""
+    outside = release.parent / "outside"
+    outside.mkdir()
+    (outside / "index.html").write_text("x", encoding="utf-8")
+    sitemap = next((release / "sitemaps").iterdir())
+    sitemap.write_text(
+        "<urlset><url><loc>https://lovspor.no/../outside/</loc></url></urlset>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="which is not in the tree"):
+        check_release(release)
