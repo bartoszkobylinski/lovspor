@@ -11,8 +11,8 @@ pids).
 from lovspor.publish.inventory import DocumentPlan, ProvisionRef
 from lovspor.publish.pages import (
     PageProvenance,
-    _layout,
     document_page_html,
+    layout,
     provision_page_html,
     section_slices,
 )
@@ -236,6 +236,6 @@ class TestProvisionPage:
         assert 'onload="bad"' not in html
 
     def test_canonical_attribute_escapes_quotes(self) -> None:
-        html = _layout("nb", "Tittel", '/lov/a" onclick="bad/', "Tekst")
+        html = layout("nb", "Tittel", '/lov/a" onclick="bad/', "Tekst")
         assert 'href="https://lovspor.no/lov/a&quot; onclick=&quot;bad/"' in html
         assert 'onclick="bad"' not in html

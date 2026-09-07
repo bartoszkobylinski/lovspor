@@ -18,6 +18,7 @@ from functools import partial
 from pathlib import Path
 
 import lovspor
+from lovspor.publish.browse import BROWSE_ROUTES, browse_index_html
 from lovspor.publish.companion import (
     SCHEMA_VERSION,
     companion_json_bytes,
@@ -40,6 +41,8 @@ from lovspor.publish.pages import (
     provision_url,
     section_slices,
 )
+from lovspor.publish.redirects import build_redirect_map, caddy_snippet, redirect_map_json
+from lovspor.publish.sitemaps import SourceRevision, robots_txt, sitemap_files
 from lovspor.snapshot import CorpusSnapshot
 
 
@@ -48,16 +51,24 @@ def emit_site(corpus: Path, sha: str, out: Path) -> None:
     snapshot = CorpusSnapshot(corpus, sha)
     inventory = build_inventory(snapshot.manifest, snapshot.read_text)
     revisions = _source_revisions(corpus, sha)
+    redirect_map = build_redirect_map(corpus, sha, inventory, snapshot.manifest)
     resolve = _resolver(inventory)
     _clear_previous_build(out)
     for plan in inventory.documents:
         _emit_document(plan, (snapshot, revisions), out, resolve)
+    for route in BROWSE_ROUTES:
+        _write(out / route / "index.html", browse_index_html(route, inventory).encode("utf-8"))
+    for name, data in sitemap_files(inventory, revisions).items():
+        _write(out / name, data)
+    _write(out / "robots.txt", robots_txt())
+    _write(out / "redirect-map.json", redirect_map_json(redirect_map))
+    _write(out / "redirects.caddy", caddy_snippet(redirect_map))
     _write(out / "site-manifest.json", _site_manifest_bytes(corpus, sha, inventory))
 
 
 def _emit_document(
     plan: DocumentPlan,
-    context: tuple[CorpusSnapshot, dict[str, str]],
+    context: tuple[CorpusSnapshot, dict[str, SourceRevision]],
     out: Path,
     resolve: LinkResolver,
 ) -> None:
@@ -115,9 +126,12 @@ def _write(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
-def _provenance_of(plan: DocumentPlan, revisions: dict[str, str]) -> PageProvenance:
+def _provenance_of(
+    plan: DocumentPlan,
+    revisions: dict[str, SourceRevision],
+) -> PageProvenance:
     return PageProvenance(
-        source_revision=revisions[plan.markdown_path],
+        source_revision=revisions[plan.markdown_path].sha,
         xml_hash=plan.xml_hash,
         renderer_version=plan.renderer_version,
     )
@@ -155,8 +169,13 @@ def _deep_url(plan: DocumentPlan, deep: str) -> str:
     return document_url(plan)
 
 
-def _source_revisions(corpus: Path, sha: str) -> dict[str, str]:
-    """``path -> last commit touching it`` in one newest-first log walk."""
+def _source_revisions(corpus: Path, sha: str) -> dict[str, SourceRevision]:
+    """``path -> its last commit (sha + committer time)`` in one log walk.
+
+    The committer time feeds sitemap ``lastmod`` and is normalised
+    through datetime for the same cross-machine reason as
+    :func:`_committer_time`.
+    """
     # core.quotePath=false: without it git octal-escapes non-ASCII paths
     # (lover/forbud-paa-vimpel-føring.md) and the manifest lookup misses.
     result = subprocess.run(  # noqa: S603
@@ -165,7 +184,7 @@ def _source_revisions(corpus: Path, sha: str) -> dict[str, str]:
             "-c",
             "core.quotePath=false",
             "log",
-            "--format=%x00%H",
+            "--format=%x00%H %cI",
             "--name-only",
             sha,
         ],
@@ -174,12 +193,19 @@ def _source_revisions(corpus: Path, sha: str) -> dict[str, str]:
         text=True,
         check=True,
     )
-    revisions: dict[str, str] = {}
-    current = ""
-    for line in result.stdout.splitlines():
+    return _parse_revision_log(result.stdout)
+
+
+def _parse_revision_log(stdout: str) -> dict[str, SourceRevision]:
+    """Newest-first walk: the first commit naming a path is its last."""
+    revisions: dict[str, SourceRevision] = {}
+    current: SourceRevision | None = None
+    for line in stdout.splitlines():
         if line.startswith("\x00"):
-            current = line[1:]
-        elif line:
+            commit_sha, _, iso = line[1:].partition(" ")
+            committed = datetime.fromisoformat(iso).isoformat()
+            current = SourceRevision(sha=commit_sha, committed_at=committed)
+        elif line and current is not None:
             revisions.setdefault(line, current)
     return revisions
 
@@ -215,9 +241,19 @@ def _clear_previous_build(out: Path) -> None:
         target = out / name
         if target.exists():
             shutil.rmtree(target)
-    manifest = out / "site-manifest.json"
-    if manifest.exists():
-        manifest.unlink()
+    sitemaps = out / "sitemaps"
+    if sitemaps.exists():
+        shutil.rmtree(sitemaps)
+    for artifact in (
+        "site-manifest.json",
+        "sitemap.xml",
+        "robots.txt",
+        "redirect-map.json",
+        "redirects.caddy",
+    ):
+        target = out / artifact
+        if target.exists():
+            target.unlink()
 
 
 def _committer_time(corpus: Path, sha: str) -> str:
