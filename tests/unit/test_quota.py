@@ -560,6 +560,24 @@ def test_service_in_flight_ceiling_counts_across_different_users(
         pass  # slots freed on exit, so the instance recovers
 
 
+def test_service_in_flight_slot_frees_when_tool_body_raises(tmp_path: Path, clock: _Clock) -> None:
+    """A failed tool must release the shared slot as well as the caller's slot."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits(max_in_flight=10, rate_burst=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(max_in_flight=1),
+    )
+
+    with pytest.raises(ValueError, match="boom"), enforcer.guard("a"):
+        raise ValueError("boom")
+
+    with enforcer.guard("a"):
+        pass
+
+
 def test_a_users_own_refusal_does_not_bill_the_instance(tmp_path: Path, clock: _Clock) -> None:
     """A call refused by the caller's own brake never happened, so it must not
     eat the shared daily ceiling that protects the embedding budget."""
