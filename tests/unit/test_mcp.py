@@ -7349,6 +7349,17 @@ def test_semantic_search_noop_does_not_consume_paid_quota(
     assert embedder.queries == []
 
 
+def test_the_spend_predicate_answers_from_the_arguments_alone() -> None:
+    """True exactly when the call will reach the paid provider: a real query
+    with a non-zero bounded limit. Everything argument-decidable that returns
+    before embedding — empty or whitespace query, zero limit, or no query
+    argument at all — is free of the paid counter."""
+    assert mcp_module._semantic_search_spends(query="husleie", limit=20) is True
+    assert mcp_module._semantic_search_spends(query="   ", limit=20) is False
+    assert mcp_module._semantic_search_spends(query="husleie", limit=0) is False
+    assert mcp_module._semantic_search_spends() is False
+
+
 def test_semantic_search_zero_limit_noop_does_not_consume_paid_quota(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

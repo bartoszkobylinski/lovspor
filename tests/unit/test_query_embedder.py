@@ -350,16 +350,27 @@ def test_the_first_claim_leads_and_the_second_joins() -> None:
 def test_an_unresolved_join_fails_loudly_after_the_bounded_wait(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """The late publisher exists only so a broken-clock mutant terminates:
+    the real code must raise on the zeroed clock long before it fires."""
     subject = QueryEmbedder(_CountingEmbedder())
     flight = _InFlight()
     subject._inflight["question"] = flight
-    monkeypatch.setattr(query_module, "_JOIN_TIMEOUT_SECONDS", 0.0)
 
-    with pytest.raises(
-        NetworkError,
-        match=r"query embedding join timed out:.*within 0s",
-    ):
-        subject.encode("question")
+    def publish_late() -> None:
+        flight.vector = np.ones(4, dtype=np.float32)
+        flight.done.set()
+
+    late = threading.Timer(0.5, publish_late)
+    late.start()
+    monkeypatch.setattr(query_module, "_JOIN_TIMEOUT_SECONDS", 0.0)
+    try:
+        with pytest.raises(
+            NetworkError,
+            match=r"query embedding join timed out:.*within 0s",
+        ):
+            subject.encode("question")
+    finally:
+        late.cancel()
 
 
 def test_a_silent_flight_trips_the_bounded_join(
