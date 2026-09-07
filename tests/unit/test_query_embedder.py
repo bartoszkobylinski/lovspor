@@ -360,3 +360,35 @@ def test_an_unresolved_join_fails_loudly_after_the_bounded_wait(
         match=r"query embedding join timed out:.*within 0s",
     ):
         subject.encode("question")
+
+
+def test_a_silent_flight_trips_the_bounded_join(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The join gives up on the clock, not on the flight's mercy: a flight
+    nobody resolves within the window is a defect reported by name."""
+    embedder = _CountingEmbedder()
+    subject = QueryEmbedder(embedder)
+    monkeypatch.setattr(query_module, "_JOIN_TIMEOUT_SECONDS", 0.05)
+    silent_flight = _InFlight()
+    late = threading.Timer(0.3, silent_flight.done.set)
+    late.start()
+    handed_out: list[str] = []
+    real_claim = subject._claim
+
+    def fake_claim(key: str) -> object:
+        if not handed_out:
+            handed_out.append(key)
+            return None, silent_flight, False
+        return real_claim(key)
+
+    monkeypatch.setattr(subject, "_claim", fake_claim)
+    try:
+        with pytest.raises(NetworkError) as excinfo:
+            subject.encode("hvor lenge gjelder en leiekontrakt")
+    finally:
+        late.cancel()
+    assert str(excinfo.value) == (
+        "query embedding join timed out: the in-flight call neither published nor failed within 0s"
+    )
+    assert embedder.calls == []
