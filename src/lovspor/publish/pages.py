@@ -76,7 +76,7 @@ def document_page_html(
         _provenance_html(plan, provenance),
     ]
     content = "\n".join(part for part in parts if part)
-    return _layout(plan.language, title, document_url(plan), content)
+    return layout(plan.language, title, document_url(plan), content)
 
 
 def provision_page_html(
@@ -95,7 +95,7 @@ def provision_page_html(
         _neighbours_html(plan, provision),
         _provenance_html(plan, provenance),
     ]
-    return _layout(
+    return layout(
         plan.language,
         f"{title} — {doc_title}",
         provision_url(plan, provision.pid),
@@ -129,7 +129,7 @@ def _section_spans(body_lines: list[str]) -> Iterator[tuple[str, int, int]]:
         yield normalise_pid(heading_id), start, end
 
 
-def _layout(lang: str, title: str, path: str, content: str) -> str:
+def layout(lang: str, title: str, path: str, content: str) -> str:
     """The shared shell: escaped head values, canonical link, no scripts."""
     safe_title = html_escape.escape(title, quote=True)
     canonical = html_escape.escape(f"{SITE_ORIGIN}{path}", quote=True)
