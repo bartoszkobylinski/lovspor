@@ -46,8 +46,6 @@ from pathlib import Path
 
 BLOCKED_PHRASE = "Codex-authored tests fail against this head"
 PROPOSAL_MARKER = "codex_proposal"
-_ADDED_TEST = re.compile(r"^\+\s*(?:async\s+)?def\s+(test_\w+)\s*\(")
-_DIFF_FILE = re.compile(r"^\+\+\+ b/(tests/.+\.py)$")
 
 
 @dataclass(frozen=True)
@@ -103,17 +101,59 @@ def count_blocking_rounds(sticky_body: str) -> int:
     return sticky_body.count(BLOCKED_PHRASE)
 
 
-def added_tests(diff_text: str) -> set[TestId]:
-    """Test functions the author added, from ``git diff <base> -- tests/``."""
+def added_tests(repo: Path, before_sha: str) -> set[TestId]:
+    """Test functions that exist now and did not exist at ``before_sha``.
+
+    Computed from the AST of each changed test file at both revisions — not
+    from the diff. A diff line shows a bare ``def test_x`` and cannot say which
+    class it lives in, so a new ``TestB.test_x`` would let a pre-existing
+    ``TestA.test_x`` pass as the author's; the contract says a pre-existing
+    failure always blocks, so the names must be exact.
+    """
+    changed = subprocess.run(  # noqa: S603
+        ["git", "diff", "--name-only", before_sha, "--", "tests/"],  # noqa: S607
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
     found: set[TestId] = set()
-    current: str | None = None
-    for line in diff_text.splitlines():
-        if match := _DIFF_FILE.match(line):
-            current = match.group(1)
+    for file in changed:
+        if not file.endswith(".py"):
             continue
-        if current and (match := _ADDED_TEST.match(line)):
-            found.add(TestId(current, match.group(1)))
+        now = repo / file
+        after = _test_names(now.read_text(encoding="utf-8")) if now.is_file() else set()
+        shown = subprocess.run(  # noqa: S603
+            ["git", "show", f"{before_sha}:{file}"],  # noqa: S607
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        before = _test_names(shown.stdout) if shown.returncode == 0 else set()
+        found.update(TestId(file, name) for name in after - before)
     return found
+
+
+def _test_names(source: str) -> set[str]:
+    """Dotted names of every test function in ``source``; empty if unparseable."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    names: set[str] = set()
+
+    def walk(scope: ast.Module | ast.ClassDef, prefix: str) -> None:
+        for node in scope.body:
+            if isinstance(node, ast.ClassDef):
+                walk(node, f"{prefix}{node.name}.")
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith(
+                "test"
+            ):
+                names.add(f"{prefix}{node.name}")
+
+    walk(tree, "")
+    return names
 
 
 def failed_tests(junit_path: Path) -> list[TestId]:
@@ -187,18 +227,26 @@ def classify(
     pytest_status: int = 0,
 ) -> Verdict:
     verdict = Verdict(round=round_number, cap=cap)
-    added_leaves = {(t.file, t.leaf) for t in added}
     for test in failures:
-        if (test.file, test.leaf) not in added_leaves:
+        if test not in added:
             verdict.foreign.append(test)
         elif round_number > cap or is_proposal(repo, test):
             verdict.advisory.append(test)
         else:
             verdict.blocking.append(test)
-    if pytest_status != 0 and not failures:
+    # pytest: 0 all passed, 1 tests failed, anything else is not a test verdict —
+    # 2 interrupted, 3 internal error, 4 usage error, 5 nothing collected. A
+    # partial junit from an interrupted run is exactly what must not be read
+    # as "here are all the failures".
+    if pytest_status not in (0, 1):
         verdict.pipeline_error = (
-            f"pytest exited {pytest_status} with no parsable failures — a collection "
-            "error, a crash, or an absent junit report; not a test verdict"
+            f"pytest exited {pytest_status}: interrupted, internal error, usage error or "
+            "nothing collected — a partial junit is not a test verdict"
+        )
+    elif pytest_status == 1 and not failures:
+        verdict.pipeline_error = (
+            "pytest exited 1 with no parsable failures — an absent or incomplete junit "
+            "report; not a test verdict"
         )
     return verdict
 
@@ -301,24 +349,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true", help="mark advisory tests xfail in place")
     args = parser.parse_args(argv)
 
-    # The author's NEW files are untracked and a plain diff would miss every test
-    # in them — intent-to-add makes them visible without staging content (the
-    # same trick the workflow's preserve steps use; the push step's `git add -A`
+    # The author's NEW files are untracked and `git diff --name-only` would miss
+    # them — intent-to-add makes them visible without staging content (the same
+    # trick the workflow's preserve steps use; the push step's `git add -A`
     # supersedes it).
     subprocess.run(["git", "add", "-N", "tests/"], cwd=args.repo, check=True)  # noqa: S607
-    diff = subprocess.run(  # noqa: S603
-        ["git", "diff", f"{args.before_sha}", "--", "tests/"],  # noqa: S607
-        cwd=args.repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
     sticky = args.sticky_body.read_text(encoding="utf-8") if args.sticky_body.is_file() else ""
     verdict = classify(
         round_number=count_blocking_rounds(sticky) + 1,
         cap=args.cap,
         failures=failed_tests(args.junit) if args.junit.is_file() else [],
-        added=added_tests(diff),
+        added=added_tests(args.repo, args.before_sha),
         repo=args.repo,
         pytest_status=args.pytest_status,
     )

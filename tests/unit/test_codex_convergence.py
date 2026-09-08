@@ -64,11 +64,38 @@ def test_round_count_comes_from_the_sticky_comment() -> None:
     assert cc.count_blocking_rounds("") == 0
 
 
-def test_added_tests_are_read_from_the_diff_including_async_and_parametrised() -> None:
-    assert cc.added_tests(DIFF) == {
-        cc.TestId("tests/unit/test_thing.py", "test_new_contract"),
-        cc.TestId("tests/unit/test_thing.py", "test_parametrised"),
+def test_added_tests_are_the_exact_names_that_did_not_exist_before(tmp_path: Path) -> None:
+    """Computed from the AST at both revisions, never from the diff: a diff line
+    shows a bare `def test_x` and cannot say which class it lives in."""
+    repo = tmp_path
+    (repo / "tests" / "unit").mkdir(parents=True)
+    path = repo / "tests" / "unit" / "test_thing.py"
+    path.write_text(
+        "class TestExisting:\n    def test_contract(self): ...\n\n\ndef test_old(): ...\n",
+        encoding="utf-8",
+    )
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    before = _git(repo, "rev-parse", "HEAD")
+    path.write_text(
+        "class TestExisting:\n    def test_contract(self): ...\n\n\n"
+        "class TestAdded:\n    def test_contract(self): ...\n\n\n"
+        "def test_old(): ...\n\n\n"
+        "async def test_async_added(): ...\n\n\n"
+        '@pytest.mark.parametrize("x", ["a"])\ndef test_parametrised(x): ...\n',
+        encoding="utf-8",
+    )
+    (repo / "tests" / "unit" / "test_brand_new.py").write_text(
+        "def test_in_new_file(): ...\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-N", "tests/"], cwd=repo, check=True)
+
+    assert cc.added_tests(repo, before) == {
+        cc.TestId("tests/unit/test_thing.py", "TestAdded.test_contract"),
         cc.TestId("tests/unit/test_thing.py", "test_async_added"),
+        cc.TestId("tests/unit/test_thing.py", "test_parametrised"),
+        cc.TestId("tests/unit/test_brand_new.py", "test_in_new_file"),
     }
 
 
@@ -404,19 +431,74 @@ def test_xfail_marks_the_failing_method_when_class_names_disambiguate_it(tmp_pat
     assert text.count("@pytest.mark.xfail") == 1
 
 
-def test_a_method_added_in_the_diff_matches_its_dotted_junit_name(tmp_path: Path) -> None:
-    """The diff shows a bare `def test_x`; junit names it `TestFoo.test_x`.
-    They must meet, or every failing method reads as a pre-existing regression."""
+def test_a_method_is_matched_by_its_exact_dotted_name(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "class TestFoo:\n    def test_x(self): ...\n")
-    junit_name = cc.TestId("tests/unit/test_thing.py", "TestFoo.test_x")
-    diff_name = cc.TestId("tests/unit/test_thing.py", "test_x")
+    method = cc.TestId("tests/unit/test_thing.py", "TestFoo.test_x")
+
+    verdict = cc.classify(round_number=1, cap=3, failures=[method], added={method}, repo=repo)
+
+    assert verdict.blocking == [method]
+    assert not verdict.foreign
+
+
+# Authored by the CI test author on PR #261, round 2, and adopted verbatim.
+
+
+def test_a_new_method_does_not_claim_an_existing_method_with_the_same_name(
+    tmp_path: Path,
+) -> None:
+    """The contract says a pre-existing failure always blocks. A new method
+    with the same leaf name in the same file must not make the old one look
+    author-added after the blocking cap."""
+    repo = _repo_with(
+        tmp_path,
+        "class TestExisting:\n"
+        "    def test_contract(self): ...\n\n\n"
+        "class TestAdded:\n"
+        "    def test_contract(self): ...\n",
+    )
+    existing = cc.TestId("tests/unit/test_thing.py", "TestExisting.test_contract")
+    added = cc.TestId("tests/unit/test_thing.py", "TestAdded.test_contract")
+
+    verdict = cc.classify(round_number=4, cap=3, failures=[existing], added={added}, repo=repo)
+
+    assert verdict.foreign == [existing]
+    assert not verdict.advisory
+    assert verdict.blocks
+
+
+def test_a_crashed_pytest_run_blocks_even_when_junit_contains_a_failure(tmp_path: Path) -> None:
+    """A partial JUnit report must not hide an interrupted pytest run. Exit 2
+    means pytest was interrupted, not that its parsed testcase list is a
+    complete test verdict."""
+    repo = _repo_with(tmp_path, "def test_new_contract(): ...\n")
+    test = cc.TestId("tests/unit/test_thing.py", "test_new_contract")
 
     verdict = cc.classify(
-        round_number=1, cap=3, failures=[junit_name], added={diff_name}, repo=repo
+        round_number=4,
+        cap=3,
+        failures=[test],
+        added={test},
+        repo=repo,
+        pytest_status=2,
     )
 
-    assert verdict.blocking == [junit_name]
-    assert not verdict.foreign
+    assert verdict.blocks
+    assert verdict.pipeline_error is not None
+    assert "exited 2" in verdict.pipeline_error
+
+
+def test_exit_one_with_parsed_failures_is_an_ordinary_test_verdict(tmp_path: Path) -> None:
+    """1 is "tests failed" — the one non-zero status that IS a verdict."""
+    repo = _repo_with(tmp_path, "def test_new_contract(): ...\n")
+    test = cc.TestId("tests/unit/test_thing.py", "test_new_contract")
+
+    verdict = cc.classify(
+        round_number=4, cap=3, failures=[test], added={test}, repo=repo, pytest_status=1
+    )
+
+    assert verdict.pipeline_error is None
+    assert verdict.advisory == [test]
 
 
 def test_a_class_path_that_does_not_exist_is_a_lookup_error(tmp_path: Path) -> None:
