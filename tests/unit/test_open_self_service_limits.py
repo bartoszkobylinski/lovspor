@@ -332,6 +332,14 @@ def test_only_hosted_oauth_gets_an_instance_ceiling(tmp_path: Path) -> None:
     assert opaque._service_limits is None
 
 
+def test_hosted_oauth_cannot_disable_the_instance_ceiling(tmp_path: Path) -> None:
+    """Self-service signup makes the number of identities unbounded, so an
+    OAuth configuration without the aggregate ceiling must fail closed rather
+    than quietly falling back to per-user limits alone."""
+    with pytest.raises(ConfigError, match="service.*limit|instance.*ceiling"):
+        _oauth_config(tmp_path, service_limits=None)
+
+
 def test_nothing_is_metered_without_a_credential_source(tmp_path: Path) -> None:
     assert _build_enforcer(_oauth_config(tmp_path), None) is None
 

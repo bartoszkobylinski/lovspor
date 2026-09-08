@@ -3366,7 +3366,13 @@ class HttpConfig(BaseModel):
         This catches the mistake early — at CLI parse, before anything binds — but
         it is not the only guard; see :meth:`oauth_pair`.
         """
-        self.oauth_pair()
+        if self.oauth_pair() is not None and self.service_limits is None:
+            raise ConfigError(
+                "hosted OAuth requires the instance-wide service limits: "
+                "self-service sign-up makes the number of identities "
+                "unbounded, and per-user limits alone no longer bound the "
+                "instance — the ceiling cannot be disabled, only retuned",
+            )
         return self
 
     def oauth_pair(self) -> tuple[str, str] | None:
@@ -3484,6 +3490,14 @@ def _build_enforcer(bind: HttpConfig, metering: LimitsSource | None) -> QuotaEnf
         # already refuses that combination unless it was asked for.
         return None
     ceiling = bind.service_limits if bind.oauth_pair() is not None else None
+    if bind.oauth_pair() is not None and ceiling is None:
+        # The constructor validator refuses this; re-checking here is the
+        # same belt oauth_pair wears against pydantic's non-validating
+        # escape hatches — an unbounded hosted instance must not boot.
+        raise ConfigError(
+            "hosted OAuth requires the instance-wide service limits: "
+            "the ceiling cannot be disabled, only retuned",
+        )
     return QuotaEnforcer(metering, service_limits=ceiling)
 
 
