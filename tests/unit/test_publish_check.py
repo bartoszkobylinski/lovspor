@@ -354,3 +354,54 @@ def test_every_artifact_read_reports_corruption_as_a_refusal(release: Path) -> N
             check_release(release)
         broken.write_bytes(original)
     check_release(release)  # and the tree is whole again
+
+
+# Authored by the CI test author on PR #257 (fourth round) and adopted verbatim.
+# Closed structurally this time: the redirect map's shape is validated once, by
+# one parser, and both consumers take typed values from it.
+
+
+def test_a_redirect_entry_without_a_source_is_refused_not_crashed(release: Path) -> None:
+    """The target-only validation must not let malformed entries reach the
+    Caddy-map comparison as a raw ``KeyError``."""
+    path = release / "redirect-map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["redirects"][0]["from"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="redirect-map.json"):
+        check_release(release)
+
+
+def test_a_non_string_gone_prefix_is_refused_not_crashed(release: Path) -> None:
+    """Every redirect-map field is untrusted release data; an unhashable
+    prefix must produce the same named refusal as malformed redirect entries."""
+    path = release / "redirect-map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["gone"].append({"path": "/lov/utgaatt/"})
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="redirect-map.json"):
+        check_release(release)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d["redirects"].append("not-an-object"),
+        lambda d: d["redirects"].append({"from": 1, "to": "/lov/testloven/"}),
+        lambda d: d["redirects"].append({"from": "/x/", "to": ["/lov/testloven/"]}),
+        lambda d: d.__setitem__("redirects", {"from": "/x/", "to": "/y/"}),
+        lambda d: d.__setitem__("gone", "/lov/"),
+    ],
+)
+def test_every_malformed_redirect_map_shape_is_one_named_refusal(
+    release: Path, mutate: object
+) -> None:
+    path = release / "redirect-map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    mutate(data)  # type: ignore[operator]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="redirect-map.json"):
+        check_release(release)

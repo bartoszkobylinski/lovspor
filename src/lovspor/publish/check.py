@@ -241,23 +241,47 @@ def _check_sitemaps(root: Path) -> int:
     return total
 
 
+def _redirect_map(root: Path) -> tuple[set[tuple[str, str]], set[str]]:
+    """``(redirects, gone)`` from ``redirect-map.json``, fully shape-checked.
+
+    Every field is untrusted release data. The shape is validated here, once,
+    so that neither consumer below can meet a malformed entry as a KeyError or
+    an unhashable value — each such escape on this PR was one more field the
+    consumers had been trusting.
+    """
+    path = root / "redirect-map.json"
+    if not path.is_file():
+        raise PublishError(f"{path} is missing")
+    data = _read_object(root, path)
+    entries = data.get("redirects", [])
+    gone = data.get("gone", [])
+    if not isinstance(entries, list) or not isinstance(gone, list):
+        raise PublishError("redirect-map.json: 'redirects' and 'gone' must be lists")
+    redirects: set[tuple[str, str]] = set()
+    for entry in entries:
+        if (
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("from"), str)
+            or not isinstance(entry.get("to"), str)
+        ):
+            raise PublishError(
+                f"redirect-map.json: redirect entry is not {{from: str, to: str}}: {entry!r}"
+            )
+        redirects.add((entry["from"], entry["to"]))
+    for prefix in gone:
+        if not isinstance(prefix, str):
+            raise PublishError(f"redirect-map.json: gone prefix is not a string: {prefix!r}")
+    return redirects, set(gone)
+
+
 def _check_redirects(root: Path) -> int:
     """Every 301 must land on a page this release serves.
 
     Redirect targets are derived from lineage at build time, so a dangling one
     means the map and the pages came from different builds.
     """
-    path = root / "redirect-map.json"
-    if not path.is_file():
-        raise PublishError(f"{path} is missing")
-    data = _read_object(root, path)
-    redirects = data.get("redirects", [])
-    if not isinstance(redirects, list):
-        raise PublishError("redirect-map.json: 'redirects' is not a list")
-    for entry in redirects:
-        target = entry.get("to") if isinstance(entry, dict) else None
-        if not isinstance(target, str):
-            raise PublishError(f"redirect-map.json has an entry without a target: {entry!r}")
+    redirects, _ = _redirect_map(root)
+    for _source, target in sorted(redirects):
         if not target.startswith("/"):
             raise PublishError(f"redirect target {target!r} is not a site-relative path")
         if _served_file(root, _relative_file(target)) is None:
@@ -285,13 +309,7 @@ def _check_caddy_map(root: Path) -> None:
         elif match := _GONE.match(line):
             # "prefix prefix*" pairs; the bare prefix is the namespace.
             served_gone.update(p for p in match.group(1).split() if not p.endswith("*"))
-    data = _read_object(root, root / "redirect-map.json")
-    entries = data.get("redirects", [])
-    gone = data.get("gone", [])
-    if not isinstance(entries, list) or not isinstance(gone, list):
-        raise PublishError("redirect-map.json: 'redirects' and 'gone' must be lists")
-    expected_redirects = {(e["from"], e["to"]) for e in entries}
-    expected_gone = set(gone)
+    expected_redirects, expected_gone = _redirect_map(root)
     if served_redirects != expected_redirects or served_gone != expected_gone:
         raise PublishError(
             "redirects.caddy disagrees with redirect-map.json: "
