@@ -52,12 +52,22 @@ _DIFF_FILE = re.compile(r"^\+\+\+ b/(tests/.+\.py)$")
 
 @dataclass(frozen=True)
 class TestId:
+    """A test by file and name. ``name`` is dotted for a method —
+    ``TestFoo.test_bar`` — because two classes may share a method name and an
+    xfail marker on the wrong one silences a passing test while the failing one
+    keeps failing."""
+
     file: str
     name: str
 
     @property
     def node(self) -> str:
-        return f"{self.file}::{self.name}"
+        return f"{self.file}::{self.name.replace('.', '::')}"
+
+    @property
+    def leaf(self) -> str:
+        """The bare function name — what a diff line shows."""
+        return self.name.rsplit(".", 1)[-1]
 
 
 @dataclass
@@ -67,10 +77,14 @@ class Verdict:
     blocking: list[TestId] = field(default_factory=list)
     foreign: list[TestId] = field(default_factory=list)
     advisory: list[TestId] = field(default_factory=list)
+    # pytest itself failed in a way the junit does not account for — a
+    # collection error, a crash, an absent report. Not a test verdict at all,
+    # and never something to wave through as "no failures parsed".
+    pipeline_error: str | None = None
 
     @property
     def blocks(self) -> bool:
-        return bool(self.blocking or self.foreign)
+        return bool(self.blocking or self.foreign or self.pipeline_error)
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -80,6 +94,7 @@ class Verdict:
             "blocking": [t.node for t in self.blocking],
             "foreign": [t.node for t in self.foreign],
             "advisory": [t.node for t in self.advisory],
+            "pipeline_error": self.pipeline_error,
         }
 
 
@@ -110,8 +125,20 @@ def failed_tests(junit_path: Path) -> list[TestId]:
             continue
         classname = case.get("classname", "")
         name = re.sub(r"\[.*\]$", "", case.get("name", ""))
-        file = case.get("file") or classname.replace(".", "/") + ".py"
-        failures.append(TestId(file, name))
+        file = case.get("file")
+        if file:
+            # module path = the file's dotted form; whatever follows is classes
+            module = file.removesuffix(".py").replace("/", ".")
+            classes = classname.removeprefix(module).strip(".")
+        else:
+            # No file attribute: assume the last capitalised segments are classes
+            parts = classname.split(".")
+            split = len(parts)
+            while split > 1 and parts[split - 1][:1].isupper():
+                split -= 1
+            file = "/".join(parts[:split]) + ".py"
+            classes = ".".join(parts[split:])
+        failures.append(TestId(file, f"{classes}.{name}" if classes else name))
     return failures
 
 
@@ -124,10 +151,25 @@ def is_proposal(repo: Path, test: TestId) -> bool:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return False
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == test.name:
-            return any(_is_proposal_decorator(d) for d in node.decorator_list)
-    return False
+    node = _find_function(tree, test.name)
+    return node is not None and any(_is_proposal_decorator(d) for d in node.decorator_list)
+
+
+def _find_function(tree: ast.Module, dotted: str) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    """Resolve ``Class.Inner.test_x`` or ``test_x`` to its definition node."""
+    *classes, leaf = dotted.split(".")
+    scope: ast.Module | ast.ClassDef = tree
+    for name in classes:
+        found = next(
+            (n for n in scope.body if isinstance(n, ast.ClassDef) and n.name == name), None
+        )
+        if found is None:
+            return None
+        scope = found
+    for node in scope.body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == leaf:
+            return node
+    return None
 
 
 def _is_proposal_decorator(node: ast.expr) -> bool:
@@ -136,16 +178,28 @@ def _is_proposal_decorator(node: ast.expr) -> bool:
 
 
 def classify(
-    *, round_number: int, cap: int, failures: list[TestId], added: set[TestId], repo: Path
+    *,
+    round_number: int,
+    cap: int,
+    failures: list[TestId],
+    added: set[TestId],
+    repo: Path,
+    pytest_status: int = 0,
 ) -> Verdict:
     verdict = Verdict(round=round_number, cap=cap)
+    added_leaves = {(t.file, t.leaf) for t in added}
     for test in failures:
-        if test not in added:
+        if (test.file, test.leaf) not in added_leaves:
             verdict.foreign.append(test)
         elif round_number > cap or is_proposal(repo, test):
             verdict.advisory.append(test)
         else:
             verdict.blocking.append(test)
+    if pytest_status != 0 and not failures:
+        verdict.pipeline_error = (
+            f"pytest exited {pytest_status} with no parsable failures — a collection "
+            "error, a crash, or an absent junit report; not a test verdict"
+        )
     return verdict
 
 
@@ -160,15 +214,12 @@ def mark_xfail(repo: Path, test: TestId, reason: str) -> None:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     lines = source.splitlines(keepends=True)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == test.name:
-            first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
-            indent = re.match(r"\s*", lines[first - 1]).group(0)  # type: ignore[union-attr]
-            marker = f'{indent}@pytest.mark.xfail(strict=True, reason="{reason}")\n'
-            lines.insert(first - 1, marker)
-            break
-    else:
+    node = _find_function(tree, test.name)
+    if node is None:
         raise LookupError(f"{test.node} not found for xfail marking")
+    first = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+    indent = re.match(r"\s*", lines[first - 1]).group(0)  # type: ignore[union-attr]
+    lines.insert(first - 1, f'{indent}@pytest.mark.xfail(strict=True, reason="{reason}")\n')
     text = "".join(lines)
     if not re.search(r"^import pytest$", text, re.M):
         text = _add_pytest_import(text)
@@ -199,6 +250,9 @@ def render_comment(verdict: Verdict, run_url: str) -> str:
         lines.append(
             f"codex-tests BLOCKED (round {verdict.round} of {verdict.cap} blocking rounds)."
         )
+        if verdict.pipeline_error:
+            lines.append("")
+            lines.append(f"{verdict.pipeline_error}.")
         if verdict.foreign:
             lines.append("")
             lines.append("Pre-existing tests broken by this head — a regression, never advisory:")
@@ -238,6 +292,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--junit", type=Path, required=True)
     parser.add_argument("--sticky-body", type=Path, required=True, help="pipeline sticky comment")
     parser.add_argument("--cap", type=int, default=3, help="blocking rounds before advisory")
+    parser.add_argument(
+        "--pytest-status", type=int, default=0, help="exit status of the pytest run"
+    )
     parser.add_argument("--run-url", default="")
     parser.add_argument("--verdict", type=Path, required=True, help="write verdict JSON here")
     parser.add_argument("--comment", type=Path, required=True, help="write comment markdown here")
@@ -263,6 +320,7 @@ def main(argv: list[str] | None = None) -> int:
         failures=failed_tests(args.junit) if args.junit.is_file() else [],
         added=added_tests(diff),
         repo=args.repo,
+        pytest_status=args.pytest_status,
     )
     if args.apply and not verdict.blocks:
         for test in verdict.advisory:

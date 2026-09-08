@@ -331,6 +331,10 @@ def test_convergence_verdict_is_the_only_step_that_fails_on_author_tests() -> No
     assert '--comment "$RUNNER_TEMP/escalation.md"' in run
     assert "--apply" in run
     assert 'if [ "$blocks" = "true" ]; then' in run
+    assert '--pytest-status "$PYTEST_STATUS"' in run
+    # An absent status (the pytest step never wrote one) must read as a failure,
+    # never as 0 — the default is the fail-closed direction.
+    assert verdict["env"]["PYTEST_STATUS"] == "${{ steps.codex-pytest.outputs.status || '1' }}"
     # advisory tests were rewritten in place: prove green before the commit step
     assert "uv run pytest tests/unit/ -q" in run
     for name in (
@@ -835,3 +839,20 @@ class TestEscalationsShareOneCommentPerWorkflow:
         used = set(re.findall(r"pr_sticky_comment\.sh (\w+)", text))
 
         assert used == {marker}
+
+
+def test_convergence_verdict_cannot_ignore_a_nonzero_pytest_status() -> None:
+    """A pytest failure with an absent or incomplete JUnit report must not be
+    converted into a green verdict merely because no failures were parsed.
+    Authored by the CI test author on PR #261, the mechanism's first live round.
+    One deviation from the verbatim test: it asserted the status reference as an
+    exact env value, which would forbid the fail-closed `|| '1'` default — an
+    absent status must read as a failure, not as an empty string."""
+    steps = _steps("pr-pipeline.yml", "codex-tests")
+    pytest_step = _named_step(steps, "Run tests on Codex additions")
+    verdict = _named_step(steps, "Convergence verdict")
+
+    assert 'echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"' in pytest_step["run"]
+    assert any(
+        "steps.codex-pytest.outputs.status" in value for value in verdict["env"].values()
+    ) or ("steps.codex-pytest.outputs.status" in verdict["run"])

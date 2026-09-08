@@ -317,6 +317,7 @@ def test_cli_marks_advisory_proposals_and_writes_the_verdict(tmp_path: Path) -> 
         "blocking": [],
         "foreign": [],
         "advisory": ["tests/unit/test_thing.py::test_new_contract"],
+        "pipeline_error": None,
     }
     assert "@pytest.mark.xfail(strict=True" in (repo / "tests/unit/test_thing.py").read_text()
     assert "ADVISORY" in (tmp_path / "c.md").read_text(encoding="utf-8")
@@ -364,3 +365,84 @@ def test_cli_sees_tests_in_a_brand_new_untracked_file(tmp_path: Path) -> None:
     verdict = json.loads((tmp_path / "v.json").read_text(encoding="utf-8"))
     assert verdict["foreign"] == []
     assert verdict["blocking"] == ["tests/unit/test_brand_new.py::test_new_contract"]
+
+
+# Authored by the CI test author on PR #261 — the first live round of this
+# mechanism, judging itself — and adopted verbatim.
+
+
+def test_xfail_marks_the_failing_method_when_class_names_disambiguate_it(tmp_path: Path) -> None:
+    """Every advisory failure must mark that test, even when two test classes
+    use the same method name."""
+    repo = _repo_with(
+        tmp_path,
+        "import pytest\n\n\n"
+        "class TestPassingContract:\n"
+        "    def test_contract(self) -> None:\n"
+        "        assert True\n\n\n"
+        "class TestProposedContract:\n"
+        "    def test_contract(self) -> None:\n"
+        "        assert False\n",
+    )
+    junit = tmp_path / "j.xml"
+    junit.write_text(
+        '<testsuites><testsuite><testcase file="tests/unit/test_thing.py" '
+        'classname="tests.unit.test_thing.TestProposedContract" name="test_contract">'
+        '<failure message="x">x</failure></testcase></testsuite></testsuites>',
+        encoding="utf-8",
+    )
+    failures = cc.failed_tests(junit)
+
+    assert failures == [cc.TestId("tests/unit/test_thing.py", "TestProposedContract.test_contract")]
+    cc.mark_xfail(repo, failures[0], "why")
+
+    text = (repo / "tests/unit/test_thing.py").read_text(encoding="utf-8")
+    assert text.index("@pytest.mark.xfail") > text.index("class TestProposedContract:")
+    assert text.index("@pytest.mark.xfail") < text.index(
+        "        assert False", text.index("class TestProposedContract:")
+    )
+    assert text.count("@pytest.mark.xfail") == 1
+
+
+def test_a_method_added_in_the_diff_matches_its_dotted_junit_name(tmp_path: Path) -> None:
+    """The diff shows a bare `def test_x`; junit names it `TestFoo.test_x`.
+    They must meet, or every failing method reads as a pre-existing regression."""
+    repo = _repo_with(tmp_path, "class TestFoo:\n    def test_x(self): ...\n")
+    junit_name = cc.TestId("tests/unit/test_thing.py", "TestFoo.test_x")
+    diff_name = cc.TestId("tests/unit/test_thing.py", "test_x")
+
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[junit_name], added={diff_name}, repo=repo
+    )
+
+    assert verdict.blocking == [junit_name]
+    assert not verdict.foreign
+
+
+def test_a_class_path_that_does_not_exist_is_a_lookup_error(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, "class TestFoo:\n    def test_x(self): ...\n")
+    with pytest.raises(LookupError):
+        cc.mark_xfail(repo, cc.TestId("tests/unit/test_thing.py", "TestBar.test_x"), "why")
+
+
+def test_a_broken_pytest_run_blocks_even_with_no_parsed_failures(tmp_path: Path) -> None:
+    """A collection error exits non-zero and reports no failing testcase. That is
+    not "everything passed" — it is "nothing ran"."""
+    repo = _repo_with(tmp_path, "def test_x(): ...\n")
+
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[], added=set(), repo=repo, pytest_status=2
+    )
+
+    assert verdict.blocks
+    assert verdict.pipeline_error is not None
+    assert "exited 2" in verdict.pipeline_error
+    assert "exited 2" in cc.render_comment(verdict, "https://run")
+
+
+def test_a_clean_pytest_run_with_no_failures_is_green(tmp_path: Path) -> None:
+    repo = _repo_with(tmp_path, "def test_x(): ...\n")
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[], added=set(), repo=repo, pytest_status=0
+    )
+    assert not verdict.blocks

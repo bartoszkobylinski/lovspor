@@ -190,6 +190,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CODEX_BLOCKING_CAP: ${{ vars.CODEX_BLOCKING_CAP || '3' }}
+          # A collection error or crash exits non-zero with no failing testcase
+          # in the junit. "No failures parsed" is not "everything passed".
+          PYTEST_STATUS: ${{ steps.codex-pytest.outputs.status || '1' }}
         run: |
           gh pr view "${{ github.event.pull_request.number }}" --json comments \
             --jq '[.comments[] | select(.body | contains("<!-- lovspor-sticky:pipeline -->")) | .body] | join("\n")' \
@@ -197,6 +200,7 @@ jobs:
           uv run python scripts/ci/codex_convergence.py \
             --before-sha "$BEFORE_SHA" \
             --junit "$RUNNER_TEMP/codex-junit.xml" \
+            --pytest-status "$PYTEST_STATUS" \
             --sticky-body "$RUNNER_TEMP/sticky-pipeline.md" \
             --cap "$CODEX_BLOCKING_CAP" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
