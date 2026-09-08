@@ -8234,4 +8234,5 @@ def test_the_will_spend_predicate_consults_the_cache(tmp_path: Path) -> None:
     assert reader.semantic_search_will_spend(query="skatt", limit=0) is False
     reader.semantic_search("skatt")
     assert reader.semantic_search_will_spend(query="skatt") is False
+    assert reader.semantic_search_will_spend() is False
     assert CorpusReader(tmp_path).semantic_search_will_spend(query="skatt") is False

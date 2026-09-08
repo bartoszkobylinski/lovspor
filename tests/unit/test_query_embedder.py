@@ -428,3 +428,13 @@ def test_knows_does_not_refresh_recency() -> None:
     subject.encode("c")
     assert subject.knows("a") is False
     assert subject.knows("b") is True
+
+
+def test_knows_shares_the_encoders_tokenizer() -> None:
+    """The peek must truncate with the same tokenizer as encode, or a
+    non-default model's cache entries would be invisible to the meter:
+    gpt2 and the default encoding cut this query at different points."""
+    subject = QueryEmbedder(_CountingEmbedder(), max_tokens=5, model_name="gpt2")
+    query = "hva sier arbeidsmiljøloven om oppsigelsestid i prøvetiden"
+    subject.encode(query)
+    assert subject.knows(query) is True
