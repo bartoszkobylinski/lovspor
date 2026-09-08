@@ -920,3 +920,40 @@ def test_charge_paid_refuses_an_unknown_credential(tmp_path: Path, clock: _Clock
     enforcer = _enforcer(tmp_path, Limits(), clock)
     with pytest.raises(QuotaExceededError, match="unknown credential"):
         enforcer.charge_paid("nobody")
+
+
+def test_charge_paid_enforces_the_shared_ceiling_across_users_and_resets_at_midnight(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """Exercise the hosted server's real spend path, not guard(paid=True).
+
+    The query embedder calls ``charge_paid`` immediately before the provider
+    request. Its shared wallet ceiling must therefore aggregate different
+    identities, refuse without charging the rejected identity, leave the
+    ordinary tool-call ledger alone, and reopen on the next UTC day.
+    """
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(paid_daily_quota=1),
+    )
+
+    enforcer.charge_paid("a")
+    with pytest.raises(QuotaExceededError, match="across all users"):
+        enforcer.charge_paid("b")
+
+    assert enforcer.paid_daily_used("a") == 1
+    assert enforcer.paid_daily_used("b") == 0
+    assert enforcer.service_paid_daily_used() == 1
+    assert enforcer.daily_used("a") == 0
+    assert enforcer.service_daily_used() == 0
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+
+    enforcer.charge_paid("b")
+    assert enforcer.paid_daily_used("a") == 0
+    assert enforcer.paid_daily_used("b") == 1
+    assert enforcer.service_paid_daily_used() == 1
