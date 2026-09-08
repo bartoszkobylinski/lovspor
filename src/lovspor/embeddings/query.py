@@ -37,6 +37,7 @@ from __future__ import annotations
 import threading
 import unicodedata
 from collections import OrderedDict
+from collections.abc import Callable
 
 import numpy as np
 
@@ -95,6 +96,11 @@ class QueryEmbedder:
         self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._inflight: dict[str, _InFlight] = {}
         self._lock = threading.Lock()
+        # Charged by the single-flight leader immediately before the provider
+        # call — the one point that cannot disagree with the bill. Wired by
+        # the hosted server after construction; None means nothing meters
+        # (stdio, or no enforcer), so nothing is charged.
+        self.before_spend: Callable[[], None] | None = None
 
     @classmethod
     def from_env(cls, embedder: EmbeddingModel) -> QueryEmbedder:
@@ -161,8 +167,16 @@ class QueryEmbedder:
             return None, flight, True
 
     def _lead(self, key: str, text: str, flight: _InFlight) -> np.ndarray:
-        """Place the one paid call and publish it to cache and waiters."""
+        """Place the one paid call and publish it to cache and waiters.
+
+        ``before_spend`` fires here and nowhere else: after every free
+        answer (cache hit, joined flight) is ruled out, before the provider
+        sees the request. Its refusal aborts the call unbilled and wakes
+        the waiters to retry — and be refused the same way.
+        """
         try:
+            if self.before_spend is not None:
+                self.before_spend()
             vector: np.ndarray = self._embedder.encode([text])[0]
             with self._lock:
                 self._cache[key] = vector
@@ -178,17 +192,6 @@ class QueryEmbedder:
             with self._lock:
                 self._inflight.pop(key, None)
             flight.done.set()
-
-    def knows(self, query: str) -> bool:
-        """Whether this exact question is already answered in cache.
-
-        A read-only peek for the paid meter: no recency refresh (metering
-        must not perturb the LRU), no provider call, no truncation notice.
-        """
-        text, _ = truncate_to_tokens(query, self._max_tokens, self._model_name)
-        key = self._key(text)
-        with self._lock:
-            return key in self._cache
 
     @property
     def max_tokens(self) -> int:

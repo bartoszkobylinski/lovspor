@@ -259,20 +259,6 @@ clamped (not rejected), so one call cannot amplify into a corpus-wide scan
 or return; the per-tool default stays 20."""
 
 
-def _semantic_search_spends(query: str = "", limit: int = 20, **_: object) -> bool:
-    """Whether a semantic_search call will actually reach the paid provider.
-
-    The paid counter tracks provider spend, not requests: the two no-ops the
-    tool documents (empty query, zero limit) return before any embedding call
-    and must not exhaust the caller's next real search. Only argument-decidable
-    no-ops are exempt — a dataset filter that matches nothing also skips the
-    provider, but deciding that requires reading the index, which the meter
-    must not do; such calls still charge. The free counter always charges:
-    a no-op is still a request the server had to serve.
-    """
-    return bool(query.strip()) and _bounded_limit(limit) != 0
-
-
 def _bounded_limit(limit: int) -> int:
     """Validate and clamp a tool's ``limit``.
 
@@ -1302,26 +1288,6 @@ class CorpusReader:
             )
         results.sort(key=lambda hit: hit["slug"] or "")
         return results
-
-    def semantic_search_will_spend(
-        self,
-        query: str = "",
-        limit: int = 20,
-        **_: object,
-    ) -> bool:
-        """Whether a semantic_search with these arguments will reach the
-        paid provider: not an argument-decidable no-op, not served by the
-        query-vector cache, and an embedder actually configured (without
-        one the tool raises before any spend). One conservative edge: two
-        concurrent identical cache misses both answer True while
-        single-flight places one provider call — the meter may overcount a
-        burst by one, never undercount a spend.
-        """
-        if not _semantic_search_spends(query=query, limit=limit):
-            return False
-        if self._query_embedder is None:
-            return False
-        return not self._query_embedder.knows(query)
 
     def semantic_search(
         self,
@@ -3541,12 +3507,37 @@ def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     return wrapper
 
 
+def _enforcer_with_spend_charger(
+    bind: HttpConfig,
+    metering: LimitsSource | None,
+    reader: CorpusReader,
+) -> QuotaEnforcer | None:
+    """Build the enforcer and wire the paid counter to the spend itself.
+
+    The query embedder's single-flight leader calls ``before_spend``
+    immediately before the provider request; charging there — never at
+    admission — is the only accounting that cannot be raced by cache
+    eviction between metering and execution. The closure resolves the
+    caller inside the worker thread: ``asyncio.to_thread`` copies the
+    request context, so the token is the calling request's, never a
+    neighbour's. stdio (no enforcer) wires nothing and charges nothing.
+    """
+    enforcer = _build_enforcer(bind, metering)
+    if enforcer is None or reader._query_embedder is None:
+        return enforcer
+
+    def _charge_paid_spend() -> None:
+        token = get_access_token()
+        if token is None:
+            raise QuotaExceededError("request carries no identified credential", 1)
+        enforcer.charge_paid(token.client_id)
+
+    reader._query_embedder.before_spend = _charge_paid_spend
+    return enforcer
+
+
 def _with_quota(
-    fn: Callable[..., Awaitable[Any]],
-    enforcer: QuotaEnforcer,
-    *,
-    paid: bool,
-    paid_when: Callable[..., bool] | None = None,
+    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer, *, paid: bool = False
 ) -> Callable[..., Awaitable[Any]]:
     """Charge a tool call against its credential's limits before it runs.
 
@@ -3565,8 +3556,7 @@ def _with_quota(
             # it ever is: an unidentified caller cannot be metered, so refuse
             # rather than serve one client's quota to everybody.
             raise QuotaExceededError("request carries no identified credential", 1)
-        charge_paid = paid and (paid_when is None or paid_when(**kwargs))
-        with enforcer.guard(token.client_id, paid=charge_paid):
+        with enforcer.guard(token.client_id, paid=paid):
             return await fn(**kwargs)
 
     return wrapper
@@ -4175,23 +4165,22 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind, verifier))
     # No store means --allow-insecure: no credential to meter, so no brakes.
     # serve_http already refuses that combination unless it was asked for.
-    enforcer = _build_enforcer(bind, metering)
+    enforcer = _enforcer_with_spend_charger(bind, metering, reader)
 
-    def _tool(
-        *,
-        paid: bool = False,
-        paid_when: Callable[..., bool] | None = None,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a tool, offloading its blocking body to a worker thread
         in hosted mode (see ``_offload_to_thread``) and metering it against the
         caller's credential (see ``_with_quota``). stdio keeps the direct sync
         call: one tool at a time, no thread hop, one local user to meter.
 
-        ``paid=True`` marks a tool that spends money downstream. Exactly one does
-        — ``semantic_search``, which embeds the caller's query through the
-        operator's OpenAI key — and it is charged against a separate, smaller
-        counter so the fifteen filesystem tools are not priced as if they cost
-        anything. stdio ignores it: there is no operator paying for someone else.
+        Admission charges only the free brakes. The paid counter — the one
+        that prices ``semantic_search``'s embedding call — is charged at the
+        spend itself: the query embedder's single-flight leader calls the
+        enforcer immediately before the provider request (see the
+        ``before_spend`` wiring below). Deciding paid-ness at admission was
+        raceable — a cache hit metered free could be evicted before the body
+        ran and reach the provider unbilled — so the bill is written where
+        the money leaves. stdio has no enforcer and charges nothing.
         """
 
         def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -4199,11 +4188,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
                 mcp.add_tool(fn)
                 return fn
             hosted = _offload_to_thread(fn)
-            mcp.add_tool(
-                hosted
-                if enforcer is None
-                else _with_quota(hosted, enforcer, paid=paid, paid_when=paid_when)
-            )
+            mcp.add_tool(hosted if enforcer is None else _with_quota(hosted, enforcer))
             return fn
 
         return decorator
@@ -4657,7 +4642,7 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
             else reader.search_body(query, dataset=dataset, limit=limit)
         )
 
-    @_tool(paid=True, paid_when=reader.semantic_search_will_spend)
+    @_tool()
     def semantic_search(
         query: str,
         dataset: str | None = None,

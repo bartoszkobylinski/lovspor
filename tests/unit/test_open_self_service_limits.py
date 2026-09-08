@@ -657,21 +657,21 @@ def test_a_credentials_counters_accumulate(tmp_path: Path, clock: _Clock) -> Non
     assert enforcer.paid_daily_used("a") == 3
 
 
-# --- exactly one tool is charged as paid -------------------------------------
+# --- the paid counter is charged at the spend, not at admission ---------------
 
 
-def test_only_semantic_search_is_registered_as_a_paid_tool(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Which tools cost money is decided once, at registration. Marking one too
-    many would meter free corpus reads against the embedding budget; marking one
-    too few would leave the budget unenforced on the only tool that spends it."""
+def test_no_tool_charges_paid_at_admission(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Which call costs money is decided where the money leaves: admission
+    charges only the free brakes, and the paid counter is charged by the
+    query embedder's single-flight leader right before the provider call.
+    A paid admission mark would re-open the metering/execution race the
+    spend-side charge exists to close."""
     seen: dict[str, bool] = {}
     original = mcp_module._with_quota
 
-    def _recording(fn, enforcer, *, paid, paid_when=None):  # type: ignore[no-untyped-def]
+    def _recording(fn, enforcer, *, paid=False):  # type: ignore[no-untyped-def]
         seen[fn.__name__] = paid
-        return original(fn, enforcer, paid=paid, paid_when=paid_when)
+        return original(fn, enforcer, paid=paid)
 
     monkeypatch.setattr(mcp_module, "_with_quota", _recording)
     _seed_corpus(tmp_path)
@@ -680,8 +680,8 @@ def test_only_semantic_search_is_registered_as_a_paid_tool(
         http=HttpConfig(credentials_path=_credentials_file(tmp_path)),
     )
 
-    assert seen["semantic_search"] is True
-    assert [name for name, paid in seen.items() if paid] == ["semantic_search"]
+    assert seen["semantic_search"] is False
+    assert [name for name, paid in seen.items() if paid] == []
     assert seen["get_law"] is False
 
 

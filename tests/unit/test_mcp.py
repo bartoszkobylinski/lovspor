@@ -7296,7 +7296,7 @@ def test_hosted_tools_are_metered_against_the_callers_credential(tmp_path: Path)
         _authed_call(server, "beta-001", "get_law", {"slug": "skatteloven"})
 
 
-def test_only_semantic_search_is_marked_as_a_paid_tool(
+def test_no_tool_is_marked_paid_at_admission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     creds = _quota_corpus(tmp_path, Limits())
@@ -7308,16 +7308,17 @@ def test_only_semantic_search_is_marked_as_a_paid_tool(
         enforcer: QuotaEnforcer,
         *,
         paid: bool = False,
-        paid_when: Callable[..., bool] | None = None,
     ) -> Callable[..., object]:
         registrations.append((fn.__name__, paid))
-        return real_with_quota(fn, enforcer, paid=paid, paid_when=paid_when)
+        return real_with_quota(fn, enforcer, paid=paid)
 
     monkeypatch.setattr(mcp_module, "_with_quota", recording_with_quota)
     build_server(tmp_path, http=HttpConfig(credentials_path=creds))
 
-    paid_tools = {name for name, paid in registrations if paid}
-    assert paid_tools == {"semantic_search"}
+    # The paid counter is charged at the spend (the embedder's single-flight
+    # leader), never at admission — a paid admission mark would re-open the
+    # metering/execution race charge-at-spend closes.
+    assert {name for name, paid in registrations if paid} == set()
     assert all(not paid for name, paid in registrations if name == "get_law")
 
 
@@ -7347,17 +7348,6 @@ def test_semantic_search_noop_does_not_consume_paid_quota(
         }
     )
     assert embedder.queries == []
-
-
-def test_the_spend_predicate_answers_from_the_arguments_alone() -> None:
-    """True exactly when the call will reach the paid provider: a real query
-    with a non-zero bounded limit. Everything argument-decidable that returns
-    before embedding — empty or whitespace query, zero limit, or no query
-    argument at all — is free of the paid counter."""
-    assert mcp_module._semantic_search_spends(query="husleie", limit=20) is True
-    assert mcp_module._semantic_search_spends(query="   ", limit=20) is False
-    assert mcp_module._semantic_search_spends(query="husleie", limit=0) is False
-    assert mcp_module._semantic_search_spends() is False
 
 
 def test_semantic_search_zero_limit_noop_does_not_consume_paid_quota(
@@ -7392,9 +7382,9 @@ def test_cached_semantic_search_does_not_consume_paid_quota_twice(
 ) -> None:
     """The query cache is a spend control: once a query vector is cached, an
     identical search does not reach the paid provider and must not consume
-    the caller's final paid allowance a second time. Exercised through the
-    real registration wiring — the paid decision is the reader's
-    ``semantic_search_will_spend``, which peeks the cache."""
+    the caller's final paid allowance a second time: the spend-side charge
+    only fires when the single-flight leader actually places a provider
+    call, and a cache hit never elects a leader."""
     creds = _quota_corpus(
         tmp_path,
         Limits(daily_quota=10, paid_daily_quota=1, max_in_flight=9, rate_burst=9),
@@ -8223,16 +8213,26 @@ def test_semantic_search_fails_loudly_on_an_unsupported_future_version(
         CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0, 0.0])).semantic_search("query")
 
 
-def test_the_will_spend_predicate_consults_the_cache(tmp_path: Path) -> None:
-    """True only for a call that will actually reach the provider: real
-    query, no cached vector, an embedder present."""
-    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+def test_cache_eviction_between_calls_still_charges_at_the_spend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cache hit is free only while its vector remains cached. With a
+    one-entry cache the second query evicts the first, so asking the first
+    again reaches for the provider — and the spend-side charge refuses it
+    once the paid ceiling is spent, with the provider never called for the
+    refused attempt. The bill is written where the money would leave."""
+    creds = _quota_corpus(
+        tmp_path,
+        Limits(daily_quota=10, paid_daily_quota=2, max_in_flight=9, rate_burst=9),
+    )
     _write_embedding_file(tmp_path, "lover", "skatteloven", [("1", [10, 0])])
-    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0]))
-    assert reader.semantic_search_will_spend(query="skatt") is True
-    assert reader.semantic_search_will_spend(query="   ") is False
-    assert reader.semantic_search_will_spend(query="skatt", limit=0) is False
-    reader.semantic_search("skatt")
-    assert reader.semantic_search_will_spend(query="skatt") is False
-    assert reader.semantic_search_will_spend() is False
-    assert CorpusReader(tmp_path).semantic_search_will_spend(query="skatt") is False
+    embedder = _FakeEmbedder([1.0, 0.0])
+    monkeypatch.setenv("LOVSPOR_SEMANTIC_QUERY_CACHE_ENTRIES", "1")
+    monkeypatch.setattr(mcp_module, "_build_embedder", lambda: embedder)
+    server = build_server(tmp_path, http=HttpConfig(credentials_path=creds))
+
+    _authed_call(server, "beta-001", "semantic_search", {"query": "skatt"})
+    _authed_call(server, "beta-001", "semantic_search", {"query": "annet"})
+    with pytest.raises(ToolError, match="daily limit of 2 semantic searches"):
+        _authed_call(server, "beta-001", "semantic_search", {"query": "skatt"})
+    assert embedder.queries == ["skatt", "annet"]

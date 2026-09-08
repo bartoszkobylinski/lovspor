@@ -896,3 +896,27 @@ def test_eviction_never_forgives_a_paid_quota_spent_today(tmp_path: Path, clock:
     assert enforcer.paid_daily_used("a") == 1
     with pytest.raises(QuotaExceededError), enforcer.guard("a", paid=True):
         pass  # pragma: no cover - guard raises before the body
+
+
+def test_charge_paid_bills_at_the_spend_and_refuses_at_the_ceiling(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """charge_paid is the spend-side twin of guard's paid mark: it touches
+    only the paid counters (the free brakes were charged at admission),
+    counts toward the same ledger paid_daily_used reads, and refuses once
+    the ceiling is spent — with nothing charged by the refusal."""
+    enforcer = _enforcer(tmp_path, Limits(paid_daily_quota=2), clock)
+
+    enforcer.charge_paid("beta-001")
+    enforcer.charge_paid("beta-001")
+    assert enforcer.paid_daily_used("beta-001") == 2
+
+    with pytest.raises(QuotaExceededError, match="daily limit of 2 semantic searches"):
+        enforcer.charge_paid("beta-001")
+    assert enforcer.paid_daily_used("beta-001") == 2
+
+
+def test_charge_paid_refuses_an_unknown_credential(tmp_path: Path, clock: _Clock) -> None:
+    enforcer = _enforcer(tmp_path, Limits(), clock)
+    with pytest.raises(QuotaExceededError, match="unknown credential"):
+        enforcer.charge_paid("nobody")

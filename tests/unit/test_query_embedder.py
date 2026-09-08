@@ -405,36 +405,23 @@ def test_a_silent_flight_trips_the_bounded_join(
     assert embedder.calls == []
 
 
-def test_knows_is_a_side_effect_free_peek() -> None:
-    """The paid meter's peek: answers from the cache alone, pays nothing,
-    and shares the normalised key with encode."""
+def test_the_leader_charges_before_the_provider_and_a_refusal_stays_unbilled() -> None:
+    """before_spend fires exactly once per provider call, immediately before
+    it: a cache hit never fires it, and a refusal aborts the call with the
+    provider never reached."""
     embedder = _CountingEmbedder()
     subject = QueryEmbedder(embedder)
-    assert subject.knows("skatt") is False
-    assert embedder.calls == []
+    charges: list[str] = []
+    subject.before_spend = lambda: charges.append("charge")
     subject.encode("skatt")
-    assert subject.knows("skatt") is True
-    assert subject.knows("  SKATT  ") is True
+    subject.encode("skatt")
+    assert charges == ["charge"]
     assert len(embedder.calls) == 1
 
+    def refuse() -> None:
+        raise RuntimeError("ceiling")
 
-def test_knows_does_not_refresh_recency() -> None:
-    """A metering peek must not perturb eviction: peeking the oldest entry
-    does not save it from the LRU."""
-    subject = QueryEmbedder(_CountingEmbedder(), cache_entries=2)
-    subject.encode("a")
-    subject.encode("b")
-    assert subject.knows("a") is True
-    subject.encode("c")
-    assert subject.knows("a") is False
-    assert subject.knows("b") is True
-
-
-def test_knows_shares_the_encoders_tokenizer() -> None:
-    """The peek must truncate with the same tokenizer as encode, or a
-    non-default model's cache entries would be invisible to the meter:
-    gpt2 and the default encoding cut this query at different points."""
-    subject = QueryEmbedder(_CountingEmbedder(), max_tokens=5, model_name="gpt2")
-    query = "hva sier arbeidsmiljøloven om oppsigelsestid i prøvetiden"
-    subject.encode(query)
-    assert subject.knows(query) is True
+    subject.before_spend = refuse
+    with pytest.raises(RuntimeError, match="ceiling"):
+        subject.encode("annet")
+    assert len(embedder.calls) == 1

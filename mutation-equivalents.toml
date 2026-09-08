@@ -1391,35 +1391,3 @@ only on an unreachable one (KeyError versus a returned None). Argued
 from Python's own dict semantics plus the module's single-remover
 invariant, which the module's concurrency tests pin.
 """
-
-[[equivalent]]
-file = "src/lovspor/mcp.py"
-symbol = "_semantic_search_spends"
-registered = "2026-09-07, PR #252, from run 34116697596"
-mutation = """
--def _semantic_search_spends(query: str = "", limit: int = 20, **_: object) -> bool:
-+def _semantic_search_spends(query: str = "", limit: int = 21, **_: object) -> bool:
-"""
-justification = """
-The limit default participates only through `_bounded_limit(limit) != 0`,
-a zero/non-zero classification: 20 and 21 both bound to a non-zero value,
-so every call — with or without an explicit limit — computes the same
-boolean. Pure Python argument over the only consumer of the value; the
-zero class itself is pinned by the predicate's direct test.
-"""
-
-[[equivalent]]
-file = "src/lovspor/mcp.py"
-symbol = "semantic_search_will_spend"
-registered = "2026-09-08, PR #252, from run 34190340940"
-mutation = """
--        limit: int = 20,
-+        limit: int = 21,
-"""
-justification = """
-Mirror of the _semantic_search_spends limit-default entry: the reader
-method forwards limit into that predicate, where it participates only
-through `_bounded_limit(limit) != 0` — a zero/non-zero classification.
-20 and 21 bound to the same class, so every call computes the same
-boolean; the zero class is pinned by the predicate's direct tests.
-"""

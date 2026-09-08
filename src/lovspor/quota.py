@@ -339,6 +339,59 @@ class QuotaEnforcer:
             if paid:
                 self._service.paid_daily.used += 1
 
+    def charge_paid(self, credential_id: str) -> None:
+        """Charge one PAID unit at the moment of provider spend.
+
+        Called by the spend site itself — the query embedder's single-flight
+        leader, immediately before the provider call — never by the admission
+        wrapper. A metering decision taken before execution can be raced by
+        cache eviction; billing at the call is the only accounting that
+        cannot disagree with the bill. Checks and charges ONLY the paid
+        counters — the admission guard has already charged the free brakes
+        for this request — and raises with the provider never called.
+        """
+        limits = self._store.limits_for(credential_id)
+        if limits is None:
+            raise QuotaExceededError(
+                f"unknown credential {credential_id}",
+                _IN_FLIGHT_RETRY_SECONDS,
+            )
+        with self._lock:
+            self._charge_paid_counters(self._state_for_locked(credential_id), limits)
+
+    def _state_for_locked(self, credential_id: str) -> _State:
+        """_state_for's body without re-taking the already-held lock."""
+        state = self._states.get(credential_id)
+        if state is None:
+            if len(self._states) >= self._eviction_threshold:
+                self._evict_idle()
+            state = _State(self._monotonic, self._utc_now)
+            self._states[credential_id] = state
+        state.last_seen = self._monotonic()
+        return state
+
+    def _charge_paid_counters(self, state: _State, limits: Limits) -> None:
+        """Refuse-or-increment for both paid ceilings; free brakes untouched."""
+        state.paid_daily.roll()
+        if state.paid_daily.used >= limits.paid_daily_quota:
+            raise QuotaExceededError(
+                f"daily limit of {limits.paid_daily_quota} semantic searches is "
+                "exhausted; the other fifteen tools are unaffected",
+                _seconds_to_utc_midnight(self._utc_now()),
+            )
+        if self._service_limits is not None:
+            self._service.paid_daily.roll()
+            if self._service.paid_daily.used >= self._service_limits.paid_daily_quota:
+                raise QuotaExceededError(
+                    "this server has reached its daily ceiling of "
+                    f"{self._service_limits.paid_daily_quota} semantic searches "
+                    "across all users",
+                    _seconds_to_utc_midnight(self._utc_now()),
+                )
+        state.paid_daily.used += 1
+        if self._service_limits is not None:
+            self._service.paid_daily.used += 1
+
     def paid_daily_used(self, credential_id: str) -> int:
         """Paid calls billed to ``credential_id`` today. For tests and diagnostics."""
         with self._lock:
