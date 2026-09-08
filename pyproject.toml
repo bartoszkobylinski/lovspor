@@ -195,6 +195,7 @@ addopts = [
 markers = [
     "integration: integration tests (slower, may use real fixtures)",
     "network: requires network access",
+    "codex_proposal: the CI test author proposes a stricter contract than the PR states; advisory, never blocking (issue #248)",
 ]
 
 # ---------- Coverage ----------

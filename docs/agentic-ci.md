@@ -166,14 +166,50 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
 - Codex jobs run only for same-repo PRs (`head.repo.full_name == repository`); the
   fork-PR approval policy is set to "all outside collaborators".
 
+## Convergence: when does `codex-tests` stop? (issue #248)
+
+The author treats "I can write a failing test" as "the implementation is wrong". On a
+fresh PR those coincide. On a mature one they diverge: an author with unlimited rounds
+can always invent a tighter contract than any spec or corpus fact requires, every
+proposal is individually defensible, and nothing in the loop concludes "the contract is
+satisfied". PR #244 ran fourteen rounds, #257 seven — the later ones each a narrower
+variant of the same file-format class, each costing ~30 min of pipeline plus a fix
+commit, with no signal separating "implementation broken" from "author still inventing".
+
+`scripts/ci/codex_convergence.py` is the fixed point. After the author's tests run it
+sorts every failure into one of three bins:
+
+| failure | verdict | why |
+|---|---|---|
+| a test the author did **not** add | **blocks**, always | a pre-existing test broken by the PR is a regression, never a proposal |
+| an author test marked `@pytest.mark.codex_proposal` | advisory | the author itself said "stricter contract I propose", not "violation of what the PR states" — the prompt requires the distinction |
+| any author test, once the PR has been blocked `CODEX_BLOCKING_CAP` times (repo variable, default 3) | advisory | the implementation side has converged; the cap gives the test side its missing notion of diminishing returns |
+| any other author test | blocks | a contract violation within the cap |
+
+Advisory tests are not discarded. The verdict marks each one `xfail(strict=True,
+reason="codex proposal, round N — owner decision, see #248")` **in place** and the round
+commits as usual, so the proposal stays in the tree, visible in `git blame`, and the day
+the owner implements it the strict xfail turns into a hard failure that says "remove
+this marker". The owner decides which proposals to take; the pipeline no longer decides
+for them by staying red. A round with advisory findings and no blockers is **green** and
+reports into the same `pipeline` sticky comment (one marker per workflow); the advisory
+body never contains the counted BLOCKED phrase, so it sits in the history without
+inflating the round count.
+
+The round count is read from the `pipeline` sticky comment by counting the phrase
+`Codex-authored tests fail against this head` — a blocking round pushes no commit, so
+the comment is the only durable record. The phrase is a contract shared by the verdict's
+comment renderer and its counter (`BLOCKED_PHRASE`, pinned by test); changing it in one
+place silently resets every open PR's count to zero.
+
 ## Failure escalation
 
 - Codex's correct new test exposes a production bug → Codex reports it, does NOT fix
   production code. The `codex-tests` job itself applies `needs-implementation-fix`,
-  comments on the PR with the failing tests, and preserves the test patch + pytest log
-  as artifact `codex-tests-<head-sha>` (issue #95 — before this, a failing round died
-  as a bare red check and the tests survived only in the run log); human relays to
-  local Claude.
+  comments on the PR with the failing tests **and the round number against the cap**, and
+  preserves the test patch + pytest log as artifact `codex-tests-<head-sha>` (issue #95 —
+  before this, a failing round died as a bare red check and the tests survived only in
+  the run log); human relays to local Claude.
 - Ambiguous/equivalent mutants → `needs-human:mutation`. BLOCKED is a valid end state,
   never to be silenced by weakening tests or thresholds.
 - Codex output is normalized (`ruff format` + `ruff check` on `tests/`) before commit in
