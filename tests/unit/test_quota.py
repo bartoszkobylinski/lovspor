@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from lovspor import quota
 from lovspor.access import (
     Credential,
     CredentialStore,
@@ -904,22 +905,29 @@ def test_charge_paid_bills_at_the_spend_and_refuses_at_the_ceiling(
     """charge_paid is the spend-side twin of guard's paid mark: it touches
     only the paid counters (the free brakes were charged at admission),
     counts toward the same ledger paid_daily_used reads, and refuses once
-    the ceiling is spent — with nothing charged by the refusal."""
+    the ceiling is spent — with nothing charged by the refusal. The message
+    and the retry hint are byte-exact: they are the client's only signal."""
     enforcer = _enforcer(tmp_path, Limits(paid_daily_quota=2), clock)
 
     enforcer.charge_paid("beta-001")
     enforcer.charge_paid("beta-001")
     assert enforcer.paid_daily_used("beta-001") == 2
 
-    with pytest.raises(QuotaExceededError, match="daily limit of 2 semantic searches"):
+    with pytest.raises(QuotaExceededError) as excinfo:
         enforcer.charge_paid("beta-001")
+    assert str(excinfo.value) == (
+        "daily limit of 2 semantic searches is exhausted; the other fifteen tools are unaffected"
+    )
+    assert excinfo.value.retry_after_seconds == quota._seconds_to_utc_midnight(clock.utc_now())
     assert enforcer.paid_daily_used("beta-001") == 2
 
 
 def test_charge_paid_refuses_an_unknown_credential(tmp_path: Path, clock: _Clock) -> None:
     enforcer = _enforcer(tmp_path, Limits(), clock)
-    with pytest.raises(QuotaExceededError, match="unknown credential"):
+    with pytest.raises(QuotaExceededError) as excinfo:
         enforcer.charge_paid("nobody")
+    assert str(excinfo.value) == "unknown credential nobody"
+    assert excinfo.value.retry_after_seconds == quota._IN_FLIGHT_RETRY_SECONDS
 
 
 def test_charge_paid_enforces_the_shared_ceiling_across_users_and_resets_at_midnight(
@@ -957,3 +965,29 @@ def test_charge_paid_enforces_the_shared_ceiling_across_users_and_resets_at_midn
     assert enforcer.paid_daily_used("a") == 0
     assert enforcer.paid_daily_used("b") == 1
     assert enforcer.service_paid_daily_used() == 1
+
+
+def test_charge_paid_accumulates_the_service_ceiling_across_credentials(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """The instance ceiling counts every credential's spend: two users at
+    one paid call each must exhaust a ceiling of two, and the third charge
+    is refused with the exact service message and a midnight retry."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(paid_daily_quota=2),
+    )
+
+    enforcer.charge_paid("a")
+    enforcer.charge_paid("b")
+    with pytest.raises(QuotaExceededError) as excinfo:
+        enforcer.charge_paid("a")
+    assert str(excinfo.value) == (
+        "this server has reached its daily ceiling of 2 semantic searches across all users"
+    )
+    assert excinfo.value.retry_after_seconds == quota._seconds_to_utc_midnight(clock.utc_now())
+    assert enforcer.paid_daily_used("a") == 1

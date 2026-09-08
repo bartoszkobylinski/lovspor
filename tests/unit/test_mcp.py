@@ -8236,3 +8236,34 @@ def test_cache_eviction_between_calls_still_charges_at_the_spend(
     with pytest.raises(ToolError, match="daily limit of 2 semantic searches"):
         _authed_call(server, "beta-001", "semantic_search", {"query": "skatt"})
     assert embedder.queries == ["skatt", "annet"]
+
+
+def test_the_spend_charger_bills_the_caller_and_refuses_an_unidentified_one(
+    tmp_path: Path,
+) -> None:
+    """The wired before_spend resolves the caller at the spend itself: an
+    authenticated request is billed to its own credential, and with no
+    request context there is nobody to bill — an unbillable spend is
+    refused with the exact message and immediate-retry hint."""
+    creds = _quota_corpus(tmp_path, Limits())
+    reader = CorpusReader(tmp_path, embedder=_FakeEmbedder([1.0, 0.0]))
+    enforcer = mcp_module._enforcer_with_spend_charger(
+        HttpConfig(credentials_path=creds), CredentialStore(creds), reader
+    )
+    assert enforcer is not None
+    assert reader._query_embedder is not None
+    charge = reader._query_embedder.before_spend
+    assert charge is not None
+
+    with pytest.raises(QuotaExceededError) as excinfo:
+        charge()
+    assert str(excinfo.value) == "request carries no identified credential"
+    assert excinfo.value.retry_after_seconds == 1
+
+    user = AuthenticatedUser(AccessToken(token="t", client_id="beta-001", scopes=[]))
+    reset = auth_context_var.set(user)
+    try:
+        charge()
+    finally:
+        auth_context_var.reset(reset)
+    assert enforcer.paid_daily_used("beta-001") == 1
