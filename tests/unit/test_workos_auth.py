@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from jwt.exceptions import PyJWKClientError
 from mcp.server.auth.provider import AccessToken
 
-from lovspor.access import Limits
+from lovspor.access import SELF_SERVICE_LIMITS, Limits
 from lovspor.workos_auth import (
     DEFAULT_WORKOS_LIMITS,
     CompositeVerifier,
@@ -88,8 +88,15 @@ def _sign(private: Any, **overrides: Any) -> str:
     return jwt.encode(claims, private, algorithm="RS256")
 
 
-def test_default_workos_limits_are_a_real_limits_bucket() -> None:
-    assert Limits() == DEFAULT_WORKOS_LIMITS
+def test_default_workos_limits_are_the_self_service_bucket_not_the_hand_issued_one() -> None:
+    """Self-service users stopped inheriting the hand-issued defaults when the
+    endpoint opened to public sign-up (2026-09-06). The assertion is inverted on
+    purpose: an anonymous sign-up must not be handed a named tester's allowance,
+    and at the hand-issued in-flight default of 4 one of them could hold four of
+    the production droplet's five worker threads."""
+    assert DEFAULT_WORKOS_LIMITS == SELF_SERVICE_LIMITS
+    assert Limits() != DEFAULT_WORKOS_LIMITS
+    assert DEFAULT_WORKOS_LIMITS.max_in_flight < Limits().max_in_flight
 
 
 def test_default_jwks_client_uses_the_authkit_oauth2_endpoint() -> None:

@@ -43,6 +43,13 @@ class FakeEncoding:
     def decode(self, tokens: list[int]) -> str:
         return f"decoded:{len(tokens)}:{tokens[-1]}"
 
+    def decode_bytes(self, tokens: list[int]) -> bytes:
+        """Truncation decodes BYTES now, so a cut inside a multi-byte character
+        drops the fragment rather than emitting U+FFFD (PR #252). The fake keeps
+        the same observable string, encoded, so the existing expectation still
+        describes what the caller gets."""
+        return self.decode(tokens).encode("utf-8")
+
 
 def _embedding_response(embeddings: list[list[float]]) -> dict[str, object]:
     return _indexed_embedding_response(

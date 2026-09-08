@@ -65,11 +65,16 @@ from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
-from pydantic import AnyHttpUrl, BaseModel, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from lovspor.access import CredentialStore
+from lovspor.access import (
+    CredentialStore,
+    Limits,
+    ServiceLimits,
+    self_service_limits_from_env,
+)
 from lovspor.embeddings import (
     EmbeddingConfig,
     EmbeddingFile,
@@ -80,6 +85,7 @@ from lovspor.embeddings import (
     read_embeddings,
     space_id_of,
 )
+from lovspor.embeddings.query import QueryEmbedder
 from lovspor.errors import ConfigError, CorpusStateError, LovsporError
 from lovspor.headings import (
     ANY_HEADING,
@@ -126,7 +132,6 @@ from lovspor.timetravel import (
     resolve_law_at_revision,
 )
 from lovspor.workos_auth import (
-    DEFAULT_WORKOS_LIMITS,
     CompositeVerifier,
     WorkOSTokenVerifier,
 )
@@ -433,6 +438,10 @@ class CorpusReader:
         # vector and a stale .bin disagree on dim, taking the whole
         # search down for one orphan file from a prior model migration.
         self._expected_dim: int | None = embedder.get_dimension() if embedder else None
+        # The paid path never touches the raw embedder: every query goes through
+        # the cap and the cache, so the unit price of a call is bounded and a
+        # repeated question costs nothing.
+        self._query_embedder = QueryEmbedder.from_env(embedder) if embedder else None
         # Which vector space this embedder speaks. Dimension cannot stand in
         # for it: two unrelated models agree on 3072 all the time, and cosine
         # similarity across their spaces returns confident nonsense instead of
@@ -1362,7 +1371,17 @@ class CorpusReader:
                 "notice": f"{bootstrap} {coverage}" if coverage else bootstrap,
             }
 
-        query_vector = self._embedder.encode([query])[0]
+        assert self._query_embedder is not None  # noqa: S101 - built with _embedder
+        query_vector, truncated = self._query_embedder.encode(query)
+        if truncated:
+            # A shortened query is a different question from the one that was
+            # asked, so the answer says so rather than quietly ranking against
+            # the part that fitted.
+            cut = (
+                f"Query truncated to the first {self._query_embedder.max_tokens} tokens "
+                "before matching; results reflect that opening portion only."
+            )
+            coverage = f"{cut} {coverage}" if coverage else cut
         hits = index.top_k(query_vector, k=limit, allowed_slugs=allowed_slugs)
         kept = [hit for hit in hits if hit.score >= min_score]
         if not kept:
@@ -3328,6 +3347,12 @@ class HttpConfig(BaseModel):
     # lovspor's own ``/mcp`` URL — the RFC 8707 resource the token is bound to.
     authkit_domain: str | None = None
     public_url: str | None = None
+    # Per-user limits for self-service OAuth users and the instance-wide ceiling
+    # above them. Defaults come from the environment so an operator retunes a
+    # live service with an edit and a restart — the hand-issued path already had
+    # that property through the credential store, the open path did not.
+    self_service_limits: Limits = Field(default_factory=self_service_limits_from_env)
+    service_limits: ServiceLimits | None = Field(default_factory=ServiceLimits.from_env)
 
     @model_validator(mode="after")
     def _reject_half_configured_oauth(self) -> Self:
@@ -3341,7 +3366,13 @@ class HttpConfig(BaseModel):
         This catches the mistake early — at CLI parse, before anything binds — but
         it is not the only guard; see :meth:`oauth_pair`.
         """
-        self.oauth_pair()
+        if self.oauth_pair() is not None and self.service_limits is None:
+            raise ConfigError(
+                "hosted OAuth requires the instance-wide service limits: "
+                "self-service sign-up makes the number of identities "
+                "unbounded, and per-user limits alone no longer bound the "
+                "instance — the ceiling cannot be disabled, only retuned",
+            )
         return self
 
     def oauth_pair(self) -> tuple[str, str] | None:
@@ -3439,10 +3470,35 @@ def _build_verifier(
                 authkit_domain=issuer,
                 resource_url=resource,
             ),
-            workos_default_limits=DEFAULT_WORKOS_LIMITS,
+            workos_default_limits=bind.self_service_limits,
         )
         return composite, composite
     return store, store
+
+
+def _build_enforcer(bind: HttpConfig, metering: LimitsSource | None) -> QuotaEnforcer | None:
+    """Quota enforcer for a bind config, or ``None`` when nothing is metered.
+
+    The instance-wide ceiling is applied only in hosted-OAuth mode. Opaque tokens
+    are hand-issued, so their aggregate is already bounded by how many the
+    operator issued; capping them server-wide would refuse a known tester because
+    of strangers. Self-service sign-up is the case where the identity count stops
+    being the operator's to control, and that is what the ceiling answers.
+    """
+    if metering is None:
+        # --allow-insecure: no credential to meter, so no brakes. serve_http
+        # already refuses that combination unless it was asked for.
+        return None
+    ceiling = bind.service_limits if bind.oauth_pair() is not None else None
+    if bind.oauth_pair() is not None and ceiling is None:
+        # The constructor validator refuses this; re-checking here is the
+        # same belt oauth_pair wears against pydantic's non-validating
+        # escape hatches — an unbounded hosted instance must not boot.
+        raise ConfigError(
+            "hosted OAuth requires the instance-wide service limits: "
+            "the ceiling cannot be disabled, only retuned",
+        )
+    return QuotaEnforcer(metering, service_limits=ceiling)
 
 
 def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
@@ -3465,8 +3521,37 @@ def _offload_to_thread(fn: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     return wrapper
 
 
+def _enforcer_with_spend_charger(
+    bind: HttpConfig,
+    metering: LimitsSource | None,
+    reader: CorpusReader,
+) -> QuotaEnforcer | None:
+    """Build the enforcer and wire the paid counter to the spend itself.
+
+    The query embedder's single-flight leader calls ``before_spend``
+    immediately before the provider request; charging there — never at
+    admission — is the only accounting that cannot be raced by cache
+    eviction between metering and execution. The closure resolves the
+    caller inside the worker thread: ``asyncio.to_thread`` copies the
+    request context, so the token is the calling request's, never a
+    neighbour's. stdio (no enforcer) wires nothing and charges nothing.
+    """
+    enforcer = _build_enforcer(bind, metering)
+    if enforcer is None or reader._query_embedder is None:
+        return enforcer
+
+    def _charge_paid_spend() -> None:
+        token = get_access_token()
+        if token is None:
+            raise QuotaExceededError("request carries no identified credential", 1)
+        enforcer.charge_paid(token.client_id)
+
+    reader._query_embedder.before_spend = _charge_paid_spend
+    return enforcer
+
+
 def _with_quota(
-    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer
+    fn: Callable[..., Awaitable[Any]], enforcer: QuotaEnforcer, *, paid: bool = False
 ) -> Callable[..., Awaitable[Any]]:
     """Charge a tool call against its credential's limits before it runs.
 
@@ -3485,7 +3570,7 @@ def _with_quota(
             # it ever is: an unidentified caller cannot be metered, so refuse
             # rather than serve one client's quota to everybody.
             raise QuotaExceededError("request carries no identified credential", 1)
-        with enforcer.guard(token.client_id):
+        with enforcer.guard(token.client_id, paid=paid):
             return await fn(**kwargs)
 
     return wrapper
@@ -4094,13 +4179,23 @@ def build_server(corpus_path: Path, *, http: HttpConfig | None = None) -> FastMC
     mcp = FastMCP("lovverk", host=bind.host, port=bind.port, **_auth_kwargs(bind, verifier))
     # No store means --allow-insecure: no credential to meter, so no brakes.
     # serve_http already refuses that combination unless it was asked for.
-    enforcer = QuotaEnforcer(metering) if metering is not None else None
+    enforcer = _enforcer_with_spend_charger(bind, metering, reader)
 
     def _tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """Register a tool, offloading its blocking body to a worker thread
         in hosted mode (see ``_offload_to_thread``) and metering it against the
         caller's credential (see ``_with_quota``). stdio keeps the direct sync
-        call: one tool at a time, no thread hop, one local user to meter."""
+        call: one tool at a time, no thread hop, one local user to meter.
+
+        Admission charges only the free brakes. The paid counter — the one
+        that prices ``semantic_search``'s embedding call — is charged at the
+        spend itself: the query embedder's single-flight leader calls the
+        enforcer immediately before the provider request (see the
+        ``before_spend`` wiring below). Deciding paid-ness at admission was
+        raceable — a cache hit metered free could be evicted before the body
+        ran and reach the provider unbilled — so the bill is written where
+        the money leaves. stdio has no enforcer and charges nothing.
+        """
 
         def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             if http is None:

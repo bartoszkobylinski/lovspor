@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from lovspor import quota
 from lovspor.access import (
     Credential,
     CredentialStore,
     Limits,
+    ServiceLimits,
     generate_token,
     hash_token,
     write_credential_file,
@@ -494,3 +498,579 @@ def test_daily_used_reports_zero_after_the_day_turns_without_a_guard(
 
     clock.now = datetime(2026, 7, 18, 0, 0, 1, tzinfo=UTC)
     assert enforcer.daily_used("beta-001") == 0  # rolled without needing a guard()
+
+
+# --- instance-wide ceiling (self-service sign-up) ---------------------------
+
+
+def _write_many(path: Path, ids: tuple[str, ...], limits: Limits) -> None:
+    write_credential_file(
+        path,
+        [
+            Credential(
+                credential_id=cid,
+                label=cid,
+                token_sha256=hash_token(generate_token()),
+                limits=limits,
+            )
+            for cid in ids
+        ],
+    )
+
+
+def test_service_daily_ceiling_refuses_a_user_still_inside_their_own_quota(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """The point of the ceiling: per-user limits do not bound N users."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(daily_quota=100))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=2),
+    )
+
+    with enforcer.guard("a"):
+        pass
+    with enforcer.guard("b"):
+        pass
+
+    with pytest.raises(QuotaExceededError) as excinfo, enforcer.guard("a"):
+        pass  # pragma: no cover - guard raises before the body
+    assert "daily ceiling" in str(excinfo.value)
+    assert enforcer.daily_used("a") == 1  # own quota untouched by the refusal
+
+
+def test_service_daily_ceiling_resets_at_the_utc_day_boundary(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """Yesterday's aggregate traffic must not permanently close the service."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=1),
+    )
+
+    with enforcer.guard("a"):
+        pass
+    with pytest.raises(QuotaExceededError, match="across all users"), enforcer.guard("b"):
+        pass  # pragma: no cover - guard raises before the body
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+
+    with enforcer.guard("b"):
+        pass
+    assert enforcer.service_daily_used() == 1
+
+
+def test_service_in_flight_ceiling_counts_across_different_users(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b", "c"), Limits(max_in_flight=4))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(max_in_flight=2),
+    )
+
+    with enforcer.guard("a"), enforcer.guard("b"):
+        with pytest.raises(QuotaExceededError) as excinfo, enforcer.guard("c"):
+            pass  # pragma: no cover - guard raises before the body
+        assert "at capacity" in str(excinfo.value)
+
+    with enforcer.guard("c"):
+        pass  # slots freed on exit, so the instance recovers
+
+
+def test_service_in_flight_ceiling_is_atomic_across_concurrent_users(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """Two hosted worker threads must not both pass a one-slot ceiling.
+
+    Pause both callers after the shared check to make the check/increment race
+    deterministic.  The timeout also lets a correctly serialized admission
+    implementation progress: its first caller times out, occupies the slot,
+    and the second is then refused before reaching this hook.
+    """
+
+    class _CoordinatedEnforcer(QuotaEnforcer):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            self._coordination_lock = threading.Lock()
+            self._checked_count = 0
+            self.both_checked = threading.Event()
+
+        def _admit_service(self, *, paid: bool) -> None:
+            super()._admit_service(paid=paid)
+            with self._coordination_lock:
+                self._checked_count += 1
+                if self._checked_count == 2:
+                    self.both_checked.set()
+            self.both_checked.wait(timeout=0.2)
+
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(max_in_flight=2))
+    enforcer = _CoordinatedEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(max_in_flight=1),
+    )
+    start = threading.Barrier(2)
+    release = threading.Event()
+
+    def call(credential_id: str) -> str:
+        start.wait(timeout=1)
+        try:
+            with enforcer.guard(credential_id):
+                release.wait(timeout=1)
+                return "admitted"
+        except QuotaExceededError:
+            return "refused"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(call, credential_id) for credential_id in ("a", "b")]
+        enforcer.both_checked.wait(timeout=0.5)
+        release.set()
+        outcomes = [future.result(timeout=1) for future in futures]
+
+    assert sorted(outcomes) == ["admitted", "refused"]
+
+
+def test_service_in_flight_slot_frees_when_tool_body_raises(tmp_path: Path, clock: _Clock) -> None:
+    """A failed tool must release the shared slot as well as the caller's slot."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits(max_in_flight=10, rate_burst=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(max_in_flight=1),
+    )
+
+    with pytest.raises(ValueError, match="boom"), enforcer.guard("a"):
+        raise ValueError("boom")
+
+    with enforcer.guard("a"):
+        pass
+
+
+def test_a_users_own_refusal_does_not_bill_the_instance(tmp_path: Path, clock: _Clock) -> None:
+    """A call refused by the caller's own brake never happened, so it must not
+    eat the shared daily ceiling that protects the embedding budget."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits(daily_quota=1))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=10),
+    )
+
+    with enforcer.guard("a"):
+        pass
+    with pytest.raises(QuotaExceededError), enforcer.guard("a"):
+        pass  # pragma: no cover - guard raises before the body
+
+    assert enforcer.service_daily_used() == 1
+
+
+def test_without_a_ceiling_the_instance_is_not_metered(tmp_path: Path, clock: _Clock) -> None:
+    """Opaque-token-only deploys keep the pre-self-service behaviour."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits())
+    enforcer = QuotaEnforcer(CredentialStore(path), clock.monotonic, clock.utc_now)
+
+    with enforcer.guard("a"):
+        pass
+
+    assert enforcer.service_daily_used() == 0
+
+
+# --- bounded state store ----------------------------------------------------
+
+
+def _saturate(enforcer: QuotaEnforcer, ids: tuple[str, ...]) -> None:
+    for cid in ids:
+        with enforcer.guard(cid):
+            pass
+
+
+def test_idle_unspent_counters_are_evicted(tmp_path: Path, clock: _Clock) -> None:
+    """Self-service sign-up makes the key space unbounded; the dict must not be."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(daily_quota=5))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=1,
+        eviction_idle_seconds=60.0,
+    )
+
+    with enforcer.guard("a"):
+        pass
+    # A new day makes "a" unspent again, and an hour makes it idle.
+    clock.now = clock.now.replace(day=clock.now.day + 1)
+    clock.advance(120)
+
+    with enforcer.guard("b"):
+        pass
+
+    assert enforcer.tracked_credentials() == 1
+
+
+def test_eviction_never_forgives_a_quota_spent_today(tmp_path: Path, clock: _Clock) -> None:
+    """The trap a naive LRU would fall into: dropping a state hands its daily
+    quota back, which anyone could drive by pausing for the idle window."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(daily_quota=1))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=1,
+        eviction_idle_seconds=60.0,
+    )
+
+    with enforcer.guard("a"):
+        pass
+    clock.advance(3600)  # idle long past the window, but same UTC day
+    with enforcer.guard("b"):
+        pass
+
+    assert enforcer.daily_used("a") == 1
+    with pytest.raises(QuotaExceededError), enforcer.guard("a"):
+        pass  # pragma: no cover - guard raises before the body
+
+
+def test_a_call_in_flight_is_never_evicted(tmp_path: Path, clock: _Clock) -> None:
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits())
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=1,
+        eviction_idle_seconds=0.0,
+    )
+
+    with enforcer.guard("a"):
+        with enforcer.guard("b"):
+            pass
+        # "a" holds a slot; dropping its state would lose the decrement and leak
+        # an in-flight count that never returns.
+        assert enforcer.tracked_credentials() == 2
+
+
+def test_eviction_continues_past_an_in_flight_credential(tmp_path: Path, clock: _Clock) -> None:
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("active", "idle", "new"), Limits())
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=2,
+        eviction_idle_seconds=60.0,
+    )
+
+    with enforcer.guard("active"):
+        with enforcer.guard("idle"):
+            pass
+        clock.now = clock.now.replace(day=clock.now.day + 1)
+        clock.advance(120)
+        with enforcer.guard("new"):
+            pass
+        assert enforcer.tracked_credentials() == 2
+
+
+def test_eviction_continues_past_a_recent_credential(tmp_path: Path, clock: _Clock) -> None:
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("recent", "idle", "new"), Limits())
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=2,
+        eviction_idle_seconds=60.0,
+    )
+
+    _saturate(enforcer, ("recent", "idle"))
+    clock.now = clock.now.replace(day=clock.now.day + 1)
+    clock.advance(120)
+    with enforcer.guard("recent"):
+        pass
+    with enforcer.guard("new"):
+        pass
+
+    assert enforcer.tracked_credentials() == 2
+
+
+# --- the one tool that costs money ------------------------------------------
+
+
+def test_free_tools_keep_working_after_the_semantic_budget_is_spent(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """Fifteen tools read files; one embeds through the operator's OpenAI key.
+    Exhausting the paid budget must not close the corpus."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits(daily_quota=100, paid_daily_quota=2))
+    enforcer = QuotaEnforcer(CredentialStore(path), clock.monotonic, clock.utc_now)
+
+    for _ in range(2):
+        with enforcer.guard("a", paid=True):
+            pass
+
+    with pytest.raises(QuotaExceededError) as excinfo, enforcer.guard("a", paid=True):
+        pass  # pragma: no cover - guard raises before the body
+    assert "semantic searches" in str(excinfo.value)
+
+    with enforcer.guard("a"):
+        pass  # a free tool is unaffected
+    assert enforcer.daily_used("a") == 3
+
+
+def test_a_free_call_never_bills_the_paid_counter(tmp_path: Path, clock: _Clock) -> None:
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits(paid_daily_quota=1))
+    enforcer = QuotaEnforcer(CredentialStore(path), clock.monotonic, clock.utc_now)
+
+    for _ in range(5):
+        with enforcer.guard("a"):
+            pass
+
+    assert enforcer.paid_daily_used("a") == 0
+    with enforcer.guard("a", paid=True):
+        pass  # the single paid call is still available
+
+
+def test_instance_paid_ceiling_bounds_the_embedding_bill(tmp_path: Path, clock: _Clock) -> None:
+    """The wallet bound: per-user paid quotas multiply by however many people
+    signed up, which is exactly the number nobody controls once sign-up opens."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=100))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(paid_daily_quota=1),
+    )
+
+    with enforcer.guard("a", paid=True):
+        pass
+    with pytest.raises(QuotaExceededError) as excinfo, enforcer.guard("b", paid=True):
+        pass  # pragma: no cover - guard raises before the body
+    assert "across all users" in str(excinfo.value)
+
+    with enforcer.guard("b"):
+        pass  # and the free tools stay open for everyone
+    assert enforcer.service_paid_daily_used() == 1
+
+
+def test_instance_paid_refusal_does_not_bill_the_rejected_user(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """A shared-wallet refusal happens before any caller counters mutate.
+
+    Otherwise one user's spend could exhaust another user's personal paid and
+    total daily allowances without that second user ever reaching the provider.
+    """
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(daily_quota=10, paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=10, paid_daily_quota=1),
+    )
+
+    with enforcer.guard("a", paid=True):
+        pass
+    with (
+        pytest.raises(QuotaExceededError, match="across all users"),
+        enforcer.guard("b", paid=True),
+    ):
+        pass  # pragma: no cover - guard raises before the body
+
+    assert enforcer.daily_used("b") == 0
+    assert enforcer.paid_daily_used("b") == 0
+    assert enforcer.service_daily_used() == 1
+    assert enforcer.service_paid_daily_used() == 1
+
+
+def test_paid_quotas_reset_at_the_utc_day_boundary(tmp_path: Path, clock: _Clock) -> None:
+    """Both new spend counters are daily limits, so yesterday's semantic
+    search must not consume either today's user allowance or today's shared
+    service allowance."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a",), Limits(daily_quota=10, paid_daily_quota=1))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=10, paid_daily_quota=1),
+    )
+
+    with enforcer.guard("a", paid=True):
+        pass
+    with pytest.raises(QuotaExceededError), enforcer.guard("a", paid=True):
+        pass  # pragma: no cover - guard raises before the body
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+
+    with enforcer.guard("a", paid=True):
+        pass
+    assert enforcer.paid_daily_used("a") == 1
+    assert enforcer.service_paid_daily_used() == 1
+
+
+def test_eviction_never_forgives_a_paid_quota_spent_today(tmp_path: Path, clock: _Clock) -> None:
+    """A credential that spent only paid calls has daily.used > 0 too, but the
+    check is written against both counters so the invariant cannot be broken by
+    a later change that meters them apart."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=1))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=1,
+        eviction_idle_seconds=60.0,
+    )
+
+    with enforcer.guard("a", paid=True):
+        pass
+    clock.advance(3600)
+    with enforcer.guard("b"):
+        pass
+
+    assert enforcer.paid_daily_used("a") == 1
+    with pytest.raises(QuotaExceededError), enforcer.guard("a", paid=True):
+        pass  # pragma: no cover - guard raises before the body
+
+
+def test_charge_paid_bills_at_the_spend_and_refuses_at_the_ceiling(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """charge_paid is the spend-side twin of guard's paid mark: it touches
+    only the paid counters (the free brakes were charged at admission),
+    counts toward the same ledger paid_daily_used reads, and refuses once
+    the ceiling is spent — with nothing charged by the refusal. The message
+    and the retry hint are byte-exact: they are the client's only signal."""
+    enforcer = _enforcer(tmp_path, Limits(paid_daily_quota=2), clock)
+
+    enforcer.charge_paid("beta-001")
+    enforcer.charge_paid("beta-001")
+    assert enforcer.paid_daily_used("beta-001") == 2
+
+    with pytest.raises(QuotaExceededError) as excinfo:
+        enforcer.charge_paid("beta-001")
+    assert str(excinfo.value) == (
+        "daily limit of 2 semantic searches is exhausted; the other fifteen tools are unaffected"
+    )
+    assert excinfo.value.retry_after_seconds == quota._seconds_to_utc_midnight(clock.utc_now())
+    assert enforcer.paid_daily_used("beta-001") == 2
+
+
+def test_charge_paid_refuses_an_unknown_credential(tmp_path: Path, clock: _Clock) -> None:
+    enforcer = _enforcer(tmp_path, Limits(), clock)
+    with pytest.raises(QuotaExceededError) as excinfo:
+        enforcer.charge_paid("nobody")
+    assert str(excinfo.value) == "unknown credential nobody"
+    assert excinfo.value.retry_after_seconds == quota._IN_FLIGHT_RETRY_SECONDS
+
+
+def test_charge_paid_enforces_the_shared_ceiling_across_users_and_resets_at_midnight(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """Exercise the hosted server's real spend path, not guard(paid=True).
+
+    The query embedder calls ``charge_paid`` immediately before the provider
+    request. Its shared wallet ceiling must therefore aggregate different
+    identities, refuse without charging the rejected identity, leave the
+    ordinary tool-call ledger alone, and reopen on the next UTC day.
+    """
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(paid_daily_quota=1),
+    )
+
+    enforcer.charge_paid("a")
+    with pytest.raises(QuotaExceededError, match="across all users"):
+        enforcer.charge_paid("b")
+
+    assert enforcer.paid_daily_used("a") == 1
+    assert enforcer.paid_daily_used("b") == 0
+    assert enforcer.service_paid_daily_used() == 1
+    assert enforcer.daily_used("a") == 0
+    assert enforcer.service_daily_used() == 0
+
+    clock.now = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
+
+    enforcer.charge_paid("b")
+    assert enforcer.paid_daily_used("a") == 0
+    assert enforcer.paid_daily_used("b") == 1
+    assert enforcer.service_paid_daily_used() == 1
+
+
+def test_charge_paid_accumulates_the_service_ceiling_across_credentials(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """The instance ceiling counts every credential's spend: two users at
+    one paid call each must exhaust a ceiling of two, and the third charge
+    is refused with the exact service message and a midnight retry."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(paid_daily_quota=2),
+    )
+
+    enforcer.charge_paid("a")
+    enforcer.charge_paid("b")
+    with pytest.raises(QuotaExceededError) as excinfo:
+        enforcer.charge_paid("a")
+    assert str(excinfo.value) == (
+        "this server has reached its daily ceiling of 2 semantic searches across all users"
+    )
+    assert excinfo.value.retry_after_seconds == quota._seconds_to_utc_midnight(clock.utc_now())
+    assert enforcer.paid_daily_used("a") == 1
+
+
+def test_charge_paid_reaches_the_same_eviction_housekeeping_as_admission(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """charge_paid resolves its state through the same locked path as
+    admission: at the threshold it evicts an idle, unspent state, and it
+    stamps recency — the housekeeping must not depend on which door the
+    credential came in through."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=1,
+        eviction_idle_seconds=60.0,
+    )
+
+    enforcer.charge_paid("a")
+    # A new day rolls "a" back to unspent, and two minutes make it idle.
+    clock.now = clock.now.replace(day=clock.now.day + 1)
+    clock.advance(120)
+    enforcer.charge_paid("b")
+
+    assert enforcer.tracked_credentials() == 1
