@@ -27,6 +27,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from lxml import etree
+
+from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.publish.companion import SCHEMA_VERSION
 from lovspor.publish.inventory import PublishError
 from lovspor.publish.pages import SITE_ORIGIN
@@ -35,8 +38,11 @@ from lovspor.publish.pages import SITE_ORIGIN
 # else under the root — the landing page, /observatory — is not this release's.
 _ROUTES = ("lov", "forskrift")
 
-_LOC = re.compile(r"<loc>([^<]+)</loc>")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+# The generator writes every <loc> under the sitemaps.org namespace; the check
+# accepts <loc> in any namespace or none, because a crawler would too and the
+# question here is whether what would be crawled is served.
+_LOC_LOCALNAME = "loc"
 # The two line shapes redirects.caddy_snippet emits. Anything else in the
 # file is a comment or the 410 `respond`, which carries no path of its own.
 _REDIR = re.compile(r"^redir (\S+) (\S+) 301$")
@@ -80,7 +86,7 @@ def check_release(root: Path) -> ReleaseReport:
         )
     for page in pages:
         _check_twin(root, page)
-    sitemap_urls = _check_sitemaps(root)
+    sitemap_urls = _check_sitemaps(root, pages)
     redirects = _check_redirects(root)
     _check_caddy_map(root)
     return ReleaseReport(
@@ -218,27 +224,59 @@ def _served_file(root: Path, relative: str | None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def _check_sitemaps(root: Path) -> int:
-    """Every URL the sitemaps advertise must be served by a file in this tree.
+def _locs(root: Path, path: Path) -> list[str]:
+    """Every ``<loc>`` in a sitemap document, parsed as XML.
 
-    A sitemap naming a page that is not here is the crawler-facing form of a
-    mixed snapshot — the exact thing Decision 8 forbids — and the sitemap is
-    the artifact search engines read first.
+    Parsed rather than pattern-matched so a truncated file fails as malformed
+    XML instead of passing on whichever ``<loc>`` elements survived the cut —
+    a partial copy can end after a complete element. The project's hardened
+    parser is used: a sitemap is release data, not trusted input.
     """
-    listed = _LOC.findall(_read_text(root, root / "sitemap.xml"))
+    try:
+        tree = etree.fromstring(path.read_bytes(), parser=safe_parser())
+    except (OSError, etree.XMLSyntaxError) as exc:
+        raise PublishError(f"{path.relative_to(root)} is unreadable: {exc}") from exc
+    return [
+        (element.text or "").strip()
+        for element in tree.iter()
+        if isinstance(element.tag, str) and etree.QName(element).localname == _LOC_LOCALNAME
+    ]
+
+
+def _check_sitemaps(root: Path, pages: list[Path]) -> int:
+    """The sitemaps and the tree must name the same pages — in both directions.
+
+    Listed-but-absent is the crawler-facing form of a mixed snapshot; emitted-
+    but-unlisted is a sitemap from a smaller build beside pages from a larger
+    one, which a listed-only check would bless as long as every surviving URL
+    still resolved. The sitemap is the artifact search engines read first, so
+    it is compared as a set against every page under the corpus namespaces,
+    browse indexes included.
+    """
+    listed = _locs(root, root / "sitemap.xml")
     if not listed:
         raise PublishError("sitemap.xml lists no sitemaps")
-    total = 0
+    advertised: set[Path] = set()
     for sitemap_url in listed:
         sitemap = _served_file(root, _path_for(sitemap_url))
         if sitemap is None:
             raise PublishError(f"sitemap.xml lists {sitemap_url}, which is not in the tree")
         name = sitemap.relative_to(root.resolve())
-        for url in _LOC.findall(_read_text(root, sitemap)):
-            if _served_file(root, _path_for(url)) is None:
+        for url in _locs(root, sitemap):
+            served = _served_file(root, _path_for(url))
+            if served is None:
                 raise PublishError(f"{name} lists {url}, which is not in the tree")
-            total += 1
-    return total
+            advertised.add(served)
+    base = root.resolve()
+    emitted = {page.resolve() for page in pages}
+    emitted.update(base / route / "index.html" for route in _ROUTES if (base / route).is_dir())
+    unlisted = sorted(emitted - advertised)
+    if unlisted:
+        raise PublishError(
+            f"{len(unlisted)} emitted page(s) appear in no sitemap, first: "
+            f"{unlisted[0].relative_to(base)}"
+        )
+    return len(advertised)
 
 
 def _redirect_map(root: Path) -> tuple[set[tuple[str, str]], set[str]]:

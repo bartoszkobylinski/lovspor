@@ -405,3 +405,48 @@ def test_every_malformed_redirect_map_shape_is_one_named_refusal(
 
     with pytest.raises(PublishError, match="redirect-map.json"):
         check_release(release)
+
+
+# Authored by the CI test author on PR #257 (fifth round) and adopted verbatim:
+# the sitemap check ran in one direction and matched by regex.
+
+
+def test_a_sitemap_omitting_an_emitted_page_is_refused(release: Path) -> None:
+    """The release gate must check sitemap/page equality in both directions.
+
+    Merely checking that listed URLs exist accepts a partially copied sitemap
+    whose remaining URLs all happen to name valid pages.
+    """
+    sitemap = release / "sitemaps" / "lover-1.xml"
+    text = sitemap.read_text(encoding="utf-8")
+    start = text.index("<url>")
+    end = text.index("</url>", start) + len("</url>")
+    sitemap.write_text(text[:start] + text[end:], encoding="utf-8")
+
+    with pytest.raises(PublishError, match="sitemap"):
+        check_release(release)
+
+
+def test_a_truncated_sitemap_is_refused_even_if_its_urls_survive(release: Path) -> None:
+    """A partial copy can end after a complete ``loc`` and still match the
+    checker's URL regex; malformed XML must not pass the pre-serve gate."""
+    sitemap = release / "sitemaps" / "lover-1.xml"
+    text = sitemap.read_text(encoding="utf-8")
+    sitemap.write_text(text.removesuffix("</urlset>\n"), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="sitemap"):
+        check_release(release)
+
+
+def test_the_browse_indexes_count_as_pages_the_sitemap_must_list(release: Path) -> None:
+    """`/lov/` and `/forskrift/` are pages too; dropping them from indexes.xml
+    would leave the entry points unadvertised while every document passed."""
+    indexes = release / "sitemaps" / "indexes.xml"
+    indexes.write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="appear in no sitemap"):
+        check_release(release)
