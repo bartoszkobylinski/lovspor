@@ -47,6 +47,7 @@ _LOC_LOCALNAME = "loc"
 # file is a comment or the 410 `respond`, which carries no path of its own.
 _REDIR = re.compile(r"^redir (\S+) (\S+) 301$")
 _GONE = re.compile(r"^@lovspor_gone path (.+)$")
+_GONE_RESPOND = re.compile(r"^respond @lovspor_gone 410$")
 
 # A document page is ``<route>/<slug>/index.html``: exactly three path parts
 # below the root. Provision pages sit deeper (``.../paragraf/<pid>/index.html``).
@@ -341,12 +342,22 @@ def _check_caddy_map(root: Path) -> None:
         raise PublishError(f"{snippet} is missing: Caddy would serve no redirects")
     served_redirects: set[tuple[str, str]] = set()
     served_gone: set[str] = set()
-    for line in _read_text(root, snippet).splitlines():
+    for number, raw in enumerate(_read_text(root, snippet).splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
         if match := _REDIR.match(line):
             served_redirects.add((match.group(1), match.group(2)))
         elif match := _GONE.match(line):
             # "prefix prefix*" pairs; the bare prefix is the namespace.
             served_gone.update(p for p in match.group(1).split() if not p.endswith("*"))
+        elif not _GONE_RESPOND.match(line):
+            # Caddy `import`s this file, so any directive in it runs with Caddy's
+            # authority. The generator writes exactly three shapes; a fourth is
+            # not a redirect map any more, whatever `caddy validate` says of it.
+            raise PublishError(
+                f"redirects.caddy line {number} is not a redirect-map directive: {line!r}"
+            )
     expected_redirects, expected_gone = _redirect_map(root)
     if served_redirects != expected_redirects or served_gone != expected_gone:
         raise PublishError(

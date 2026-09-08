@@ -450,3 +450,35 @@ def test_the_browse_indexes_count_as_pages_the_sitemap_must_list(release: Path) 
 
     with pytest.raises(PublishError, match="appear in no sitemap"):
         check_release(release)
+
+
+# Authored by the CI test author on PR #257 (sixth round) and adopted verbatim.
+# Caddy `import`s the snippet, so a directive in it runs with Caddy's authority;
+# the check now admits exactly the three shapes the generator writes.
+
+
+def test_the_caddy_map_cannot_contain_unmodelled_runtime_directives(release: Path) -> None:
+    """The served map must not do more than its validated JSON representation.
+
+    An extra valid directive is accepted by ``caddy validate`` but can change
+    live routing, so ignoring it would validate a different map from the one
+    Caddy actually imports.
+    """
+    snippet = release / "redirects.caddy"
+    snippet.write_text(
+        snippet.read_text(encoding="utf-8") + "respond /lov/testloven/* 503\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="redirects.caddy"):
+        check_release(release)
+
+
+def test_comments_and_blank_lines_in_the_caddy_map_are_not_directives(release: Path) -> None:
+    snippet = release / "redirects.caddy"
+    snippet.write_text(
+        "\n# a comment\n\n" + snippet.read_text(encoding="utf-8") + "\n   \n",
+        encoding="utf-8",
+    )
+
+    check_release(release)
