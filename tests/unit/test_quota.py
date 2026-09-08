@@ -816,6 +816,37 @@ def test_instance_paid_ceiling_bounds_the_embedding_bill(tmp_path: Path, clock: 
     assert enforcer.service_paid_daily_used() == 1
 
 
+def test_instance_paid_refusal_does_not_bill_the_rejected_user(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """A shared-wallet refusal happens before any caller counters mutate.
+
+    Otherwise one user's spend could exhaust another user's personal paid and
+    total daily allowances without that second user ever reaching the provider.
+    """
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(daily_quota=10, paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(daily_quota=10, paid_daily_quota=1),
+    )
+
+    with enforcer.guard("a", paid=True):
+        pass
+    with (
+        pytest.raises(QuotaExceededError, match="across all users"),
+        enforcer.guard("b", paid=True),
+    ):
+        pass  # pragma: no cover - guard raises before the body
+
+    assert enforcer.daily_used("b") == 0
+    assert enforcer.paid_daily_used("b") == 0
+    assert enforcer.service_daily_used() == 1
+    assert enforcer.service_paid_daily_used() == 1
+
+
 def test_paid_quotas_reset_at_the_utc_day_boundary(tmp_path: Path, clock: _Clock) -> None:
     """Both new spend counters are daily limits, so yesterday's semantic
     search must not consume either today's user allowance or today's shared
