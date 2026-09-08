@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -584,6 +586,61 @@ def test_service_in_flight_ceiling_counts_across_different_users(
 
     with enforcer.guard("c"):
         pass  # slots freed on exit, so the instance recovers
+
+
+def test_service_in_flight_ceiling_is_atomic_across_concurrent_users(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """Two hosted worker threads must not both pass a one-slot ceiling.
+
+    Pause both callers after the shared check to make the check/increment race
+    deterministic.  The timeout also lets a correctly serialized admission
+    implementation progress: its first caller times out, occupies the slot,
+    and the second is then refused before reaching this hook.
+    """
+
+    class _CoordinatedEnforcer(QuotaEnforcer):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            self._coordination_lock = threading.Lock()
+            self._checked_count = 0
+            self.both_checked = threading.Event()
+
+        def _admit_service(self, *, paid: bool) -> None:
+            super()._admit_service(paid=paid)
+            with self._coordination_lock:
+                self._checked_count += 1
+                if self._checked_count == 2:
+                    self.both_checked.set()
+            self.both_checked.wait(timeout=0.2)
+
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(max_in_flight=2))
+    enforcer = _CoordinatedEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        service_limits=ServiceLimits(max_in_flight=1),
+    )
+    start = threading.Barrier(2)
+    release = threading.Event()
+
+    def call(credential_id: str) -> str:
+        start.wait(timeout=1)
+        try:
+            with enforcer.guard(credential_id):
+                release.wait(timeout=1)
+                return "admitted"
+        except QuotaExceededError:
+            return "refused"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(call, credential_id) for credential_id in ("a", "b")]
+        enforcer.both_checked.wait(timeout=0.5)
+        release.set()
+        outcomes = [future.result(timeout=1) for future in futures]
+
+    assert sorted(outcomes) == ["admitted", "refused"]
 
 
 def test_service_in_flight_slot_frees_when_tool_body_raises(tmp_path: Path, clock: _Clock) -> None:

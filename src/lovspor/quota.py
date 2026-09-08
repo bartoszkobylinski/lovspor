@@ -421,11 +421,18 @@ class QuotaEnforcer:
                 f"unknown credential {credential_id}",
                 _IN_FLIGHT_RETRY_SECONDS,
             )
-        state = self._state_for(credential_id)
-        self._admit(state, limits, paid=paid)
+        # Admission and release mutate shared counters, and since the paid
+        # charge moved to the spend site those counters are touched from
+        # worker threads too — every check-and-increment must be atomic
+        # under the one enforcer lock, or two concurrent admissions both
+        # pass the same last in-flight slot.
+        with self._lock:
+            state = self._state_for_locked(credential_id)
+            self._admit(state, limits, paid=paid)
         try:
             yield
         finally:
-            state.in_flight -= 1
-            if self._service_limits is not None:
-                self._service.in_flight -= 1
+            with self._lock:
+                state.in_flight -= 1
+                if self._service_limits is not None:
+                    self._service.in_flight -= 1
