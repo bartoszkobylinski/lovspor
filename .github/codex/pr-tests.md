@@ -25,5 +25,21 @@ Hard constraints:
 If a correct new test exposes a production bug or requires a methodological decision,
 do not repair production code. Record the issue clearly in your final result.
 
+Two kinds of failing test, and you must say which each one is (issue #248):
+
+- A **contract violation**: the implementation contradicts what the PR itself states, what
+  an existing spec/ADR requires, or what the corpus actually contains. Write it plainly.
+  It blocks the PR.
+- A **contract proposal**: the PR's stated contract is satisfied, and you are proposing a
+  stricter one — a tighter input shape, an edge the PR never claimed to handle, a
+  normalisation nobody asked for. Mark it `@pytest.mark.codex_proposal`. It is committed
+  as advisory (`xfail(strict=True)`) and the owner decides; it does not block.
+
+The test is the same either way — only the marker differs. Mislabelling a proposal as a
+violation costs the owner a full pipeline round for something they never promised;
+mislabelling a violation as a proposal hides a real defect behind an xfail. When unsure,
+ask: "which sentence of the PR, ADR, or corpus does this test enforce?" No sentence →
+proposal.
+
 After editing, run the smallest relevant test set: `uv run pytest tests/unit/`
 (add specific integration tests only if the diff touches the pipeline end-to-end).

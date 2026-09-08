@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -295,20 +297,56 @@ def test_remediation_fallback_hands_claude_the_same_prompt_as_codex() -> None:
 
 
 def test_codex_test_failure_is_not_hidden_by_tee() -> None:
+    """The pytest step records its own exit status through the tee (PIPESTATUS)
+    and hands it to the verdict as junit; it no longer fails the job itself,
+    because a red suite is evidence and the convergence verdict is the judge
+    (issue #248)."""
     steps = _steps("pr-pipeline.yml", "codex-tests")
     pytest_step = _named_step(steps, "Run tests on Codex additions")
 
     assert pytest_step["id"] == "codex-pytest"
-    assert pytest_step["run"].splitlines() == [
-        "set +e",
-        'uv run pytest tests/unit/ 2>&1 | tee "$RUNNER_TEMP/codex-pytest.log"',
-        'exit "${PIPESTATUS[0]}"',
-    ]
+    lines = pytest_step["run"].splitlines()
+    assert lines[0] == "set +e"
+    assert '--junitxml="$RUNNER_TEMP/codex-junit.xml"' in lines[1]
+    assert '| tee "$RUNNER_TEMP/codex-pytest.log"' in lines[2]
+    assert lines[3] == 'echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"'
+    assert not any(line.startswith("exit") for line in lines)
+
+
+def test_convergence_verdict_is_the_only_step_that_fails_on_author_tests() -> None:
+    """Issue #248. The verdict reads the pipeline sticky comment for the round
+    count, runs the classifier with --apply, and exits 1 only when the verdict
+    blocks — so every failure() step downstream keys off THIS step."""
+    steps = _steps("pr-pipeline.yml", "codex-tests")
+    verdict = _named_step(steps, "Convergence verdict")
+    run = verdict["run"]
+
+    assert verdict["id"] == "verdict"
+    assert verdict["env"]["CODEX_BLOCKING_CAP"] == "${{ vars.CODEX_BLOCKING_CAP || '3' }}"
+    assert 'contains("<!-- lovspor-sticky:pipeline -->")' in run
+    assert "scripts/ci/codex_convergence.py" in run
+    assert '--junit "$RUNNER_TEMP/codex-junit.xml"' in run
+    assert '--sticky-body "$RUNNER_TEMP/sticky-pipeline.md"' in run
+    assert '--cap "$CODEX_BLOCKING_CAP"' in run
+    assert '--comment "$RUNNER_TEMP/escalation.md"' in run
+    assert "--apply" in run
+    assert 'if [ "$blocks" = "true" ]; then' in run
+    # advisory tests were rewritten in place: prove green before the commit step
+    assert "uv run pytest tests/unit/ -q" in run
+    for name in (
+        "Preserve Codex tests on failure",
+        "Upload Codex tests and log",
+        "Escalate — Codex test exposed an implementation defect",
+    ):
+        assert _named_step(steps, name)["if"] == "failure() && steps.verdict.outcome == 'failure'"
+    advisory = _named_step(steps, "Report advisory proposals")
+    assert "steps.verdict.outputs.advisory != '0'" in advisory["if"]
+    assert "pr_sticky_comment.sh pipeline" in advisory["run"]  # one marker per workflow
 
 
 def test_codex_test_failure_preserves_untracked_tests_and_log() -> None:
     steps = _steps("pr-pipeline.yml", "codex-tests")
-    condition = "failure() && steps.codex-pytest.outcome == 'failure'"
+    condition = "failure() && steps.verdict.outcome == 'failure'"
     preserve = _named_step(steps, "Preserve Codex tests on failure")
     upload = _named_step(steps, "Upload Codex tests and log")
 
@@ -347,7 +385,7 @@ def test_codex_test_failure_escalates_on_the_current_pr() -> None:
         "pull-requests": "write",
         "issues": "write",
     }
-    assert escalation["if"] == "failure() && steps.codex-pytest.outcome == 'failure'"
+    assert escalation["if"] == "failure() && steps.verdict.outcome == 'failure'"
     assert escalation["env"] == {"GH_TOKEN": "${{ secrets.GITHUB_TOKEN }}"}
     assert (
         'gh pr edit "${{ github.event.pull_request.number }}" '
@@ -357,11 +395,27 @@ def test_codex_test_failure_escalates_on_the_current_pr() -> None:
         'scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" '
         '"$RUNNER_TEMP/escalation.md"' in command
     )
-    assert "codex-tests BLOCKED: Codex-authored tests fail against this head." in command
-    assert "grep -E '^FAILED ' \"$RUNNER_TEMP/codex-pytest.log\" | head -10" in command
+    # The verdict writes the escalation body (round number + the counted phrase);
+    # this step only appends the artifact pointer, so it must APPEND, not overwrite.
+    assert '>> "$RUNNER_TEMP/escalation.md"' in command
+    assert '> "$RUNNER_TEMP/escalation.md"' not in command.replace('>> "$RUNNER_TEMP', "")
     assert "codex-tests-${{ github.event.pull_request.head.sha }}" in command
-    run_url = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-    assert run_url in command
+
+
+def test_the_verdict_and_the_round_counter_agree_on_the_blocked_phrase() -> None:
+    """The round count is the number of times this phrase appears in the pipeline
+    sticky comment. The verdict script owns the phrase; the workflow must not
+    write a competing one, or the count drifts (issue #248)."""
+    script = Path(__file__).resolve().parents[2] / "scripts" / "ci" / "codex_convergence.py"
+    spec = importlib.util.spec_from_file_location("codex_convergence_phrase", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    steps = _steps("pr-pipeline.yml", "codex-tests")
+    for step in steps:
+        assert module.BLOCKED_PHRASE not in str(step.get("run", "")), step["name"]
 
 
 def test_antiloop_matches_the_marker_only_in_the_subject_line() -> None:
@@ -463,7 +517,7 @@ class TestEscalationCoversEveryFailure:
         steps = _steps("pr-pipeline.yml", "codex-tests")
         fallback = _named_step(steps, "Escalate — the pipeline failed before the tests ran")
 
-        assert fallback["if"] == "failure() && steps.codex-pytest.outcome != 'failure'"
+        assert fallback["if"] == "failure() && steps.verdict.outcome != 'failure'"
         assert "needs-human:pipeline" in fallback["run"]
         assert "scripts/ci/pr_sticky_comment.sh pipeline" in fallback["run"]
 
@@ -474,7 +528,7 @@ class TestEscalationCoversEveryFailure:
         steps = _steps("pr-pipeline.yml", "codex-tests")
         preserve = _named_step(steps, "Preserve agent work when the pipeline fails")
 
-        assert preserve["if"] == "failure() && steps.codex-pytest.outcome != 'failure'"
+        assert preserve["if"] == "failure() && steps.verdict.outcome != 'failure'"
         # Written by the independent test author, which caught the first
         # version diffing the worktree instead of BEFORE_SHA: the agent
         # commits its own work, so a bare `git diff` preserves nothing.

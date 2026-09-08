@@ -168,23 +168,68 @@ jobs:
       - name: Run tests on Codex additions
         id: codex-pytest
         if: steps.antiloop.outputs.skip != 'true'
+        # Never fails on its own: a red suite here is evidence, not a verdict.
+        # The convergence step below decides whether the failures block (#248).
         run: |
           set +e
-          uv run pytest tests/unit/ 2>&1 | tee "$RUNNER_TEMP/codex-pytest.log"
-          exit "${PIPESTATUS[0]}"
+          uv run pytest tests/unit/ --junitxml="$RUNNER_TEMP/codex-junit.xml" 2>&1 \
+            | tee "$RUNNER_TEMP/codex-pytest.log"
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      # Issue #248: the author has no notion of diminishing returns, so this
+      # step supplies one. A pre-existing test broken by the PR always blocks.
+      # An author test the author itself marked `codex_proposal` is advisory.
+      # After CODEX_BLOCKING_CAP blocking rounds on one PR, every new author
+      # failure is advisory. Advisory tests are committed as xfail(strict=True):
+      # visible, tracked, and a hard failure the day the proposal is implemented.
+      # Round count comes from the sticky comment — a blocking round pushes no
+      # commit, so the comment is the only durable record.
+      - name: Convergence verdict
+        id: verdict
+        if: steps.antiloop.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CODEX_BLOCKING_CAP: ${{ vars.CODEX_BLOCKING_CAP || '3' }}
+        run: |
+          gh pr view "${{ github.event.pull_request.number }}" --json comments \
+            --jq '[.comments[] | select(.body | contains("<!-- lovspor-sticky:pipeline -->")) | .body] | join("\n")' \
+            > "$RUNNER_TEMP/sticky-pipeline.md" || : > "$RUNNER_TEMP/sticky-pipeline.md"
+          uv run python scripts/ci/codex_convergence.py \
+            --before-sha "$BEFORE_SHA" \
+            --junit "$RUNNER_TEMP/codex-junit.xml" \
+            --sticky-body "$RUNNER_TEMP/sticky-pipeline.md" \
+            --cap "$CODEX_BLOCKING_CAP" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --verdict "$RUNNER_TEMP/verdict.json" \
+            --comment "$RUNNER_TEMP/escalation.md" \
+            --apply
+          blocks=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["blocks"]).lower())' "$RUNNER_TEMP/verdict.json")
+          advisory=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["advisory"]))' "$RUNNER_TEMP/verdict.json")
+          echo "blocks=$blocks" >> "$GITHUB_OUTPUT"
+          echo "advisory=$advisory" >> "$GITHUB_OUTPUT"
+          if [ "$blocks" = "true" ]; then
+            echo "codex-tests BLOCKED — see the verdict" >&2
+            exit 1
+          fi
+          # Advisory tests were just marked xfail in place; prove the tree is green
+          # before it is committed, and normalize the one line the marker added.
+          if [ "$advisory" -gt 0 ]; then
+            uv run ruff format tests/
+            uv run pytest tests/unit/ -q
+          fi
 
       # Contract (docs/agentic-ci.md, Failure escalation): a Codex test failing
       # against this head must label the PR, comment, and preserve the tests —
       # a bare red check buries the evidence in an expiring log (issue #95).
       # git add -N: Codex's new test files are untracked, a plain diff misses them.
       - name: Preserve Codex tests on failure
-        if: failure() && steps.codex-pytest.outcome == 'failure'
+        if: failure() && steps.verdict.outcome == 'failure'
         run: |
           git add -N tests/
           git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/codex-tests.patch"
 
       - name: Upload Codex tests and log
-        if: failure() && steps.codex-pytest.outcome == 'failure'
+        if: failure() && steps.verdict.outcome == 'failure'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: codex-tests-${{ github.event.pull_request.head.sha }}
@@ -193,19 +238,29 @@ jobs:
             ${{ runner.temp }}/codex-pytest.log
 
       - name: Escalate — Codex test exposed an implementation defect
-        if: failure() && steps.codex-pytest.outcome == 'failure'
+        if: failure() && steps.verdict.outcome == 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh pr edit "${{ github.event.pull_request.number }}" --add-label "needs-implementation-fix"
+          # The verdict already wrote the escalation body, carrying the round
+          # number and the exact phrase the round counter reads. Append the
+          # evidence pointer — append, never overwrite.
           {
-            echo "codex-tests BLOCKED: Codex-authored tests fail against this head."
             echo ""
-            grep -E '^FAILED ' "$RUNNER_TEMP/codex-pytest.log" | head -10
-            echo ""
-            echo "Tests + log: artifact \`codex-tests-${{ github.event.pull_request.head.sha }}\` (run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-          } > "$RUNNER_TEMP/escalation.md"
+            echo "Tests + log: artifact \`codex-tests-${{ github.event.pull_request.head.sha }}\`"
+          } >> "$RUNNER_TEMP/escalation.md"
           scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/escalation.md"
+
+      # A round that produced only proposals is green. Say so where the owner
+      # reads it. Same sticky marker as the blocked rounds — one per workflow —
+      # and the advisory body never contains the counted BLOCKED phrase, so it
+      # sits in the history without inflating the round count.
+      - name: Report advisory proposals
+        if: steps.antiloop.outputs.skip != 'true' && steps.verdict.outputs.advisory != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/escalation.md"
 
       - name: Commit and push test additions
         id: push
@@ -237,7 +292,7 @@ jobs:
       # author's whole run was discarded. #95 preserved the tests when they
       # FAILED; they must also survive the pipeline itself failing.
       - name: Preserve agent work when the pipeline fails
-        if: failure() && steps.codex-pytest.outcome != 'failure'
+        if: failure() && steps.verdict.outcome != 'failure'
         run: |
           git add -N tests/
           # Diff against BEFORE_SHA, not the worktree: the agent commits its own
@@ -248,7 +303,7 @@ jobs:
           git diff "$BEFORE_SHA" -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true
 
       - name: Upload preserved agent work
-        if: failure() && steps.codex-pytest.outcome != 'failure'
+        if: failure() && steps.verdict.outcome != 'failure'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: agent-work-${{ github.event.pull_request.head.sha }}
@@ -256,7 +311,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Escalate — the pipeline failed before the tests ran
-        if: failure() && steps.codex-pytest.outcome != 'failure'
+        if: failure() && steps.verdict.outcome != 'failure'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
