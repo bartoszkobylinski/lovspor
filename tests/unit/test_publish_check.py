@@ -306,3 +306,51 @@ def test_a_gone_prefix_dropped_from_the_snippet_is_caught(release: Path) -> None
 
     with pytest.raises(PublishError, match="gone prefixes"):
         check_release(release)
+
+
+# Authored by the CI test author on PR #257 (third round) and adopted verbatim:
+# three inputs the checker handled with a traceback instead of a refusal.
+
+
+def test_a_boolean_manifest_document_count_is_refused(release: Path) -> None:
+    """JSON booleans are Python integers, but cannot describe a release size."""
+    manifest = release / "site-manifest.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["documents"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="has no document count: True"):
+        check_release(release)
+
+
+def test_a_sitemap_with_malformed_utf8_fails_as_a_publish_error(release: Path) -> None:
+    (release / "sitemap.xml").write_bytes(b"\xff")
+
+    with pytest.raises(PublishError, match="sitemap.xml.*unreadable"):
+        check_release(release)
+
+
+def test_a_redirect_map_that_is_not_an_object_is_refused(release: Path) -> None:
+    (release / "redirect-map.json").write_text("[]", encoding="utf-8")
+
+    with pytest.raises(PublishError, match="redirect-map.json is not a JSON object"):
+        check_release(release)
+
+
+def test_every_artifact_read_reports_corruption_as_a_refusal(release: Path) -> None:
+    """The contract is one named refusal for any broken input. Each artifact the
+    checker opens is corrupted in turn; none may escape as a raw exception."""
+    for name in (
+        "site-manifest.json",
+        "redirect-map.json",
+        "redirects.caddy",
+        "lov/testloven/index.json",
+        "sitemaps/" + next((release / "sitemaps").iterdir()).name,
+    ):
+        broken = release / name
+        original = broken.read_bytes()
+        broken.write_bytes(b"\xff\xfe not utf-8")
+        with pytest.raises(PublishError, match="unreadable"):
+            check_release(release)
+        broken.write_bytes(original)
+    check_release(release)  # and the tree is whole again

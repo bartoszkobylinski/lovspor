@@ -92,17 +92,36 @@ def check_release(root: Path) -> ReleaseReport:
     )
 
 
+def _read_text(root: Path, path: Path) -> str:
+    """UTF-8 text of ``path``, or a :class:`PublishError` naming it.
+
+    Every artifact the generator writes is UTF-8; a byte that is not is a
+    corrupted copy, and the check's contract is one named refusal, never a
+    traceback from inside the codec.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise PublishError(f"{path.relative_to(root)} is unreadable: {exc}") from exc
+
+
+def _read_object(root: Path, path: Path) -> dict[str, object]:
+    """``path`` parsed as a JSON object, or a :class:`PublishError` naming it."""
+    try:
+        data = json.loads(_read_text(root, path))
+    except ValueError as exc:
+        raise PublishError(f"{path.relative_to(root)} is unreadable: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PublishError(f"{path.relative_to(root)} is not a JSON object")
+    return data
+
+
 def _manifest(root: Path) -> tuple[str, int]:
     """``(corpus_commit, documents)`` from a manifest this engine can serve."""
     path = root / "site-manifest.json"
     if not path.is_file():
         raise PublishError(f"{path} is missing: not a release tree")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise PublishError(f"{path} is unreadable: {exc}") from exc
-    if not isinstance(data, dict):
-        raise PublishError(f"{path} is not a JSON object")
+    data = _read_object(root, path)
     if data.get("site_schema_version") != SCHEMA_VERSION:
         raise PublishError(
             f"{path} has site_schema_version {data.get('site_schema_version')!r}; "
@@ -112,7 +131,9 @@ def _manifest(root: Path) -> tuple[str, int]:
     if not isinstance(commit, str) or not _SHA.match(commit):
         raise PublishError(f"{path} names no full corpus commit: {commit!r}")
     documents = data.get("documents")
-    if not isinstance(documents, int) or documents < 0:
+    # bool is a subclass of int, so `True` would pass an isinstance check and
+    # then equal a one-document tree. A release size is not a truth value.
+    if isinstance(documents, bool) or not isinstance(documents, int) or documents < 0:
         raise PublishError(f"{path} has no document count: {documents!r}")
     return commit, documents
 
@@ -151,11 +172,8 @@ def _check_twin(root: Path, page: Path) -> None:
     twin = page.with_name("index.json")
     if not twin.is_file():
         raise PublishError(f"{page.relative_to(root)} has no index.json twin")
-    try:
-        data = json.loads(twin.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise PublishError(f"{twin.relative_to(root)} is unreadable: {exc}") from exc
-    provenance = data.get("provenance") if isinstance(data, dict) else None
+    data = _read_object(root, twin)
+    provenance = data.get("provenance")
     recorded = provenance.get("representation_hash") if isinstance(provenance, dict) else None
     actual = hashlib.sha256(page.read_bytes()).hexdigest()
     if recorded != actual:
@@ -207,8 +225,7 @@ def _check_sitemaps(root: Path) -> int:
     mixed snapshot — the exact thing Decision 8 forbids — and the sitemap is
     the artifact search engines read first.
     """
-    index = (root / "sitemap.xml").read_text(encoding="utf-8")
-    listed = _LOC.findall(index)
+    listed = _LOC.findall(_read_text(root, root / "sitemap.xml"))
     if not listed:
         raise PublishError("sitemap.xml lists no sitemaps")
     total = 0
@@ -217,7 +234,7 @@ def _check_sitemaps(root: Path) -> int:
         if sitemap is None:
             raise PublishError(f"sitemap.xml lists {sitemap_url}, which is not in the tree")
         name = sitemap.relative_to(root.resolve())
-        for url in _LOC.findall(sitemap.read_text(encoding="utf-8")):
+        for url in _LOC.findall(_read_text(root, sitemap)):
             if _served_file(root, _path_for(url)) is None:
                 raise PublishError(f"{name} lists {url}, which is not in the tree")
             total += 1
@@ -233,11 +250,10 @@ def _check_redirects(root: Path) -> int:
     path = root / "redirect-map.json"
     if not path.is_file():
         raise PublishError(f"{path} is missing")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise PublishError(f"{path} is unreadable: {exc}") from exc
-    redirects = data.get("redirects", []) if isinstance(data, dict) else []
+    data = _read_object(root, path)
+    redirects = data.get("redirects", [])
+    if not isinstance(redirects, list):
+        raise PublishError("redirect-map.json: 'redirects' is not a list")
     for entry in redirects:
         target = entry.get("to") if isinstance(entry, dict) else None
         if not isinstance(target, str):
@@ -263,15 +279,19 @@ def _check_caddy_map(root: Path) -> None:
         raise PublishError(f"{snippet} is missing: Caddy would serve no redirects")
     served_redirects: set[tuple[str, str]] = set()
     served_gone: set[str] = set()
-    for line in snippet.read_text(encoding="utf-8").splitlines():
+    for line in _read_text(root, snippet).splitlines():
         if match := _REDIR.match(line):
             served_redirects.add((match.group(1), match.group(2)))
         elif match := _GONE.match(line):
             # "prefix prefix*" pairs; the bare prefix is the namespace.
             served_gone.update(p for p in match.group(1).split() if not p.endswith("*"))
-    data = json.loads((root / "redirect-map.json").read_text(encoding="utf-8"))
-    expected_redirects = {(e["from"], e["to"]) for e in data.get("redirects", [])}
-    expected_gone = set(data.get("gone", []))
+    data = _read_object(root, root / "redirect-map.json")
+    entries = data.get("redirects", [])
+    gone = data.get("gone", [])
+    if not isinstance(entries, list) or not isinstance(gone, list):
+        raise PublishError("redirect-map.json: 'redirects' and 'gone' must be lists")
+    expected_redirects = {(e["from"], e["to"]) for e in entries}
+    expected_gone = set(gone)
     if served_redirects != expected_redirects or served_gone != expected_gone:
         raise PublishError(
             "redirects.caddy disagrees with redirect-map.json: "
