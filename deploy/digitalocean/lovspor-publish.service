@@ -11,6 +11,9 @@ Type=oneshot
 # Root: the script reloads Caddy and owns the release symlink. The build itself
 # is run as the lovspor user inside the script.
 User=root
+# `caddy validate` inside the script needs LOVSPOR_DOMAIN, which only Caddy's own
+# drop-in exports. Read the same file; the script also sources it for manual runs.
+EnvironmentFile=-/etc/default/caddy-lovspor
 ExecStart=/opt/lovspor/app/deploy/digitalocean/publish-release.sh
 # A full build is ~4 min for ~93k pages, then rsync and a hash of every page.
 # Bounded so a wedged build cannot hold the unit forever; generous so a slow

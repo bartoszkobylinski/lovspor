@@ -20,6 +20,19 @@
 # exactly as it was.
 set -euo pipefail
 
+# The Caddyfile's site block is `{$LOVSPOR_DOMAIN} {`. Caddy the SERVICE gets
+# that variable from its systemd drop-in; a shell running `caddy validate` does
+# not, the placeholder expands to nothing, the site block parses as a global
+# options block, and validation fails with "unrecognized global option: encode".
+# Seen on the first enablement, 2026-09-08. Source the same file Caddy does.
+if [ -r /etc/default/caddy-lovspor ]; then
+	set -a
+	# shellcheck disable=SC1091
+	. /etc/default/caddy-lovspor
+	set +a
+fi
+: "${LOVSPOR_DOMAIN:?LOVSPOR_DOMAIN is unset and /etc/default/caddy-lovspor did not provide it}"
+
 RELEASES=/var/www/lovspor-releases
 CURRENT=/var/www/lovspor-current
 APP=/opt/lovspor/app
