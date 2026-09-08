@@ -187,7 +187,7 @@ this on a fresh box, but is not re-run on a live one:
 sudo install -m644 /opt/lovspor/app/deploy/digitalocean/lovspor-publish.service /etc/systemd/system/
 sudo install -d -o lovspor -g lovspor -m 755 /var/www/lovspor-releases
 sudo install -m644 /opt/lovspor/app/deploy/digitalocean/Caddyfile /etc/caddy/Caddyfile
-sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+sudo sh -c 'set -a; . /etc/default/caddy-lovspor; caddy validate --config /etc/caddy/Caddyfile' && sudo systemctl reload caddy
 sudo systemctl daemon-reload
 ```
 
