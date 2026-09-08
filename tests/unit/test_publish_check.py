@@ -265,3 +265,44 @@ def test_a_page_url_inside_a_sitemap_cannot_escape_either(release: Path) -> None
 
     with pytest.raises(PublishError, match="which is not in the tree"):
         check_release(release)
+
+
+# Authored by the CI test author on PR #257 and adopted verbatim: the checks
+# read redirect-map.json, but Caddy imports redirects.caddy. Validating one
+# while serving the other is validating the wrong artifact.
+
+
+def test_the_caddy_redirect_map_is_required(release: Path) -> None:
+    """Caddy serves the generated snippet rather than redirect-map.json, so a
+    release without that snippet has silently lost all of its redirects."""
+    (release / "redirects.caddy").unlink()
+
+    with pytest.raises(PublishError, match="redirects.caddy .* missing"):
+        check_release(release)
+
+
+def test_the_caddy_redirect_map_cannot_disagree_with_the_json_map(release: Path) -> None:
+    """The JSON map is not the runtime artifact.  Checking it must not bless a
+    different Caddy map, or pages from one build can be served with redirects
+    from another build after the atomic switch."""
+    snippet = release / "redirects.caddy"
+    snippet.write_text(
+        snippet.read_text(encoding="utf-8").replace("/lov/testloven/ 301", "/lov/finnes-ikke/ 301"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="redirects.caddy"):
+        check_release(release)
+
+
+def test_a_gone_prefix_dropped_from_the_snippet_is_caught(release: Path) -> None:
+    """The 410 half of the map has no per-line target to check, so it is
+    compared as a set of prefixes; losing one would resurrect a retired
+    namespace as a 404 instead of the documented 410."""
+    path = release / "redirect-map.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["gone"].append("/lov/utgaatt/")
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="gone prefixes"):
+        check_release(release)

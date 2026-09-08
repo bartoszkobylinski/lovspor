@@ -37,6 +37,10 @@ _ROUTES = ("lov", "forskrift")
 
 _LOC = re.compile(r"<loc>([^<]+)</loc>")
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+# The two line shapes redirects.caddy_snippet emits. Anything else in the
+# file is a comment or the 410 `respond`, which carries no path of its own.
+_REDIR = re.compile(r"^redir (\S+) (\S+) 301$")
+_GONE = re.compile(r"^@lovspor_gone path (.+)$")
 
 # A document page is ``<route>/<slug>/index.html``: exactly three path parts
 # below the root. Provision pages sit deeper (``.../paragraf/<pid>/index.html``).
@@ -78,6 +82,7 @@ def check_release(root: Path) -> ReleaseReport:
         _check_twin(root, page)
     sitemap_urls = _check_sitemaps(root)
     redirects = _check_redirects(root)
+    _check_caddy_map(root)
     return ReleaseReport(
         corpus_commit=corpus_commit,
         documents=len(documents),
@@ -242,3 +247,34 @@ def _check_redirects(root: Path) -> int:
         if _served_file(root, _relative_file(target)) is None:
             raise PublishError(f"redirect target {target} is not in the tree")
     return len(redirects)
+
+
+def _check_caddy_map(root: Path) -> None:
+    """``redirects.caddy`` must exist and say what ``redirect-map.json`` says.
+
+    Caddy imports the snippet; the JSON is what the checks above read. Blessing
+    the JSON while the snippet is absent or differs would validate an artifact
+    Caddy never sees and serve pages from one build under redirects from
+    another — the mixed snapshot the switch exists to prevent. Found by the CI
+    test author on PR #257.
+    """
+    snippet = root / "redirects.caddy"
+    if not snippet.is_file():
+        raise PublishError(f"{snippet} is missing: Caddy would serve no redirects")
+    served_redirects: set[tuple[str, str]] = set()
+    served_gone: set[str] = set()
+    for line in snippet.read_text(encoding="utf-8").splitlines():
+        if match := _REDIR.match(line):
+            served_redirects.add((match.group(1), match.group(2)))
+        elif match := _GONE.match(line):
+            # "prefix prefix*" pairs; the bare prefix is the namespace.
+            served_gone.update(p for p in match.group(1).split() if not p.endswith("*"))
+    data = json.loads((root / "redirect-map.json").read_text(encoding="utf-8"))
+    expected_redirects = {(e["from"], e["to"]) for e in data.get("redirects", [])}
+    expected_gone = set(data.get("gone", []))
+    if served_redirects != expected_redirects or served_gone != expected_gone:
+        raise PublishError(
+            "redirects.caddy disagrees with redirect-map.json: "
+            f"{len(served_redirects)} vs {len(expected_redirects)} redirects, "
+            f"{len(served_gone)} vs {len(expected_gone)} gone prefixes"
+        )
