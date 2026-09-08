@@ -174,6 +174,24 @@ def test_a_proposal_marker_with_arguments_still_counts(tmp_path: Path) -> None:
     assert cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
 
 
+@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+def test_a_proposal_marker_on_a_class_applies_to_its_test_methods(tmp_path: Path) -> None:
+    """Pytest class markers are inherited by every test method in the class."""
+    repo = _repo_with(
+        tmp_path,
+        "import pytest\n\n\n"
+        "@pytest.mark.codex_proposal\n"
+        "class TestProposedContract:\n"
+        "    def test_new_contract(self): ...\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "TestProposedContract.test_new_contract")
+
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+
+    assert verdict.advisory == [test]
+    assert not verdict.blocks
+
+
 def test_only_the_documented_pytest_proposal_marker_is_advisory(tmp_path: Path) -> None:
     """A same-named attribute on another decorator is not the marker contract."""
     repo = _repo_with(
