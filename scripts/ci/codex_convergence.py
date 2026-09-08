@@ -213,8 +213,23 @@ def _find_function(tree: ast.Module, dotted: str) -> ast.FunctionDef | ast.Async
 
 
 def _is_proposal_decorator(node: ast.expr) -> bool:
+    """Match ``pytest.mark.codex_proposal`` / ``mark.codex_proposal``, bare or called.
+
+    Only the pytest marker is the contract: a same-named attribute on any other
+    object (``@custom.codex_proposal``) is not a proposal.
+    """
     target = node.func if isinstance(node, ast.Call) else node
-    return isinstance(target, ast.Attribute) and target.attr == PROPOSAL_MARKER
+    if not (isinstance(target, ast.Attribute) and target.attr == PROPOSAL_MARKER):
+        return False
+    mark = target.value
+    if isinstance(mark, ast.Name):
+        return mark.id == "mark"
+    return (
+        isinstance(mark, ast.Attribute)
+        and mark.attr == "mark"
+        and isinstance(mark.value, ast.Name)
+        and mark.value.id == "pytest"
+    )
 
 
 def classify(

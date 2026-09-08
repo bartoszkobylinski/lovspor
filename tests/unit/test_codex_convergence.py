@@ -174,6 +174,25 @@ def test_a_proposal_marker_with_arguments_still_counts(tmp_path: Path) -> None:
     assert cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
 
 
+def test_only_the_documented_pytest_proposal_marker_is_advisory(tmp_path: Path) -> None:
+    """A same-named attribute on another decorator is not the marker contract."""
+    repo = _repo_with(
+        tmp_path,
+        "class custom:\n"
+        "    @staticmethod\n"
+        "    def codex_proposal(function):\n"
+        "        return function\n\n\n"
+        "@custom.codex_proposal\n"
+        "def test_new_contract(): ...\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_new_contract")
+
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+
+    assert verdict.blocking == [test]
+    assert not verdict.advisory
+
+
 def test_an_unparseable_test_file_is_not_a_proposal(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "def test_new_contract(: ...\n")
     assert not cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
