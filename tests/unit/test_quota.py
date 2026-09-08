@@ -991,3 +991,29 @@ def test_charge_paid_accumulates_the_service_ceiling_across_credentials(
     )
     assert excinfo.value.retry_after_seconds == quota._seconds_to_utc_midnight(clock.utc_now())
     assert enforcer.paid_daily_used("a") == 1
+
+
+def test_charge_paid_reaches_the_same_eviction_housekeeping_as_admission(
+    tmp_path: Path, clock: _Clock
+) -> None:
+    """charge_paid resolves its state through the same locked path as
+    admission: at the threshold it evicts an idle, unspent state, and it
+    stamps recency — the housekeeping must not depend on which door the
+    credential came in through."""
+    path = tmp_path / "credentials.json"
+    _write_many(path, ("a", "b"), Limits(paid_daily_quota=10))
+    enforcer = QuotaEnforcer(
+        CredentialStore(path),
+        clock.monotonic,
+        clock.utc_now,
+        eviction_threshold=1,
+        eviction_idle_seconds=60.0,
+    )
+
+    enforcer.charge_paid("a")
+    # A new day rolls "a" back to unspent, and two minutes make it idle.
+    clock.now = clock.now.replace(day=clock.now.day + 1)
+    clock.advance(120)
+    enforcer.charge_paid("b")
+
+    assert enforcer.tracked_credentials() == 1

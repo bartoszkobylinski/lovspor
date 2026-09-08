@@ -263,14 +263,7 @@ class QuotaEnforcer:
 
     def _state_for(self, credential_id: str) -> _State:
         with self._lock:
-            state = self._states.get(credential_id)
-            if state is None:
-                if len(self._states) >= self._eviction_threshold:
-                    self._evict_idle()
-                state = _State(self._monotonic, self._utc_now)
-                self._states[credential_id] = state
-            state.last_seen = self._monotonic()
-            return state
+            return self._state_for_locked(credential_id)
 
     def _admit_service(self, *, paid: bool) -> None:
         """Check the instance ceiling. Charges nothing; raises if it is reached."""
