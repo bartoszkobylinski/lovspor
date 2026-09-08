@@ -24,12 +24,15 @@ set -euo pipefail
 # that variable from its systemd drop-in; a shell running `caddy validate` does
 # not, the placeholder expands to nothing, the site block parses as a global
 # options block, and validation fails with "unrecognized global option: encode".
-# Seen on the first enablement, 2026-09-08. Source the same file Caddy does.
-if [ -r /etc/default/caddy-lovspor ]; then
-	set -a
-	# shellcheck disable=SC1091
-	. /etc/default/caddy-lovspor
-	set +a
+# Seen on the first enablement, 2026-09-08. Read the same file Caddy does —
+# but READ it, do not source it: it is a systemd EnvironmentFile, and the value
+# is `lovspor.no, lovspor.bartoszkobylinski.com` unquoted. systemd takes the
+# rest of the line; a shell takes the first word as the value and runs the
+# second as a command ("lovspor.bartoszkobylinski.com: not found" — also seen
+# 2026-09-08, on the fix for the first one).
+if [ -z "${LOVSPOR_DOMAIN:-}" ] && [ -r /etc/default/caddy-lovspor ]; then
+	LOVSPOR_DOMAIN="$(sed -n 's/^LOVSPOR_DOMAIN=//p' /etc/default/caddy-lovspor | tail -n 1 | sed 's/^"\(.*\)"$/\1/')"
+	export LOVSPOR_DOMAIN
 fi
 : "${LOVSPOR_DOMAIN:?LOVSPOR_DOMAIN is unset and /etc/default/caddy-lovspor did not provide it}"
 
