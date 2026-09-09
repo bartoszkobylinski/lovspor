@@ -46,7 +46,10 @@ from lovspor.site.scan import check_links, scan_page
 from lovspor.site.templates import TEMPLATES_DIR
 from lovspor.tool_surface import ToolSurfaceDescriptor, describe_tool_surface
 from tests.unit.site_fixtures import (
+    ENVIRONMENT,
+    INTERPRETER,
     OBSERVED_AT,
+    TREE,
     available_observation,
     checkout_for,
     commit_all,
@@ -121,7 +124,18 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
 
 @pytest.fixture(scope="module")
 def built(world: World, tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, SiteBuildReport]:
+    """One build shared by the read-only assertions on the tree."""
     out = tmp_path_factory.mktemp("built") / "site"
+    return out, world.build(out)
+
+
+@pytest.fixture
+def fresh_build(world: World, tmp_path: Path) -> tuple[Path, SiteBuildReport]:
+    """A build of this test's own. The mutation run attributes code executed
+    inside a module-scoped fixture to the first test that requested it, so an
+    assertion on ``site-facts.json`` that should fail a mutated builder must
+    build for itself, or it is never run against the mutant."""
+    out = tmp_path / "site"
     return out, world.build(out)
 
 
@@ -809,9 +823,9 @@ class TestDeterminism:
         assert _facts(one)["release_key"] == _facts(two)["release_key"]
 
     def test_the_fingerprint_is_recomputable_and_recorded_with_its_components(
-        self, world: World, built: tuple[Path, SiteBuildReport]
+        self, world: World, fresh_build: tuple[Path, SiteBuildReport]
     ) -> None:
-        out, _ = built
+        out, _ = fresh_build
         toolchain = toolchain_fingerprint(world.checkout)
         recorded = _facts(out)["toolchain"]
 
@@ -823,9 +837,9 @@ class TestDeterminism:
 
 class TestSiteFacts:
     def test_provenance_is_complete(
-        self, world: World, built: tuple[Path, SiteBuildReport]
+        self, world: World, fresh_build: tuple[Path, SiteBuildReport]
     ) -> None:
-        out, report = built
+        out, report = fresh_build
         facts = _facts(out)
         document = json.loads((out / "deployment-capabilities.json").read_text(encoding="utf-8"))
         observation = Observation.model_validate(document["observation"])
@@ -871,10 +885,69 @@ class TestSiteFacts:
             "authenticated": {"status": "observed", "reason": None},
         }
 
-    def test_artifacts_are_named_by_logical_identity_and_hash(
-        self, world: World, built: tuple[Path, SiteBuildReport]
+    def test_site_facts_carries_exactly_the_schema_keys(
+        self, fresh_build: tuple[Path, SiteBuildReport]
     ) -> None:
-        out, _ = built
+        """Schema version 1, key for key: a consumer reads these names, so a
+        renamed or dropped key is a broken file, not a cosmetic change."""
+        out, _ = fresh_build
+        facts = _facts(out)
+        document = json.loads((out / "deployment-capabilities.json").read_text(encoding="utf-8"))
+
+        assert set(facts) == {
+            "schema_version",
+            "lovspor_commit",
+            "engine_version",
+            "corpus_commit",
+            "corpus_commit_time",
+            "site_manifest_sha256",
+            "toolchain",
+            "release_key",
+            "release_content_id",
+            "capability_sha256",
+            "capability",
+            "artifacts",
+            "facts",
+        }
+        assert set(facts["capability"]) == {
+            "expected_runtime_identity",
+            "observed_runtime_identity",
+            "comparisons",
+            "hosted_state",
+            "process",
+            "transport",
+        }
+        assert set(facts["toolchain"]) == {
+            "fingerprint",
+            "interpreter",
+            "jinja2_version",
+            "uv_lock_sha256",
+        }
+        assert set(facts["release_key"]) == {
+            "corpus_commit",
+            "lovspor_commit",
+            "state_sha256",
+            "toolchain_fingerprint",
+        }
+        identity = {
+            "tree_sha256": TREE,
+            "environment_sha256": ENVIRONMENT,
+            "interpreter": INTERPRETER,
+        }
+        assert facts["capability"]["expected_runtime_identity"] == identity
+        assert facts["capability"]["observed_runtime_identity"] == identity
+        assert document["observation"]["process"]["runtime_identity"] == identity
+        assert all(set(entry) == {"id", "sha256"} for entry in facts["artifacts"])
+        assert len(facts["artifacts"]) == 3
+        assert all(
+            set(entry) == {"page", "artifact", "field", "kind", "value", "unobserved"}
+            for entry in facts["facts"]
+        )
+
+    def test_artifacts_are_named_by_logical_identity_and_hash(
+        self, world: World, fresh_build: tuple[Path, SiteBuildReport]
+    ) -> None:
+        out, _ = fresh_build
         artifacts = {entry["id"]: entry["sha256"] for entry in _facts(out)["artifacts"]}
 
         assert artifacts == {
