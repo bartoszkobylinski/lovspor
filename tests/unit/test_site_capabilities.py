@@ -456,6 +456,9 @@ class TestHostedState:
             ('Basic realm="legacy",Bearer', True),
             ("Bearerish", False),
             ('Basic realm="Bearer"', False),
+            ('Basic realm="a \\" b, Bearer", Bearer realm="x"', True),
+            ('Basic realm="Bearer", Digest', False),
+            ('Basic realm="legacy, Bearer realm=x"', False),
             ("Digest realm=x, Basic", False),
         ],
     )

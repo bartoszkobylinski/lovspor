@@ -98,6 +98,9 @@ _SERVED_VALUES = ("served_tool_surface_sha256", "served_tool_count")
 # order; the scheme token is case-insensitive and ends at whitespace, a comma or
 # the end of the value. So "Basic realm=\"x\", Bearer realm=\"y\"" advertises Bearer.
 _BEARER = re.compile(r"(?:^|,)\s*Bearer(?=\s|,|$)", re.IGNORECASE)
+# RFC 7230 §3.2.6 quoted-string: a comma or the word Bearer inside a parameter's
+# quoted value (realm="legacy, Bearer") is data, not a challenge boundary.
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
 _UNAUTHORIZED = 401
 """Step (a)'s documented answer with a Bearer challenge (RFC 6750 §3)."""
 
@@ -354,7 +357,7 @@ def bearer_401(step: UnauthenticatedStep | None) -> bool:
         step is not None
         and step.status_code == _UNAUTHORIZED
         and step.challenge is not None
-        and _BEARER.search(step.challenge) is not None
+        and _BEARER.search(_QUOTED.sub('""', step.challenge)) is not None
     )
 
 
