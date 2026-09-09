@@ -731,6 +731,27 @@ class TestSiteDriftCheckCommand:
         )
         assert not httpx_mock.get_requests()
 
+    def test_a_served_target_outside_http_is_a_usage_error(
+        self, credential: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Every operator-supplied URL is validated before any I/O — the served
+        document's too, with the same classification as the probe targets."""
+        called = False
+
+        def forbidden_drift_check(*args: object, **kwargs: object) -> None:
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(lovspor.cli, "drift_check", forbidden_drift_check)
+        result = runner.invoke(
+            app,
+            _drift_args("--served-url", "lovspor.no/deployment-capabilities.json"),
+        )
+
+        assert result.exit_code == 2
+        assert "Invalid value: served_url: not an http(s) URL" in result.stderr
+        assert called is False
+
     def test_the_observer_is_the_drift_timer_by_default(
         self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock
     ) -> None:

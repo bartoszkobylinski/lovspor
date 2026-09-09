@@ -44,7 +44,13 @@ from lovspor.site.fixture import (
     expected_checkout,
     synthetic_document,
 )
-from lovspor.site.probe import CANONICAL_MCP_URL, DEFAULT_READINESS_URL, ProbeSettings, probe
+from lovspor.site.probe import (
+    CANONICAL_MCP_URL,
+    DEFAULT_READINESS_URL,
+    ProbeSettings,
+    probe,
+    require_http_url,
+)
 from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
@@ -478,9 +484,12 @@ def site_drift_check(
             timeout_seconds=timeout_seconds,
             observer=_OBSERVERS[observer],
         )
+        require_http_url(served_url)
     except ValidationError as error:
         # A malformed option is a usage error (exit 2), not a drift verdict.
         raise typer.BadParameter(_first_validation_message(error)) from error
+    except ValueError as error:
+        raise typer.BadParameter(f"served_url: {error}") from error
     try:
         with httpx.Client() as client:
             report = drift_check(served_url, settings, client=client, clock=_clock)

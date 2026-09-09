@@ -112,6 +112,14 @@ _LINE_ENDING = re.compile(r"\r\n?")
 NoAnswer = Literal["network", "timeout"]
 
 
+def require_http_url(value: str) -> str:
+    """An operator-supplied target is validated before any I/O: http(s) with a host."""
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"} or not parts.netloc:
+        raise ValueError(f"not an http(s) URL: {value!r}")
+    return value
+
+
 class ProbeSettings(BaseModel):
     """Where the probe looks, with what, for how long, and as whom."""
 
@@ -126,10 +134,7 @@ class ProbeSettings(BaseModel):
     @field_validator("readiness_url", "public_mcp_url")
     @classmethod
     def _http_url(cls, value: str) -> str:
-        parts = urlsplit(value)
-        if parts.scheme not in {"http", "https"} or not parts.netloc:
-            raise ValueError(f"not an http(s) URL: {value!r}")
-        return value
+        return require_http_url(value)
 
 
 @dataclass(frozen=True)
