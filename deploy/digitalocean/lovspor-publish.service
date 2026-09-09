@@ -1,5 +1,5 @@
 [Unit]
-Description=Publish the lovverk corpus as the ADR-0013 static site (build, validate, atomic switch)
+Description=Publish the lovverk corpus and the site as one release envelope (build, validate, config swap)
 Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
 # The build reads the corpus clone; publishing a half-fetched clone would
 # validate fine and still be wrong, so never overlap the two.
@@ -8,15 +8,21 @@ Conflicts=lovspor-fetch-corpus.service
 
 [Service]
 Type=oneshot
-# Root: the script reloads Caddy and owns the release symlink. The build itself
+# Root, the release/reconcile identity (ADR-0014 Decision 6): it opens Caddy's
+# admin socket, writes the release fragment and reloads Caddy. The build itself
 # is run as the lovspor user inside the script.
 User=root
-# `caddy validate` inside the script needs LOVSPOR_DOMAIN, which only Caddy's own
-# drop-in exports. Read the same file; the script also sources it for manual runs.
+# `caddy validate`/`caddy adapt` inside the release commands need LOVSPOR_DOMAIN,
+# which only Caddy's own drop-in exports. Read the same file; the script also
+# reads it for manual runs.
 EnvironmentFile=-/etc/default/caddy-lovspor
+# The release probe's credential (ADR-0014 Decision 4), delivered as
+# $CREDENTIALS_DIRECTORY/site-probe to root only; the script hands it to the
+# build user on stdin. Issue and store it as docs/mcp.md describes.
+LoadCredential=site-probe:/etc/lovspor/credentials/site-probe
 ExecStart=/opt/lovspor/app/deploy/digitalocean/publish-release.sh
-# A full build is ~4 min for ~93k pages, then rsync and a hash of every page.
-# Bounded so a wedged build cannot hold the unit forever; generous so a slow
-# disk does not abort a good release mid-rsync (nothing public changes until
-# the very last step, so an abort here costs time, not correctness).
+# A full build is ~4 min for ~93k pages, then the link pass and a hash of every
+# page, twice. Bounded so a wedged build cannot hold the unit forever; generous
+# so a slow disk does not abort a good release mid-build (nothing public changes
+# until the configuration swap, so an abort here costs time, not correctness).
 TimeoutStartSec=1800
