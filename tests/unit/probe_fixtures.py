@@ -14,11 +14,13 @@ from collections.abc import Callable
 from typing import Any
 
 import httpx
+from mcp.types import ListToolsResult
 from pytest_httpx import HTTPXMock
 
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.probe import CANONICAL_MCP_URL
-from tests.unit.site_fixtures import ENVIRONMENT, INTERPRETER, SURFACE, TREE
+from lovspor.tool_surface import describe_listed_tools
+from tests.unit.site_fixtures import ENVIRONMENT, INTERPRETER, TREE
 
 READINESS_URL = "http://127.0.0.1:8000/readyz"
 MCP_URL = CANONICAL_MCP_URL
@@ -42,7 +44,7 @@ def attestation(*, ready: bool = True, **overrides: Any) -> dict[str, Any]:
             "environment_sha256": ENVIRONMENT,
             "interpreter": INTERPRETER,
         },
-        "tool_surface_sha256": SURFACE,
+        "tool_surface_sha256": LISTING_SURFACE,
         "tool_count": 2,
         "credential_modes": ["token"],
         "oauth_configured": False,
@@ -61,6 +63,14 @@ def tools_listing(names: tuple[str, ...] = ("a", "b")) -> dict[str, Any]:
             {"name": name, "description": "æ", "inputSchema": {"type": "object"}} for name in names
         ]
     }
+
+
+# The surface the default fake serves, hashed as the descriptor hashes it — so the
+# default attestation and the default listing agree, and a test that wants
+# ``transport_surface_match: false`` has to make the difference explicit.
+LISTING_SURFACE = describe_listed_tools(
+    ListToolsResult.model_validate(tools_listing()).tools
+).schema_sha256
 
 
 class FakeMcp:

@@ -51,6 +51,7 @@ from tests.unit.probe_fixtures import (
     AUTHKIT_OPENID_URL,
     CHALLENGE,
     DISCOVERY_URL,
+    LISTING_SURFACE,
     MCP_URL,
     READINESS_URL,
     SESSION_ID,
@@ -65,7 +66,6 @@ from tests.unit.probe_fixtures import (
 from tests.unit.site_fixtures import (
     ENVIRONMENT,
     INTERPRETER,
-    SURFACE,
     TREE,
     checkout_expectations,
 )
@@ -138,7 +138,7 @@ class TestProcess:
         assert process.runtime_identity.tree_sha256 == TREE
         assert process.runtime_identity.environment_sha256 == ENVIRONMENT
         assert process.runtime_identity.interpreter == INTERPRETER
-        assert process.tool_surface_sha256 == SURFACE
+        assert process.tool_surface_sha256 == LISTING_SURFACE
         assert process.tool_count == 2
         assert process.credential_modes == ("token",)
         assert process.oauth_configured is False
@@ -240,6 +240,22 @@ class TestTransportUnauthenticated:
         assert json.loads(first.content)["method"] == "initialize"
         assert first.headers["accept"] == "application/json, text/event-stream"
         assert first.headers["content-type"] == "application/json"
+
+    def test_step_b_runs_when_bearer_is_not_the_first_advertised_challenge(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """The contract requires a 401 with a Bearer challenge, regardless of
+        whether the server advertises another authentication scheme first."""
+        challenge = f'Basic realm="legacy", {CHALLENGE}'
+        ready(httpx_mock)
+        fake = FakeMcp(unauthenticated=(401, challenge))
+
+        document = run(httpx_mock, fake=fake)
+
+        assert document.observation.transport.unauthenticated is not None
+        assert document.observation.transport.unauthenticated.challenge == challenge
+        assert document.observation.transport.authenticated.outcome == "ok"
+        assert document.state.hosted_state == "available"
 
     @pytest.mark.parametrize(
         ("status", "challenge"),

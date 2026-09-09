@@ -20,6 +20,7 @@ from lovspor.site.capabilities import (
     ProcessRecord,
     TransportRecord,
     UnauthenticatedStep,
+    bearer_401,
     derive_comparisons,
     derive_hosted_state,
     derive_state,
@@ -444,6 +445,28 @@ class TestHostedState:
         assert comparisons["tool_surface_match"] == "unknown"
         assert comparisons["transport_surface_match"] == "unknown"
         assert comparisons["oauth_discovery_consistent"] == "unknown"
+
+    @pytest.mark.parametrize(
+        ("challenge", "expected"),
+        [
+            ("Bearer", True),
+            ('Bearer realm="lovspor"', True),
+            ('bearer realm="x"', True),
+            ('Basic realm="legacy", Bearer realm="lovspor"', True),
+            ('Basic realm="legacy",Bearer', True),
+            ("Bearerish", False),
+            ('Basic realm="Bearer"', False),
+            ("Digest realm=x, Basic", False),
+        ],
+    )
+    def test_bearer_is_recognised_among_rfc7235_challenges(
+        self, challenge: str, expected: bool
+    ) -> None:
+        """RFC 7235 §4.1: challenges are comma-separated in any order; the scheme
+        token is case-insensitive and must stand alone."""
+        step = UnauthenticatedStep(status_code=401, challenge=challenge)
+
+        assert bearer_401(step) is expected
 
     @pytest.mark.parametrize(
         ("status_code", "challenge"),

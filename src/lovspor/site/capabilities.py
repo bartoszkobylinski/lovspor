@@ -94,7 +94,10 @@ _PROCESS_VALUES = (
     "oauth_configured",
 )
 _SERVED_VALUES = ("served_tool_surface_sha256", "served_tool_count")
-_BEARER = re.compile(r"^bearer(?:\s|$)", re.IGNORECASE)
+# RFC 7235 §4.1: one header may carry several challenges, comma-separated, in any
+# order; the scheme token is case-insensitive and ends at whitespace, a comma or
+# the end of the value. So "Basic realm=\"x\", Bearer realm=\"y\"" advertises Bearer.
+_BEARER = re.compile(r"(?:^|,)\s*Bearer(?=\s|,|$)", re.IGNORECASE)
 _UNAUTHORIZED = 401
 """Step (a)'s documented answer with a Bearer challenge (RFC 6750 §3)."""
 
@@ -351,7 +354,7 @@ def bearer_401(step: UnauthenticatedStep | None) -> bool:
         step is not None
         and step.status_code == _UNAUTHORIZED
         and step.challenge is not None
-        and _BEARER.match(step.challenge) is not None
+        and _BEARER.search(step.challenge) is not None
     )
 
 
