@@ -313,6 +313,16 @@ class TestTheId:
         with pytest.raises(EnvelopeError, match="release.caddy names /elsewhere"):
             check_envelope(envelope)
 
+    def test_the_fragment_must_contain_the_redirect_import_and_both_roots(
+        self, envelope: Path
+    ) -> None:
+        """ADR-0014's envelope fragment serves both trees and their redirect map."""
+        recorded = _json(envelope / FACTS)["release_content_id"]
+        write_fragment(envelope, f"vars lovspor_release {recorded}\n")
+
+        with pytest.raises(EnvelopeError, match="release.caddy"):
+            check_envelope(envelope)
+
     def test_the_fragment_must_not_escape_the_release_with_parent_segments(
         self, envelope: Path
     ) -> None:

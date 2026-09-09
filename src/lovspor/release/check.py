@@ -37,6 +37,7 @@ from lovspor.release.envelope import (
     ReleaseRecord,
     fragment_paths,
     fragment_release_id,
+    fragment_text,
     is_complete,
     is_release_id,
     missing_parts,
@@ -238,6 +239,14 @@ def _check_ids(root: Path, record: ReleaseRecord, facts: dict[str, object]) -> s
     for path in fragment_paths(fragment):
         if not _inside(path, expected_root):
             raise EnvelopeError(f"release.caddy names {path}, outside {expected_root}/")
+    # The fragment is a pure function of (release root, id): both roots, the
+    # redirect-map import and the vars line, nothing else. Anything but that
+    # text serves something other than this envelope.
+    expected_fragment = fragment_text(Path(expected_root), recomputed)
+    if fragment != expected_fragment:
+        raise EnvelopeError(
+            f"release.caddy is not the fragment for release {recomputed} at {expected_root}/"
+        )
     if is_release_id(root.name) and root.name != recomputed:
         raise EnvelopeError(f"directory {root.name} holds release {recomputed}")
     return recomputed
