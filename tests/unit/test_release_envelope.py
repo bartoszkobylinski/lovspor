@@ -181,6 +181,16 @@ class TestFragment:
         with pytest.raises(IncompleteEnvelopeError, match=FRAGMENT_NAME):
             read_fragment(tmp_path)
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    def test_a_fragment_with_malformed_utf_8_is_an_incomplete_envelope(
+        self, tmp_path: Path
+    ) -> None:
+        """An invalid envelope artifact is a named refusal, never an uncaught codec error."""
+        (tmp_path / FRAGMENT_NAME).write_bytes(b"vars lovspor_release \xff\n")
+
+        with pytest.raises(IncompleteEnvelopeError, match=FRAGMENT_NAME):
+            read_fragment(tmp_path)
+
 
 class TestRecord:
     def test_round_trips_with_sorted_keys_and_no_builder_clock(self, tmp_path: Path) -> None:
