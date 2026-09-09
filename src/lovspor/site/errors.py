@@ -39,3 +39,18 @@ class ProbeError(LovsporError):
     inputs: a clock without a timezone, whose reading could not be written
     as the RFC 3339 UTC instant every ``observed_at`` must be.
     """
+
+
+class ServedDocumentError(CapabilityDocumentError):
+    """The served ``deployment-capabilities.json`` could not be read for the drift check.
+
+    ``reason`` is one word for the unit's log line — ``network``,
+    ``timeout``, ``http_<code>`` or ``invalid`` — so a failed
+    ``lovspor-site-drift.service`` names what stopped the comparison
+    before it started; this is its own exit, never reported as drift.
+    """
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        suffix = f" ({detail})" if detail else ""
+        super().__init__(f"served capability document unavailable: {reason}{suffix}")
+        self.reason = reason

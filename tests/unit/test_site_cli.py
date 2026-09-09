@@ -1,9 +1,12 @@
-"""``build-site`` and ``site-fixture``: the operator's route to ADR-0014 builds.
+"""``build-site``, ``site-fixture``, ``release-probe``, ``site-drift-check``.
 
-A new surface is not shipped until an operator can reach it through a
-supported interface (CLAUDE.md): the site tree and the CI fixture
-document must both be producible by ``lovspor`` commands alone, and the
-fixture a command writes must be a document the build command accepts.
+The operator's route to ADR-0014 builds. A new surface is not shipped
+until an operator can reach it through a supported interface
+(CLAUDE.md): the site tree, the CI fixture document and the release's
+own capability document must all be producible by ``lovspor`` commands
+alone, and the document a command writes must be a document the build
+command accepts. The drift check is the same probe under the timer's
+identity, with the exit codes the unit reports through.
 
 ``discover_checkout`` is environment discovery, not logic: it is
 monkeypatched to a throwaway checkout here, because the developer's own
@@ -11,20 +14,43 @@ work tree is dirty exactly while these tests are being written.
 """
 
 import json
+import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
 import pytest
+from pytest_httpx import HTTPXMock
 from typer.main import get_command
 from typer.testing import CliRunner
 
 import lovspor.cli
 from lovspor.cli import app
 from lovspor.publish.emit import emit_site
-from lovspor.site.build import require_clean_work_tree
+from lovspor.site.build import SiteInputs, build_site, require_clean_work_tree
 from lovspor.site.capabilities import load_capabilities
-from lovspor.site.fixture import FixtureCase, document_bytes, synthetic_document
+from lovspor.site.errors import SiteBuildError
+from lovspor.site.fixture import (
+    FixtureCase,
+    document_bytes,
+    expected_checkout,
+    synthetic_document,
+)
+from lovspor.tool_surface import describe_tool_surface
+from tests.unit.probe_fixtures import (
+    MCP_URL,
+    READINESS_URL,
+    TOKEN,
+    FakeMcp,
+    absent_discovery,
+    attestation,
+    install,
+    ready,
+    tools_listing,
+)
 from tests.unit.site_fixtures import run_git, throwaway_checkout, throwaway_corpus
+
+SERVED_URL = "https://lovspor.no/deployment-capabilities.json"
 
 runner = CliRunner()
 
@@ -241,3 +267,418 @@ class TestHelp:
         assert result.exit_code == 0
         for command in ("publish-site", "build-site", "site-fixture"):
             assert command in result.output
+
+
+def _probe_args(corpus: Path, out: Path, *extra: str) -> list[str]:
+    return [
+        "release-probe",
+        "--corpus",
+        str(corpus),
+        "--out",
+        str(out),
+        "--readiness-url",
+        READINESS_URL,
+        "--public-mcp-url",
+        MCP_URL,
+        *extra,
+    ]
+
+
+def _host(httpx_mock: HTTPXMock, corpus: Path) -> FakeMcp:
+    """A host serving exactly the checkout's surface, token mode, no discovery."""
+    descriptor = describe_tool_surface(corpus)
+    ready(
+        httpx_mock,
+        payload=attestation(
+            tool_surface_sha256=descriptor.schema_sha256, tool_count=descriptor.tool_count
+        ),
+    )
+    absent_discovery(httpx_mock)
+    fake = FakeMcp(tools_listing(("x", "y")))
+    fake.listing = _served_listing(corpus)
+    return install(httpx_mock, fake)
+
+
+def _served_listing(corpus: Path) -> dict[str, object]:
+    """The checkout's real ``tools/list`` result, as the SDK puts it on the wire."""
+    import asyncio  # noqa: PLC0415
+
+    from mcp.types import ListToolsResult  # noqa: PLC0415
+
+    from lovspor.mcp import build_server  # noqa: PLC0415
+
+    listed = ListToolsResult(tools=asyncio.run(build_server(corpus).list_tools()))
+    return listed.model_dump(by_alias=True, mode="json", exclude_none=True)
+
+
+@pytest.fixture
+def credential(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The probe credential as systemd ``LoadCredential=site-probe:...`` delivers it."""
+    directory = tmp_path / "credentials"
+    directory.mkdir()
+    (directory / "site-probe").write_text(TOKEN + "\n", encoding="utf-8")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(directory))
+    monkeypatch.delenv("LOVSPOR_PROBE_TOKEN_FILE", raising=False)
+    return directory / "site-probe"
+
+
+class TestReleaseProbeCommand:
+    def test_writes_the_observed_document_for_this_checkout(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+    ) -> None:
+        _, commit, corpus, _ = repos
+        fake = _host(httpx_mock, corpus)
+        out = tmp_path / "deployment-capabilities.json"
+        before = datetime.now(UTC).replace(microsecond=0)
+
+        result = runner.invoke(app, _probe_args(corpus, out))
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(out)
+        assert document.state.checkout == expected_checkout(checkout, corpus)
+        assert document.state.checkout.lovspor_commit == commit
+        assert document.state.hosted_state == "available"
+        assert document.observation.process.observer == "release-probe"
+        assert document.observation.transport.authenticated.outcome == "ok"
+        assert fake.methods()[-1] == "tools/list"
+        observed_at = document.observation.process.observed_at
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", observed_at)
+        assert datetime.fromisoformat(observed_at) >= before
+        assert commit[:12] in result.output
+        assert "hosted state available" in result.output
+        assert TOKEN not in result.output
+        assert out.read_bytes() == document_bytes(document)
+
+    def test_the_credential_is_read_from_the_systemd_credentials_directory(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+    ) -> None:
+        _, _, corpus, _ = repos
+        fake = _host(httpx_mock, corpus)
+        result = runner.invoke(app, _probe_args(corpus, tmp_path / "c.json"))
+
+        assert result.exit_code == 0, result.output
+        bearers = {
+            r.headers.get("authorization") for r in fake.requests if "authorization" in r.headers
+        }
+        assert bearers == {f"Bearer {TOKEN}"}
+
+    def test_an_explicit_token_file_wins_over_the_credentials_directory(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+    ) -> None:
+        _, _, corpus, _ = repos
+        explicit = tmp_path / "other-token"
+        explicit.write_text("lsp_explicit\n", encoding="utf-8")
+        fake = _host(httpx_mock, corpus)
+        fake.accepted_token = "lsp_explicit"
+
+        result = runner.invoke(
+            app, _probe_args(corpus, tmp_path / "c.json", "--probe-token-file", str(explicit))
+        )
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(tmp_path / "c.json")
+        assert document.observation.transport.authenticated.outcome == "ok"
+
+    def test_the_token_file_can_be_named_by_the_environment(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _, _, corpus, _ = repos
+        token_file = tmp_path / "env-token"
+        token_file.write_text(TOKEN, encoding="utf-8")
+        monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
+        monkeypatch.setenv("LOVSPOR_PROBE_TOKEN_FILE", str(token_file))
+        _host(httpx_mock, corpus)
+
+        result = runner.invoke(app, _probe_args(corpus, tmp_path / "c.json"))
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(tmp_path / "c.json")
+        assert document.observation.transport.authenticated.outcome == "ok"
+
+    @pytest.mark.parametrize("shape", ["absent", "unreadable", "empty"])
+    def test_a_credential_that_cannot_be_loaded_is_recorded_not_fatal(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+        shape: str,
+    ) -> None:
+        """A secret that cannot be loaded is ``probe_credential_missing``
+        (ADR:901-903): the document is still written, the release proceeds."""
+        _, _, corpus, _ = repos
+        monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
+        monkeypatch.delenv("LOVSPOR_PROBE_TOKEN_FILE", raising=False)
+        args = _probe_args(corpus, tmp_path / "c.json")
+        if shape == "unreadable":
+            args += ["--probe-token-file", str(tmp_path / "missing" / "site-probe")]
+        elif shape == "empty":
+            (tmp_path / "empty").write_text("\n", encoding="utf-8")
+            args += ["--probe-token-file", str(tmp_path / "empty")]
+        fake = _host(httpx_mock, corpus)
+
+        result = runner.invoke(app, args)
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(tmp_path / "c.json")
+        step = document.observation.transport.authenticated
+        assert (step.status, step.reason) == ("unobserved", "probe_credential_missing")
+        assert document.state.hosted_state == "unknown"
+        assert fake.methods() == ["initialize"]
+        assert "probe credential" in result.output
+
+    def test_a_dirty_checkout_is_refused_before_any_request(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _, _, corpus, _ = repos
+        dirty, _ = throwaway_checkout(tmp_path / "dirty")
+        (dirty / "note.txt").write_text("x", encoding="utf-8")
+        monkeypatch.setattr(lovspor.cli, "discover_checkout", lambda: dirty)
+        out = tmp_path / "c.json"
+
+        result = runner.invoke(app, _probe_args(corpus, out))
+
+        assert result.exit_code == 1
+        assert "release probe refused:" in result.output
+        assert not out.exists()
+        assert not httpx_mock.get_requests()
+
+    def test_a_target_outside_http_is_refused(
+        self, repos: tuple[Path, str, Path, Path], checkout: Path, tmp_path: Path
+    ) -> None:
+        _, _, corpus, _ = repos
+        out = tmp_path / "c.json"
+
+        result = runner.invoke(app, _probe_args(corpus, out, "--public-mcp-url", "lovspor.no/mcp"))
+
+        assert result.exit_code == 1
+        assert "release probe refused:" in result.output
+        assert not out.exists()
+
+    def test_the_document_is_written_in_every_observed_state(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+    ) -> None:
+        """Hosted state never gates the release (ADR:932-946)."""
+        _, _, corpus, _ = repos
+        httpx_mock.add_response(url=READINESS_URL, status_code=502)
+        httpx_mock.add_response(url=MCP_URL, status_code=421)
+        absent_discovery(httpx_mock)
+        out = tmp_path / "c.json"
+
+        result = runner.invoke(app, _probe_args(corpus, out))
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(out)
+        assert document.observation.process.reason == "http_502"
+        assert document.state.hosted_state == "unavailable"
+        assert "hosted state unavailable" in result.output
+        assert "http_502" in result.output
+
+    def test_the_probe_feeds_the_build_command(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+    ) -> None:
+        """Operator's question: probe in, tree out, no hand-written JSON."""
+        _, commit, corpus, manifest = repos
+        _host(httpx_mock, corpus)
+        capabilities = tmp_path / "deployment-capabilities.json"
+        probe = runner.invoke(app, _probe_args(corpus, capabilities))
+        assert probe.exit_code == 0, probe.output
+
+        report = build_site(
+            SiteInputs(
+                checkout=checkout,
+                corpus=corpus,
+                corpus_manifest=manifest,
+                capabilities=capabilities,
+                out=tmp_path / "site",
+            )
+        )
+
+        assert report.hosted_state == "available"
+        assert report.lovspor_commit == commit
+        assert (tmp_path / "site" / "deployment-capabilities.json").read_bytes() == (
+            capabilities.read_bytes()
+        )
+
+
+def _drift_args(*extra: str) -> list[str]:
+    return [
+        "site-drift-check",
+        "--served-url",
+        SERVED_URL,
+        "--readiness-url",
+        READINESS_URL,
+        "--public-mcp-url",
+        MCP_URL,
+        *extra,
+    ]
+
+
+class TestSiteDriftCheckCommand:
+    @pytest.fixture
+    def released(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+    ) -> tuple[Path, Path, FakeMcp]:
+        """The document the release probe wrote for the host, as the site serves it."""
+        _, _, corpus, _ = repos
+        fake = _host(httpx_mock, corpus)
+        document = tmp_path / "served.json"
+        result = runner.invoke(app, _probe_args(corpus, document))
+        assert result.exit_code == 0, result.output
+        httpx_mock.reset()
+        return corpus, document, fake
+
+    def _host_again(self, httpx_mock: HTTPXMock, corpus: Path, fake: FakeMcp) -> FakeMcp:
+        descriptor = describe_tool_surface(corpus)
+        ready(
+            httpx_mock,
+            payload=attestation(
+                tool_surface_sha256=descriptor.schema_sha256, tool_count=descriptor.tool_count
+            ),
+        )
+        absent_discovery(httpx_mock)
+        return install(httpx_mock, fake)
+
+    def test_no_drift_exits_zero_with_one_line(
+        self,
+        released: tuple[Path, Path, FakeMcp],
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        corpus, document, fake = released
+        httpx_mock.add_response(url=SERVED_URL, content=document.read_bytes())
+        self._host_again(httpx_mock, corpus, fake)
+
+        def no_checkout() -> Path:
+            raise SiteBuildError("the drift check must not read a checkout")
+
+        monkeypatch.setattr(lovspor.cli, "discover_checkout", no_checkout)
+        result = runner.invoke(app, _drift_args())
+
+        assert result.exit_code == 0, result.output
+        assert result.output.count("\n") == 1
+        assert result.output.startswith("site-drift-check: no drift ")
+        assert "observer=drift-timer" in result.output
+        assert TOKEN not in result.output
+
+    def test_drift_exits_one_naming_the_differing_fields(
+        self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock
+    ) -> None:
+        _, document, fake = released
+        httpx_mock.add_response(url=SERVED_URL, content=document.read_bytes())
+        ready(httpx_mock, status=503)
+        absent_discovery(httpx_mock)
+        install(httpx_mock, fake)
+
+        result = runner.invoke(app, _drift_args())
+
+        assert result.exit_code == 1
+        lines = [line for line in result.output.splitlines() if line]
+        assert len(lines) == 1
+        line = lines[0]
+        assert line.startswith("site-drift-check: drift ")
+        fields = re.search(r"fields=(\S+)", line)
+        assert fields is not None
+        assert "hosted_state" in fields.group(1).split(",")
+        assert "process.ready" in fields.group(1).split(",")
+        assert "observed_at" not in fields.group(1)
+        assert "served_state_sha256=" in line
+        assert "observed_state_sha256=" in line
+
+    def test_an_unreadable_served_document_exits_three_with_its_reason(
+        self, httpx_mock: HTTPXMock, credential: Path
+    ) -> None:
+        httpx_mock.add_response(url=SERVED_URL, status_code=503)
+
+        result = runner.invoke(app, _drift_args())
+
+        assert result.exit_code == 3
+        assert "site-drift-check: served_document_unavailable" in result.output
+        assert "reason=http_503" in result.output
+        assert not httpx_mock.get_requests(url=READINESS_URL)
+
+    def test_the_observer_is_the_drift_timer_by_default(
+        self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock
+    ) -> None:
+        corpus, document, fake = released
+        httpx_mock.add_response(url=SERVED_URL, content=document.read_bytes())
+        self._host_again(httpx_mock, corpus, fake)
+        command = get_command(app)
+        assert isinstance(command, click.Group)
+        observer = next(
+            param
+            for param in command.commands["site-drift-check"].params
+            if "--observer" in param.opts
+        )
+
+        assert observer.default == "drift-timer"
+        assert runner.invoke(app, _drift_args()).exit_code == 0
+
+    def test_exit_codes_are_documented_in_the_help(self) -> None:
+        result = runner.invoke(app, ["site-drift-check", "--help"])
+
+        assert result.exit_code == 0
+        for code in ("0", "1", "2", "3"):
+            assert re.search(rf"\b{code}\b", result.output)
+        assert "drift" in result.output
+        assert "served document" in result.output
+
+
+class TestProbeHelp:
+    def test_both_commands_are_registered(self) -> None:
+        result = runner.invoke(app, ["--help"])
+
+        assert result.exit_code == 0
+        assert "release-probe" in result.output
+        assert "site-drift-check" in result.output
+
+    def test_the_probe_has_no_checkout_option_and_the_drift_check_no_corpus(self) -> None:
+        command = get_command(app)
+        assert isinstance(command, click.Group)
+        probe_options = {n for p in command.commands["release-probe"].params for n in p.opts}
+        drift_options = {n for p in command.commands["site-drift-check"].params for n in p.opts}
+
+        assert "--checkout" not in probe_options
+        assert {"--corpus", "--out", "--probe-token-file", "--observer"} <= probe_options
+        assert "--corpus" not in drift_options
+        assert {"--served-url", "--probe-token-file", "--observer"} <= drift_options

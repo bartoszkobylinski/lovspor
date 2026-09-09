@@ -1,11 +1,15 @@
 """lovspor command-line interface."""
 
+import os
 import subprocess
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
+from pydantic import SecretStr, ValidationError
 
 from lovspor import __version__
 from lovspor.access import (
@@ -27,11 +31,20 @@ from lovspor.observatory.commands import observatory_app
 from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
+from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.site.build import SiteInputs, build_site, discover_checkout
-from lovspor.site.errors import SiteBuildError
-from lovspor.site.fixture import FixtureCase, document_bytes, synthetic_document
+from lovspor.site.capabilities import CapabilityDocument, Observer, state_sha256
+from lovspor.site.drift import DriftReport, drift_check
+from lovspor.site.errors import ProbeError, ServedDocumentError, SiteBuildError
+from lovspor.site.fixture import (
+    FixtureCase,
+    document_bytes,
+    expected_checkout,
+    synthetic_document,
+)
+from lovspor.site.probe import CANONICAL_MCP_URL, DEFAULT_READINESS_URL, ProbeSettings, probe
 from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
@@ -267,6 +280,208 @@ def site_fixture(
         f"capability fixture {case.value} for lovspor commit "
         f"{document.state.checkout.lovspor_commit[:12]} written to {out}"
     )
+
+
+class ObserverName(StrEnum):
+    """Who made an observation: the release procedure, or the hourly timer."""
+
+    release_probe = "release-probe"
+    drift_timer = "drift-timer"
+
+
+_OBSERVERS: dict[ObserverName, Observer] = {
+    ObserverName.release_probe: "release-probe",
+    ObserverName.drift_timer: "drift-timer",
+}
+SERVED_CAPABILITIES_URL = f"{SITE_ORIGIN}/deployment-capabilities.json"
+_PROBE_CREDENTIAL_NAME = "site-probe"
+_DRIFT_EXIT_DRIFTED = 1
+_DRIFT_EXIT_SERVED_UNAVAILABLE = 3
+
+_ReadinessUrlOption = Annotated[
+    str,
+    typer.Option("--readiness-url", help="Loopback /readyz of the running MCP process."),
+]
+_PublicMcpUrlOption = Annotated[
+    str,
+    typer.Option(
+        "--public-mcp-url",
+        help="The public /mcp URL a client dials — also the RFC 9728 resource the "
+        "discovery document must name exactly.",
+    ),
+]
+_ProbeTokenFileOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--probe-token-file",
+        envvar="LOVSPOR_PROBE_TOKEN_FILE",
+        help="File holding the probe credential (default: $CREDENTIALS_DIRECTORY/site-probe, "
+        "as systemd LoadCredential= delivers it). Missing, empty or unreadable: step (b) "
+        "is recorded unobserved with reason probe_credential_missing, never as a failure.",
+    ),
+]
+_TimeoutOption = Annotated[
+    float, typer.Option("--timeout-seconds", help="Per-request timeout, in seconds.")
+]
+_ObserverOption = Annotated[
+    ObserverName, typer.Option("--observer", help="Recorded as the records' observer.")
+]
+
+
+def _probe_token_path(explicit: Path | None) -> Path | None:
+    if explicit is not None:
+        return explicit
+    directory = os.environ.get("CREDENTIALS_DIRECTORY")
+    return Path(directory) / _PROBE_CREDENTIAL_NAME if directory else None
+
+
+def _probe_token(explicit: Path | None) -> SecretStr | None:
+    """The secret, or ``None`` with one line saying why step (b) will be unobserved.
+
+    Never fatal: a secret that cannot be loaded is the observer's failure
+    and is recorded as such (ADR-0014 Decision 4). The line names the path,
+    never the content.
+    """
+    path = _probe_token_path(explicit)
+    if path is None:
+        typer.echo("probe credential: none configured (step (b) unobserved)", err=True)
+        return None
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        typer.echo(f"probe credential unreadable: {path}: {error.strerror}", err=True)
+        return None
+    if not token:
+        typer.echo(f"probe credential empty: {path}", err=True)
+        return None
+    return SecretStr(token)
+
+
+def _clock() -> datetime:
+    return datetime.now(UTC)
+
+
+def _summary(document: CapabilityDocument) -> str:
+    process, transport = document.observation.process, document.observation.transport
+    step = transport.authenticated
+
+    def status(name: str, value: str, reason: str | None) -> str:
+        return f"{name} {value}" + (f" ({reason})" if reason else "")
+
+    return ", ".join(
+        (
+            f"hosted state {document.state.hosted_state}",
+            status("process", process.status, process.reason),
+            status("transport", transport.status, transport.reason),
+            status("authenticated", step.status, step.reason),
+            status("discovery", transport.oauth_discovery.verdict, None),
+        )
+    )
+
+
+@app.command(name="release-probe")
+def release_probe(
+    corpus: Annotated[
+        Path,
+        typer.Option(
+            help="Path to a lovverk checkout; the expected tool-surface descriptor is read from it."
+        ),
+    ],
+    out: Annotated[Path, typer.Option(help="File to write the capability document to.")],
+    readiness_url: _ReadinessUrlOption = DEFAULT_READINESS_URL,
+    public_mcp_url: _PublicMcpUrlOption = CANONICAL_MCP_URL,
+    probe_token_file: _ProbeTokenFileOption = None,
+    timeout_seconds: _TimeoutOption = 10.0,
+    observer: _ObserverOption = ObserverName.release_probe,
+) -> None:
+    """Observe the running host and write deployment-capabilities.json for this checkout.
+
+    The checkout part is real — HEAD of the clean work tree this command runs
+    from, its runtime identity and tool-surface descriptor — and the two
+    records are observed: /readyz over loopback, the public /mcp as a client
+    dials it, and the RFC 9728 document validated semantically (ADR-0014
+    Decision 4). The document is written in every observed state; hosted
+    state never gates the release. Exit 1 names the refusal.
+    """
+    try:
+        expected = expected_checkout(discover_checkout(), corpus)
+        settings = ProbeSettings(
+            readiness_url=readiness_url,
+            public_mcp_url=public_mcp_url,
+            probe_token=_probe_token(probe_token_file),
+            timeout_seconds=timeout_seconds,
+            observer=_OBSERVERS[observer],
+        )
+        with httpx.Client() as client:
+            document = probe(settings, client=client, checkout=expected, clock=_clock)
+    except (SiteBuildError, ProbeError, ValidationError) as error:
+        typer.echo(f"release probe refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    out.write_bytes(document_bytes(document))
+    typer.echo(
+        f"capability document for lovspor commit {expected.lovspor_commit[:12]} "
+        f"written to {out}: {_summary(document)}"
+    )
+
+
+def _drift_line(report: DriftReport, observer: ObserverName) -> str:
+    served, observed = report.served, report.observed
+    verdict = "drift" if report.drifted else "no drift"
+    line = (
+        f"site-drift-check: {verdict} observer={observer.value} "
+        f"served_observed_at={served.observation.process.observed_at} "
+        f"observed_at={observed.observation.process.observed_at} "
+        f"served_state_sha256={state_sha256(served.state)} "
+        f"observed_state_sha256={state_sha256(observed.state)} "
+        f"hosted_state={served.state.hosted_state}->{observed.state.hosted_state}"
+    )
+    if report.drifted:
+        line += f" fields={','.join(report.differences)}"
+    return line
+
+
+@app.command(name="site-drift-check")
+def site_drift_check(
+    served_url: Annotated[
+        str, typer.Option("--served-url", help="The live deployment-capabilities.json.")
+    ] = SERVED_CAPABILITIES_URL,
+    readiness_url: _ReadinessUrlOption = DEFAULT_READINESS_URL,
+    public_mcp_url: _PublicMcpUrlOption = CANONICAL_MCP_URL,
+    probe_token_file: _ProbeTokenFileOption = None,
+    timeout_seconds: _TimeoutOption = 10.0,
+    observer: _ObserverOption = ObserverName.drift_timer,
+) -> None:
+    """Re-observe the host and compare its state with the served deployment-capabilities.json.
+
+    The hourly timer's check (ADR-0014 Decision 4): the same probe as
+    release-probe, deriving state against the served document's own checkout,
+    compared field by field — state only, never observed_at, observer or an
+    unobserved reason. Reads no checkout and no corpus.
+
+    Exit codes: 0 no drift; 1 drift — one line on stderr names the differing
+    fields as dotted paths; 2 usage error; 3 the served document could not be
+    fetched or is invalid — its own failure, never reported as drift.
+    """
+    settings = ProbeSettings(
+        readiness_url=readiness_url,
+        public_mcp_url=public_mcp_url,
+        probe_token=_probe_token(probe_token_file),
+        timeout_seconds=timeout_seconds,
+        observer=_OBSERVERS[observer],
+    )
+    try:
+        with httpx.Client() as client:
+            report = drift_check(served_url, settings, client=client, clock=_clock)
+    except ServedDocumentError as error:
+        typer.echo(
+            f"site-drift-check: served_document_unavailable reason={error.reason} url={served_url}",
+            err=True,
+        )
+        raise typer.Exit(code=_DRIFT_EXIT_SERVED_UNAVAILABLE) from error
+    if report.drifted:
+        typer.echo(_drift_line(report, observer), err=True)
+        raise typer.Exit(code=_DRIFT_EXIT_DRIFTED)
+    typer.echo(_drift_line(report, observer))
 
 
 @app.command(name="publish-check")
