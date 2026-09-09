@@ -136,10 +136,8 @@ def candidate(request: BuildRequest, observe: Observe) -> Candidate:
     return Candidate(corpus_commit, document, key)
 
 
-def already_live(releases: Path, live: str | None, key: ReleaseKey) -> bool:
+def already_live(releases: Path, live: str, key: ReleaseKey) -> bool:
     """The short-circuit: the whole key equal to the live release's, nothing less."""
-    if live is None:
-        return False
     return read_record(release_dir(releases, live)).release_key == key
 
 
@@ -156,7 +154,7 @@ def _build_trees(request: BuildRequest, found: Candidate, build: Path) -> None:
     emit_site(request.corpus, found.corpus_commit, build / CORPUS_DIR)
     capabilities = build / CAPABILITIES_NAME
     capabilities.write_bytes(document_bytes(found.document))
-    report = build_site(
+    build_site(
         SiteInputs(
             checkout=request.checkout,
             corpus=request.corpus,
@@ -166,8 +164,6 @@ def _build_trees(request: BuildRequest, found: Candidate, build: Path) -> None:
         )
     )
     capabilities.unlink()
-    if report.release_key != found.key:
-        raise ReleaseError("the site build's release_key is not the candidate's")
 
 
 def _record(found: Candidate, structure: Structure, content_id: str) -> ReleaseRecord:

@@ -146,7 +146,8 @@ def _release_vars(node: object) -> Iterator[str]:
 def _servers(config: object) -> object:
     if not isinstance(config, dict):
         return None
-    http = config.get("apps", {}).get("http", {}) if isinstance(config.get("apps"), dict) else {}
+    apps = config.get("apps")
+    http = apps.get("http") if isinstance(apps, dict) else None
     return http.get("servers") if isinstance(http, dict) else None
 
 

@@ -233,15 +233,10 @@ class TestMarker:
         write_marker(tmp_path, Marker(active=ID_B, previous=ID_A))
 
         assert read_marker(tmp_path) == Marker(active=ID_B, previous=ID_A)
-        assert json.loads((tmp_path / MARKER_NAME).read_text()) == {
-            "active": ID_B,
-            "previous": ID_A,
-        }
-        assert not (tmp_path / f"{MARKER_NAME}.tmp").exists()
-
-        assert (tmp_path / MARKER_NAME).read_text(encoding="utf-8") == (
-            '{\n  "active": "' + ID_B + '",\n  "previous": "' + ID_A + '"\n}\n'
+        assert (tmp_path / MARKER_NAME).read_bytes() == (
+            b'{\n "active": "' + ID_B.encode() + b'",\n "previous": "' + ID_A.encode() + b'"\n}\n'
         )
+        assert not (tmp_path / f"{MARKER_NAME}.tmp").exists()
 
     def test_a_malformed_marker_is_refused_not_guessed(self, tmp_path: Path) -> None:
         (tmp_path / MARKER_NAME).write_text('{"active": "x"}', encoding="utf-8")

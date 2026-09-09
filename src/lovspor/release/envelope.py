@@ -19,14 +19,13 @@ never in directory order, so a staged release that never went live
 cannot masquerade as the rollback target.
 """
 
-import json
 import re
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from lovspor.atomic_io import atomic_write_text
+from lovspor.atomic_io import atomic_write_bytes, atomic_write_text
 from lovspor.publish.companion import companion_json_bytes
 from lovspor.release.errors import IncompleteEnvelopeError
 from lovspor.site.fingerprint import ReleaseKey
@@ -174,13 +173,14 @@ def read_record(root: Path) -> ReleaseRecord:
         raise IncompleteEnvelopeError(message) from error
 
 
-def record_bytes(record: ReleaseRecord) -> bytes:
+def record_bytes(record: ReleaseRecord | Marker) -> bytes:
+    """The record's — or the marker's — bytes: sorted keys, UTF-8, one trailing newline."""
     return companion_json_bytes(record.model_dump(mode="json"))
 
 
 def write_record(root: Path, record: ReleaseRecord) -> None:
     """Written by replace, never in place: a hard-linked file shares its inode."""
-    atomic_write_text(root / RECORD_NAME, record_bytes(record).decode("utf-8"))
+    atomic_write_bytes(root / RECORD_NAME, record_bytes(record))
 
 
 def write_fragment(root: Path, text: str) -> None:
@@ -207,6 +207,5 @@ def read_marker(releases: Path) -> Marker | None:
 
 
 def write_marker(releases: Path, marker: Marker) -> None:
-    """M by atomic rename, never in place."""
-    payload = json.dumps(marker.model_dump(mode="json"), sort_keys=True, indent=2) + "\n"
-    atomic_write_text(releases / MARKER_NAME, payload)
+    """M by atomic rename, never in place; the record's serialisation."""
+    atomic_write_bytes(releases / MARKER_NAME, record_bytes(marker))
