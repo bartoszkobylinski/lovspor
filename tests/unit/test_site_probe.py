@@ -465,6 +465,41 @@ class TestTransportAuthenticated:
 
         assert (step.status, step.outcome) == ("observed", "http_500")
 
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            (500, ("observed", None, "http_500")),
+            (401, ("unobserved", "probe_credential_rejected", None)),
+        ],
+        ids=["subject-http-error", "credential-rejected"],
+    )
+    def test_a_refused_initialized_notification_stops_before_listing(
+        self,
+        httpx_mock: HTTPXMock,
+        status: int,
+        expected: tuple[str, str | None, str | None],
+    ) -> None:
+        ready(httpx_mock)
+
+        class RefuseInitialized(FakeMcp):
+            def _in_session(
+                self, request: httpx.Request, message: dict[str, Any]
+            ) -> httpx.Response:
+                if message["method"] == "notifications/initialized":
+                    return httpx.Response(status)
+                return super()._in_session(request, message)
+
+        fake = RefuseInitialized()
+        step = run(httpx_mock, fake=fake).observation.transport.authenticated
+
+        assert (step.status, step.reason, step.outcome) == expected
+        assert fake.methods() == [
+            "initialize",
+            "initialize",
+            "notifications/initialized",
+        ]
+        assert not any(request.method == "DELETE" for request in fake.requests)
+
     def test_an_initialize_result_outside_the_mcp_schema_is_a_protocol_error(
         self, httpx_mock: HTTPXMock
     ) -> None:
