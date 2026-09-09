@@ -4,15 +4,14 @@ Describes the one thing that separates the treatment condition from the
 control condition: a local stdio ``lovspor mcp`` server bound to the
 pinned lovverk checkout. Everything here is derived from the server the
 run will actually launch — the tool list and the schema hash come from
-``build_server`` itself, so a recorded surface cannot drift away from
-the served one.
+``build_server`` itself, read through the neutral registry
+``lovspor.tool_surface`` that publication reads too — so a recorded
+surface cannot drift away from the served one.
 
 The backend is deliberately local: METHODOLOGY §5 forbids pointing the
 treatment arm at the hosted production endpoint, whose corpus moves.
 """
 
-import asyncio
-import hashlib
 import json
 import sysconfig
 from pathlib import Path
@@ -22,6 +21,7 @@ from pydantic import BaseModel
 
 from lovspor.errors import LovsporError
 from lovspor.mcp import build_server
+from lovspor.tool_surface import describe_tool_surface
 
 SERVER_NAME = "lovverk"
 TRANSPORT = "native-mcp"
@@ -46,18 +46,13 @@ def tool_surface(corpus_path: Path) -> ToolSurface:
     and output schema), so the hash covers exactly the material the
     model is shown — not our idea of it.
     """
-    tools = asyncio.run(build_server(corpus_path).list_tools())
-    documents = sorted(
-        (tool.model_dump(mode="json", exclude_none=True) for tool in tools),
-        key=lambda document: str(document["name"]),
-    )
-    if not documents:
+    # The factory is named here, not left to the registry's default: this
+    # module's promise is that the surface comes from build_server itself,
+    # and its tests substitute a stub server through this very name.
+    descriptor = describe_tool_surface(corpus_path, server_factory=build_server)
+    if not descriptor.names:
         raise ToolSurfaceError(f"the MCP server for {corpus_path} exposes no tools")
-    canonical = json.dumps(documents, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return ToolSurface(
-        names=tuple(str(document["name"]) for document in documents),
-        schema_sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
-    )
+    return ToolSurface(names=descriptor.names, schema_sha256=descriptor.schema_sha256)
 
 
 def verify_server_command(server_command: Path) -> None:
