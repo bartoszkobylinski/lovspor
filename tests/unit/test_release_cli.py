@@ -56,6 +56,16 @@ def envelopes(world: World, tmp_path_factory: pytest.TempPathFactory) -> tuple[P
     return releases, a, b
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(rendered: str) -> str:
+    """rich output collapsed to its words: no escapes, no box drawing, one space."""
+    text = _ANSI.sub("", rendered)
+    text = re.sub(r"[\u2500-\u257f]", " ", text)
+    return " ".join(text.split())
+
+
 class Host(NamedTuple):
     plane: ControlPlane
     caddy: FakeCaddy
@@ -357,7 +367,9 @@ class TestBuild:
         result = runner.invoke(app, _build_args(world, tmp_path, "latest", None))
 
         assert result.exit_code == 2
-        assert "--live must be a release_content_id or 'none'" in result.output
+        # rich renders the usage error as an ANSI-styled panel wrapped at the
+        # terminal width; compare the words, not the rendering.
+        assert "--live must be a release_content_id or 'none'" in _plain(result.output)
 
 
 class TestPublishCheck:
