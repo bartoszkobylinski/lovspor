@@ -226,6 +226,34 @@ class TestClosureWalk:
 
         assert [d.name for d in found] == ["a-lib", "c", "e"]
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    def test_excludes_an_installed_dependency_whose_environment_marker_is_false(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The environment hash covers the resolved closure for this interpreter,
+        not every conditional dependency that happens to be installed."""
+        stubs = {
+            "app": _StubDistribution(
+                {
+                    "METADATA": _metadata(
+                        "app",
+                        "1",
+                        "current",
+                        "foreign; python_version < '0'",
+                    )
+                }
+            ),
+            "current": _StubDistribution({"METADATA": _metadata("current", "1")}),
+            "foreign": _StubDistribution({"METADATA": _metadata("foreign", "1")}),
+        }
+        monkeypatch.setattr(
+            importlib.metadata,
+            "distribution",
+            lambda name: stubs[normalise_name(name)],
+        )
+
+        assert [item.name for item in installed_distributions("app")] == ["current"]
+
     def test_records_direct_urls_with_their_commit(self, index: dict[str, object]) -> None:
         by_name = {d.name: d for d in installed_distributions("app")}
 
