@@ -1,8 +1,12 @@
 """Caddy as the release procedure sees it: pairs, argv, the admin endpoint (ADR-0014 Decision 6)."""
 
+import hashlib
 import json
+import socket
 import subprocess
 import sys
+import tempfile
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -82,6 +86,15 @@ class TestConfigPair:
         assert canonical_hash({"b": 1, "a": [1, 2]}) == canonical_hash({"a": [1, 2], "b": 1})
         assert canonical_hash(json.loads('{"a":\n 1}')) == canonical_hash({"a": 1})
 
+    def test_the_hash_is_the_sha256_of_the_compact_sorted_utf_8_serialisation(self) -> None:
+        """No insignificant whitespace, keys sorted, non-ASCII kept as is: the bytes are fixed."""
+        subtree = {"b": 1, "a": ["\u00e6\u00f8\u00e5", 2]}
+
+        assert (
+            canonical_hash(subtree)
+            == hashlib.sha256('{"a":["\u00e6\u00f8\u00e5",2],"b":1}'.encode()).hexdigest()
+        )
+
     def test_the_same_id_with_one_handler_changed_is_another_pair(self) -> None:
         """The id alone is never trusted: a hand-edited handler moves the hash."""
         edited = config_pair(_config(_site(_routes(ID_A, root="/r/b"))))
@@ -121,6 +134,24 @@ class TestConfigPair:
 
         assert pair.release_id is None
         assert pair.config_hash == canonical_hash(None)
+
+    def test_a_server_without_routes_is_no_release_hashed_over_the_servers(self) -> None:
+        servers = {"srv0": {"listen": [":443"]}, "srv1": "not a server"}
+
+        pair = config_pair({"apps": {"http": {"servers": servers}}})
+
+        assert pair == ConfigPair(release_id=None, config_hash=canonical_hash(servers))
+
+    def test_only_a_lone_subroute_is_unwrapped_for_the_hash(self) -> None:
+        """A subroute beside another handler is not the site block's one subroute."""
+        inner = [{"handle": [{"handler": "vars", "lovspor_release": ID_A}]}]
+        handle = [{"handler": "subroute", "routes": inner}, {"handler": "file_server"}]
+        route = {"match": [{"host": ["x"]}], "handle": handle}
+
+        pair = config_pair(_config(route))
+
+        assert pair == ConfigPair(release_id=ID_A, config_hash=canonical_hash(handle))
+        assert pair.config_hash != canonical_hash(inner)
 
     def test_a_site_route_without_a_single_subroute_hashes_its_handle_list(self) -> None:
         handle = [{"handler": "vars", "lovspor_release": ID_A}, {"handler": "file_server"}]
@@ -168,8 +199,9 @@ class TestCommands:
     def test_adapt_failures_are_named(self, tmp_path: Path) -> None:
         with pytest.raises(ControlPlaneError, match="caddy adapt failed .*: boom"):
             adapt(RecordingRunner(Completed(1, "", "boom\n")), tmp_path, tmp_path / "f")
-        with pytest.raises(ControlPlaneError, match="no JSON"):
+        with pytest.raises(ControlPlaneError) as caught:
             adapt(RecordingRunner(Completed(0, "not json", "")), tmp_path, tmp_path / "f")
+        assert str(caught.value) == "caddy adapt produced no JSON"
 
     def test_validate_runs_the_validate_argv_and_refuses_on_failure(self, tmp_path: Path) -> None:
         runner = RecordingRunner(Completed(0, "", "Valid configuration\n"))
@@ -235,6 +267,38 @@ class TestAdminAddress:
         assert admin_base(address) == ("http://localhost:2019", None)
 
 
+class _UnixSocketAdmin:
+    """One canned ``GET /config/`` answer over a real Unix socket, served from a thread."""
+
+    def __init__(self, path: Path, body: bytes) -> None:
+        self.received = b""
+        self._body = body
+        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._server.bind(str(path))
+        self._server.listen(1)
+        self._server.settimeout(5)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        try:
+            connection, _ = self._server.accept()
+        except OSError:
+            return
+        with connection:
+            connection.settimeout(5)
+            self.received = connection.recv(65536)
+            head = (
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                b"Content-Length: %d\r\nConnection: close\r\n\r\n" % len(self._body)
+            )
+            connection.sendall(head + self._body)
+
+    def close(self) -> None:
+        self._server.close()
+        self._thread.join(timeout=5)
+
+
 class TestHttpxAdminClient:
     def test_default_and_explicit_timeouts_are_preserved(self) -> None:
         assert HttpxAdminClient("localhost:2019").timeout_seconds == 5.0
@@ -261,14 +325,20 @@ class TestHttpxAdminClient:
 
     def test_a_non_200_or_non_json_answer_is_unobservable(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(url="http://localhost:2019/config/", status_code=403)
-        with pytest.raises(UnobservableError, match="HTTP 403") as status_error:
+        with pytest.raises(UnobservableError) as forbidden:
             HttpxAdminClient("localhost:2019").running_config()
-        assert status_error.value.reason == "admin_unreachable"
+        assert (forbidden.value.reason, forbidden.value.detail) == (
+            "admin_unreachable",
+            "localhost:2019: HTTP 403",
+        )
 
         httpx_mock.add_response(url="http://localhost:2019/config/", text="<html>")
-        with pytest.raises(UnobservableError, match="not JSON") as json_error:
+        with pytest.raises(UnobservableError) as markup:
             HttpxAdminClient("localhost:2019").running_config()
-        assert json_error.value.reason == "admin_unreachable"
+        assert (markup.value.reason, markup.value.detail) == (
+            "admin_unreachable",
+            "localhost:2019: /config/ is not JSON",
+        )
 
     def test_passes_configured_timeout_to_the_request(
         self, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
@@ -286,3 +356,34 @@ class TestHttpxAdminClient:
         HttpxAdminClient("localhost:2019", 1.25).running_config()
 
         assert seen == [1.25]
+
+    def test_the_timeout_is_the_clients_on_every_leg_five_seconds_by_default(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        httpx_mock.add_response(url="http://localhost:2019/config/", json={}, is_reusable=True)
+
+        HttpxAdminClient("localhost:2019").running_config()
+        HttpxAdminClient("localhost:2019", timeout_seconds=2.5).running_config()
+
+        timeouts = [request.extensions["timeout"] for request in httpx_mock.get_requests()]
+        assert timeouts == [
+            {"connect": 5.0, "read": 5.0, "write": 5.0, "pool": 5.0},
+            {"connect": 2.5, "read": 2.5, "write": 2.5, "pool": 2.5},
+        ]
+
+    def test_a_unix_address_dials_that_socket_and_nothing_on_the_network(self) -> None:
+        """Caddy's default admin endpoint is a socket; the request has to reach it."""
+        body = b'{"apps": {"http": {"servers": {}}}}'
+        # tempfile, not tmp_path: sun_path is limited to ~100 bytes, and pytest's
+        # per-test directory under macOS's /var/folders/... is longer than that.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "admin.sock"
+            admin = _UnixSocketAdmin(path, body)
+            try:
+                config = HttpxAdminClient(f"unix/{path}").running_config()
+            finally:
+                admin.close()
+
+        assert config == json.loads(body)
+        assert admin.received.startswith(b"GET /config/ HTTP/1.1\r\n")
+        assert b"host: 127.0.0.1\r\n" in admin.received.lower()
