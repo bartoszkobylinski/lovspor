@@ -974,6 +974,23 @@ class TestScans:
         with pytest.raises(SiteBuildError):
             scan_page("/x/", self._page(body))
 
+    @pytest.mark.parametrize(
+        ("body", "attribute"),
+        [
+            ('<audio src="https://example.com/a.mp3"></audio>', "src"),
+            ('<source srcset="/a.webp 1x, https://example.com/a.webp 2x">', "srcset"),
+            ('<input imagesrcset="https://example.com/a.png 2x">', "imagesrcset"),
+            ('<div data="https://example.com/a.bin"></div>', "data"),
+            ('<video poster="https://example.com/a.jpg"></video>', "poster"),
+        ],
+    )
+    def test_each_fetching_attribute_refuses_an_external_asset(
+        self, body: str, attribute: str
+    ) -> None:
+        """Exercise the attribute scan itself, including elements that are otherwise allowed."""
+        with pytest.raises(SiteBuildError, match=rf"external {attribute}="):
+            scan_page("/x/", self._page(body))
+
     def test_an_external_stylesheet_or_import_fails(self) -> None:
         with pytest.raises(SiteBuildError, match="link"):
             scan_page(
