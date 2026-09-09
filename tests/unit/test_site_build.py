@@ -217,7 +217,9 @@ class TestGitGuard:
         root, _ = throwaway_checkout(tmp_path)
         (root / "scratch.txt").write_text("x", encoding="utf-8")
 
-        with pytest.raises(SiteBuildError, match=r"dirty work tree .*\?\? scratch\.txt"):
+        with pytest.raises(
+            SiteBuildError, match=rf"^dirty work tree at {re.escape(str(root))}: \?\? scratch\.txt$"
+        ):
             require_clean_work_tree(root)
 
     def test_a_staged_change_is_dirty(self, tmp_path: Path) -> None:
@@ -237,8 +239,28 @@ class TestGitGuard:
     def test_a_repository_without_a_commit_is_refused(self, tmp_path: Path) -> None:
         run_git(tmp_path, "init", "-q")
 
-        with pytest.raises(SiteBuildError, match="HEAD"):
+        with pytest.raises(
+            SiteBuildError, match=rf"^no commit at HEAD in {re.escape(str(tmp_path))}$"
+        ):
             require_clean_work_tree(tmp_path)
+
+    def test_a_work_tree_whose_status_cannot_be_read_is_refused(self, tmp_path: Path) -> None:
+        """Inside a work tree, yet ``git status`` fails — a corrupt index —
+        is not a clean tree; the guard does not read past the failure."""
+        root, _ = throwaway_checkout(tmp_path)
+        (root / ".git" / "index").write_bytes(b"garbage")
+
+        with pytest.raises(SiteBuildError, match=rf"^not a git work tree: {re.escape(str(root))}$"):
+            require_clean_work_tree(root)
+
+    def test_git_missing_is_a_build_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root, _ = throwaway_checkout(tmp_path)
+        monkeypatch.setenv("PATH", str(tmp_path / "no-git-here"))
+
+        with pytest.raises(SiteBuildError, match=r"^git is not available: \[Errno 2\] .*'git'$"):
+            require_clean_work_tree(root)
 
     def test_a_dirty_checkout_fails_the_build_before_it_writes(
         self, world: World, tmp_path: Path
@@ -293,7 +315,10 @@ class TestDiscoverCheckout:
         package.mkdir(parents=True)
         monkeypatch.setattr(site_build, "_PACKAGE_DIR", package)
 
-        with pytest.raises(SiteBuildError, match="not a git work tree"):
+        with pytest.raises(
+            SiteBuildError,
+            match="^not a git work tree: the imported lovspor package has no HEAD$",
+        ):
             discover_checkout()
 
     def test_a_wheel_inside_a_foreign_repository_is_refused(
@@ -351,7 +376,13 @@ class TestBuildInputs:
             world.observation(), checkout_for("f" * 40, world.descriptor.schema_sha256)
         )
 
-        with pytest.raises(SiteBuildError, match="foreign commit"):
+        with pytest.raises(
+            SiteBuildError,
+            match=(
+                f"^capability document names a foreign commit {'f' * 12}, "
+                f"the work tree is at {world.lovspor_commit[:12]}$"
+            ),
+        ):
             build_site(world.inputs(tmp_path / "site", document))
 
     def test_a_document_expecting_another_tool_surface_fails(
@@ -361,7 +392,10 @@ class TestBuildInputs:
         the one the document's checkout part names (plan F.3)."""
         document = document_for(world.observation(), checkout_for(world.lovspor_commit, "e" * 64))
 
-        with pytest.raises(SiteBuildError, match="tool surface"):
+        with pytest.raises(
+            SiteBuildError,
+            match="^capability document expects another tool surface than the checkout describes$",
+        ):
             build_site(world.inputs(tmp_path / "site", document))
 
     def test_a_manifest_without_the_fields_the_site_reads_fails(
@@ -395,6 +429,27 @@ class TestBuildInputs:
 
 
 class TestTree:
+    def test_the_tree_is_written_under_missing_parents_and_into_an_existing_empty_dir(
+        self, world: World, tmp_path: Path
+    ) -> None:
+        """``out`` may be a path whose parents do not exist yet, or an empty
+        directory the operator made; a page's directory chain is created
+        whether or not a page above it was emitted first."""
+        inputs = world.inputs(tmp_path / "site")
+        deep = tmp_path / "a" / "b" / "site"
+        pages = {"/deep/nested/": "<p>x</p>", "/": "<p>root</p>"}
+        site_build._write_tree(inputs.model_copy(update={"out": deep}), pages, {"v": "1"})
+
+        assert (deep / "deep" / "nested" / "index.html").read_bytes() == b"<p>x</p>"
+        assert (deep / "index.html").read_bytes() == b"<p>root</p>"
+        assert _files(deep) >= {"deep/nested/index.html", "index.html", *_ROOT_FILES}
+
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        site_build._write_tree(inputs.model_copy(update={"out": empty}), pages, {"v": "1"})
+
+        assert (empty / "deep" / "nested" / "index.html").read_bytes() == b"<p>x</p>"
+
     def test_report_names_the_commit_the_pages_and_the_key(
         self, world: World, built: tuple[Path, SiteBuildReport]
     ) -> None:

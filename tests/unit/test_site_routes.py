@@ -202,6 +202,21 @@ class TestEmittedPages:
     def test_order_is_deterministic(self) -> None:
         assert [p.path for p in emitted_pages()] == [p.path for p in emitted_pages()]
 
+    def test_the_registry_reaches_the_client_hook(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """``emitted_pages`` hands its registry to ``client_routes`` — the hook
+        ignores it today, so only the hand-over itself can be observed."""
+        handed: list[object] = []
+
+        def hook(registry: object | None = None) -> tuple[SiteRoute, ...]:
+            handed.append(registry)
+            return ()
+
+        monkeypatch.setattr(routes_module, "client_routes", hook)
+        registry = object()
+
+        assert emitted_pages(registry) == emitted_pages()
+        assert handed == [registry, None]
+
     def test_client_pages_are_a_projection_of_the_registry(self) -> None:
         """Zero registry entries, zero client pages — the set of pages is
         never the source for the set of clients (ADR:565-572)."""

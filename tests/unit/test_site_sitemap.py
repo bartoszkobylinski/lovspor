@@ -60,5 +60,26 @@ class TestSitemapSiteXml:
         assert b"&amp;" in payload
         assert _locs(payload) == [f"{SITE_ORIGIN}/a-b/?x=1&y=2"]
 
+    def test_bytes_are_one_url_per_line_and_nothing_between(self) -> None:
+        route = SiteRoute(
+            path="/a/",
+            template="placeholder",
+            status="planned",
+            title=Localised(nb="t", en="t"),
+            description=Localised(nb="d", en="d"),
+        )
+        pages = (
+            EmittedPage(path="/a/", lang="nb", route=route),
+            EmittedPage(path="/en/a/", lang="en", route=route),
+        )
+
+        assert sitemap_site_xml(pages) == (
+            b'<?xml version="1.0" encoding="UTF-8"?>\n'
+            b'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            b"<url><loc>https://lovspor.no/a/</loc></url>\n"
+            b"<url><loc>https://lovspor.no/en/a/</loc></url>\n"
+            b"</urlset>\n"
+        )
+
     def test_empty_page_set_is_an_empty_urlset(self) -> None:
         assert _locs(sitemap_site_xml(())) == []

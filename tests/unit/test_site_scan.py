@@ -88,3 +88,35 @@ def test_reciprocity_error_names_the_page() -> None:
 
     with pytest.raises(SiteBuildError, match="page /x/.*name the page itself once"):
         check_links({"/x/": _page("safe", head)})
+
+
+def test_a_literal_stays_marked_after_a_nested_element_closes() -> None:
+    """Closing ``<b>`` pops ``<b>`` and nothing above it: the ``data-literal``
+    span still excludes the ``2`` that follows."""
+    scan_page("/x/", _page("<p><span data-literal>v<b>x</b>2</span></p>"))
+
+
+def test_a_canonical_link_without_href_is_reported_as_the_empty_href() -> None:
+    markup = _page("safe").replace(
+        f'<link rel="canonical" href="{SITE_ORIGIN}/x/">', '<link rel="canonical">'
+    )
+
+    with pytest.raises(SiteBuildError, match=r"rel=canonical is \[''\], not exactly itself once"):
+        scan_page("/x/", markup)
+
+
+def test_fragment_protocol_relative_and_scheme_links_are_not_checked_against_the_tree() -> None:
+    check_links(
+        {
+            "/x/": _page(
+                '<a href="#top">a</a><a href="//example.com/">b</a>'
+                '<a href="https://example.com/">c</a><a href="mailto:x@example.com">d</a>'
+            )
+        }
+    )
+
+
+def test_head_text_outside_the_title_is_not_scanned() -> None:
+    """Page text is the body, the title and the description (module doc):
+    stray head text is not rendered, and is not the numeral scan's business."""
+    scan_page("/x/", _page("safe").replace("<head>", "<head>7"))

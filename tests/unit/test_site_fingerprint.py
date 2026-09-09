@@ -176,6 +176,35 @@ class TestReleaseContentId:
         )
         assert release_content_id(corpus, site) != base
 
+    def test_hashes_the_facts_file_in_canonical_form(self, tmp_path: Path) -> None:
+        """Sorted keys, no whitespace, non-ASCII kept, the id field removed —
+        and a facts file without the field hashes as it is (ADR:1012-1020)."""
+        corpus, site = _release(tmp_path)
+        facts = site / "site-facts.json"
+        facts.write_text('{"z": "æøå", "a": 1, "release_content_id": null}', encoding="utf-8")
+        canonical = json.dumps(
+            {"a": 1, "z": "æøå"}, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        lines = sorted(
+            [
+                f"corpus/lov/x/index.html\0{_sha(b'<p>x</p>')}\n",
+                f"corpus/site-manifest.json\0{_sha(b'{"documents": 1}')}\n",
+                f"site/index.html\0{_sha(b'<p>no</p>')}\n",
+                f"site/en/index.html\0{_sha(b'<p>en</p>')}\n",
+                f"site/site-facts.json\0{_sha(canonical.encode('utf-8'))}\n",
+            ]
+        )
+        expected = _sha("".join(lines).encode("utf-8"))
+
+        assert canonical == '{"a":1,"z":"æøå"}'
+        assert release_content_id(corpus, site) == expected
+
+        facts.write_text(f'{{"a":1,"release_content_id":"{"0" * 64}","z":"æøå"}}', encoding="utf-8")
+        assert release_content_id(corpus, site) == expected
+
+        facts.write_text('{"a":1,"z":"æøå"}', encoding="utf-8")
+        assert release_content_id(corpus, site) == expected
+
     def test_ignores_json_whitespace_of_the_facts_file_only(self, tmp_path: Path) -> None:
         corpus, site = _release(tmp_path)
         base = release_content_id(corpus, site)

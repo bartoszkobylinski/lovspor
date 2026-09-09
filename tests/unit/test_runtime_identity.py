@@ -301,3 +301,43 @@ class TestClosureWalk:
         installed_distributions("root")
 
         assert calls.count("shared") == 1
+
+    def test_extras_are_tracked_per_distribution(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """An extra requested for one distribution says nothing about another:
+        ``lib`` is walked first with no extra, then requested again as
+        ``lib[x]`` by ``other`` — that second request must follow ``g``."""
+        stubs = {
+            "app": _StubDistribution({"METADATA": _metadata("app", "1", "other[x]", "lib")}),
+            "other": _StubDistribution({"METADATA": _metadata("other", "1", "lib[x]")}),
+            "lib": _StubDistribution({"METADATA": _metadata("lib", "1", "g; extra == 'x'")}),
+            "g": _StubDistribution({"METADATA": _metadata("g", "1")}),
+        }
+        monkeypatch.setattr(
+            importlib.metadata, "distribution", lambda name: stubs[normalise_name(name)]
+        )
+
+        assert [item.name for item in installed_distributions("app")] == ["g", "lib", "other"]
+
+    def test_each_distribution_is_looked_up_once_per_new_extra(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A request already satisfied — same name, no extra beyond those
+        known — is not walked again: ``a_lib[x]`` is asked for by both
+        ``app`` and ``e``, and ``c`` by both walks of ``a_lib`` if the second
+        were to happen. (On a dependency cycle a re-walk would never end.)"""
+        stubs = {
+            "app": _StubDistribution({"METADATA": _metadata("app", "1", "A_lib[x]", "e")}),
+            "a-lib": _StubDistribution({"METADATA": _metadata("A_lib", "1", "c; extra == 'x'")}),
+            "e": _StubDistribution({"METADATA": _metadata("e", "1", "a_lib[x]")}),
+            "c": _StubDistribution({"METADATA": _metadata("c", "1")}),
+        }
+        lookups: list[str] = []
+
+        def distribution(name: str) -> _StubDistribution:
+            lookups.append(normalise_name(name))
+            return stubs[normalise_name(name)]
+
+        monkeypatch.setattr(importlib.metadata, "distribution", distribution)
+
+        assert [item.name for item in installed_distributions("app")] == ["a-lib", "c", "e"]
+        assert sorted(lookups) == ["a-lib", "app", "c", "e"]

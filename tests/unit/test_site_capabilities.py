@@ -19,6 +19,7 @@ from lovspor.site.capabilities import (
     Observation,
     ProcessRecord,
     TransportRecord,
+    UnauthenticatedStep,
     derive_comparisons,
     derive_hosted_state,
     derive_state,
@@ -623,6 +624,33 @@ class TestStateHash:
         )
 
         assert state_sha256(state) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def test_state_keeps_step_a_verbatim(self) -> None:
+        state = derive_state(
+            Observation.model_validate(available_observation()),
+            Checkout.model_validate(checkout_expectations()),
+        )
+
+        assert state.transport.unauthenticated == UnauthenticatedStep(
+            status_code=401, challenge="Bearer"
+        )
+
+    def test_state_sha256_keeps_non_ascii_unescaped(self) -> None:
+        """Canonical form keeps non-ASCII as is (ADR:1003-1006): a challenge
+        naming a realm in Norwegian hashes as its characters, not as escapes."""
+        observation = available_observation()
+        observation["transport"]["unauthenticated"]["challenge"] = 'Bearer realm="Bærum"'
+        state = derive_state(
+            Observation.model_validate(observation),
+            Checkout.model_validate(checkout_expectations()),
+        )
+        dumped = state.model_dump(mode="json")
+        kept = json.dumps(dumped, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        escaped = json.dumps(dumped, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+        assert "Bærum" in kept and "Bærum" not in escaped
+        assert state_sha256(state) == hashlib.sha256(kept.encode("utf-8")).hexdigest()
+        assert state_sha256(state) != hashlib.sha256(escaped.encode("utf-8")).hexdigest()
 
     def test_derive_state_is_pure(self) -> None:
         observation = Observation.model_validate(available_observation())
