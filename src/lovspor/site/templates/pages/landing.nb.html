@@ -1,0 +1,57 @@
+{#- The Norwegian landing, migrated from deploy/digitalocean/site/index.html:71-122
+    word for word (owner decision 2026-09-09) with exactly these substitutions:
+    the document count and the tool count are facts, example and identifier
+    digits are marked literals, and "Kommer snart" is the planned badge. -#}
+{% extends "_base.html" %}
+{% block main %}
+    <span class="tag">Privat beta</span>
+    <h1>Norsk lovtekst KI-en ikke dikter opp.</h1>
+    <p class="lede">lovspor gir ChatGPT, Claude og de KI-verktøyene du allerede bruker <strong>den faktiske teksten</strong> i norske lover og forskrifter — med henvisninger du kan etterprøve, ikke paragrafnumre modellen har funnet på.</p>
+
+    <div class="panel">
+      Spør en vanlig KI om <code><span data-literal>folketrygdloven § 8-18</span></code>, og den svarer med selvtillit — ofte med henvisning til paragrafer som ikke finnes. <span class="accent">I juss er et sannsynlig svar et farlig svar.</span> lovspor gjør at modellen siterer den virkelige bestemmelsen, eller sier at den ikke vet.
+    </div>
+
+    <h2>Hva det er</h2>
+    <p>En <a href="https://modelcontextprotocol.io">MCP</a>-server over et løpende oppdatert, hash-verifisert korpus av norsk rett — <strong>{{ fact("corpus.documents", kind="corpus") }} lover og sentrale forskrifter</strong> som gjelder i dag. {{ fact("code.tool_surface.tool_count", kind="code") }} verktøy: semantisk søk, etterprøving av henvisninger og sitater, oppslag i enkeltbestemmelser, endringshistorikk og diff. Hvert svar kan spores tilbake til ordlyden i kilden.</p>
+
+    <h2>Hvem det er for</h2>
+    <p><strong>Alle.</strong> Motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>, og korpuset bygges fra Lovdatas åpne data. Trenger du norsk lovtekst i et KI-verktøy, kan du kjøre hele greia selv — uten å spørre noen, og uten å betale for det.</p>
+    <p>Den driftede tjenesten er i privat beta fordi jeg drifter den alene. <span class="accent">Koden er det ikke.</span></p>
+
+    <h2>Hva det dekker — ærlig</h2>
+    <div class="cover">
+      <div>
+        <p><strong>Dekket</strong></p>
+        <ul>
+          <li class="yes">Lover</li>
+          <li class="yes">Sentrale forskrifter</li>
+          <li class="yes">Gjeldende rett, med endringshistorikk</li>
+        </ul>
+      </div>
+      <div>
+        <p><strong>Ikke dekket</strong></p>
+        <ul>
+          <li class="no">Rettspraksis</li>
+          <li class="no">Kommunale arealplaner</li>
+          <li class="no">Lukkede standarder (NS-kontrakter)</li>
+        </ul>
+      </div>
+    </div>
+    <p class="muted">Kilde: Lovdatas åpne data (<span data-literal>NLOD 2.0</span>). lovspor er et oppslagsverktøy som viser lovteksten — det er ikke juridisk rådgivning.</p>
+
+    <h2>Slik bruker du det</h2>
+    <p>Inne i KI-verktøyet du allerede jobber i — ingen ny app å lære.</p>
+    <ul>
+      <li><strong>Som connector i ChatGPT og Claude</strong> — ett klikk, ingenting å konfigurere. <em>{{ badge("planned") }} — slik de fleste vil bruke det.</em></li>
+      <li><strong>I Claude Code, Codex eller Cursor</strong> — virker i dag; legg inn tokenet på én linje:</li>
+    </ul>
+    <pre>claude mcp add --transport http lovverk \
+  https://lovspor.no/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN"</pre>
+
+    <h2>Få tilgang</h2>
+    <p>Privat beta. Send meg en e-post for et token.</p>
+    <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20tilgang">Be om et beta-token →</a></p>
+    <p class="muted">Eller kjør det selv — motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+{% endblock %}

@@ -50,6 +50,11 @@ dependencies = [
     # anyio.to_thread offloads the blocking JWKS/JWT verification off the event
     # loop. Already a transitive mcp dep; declared because we import it directly.
     "anyio>=4.0.0",
+    # Renders the public site and the shared page chrome (ADR-0014 Decision 1).
+    # Core, not an extra: `uv sync --frozen --no-dev` on the documented host
+    # must be able to build the site with one sync contract, and the resolved
+    # version enters the toolchain fingerprint as a determinism input.
+    "jinja2>=3.1.6",
 ]
 
 [project.optional-dependencies]

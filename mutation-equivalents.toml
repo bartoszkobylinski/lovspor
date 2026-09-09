@@ -1428,3 +1428,451 @@ UTF-8 codec and encode identical bytes. The digest of identical bytes is
 identical. This is a property of the language's codec registry, not of any
 dependency.
 """
+
+[[equivalent]]
+file = "src/lovspor/runtime_identity.py"
+symbol = "tree_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return _sha256("".join(sorted(lines)).encode("utf-8"))
++    return _sha256("".join(sorted(lines)).encode("UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive in Python: `str.encode` resolves the name
+through the codec registry (`codecs.lookup`), which normalises it before the
+lookup, so "utf-8" and "UTF-8" select the same UTF-8 codec and encode identical
+bytes. The digest of identical bytes is identical. A property of the language's
+codec registry, not of any dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/runtime_identity.py"
+symbol = "canonical_environment_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return _sha256("".join(lines).encode("utf-8"))
++    return _sha256("".join(lines).encode("UTF-8"))
+"""
+justification = """
+Same codec-registry argument as `tree_sha256` above: `codecs.lookup` normalises
+the codec name, so both spellings reach the same encoder and the same bytes,
+hence the same SHA-256.
+"""
+
+[[equivalent]]
+file = "src/lovspor/runtime_identity.py"
+symbol = "installed_distributions"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-def installed_distributions(root: str = "lovspor") -> tuple[Distribution, ...]:
++def installed_distributions(root: str = "LOVSPOR") -> tuple[Distribution, ...]:
+"""
+justification = """
+`root` is read at exactly two places, both through `normalise_name(root)`:
+the queue seed and the final `found.pop`. `normalise_name` is
+`re.sub(r"[-_.]+", "-", name).lower()`, and `str.lower` maps "LOVSPOR" and
+"lovspor" to the same string, so every operation downstream sees "lovspor"
+under either default. Pure Python string semantics; no dependency involved.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "_git"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` reads `check` only for its truth value (`if check and
+retcode:`), and `None` is falsy exactly as `False` is, so neither raises on a
+non-zero exit; the caller reads `returncode` itself either way. Same argument
+as the registered `llhb/pair_manifest._git` entry; Python's own `None`
+semantics, not a dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "_git"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` leaves the call byte-for-byte equivalent in behaviour.
+It is spelled out only because ruff PLW1510 demands an explicit `check`. Same
+argument as the registered `llhb/pair_manifest._git` entry.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "require_clean_work_tree"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    head = _git(root, "rev-parse", "--verify", "HEAD^{commit}")
++    head = _git(root, "rev-parse", "HEAD^{commit}")
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_git_rev_parse_fails_on_an_unborn_head_without_verify"
+justification = """
+With exactly one fixed revision argument, `git rev-parse` exits non-zero when
+the revision does not resolve whether or not `--verify` is given (without the
+flag it additionally echoes the argument to stdout, which `_git` discards
+because it returns None on any non-zero exit), and when HEAD resolves both
+spellings print the same full sha. `--verify` only adds the single-argument /
+valid-object check that one literal argument already satisfies. So `_git`
+returns the same value under both, for an unborn HEAD and a committed one. This
+argues from git's behaviour, an external tool, so the assumption test runs both
+spellings in an unborn and in a committed repository.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "_write_tree"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        target = out / path.lstrip("/") / "index.html"
++        target = out / path.lstrip("XX/XX") / "index.html"
+"""
+assumption_test = "tests/unit/test_site_routes.py::TestSiteRoute::test_rejects_a_path_outside_the_directory_shape"
+justification = """
+The argument to `str.lstrip` is a CHARACTER SET, so "XX/XX" is the set {X, /}.
+The keys of `pages` are emitted page paths: a `SiteRoute.path`, which the
+`RoutePath` pattern `^/(?:[a-z0-9-]+/)*$` restricts to "/" and lower-case ASCII
+segments, or that path behind the "/en" prefix. No such string can carry an
+upper-case X anywhere, let alone at its front, so the X in the set never
+matches and the set strips exactly what {/} strips. Same argument as the
+registered `observatory/registry.normalised_domain` entry. The path shape is a
+pydantic constraint, so the route-shape test that rejects "/Status/" is named
+as the assumption test.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/build.py"
+symbol = "_write_tree"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        target.write_bytes(markup.encode("utf-8"))
++        target.write_bytes(markup.encode("UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" select the same
+codec and write identical bytes. Python's codec registry, not a dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
++        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=None
+"""
+justification = """
+`json.dumps` reads `ensure_ascii` only for its truth value, and `None` is
+falsy exactly as `False` is, so both select the encoder that keeps non-ASCII as
+is and produce byte-identical output for every input. Same argument as the
+registered `observatory/model.record_to_json_line` entry; Python's own `None`
+semantics, not a dependency. (`ensure_ascii` removed or `True` is NOT
+equivalent and is killed by a non-ASCII challenge.)
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
++        state.model_dump(mode=None), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+pydantic selects the JSON serialiser only for the exact string "json"; None
+and any other string take the Python path. `State` holds str, int, bool, None,
+Literal strings, nested models and one `tuple[CredentialMode, ...]`; the Python
+path differs from the JSON path only in leaving that tuple a tuple, which
+`json.dumps` renders as the same list. So the dumped dict serialises to the
+same canonical bytes and the same SHA-256 under either mode. Verified
+byte-identical for the available and unobserved states (pydantic 2.13.3,
+pydantic-core 2.46.3); the assumption test re-checks every mode spelling
+against the JSON-mode reference, so a field type the Python path renders
+differently turns this waiver into a red test.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
++        state.model_dump(mode="XXjsonXX"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: any mode other than the exact
+string "json" takes pydantic's Python path, whose output for `State` serialises
+to the same canonical bytes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
++        state.model_dump(mode="JSON"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: pydantic matches the mode string
+case-sensitively, so "JSON" is the Python path, whose output for `State`
+serialises to the same canonical bytes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "state_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++    return hashlib.sha256(canonical.encode("UTF-8")).hexdigest()
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" encode identical
+bytes and hash to the same digest. Python's codec registry, not a dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/facts.py"
+symbol = "_wording"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        raise SiteBuildError(f"fact {source.id!r} has no value")
++        raise SiteBuildError(None)
+"""
+assumption_test = "tests/unit/test_site_facts.py::TestFactSource::test_a_source_has_a_value_or_an_unobserved_record_never_both_or_neither"
+justification = """
+The raise is unreachable. `FactSource._one_reading` refuses a source whose
+`value` and `unobserved` are both None (and both set), so every source that
+exists has exactly one of them; `_wording` returns on `unobserved` first, so at
+the `value is None` check `unobserved` is None and therefore `value` is not.
+Both spellings of the unreachable raise compute the same on every reachable
+input. The invariant is a model validator, so the test that pins it is named.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "toolchain_fingerprint"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    jinja2_version = importlib.metadata.version("jinja2")
++    jinja2_version = importlib.metadata.version("JINJA2")
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_importlib_metadata_lookup_is_case_insensitive"
+justification = """
+`importlib.metadata` normalises the requested distribution name (PEP 503:
+case-folded, runs of `-`, `_` and `.` as one `-`) before it searches, so
+`version("JINJA2")`, `version("Jinja2")` and `version("jinja2")` find the same
+installed jinja2 distribution and return the same version string, which is
+then hashed and recorded identically. The lookup is a standard-library
+behaviour and the distribution is a dependency, so the assumption test pins
+that all three spellings resolve to one version.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "toolchain_fingerprint"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        fingerprint=_sha256(canonical.encode("utf-8")),
++        fingerprint=_sha256(canonical.encode("UTF-8")),
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" encode identical
+bytes and the fingerprint is the same digest. Python's codec registry, not a
+dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "_facts_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    canonical = json.dumps(facts, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
++    canonical = json.dumps(facts, sort_keys=True, separators=(",", ":"), ensure_ascii=None)
+"""
+justification = """
+`json.dumps` reads `ensure_ascii` only for its truth value, and `None` is
+falsy exactly as `False` is, so both select the encoder that keeps non-ASCII as
+is and produce byte-identical canonical text. Same argument as the registered
+`observatory/model.record_to_json_line` entry; Python's own `None` semantics.
+(`ensure_ascii` removed or `True` is NOT equivalent and is killed by a facts
+file carrying "æøå".)
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "_facts_sha256"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return _sha256(canonical.encode("utf-8"))
++    return _sha256(canonical.encode("UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" encode identical
+bytes and hash to the same digest. Python's codec registry, not a dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "release_content_id"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return _sha256("".join(lines).encode("utf-8"))
++    return _sha256("".join(lines).encode("UTF-8"))
+"""
+justification = """
+Same codec-registry argument: `codecs.lookup` normalises the codec name, so
+both spellings reach the same UTF-8 encoder, the same bytes and the same
+SHA-256 over the listing.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fingerprint.py"
+symbol = "write_release_content_id"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    atomic_write_text(facts_path, companion_json_bytes(facts).decode("utf-8"))
++    atomic_write_text(facts_path, companion_json_bytes(facts).decode("UTF-8"))
+"""
+justification = """
+`bytes.decode` resolves the codec name through the same case-insensitive
+registry as `str.encode` (`codecs.lookup("UTF-8")` and `codecs.lookup("utf-8")`
+return the same CodecInfo), so both spellings decode the same bytes to the same
+text and the same file is written. Python's codec registry, not a dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fixture.py"
+symbol = "document_bytes"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return companion_json_bytes(document.model_dump(mode="json"))
++    return companion_json_bytes(document.model_dump(mode=None))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `capabilities.state_sha256` mode entries: pydantic takes
+the JSON serialiser only for the exact string "json", and `CapabilityDocument`
+holds str, int, bool, None, Literal strings, nested models and
+`tuple[CredentialMode, ...]` — the Python path leaves only that tuple
+un-listed, and `companion_json_bytes` (`json.dumps`) renders a tuple as the
+same list. Verified byte-identical for `capability_document()`; the shared
+assumption test includes the document.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fixture.py"
+symbol = "document_bytes"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return companion_json_bytes(document.model_dump(mode="json"))
++    return companion_json_bytes(document.model_dump(mode="XXjsonXX"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: any mode other than the exact
+string "json" is pydantic's Python path, whose output for the document
+serialises to the same bytes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/fixture.py"
+symbol = "document_bytes"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    return companion_json_bytes(document.model_dump(mode="json"))
++    return companion_json_bytes(document.model_dump(mode="JSON"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: pydantic matches the mode string
+case-sensitively, so "JSON" is the Python path, whose output for the document
+serialises to the same bytes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/scan.py"
+symbol = "_PageScanner.__init__ / handle_endtag"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        self._in_body = False
++        self._in_body = None
+"""
+justification = """
+`_in_body` is assigned False at construction and at `</body>` (this one
+mutation text matches both sites) and True at `<body>`, and it is read at
+exactly one place, `if (self._in_body or self._in_title()) and ...`, i.e. only
+for its truth value. `None` is falsy exactly as `False` is, so every read sees
+the same branch. Pure Python truth semantics; no dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/scan.py"
+symbol = "_PageScanner._check_element"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-        if _STYLE_IMPORT.search(attributes.get("style") or ""):
++        if _STYLE_IMPORT.search(attributes.get("style") or "XXXX"):
+"""
+justification = """
+The fallback is reached only when the element has no `style` attribute (or an
+empty one), and its only use is as the subject of `_STYLE_IMPORT.search`, whose
+pattern is `@import|url\\(\\s*['"]?(?:https?:)?//`. Neither "" nor "XXXX"
+contains "@import" or "url(", so the search returns None for both and no
+finding is appended; the string is not stored or reported anywhere. Pure
+Python: `x or y` yields `y` only when `x` is falsy, and a regex with no match
+on either literal.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/sources.py"
+symbol = "_served_absence"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    reason = record.reason or step.reason or step.outcome or "not_reported"
++    reason = record.reason or step.reason or step.outcome or "XXnot_reportedXX"
+"""
+assumption_test = "tests/unit/test_site_capabilities.py::TestSchema::test_an_authenticated_step_names_the_offending_fields"
+justification = """
+The fourth operand is never evaluated. A `TransportRecord` that is unobserved
+carries a non-empty `reason` (`_check_reason`, pinned by the transport case of
+the record-validator tests); one that is observed holds an `AuthenticatedStep`
+that is either unobserved with a non-empty `reason` (`_check_reason` on the
+step) or observed with a non-empty `outcome` (`_require_present`). All three
+are Literal strings, so one of the first three operands is truthy for every
+document the schema accepts, and `or` never reaches the literal. The validators
+are pydantic model validators, so the test that pins the step's two cases is
+named.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/sources.py"
+symbol = "_served_absence"
+registered = "2026-09-09, PR #263, from run 34336249675"
+mutation = """
+-    reason = record.reason or step.reason or step.outcome or "not_reported"
++    reason = record.reason or step.reason or step.outcome or "NOT_REPORTED"
+"""
+assumption_test = "tests/unit/test_site_capabilities.py::TestSchema::test_an_authenticated_step_names_the_offending_fields"
+justification = """
+Same argument as the entry above: the fourth operand of the `or` chain is
+never evaluated for a document the schema accepts, so its spelling cannot
+reach any output.
+"""

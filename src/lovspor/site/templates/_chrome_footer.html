@@ -1,0 +1,15 @@
+{#- The shared footer: the licence, attribution and not-legal-advice lines
+    of the landing, verbatim per language. The licence identifier is a
+    marked literal, not a fact; the chrome adds no external link
+    (ADR-0014 Decision 5). -#}
+<footer>
+{% if lang == "en" %}
+  Contains data under <span data-literal>NLOD 2.0</span> from Lovdata. Not affiliated with or endorsed by Lovdata.
+  lovspor provides the text of law for reference; it does not provide legal advice. Built by Bartosz Kobyliński.
+  <br><a href="/observatory/">About our crawler</a> — for site administrators who found <code>lovspor-observatory</code> in their logs.
+{% else %}
+  Inneholder data under <span data-literal>NLOD 2.0</span> fra Lovdata. Ikke tilknyttet eller godkjent av Lovdata.
+  lovspor viser lovtekst til oppslag; det er ikke juridisk rådgivning. Bygget av Bartosz Kobyliński.
+  <br><a href="/observatory/">Om roboten vår</a> — for nettstedsansvarlige som fant <code>lovspor-observatory</code> i loggene sine.
+{% endif %}
+</footer>

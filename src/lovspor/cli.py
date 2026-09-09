@@ -29,6 +29,9 @@ from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
+from lovspor.site.build import SiteInputs, build_site, discover_checkout
+from lovspor.site.errors import SiteBuildError
+from lovspor.site.fixture import FixtureCase, document_bytes, synthetic_document
 from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
@@ -184,6 +187,86 @@ def publish_site(
         typer.echo(f"publish refused: {error}", err=True)
         raise typer.Exit(code=1) from error
     typer.echo(f"site built from corpus commit {resolved[:12]} into {out}")
+
+
+@app.command(name="build-site")
+def build_site_command(
+    corpus: Annotated[
+        Path,
+        typer.Option(
+            help="Path to a lovverk checkout; the tool-surface descriptor is read from it."
+        ),
+    ],
+    corpus_manifest: Annotated[
+        Path,
+        typer.Option(help="The corpus release's site-manifest.json (written by publish-site)."),
+    ],
+    capabilities: Annotated[
+        Path,
+        typer.Option(help="deployment-capabilities.json captured for this checkout."),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(help="Directory to write the site tree into; must be empty."),
+    ],
+) -> None:
+    """Build the ADR-0014 site tree from this checkout, a corpus release and a capability document.
+
+    The checkout is the clean git work tree this command runs from — it is
+    discovered, never named, so the recorded ``lovspor_commit`` is always the
+    revision the pages were built from. Exit 1 names the first refusal.
+    """
+    try:
+        inputs = SiteInputs(
+            checkout=discover_checkout(),
+            corpus=corpus,
+            corpus_manifest=corpus_manifest,
+            capabilities=capabilities,
+            out=out,
+        )
+        report = build_site(inputs)
+    except SiteBuildError as error:
+        typer.echo(f"site build refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        f"site built from lovspor commit {report.lovspor_commit[:12]}: "
+        f"{len(report.pages)} pages into {out} (hosted state {report.hosted_state})"
+    )
+
+
+@app.command(name="site-fixture")
+def site_fixture(
+    corpus: Annotated[
+        Path,
+        typer.Option(
+            help="Path to a lovverk checkout; the tool-surface descriptor is read from it."
+        ),
+    ],
+    case: Annotated[
+        FixtureCase,
+        typer.Option(help="The observation shape to synthesise."),
+    ],
+    out: Annotated[
+        Path,
+        typer.Option(help="File to write the capability document to."),
+    ],
+) -> None:
+    """Write a synthetic deployment-capabilities.json for this checkout (CI and tests).
+
+    The checkout part is real — HEAD of the clean work tree this command runs
+    from, its runtime identity and tool-surface descriptor; the observation is
+    the named fixture shape with a fixed observed_at. Exit 1 names the refusal.
+    """
+    try:
+        document = synthetic_document(discover_checkout(), corpus, case)
+    except SiteBuildError as error:
+        typer.echo(f"site fixture refused: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    out.write_bytes(document_bytes(document))
+    typer.echo(
+        f"capability fixture {case.value} for lovspor commit "
+        f"{document.state.checkout.lovspor_commit[:12]} written to {out}"
+    )
 
 
 @app.command(name="publish-check")
