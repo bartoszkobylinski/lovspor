@@ -379,6 +379,33 @@ class TestTransportAuthenticated:
         assert step.outcome == "ok"
         assert step.served_tool_count == 2
 
+    def test_the_answer_may_follow_other_events_on_the_stream_the_sdk_server_writes(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """One POST's stream is CRLF-separated (sse-starlette's default, which the
+        SDK server keeps) and may carry a priming event, a keep-alive, and a
+        notification before the response: only ``message`` events are read,
+        empty data is no payload, and a payload spans every ``data:`` line."""
+        ready(httpx_mock)
+        notification = {"jsonrpc": "2.0", "method": "notifications/message", "params": {}}
+        stream = "".join(
+            [
+                "id: 7\r\nretry: 1000\r\ndata: \r\n\r\n",
+                "event: ping\r\ndata: keepalive\r\n\r\n",
+                f"event: message\r\ndata: {json.dumps(notification)}\r\n\r\n",
+                'event:message\r\ndata: {"jsonrpc": "2.0", "id": 2,\r\n',
+                f'data: "result": {json.dumps(tools_listing(("a", "b", "c")))}}}\r\n\r\n',
+            ]
+        )
+        fake = FakeMcp()
+        fake.list_answer = lambda _request: httpx.Response(
+            200, headers={"Content-Type": "text/event-stream"}, content=stream.encode()
+        )
+        step = run(httpx_mock, fake=fake).observation.transport.authenticated
+
+        assert (step.status, step.outcome) == ("observed", "ok")
+        assert step.served_tool_count == 3
+
     def test_the_served_surface_hashes_as_the_descriptor_hashes_the_same_server(
         self, httpx_mock: HTTPXMock, corpus: Path
     ) -> None:

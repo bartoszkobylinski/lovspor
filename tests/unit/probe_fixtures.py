@@ -54,7 +54,8 @@ def attestation(*, ready: bool = True, **overrides: Any) -> dict[str, Any]:
 
 
 def sse(message: dict[str, Any]) -> bytes:
-    return f"event: message\ndata: {json.dumps(message)}\n\n".encode()
+    """One ``message`` event, CRLF-separated as the SDK server writes it."""
+    return f"event: message\r\ndata: {json.dumps(message)}\r\n\r\n".encode()
 
 
 def tools_listing(names: tuple[str, ...] = ("a", "b")) -> dict[str, Any]:

@@ -52,6 +52,7 @@ client is what a probe with a timeout budget can reason about.
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -104,6 +105,9 @@ _OK, _ACCEPTED, _UNAUTHORIZED, _FORBIDDEN, _NOT_FOUND, _UNAVAILABLE = 200, 202, 
 _ACCEPT = "application/json, text/event-stream"
 _JSON = "application/json"
 _SSE = "text/event-stream"
+# A stream's lines end in CRLF, LF or CR; the SDK server writes CRLF
+# (sse-starlette's default), so an event boundary is not two bare LFs.
+_LINE_ENDING = re.compile(r"\r\n?")
 
 NoAnswer = Literal["network", "timeout"]
 
@@ -248,7 +252,7 @@ def _step_failed(outcome: str) -> AuthenticatedStep:
 def _sse_data(body: str) -> list[str]:
     """The ``data`` of every ``message`` event on one event stream."""
     payloads: list[str] = []
-    for event in body.split("\n\n"):
+    for event in _LINE_ENDING.sub("\n", body).split("\n\n"):
         lines = [line for line in event.splitlines() if line]
         kind = next((line[6:].strip() for line in lines if line.startswith("event:")), "message")
         data = "\n".join(line[5:].lstrip() for line in lines if line.startswith("data:"))
