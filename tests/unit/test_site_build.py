@@ -1040,6 +1040,20 @@ class TestScans:
         with pytest.raises(SiteBuildError, match=r"external (?:xlink:)?href="):
             scan_page("/x/", self._page(body))
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.parametrize(
+        "body",
+        [
+            '<input imagesrcset="data:image/png;base64,eA== 1x">',
+            '<svg><use xlink:href="javascript:void(0)"></use></svg>',
+        ],
+    )
+    def test_every_fetching_attribute_refuses_a_forbidden_scheme(self, body: str) -> None:
+        """The no-script rule covers newer image and SVG fetching attributes too."""
+        with pytest.raises(SiteBuildError, match=r"(?:data|javascript):"):
+            scan_page("/x/", self._page(body))
+
     def test_a_page_has_exactly_one_meta_description(self) -> None:
         doubled = self._page("<p>ok</p>").replace(
             '<meta name="description" content="d">',
