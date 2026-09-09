@@ -9,6 +9,7 @@ the throwaway checkout as the site CLI tests do.
 
 import re
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
 
@@ -281,11 +282,46 @@ class TestBuild:
         content_id = result.stdout.strip()
         assert re.fullmatch(r"[0-9a-f]{64}", content_id)
         assert (releases / content_id / FRAGMENT_NAME).is_file()
-        assert "built and finalized" in result.stderr
+        assert f"release {content_id[:12]}: built and finalized" in result.stderr.splitlines()
         assert fake.methods()[-1] == "tools/list"
         assert TOKEN not in result.output
         document = (releases / content_id / "site" / "deployment-capabilities.json").read_text()
         assert '"observer": "release-probe"' in document
+
+    def test_the_same_release_is_reused_and_the_live_one_is_already_live(
+        self,
+        world: World,
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The wrapper reads the id from stdout either way; stderr says which case it was.
+
+        The command's clock is the one input the id depends on that a second
+        run would not repeat, so it is held still."""
+        monkeypatch.setattr(commands, "_clock", lambda: datetime(2026, 1, 1, tzinfo=UTC))
+        _fake_host(httpx_mock)
+        releases = tmp_path / "releases"
+        first = runner.invoke(app, _build_args(world, releases, "none", None))
+        assert first.exit_code == 0, first.output
+        content_id = first.stdout.strip()
+
+        ready(httpx_mock)
+        absent_discovery(httpx_mock)
+        again = runner.invoke(app, _build_args(world, releases, "none", None))
+        write_marker(releases, Marker(active=content_id, previous=None))
+        ready(httpx_mock)
+        absent_discovery(httpx_mock)
+        live = runner.invoke(app, _build_args(world, releases, content_id, None))
+
+        assert again.exit_code == 0, again.output
+        assert again.stdout == f"{content_id}\n"
+        assert f"release {content_id[:12]}: reused, already on disk" in again.stderr.splitlines()
+        assert live.exit_code == 0, live.output
+        assert live.stdout == f"{content_id}\n"
+        assert f"release {content_id[:12]}: already live" in live.stderr.splitlines()
+        assert {path.name for path in releases.iterdir()} == {"ACTIVE", content_id}
 
     def test_a_missing_credential_is_recorded_not_fatal(
         self, world: World, checkout: Path, tmp_path: Path, httpx_mock: HTTPXMock
@@ -311,13 +347,17 @@ class TestBuild:
         result = runner.invoke(app, _build_args(world, releases, "none", None))
 
         assert result.exit_code == 1
-        assert "the marker names aaaaaaaaaaaa" in result.output
+        assert (
+            f"release refused: --live names none, the marker names {'a' * 64}; "
+            "establish the live release with `lovspor release live` first"
+        ) in result.output.splitlines()
         assert not any(releases.glob(".build-*"))
 
     def test_live_must_be_an_id_or_none(self, world: World, tmp_path: Path) -> None:
         result = runner.invoke(app, _build_args(world, tmp_path, "latest", None))
 
         assert result.exit_code == 2
+        assert "--live must be a release_content_id or 'none'" in result.output
 
 
 class TestPublishCheck:
