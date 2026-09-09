@@ -90,8 +90,25 @@ class TestAPassingEnvelope:
         assert structure.manifest.corpus_commit == _json(envelope / FACTS)["corpus_commit"]
         assert structure.document.state.hosted_state == "available"
 
+    def test_the_pages_are_read_as_utf_8_whatever_the_process_locale(
+        self, built: Path, c_locale: None
+    ) -> None:
+        """Every page carries the chrome's non-ASCII text; a root unit without LANG scans it."""
+        assert check_envelope(built).release_content_id == built.name
+
 
 class TestTwoTrees:
+    def test_an_empty_directory_is_missing_both_trees_and_nothing_else_yet(
+        self, tmp_path: Path
+    ) -> None:
+        """Step 2 runs before the id files exist, so only the trees are named."""
+        empty = tmp_path / f"{BUILD_PREFIX}empty"
+        empty.mkdir()
+
+        with pytest.raises(IncompleteEnvelopeError) as caught:
+            check_envelope(empty)
+        assert str(caught.value) == f"{BUILD_PREFIX}empty: missing corpus/, site/"
+
     def test_a_corpus_without_a_site_is_refused(self, envelope: Path) -> None:
         shutil.rmtree(envelope / "site")
 
@@ -114,6 +131,17 @@ class TestTwoTrees:
         with pytest.raises(IncompleteEnvelopeError, match=f"missing {name}"):
             check_envelope(copy)
 
+    def test_an_id_named_directory_without_both_id_files_names_both(
+        self, copies: Callable[[str], Path]
+    ) -> None:
+        copy = copies("3" * 64)
+        (copy / RECORD_NAME).unlink()
+        (copy / FRAGMENT_NAME).unlink()
+
+        with pytest.raises(IncompleteEnvelopeError) as caught:
+            check_envelope(copy)
+        assert str(caught.value) == f"{'3' * 64}: missing {RECORD_NAME}, {FRAGMENT_NAME}"
+
     @pytest.mark.parametrize("name", ["site-facts.json", "sitemap-site.xml"])
     def test_a_site_root_file_is_required(self, envelope: Path, name: str) -> None:
         (envelope / "site" / name).unlink()
@@ -121,16 +149,51 @@ class TestTwoTrees:
         with pytest.raises(EnvelopeError, match=f"site/{name} is missing"):
             check_envelope(envelope)
 
+    def test_a_missing_manifest_is_named_as_unreadable(self, envelope: Path) -> None:
+        (envelope / MANIFEST).unlink()
+
+        with pytest.raises(EnvelopeError) as caught:
+            check_envelope(envelope)
+        assert str(caught.value).startswith(f"{MANIFEST} is unreadable: ")
+        assert str(envelope / MANIFEST) in str(caught.value)
+
+    def test_a_manifest_that_is_not_a_release_manifest_is_refused(self, envelope: Path) -> None:
+        (envelope / MANIFEST).write_text("{}", encoding="utf-8")
+
+        with pytest.raises(EnvelopeError) as caught:
+            check_envelope(envelope)
+        assert str(caught.value) == f"{MANIFEST} is not a release manifest"
+
+    def test_a_facts_file_that_is_not_json_is_refused(self, envelope: Path) -> None:
+        (envelope / FACTS).write_text("{", encoding="utf-8")
+
+        with pytest.raises(EnvelopeError) as caught:
+            check_envelope(envelope)
+        assert str(caught.value).startswith(f"{FACTS} is not JSON: ")
+        assert len(str(caught.value)) > len(f"{FACTS} is not JSON: ")
+
+    def test_a_facts_file_without_the_corpus_commit_is_refused(self, envelope: Path) -> None:
+        facts = _json(envelope / FACTS)
+        del facts["corpus_commit"]
+        _rewrite(envelope / FACTS, facts)
+
+        with pytest.raises(EnvelopeError) as caught:
+            check_envelope(envelope)
+        assert str(caught.value) == f"{FACTS} carries no corpus_commit"
+
 
 class TestCrossTreeAssertions:
     def test_the_site_must_describe_the_corpus_beside_it(self, envelope: Path) -> None:
         facts = _json(envelope / FACTS)
         facts["corpus_commit"] = "f" * 40
         _rewrite(envelope / FACTS, facts)
+        corpus_commit = _json(envelope / MANIFEST)["corpus_commit"]
 
-        with pytest.raises(EnvelopeError, match="describes corpus ffffffffffff") as caught:
+        with pytest.raises(EnvelopeError) as caught:
             check_envelope(envelope)
-        assert "corpus/ is" in str(caught.value)
+        assert str(caught.value) == (
+            f"{FACTS} describes corpus {'f' * 12}, corpus/ is {corpus_commit[:12]}"
+        )
 
     def test_the_manifest_hash_must_be_of_the_manifest_beside_it(self, envelope: Path) -> None:
         manifest = envelope / MANIFEST
@@ -154,21 +217,36 @@ class TestCrossTreeAssertions:
         with pytest.raises(EnvelopeError, match="deployment-capabilities.json"):
             check_envelope(envelope)
 
-    def test_the_key_must_carry_the_documents_state(self, envelope: Path) -> None:
+    @pytest.mark.parametrize(
+        ("component", "value", "message"),
+        [
+            (
+                "state_sha256",
+                "0" * 64,
+                "release_key.state_sha256 is not the capability document's state",
+            ),
+            (
+                "lovspor_commit",
+                "0" * 40,
+                "release_key.lovspor_commit is not the capability document's checkout",
+            ),
+            (
+                "corpus_commit",
+                "0" * 40,
+                "release_key.corpus_commit is not the corpus tree's commit",
+            ),
+        ],
+    )
+    def test_the_key_must_carry_the_documents_state_checkout_and_the_corpus_commit(
+        self, envelope: Path, component: str, value: str, message: str
+    ) -> None:
         facts = _json(envelope / FACTS)
-        facts["release_key"]["state_sha256"] = "0" * 64
+        facts["release_key"][component] = value
         _rewrite(envelope / FACTS, facts)
 
-        with pytest.raises(EnvelopeError, match="state_sha256"):
+        with pytest.raises(EnvelopeError) as caught:
             check_envelope(envelope)
-
-    def test_the_key_must_carry_the_documents_checkout(self, envelope: Path) -> None:
-        facts = _json(envelope / FACTS)
-        facts["release_key"]["lovspor_commit"] = "0" * 40
-        _rewrite(envelope / FACTS, facts)
-
-        with pytest.raises(EnvelopeError, match="release_key.lovspor_commit"):
-            check_envelope(envelope)
+        assert str(caught.value) == message
 
     def test_a_facts_file_without_the_key_is_refused(self, envelope: Path) -> None:
         facts = _json(envelope / FACTS)
@@ -250,8 +328,9 @@ class TestTheRecord:
         record["release_key"]["toolchain_fingerprint"] = "0" * 64
         _rewrite(envelope / RECORD_NAME, record)
 
-        with pytest.raises(EnvelopeError, match="release_key differs"):
+        with pytest.raises(EnvelopeError) as caught:
             check_envelope(envelope)
+        assert str(caught.value) == "release.json release_key differs from site-facts.json"
 
     @pytest.mark.parametrize("field", ["capability_sha256", "site_manifest_sha256"])
     def test_must_agree_with_the_facts_on_the_input_hashes(
@@ -261,24 +340,27 @@ class TestTheRecord:
         record[field] = "0" * 64
         _rewrite(envelope / RECORD_NAME, record)
 
-        with pytest.raises(EnvelopeError, match=f"{field} differs"):
+        with pytest.raises(EnvelopeError) as caught:
             check_envelope(envelope)
+        assert str(caught.value) == f"release.json {field} differs from site-facts.json"
 
     def test_must_summarise_the_corpus_beside_it(self, envelope: Path) -> None:
         record = _json(envelope / RECORD_NAME)
         record["corpus"]["corpus_commit"] = "0" * 40
         _rewrite(envelope / RECORD_NAME, record)
 
-        with pytest.raises(EnvelopeError, match="corpus summary names another"):
+        with pytest.raises(EnvelopeError) as caught:
             check_envelope(envelope)
+        assert str(caught.value) == "release.json corpus summary names another corpus commit"
 
     def test_must_carry_the_documents_instant(self, envelope: Path) -> None:
         record = _json(envelope / RECORD_NAME)
         record["observed_at"] = "2030-01-01T00:00:00Z"
         _rewrite(envelope / RECORD_NAME, record)
 
-        with pytest.raises(EnvelopeError, match="observed_at"):
+        with pytest.raises(EnvelopeError) as caught:
             check_envelope(envelope)
+        assert str(caught.value) == "release.json observed_at is not the capability document's"
 
 
 class TestTheTrees:
