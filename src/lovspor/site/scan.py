@@ -59,6 +59,17 @@ _FORBIDDEN_TAGS = frozenset({"script", "iframe", "object", "embed"})
 _REFERENCE_ATTRIBUTES = ("href", "src", "srcset", "action", "formaction", "data", "poster")
 _ALLOWED_LINK_RELS = frozenset({"canonical", "alternate"})
 _EXTERNAL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:)?//", re.IGNORECASE)
+# Every attribute through which an element can fetch a resource. ``srcset`` and
+# ``imagesrcset`` carry a comma-separated candidate list, each ``url [descriptor]``.
+_ASSET_ATTRIBUTES = ("src", "srcset", "imagesrcset", "data", "poster")
+
+
+def _asset_urls(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [candidate.strip().split()[0] for candidate in value.split(",") if candidate.strip()]
+
+
 _FORBIDDEN_SCHEME = re.compile(r"^\s*(?:javascript|data):", re.IGNORECASE)
 _DIGIT = re.compile(r"\d")
 _STYLE_IMPORT = re.compile(r"@import|url\(\s*['\"]?(?:https?:)?//", re.IGNORECASE)
@@ -135,8 +146,10 @@ class _PageScanner(HTMLParser):
                 self.findings.append(f"{name} handler on <{tag}>")
             if name in _REFERENCE_ATTRIBUTES and value and _FORBIDDEN_SCHEME.match(value):
                 self.findings.append(f"{name}={value!r} on <{tag}>")
-        if tag == "img" and _EXTERNAL.match(attributes.get("src") or ""):
-            self.findings.append(f"external <img> {attributes.get('src')!r}")
+        for name in _ASSET_ATTRIBUTES:
+            for candidate in _asset_urls(attributes.get(name)):
+                if _EXTERNAL.match(candidate):
+                    self.findings.append(f"external {name}={candidate!r} on <{tag}>")
 
     def _link(self, attributes: Attributes) -> None:
         rel, href = attributes.get("rel") or "", attributes.get("href") or ""

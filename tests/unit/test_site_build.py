@@ -963,6 +963,10 @@ class TestScans:
             '<a href="javascript:void(0)">a</a>',
             '<a href="data:text/html,x">a</a>',
             '<img src="https://example.com/a.png">',
+            '<img src="/local.png" srcset="https://example.com/a.png 2x">',
+            '<picture><source srcset="/a.png 1x, //cdn.example.com/a.png 2x"></picture>',
+            '<video poster="https://example.com/p.jpg"></video>',
+            '<object data="https://example.com/x.svg"></object>',
             '<iframe src="/x/"></iframe>',
         ],
     )
