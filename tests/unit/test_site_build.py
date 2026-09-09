@@ -1041,15 +1041,22 @@ class TestScans:
             scan_page("/x/", self._page(body))
 
     @pytest.mark.parametrize(
-        "body",
+        ("body", "attribute"),
         [
-            '<input imagesrcset="data:image/png;base64,eA== 1x">',
-            '<svg><use xlink:href="javascript:void(0)"></use></svg>',
+            ('<audio src="data:audio/wav;base64,eA=="></audio>', "src"),
+            ('<source srcset="/a.webp 1x, javascript:void(0) 2x">', "srcset"),
+            ('<input imagesrcset="data:image/png;base64,eA== 1x">', "imagesrcset"),
+            ('<div data="javascript:void(0)"></div>', "data"),
+            ('<video poster="data:image/png;base64,eA=="></video>', "poster"),
+            ('<svg><image href="data:image/svg+xml,x"></image></svg>', "href"),
+            ('<svg><use xlink:href="javascript:void(0)"></use></svg>', "xlink:href"),
         ],
     )
-    def test_every_fetching_attribute_refuses_a_forbidden_scheme(self, body: str) -> None:
+    def test_every_fetching_attribute_refuses_a_forbidden_scheme(
+        self, body: str, attribute: str
+    ) -> None:
         """The no-script rule covers newer image and SVG fetching attributes too."""
-        with pytest.raises(SiteBuildError, match=r"(?:data|javascript):"):
+        with pytest.raises(SiteBuildError, match=rf"{attribute}=.*(?:data|javascript):"):
             scan_page("/x/", self._page(body))
 
     def test_a_page_has_exactly_one_meta_description(self) -> None:
