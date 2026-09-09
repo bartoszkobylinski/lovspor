@@ -449,6 +449,25 @@ class TestTransportAuthenticated:
 
         assert (step.status, step.outcome) == ("observed", "http_500")
 
+    def test_an_initialize_result_outside_the_mcp_schema_is_a_protocol_error(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """Step (b) promises an MCP initialize, not merely a JSON-RPC result."""
+        ready(httpx_mock)
+
+        class InvalidInitialize(FakeMcp):
+            def _authenticated(self, request: httpx.Request) -> httpx.Response:
+                message = json.loads(request.content)
+                if message["method"] == "initialize":
+                    return self._reply(message, {})
+                return super()._authenticated(request)
+
+        step = run(httpx_mock, fake=InvalidInitialize()).observation.transport.authenticated
+
+        assert (step.status, step.outcome) == ("observed", "protocol_error")
+        assert step.served_tool_surface_sha256 is None
+        assert step.served_tool_count is None
+
     def test_a_network_failure_mid_handshake_is_the_observers(self, httpx_mock: HTTPXMock) -> None:
         ready(httpx_mock)
         fake = FakeMcp()

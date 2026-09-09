@@ -116,7 +116,14 @@ class FakeMcp:
             return refusal
         message = json.loads(request.content)
         if message["method"] == "initialize":
-            return self._reply(message, {"protocolVersion": "2025-06-18", "capabilities": {}})
+            return self._reply(
+                message,
+                {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "serverInfo": {"name": "fake-lovspor", "version": "0"},
+                },
+            )
         if request.headers.get("mcp-session-id") != SESSION_ID:
             return httpx.Response(400, json={"error": "Bad Request: Missing session ID"})
         return self._in_session(request, message)

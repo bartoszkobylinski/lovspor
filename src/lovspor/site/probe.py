@@ -61,6 +61,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
+    InitializeResult,
     JSONRPCMessage,
     JSONRPCResponse,
     ListToolsResult,
@@ -364,8 +365,12 @@ def _list_with_credential(run: _Run, token: SecretStr) -> AuthenticatedStep:
     initialized = session.request("initialize", _initialize_params())
     if isinstance(initialized, AuthenticatedStep):
         return initialized
-    version = initialized.get("protocolVersion")
-    session.protocol_version = version if isinstance(version, str) else None
+    try:
+        # Step (b) promises an MCP initialize, not merely a JSON-RPC result.
+        handshake = InitializeResult.model_validate(initialized)
+    except ValidationError:
+        return _step_failed("protocol_error")
+    session.protocol_version = str(handshake.protocolVersion)
     refused = session.notify("notifications/initialized")
     if refused is not None:
         return refused
