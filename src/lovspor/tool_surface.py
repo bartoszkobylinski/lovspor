@@ -6,7 +6,11 @@ output schema) and hashes that list in one canonical form. The result is
 the descriptor every consumer of "which tools does lovverk serve" reads:
 the LLHB Stage 6 treatment arm (``lovspor.llhb.mcp_surface``) records it
 in run metadata, and the public product surface — the site build and the
-``/readyz`` attestation — publishes it.
+``/readyz`` attestation — publishes it. ``describe_listed_tools`` is the
+hashing on its own, for a consumer that already holds a listing: the
+release probe hashes what ``tools/list`` returned through the public
+path with it, so ``transport_surface_match`` compares one canonical form
+with itself, never two hashings.
 
 It lives in the core layer, beside ``build_server``, on purpose. The
 benchmark module describes itself as the Stage 6 treatment-arm surface,
@@ -24,11 +28,12 @@ beside it is added to it.
 import asyncio
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Self
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import Tool
 from pydantic import BaseModel, model_validator
 
 from lovspor.mcp import build_server
@@ -64,7 +69,17 @@ def describe_tool_surface(
     launch" names its own, so the binding is visible where the promise is
     made rather than hidden in a default.
     """
-    tools = asyncio.run(server_factory(corpus_path).list_tools())
+    return describe_listed_tools(asyncio.run(server_factory(corpus_path).list_tools()))
+
+
+def describe_listed_tools(tools: Iterable[Tool]) -> ToolSurfaceDescriptor:
+    """Describe a listing of tools, wherever it was listed.
+
+    The canonical form is the one fact this module owns: name order, key
+    order, separators, non-ASCII escaping and the omission of empty fields.
+    A listing a client received over the wire and a listing read from the
+    server object hash equal exactly when they describe the same surface.
+    """
     documents = sorted(
         (tool.model_dump(mode="json", exclude_none=True) for tool in tools),
         key=lambda document: str(document["name"]),
