@@ -379,6 +379,14 @@ def _summary(document: CapabilityDocument) -> str:
     )
 
 
+def _first_validation_message(error: ValidationError) -> str:
+    """The first field's message, as the operator typed the option that caused it."""
+    first = error.errors()[0]
+    field = ".".join(str(part) for part in first["loc"]) or "option"
+    message = first["msg"].removeprefix("Value error, ")
+    return f"{field}: {message}"
+
+
 @app.command(name="release-probe")
 def release_probe(
     corpus: Annotated[
@@ -462,13 +470,17 @@ def site_drift_check(
     fields as dotted paths; 2 usage error; 3 the served document could not be
     fetched or is invalid — its own failure, never reported as drift.
     """
-    settings = ProbeSettings(
-        readiness_url=readiness_url,
-        public_mcp_url=public_mcp_url,
-        probe_token=_probe_token(probe_token_file),
-        timeout_seconds=timeout_seconds,
-        observer=_OBSERVERS[observer],
-    )
+    try:
+        settings = ProbeSettings(
+            readiness_url=readiness_url,
+            public_mcp_url=public_mcp_url,
+            probe_token=_probe_token(probe_token_file),
+            timeout_seconds=timeout_seconds,
+            observer=_OBSERVERS[observer],
+        )
+    except ValidationError as error:
+        # A malformed option is a usage error (exit 2), not a drift verdict.
+        raise typer.BadParameter(_first_validation_message(error)) from error
     try:
         with httpx.Client() as client:
             report = drift_check(served_url, settings, client=client, clock=_clock)

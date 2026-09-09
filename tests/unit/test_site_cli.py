@@ -637,6 +637,19 @@ class TestSiteDriftCheckCommand:
         assert "reason=http_503" in result.output
         assert not httpx_mock.get_requests(url=READINESS_URL)
 
+    def test_a_target_outside_http_is_a_usage_error(
+        self, httpx_mock: HTTPXMock, credential: Path
+    ) -> None:
+        """Exit 2 is the command's documented classification for invalid options."""
+        result = runner.invoke(
+            app,
+            _drift_args("--public-mcp-url", "lovspor.no/mcp"),
+        )
+
+        assert result.exit_code == 2
+        assert "not an http(s) URL" in result.output
+        assert not httpx_mock.get_requests()
+
     def test_the_observer_is_the_drift_timer_by_default(
         self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock
     ) -> None:
