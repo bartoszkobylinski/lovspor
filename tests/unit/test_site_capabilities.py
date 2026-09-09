@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -11,10 +12,13 @@ from pydantic import ValidationError
 
 from lovspor.errors import LovsporError
 from lovspor.site.capabilities import (
+    AuthenticatedStep,
     CapabilityDocument,
     CapabilityDocumentError,
     Checkout,
     Observation,
+    ProcessRecord,
+    TransportRecord,
     derive_comparisons,
     derive_hosted_state,
     derive_state,
@@ -26,6 +30,7 @@ from lovspor.site.errors import SiteBuildError
 from tests.unit.site_fixtures import (
     DISCOVERY,
     OBSERVED_AT,
+    SURFACE,
     available_observation,
     capability_document,
     checkout_expectations,
@@ -33,6 +38,15 @@ from tests.unit.site_fixtures import (
     unobserved_authenticated,
     unobserved_process,
     unobserved_transport,
+)
+
+_PROCESS_VALUES = (
+    "ready",
+    "runtime_identity",
+    "tool_surface_sha256",
+    "tool_count",
+    "credential_modes",
+    "oauth_configured",
 )
 
 
@@ -229,6 +243,133 @@ class TestSchema:
 
         with pytest.raises(ValidationError):
             document.state.hosted_state = "unknown"  # type: ignore[misc]
+
+    @pytest.mark.parametrize(
+        ("record", "message"),
+        [
+            pytest.param(
+                {"status": "unobserved", "reason": None},
+                "an unobserved record names its reason",
+                id="unobserved process without a reason",
+            ),
+            pytest.param(
+                {"status": "observed", "reason": "timeout", "ready": True},
+                "an observed record carries no reason",
+                id="observed process with a reason",
+            ),
+            pytest.param(
+                {"status": "unobserved", "reason": "timeout", "ready": True, "tool_count": 17},
+                "an unobserved process records no value: ready, tool_count",
+                id="unobserved process with values",
+            ),
+            pytest.param(
+                {"status": "observed", "reason": None, "ready": None},
+                "an observed process says whether it is ready: ready",
+                id="observed process without ready",
+            ),
+        ],
+    )
+    def test_a_process_record_names_the_offending_fields(
+        self, record: dict[str, Any], message: str
+    ) -> None:
+        """The record validators are tested on the record itself: through the
+        document, the derivation rule rejects the same shapes first and would
+        hide a validator that stopped saying why (ADR:737-743)."""
+        absent = dict.fromkeys(_PROCESS_VALUES)
+
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            ProcessRecord.model_validate(
+                {**absent, "observed_at": OBSERVED_AT, "observer": "release-probe", **record}
+            )
+
+    @pytest.mark.parametrize(
+        ("step", "message"),
+        [
+            pytest.param(
+                {"status": "observed", "reason": None, "outcome": "ok"},
+                "a listed surface records what it listed: "
+                "served_tool_surface_sha256, served_tool_count",
+                id="ok without the listed surface",
+            ),
+            pytest.param(
+                {"status": "observed", "reason": None, "outcome": None},
+                "an observed step records its outcome: outcome",
+                id="observed without an outcome",
+            ),
+            pytest.param(
+                {"status": "unobserved", "reason": None, "outcome": None},
+                "an unobserved record names its reason",
+                id="unobserved step without a reason",
+            ),
+            pytest.param(
+                {"status": "observed", "reason": "timeout", "outcome": "protocol_error"},
+                "an observed record carries no reason",
+                id="observed step with a reason",
+            ),
+            pytest.param(
+                {
+                    "status": "unobserved",
+                    "reason": "timeout",
+                    "outcome": "ok",
+                    "served_tool_surface_sha256": SURFACE,
+                    "served_tool_count": 17,
+                },
+                "an unobserved step records no value: "
+                "outcome, served_tool_surface_sha256, served_tool_count",
+                id="unobserved step with values",
+            ),
+            pytest.param(
+                {
+                    "status": "observed",
+                    "reason": None,
+                    "outcome": "protocol_error",
+                    "served_tool_surface_sha256": SURFACE,
+                    "served_tool_count": 17,
+                },
+                "no surface was listed: served_tool_surface_sha256, served_tool_count",
+                id="failed step with a listed surface",
+            ),
+        ],
+    )
+    def test_an_authenticated_step_names_the_offending_fields(
+        self, step: dict[str, Any], message: str
+    ) -> None:
+        absent = {"served_tool_surface_sha256": None, "served_tool_count": None}
+
+        with pytest.raises(ValidationError, match=re.escape(message)):
+            AuthenticatedStep.model_validate({**absent, **step})
+
+    def test_a_transport_record_names_the_offending_fields(self) -> None:
+        observed = available_observation()["transport"]
+        unobserved = unobserved_transport("network")["transport"]
+
+        with pytest.raises(
+            ValidationError, match=re.escape("an unobserved record names its reason")
+        ):
+            TransportRecord.model_validate({**unobserved, "reason": None})
+        with pytest.raises(
+            ValidationError, match=re.escape("an observed record carries no reason")
+        ):
+            TransportRecord.model_validate({**observed, "reason": "network"})
+        with pytest.raises(
+            ValidationError,
+            match=re.escape("an observed transport records step (a): unauthenticated"),
+        ):
+            TransportRecord.model_validate({**observed, "unauthenticated": None})
+        with pytest.raises(
+            ValidationError,
+            match=re.escape("an unobserved transport records no value: unauthenticated"),
+        ):
+            TransportRecord.model_validate(
+                {**unobserved, "unauthenticated": observed["unauthenticated"]}
+            )
+        with pytest.raises(
+            ValidationError,
+            match=re.escape("an unobserved transport observed neither step (b) nor discovery"),
+        ):
+            TransportRecord.model_validate(
+                {**unobserved, "oauth_discovery": observed["oauth_discovery"]}
+            )
 
 
 def _document_unchecked(observation: dict[str, Any]) -> dict[str, Any]:
