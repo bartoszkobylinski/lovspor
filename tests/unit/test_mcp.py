@@ -39,7 +39,7 @@ from lovspor.access import (
     hash_token,
     write_credential_file,
 )
-from lovspor.attestation import compute_attestation
+from lovspor.attestation import ProcessAttestation, RuntimeIdentity, compute_attestation
 from lovspor.embeddings import (
     LEGACY_SPACE_DESCRIPTOR,
     OpenAIEmbedder,
@@ -5415,6 +5415,51 @@ def test_readyz_reports_unavailable_when_the_corpus_manifest_disappears(
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable", **attestation.payload(ready=False)}
     assert response.json()["ready"] is False
+
+
+def test_readyz_recovers_when_the_corpus_manifest_reappears_without_recomputing_attestation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Readiness is observed on every request even though process identity is
+    fixed at startup, so restoring the corpus must recover the same process."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    manifest = tmp_path / "manifest.json"
+    manifest_bytes = manifest.read_bytes()
+    server = build_server(tmp_path, http=HttpConfig())
+    attestation = ProcessAttestation(
+        ready=False,
+        runtime_identity=RuntimeIdentity(
+            tree_sha256="1" * 64,
+            environment_sha256="2" * 64,
+            interpreter="cpython 3.12.3",
+        ),
+        tool_surface_sha256="3" * 64,
+        tool_count=17,
+        credential_modes=("token",),
+        oauth_configured=False,
+    )
+    monkeypatch.setattr(mcp_module, "compute_attestation", lambda *_a, **_k: attestation)
+    manifest.unlink()
+    _add_health_routes(server, tmp_path, HttpConfig())
+    readyz = next(
+        route.endpoint for route in server.streamable_http_app().routes if route.path == "/readyz"
+    )
+
+    unavailable = asyncio.run(readyz(None))
+    manifest.write_bytes(manifest_bytes)
+    recovered = asyncio.run(readyz(None))
+    unavailable_payload = json.loads(unavailable.body)
+    recovered_payload = json.loads(recovered.body)
+
+    assert unavailable.status_code == 503
+    assert unavailable_payload["status"] == "unavailable"
+    assert unavailable_payload["ready"] is False
+    assert recovered.status_code == 200
+    assert recovered_payload["status"] == "ready"
+    assert recovered_payload["ready"] is True
+    assert {k: v for k, v in unavailable_payload.items() if k not in {"status", "ready"}} == {
+        k: v for k, v in recovered_payload.items() if k not in {"status", "ready"}
+    }
 
 
 def test_readyz_attests_oauth_exactly_when_the_authkit_pair_is_configured(
