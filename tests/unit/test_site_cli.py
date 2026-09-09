@@ -13,7 +13,9 @@ work tree is dirty exactly while these tests are being written.
 import json
 from pathlib import Path
 
+import click
 import pytest
+from typer.main import get_command
 from typer.testing import CliRunner
 
 import lovspor.cli
@@ -137,12 +139,12 @@ class TestBuildSiteCommand:
     def test_has_no_checkout_option(self) -> None:
         """The checkout is discovered, never named: an option would allow
         foreign-repository provenance (plan F.2)."""
-        result = runner.invoke(app, ["build-site", "--help"])
+        command = get_command(app)
+        assert isinstance(command, click.Group)
+        options = {name for param in command.commands["build-site"].params for name in param.opts}
 
-        assert result.exit_code == 0
-        assert "--checkout" not in result.output
-        for option in ("--corpus", "--corpus-manifest", "--capabilities", "--out"):
-            assert option in result.output
+        assert "--checkout" not in options
+        assert {"--corpus", "--corpus-manifest", "--capabilities", "--out"} <= options
 
 
 class TestSiteFixtureCommand:
