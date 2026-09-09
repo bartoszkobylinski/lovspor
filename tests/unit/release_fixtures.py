@@ -7,6 +7,7 @@ instant. Real trees are built from them into a ``tmp_path`` releases
 root; nothing here reads the developer's own repository.
 """
 
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -17,7 +18,9 @@ from lovspor.site.capabilities import CapabilityDocument, Checkout
 from tests.unit.site_fixtures import (
     OBSERVED_AT,
     available_observation,
+    commit_all,
     document_for,
+    run_git,
     throwaway_checkout,
     throwaway_corpus,
     with_surface,
@@ -37,6 +40,18 @@ def make_world(root: Path) -> World:
     checkout, lovspor_commit = throwaway_checkout(root / "lovspor")
     corpus, corpus_commit = throwaway_corpus(root / "lovverk")
     return World(checkout, lovspor_commit, corpus, corpus_commit)
+
+
+def rename_document(world: World) -> str:
+    """Rename the corpus's one document, so the next release carries a 301 in its map."""
+    run_git(world.corpus, "mv", "lover/testloven.md", "lover/nyloven.md")
+    manifest_path = world.corpus / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record = manifest["documents"]["doc-1"]
+    record["markdown_path"] = "lover/nyloven.md"
+    record["slug"] = "nyloven"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return commit_all(world.corpus, "renamed")
 
 
 def observation_for(checkout: Checkout, observed_at: str = OBSERVED_AT) -> dict[str, Any]:
