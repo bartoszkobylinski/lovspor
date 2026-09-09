@@ -14,12 +14,24 @@ assumption, and the tests live here.
 
 from __future__ import annotations
 
+import importlib.metadata
+import json
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
+from tests.unit.site_fixtures import (
+    available_observation,
+    capability_document,
+    checkout_expectations,
+    throwaway_checkout,
+    unobserved_transport,
+)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _REGISTER = _ROOT / "mutation-equivalents.toml"
@@ -91,6 +103,69 @@ def test_httpx_still_normalises_the_request_method() -> None:
     assert httpx.Request("get", url).method == "GET"
     assert httpx.Request("gEt", url).method == "GET"
     assert httpx.Request("GET", url).method == "GET"
+
+
+def test_assumption_a_python_mode_dump_serialises_like_json_mode() -> None:
+    """Pins the argument that waives the ``mode="json"`` -> ``None`` / other
+    string mutants in ``site/capabilities.py::state_sha256`` and
+    ``site/fixture.py::document_bytes``: pydantic takes the JSON serialiser only
+    for the exact string "json" and the Python one otherwise, and these models
+    hold nothing the Python path renders differently under ``json.dumps`` — the
+    one non-JSON-native type is ``tuple[CredentialMode, ...]``, which dumps as a
+    list either way. A field type that the Python path leaves as an object
+    (a datetime, an enum, bytes) would make this test fail, and the mutants
+    real."""
+    checkout = Checkout.model_validate(checkout_expectations())
+    models: list[Any] = [
+        derive_state(Observation.model_validate(available_observation()), checkout),
+        derive_state(Observation.model_validate(unobserved_transport("network")), checkout),
+        CapabilityDocument.model_validate(capability_document()),
+    ]
+
+    for model in models:
+        reference = json.dumps(model.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+        for mode in ("python", None, "JSON", "XXjsonXX"):
+            dumped = json.dumps(model.model_dump(mode=mode), sort_keys=True, ensure_ascii=False)
+            assert dumped == reference, mode
+
+
+def test_assumption_importlib_metadata_lookup_is_case_insensitive() -> None:
+    """Pins the argument that waives the ``version("jinja2")`` -> ``"JINJA2"``
+    mutant in ``site/fingerprint.py``: ``importlib.metadata`` normalises the
+    requested name (PEP 503: case-folded, runs of ``-_.`` as one ``-``) before
+    it searches for a distribution, so every spelling finds the same one."""
+    assert importlib.metadata.version("JINJA2") == importlib.metadata.version("jinja2")
+    assert importlib.metadata.version("Jinja2") == importlib.metadata.version("jinja2")
+
+
+def test_assumption_git_rev_parse_fails_on_an_unborn_head_without_verify(tmp_path: Path) -> None:
+    """Pins the argument that waives the dropped ``--verify`` in
+    ``site/build.py::require_clean_work_tree``: with one revision argument,
+    ``git rev-parse`` exits non-zero when it does not resolve — ``--verify``
+    or not (it also echoes the argument to stdout, which ``_git`` discards on
+    failure) — and prints the same sha when it does."""
+    unborn = tmp_path / "unborn"
+    unborn.mkdir()
+    subprocess.run(["git", "-C", str(unborn), "init", "-q"], check=True)
+    without = subprocess.run(
+        ["git", "-C", str(unborn), "rev-parse", "HEAD^{commit}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert without.returncode != 0
+
+    root, head = throwaway_checkout(tmp_path / "committed")
+    resolved = [
+        subprocess.run(
+            ["git", "-C", str(root), "rev-parse", *flags, "HEAD^{commit}"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        for flags in ((), ("--verify",))
+    ]
+    assert resolved == [head, head]
 
 
 def test_an_entry_arguing_from_a_dependency_names_the_test_that_pins_it() -> None:
