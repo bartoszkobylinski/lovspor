@@ -15,17 +15,20 @@ import asyncio
 import hashlib
 import json
 import logging
-from datetime import UTC, datetime, timedelta, timezone
+import time
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from mcp.types import ListToolsResult
+from mcp.types import LATEST_PROTOCOL_VERSION, InitializeRequest, ListToolsResult
 from pydantic import SecretStr, ValidationError
 from pytest_httpx import HTTPXMock
 
 import lovspor.site.probe as probe_module
+from lovspor import __version__
 from lovspor.mcp import HttpConfig, build_server
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.capabilities import (
@@ -61,6 +64,7 @@ from tests.unit.probe_fixtures import (
     attestation,
     install,
     ready,
+    sse,
     tools_listing,
 )
 from tests.unit.site_fixtures import (
@@ -73,6 +77,25 @@ from tests.unit.site_fixtures import (
 MOMENT = datetime(2026, 9, 9, 10, 11, 12, 345678, tzinfo=UTC)
 OBSERVED_AT = "2026-09-09T10:11:12Z"
 CORPUS_DOCS = {"testloven": ("Testloven", "### § 1. Formål\n\nLoven gjelder.\n")}
+SSE_TYPE = "text/event-stream"
+INITIALIZE_PARAMS = {
+    "protocolVersion": LATEST_PROTOCOL_VERSION,
+    "capabilities": {},
+    "clientInfo": {"name": "lovspor-site-probe", "version": __version__},
+}
+
+
+class Undecided(tzinfo):
+    """A tzinfo that never states its offset: Python treats the datetime as naive."""
+
+    def utcoffset(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def dst(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> str | None:
+        return None
 
 
 def clock() -> datetime:
@@ -115,6 +138,16 @@ def run(
 def healthy(httpx_mock: HTTPXMock) -> FakeMcp:
     ready(httpx_mock)
     return install(httpx_mock, FakeMcp())
+
+
+@pytest.fixture
+def kolkata_local_time(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """A process zone five and a half hours from UTC, so a local-time reading would show."""
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 @pytest.fixture(scope="module")
@@ -220,6 +253,7 @@ class TestProcess:
         request = httpx_mock.get_request(url=READINESS_URL)
 
         assert request is not None
+        assert request.method == "GET"
         assert "authorization" not in request.headers
         assert request.extensions["timeout"]["read"] == 0.25
 
@@ -240,6 +274,28 @@ class TestTransportUnauthenticated:
         assert json.loads(first.content)["method"] == "initialize"
         assert first.headers["accept"] == "application/json, text/event-stream"
         assert first.headers["content-type"] == "application/json"
+
+    def test_step_a_is_the_documented_initialize_request_on_the_wire(
+        self, httpx_mock: HTTPXMock, healthy: FakeMcp
+    ) -> None:
+        """A JSON-RPC 2.0 ``initialize`` the SDK's own schema accepts, naming
+        this probe, under the two headers the transport requires — each
+        spelled as the client already spells it, so the wire carries no
+        header the client would not send by itself."""
+        run(httpx_mock)
+        first = healthy.requests[0]
+        body = json.loads(first.content)
+        with httpx.Client() as client:
+            plain = client.build_request("POST", MCP_URL, json={}).headers.raw
+
+        assert body == {
+            "jsonrpc": "2.0",
+            "id": 0,
+            "method": "initialize",
+            "params": INITIALIZE_PARAMS,
+        }
+        InitializeRequest.model_validate({"method": "initialize", "params": body["params"]})
+        assert {name for name, _ in first.headers.raw} == {name for name, _ in plain}
 
     def test_step_b_runs_when_bearer_is_not_the_first_advertised_challenge(
         self, httpx_mock: HTTPXMock
@@ -365,11 +421,21 @@ class TestTransportAuthenticated:
         assert listing.headers["mcp-session-id"] == SESSION_ID
         assert listing.headers["mcp-protocol-version"] == "2025-06-18"
         assert "mcp-session-id" not in posts[0].headers
-        initialize = json.loads(posts[0].content)["params"]
-        assert set(initialize) == {"protocolVersion", "capabilities", "clientInfo"}
+        assert json.loads(posts[0].content) == {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": INITIALIZE_PARAMS,
+        }
         assert json.loads(posts[1].content) == {
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
+        }
+        assert json.loads(listing.content) == {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/list",
+            "params": {},
         }
 
     def test_a_json_answer_is_read_like_an_sse_one(self, httpx_mock: HTTPXMock) -> None:
@@ -378,6 +444,56 @@ class TestTransportAuthenticated:
 
         assert step.outcome == "ok"
         assert step.served_tool_count == 2
+
+    @pytest.mark.parametrize(
+        "content_type",
+        ["application/json; charset=utf-8", "text/event-stream; charset=utf-8"],
+        ids=["json", "sse"],
+    )
+    def test_a_media_type_with_parameters_is_still_the_answer(
+        self, httpx_mock: HTTPXMock, content_type: str
+    ) -> None:
+        """A charset parameter, as a server or a proxy may add one, does not
+        turn the answer into something the probe cannot read."""
+        ready(httpx_mock)
+        answer = {"jsonrpc": "2.0", "id": 2, "result": tools_listing(("a", "b", "c"))}
+        content = sse(answer) if content_type.startswith(SSE_TYPE) else json.dumps(answer).encode()
+        fake = FakeMcp()
+        fake.list_answer = lambda _request: httpx.Response(
+            200, headers={"Content-Type": content_type}, content=content
+        )
+        step = run(httpx_mock, fake=fake).observation.transport.authenticated
+
+        assert (step.outcome, step.served_tool_count) == ("ok", 3)
+
+    def test_an_answer_without_a_content_type_is_a_protocol_error(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        ready(httpx_mock)
+        answer = {"jsonrpc": "2.0", "id": 2, "result": tools_listing()}
+        fake = FakeMcp()
+        fake.list_answer = lambda _request: httpx.Response(200, content=sse(answer))
+        step = run(httpx_mock, fake=fake).observation.transport.authenticated
+
+        assert (step.status, step.outcome) == ("observed", "protocol_error")
+
+    def test_the_answer_needs_no_event_line_and_no_space_after_the_colon(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """An event without an ``event:`` line is a ``message`` event, the
+        space after ``data:`` is optional, and the stream need not end in a
+        blank line (SSE: event dispatch at end of stream)."""
+        ready(httpx_mock)
+        answer = {"jsonrpc": "2.0", "id": 2, "result": tools_listing(("a", "b", "c"))}
+        fake = FakeMcp()
+        fake.list_answer = lambda _request: httpx.Response(
+            200,
+            headers={"Content-Type": SSE_TYPE},
+            content=f"data:{json.dumps(answer)}".encode(),
+        )
+        step = run(httpx_mock, fake=fake).observation.transport.authenticated
+
+        assert (step.outcome, step.served_tool_count) == ("ok", 3)
 
     def test_the_answer_may_follow_other_events_on_the_stream_the_sdk_server_writes(
         self, httpx_mock: HTTPXMock
@@ -559,6 +675,27 @@ class TestTransportAuthenticated:
 
         assert (step.status, step.reason) == ("unobserved", "timeout")
 
+    def test_a_credential_rejected_on_initialized_is_the_observers_failure(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """The observer-failure rule covers every request in authenticated step (b)."""
+        ready(httpx_mock)
+
+        class RejectInitialized(FakeMcp):
+            def _in_session(
+                self, request: httpx.Request, message: dict[str, Any]
+            ) -> httpx.Response:
+                if message["method"] == "notifications/initialized":
+                    return self._refuse((401, CHALLENGE))
+                return super()._in_session(request, message)
+
+        document = run(httpx_mock, fake=RejectInitialized())
+        step = document.observation.transport.authenticated
+
+        assert (step.status, step.reason) == ("unobserved", "probe_credential_rejected")
+        assert step.outcome is None
+        assert document.state.hosted_state == "unknown"
+
 
 class TestOAuthDiscovery:
     def _valid(self, **overrides: Any) -> dict[str, Any]:
@@ -576,6 +713,18 @@ class TestOAuthDiscovery:
             "https://h.example:8443/.well-known/oauth-protected-resource/x/mcp"
         )
 
+    @pytest.mark.parametrize(
+        ("resource", "path"),
+        [("https://h.example/x/mcp/", "/x/mcp"), ("https://h.example/X", "/X")],
+        ids=["trailing-slash-dropped", "last-character-kept"],
+    )
+    def test_the_resource_path_is_inserted_verbatim_but_for_trailing_slashes(
+        self, resource: str, path: str
+    ) -> None:
+        assert protected_resource_metadata_url(resource) == (
+            f"https://h.example/.well-known/oauth-protected-resource{path}"
+        )
+
     def test_the_authorization_server_urls_follow_rfc_8414_then_openid(self) -> None:
         assert authorization_server_metadata_urls(f"{AUTHKIT}/") == (
             AUTHKIT_METADATA_URL,
@@ -584,6 +733,10 @@ class TestOAuthDiscovery:
         assert authorization_server_metadata_urls("https://as.example/issuer1") == (
             "https://as.example/.well-known/oauth-authorization-server/issuer1",
             "https://as.example/issuer1/.well-known/openid-configuration",
+        )
+        assert authorization_server_metadata_urls("https://as.example/X/") == (
+            "https://as.example/.well-known/oauth-authorization-server/X",
+            "https://as.example/X/.well-known/openid-configuration",
         )
 
     def test_a_404_is_absent(self, httpx_mock: HTTPXMock, healthy: FakeMcp) -> None:
@@ -604,6 +757,27 @@ class TestOAuthDiscovery:
         assert discovery.verdict == "valid"
         assert discovery.invalid_reason is None
         assert discovery.document_sha256 == hashlib.sha256(raw).hexdigest()
+        for url in (DISCOVERY_URL, AUTHKIT_METADATA_URL):
+            request = httpx_mock.get_request(url=url)
+            assert request is not None and request.method == "GET", url
+
+    @pytest.mark.parametrize(
+        ("listed", "issuer"),
+        [(AUTHKIT, f"{AUTHKIT}/"), ("https://as.example/X", "https://as.example/X")],
+        ids=["slash-on-the-issuer-side", "path-verbatim"],
+    )
+    def test_the_issuer_is_the_listed_server_with_or_without_a_trailing_slash(
+        self, httpx_mock: HTTPXMock, healthy: FakeMcp, listed: str, issuer: str
+    ) -> None:
+        """RFC 8414 §3.3: one identifier however the slash falls; the rest
+        of the path is compared verbatim."""
+        httpx_mock.add_response(url=DISCOVERY_URL, json=self._valid(authorization_servers=[listed]))
+        httpx_mock.add_response(
+            url=authorization_server_metadata_urls(listed)[0], json={"issuer": issuer}
+        )
+        discovery = run(httpx_mock, discovery=False).observation.transport.oauth_discovery
+
+        assert (discovery.verdict, discovery.invalid_reason) == ("valid", None)
 
     def test_a_valid_document_beside_an_oauth_process_is_consistent(
         self, httpx_mock: HTTPXMock
@@ -755,21 +929,30 @@ class TestDocument:
         assert observation.process.observed_at == OBSERVED_AT
         assert observation.transport.observed_at == OBSERVED_AT
 
-    def test_the_clock_is_read_in_utc_whatever_zone_it_reports(
-        self, httpx_mock: HTTPXMock, healthy: FakeMcp
+    def test_the_clock_is_read_in_utc_whatever_zone_it_or_the_process_reports(
+        self, httpx_mock: HTTPXMock, healthy: FakeMcp, kolkata_local_time: None
     ) -> None:
         oslo = MOMENT.astimezone(timezone(timedelta(hours=2)))
         absent_discovery(httpx_mock)
+        assert datetime.now().astimezone().utcoffset() == timedelta(hours=5, minutes=30)
         with httpx.Client() as client:
             document = probe(settings(), client=client, checkout=checkout(), clock=lambda: oslo)
 
         assert document.observation.process.observed_at == OBSERVED_AT
 
-    def test_a_naive_clock_is_refused(self, httpx_mock: HTTPXMock) -> None:
-        naive = MOMENT.replace(tzinfo=None)
-        with httpx.Client() as client, pytest.raises(ProbeError, match="timezone"):
-            probe(settings(), client=client, checkout=checkout(), clock=lambda: naive)
+    @pytest.mark.parametrize(
+        "moment",
+        [MOMENT.replace(tzinfo=None), MOMENT.replace(tzinfo=Undecided())],
+        ids=["no-tzinfo", "tzinfo-without-an-offset"],
+    )
+    def test_a_clock_that_is_not_aware_is_refused(
+        self, httpx_mock: HTTPXMock, moment: datetime
+    ) -> None:
+        """Aware, in Python's sense: a tzinfo whose utcoffset() is not None."""
+        with httpx.Client() as client, pytest.raises(ProbeError) as refusal:
+            probe(settings(), client=client, checkout=checkout(), clock=lambda: moment)
 
+        assert str(refusal.value) == "the probe clock must be timezone-aware"
         assert not httpx_mock.get_requests()
 
     @pytest.mark.parametrize("observer", ["release-probe", "drift-timer"])
