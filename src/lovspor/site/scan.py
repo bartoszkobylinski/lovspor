@@ -62,6 +62,13 @@ _EXTERNAL = re.compile(r"^(?:[a-z][a-z0-9+.-]*:)?//", re.IGNORECASE)
 # Every attribute through which an element can fetch a resource. ``srcset`` and
 # ``imagesrcset`` carry a comma-separated candidate list, each ``url [descriptor]``.
 _ASSET_ATTRIBUTES = ("src", "srcset", "imagesrcset", "data", "poster")
+# Inside inline SVG, ``href`` (and the legacy ``xlink:href``) fetches a resource on
+# these elements rather than linking — the parser lower-cases tag names.
+_SVG_ASSET_ATTRIBUTES = {
+    "image": ("href", "xlink:href"),
+    "use": ("href", "xlink:href"),
+    "feimage": ("href", "xlink:href"),
+}
 
 
 def _asset_urls(value: str | None) -> list[str]:
@@ -84,7 +91,7 @@ class _PageScanner(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.text: list[str] = []
-        self.description: str | None = None
+        self.descriptions: list[str] = []
         self.canonical: str | None = None
         self.alternate_links: list[tuple[str, str]] = []
         self.links: list[str] = []
@@ -104,7 +111,7 @@ class _PageScanner(HTMLParser):
         if tag == "body":
             self._in_body = True
         elif tag == "meta" and attributes.get("name") == "description":
-            self.description = attributes.get("content")
+            self.descriptions.append(attributes.get("content") or "")
         elif tag == "link":
             self._link(attributes)
         elif tag == "a" and attributes.get("href") is not None:
@@ -146,7 +153,7 @@ class _PageScanner(HTMLParser):
                 self.findings.append(f"{name} handler on <{tag}>")
             if name in _REFERENCE_ATTRIBUTES and value and _FORBIDDEN_SCHEME.match(value):
                 self.findings.append(f"{name}={value!r} on <{tag}>")
-        for name in _ASSET_ATTRIBUTES:
+        for name in (*_ASSET_ATTRIBUTES, *_SVG_ASSET_ATTRIBUTES.get(tag, ())):
             for candidate in _asset_urls(attributes.get(name)):
                 if _EXTERNAL.match(candidate):
                     self.findings.append(f"external {name}={candidate!r} on <{tag}>")
@@ -169,7 +176,7 @@ def _scan(markup: str) -> _PageScanner:
 
 
 def _numerals(page: str, scanner: _PageScanner) -> None:
-    pieces = [*scanner.text, *([scanner.description] if scanner.description else [])]
+    pieces = [*scanner.text, *scanner.descriptions]
     for piece in pieces:
         if _DIGIT.search(piece):
             raise SiteBuildError(
@@ -183,6 +190,10 @@ def scan_page(page: str, markup: str) -> None:
     if scanner.findings:
         raise SiteBuildError(f"page {page} is outside the no-script rule: {scanner.findings[0]}")
     _numerals(page, scanner)
+    if len(scanner.descriptions) != 1:
+        raise SiteBuildError(
+            f"page {page}: {len(scanner.descriptions)} meta descriptions, expected exactly one"
+        )
     if scanner.canonical != canonical_url(page):
         raise SiteBuildError(f"page {page}: rel=canonical is {scanner.canonical!r}, not itself")
 

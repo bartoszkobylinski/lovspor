@@ -959,6 +959,15 @@ class TestScans:
         with pytest.raises(SiteBuildError, match="numeral"):
             scan_page("/x/", self._page("<p>ok</p>").replace('content="d"', 'content="d 2"'))
 
+    def test_every_description_is_scanned_for_a_typed_numeral(self) -> None:
+        markup = self._page("<p>ok</p>").replace(
+            '<meta name="description" content="d">',
+            '<meta name="description" content="unledgered 2"><meta name="description" content="d">',
+        )
+
+        with pytest.raises(SiteBuildError, match=r"numeral.*unledgered 2"):
+            scan_page("/x/", markup)
+
     def test_a_numeral_in_code_or_pre_is_not_exempt(self) -> None:
         with pytest.raises(SiteBuildError, match="numeral"):
             scan_page("/x/", self._page("<pre>x 1</pre>"))
@@ -1013,6 +1022,35 @@ class TestScans:
         """Exercise the attribute scan itself, including elements that are otherwise allowed."""
         with pytest.raises(SiteBuildError, match=rf"external {attribute}="):
             scan_page("/x/", self._page(body))
+
+    def test_svg_image_href_refuses_an_external_asset(self) -> None:
+        body = '<svg><image href="https://example.com/a.svg"></image></svg>'
+
+        with pytest.raises(SiteBuildError, match=r"external href="):
+            scan_page("/x/", self._page(body))
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            '<svg><use xlink:href="https://example.com/s.svg#i"></use></svg>',
+            '<svg><filter><feImage href="//cdn.example.com/f.png"></feImage></filter></svg>',
+        ],
+    )
+    def test_svg_use_and_feimage_refuse_an_external_asset(self, body: str) -> None:
+        with pytest.raises(SiteBuildError, match=r"external (?:xlink:)?href="):
+            scan_page("/x/", self._page(body))
+
+    def test_a_page_has_exactly_one_meta_description(self) -> None:
+        doubled = self._page("<p>ok</p>").replace(
+            '<meta name="description" content="d">',
+            '<meta name="description" content="d"><meta name="description" content="e">',
+        )
+        with pytest.raises(SiteBuildError, match="meta descriptions"):
+            scan_page("/x/", doubled)
+        with pytest.raises(SiteBuildError, match="meta descriptions"):
+            scan_page(
+                "/x/", self._page("<p>ok</p>").replace('<meta name="description" content="d">', "")
+            )
 
     def test_an_external_stylesheet_or_import_fails(self) -> None:
         with pytest.raises(SiteBuildError, match="link"):
