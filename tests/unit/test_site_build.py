@@ -1025,6 +1025,26 @@ class TestScans:
         with pytest.raises(SiteBuildError, match="hreflang"):
             check_links(pages)
 
+    def test_hreflang_must_name_the_page_itself_exactly_once(self) -> None:
+        pages = {
+            "/x/": self._page(
+                "<p>a</p>",
+                f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/x/">'
+                f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/x/">'
+                f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/x/">',
+            ),
+            "/en/x/": self._page(
+                "<p>a</p>",
+                f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/x/">'
+                f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/x/">',
+            ).replace(
+                f'canonical" href="{SITE_ORIGIN}/x/"', f'canonical" href="{SITE_ORIGIN}/en/x/"'
+            ),
+        }
+
+        with pytest.raises(SiteBuildError, match="hreflang.*once"):
+            check_links(pages)
+
 
 class TestTemplateContract:
     """A template outside the fact contract fails the build."""

@@ -75,11 +75,17 @@ class _PageScanner(HTMLParser):
         self.text: list[str] = []
         self.description: str | None = None
         self.canonical: str | None = None
-        self.alternates: dict[str, str] = {}
+        self.alternate_links: list[tuple[str, str]] = []
         self.links: list[str] = []
         self.findings: list[str] = []
         self._stack: list[tuple[str, bool]] = []
         self._in_body = False
+
+    @property
+    def alternates(self) -> dict[str, str]:
+        """``hreflang`` -> href, valid only once ``_check_reciprocity`` has ruled out
+        a language named twice (a dict would silently keep the last one)."""
+        return dict(self.alternate_links)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes: Attributes = dict(attrs)
@@ -139,7 +145,7 @@ class _PageScanner(HTMLParser):
         elif rel == "canonical":
             self.canonical = href
         elif attributes.get("hreflang"):
-            self.alternates[attributes["hreflang"] or ""] = href
+            self.alternate_links.append((attributes["hreflang"] or "", href))
 
 
 def _scan(markup: str) -> _PageScanner:
@@ -183,9 +189,13 @@ def _check_page_links(page: str, links: list[str], emitted: frozenset[str]) -> N
 
 
 def _check_reciprocity(page: str, scanners: dict[str, _PageScanner]) -> None:
-    alternates = scanners[page].alternates
-    if not alternates:
+    links = scanners[page].alternate_links
+    if not links:
         return
+    languages = [lang for lang, _ in links]
+    if len(set(languages)) != len(languages):
+        raise SiteBuildError(f"page {page}: hreflang alternates must name each language once")
+    alternates = scanners[page].alternates
     own = [lang for lang, href in alternates.items() if href == canonical_url(page)]
     if len(own) != 1:
         raise SiteBuildError(f"page {page}: hreflang alternates do not name the page itself once")
