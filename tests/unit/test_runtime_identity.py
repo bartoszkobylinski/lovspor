@@ -244,6 +244,13 @@ class TestClosureWalk:
             "thing", frozenset(), frozenset()
         )
 
+    def test_whitespace_around_an_extra_is_not_part_of_its_name(self) -> None:
+        """PEP 508 allows ``thing[one, two]``; the extra is ``two``, not ``" two"``."""
+        parsed = runtime_identity._parse_requirement("thing[one, two ,three]")
+
+        assert parsed is not None
+        assert parsed.extras == frozenset({"one", "two", "three"})
+
     def test_direct_url_without_a_url_field_is_the_empty_string(self) -> None:
         distribution = _StubDistribution({"direct_url.json": "{}"})
 

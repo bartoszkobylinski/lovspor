@@ -116,7 +116,9 @@ def _parse_requirement(text: str) -> _Requirement | None:
     if match is None:
         return None
     extras = frozenset(
-        normalise_name(extra) for extra in (match["extras"] or "").split(",") if extra.strip()
+        normalise_name(extra.strip())
+        for extra in (match["extras"] or "").split(",")
+        if extra.strip()
     )
     extra_markers = frozenset(normalise_name(extra) for extra in _EXTRA_MARKER.findall(marker))
     return _Requirement(normalise_name(match["name"]), extras, extra_markers)
