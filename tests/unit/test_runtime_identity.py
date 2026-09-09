@@ -215,6 +215,9 @@ def index(monkeypatch: pytest.MonkeyPatch) -> dict[str, _StubDistribution]:
 
 
 class TestClosureWalk:
+    def test_an_absent_root_has_an_empty_closure(self, index: dict[str, object]) -> None:
+        assert installed_distributions("missing") == ()
+
     def test_follows_requested_extras_and_skips_the_rest(self, index: dict[str, object]) -> None:
         """``a_lib[x]`` pulls ``c``; ``d`` sits behind an extra nobody asked
         for, ``b`` behind an extra of the root, ``missing`` is not
@@ -276,3 +279,25 @@ class TestClosureWalk:
             "from-a",
             "from-b",
         }
+
+    def test_a_repeated_dependency_without_new_extras_is_not_revisited(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stubs = {
+            "root": _StubDistribution({"METADATA": _metadata("root", "1", "left", "right")}),
+            "left": _StubDistribution({"METADATA": _metadata("left", "1", "shared")}),
+            "right": _StubDistribution({"METADATA": _metadata("right", "1", "shared")}),
+            "shared": _StubDistribution({"METADATA": _metadata("shared", "1")}),
+        }
+        calls: list[str] = []
+
+        def distribution(name: str) -> _StubDistribution:
+            normalised = normalise_name(name)
+            calls.append(normalised)
+            return stubs[normalised]
+
+        monkeypatch.setattr(importlib.metadata, "distribution", distribution)
+
+        installed_distributions("root")
+
+        assert calls.count("shared") == 1

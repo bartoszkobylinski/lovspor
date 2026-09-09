@@ -60,6 +60,15 @@ def test_title_is_scanned_but_ordinary_head_text_is_not() -> None:
         scan_page("/x/", _page("safe").replace("<title>safe</title>", "<title>7</title>"))
 
 
+def test_text_after_body_is_not_scanned_as_body_content() -> None:
+    scan_page("/x/", _page("safe") + "7")
+
+
+def test_style_element_matching_is_case_insensitive() -> None:
+    with pytest.raises(SiteBuildError, match="@import or external"):
+        scan_page("/x/", _page("<STYLE>@import url(/x)</STYLE>"))
+
+
 def test_empty_link_fields_are_preserved_for_validation() -> None:
     scanner = _scan(_page("safe", '<link href="">'))
 

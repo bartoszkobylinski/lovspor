@@ -180,6 +180,17 @@ def _fact_values(markup: str, fact_id: str) -> list[str]:
 
 
 class TestGitGuard:
+    def test_git_os_error_keeps_actionable_detail(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def unavailable(*args: object, **kwargs: object) -> None:
+            raise OSError("executable missing")
+
+        monkeypatch.setattr(site_build.subprocess, "run", unavailable)
+
+        with pytest.raises(SiteBuildError, match="git is not available: executable missing"):
+            site_build._git(tmp_path, "status")
+
     def test_outside_a_git_work_tree_is_refused(self, tmp_path: Path) -> None:
         with pytest.raises(SiteBuildError, match="not a git work tree"):
             require_clean_work_tree(tmp_path)
@@ -192,7 +203,7 @@ class TestGitGuard:
         root, _ = throwaway_checkout(tmp_path)
         (root / "scratch.txt").write_text("x", encoding="utf-8")
 
-        with pytest.raises(SiteBuildError, match="dirty"):
+        with pytest.raises(SiteBuildError, match=r"dirty work tree .*\?\? scratch\.txt"):
             require_clean_work_tree(root)
 
     def test_a_staged_change_is_dirty(self, tmp_path: Path) -> None:
@@ -578,6 +589,46 @@ class TestObservatory:
 
 
 class TestStatusPage:
+    def test_site_facts_preserve_the_companion_schema(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        out, _ = built
+        facts = _facts(out)
+
+        assert set(facts) == {
+            "schema_version",
+            "engine_version",
+            "corpus_commit",
+            "corpus_commit_time",
+            "lovspor_commit",
+            "site_manifest_sha256",
+            "toolchain",
+            "release_key",
+            "release_content_id",
+            "capability_sha256",
+            "capability",
+            "artifacts",
+            "facts",
+        }
+        assert all(set(artifact) == {"id", "sha256"} for artifact in facts["artifacts"])
+        capability = facts["capability"]
+        assert set(capability) == {
+            "expected_runtime_identity",
+            "observed_runtime_identity",
+            "comparisons",
+            "hosted_state",
+            "process",
+            "transport",
+        }
+        assert set(capability["process"]) == {"status", "reason", "observed_at"}
+        assert set(capability["transport"]) == {
+            "status",
+            "reason",
+            "observed_at",
+            "authenticated",
+        }
+        assert set(capability["transport"]["authenticated"]) == {"status", "reason"}
+
     def test_shows_corpus_facts_hosted_state_and_the_five_comparisons_verbatim(
         self, built: tuple[Path, SiteBuildReport], world: World
     ) -> None:
