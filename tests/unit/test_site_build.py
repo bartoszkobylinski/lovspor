@@ -232,10 +232,33 @@ class TestGitGuard:
 
 
 class TestDiscoverCheckout:
-    def test_the_developer_checkout_is_discovered_from_the_imported_package(self) -> None:
+    def test_the_checkout_is_discovered_from_the_imported_package(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """``git rev-parse --show-toplevel`` from the package directory, and
-        that top's ``src/lovspor`` is the package that was imported."""
-        assert discover_checkout() == _REPO
+        that top's ``src/lovspor`` is the package that was imported. Exercised
+        on a throwaway checkout: where *this* test process imported lovspor
+        from is an environment fact (a mutation run imports it from a copy),
+        not the behaviour under test."""
+        root, _ = throwaway_checkout(tmp_path / "checkout")
+        monkeypatch.setattr(site_build, "_PACKAGE_DIR", (root / "src" / "lovspor").resolve())
+
+        assert discover_checkout() == root.resolve()
+
+    def test_a_package_that_is_not_the_checkouts_own_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A package inside a work tree but not at ``<top>/src/lovspor`` — a
+        wheel installed into a venv under some repository, or a mutation
+        harness's copy — is refused: its provenance would be that repository's
+        HEAD without being that repository's code (ADR-0014 Decision 1)."""
+        root, _ = throwaway_checkout(tmp_path / "checkout")
+        copy = root / "mutants" / "src" / "lovspor"
+        copy.mkdir(parents=True)
+        monkeypatch.setattr(site_build, "_PACKAGE_DIR", copy.resolve())
+
+        with pytest.raises(SiteBuildError, match="refusing to attest"):
+            discover_checkout()
 
     def test_a_package_outside_a_work_tree_is_refused(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
