@@ -418,6 +418,16 @@ class TestTheTrees:
         with pytest.raises(EnvelopeError, match="site/: page /en/ is not in the tree"):
             check_envelope(envelope)
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    def test_a_site_page_with_malformed_utf_8_is_a_named_envelope_refusal(
+        self, envelope: Path
+    ) -> None:
+        """The final checker turns every on-disk defect into one named envelope error."""
+        (envelope / "site" / "index.html").write_bytes(b"\xff")
+
+        with pytest.raises(EnvelopeError, match=r"site/: page /.*UTF-8"):
+            check_envelope(envelope)
+
     def test_a_script_on_a_site_page_is_refused(self, envelope: Path) -> None:
         page = envelope / "site" / "index.html"
         page.write_text(
