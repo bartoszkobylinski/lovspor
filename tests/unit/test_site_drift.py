@@ -27,6 +27,7 @@ from pytest_httpx import HTTPXMock
 from lovspor.site.capabilities import Checkout, State, parse_capabilities
 from lovspor.site.drift import (
     DriftReport,
+    _differences,
     drift_check,
     fetch_served_document,
     state_differences,
@@ -163,6 +164,20 @@ class TestStateDifferences:
         assert "process.status" in differences
         assert not any(name.startswith("process.runtime_identity.") for name in differences)
 
+    @pytest.mark.parametrize(
+        ("left", "right"),
+        [({"a": 1}, {}), ({}, {"a": 1}), ({"a": {"b": 1}}, {"a": {}})],
+        ids=["only-left", "only-right", "only-left-nested"],
+    )
+    def test_a_leaf_present_on_one_side_only_is_a_difference_at_its_path(
+        self, left: dict[str, Any], right: dict[str, Any]
+    ) -> None:
+        """Every leaf on which the two disagree, so a key one side lacks is
+        named — walked over the union of the keys, never their intersection."""
+        expected = "a.b" if "b" in str(left) else "a"
+
+        assert list(_differences(left, right, "")) == [expected]
+
     def test_observation_time_observer_and_reason_are_not_state(self) -> None:
         """Two documents of one meaning: the comparison reads none of them."""
         later = available_observation()
@@ -187,20 +202,34 @@ class TestFetchServedDocument:
         assert "authorization" not in request.headers
 
     @pytest.mark.parametrize(
-        ("answer", "reason"),
+        ("answer", "reason", "detail"),
         [
-            (httpx.ConnectError("dns"), "network"),
-            (httpx.ReadTimeout("slow"), "timeout"),
-            (httpx.Response(404), "http_404"),
-            (httpx.Response(502), "http_502"),
-            (httpx.Response(200, content=b"<html>"), "invalid"),
-            (httpx.Response(200, json={"schema_version": "2"}), "invalid"),
+            (httpx.ConnectError("dns"), "network", " (dns)"),
+            (httpx.ReadTimeout("slow"), "timeout", " (slow)"),
+            (httpx.Response(404), "http_404", ""),
+            (httpx.Response(502), "http_502", ""),
+            (
+                httpx.Response(200, content=b"<html>"),
+                "invalid",
+                " (invalid capability document: 1 validation error for CapabilityDocument)",
+            ),
+            (
+                httpx.Response(200, json={"schema_version": "2"}),
+                "invalid",
+                " (invalid capability document: 3 validation errors for CapabilityDocument)",
+            ),
         ],
         ids=["network", "timeout", "404", "502", "html", "wrong-schema"],
     )
     def test_anything_else_is_the_served_document_error_naming_the_reason(
-        self, httpx_mock: HTTPXMock, answer: httpx.Response | Exception, reason: str
+        self,
+        httpx_mock: HTTPXMock,
+        answer: httpx.Response | Exception,
+        reason: str,
+        detail: str,
     ) -> None:
+        """One line for the unit's log: the reason word, then the transport's
+        or the validator's own first line as the detail — nothing for a status."""
         if isinstance(answer, Exception):
             httpx_mock.add_exception(answer, url=SERVED_URL)
         else:
@@ -211,7 +240,7 @@ class TestFetchServedDocument:
 
         assert caught.value.reason == reason
         assert isinstance(caught.value, CapabilityDocumentError)
-        assert reason in str(caught.value)
+        assert str(caught.value) == f"served capability document unavailable: {reason}{detail}"
 
     def test_a_document_whose_state_is_not_its_own_derivation_is_invalid(
         self, httpx_mock: HTTPXMock
@@ -242,6 +271,9 @@ class TestDriftCheck:
         assert report.observed.observation.process.observer == "drift-timer"
         assert report.observed.observation.process.observed_at == "2026-09-09T12:00:00Z"
         assert report.served.observation.process.observer == "release-probe"
+        served_request = httpx_mock.get_request(url=SERVED_URL)
+        assert served_request is not None
+        assert served_request.extensions["timeout"]["read"] == settings().timeout_seconds
 
     def test_the_expectations_are_the_served_documents_checkout(
         self, httpx_mock: HTTPXMock
