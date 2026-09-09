@@ -138,6 +138,46 @@ Two probes are exposed for operators, both unauthenticated and deliberately chea
 
 The site build computes the expected values with the same functions from the checkout it builds from and reports each comparison (`runtime_tree_match`, `environment_match`, `tool_surface_match`) as an observed fact, never as "up now". Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_status`](#corpus_status) tool rather than the probes.
 
+### Release probe and drift check
+
+`deployment-capabilities.json` — the one artifact a hosted claim on the site may trace to (ADR-0014 Decision 4) — is written at release time by **`lovspor release-probe`** and re-checked hourly by **`lovspor site-drift-check`**. Both run the same probe (`lovspor.site.probe`) and share one `state` derivation with the build (`lovspor.site.capabilities.derive_state`); a document whose `state` is not that function of its own `observation` is invalid everywhere.
+
+**What is observed.** Two subjects, each on its own:
+
+| Subject | How | Recorded |
+|---|---|---|
+| `process` | `GET http://127.0.0.1:8000/readyz` over loopback | `ready` and the attestation above, verbatim, on both `200` and `503`. A payload outside the attestation schema is `unobserved, schema_invalid`; no answer is `network` / `timeout`; any other status `http_<code>`. |
+| `transport` (a) | an unauthenticated `POST https://lovspor.no/mcp` (an `initialize`, as any client's first message), through Caddy | `status_code` and the `WWW-Authenticate` challenge, verbatim. The documented answer is `401` with a `Bearer` challenge; `421`, `404`, a `5xx` or a `200` is recorded as it came and is a failed step. No answer leaves the whole transport `unobserved`. |
+| `transport` (b) | only after (a) answered the Bearer `401`: MCP `initialize` → `notifications/initialized` → `tools/list` over Streamable HTTP with the probe credential | `outcome` (`ok`, `http_<code>`, `protocol_error`), `served_tool_surface_sha256` and `served_tool_count` — the listed tools hashed by the descriptor's own function, so the served surface and the process's attested surface compare one canonical form with itself. |
+| `oauth_discovery` | `GET https://lovspor.no/.well-known/oauth-protected-resource/mcp` | `absent` on `404`; otherwise validated **semantically**, never for presence: `resource` must equal `https://lovspor.no/mcp` exactly (scheme, host, path — the constant the probe itself targets), `authorization_servers` must be non-empty, and each entry's RFC 8414 metadata (`/.well-known/oauth-authorization-server`, then `/.well-known/openid-configuration`) must be fetchable with an `issuer` naming the entry. Verdict `valid` or `invalid` with one reason — `resource_mismatch`, `no_authorization_server`, `issuer_unreachable`, `issuer_mismatch`, `malformed` — beside the document's SHA-256. The OAuth flow itself is not exercised. |
+
+`observed_at` is the probe's clock, read once per run in RFC 3339 UTC; `observer` is `release-probe` or `drift-timer`. `hosted_state` is derived, not stored: `available` only when a real client call listed the served tools through the public path and found the surface the process attests — loopback readiness alone can never yield it.
+
+**The observer-failure rule.** A failure attributable to the probe — its credential, its network, its tooling — is recorded as `unobserved` with its reason; only a failure attributable to the host is an observed failure. So a `401`/`403` on step (b) right after (a) observed the auth layer answering the expected Bearer `401` is `unobserved, probe_credential_rejected` — the auth layer refused *our* token, which says nothing about whether valid clients are served — and a credential that cannot be loaded is `unobserved, probe_credential_missing`. Either leaves `transport_surface_match` and `hosted_state` `unknown`, never `unavailable`; the site then says "not attested (unobserved: reason)" rather than "down". **Hosted state never gates the release**: the document is written in every state.
+
+**The probe credential.** A dedicated opaque token, issued like any other and constrained by quota and lifetime (scope enforcement does not exist yet — its authority equals any token's read-tool authority):
+
+```bash
+lovspor tokens issue --label site-probe --expires-in-days 30
+```
+
+Then set tiny `Limits` on that record in the credential store (`~/.config/lovspor/credentials.json` of the `lovspor` user on the droplet; the server re-reads the file on change): `max_in_flight` `1`, `rate_per_minute` `6`, `rate_burst` `3`, `daily_quota` `100`, `paid_daily_quota` `1` (the schema minimum — the probe never calls `semantic_search`). The hand-issued defaults in `Limits` are the beta brake, not the probe's.
+
+Store the plaintext **root-owned, mode `0600`**, outside the repository and the release tree:
+
+```bash
+install -d -m 700 /etc/lovspor/credentials
+umask 077 && printf '%s\n' 'lsp_…' > /etc/lovspor/credentials/site-probe
+```
+
+Both units receive it through systemd `LoadCredential=site-probe:/etc/lovspor/credentials/site-probe`, which hands the process a copy at `$CREDENTIALS_DIRECTORY/site-probe`; the commands read that path by default (`--probe-token-file` / `LOVSPOR_PROBE_TOKEN_FILE` override it for a manual run). The units run as `root`, like `lovspor-publish.service`; the secret is never readable by `User=lovspor`, the MCP service's identity, never in an environment file, and never written into any document or log — only outcomes are recorded.
+
+**Rotation.** Before the 30-day expiry (the drift timer names `probe_credential_rejected` the hour after it lapses): issue a new token with the same label, write the file, revoke the old id with `lovspor tokens revoke`, then release again so the served document is one the new credential produced.
+
+**The drift timer.** `lovspor-site-drift.timer` runs `lovspor-site-drift.service` hourly (`Persistent=true`, off the fetch timer's minute, never overlapping `lovspor-publish.service`). The check fetches the served `https://lovspor.no/deployment-capabilities.json`, runs the probe as `observer: drift-timer`, derives `state` against the served document's **own** `checkout` — a moved work tree without a release is not drift of the hosted state; a restart that changed what the process runs or serves is — and compares the two `state` parts only, never `observed_at`, `observer` or an unobserved `reason`. A rotated-but-unreleased or expired probe credential is drift of the same kind (`transport.authenticated.status` moves) and fails the unit within the hour; the fix is rotation, then a release.
+
+**Exit codes.** `release-probe`: `0` written (in every observed state), `1` refused (dirty or absent work tree, a target that is not an `http(s)` URL), `2` usage. `site-drift-check`: `0` no drift, one summary line; `1` drift — one line on stderr, `site-drift-check: drift … fields=<dotted paths>`, surfaced as a failed unit; `2` usage; `3` the served document could not be fetched or is invalid (`site-drift-check: served_document_unavailable reason=<network|timeout|http_<code>|invalid>`), its own failure, never reported as drift. `systemctl --failed` and `journalctl -u lovspor-site-drift.service` show which.
+
 ---
 
 ## Prerequisites
