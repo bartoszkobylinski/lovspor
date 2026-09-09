@@ -313,6 +313,38 @@ class TestTheId:
         with pytest.raises(EnvelopeError, match="release.caddy names /elsewhere"):
             check_envelope(envelope)
 
+    def test_the_fragment_must_not_escape_the_release_with_parent_segments(
+        self, envelope: Path
+    ) -> None:
+        """ADR-0014 requires every fragment path to stay in its immutable release."""
+        recorded = _json(envelope / FACTS)["release_content_id"]
+        release_root = envelope.parent / recorded
+        fragment = fragment_text(release_root, recorded).replace(
+            f"{release_root}/site", f"{release_root}/../outside"
+        )
+        write_fragment(envelope, fragment)
+
+        with pytest.raises(EnvelopeError, match="release.caddy names .*outside"):
+            check_envelope(envelope)
+
+    @pytest.mark.parametrize(
+        "escape",
+        ["/./site", "/site/../../other", "/site/..", "/site/../site", "/site/./x"],
+    )
+    def test_lexical_tricks_in_a_fragment_path_are_refused(
+        self, envelope: Path, escape: str
+    ) -> None:
+        """Dot segments and a sibling sharing the prefix are outside, whatever the text."""
+        recorded = _json(envelope / FACTS)["release_content_id"]
+        release_root = envelope.parent / recorded
+        fragment = fragment_text(release_root, recorded).replace(
+            f"{release_root}/site", f"{release_root}{escape}"
+        )
+        write_fragment(envelope, fragment)
+
+        with pytest.raises(EnvelopeError, match="release.caddy names .*outside"):
+            check_envelope(envelope)
+
     def test_an_id_named_directory_must_hold_that_release(
         self, copies: Callable[[str], Path]
     ) -> None:

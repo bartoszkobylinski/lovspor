@@ -23,7 +23,8 @@ id-carrying files are absent is an incomplete envelope, never a pass.
 
 import hashlib
 import json
-from pathlib import Path
+import posixpath
+from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -78,6 +79,20 @@ class EnvelopeReport(BaseModel):
             f"envelope ok: release {self.release_content_id[:12]}, {self.corpus.summary()}, "
             f"{self.site_pages} site pages"
         )
+
+
+def _inside(path: str, root: str) -> bool:
+    """``path`` is a strict descendant of ``root`` after lexical normalisation.
+
+    A textual prefix test lets ``<root>/../elsewhere`` through; ``..`` and ``.``
+    segments are refused outright (a fragment names immutable absolute paths,
+    never relative steps), and the normalised path must still start under root.
+    """
+    # Raw segments: PurePosixPath drops "." while parsing, and a fragment names
+    # canonical absolute paths, so any dot segment is refused as written.
+    if not path.startswith("/") or any(part in {"..", "."} for part in path.split("/")):
+        return False
+    return PurePosixPath(posixpath.normpath(path)).is_relative_to(root) and path != root
 
 
 def _sha256(payload: bytes) -> str:
@@ -221,7 +236,7 @@ def _check_ids(root: Path, record: ReleaseRecord, facts: dict[str, object]) -> s
             )
     expected_root = (root.resolve().parent / recomputed).as_posix()
     for path in fragment_paths(fragment):
-        if not path.startswith(expected_root + "/"):
+        if not _inside(path, expected_root):
             raise EnvelopeError(f"release.caddy names {path}, outside {expected_root}/")
     if is_release_id(root.name) and root.name != recomputed:
         raise EnvelopeError(f"directory {root.name} holds release {recomputed}")
