@@ -92,6 +92,27 @@ class TestNames:
 
 
 class TestFragment:
+    def test_generated_fragment_is_byte_exact(self) -> None:
+        root = Path("/r") / ID_A
+
+        assert fragment_text(root, ID_A) == (
+            f"# lovspor release {ID_A} — written by `lovspor release build`"
+            " (ADR-0014 Decision 6). Do not edit.\n"
+            "# Imported into the site block by the host's Caddyfile. Every path below names one\n"
+            "# immutable release directory, so the configuration is one release, never a mix.\n"
+            f"vars {RELEASE_VAR} {ID_A}\n"
+            f"@lovspor_corpus path {' '.join(CORPUS_PATHS)}\n"
+            "handle @lovspor_corpus {\n"
+            f"\timport {root}/corpus/redirects*.caddy\n"
+            f"\troot * {root}/corpus\n"
+            "\tfile_server\n"
+            "}\n"
+            "handle {\n"
+            f"\troot * {root}/site\n"
+            "\tfile_server\n"
+            "}\n"
+        )
+
     def test_carries_the_vars_directive_and_only_absolute_immutable_paths(self) -> None:
         text = fragment_text(Path("/var/www/lovspor-releases") / ID_A, ID_A)
 
@@ -218,6 +239,10 @@ class TestMarker:
         }
         assert not (tmp_path / f"{MARKER_NAME}.tmp").exists()
 
+        assert (tmp_path / MARKER_NAME).read_text(encoding="utf-8") == (
+            '{\n  "active": "' + ID_B + '",\n  "previous": "' + ID_A + '"\n}\n'
+        )
+
     def test_a_malformed_marker_is_refused_not_guessed(self, tmp_path: Path) -> None:
         (tmp_path / MARKER_NAME).write_text('{"active": "x"}', encoding="utf-8")
         with pytest.raises(IncompleteEnvelopeError, match="not a marker"):
@@ -264,6 +289,13 @@ class TestHardlinkUnchanged:
 
         assert (build / "corpus" / "lov" / "changed.html").read_bytes() == b"live!"
         assert (build / "corpus" / "lov" / "changed.html").stat().st_nlink == 1
+
+    def test_counts_every_linked_file(self, tmp_path: Path) -> None:
+        build, live = self._trees(tmp_path)
+        for root in (build, live):
+            (root / "corpus" / "second.html").write_bytes(b"also same")
+
+        assert hardlink_unchanged(build, live) == 2
 
     def test_symlinks_are_neither_followed_nor_linked(self, tmp_path: Path) -> None:
         build, live = self._trees(tmp_path)

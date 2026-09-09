@@ -1,6 +1,7 @@
 """Caddy as the release procedure sees it: pairs, argv, the admin endpoint (ADR-0014 Decision 6)."""
 
 import json
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -208,6 +209,18 @@ class TestSubprocessRunner:
         with pytest.raises(ControlPlaneError, match="cannot run /nonexistent/caddy"):
             SubprocessRunner().run(["/nonexistent/caddy", "adapt"], {})
 
+    def test_explicitly_disables_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: dict[str, object] = {}
+
+        def fake_run(argv: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        SubprocessRunner().run(["caddy", "adapt"], {})
+
+        assert seen["check"] is False
+
 
 class TestAdminAddress:
     def test_a_unix_socket_address_dials_the_socket(self) -> None:
@@ -215,6 +228,7 @@ class TestAdminAddress:
 
         assert base == "http://127.0.0.1"
         assert isinstance(transport, httpx.HTTPTransport)
+        assert transport._pool._uds == "/run/caddy/admin.sock"
 
     @pytest.mark.parametrize("address", ["localhost:2019", "tcp/localhost:2019"])
     def test_a_tcp_address_is_a_loopback_url(self, address: str) -> None:
@@ -222,6 +236,10 @@ class TestAdminAddress:
 
 
 class TestHttpxAdminClient:
+    def test_default_and_explicit_timeouts_are_preserved(self) -> None:
+        assert HttpxAdminClient("localhost:2019").timeout_seconds == 5.0
+        assert HttpxAdminClient("localhost:2019", 1.25).timeout_seconds == 1.25
+
     def test_reads_the_running_configuration(self, httpx_mock: HTTPXMock) -> None:
         config = _config(_site(_routes(ID_A)))
         httpx_mock.add_response(url="http://localhost:2019/config/", json=config)
@@ -243,9 +261,28 @@ class TestHttpxAdminClient:
 
     def test_a_non_200_or_non_json_answer_is_unobservable(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(url="http://localhost:2019/config/", status_code=403)
-        with pytest.raises(UnobservableError, match="HTTP 403"):
+        with pytest.raises(UnobservableError, match="HTTP 403") as status_error:
             HttpxAdminClient("localhost:2019").running_config()
+        assert status_error.value.reason == "admin_unreachable"
 
         httpx_mock.add_response(url="http://localhost:2019/config/", text="<html>")
-        with pytest.raises(UnobservableError, match="not JSON"):
+        with pytest.raises(UnobservableError, match="not JSON") as json_error:
             HttpxAdminClient("localhost:2019").running_config()
+        assert json_error.value.reason == "admin_unreachable"
+
+    def test_passes_configured_timeout_to_the_request(
+        self, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[object] = []
+        original = httpx.Client.get
+
+        def recording_get(client: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
+            seen.append(kwargs.get("timeout", "missing"))
+            return original(client, url, **kwargs)
+
+        monkeypatch.setattr(httpx.Client, "get", recording_get)
+        httpx_mock.add_response(url="http://localhost:2019/config/", json={})
+
+        HttpxAdminClient("localhost:2019", 1.25).running_config()
+
+        assert seen == [1.25]
