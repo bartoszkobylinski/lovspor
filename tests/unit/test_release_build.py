@@ -7,11 +7,12 @@ checkpoint that stops the procedure at a named step, in place of a kill.
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 import pytest
 
-from lovspor.release.build import STEPS, BuildRequest, build_release, candidate
+from lovspor.release.build import STEPS, BuildOutcome, BuildRequest, build_release, candidate
 from lovspor.release.check import check_envelope
 from lovspor.release.envelope import (
     BUILD_PREFIX,
@@ -25,6 +26,7 @@ from lovspor.release.envelope import (
     read_record,
 )
 from lovspor.release.errors import (
+    EnvelopeError,
     IncompleteEnvelopeError,
     ReleaseConflictError,
     ReleaseError,
@@ -128,10 +130,13 @@ class TestAFreshBuild:
         assert not (release / "deployment-capabilities.json").exists()
 
     def test_the_releases_root_is_created_and_the_envelope_is_world_readable(
-        self, world: World, releases: Path
+        self, world: World, tmp_path: Path
     ) -> None:
+        releases = tmp_path / "var" / "www" / "lovspor-releases"
+
         outcome = build(world, releases)
 
+        assert releases.is_dir()
         mode = (releases / outcome.release_content_id).stat().st_mode & 0o777
         assert mode == 0o755
 
@@ -193,6 +198,36 @@ class TestTheOrder:
         assert is_complete(release)
         assert check_envelope(release).release_content_id == release.name
 
+    def test_a_refusal_after_the_build_directory_exists_removes_it(
+        self, world: World, releases: Path
+    ) -> None:
+        def strip_the_facts(step: str) -> None:
+            if step == "linked":
+                (only,) = _build_dirs(releases)
+                (only / "site" / "site-facts.json").unlink()
+
+        with pytest.raises(EnvelopeError, match="site/site-facts.json is missing"):
+            build_release(request_for(world, releases), observer(), None, strip_the_facts)
+
+        assert list(releases.iterdir()) == []
+
+    def test_a_build_directory_pruned_underneath_the_procedure_still_names_the_refusal(
+        self, world: World, releases: Path
+    ) -> None:
+        """``prune`` in another process removes every ``.build-*``; the procedure
+        then refuses on what it finds, and its own cleanup has nothing to add."""
+
+        def prune_it(step: str) -> None:
+            if step == "linked":
+                (only,) = _build_dirs(releases)
+                shutil.rmtree(only)
+
+        with pytest.raises(IncompleteEnvelopeError) as caught:
+            build_release(request_for(world, releases), observer(), None, prune_it)
+
+        assert str(caught.value).endswith(": missing corpus/, site/")
+        assert list(releases.iterdir()) == []
+
     def test_a_refusal_removes_its_own_build_directory(self, world: World, releases: Path) -> None:
         run_git(world.checkout, "commit", "--allow-empty", "-q", "-m", "moved")
         (world.checkout / "dirty.txt").write_text("x", encoding="utf-8")
@@ -225,10 +260,14 @@ class TestTheSameId:
 
     def _refuses(self, world: World, releases: Path, existing: Path) -> None:
         before = files(existing)
-        with pytest.raises(ReleaseConflictError, match="not the same finalized release"):
+        with pytest.raises(ReleaseConflictError) as caught:
             build(world, releases)
         assert files(existing) == before
         (left,) = _build_dirs(releases)
+        assert str(caught.value) == (
+            f"{existing} exists and is not the same finalized release as {left.name}; "
+            "neither directory was touched"
+        )
         assert is_complete(left)
         assert check_envelope(left).release_content_id == existing.name
 
@@ -272,8 +311,7 @@ class TestTheShortCircuit:
 
         outcome = build(world, releases, live=live, observe=observer(LATER))
 
-        assert outcome.already_live
-        assert outcome.release_content_id == live
+        assert outcome == BuildOutcome(release_content_id=live, already_live=True, reused=False)
         assert files(releases / live) == before
         assert sorted(releases.iterdir()) == [releases / live]
 
@@ -367,6 +405,20 @@ class TestCandidate:
         with pytest.raises(ReleaseError, match="not a corpus commit"):
             candidate(request, observe)  # type: ignore[arg-type]
         assert asked == []
+
+    def test_a_corpus_that_cannot_be_entered_is_refused_before_the_probe(
+        self, world: World, tmp_path: Path
+    ) -> None:
+        corpus = tmp_path / "absent"
+        request = BuildRequest(releases=tmp_path / "r", checkout=world.checkout, corpus=corpus)
+
+        def observe(checkout: object) -> object:
+            raise AssertionError("must not be reached")
+
+        with pytest.raises(ReleaseError) as caught:
+            candidate(request, observe)  # type: ignore[arg-type]
+        assert str(caught.value).startswith(f"cannot run git in {corpus}: ")
+        assert str(corpus) in str(caught.value).partition(": ")[2]
 
     def test_the_key_is_built_from_the_probes_state(self, world: World, releases: Path) -> None:
         found = candidate(request_for(world, releases), observer())
