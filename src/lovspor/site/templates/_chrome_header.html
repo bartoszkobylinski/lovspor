@@ -1,0 +1,18 @@
+{#- The shared header: brand, the corpus links, the optional language
+    switch. Fixed strings and fixed internal links only — no count, date,
+    commit or capability state may arrive here (ADR-0014 Decision 5). -#}
+<header>
+  <a class="brand" href="/">lov<span>spor</span></a>
+  <nav class="lang">
+    {%- if lang == "en" -%}
+    <a href="/lov/">Acts</a> · <a href="/forskrift/">Regulations</a>
+    {%- else -%}
+    <a href="/lov/">Lover</a> · <a href="/forskrift/">Forskrifter</a>
+    {%- endif -%}
+    {%- if language_switch_href -%}
+    {%- if lang == "en" %} · <a href="{{ language_switch_href }}">NO</a> · <strong>EN</strong>
+    {%- else %} · <strong>NO</strong> · <a href="{{ language_switch_href }}">EN</a>
+    {%- endif -%}
+    {%- endif -%}
+  </nav>
+</header>
