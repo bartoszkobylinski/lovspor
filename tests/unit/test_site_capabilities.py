@@ -23,158 +23,29 @@ from lovspor.site.capabilities import (
     state_sha256,
 )
 from lovspor.site.errors import SiteBuildError
-
-TREE = "1" * 64
-ENVIRONMENT = "2" * 64
-SURFACE = "3" * 64
-DISCOVERY = "4" * 64
-COMMIT = "a" * 40
-INTERPRETER = "cpython 3.12.11"
-OBSERVED_AT = "2026-01-01T00:00:00Z"
-
-
-def _observation() -> dict[str, Any]:
-    """Both subjects observed and every clause of ``available`` met."""
-    return {
-        "process": {
-            "status": "observed",
-            "reason": None,
-            "observed_at": OBSERVED_AT,
-            "observer": "release-probe",
-            "ready": True,
-            "runtime_identity": {
-                "tree_sha256": TREE,
-                "environment_sha256": ENVIRONMENT,
-                "interpreter": INTERPRETER,
-            },
-            "tool_surface_sha256": SURFACE,
-            "tool_count": 17,
-            "credential_modes": ["token", "oauth"],
-            "oauth_configured": True,
-        },
-        "transport": {
-            "status": "observed",
-            "reason": None,
-            "observed_at": OBSERVED_AT,
-            "observer": "release-probe",
-            "unauthenticated": {"status_code": 401, "challenge": "Bearer"},
-            "authenticated": {
-                "status": "observed",
-                "reason": None,
-                "outcome": "ok",
-                "served_tool_surface_sha256": SURFACE,
-                "served_tool_count": 17,
-            },
-            "oauth_discovery": {
-                "verdict": "valid",
-                "invalid_reason": None,
-                "document_sha256": DISCOVERY,
-            },
-        },
-    }
-
-
-def _checkout() -> dict[str, Any]:
-    return {
-        "lovspor_commit": COMMIT,
-        "expected_runtime_identity": {
-            "tree_sha256": TREE,
-            "environment_sha256": ENVIRONMENT,
-            "interpreter": INTERPRETER,
-        },
-        "expected_tool_surface_sha256": SURFACE,
-    }
-
-
-def _document(observation: dict[str, Any] | None = None) -> dict[str, Any]:
-    observation = observation if observation is not None else _observation()
-    state = derive_state(
-        Observation.model_validate(observation), Checkout.model_validate(_checkout())
-    )
-    return {
-        "schema_version": "1",
-        "observation": observation,
-        "state": state.model_dump(mode="json"),
-    }
+from tests.unit.site_fixtures import (
+    DISCOVERY,
+    OBSERVED_AT,
+    available_observation,
+    capability_document,
+    checkout_expectations,
+    readyz_503,
+    unobserved_authenticated,
+    unobserved_process,
+    unobserved_transport,
+)
 
 
 def _derive(observation: dict[str, Any]) -> tuple[dict[str, str], str]:
     parsed = Observation.model_validate(observation)
-    comparisons = derive_comparisons(parsed, Checkout.model_validate(_checkout()))
+    comparisons = derive_comparisons(parsed, Checkout.model_validate(checkout_expectations()))
     return comparisons.model_dump(mode="json"), derive_hosted_state(parsed, comparisons)
-
-
-def _unobserved_process(reason: str) -> dict[str, Any]:
-    observation = _observation()
-    observation["process"] = {
-        "status": "unobserved",
-        "reason": reason,
-        "observed_at": OBSERVED_AT,
-        "observer": "release-probe",
-        "ready": None,
-        "runtime_identity": None,
-        "tool_surface_sha256": None,
-        "tool_count": None,
-        "credential_modes": None,
-        "oauth_configured": None,
-    }
-    return observation
-
-
-def _unobserved_transport(reason: str) -> dict[str, Any]:
-    observation = _observation()
-    observation["transport"] = {
-        "status": "unobserved",
-        "reason": reason,
-        "observed_at": OBSERVED_AT,
-        "observer": "release-probe",
-        "unauthenticated": None,
-        "authenticated": {
-            "status": "unobserved",
-            "reason": "not_attempted",
-            "outcome": None,
-            "served_tool_surface_sha256": None,
-            "served_tool_count": None,
-        },
-        "oauth_discovery": {
-            "verdict": "unobserved",
-            "invalid_reason": None,
-            "document_sha256": None,
-        },
-    }
-    return observation
-
-
-def _unobserved_authenticated(reason: str) -> dict[str, Any]:
-    observation = _observation()
-    observation["transport"]["authenticated"] = {
-        "status": "unobserved",
-        "reason": reason,
-        "outcome": None,
-        "served_tool_surface_sha256": None,
-        "served_tool_count": None,
-    }
-    return observation
-
-
-def _readyz_503() -> dict[str, Any]:
-    """A 503 carries no attestation: observed, not ready, every value absent."""
-    observation = _observation()
-    observation["process"].update(
-        ready=False,
-        runtime_identity=None,
-        tool_surface_sha256=None,
-        tool_count=None,
-        credential_modes=None,
-        oauth_configured=None,
-    )
-    return observation
 
 
 class TestSchema:
     def test_accepts_a_document_whose_state_is_its_own_derivation(self, tmp_path: Path) -> None:
         path = tmp_path / "deployment-capabilities.json"
-        path.write_text(json.dumps(_document()), encoding="utf-8")
+        path.write_text(json.dumps(capability_document()), encoding="utf-8")
 
         document = load_capabilities(path)
 
@@ -184,12 +55,12 @@ class TestSchema:
 
     def test_accepts_every_unobserved_shape(self) -> None:
         for observation in (
-            _unobserved_process("timeout"),
-            _unobserved_transport("network"),
-            _unobserved_authenticated("probe_credential_rejected"),
-            _readyz_503(),
+            unobserved_process("timeout"),
+            unobserved_transport("network"),
+            unobserved_authenticated("probe_credential_rejected"),
+            readyz_503(),
         ):
-            CapabilityDocument.model_validate(_document(observation))
+            CapabilityDocument.model_validate(capability_document(observation))
 
     @pytest.mark.parametrize(
         "mutate",
@@ -281,7 +152,7 @@ class TestSchema:
         ],
     )
     def test_rejects_a_document_outside_the_closed_schema(self, mutate, tmp_path: Path) -> None:
-        document = _document()
+        document = capability_document()
         mutate(document)
         path = tmp_path / "deployment-capabilities.json"
         path.write_text(json.dumps(document), encoding="utf-8")
@@ -308,14 +179,14 @@ class TestSchema:
     )
     def test_an_unobserved_record_records_no_value(self, mutate) -> None:
         """The document never records a guess (ADR-0014 Decision 4)."""
-        observation = _unobserved_process("timeout")
+        observation = unobserved_process("timeout")
         mutate(observation)
 
         with pytest.raises(CapabilityDocumentError):
             parse_capabilities(json.dumps(_document_unchecked(observation)).encode("utf-8"))
 
     def test_an_unobserved_step_records_no_value(self) -> None:
-        observation = _unobserved_authenticated("probe_credential_rejected")
+        observation = unobserved_authenticated("probe_credential_rejected")
         observation["transport"]["authenticated"]["served_tool_count"] = 17
 
         with pytest.raises(CapabilityDocumentError):
@@ -324,7 +195,7 @@ class TestSchema:
     def test_rejects_a_state_that_is_not_the_function_of_its_observation(
         self, tmp_path: Path
     ) -> None:
-        document = _document()
+        document = capability_document()
         document["state"]["hosted_state"] = "unavailable"
         path = tmp_path / "deployment-capabilities.json"
         path.write_text(json.dumps(document), encoding="utf-8")
@@ -333,7 +204,7 @@ class TestSchema:
             load_capabilities(path)
 
     def test_rejects_a_state_whose_checkout_was_edited(self, tmp_path: Path) -> None:
-        document = _document()
+        document = capability_document()
         document["state"]["checkout"]["expected_tool_surface_sha256"] = "5" * 64
         path = tmp_path / "deployment-capabilities.json"
         path.write_text(json.dumps(document), encoding="utf-8")
@@ -354,7 +225,7 @@ class TestSchema:
         assert issubclass(SiteBuildError, LovsporError)
 
     def test_models_are_frozen(self) -> None:
-        document = CapabilityDocument.model_validate(_document())
+        document = CapabilityDocument.model_validate(capability_document())
 
         with pytest.raises(ValidationError):
             document.state.hosted_state = "unknown"  # type: ignore[misc]
@@ -362,20 +233,20 @@ class TestSchema:
 
 def _document_unchecked(observation: dict[str, Any]) -> dict[str, Any]:
     """A document body around an observation the schema may refuse."""
-    state = _document()["state"]
+    state = capability_document()["state"]
     return {"schema_version": "1", "observation": observation, "state": state}
 
 
 class TestHostedState:
     def test_every_clause_met_is_available(self) -> None:
-        comparisons, hosted = _derive(_observation())
+        comparisons, hosted = _derive(available_observation())
 
         assert hosted == "available"
         assert comparisons == dict.fromkeys(comparisons, "true")
 
     def test_loopback_only_is_never_available(self) -> None:
         """A healthy /readyz beside an unreachable public host is unknown."""
-        comparisons, hosted = _derive(_unobserved_transport("network"))
+        comparisons, hosted = _derive(unobserved_transport("network"))
 
         assert hosted == "unknown"
         assert comparisons["transport_surface_match"] == "unknown"
@@ -388,13 +259,13 @@ class TestHostedState:
         "reason", ["timeout", "network", "tool_missing", "schema_invalid", "http_500"]
     )
     def test_an_unobserved_process_is_unknown_across_the_board(self, reason: str) -> None:
-        comparisons, hosted = _derive(_unobserved_process(reason))
+        comparisons, hosted = _derive(unobserved_process(reason))
 
         assert hosted == "unknown"
         assert comparisons == dict.fromkeys(comparisons, "unknown")
 
     def test_a_readyz_503_is_unavailable_with_the_checkout_comparisons_unknown(self) -> None:
-        comparisons, hosted = _derive(_readyz_503())
+        comparisons, hosted = _derive(readyz_503())
 
         assert hosted == "unavailable"
         assert comparisons["runtime_tree_match"] == "unknown"
@@ -418,12 +289,12 @@ class TestHostedState:
     def test_step_a_not_a_bearer_401_is_unavailable(
         self, status_code: int, challenge: str | None
     ) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["transport"]["unauthenticated"] = {
             "status_code": status_code,
             "challenge": challenge,
         }
-        observation["transport"]["authenticated"] = _unobserved_authenticated("not_attempted")[
+        observation["transport"]["authenticated"] = unobserved_authenticated("not_attempted")[
             "transport"
         ]["authenticated"]
 
@@ -432,7 +303,7 @@ class TestHostedState:
         assert hosted == "unavailable"
 
     def test_the_bearer_scheme_is_matched_as_a_scheme(self) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["transport"]["unauthenticated"]["challenge"] = 'bearer realm="lovspor"'
         assert _derive(observation)[1] == "available"
         observation["transport"]["unauthenticated"]["challenge"] = "Bearerish"
@@ -449,14 +320,14 @@ class TestHostedState:
         ],
     )
     def test_observer_failure_on_step_b_is_unknown_never_unavailable(self, reason: str) -> None:
-        comparisons, hosted = _derive(_unobserved_authenticated(reason))
+        comparisons, hosted = _derive(unobserved_authenticated(reason))
 
         assert hosted == "unknown"
         assert comparisons["transport_surface_match"] == "unknown"
 
     @pytest.mark.parametrize("outcome", ["http_500", "http_421", "http_403", "protocol_error"])
     def test_a_failed_step_b_is_unavailable(self, outcome: str) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["transport"]["authenticated"].update(
             outcome=outcome, served_tool_surface_sha256=None, served_tool_count=None
         )
@@ -466,7 +337,7 @@ class TestHostedState:
         assert hosted == "unavailable"
 
     def test_a_served_surface_that_differs_from_the_process_is_unavailable(self) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["transport"]["authenticated"]["served_tool_surface_sha256"] = "5" * 64
         observation["transport"]["authenticated"]["served_tool_count"] = 16
 
@@ -476,7 +347,7 @@ class TestHostedState:
         assert hosted == "unavailable"
 
     def test_ready_false_with_an_attestation_is_unavailable(self) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["process"]["ready"] = False
 
         _comparisons, hosted = _derive(observation)
@@ -486,7 +357,7 @@ class TestHostedState:
 
 class TestComparisons:
     def test_a_code_change_moving_tree_and_surface_is_exactly_two_falses(self) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["process"]["runtime_identity"]["tree_sha256"] = "5" * 64
         observation["process"]["tool_surface_sha256"] = "6" * 64
         observation["transport"]["authenticated"]["served_tool_surface_sha256"] = "6" * 64
@@ -503,11 +374,11 @@ class TestComparisons:
         assert hosted == "available"
 
     def test_environment_match_needs_both_hash_and_interpreter(self) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["process"]["runtime_identity"]["interpreter"] = "cpython 3.13.1"
         assert _derive(observation)[0]["environment_match"] == "false"
 
-        observation = _observation()
+        observation = available_observation()
         observation["process"]["runtime_identity"]["environment_sha256"] = "5" * 64
         assert _derive(observation)[0]["environment_match"] == "false"
 
@@ -527,7 +398,7 @@ class TestComparisons:
     def test_oauth_discovery_consistent_table(
         self, verdict: str, configured: bool, expected: str
     ) -> None:
-        observation = _observation()
+        observation = available_observation()
         observation["process"]["oauth_configured"] = configured
         observation["transport"]["oauth_discovery"] = {
             "verdict": verdict,
@@ -538,10 +409,10 @@ class TestComparisons:
         assert _derive(observation)[0]["oauth_discovery_consistent"] == expected
 
     def test_oauth_discovery_consistent_is_unknown_without_the_process_claim(self) -> None:
-        assert _derive(_readyz_503())[0]["oauth_discovery_consistent"] == "unknown"
+        assert _derive(readyz_503())[0]["oauth_discovery_consistent"] == "unknown"
 
     def test_comparisons_take_only_the_three_values(self) -> None:
-        comparisons, _hosted = _derive(_observation())
+        comparisons, _hosted = _derive(available_observation())
 
         assert set(comparisons) == {
             "runtime_tree_match",
@@ -556,7 +427,8 @@ class TestComparisons:
 class TestStateHash:
     def test_state_drops_observed_at_observer_and_unobserved_reason(self) -> None:
         state = derive_state(
-            Observation.model_validate(_observation()), Checkout.model_validate(_checkout())
+            Observation.model_validate(available_observation()),
+            Checkout.model_validate(checkout_expectations()),
         )
         dumped = json.dumps(state.model_dump(mode="json"))
 
@@ -567,42 +439,43 @@ class TestStateHash:
         assert state.transport.authenticated.status == "observed"
 
     def test_state_sha256_is_invariant_to_observation_time_and_observer(self) -> None:
-        base = _observation()
+        base = available_observation()
         later = copy.deepcopy(base)
         later["process"]["observed_at"] = "2026-02-02T12:00:00Z"
         later["transport"]["observed_at"] = "2026-02-02T12:00:00Z"
         later["transport"]["observer"] = "drift-timer"
 
-        checkout = Checkout.model_validate(_checkout())
+        checkout = Checkout.model_validate(checkout_expectations())
         assert state_sha256(
             derive_state(Observation.model_validate(base), checkout)
         ) == state_sha256(derive_state(Observation.model_validate(later), checkout))
 
     def test_state_sha256_is_invariant_to_the_unobserved_reason(self) -> None:
-        checkout = Checkout.model_validate(_checkout())
+        checkout = Checkout.model_validate(checkout_expectations())
         rejected = derive_state(
-            Observation.model_validate(_unobserved_authenticated("probe_credential_rejected")),
+            Observation.model_validate(unobserved_authenticated("probe_credential_rejected")),
             checkout,
         )
         missing = derive_state(
-            Observation.model_validate(_unobserved_authenticated("probe_credential_missing")),
+            Observation.model_validate(unobserved_authenticated("probe_credential_missing")),
             checkout,
         )
 
         assert state_sha256(rejected) == state_sha256(missing)
 
     def test_state_sha256_moves_with_the_state(self) -> None:
-        checkout = Checkout.model_validate(_checkout())
-        available = derive_state(Observation.model_validate(_observation()), checkout)
+        checkout = Checkout.model_validate(checkout_expectations())
+        available = derive_state(Observation.model_validate(available_observation()), checkout)
         unknown = derive_state(
-            Observation.model_validate(_unobserved_authenticated("timeout")), checkout
+            Observation.model_validate(unobserved_authenticated("timeout")), checkout
         )
 
         assert state_sha256(available) != state_sha256(unknown)
 
     def test_state_sha256_is_the_canonical_json_digest(self) -> None:
         state = derive_state(
-            Observation.model_validate(_observation()), Checkout.model_validate(_checkout())
+            Observation.model_validate(available_observation()),
+            Checkout.model_validate(checkout_expectations()),
         )
         canonical = json.dumps(
             state.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -611,7 +484,7 @@ class TestStateHash:
         assert state_sha256(state) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def test_derive_state_is_pure(self) -> None:
-        observation = Observation.model_validate(_observation())
-        checkout = Checkout.model_validate(_checkout())
+        observation = Observation.model_validate(available_observation())
+        checkout = Checkout.model_validate(checkout_expectations())
 
         assert derive_state(observation, checkout) == derive_state(observation, checkout)
