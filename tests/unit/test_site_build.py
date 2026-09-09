@@ -1089,7 +1089,6 @@ class TestScans:
         with pytest.raises(SiteBuildError, match="canonical"):
             scan_page("/y/", self._page("<p>a</p>"))
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     def test_every_canonical_must_name_the_page_itself(self) -> None:
         canonical = f'<link rel="canonical" href="{SITE_ORIGIN}/x/">'
         markup = self._page("<p>a</p>").replace(

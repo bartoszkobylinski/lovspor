@@ -92,7 +92,7 @@ class _PageScanner(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.text: list[str] = []
         self.descriptions: list[str] = []
-        self.canonical: str | None = None
+        self.canonicals: list[str] = []
         self.alternate_links: list[tuple[str, str]] = []
         self.links: list[str] = []
         self.findings: list[str] = []
@@ -165,7 +165,7 @@ class _PageScanner(HTMLParser):
         if rel not in _ALLOWED_LINK_RELS:
             self.findings.append(f"<link rel={rel!r}> is not canonical or alternate")
         elif rel == "canonical":
-            self.canonical = href
+            self.canonicals.append(href)
         elif attributes.get("hreflang"):
             self.alternate_links.append((attributes["hreflang"] or "", href))
 
@@ -196,8 +196,10 @@ def scan_page(page: str, markup: str) -> None:
         raise SiteBuildError(
             f"page {page}: {len(scanner.descriptions)} meta descriptions, expected exactly one"
         )
-    if scanner.canonical != canonical_url(page):
-        raise SiteBuildError(f"page {page}: rel=canonical is {scanner.canonical!r}, not itself")
+    if scanner.canonicals != [canonical_url(page)]:
+        raise SiteBuildError(
+            f"page {page}: rel=canonical is {scanner.canonicals!r}, not exactly itself once"
+        )
 
 
 def _internal_link_allowed(href: str, emitted: frozenset[str]) -> bool:
