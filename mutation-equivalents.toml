@@ -1394,7 +1394,7 @@ invariant, which the module's concurrency tests pin.
 
 [[equivalent]]
 file = "src/lovspor/tool_surface.py"
-symbol = "describe_tool_surface"
+symbol = "describe_listed_tools"
 registered = "2026-09-09, PR #262, from run 34315002166"
 mutation = """
 -    canonical = json.dumps(documents, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -1414,7 +1414,7 @@ same SHA-256 out; no test can tell them apart. This argues from Python's own
 
 [[equivalent]]
 file = "src/lovspor/tool_surface.py"
-symbol = "describe_tool_surface"
+symbol = "describe_listed_tools"
 registered = "2026-09-09, PR #262, from run 34315002166"
 mutation = """
 -        schema_sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
@@ -1875,4 +1875,191 @@ justification = """
 Same argument as the entry above: the fourth operand of the `or` chain is
 never evaluated for a document the schema accepts, so its spelling cannot
 reach any output.
+"""
+
+[[equivalent]]
+file = "src/lovspor/cli.py"
+symbol = "_probe_token"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        token = path.read_text(encoding="utf-8").strip()
++        token = path.read_text(encoding="UTF-8").strip()
+"""
+justification = """
+Codec names are case-insensitive: `Path.read_text` hands the name to the
+text wrapper, which resolves it through the codec registry, and the registry
+normalises the name (`codecs.lookup("UTF-8")` and `codecs.lookup("utf-8")`
+return the same CodecInfo), so both spellings decode the same bytes to the
+same credential. Python's codec registry, not a dependency. (`encoding=None`
+is NOT equivalent — it is the locale's codec — and is killed under the C
+locale by `test_the_credential_is_read_as_utf_8_whatever_the_process_locale`.)
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/capabilities.py"
+symbol = "bearer_401"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        and _BEARER.search(_QUOTED.sub('""', step.challenge)) is not None
++        and _BEARER.search(_QUOTED.sub('XX""XX', step.challenge)) is not None
+"""
+justification = """
+The substituted text is read by exactly one consumer, `_BEARER.search`, whose
+pattern `(?:^|,)\\s*Bearer(?=\\s|,|$)` (IGNORECASE) consumes only start-of-string,
+a comma, whitespace and the letters of "bearer", and looks ahead for
+whitespace, a comma or end-of-string. Both replacements, `""` and `XX""XX`, are
+non-empty, contain no newline, no comma, no whitespace and no letter of
+"bearer", so no match can begin inside, end inside or span across a replaced
+span, and everything outside the replaced spans is identical in the two
+strings. A match therefore exists in one exactly when it exists in the other,
+and the function's boolean is the same for every challenge. Pure Python `re`
+semantics, no dependency; checked by a 200,000-string fuzz over the pattern's
+alphabet (quotes, commas, spaces, backslashes, "Bearer" in both cases, "X")
+with zero disagreements.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/drift.py"
+symbol = "state_differences"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    return tuple(_differences(served.model_dump(mode="json"), observed.model_dump(mode="json"), ""))
++    return tuple(_differences(served.model_dump(mode="json"), observed.model_dump(mode="json"), None))
+"""
+assumption_test = "tests/unit/test_site_drift.py::TestStateDifferences::test_names_every_differing_leaf_by_its_dotted_path_sorted"
+justification = """
+`_differences` reads its `path` argument in two places. In the dict branch it
+is read for truth only — `f"{path}.{key}" if path else key` — and `None` is
+falsy exactly as `""` is, so the first level of keys becomes the same bare
+names and every deeper call receives a non-empty string, never the root value
+again. The other read, `yield path`, is the leaf branch, reached at the root
+only if the two arguments are not both dicts; they are two `model_dump`
+results of `State`, and the pydantic dump of a model is a dict, so the leaf
+branch is never entered with the root value. The named test pins that the
+walk recurses from the root (the paths it asserts are dotted from the first
+level; a non-dict root would yield the root value alone).
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "observe_process"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    answer = _send(run.client, run.request("GET", run.settings.readiness_url))
++    answer = _send(run.client, run.request("get", run.settings.readiness_url))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
+justification = """
+httpx normalises the method before the request exists: Request.__init__ does
+`self.method = method.upper()`, so "get" and "GET" build the same request and
+put the same bytes on the wire; a test asserting request.method only ever
+sees the normalised value. Same argument as the registered
+`observatory/fetch._request` entry, pinned by the same assumption test.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_issuer_of / observe_discovery"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    answer = _send(run.client, run.request("GET", url))
++    answer = _send(run.client, run.request("get", url))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
+justification = """
+The same line at two sites (the issuer metadata read and the discovery
+document read), the same argument as the `observe_process` entry above:
+httpx upper-cases the method in Request.__init__, so the mutated call builds
+the identical request.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "observe_transport"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        run.client, run.request("POST", run.settings.public_mcp_url, json=body, headers=headers)
++        run.client, run.request("post", run.settings.public_mcp_url, json=body, headers=headers)
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_httpx_still_normalises_the_request_method"
+justification = """
+Same argument as the two GET entries above, for the one POST the probe builds
+outside `_McpSession`: httpx upper-cases the method in Request.__init__, so
+"post" and "POST" build the identical request. The assumption test covers
+"post" as well as "get".
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_rpc_result"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
++    content_type = response.headers.get("CONTENT-TYPE", "").split(";")[0].strip().lower()
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_header_lookup_is_case_insensitive"
+justification = """
+`response.headers` is an httpx `Headers`, whose lookup lower-cases the
+requested name before comparing it with the stored lower-cased names, so
+`get("CONTENT-TYPE")` and `get("content-type")` return the same value for the
+same response and the media type is read identically. A property of httpx,
+so the assumption test pins it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_rpc_result"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
++    content_type = response.headers.get("content-type", "XXXX").split(";")[0].strip().lower()
+"""
+justification = """
+The default is reached only when the answer carries no Content-Type, and it is
+consumed by nothing but the two equality tests that follow: after
+`.split(";")[0].strip().lower()`, "" stays "" and "XXXX" becomes "xxxx", and
+neither equals "application/json" or "text/event-stream", so both fall through
+to `return None`. The string is not stored or reported. Pure Python string
+semantics; the no-header case itself is pinned by
+`test_an_answer_without_a_content_type_is_a_protocol_error`.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "observe_transport"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        status_code=answer.status_code, challenge=answer.headers.get("www-authenticate")
++        status_code=answer.status_code, challenge=answer.headers.get("WWW-AUTHENTICATE")
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_httpx_header_lookup_is_case_insensitive"
+justification = """
+Same argument as the `_rpc_result` Content-Type entry: httpx `Headers` lookup
+is case-insensitive, so both spellings read the same challenge verbatim from
+the same answer.
+"""
+
+[[equivalent]]
+file = "src/lovspor/site/probe.py"
+symbol = "_sse_data"
+registered = "2026-09-09, PR #266, from run 34382097818"
+mutation = """
+-        data = "\\n".join(line[5:].removeprefix(" ") for line in lines if line.startswith("data:"))
++        data = "\\n".join(line[5:].removesuffix(" ") for line in lines if line.startswith("data:"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_the_json_rpc_parser_ignores_a_space_at_a_line_margin"
+justification = """
+The two spellings differ on one line's value by at most one U+0020 at one
+margin: the original drops a leading space, the mutant a trailing one, and
+for a value that is a lone space both produce "". The joined payload is
+consumed in two ways only. For truth (`and data`): it is empty in one exactly
+when it is empty in the other, since a line's value is empty after either
+rule only when it was "" or " ". By `JSONRPCMessage.model_validate_json`: a
+space at a line margin is outside every JSON token, because a JSON string
+cannot contain a raw line break and so never straddles two `data:` lines,
+and the parser (pydantic's) treats a U+0020 before or after a token as
+insignificant whitespace — pinned by the assumption test — so the parsed
+message, or the validation failure, is the same. `lstrip()` was the earlier
+spelling and had no provable twin: it also removed non-breaking spaces,
+which the parser does not ignore; the spec-exact rule replaced it.
 """
