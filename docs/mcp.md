@@ -124,9 +124,19 @@ Two probes are exposed for operators, both unauthenticated and deliberately chea
 | Endpoint | Meaning |
 |---|---|
 | `GET /healthz` | process is up — `{"status": "ok"}` |
-| `GET /readyz` | corpus is present — `{"status": "ready"}`, or `503` `{"status": "unavailable"}` |
+| `GET /readyz` | corpus is present — `{"status": "ready", ...}`, or `503` `{"status": "unavailable", ...}` |
 
-Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_status`](#corpus_status) tool rather than the probes.
+`/readyz` also carries a **runtime attestation**: what this process actually runs, computed once at startup and served beside `status` on both the `200` and the `503` answer (only `ready` moves between them), so the release probe can capture it verbatim as the `process` observation of `deployment-capabilities.json` (ADR-0014 Decision 4). It attests the process, never a file: the tree hash covers the package the interpreter imports and the environment hash covers the distributions it imports — a `git pull` without a successful `uv sync` shows up as a mismatch rather than being papered over by a lockfile. The route is unauthenticated, so the payload is public by construction — no secret, URL, hostname, commit or timestamp is in it.
+
+- `schema_version` — `"1"`; a further field is a schema bump.
+- `ready` — `true` on `200`, `false` on `503`; the same corpus-present rule `status` follows.
+- `runtime_identity.tree_sha256` — SHA-256 over the installed `lovspor` package files, excluding `lovspor/site/`, `__pycache__/` and `*.pyc`.
+- `runtime_identity.environment_sha256` — SHA-256 over the installed distributions in `lovspor`'s production dependency closure (normalised name, version, direct URL where one applies), enumerated through `importlib.metadata`; never derived from `uv.lock`.
+- `runtime_identity.interpreter` — implementation and `major.minor.patch`, e.g. `cpython 3.12.11`.
+- `tool_surface_sha256`, `tool_count` — the tool-surface descriptor (every tool's name, description, input and output schema, in one canonical JSON form) of this very server instance, so what a client's `tools/list` returns can be compared with what the process claims to serve.
+- `credential_modes` — `["token"]` or `["token", "oauth"]`; `oauth_configured` — whether the AuthKit pair was set when the process started. Both are the process's own claim about its configuration, not an observation of the public path.
+
+The site build computes the expected values with the same functions from the checkout it builds from and reports each comparison (`runtime_tree_match`, `environment_match`, `tool_surface_match`) as an observed fact, never as "up now". Richer freshness (corpus age, staleness, HEAD commit) stays behind the [`corpus_status`](#corpus_status) tool rather than the probes.
 
 ---
 

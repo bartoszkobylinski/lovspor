@@ -75,6 +75,7 @@ from lovspor.access import (
     ServiceLimits,
     self_service_limits_from_env,
 )
+from lovspor.attestation import compute_attestation, corpus_present
 from lovspor.embeddings import (
     EmbeddingConfig,
     EmbeddingFile,
@@ -4983,18 +4984,24 @@ def serve_http(corpus_path: Path, http: HttpConfig) -> None:
             flush=True,
         )
     server = build_server(corpus_path, http=http)
-    _add_health_routes(server, corpus_path)
+    _add_health_routes(server, corpus_path, http)
     server.run(transport="streamable-http")
 
 
-def _add_health_routes(server: FastMCP, corpus_path: Path) -> None:
-    """Attach ``/healthz`` (process up) and ``/readyz`` (corpus present).
+def _add_health_routes(server: FastMCP, corpus_path: Path, http: HttpConfig) -> None:
+    """Attach ``/healthz`` (process up) and ``/readyz`` (corpus present + attestation).
 
     Kept deliberately cheap so a probe hammering them cannot stall the event
     loop: readiness only stats ``manifest.json`` rather than parsing it or
-    shelling out to git. Richer freshness stays behind the ``corpus_status``
-    tool. custom_route endpoints are unauthenticated by design (FastMCP).
+    shelling out to git, and the runtime attestation ``/readyz`` carries
+    (ADR-0014 Decision 4, ``lovspor.attestation``) is computed once here,
+    from this very server instance, never per request. Richer freshness
+    stays behind the ``corpus_status`` tool. custom_route endpoints are
+    unauthenticated by design (FastMCP), so the payload is public.
     """
+    attestation = compute_attestation(
+        corpus_path, oauth_configured=http.oauth_pair() is not None, server_factory=lambda _: server
+    )
 
     # FastMCP's custom_route decorator is untyped; scope the ignore tightly.
     @server.custom_route("/healthz", methods=["GET"])  # type: ignore[untyped-decorator]
@@ -5003,6 +5010,8 @@ def _add_health_routes(server: FastMCP, corpus_path: Path) -> None:
 
     @server.custom_route("/readyz", methods=["GET"])  # type: ignore[untyped-decorator]
     async def readyz(request: Request) -> Response:
-        if (corpus_path / "manifest.json").is_file():
-            return JSONResponse({"status": "ready"})
-        return JSONResponse({"status": "unavailable"}, status_code=503)
+        if corpus_present(corpus_path):
+            return JSONResponse({"status": "ready", **attestation.payload(ready=True)})
+        return JSONResponse(
+            {"status": "unavailable", **attestation.payload(ready=False)}, status_code=503
+        )

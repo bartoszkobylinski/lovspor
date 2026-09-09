@@ -39,6 +39,7 @@ from lovspor.access import (
     hash_token,
     write_credential_file,
 )
+from lovspor.attestation import ProcessAttestation, RuntimeIdentity, compute_attestation
 from lovspor.embeddings import (
     LEGACY_SPACE_DESCRIPTOR,
     OpenAIEmbedder,
@@ -5373,7 +5374,7 @@ def test_warm_builds_the_embedding_index_when_an_embedder_is_configured(
 def test_health_routes_report_process_and_corpus_readiness(tmp_path: Path) -> None:
     _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
     server = build_server(tmp_path, http=HttpConfig())
-    _add_health_routes(server, tmp_path)
+    _add_health_routes(server, tmp_path, HttpConfig())
 
     client = TestClient(server.streamable_http_app())
 
@@ -5383,23 +5384,146 @@ def test_health_routes_report_process_and_corpus_readiness(tmp_path: Path) -> No
 
     readyz = client.get("/readyz")
     assert readyz.status_code == 200
-    assert readyz.json() == {"status": "ready"}
+    # The attestation of this very server instance, verbatim, after ``status``
+    # (ADR-0014 Decision 4): the release probe captures it as the process record.
+    attestation = compute_attestation(
+        tmp_path, oauth_configured=False, server_factory=lambda _: server
+    )
+    assert readyz.json() == {"status": "ready", **attestation.model_dump(mode="json")}
+    assert next(iter(readyz.json())) == "status"
+    assert readyz.json()["ready"] is True
+    assert readyz.json()["credential_modes"] == ["token"]
+    assert readyz.json()["oauth_configured"] is False
 
 
 def test_readyz_reports_unavailable_when_the_corpus_manifest_disappears(
     tmp_path: Path,
 ) -> None:
     """A probe must fail the instance out when the corpus vanishes underneath
-    it rather than letting it serve on."""
+    it rather than letting it serve on. The attestation still describes the
+    process — only ``ready`` moves — so the probe records what runs."""
     _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
     server = build_server(tmp_path, http=HttpConfig())
-    _add_health_routes(server, tmp_path)
+    _add_health_routes(server, tmp_path, HttpConfig())
+    attestation = compute_attestation(
+        tmp_path, oauth_configured=False, server_factory=lambda _: server
+    )
     (tmp_path / "manifest.json").unlink()
 
     response = TestClient(server.streamable_http_app()).get("/readyz")
 
     assert response.status_code == 503
-    assert response.json() == {"status": "unavailable"}
+    assert response.json() == {"status": "unavailable", **attestation.payload(ready=False)}
+    assert response.json()["ready"] is False
+
+
+def test_readyz_recovers_when_the_corpus_manifest_reappears_without_recomputing_attestation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Readiness is observed on every request even though process identity is
+    fixed at startup, so restoring the corpus must recover the same process."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    manifest = tmp_path / "manifest.json"
+    manifest_bytes = manifest.read_bytes()
+    server = build_server(tmp_path, http=HttpConfig())
+    attestation = ProcessAttestation(
+        ready=False,
+        runtime_identity=RuntimeIdentity(
+            tree_sha256="1" * 64,
+            environment_sha256="2" * 64,
+            interpreter="cpython 3.12.3",
+        ),
+        tool_surface_sha256="3" * 64,
+        tool_count=17,
+        credential_modes=("token",),
+        oauth_configured=False,
+    )
+    monkeypatch.setattr(mcp_module, "compute_attestation", lambda *_a, **_k: attestation)
+    manifest.unlink()
+    _add_health_routes(server, tmp_path, HttpConfig())
+    readyz = next(
+        route.endpoint for route in server.streamable_http_app().routes if route.path == "/readyz"
+    )
+
+    unavailable = asyncio.run(readyz(None))
+    manifest.write_bytes(manifest_bytes)
+    recovered = asyncio.run(readyz(None))
+    unavailable_payload = json.loads(unavailable.body)
+    recovered_payload = json.loads(recovered.body)
+
+    assert unavailable.status_code == 503
+    assert unavailable_payload["status"] == "unavailable"
+    assert unavailable_payload["ready"] is False
+    assert recovered.status_code == 200
+    assert recovered_payload["status"] == "ready"
+    assert recovered_payload["ready"] is True
+    assert {k: v for k, v in unavailable_payload.items() if k not in {"status", "ready"}} == {
+        k: v for k, v in recovered_payload.items() if k not in {"status", "ready"}
+    }
+
+
+def test_readyz_attests_oauth_exactly_when_the_authkit_pair_is_configured(
+    tmp_path: Path,
+) -> None:
+    """``credential_modes`` and ``oauth_configured`` are the process's own claim
+    about the pair it started with — and the pair's URLs never reach the payload."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    creds = tmp_path / "credentials.json"
+    write_credential_file(creds, [])
+    config = HttpConfig(
+        credentials_path=creds, authkit_domain=_AUTHKIT_DOMAIN, public_url=_PUBLIC_URL
+    )
+    server = build_server(tmp_path, http=config)
+    _add_health_routes(server, tmp_path, config)
+
+    response = TestClient(server.streamable_http_app()).get("/readyz")
+
+    payload = response.json()
+    assert payload["credential_modes"] == ["token", "oauth"]
+    assert payload["oauth_configured"] is True
+    assert payload == {
+        "status": "ready",
+        **compute_attestation(
+            tmp_path, oauth_configured=True, server_factory=lambda _: server
+        ).model_dump(mode="json"),
+    }
+    assert _AUTHKIT_DOMAIN not in response.text
+    assert _PUBLIC_URL not in response.text
+    assert str(creds) not in response.text
+
+
+def test_readyz_attestation_is_computed_once_at_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once, when the routes attach — never per request: the identity hashes
+    the installed tree and enumerates the environment, and a probe loop must
+    not pay for that on every poll (ADR-0014 Decision 4)."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    server = build_server(tmp_path, http=HttpConfig())
+    calls: list[dict[str, object]] = []
+    real = compute_attestation
+
+    def counting(corpus_path: Path, **kwargs: object) -> object:
+        calls.append({"corpus_path": corpus_path, **kwargs})
+        return real(corpus_path, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(mcp_module, "compute_attestation", counting)
+
+    _add_health_routes(server, tmp_path, HttpConfig())
+    assert len(calls) == 1
+    assert calls[0]["corpus_path"] == tmp_path
+    assert calls[0]["oauth_configured"] is False
+    # The seam hands back this very server: no second server is built to hash.
+    factory = calls[0]["server_factory"]
+    assert callable(factory)
+    assert factory(tmp_path) is server
+
+    client = TestClient(server.streamable_http_app())
+    first = client.get("/readyz").json()
+    second = client.get("/readyz").json()
+
+    assert len(calls) == 1
+    assert first == second
 
 
 def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
@@ -5416,14 +5540,23 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
         def run(self, transport: str) -> None:
             calls.append(f"run:{transport}")
 
+    built = _FakeServer()
+
     def fake_build(path: Path, *, http: HttpConfig | None = None) -> _FakeServer:
         captured["path"] = path
         captured["http"] = http
         calls.append("build")
-        return _FakeServer()
+        return built
+
+    def fake_health(server: object, corpus_path: Path, http: HttpConfig) -> None:
+        # Exact positional contract: the health routes attest the SERVED
+        # instance against THIS corpus under THIS bind config — a swapped,
+        # dropped or None argument would attest something else.
+        captured["health"] = (server, corpus_path, http)
+        calls.append("health")
 
     monkeypatch.setattr(mcp_module, "build_server", fake_build)
-    monkeypatch.setattr(mcp_module, "_add_health_routes", lambda *_: calls.append("health"))
+    monkeypatch.setattr(mcp_module, "_add_health_routes", fake_health)
 
     config = HttpConfig(host="127.0.0.1", port=9001, credentials_path=tmp_path / "creds.json")
     mcp_module.serve_http(tmp_path, config)
@@ -5431,6 +5564,8 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
     assert calls == ["load_env", "build", "health", "run:streamable-http"]
     assert captured["path"] == tmp_path
     assert captured["http"] == config
+    assert captured["health"] == (built, tmp_path, config)
+    assert captured["health"][0] is built
 
 
 def test_serve_http_refuses_to_start_without_authentication(tmp_path: Path) -> None:
