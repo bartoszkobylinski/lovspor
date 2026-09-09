@@ -1040,8 +1040,6 @@ class TestScans:
         with pytest.raises(SiteBuildError, match=r"external (?:xlink:)?href="):
             scan_page("/x/", self._page(body))
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     @pytest.mark.parametrize(
         "body",
         [

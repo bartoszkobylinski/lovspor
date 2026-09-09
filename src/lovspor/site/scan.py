@@ -157,7 +157,9 @@ class _PageScanner(HTMLParser):
             self.findings.append(f"@import or external url() in style attribute on <{tag}>")
         for name in (*_ASSET_ATTRIBUTES, *_SVG_ASSET_ATTRIBUTES.get(tag, ())):
             for candidate in _asset_urls(attributes.get(name)):
-                if _EXTERNAL.match(candidate):
+                if _FORBIDDEN_SCHEME.match(candidate):
+                    self.findings.append(f"{name}={candidate!r} on <{tag}>")
+                elif _EXTERNAL.match(candidate):
                     self.findings.append(f"external {name}={candidate!r} on <{tag}>")
 
     def _link(self, attributes: Attributes) -> None:
