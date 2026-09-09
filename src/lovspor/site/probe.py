@@ -250,12 +250,17 @@ def _step_failed(outcome: str) -> AuthenticatedStep:
 
 
 def _sse_data(body: str) -> list[str]:
-    """The ``data`` of every ``message`` event on one event stream."""
+    """The ``data`` of every ``message`` event on one event stream.
+
+    A field value loses the one space that may follow its colon, as the
+    SSE specification says, and no other character: the payload is the
+    server's bytes, joined across ``data:`` lines with LF.
+    """
     payloads: list[str] = []
     for event in _LINE_ENDING.sub("\n", body).split("\n\n"):
         lines = [line for line in event.splitlines() if line]
         kind = next((line[6:].strip() for line in lines if line.startswith("event:")), "message")
-        data = "\n".join(line[5:].lstrip() for line in lines if line.startswith("data:"))
+        data = "\n".join(line[5:].removeprefix(" ") for line in lines if line.startswith("data:"))
         if kind == "message" and data:
             payloads.append(data)
     return payloads
