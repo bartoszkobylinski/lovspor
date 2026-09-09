@@ -93,15 +93,17 @@ class TestNames:
 
 class TestFragment:
     def test_generated_fragment_is_byte_exact(self) -> None:
-        root = Path("/r") / ID_A
+        """The comment lines are the operator's only warning; the directives are Caddy's."""
+        root = Path("/var/www/lovspor-releases") / ID_A
 
         assert fragment_text(root, ID_A) == (
             f"# lovspor release {ID_A} — written by `lovspor release build`"
             " (ADR-0014 Decision 6). Do not edit.\n"
             "# Imported into the site block by the host's Caddyfile. Every path below names one\n"
             "# immutable release directory, so the configuration is one release, never a mix.\n"
-            f"vars {RELEASE_VAR} {ID_A}\n"
-            f"@lovspor_corpus path {' '.join(CORPUS_PATHS)}\n"
+            f"vars lovspor_release {ID_A}\n"
+            "@lovspor_corpus path /lov /lov/* /forskrift /forskrift/* /sitemap.xml /sitemaps/*"
+            " /robots.txt /site-manifest.json\n"
             "handle @lovspor_corpus {\n"
             f"\timport {root}/corpus/redirects*.caddy\n"
             f"\troot * {root}/corpus\n"
@@ -165,6 +167,15 @@ class TestFragment:
 
         assert read_fragment(tmp_path) == fragment_text(tmp_path / ID_A, ID_A)
         assert not (tmp_path / f"{FRAGMENT_NAME}.tmp").exists()
+
+    def test_is_read_as_utf_8_whatever_the_process_locale(
+        self, tmp_path: Path, c_locale: None
+    ) -> None:
+        """The header's em dash is outside ASCII; a root unit without LANG still reads it."""
+        text = fragment_text(tmp_path / ID_A, ID_A)
+        (tmp_path / FRAGMENT_NAME).write_bytes(text.encode("utf-8"))
+
+        assert read_fragment(tmp_path) == text
 
     def test_an_absent_fragment_is_an_incomplete_envelope(self, tmp_path: Path) -> None:
         with pytest.raises(IncompleteEnvelopeError, match=FRAGMENT_NAME):
@@ -263,13 +274,16 @@ class TestHardlinkUnchanged:
     def test_links_only_byte_identical_files_at_the_same_path(self, tmp_path: Path) -> None:
         build, live = self._trees(tmp_path)
         os.utime(live / "corpus" / "lov" / "same.html", (1_700_000_000, 1_700_000_000))
+        for root in (live, build):
+            (root / "corpus" / "robots.txt").write_bytes(b"User-agent: *\n")
 
         linked = hardlink_unchanged(build, live)
 
-        assert linked == 1
+        assert linked == 2
         same = build / "corpus" / "lov" / "same.html"
         assert same.stat().st_ino == (live / "corpus" / "lov" / "same.html").stat().st_ino
         assert same.stat().st_mtime == 1_700_000_000
+        assert (build / "corpus" / "robots.txt").stat().st_nlink == 2
         assert (build / "corpus" / "lov" / "changed.html").read_bytes() == b"build"
         assert (build / "corpus" / "lov" / "changed.html").stat().st_nlink == 1
         assert (build / "corpus" / "new.html").stat().st_nlink == 1
@@ -295,12 +309,15 @@ class TestHardlinkUnchanged:
     def test_symlinks_are_neither_followed_nor_linked(self, tmp_path: Path) -> None:
         build, live = self._trees(tmp_path)
         (build / "corpus" / "alias.html").symlink_to(live / "corpus" / "gone.html")
+        (live / "corpus" / "alias.html").write_bytes(b"gone")
         (live / "corpus" / "lov" / "linked.html").symlink_to(live / "corpus" / "gone.html")
         (build / "corpus" / "lov" / "linked.html").write_bytes(b"gone")
 
-        hardlink_unchanged(build, live)
+        linked = hardlink_unchanged(build, live)
 
+        assert linked == 1
         assert (build / "corpus" / "alias.html").is_symlink()
+        assert (live / "corpus" / "alias.html").stat().st_nlink == 1
         assert (build / "corpus" / "lov" / "linked.html").stat().st_nlink == 1
 
     def test_an_unlinkable_twin_is_a_named_refusal(
