@@ -1,0 +1,30 @@
+[Unit]
+Description=Compare the running MCP host with the served deployment-capabilities.json (ADR-0014)
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/docs/mcp.md
+After=network-online.target
+Wants=network-online.target
+# The release rewrites the served document; a check that straddles the switch
+# would compare a fresh observation with a document about to be replaced.
+After=lovspor-publish.service
+Conflicts=lovspor-publish.service
+
+[Service]
+Type=oneshot
+# Root, like lovspor-publish.service: the probe credential is delivered to the
+# unit's own identity and is never readable by User=lovspor, the MCP service's
+# identity. The check itself only reads — loopback /readyz, the public /mcp as a
+# client, the served document — and writes nothing.
+User=root
+WorkingDirectory=/opt/lovspor/app
+# The probe credential: an operator-issued opaque token with tiny limits, kept
+# root-owned 0600 at the source path and handed to the process as
+# $CREDENTIALS_DIRECTORY/site-probe, which site-drift-check reads by default.
+# Rotation: `lovspor tokens issue --label site-probe --expires-in-days 30`,
+# then a release. See docs/mcp.md § Release probe and drift check.
+LoadCredential=site-probe:/etc/lovspor/credentials/site-probe
+ExecStart=/opt/lovspor/app/.venv/bin/lovspor site-drift-check --served-url https://lovspor.no/deployment-capabilities.json --observer drift-timer
+# Exit 1 = drift (one log line names the differing fields), 3 = the served
+# document could not be read; both surface as a failed unit (systemctl --failed).
+# oneshot disables the start timeout by default; every request the check makes
+# is bounded, so a short ceiling keeps a stalled proxy from wedging the timer.
+TimeoutStartSec=120

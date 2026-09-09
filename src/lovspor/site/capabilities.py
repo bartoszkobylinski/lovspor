@@ -94,7 +94,13 @@ _PROCESS_VALUES = (
     "oauth_configured",
 )
 _SERVED_VALUES = ("served_tool_surface_sha256", "served_tool_count")
-_BEARER = re.compile(r"^bearer(?:\s|$)", re.IGNORECASE)
+# RFC 7235 §4.1: one header may carry several challenges, comma-separated, in any
+# order; the scheme token is case-insensitive and ends at whitespace, a comma or
+# the end of the value. So "Basic realm=\"x\", Bearer realm=\"y\"" advertises Bearer.
+_BEARER = re.compile(r"(?:^|,)\s*Bearer(?=\s|,|$)", re.IGNORECASE)
+# RFC 7230 §3.2.6 quoted-string: a comma or the word Bearer inside a parameter's
+# quoted value (realm="legacy, Bearer") is data, not a challenge boundary.
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"')
 _UNAUTHORIZED = 401
 """Step (a)'s documented answer with a Bearer challenge (RFC 6750 §3)."""
 
@@ -339,12 +345,19 @@ def derive_comparisons(observation: Observation, checkout: Checkout) -> Comparis
     )
 
 
-def _bearer_401(step: UnauthenticatedStep | None) -> bool:
+def bearer_401(step: UnauthenticatedStep | None) -> bool:
+    """Step (a) answered the documented ``401`` with a Bearer challenge (RFC 6750 §3).
+
+    The one clause both the derivation and the probe read: ``available``
+    requires it, and the probe attempts step (b) only after it — a
+    credential presented to a transport that did not ask for one observes
+    nothing about the auth layer.
+    """
     return (
         step is not None
         and step.status_code == _UNAUTHORIZED
         and step.challenge is not None
-        and _BEARER.match(step.challenge) is not None
+        and _BEARER.search(_QUOTED.sub('""', step.challenge)) is not None
     )
 
 
@@ -356,7 +369,7 @@ def _subject_failed(observation: Observation, comparisons: Comparisons) -> bool:
         return False
     authenticated = transport.authenticated
     return (
-        not _bearer_401(transport.unauthenticated)
+        not bearer_401(transport.unauthenticated)
         or (authenticated.status == "observed" and authenticated.outcome != "ok")
         or comparisons.transport_surface_match == "false"
     )
@@ -370,7 +383,7 @@ def derive_hosted_state(observation: Observation, comparisons: Comparisons) -> H
         process.status == "observed"
         and process.ready is True
         and transport.status == "observed"
-        and _bearer_401(transport.unauthenticated)
+        and bearer_401(transport.unauthenticated)
         and authenticated.status == "observed"
         and authenticated.outcome == "ok"
         and comparisons.transport_surface_match == "true"

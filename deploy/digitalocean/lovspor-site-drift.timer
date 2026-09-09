@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly drift check of the hosted MCP state against the served site (ADR-0014)
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/docs/mcp.md
+
+[Timer]
+# Hourly, off the hour so it never coincides with the daily fetch/publish pair;
+# Persistent catches a missed run (droplet was off/rebooted) on next boot.
+OnCalendar=*-*-* *:17:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

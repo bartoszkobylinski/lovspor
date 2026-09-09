@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import pytest
+from mcp.types import JSONRPCMessage
+from pydantic import ValidationError
 
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
 from tests.unit.site_fixtures import (
@@ -94,15 +97,55 @@ def _broken_assumption_tests(entries: list[dict[str, Any]], root: Path) -> list[
 
 
 def test_httpx_still_normalises_the_request_method() -> None:
-    """Pins the argument that waives the ``"GET"`` -> ``"get"`` mutant in
-    ``observatory/fetch.py``. The day httpx stops upper-casing the method, that
-    mutant becomes a real defect — a request going out as ``get`` — and this
-    test is what says so."""
+    """Pins the argument that waives the ``"GET"`` -> ``"get"`` mutants in
+    ``observatory/fetch.py`` and ``site/probe.py`` and the ``"POST"`` ->
+    ``"post"`` one in the probe. The day httpx stops upper-casing the method,
+    those mutants become real defects — a request going out as ``get`` — and
+    this test is what says so."""
     url = "https://www.baerum.kommune.no/"
 
     assert httpx.Request("get", url).method == "GET"
     assert httpx.Request("gEt", url).method == "GET"
     assert httpx.Request("GET", url).method == "GET"
+    assert httpx.Request("post", url).method == "POST"
+
+
+def test_assumption_httpx_header_lookup_is_case_insensitive() -> None:
+    """Pins the argument that waives the ``get("content-type")`` ->
+    ``get("CONTENT-TYPE")`` and ``get("www-authenticate")`` ->
+    ``get("WWW-AUTHENTICATE")`` mutants in ``site/probe.py``: an httpx
+    ``Headers`` lookup lower-cases the requested name, so every spelling reads
+    the one stored value, on a response's headers as on any other."""
+    response = httpx.Response(
+        401,
+        headers={"Content-Type": "text/event-stream; charset=utf-8", "WWW-Authenticate": "Bearer"},
+    )
+
+    for name in ("content-type", "CONTENT-TYPE", "Content-Type"):
+        assert response.headers.get(name) == "text/event-stream; charset=utf-8", name
+    for name in ("www-authenticate", "WWW-AUTHENTICATE", "WWW-Authenticate"):
+        assert response.headers.get(name) == "Bearer", name
+    assert response.headers.get("X-ABSENT", "") == ""
+
+
+def test_assumption_the_json_rpc_parser_ignores_a_space_at_a_line_margin() -> None:
+    """Pins the argument that waives the ``removeprefix(" ")`` ->
+    ``removesuffix(" ")`` mutant in ``site/probe.py::_sse_data``: the two rules
+    differ by one U+0020 at one margin of a ``data:`` line's value, and the
+    JSON-RPC parser — pydantic's, under ``JSONRPCMessage`` — treats a space
+    before or after a token as insignificant, on one line and across the LF
+    that joins two. A non-breaking space is not whitespace to it, which is why
+    the earlier ``lstrip()`` had no such twin."""
+    answer = '{"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}'
+    reference = JSONRPCMessage.model_validate_json(answer).root
+
+    for padded in (f" {answer}", f"{answer} ", f" {answer} "):
+        assert JSONRPCMessage.model_validate_json(padded).root == reference, padded
+    head, tail = answer.split(", ", 1)
+    for joined in (f"{head},\n {tail}", f"{head}, \n{tail}", f"{head},\n{tail}"):
+        assert JSONRPCMessage.model_validate_json(joined).root == reference, joined
+    with pytest.raises(ValidationError):
+        JSONRPCMessage.model_validate_json(f"\u00a0{answer}")
 
 
 def test_assumption_a_python_mode_dump_serialises_like_json_mode() -> None:

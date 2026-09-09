@@ -9,7 +9,11 @@ from pydantic import ValidationError
 
 import lovspor.tool_surface
 from lovspor.llhb.mcp_surface import tool_surface
-from lovspor.tool_surface import ToolSurfaceDescriptor, describe_tool_surface
+from lovspor.tool_surface import (
+    ToolSurfaceDescriptor,
+    describe_listed_tools,
+    describe_tool_surface,
+)
 from tests.unit.llhb_fixtures import build_corpus
 
 CORPUS_DOCS = {"testloven": ("Testloven", "### § 1. Formål\n\nLoven gjelder.\n")}
@@ -100,6 +104,30 @@ class TestDescribeToolSurface:
 
         assert descriptor.names == ()
         assert descriptor.tool_count == 0
+        assert descriptor.schema_sha256 == hashlib.sha256(b"[]").hexdigest()
+
+
+class TestDescribeListedTools:
+    def test_hashes_a_listed_tool_set_exactly_as_the_server_description_does(
+        self, corpus: Path
+    ) -> None:
+        """The release probe hashes what ``tools/list`` returned through the
+        public path with this function; the two sides of
+        ``transport_surface_match`` must be one hashing, not two."""
+        listed = describe_listed_tools([_Tool("b"), _Tool("a")])
+        described = describe_tool_surface(corpus, server_factory=lambda _p: _StubServer("b", "a"))
+
+        assert listed == described
+
+    def test_orders_by_name_whatever_order_the_server_listed(self) -> None:
+        assert describe_listed_tools([_Tool("b"), _Tool("a")]) == describe_listed_tools(
+            [_Tool("a"), _Tool("b")]
+        )
+
+    def test_an_empty_listing_is_the_empty_surface(self) -> None:
+        descriptor = describe_listed_tools([])
+
+        assert descriptor.names == ()
         assert descriptor.schema_sha256 == hashlib.sha256(b"[]").hexdigest()
 
 

@@ -28,3 +28,29 @@ class CapabilityDocumentError(SiteBuildError):
     every state — both subjects ``unobserved`` included — so this is a
     check on the release procedure, not on the hosted service.
     """
+
+
+class ProbeError(LovsporError):
+    """The release probe cannot run at all.
+
+    Never an observation failure — a subject that did not answer is
+    recorded as ``unobserved`` with its reason, and the document exists in
+    every state (ADR-0014 Decision 4). This is the probe refusing its own
+    inputs: a clock without a timezone, whose reading could not be written
+    as the RFC 3339 UTC instant every ``observed_at`` must be.
+    """
+
+
+class ServedDocumentError(CapabilityDocumentError):
+    """The served ``deployment-capabilities.json`` could not be read for the drift check.
+
+    ``reason`` is one word for the unit's log line — ``network``,
+    ``timeout``, ``http_<code>`` or ``invalid`` — so a failed
+    ``lovspor-site-drift.service`` names what stopped the comparison
+    before it started; this is its own exit, never reported as drift.
+    """
+
+    def __init__(self, reason: str, detail: str = "") -> None:
+        suffix = f" ({detail})" if detail else ""
+        super().__init__(f"served capability document unavailable: {reason}{suffix}")
+        self.reason = reason
