@@ -153,6 +153,8 @@ class _PageScanner(HTMLParser):
                 self.findings.append(f"{name} handler on <{tag}>")
             if name in _REFERENCE_ATTRIBUTES and value and _FORBIDDEN_SCHEME.match(value):
                 self.findings.append(f"{name}={value!r} on <{tag}>")
+        if _STYLE_IMPORT.search(attributes.get("style") or ""):
+            self.findings.append(f"@import or external url() in style attribute on <{tag}>")
         for name in (*_ASSET_ATTRIBUTES, *_SVG_ASSET_ATTRIBUTES.get(tag, ())):
             for candidate in _asset_urls(attributes.get(name)):
                 if _EXTERNAL.match(candidate):

@@ -1063,6 +1063,28 @@ class TestScans:
                 self._page("<p>a</p>").replace("<style>", '<style>@import url("https://x.no");'),
             )
 
+    def test_an_external_asset_in_a_style_attribute_fails(self) -> None:
+        with pytest.raises(SiteBuildError, match="external|url"):
+            scan_page(
+                "/x/",
+                self._page('<p style="background-image:url(https://example.com/a.png)">a</p>'),
+            )
+
+    @pytest.mark.parametrize(
+        "style",
+        [
+            "background:url('//cdn.example.com/a.png')",
+            "background:url(HTTPS://example.com/a.png)",
+            "@import url(https://example.com/a.css)",
+        ],
+    )
+    def test_style_attribute_variants_fail(self, style: str) -> None:
+        with pytest.raises(SiteBuildError, match="style attribute"):
+            scan_page("/x/", self._page(f'<p style="{style}">a</p>'))
+
+    def test_a_local_url_in_a_style_attribute_passes(self) -> None:
+        scan_page("/x/", self._page('<p style="background:url(/a.png)">a</p>'))
+
     def test_canonical_must_be_the_page_itself(self) -> None:
         with pytest.raises(SiteBuildError, match="canonical"):
             scan_page("/y/", self._page("<p>a</p>"))
