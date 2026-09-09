@@ -1,9 +1,9 @@
 """Synthetic capability documents for CI and tests (ADR-0014 Decision 4).
 
-The release probe that captures ``deployment-capabilities.json`` from
-the running server is later work; until it exists — and beside it, for
-tests — this generator writes a document of the same closed schema in
-which the **checkout part is real** and the **observations are
+The release probe (``lovspor.site.probe``) captures
+``deployment-capabilities.json`` from the running server; beside it, for
+CI and tests, this generator writes a document of the same closed schema
+in which the **checkout part is real** and the **observations are
 synthesised**: ``state.checkout`` is read from the work tree the
 generator runs in (its ``HEAD``, the runtime identity of its
 ``src/lovspor`` and installed environment, the tool-surface descriptor
