@@ -1,6 +1,7 @@
 """The capability-document fixture generator (ADR-0014 Decision 4, plan B)."""
 
 import ast
+import hashlib
 import json
 from pathlib import Path
 
@@ -89,6 +90,11 @@ INTENT: dict[FixtureCase, tuple[str, dict[str, str]]] = {
 }
 
 
+def _salt(label: str) -> str:
+    """The fixture's synthesised hash for ``label``, recomputed rather than imported."""
+    return hashlib.sha256(f"fixture:{label}".encode()).hexdigest()
+
+
 @pytest.fixture(scope="module")
 def repos(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str, Path]:
     root = tmp_path_factory.mktemp("fixture")
@@ -167,6 +173,7 @@ class TestSyntheticDocument:
         assert process.status == "observed" and process.ready is True
         assert transport.unauthenticated is not None
         assert transport.unauthenticated.status_code == 401
+        assert transport.unauthenticated.challenge == "Bearer"  # RFC 6750 spelling, verbatim
         assert transport.authenticated.outcome == "ok"
         assert transport.authenticated.served_tool_count == process.tool_count
         assert process.tool_count == describe_tool_surface(corpus).tool_count
@@ -200,6 +207,87 @@ class TestSyntheticDocument:
             assert step.status == "unobserved"
             assert step.reason == reason
             assert step.served_tool_count is None
+
+    def test_the_transport_unobserved_case_records_no_transport_value(
+        self, repos: tuple[Path, str, Path]
+    ) -> None:
+        checkout, _, corpus = repos
+        transport = synthetic_document(
+            checkout, corpus, FixtureCase.transport_unobserved
+        ).observation.transport
+
+        assert transport.status == "unobserved"
+        assert transport.reason == "network"
+        assert transport.unauthenticated is None
+        assert transport.authenticated.status == "unobserved"
+        assert transport.authenticated.reason == "not_attempted"
+        assert transport.oauth_discovery.verdict == "unobserved"
+
+    @pytest.mark.parametrize(
+        ("case", "differing", "same"),
+        [
+            (FixtureCase.tree_differs, "tree_sha256", "environment_sha256"),
+            (FixtureCase.environment_differs, "environment_sha256", "tree_sha256"),
+        ],
+    )
+    def test_a_differing_identity_component_is_the_labelled_salt(
+        self, repos: tuple[Path, str, Path], case: FixtureCase, differing: str, same: str
+    ) -> None:
+        """The synthesised hashes are a contract: the generator promises the
+        same bytes across its versions, so each is a fixed salt of its label."""
+        checkout, _, corpus = repos
+        document = synthetic_document(checkout, corpus, case)
+        identity = document.observation.process.runtime_identity
+        expected = document.state.checkout.expected_runtime_identity
+
+        assert identity is not None
+        assert getattr(identity, differing) == _salt(differing.removesuffix("_sha256"))
+        assert getattr(identity, same) == getattr(expected, same)
+        assert identity.interpreter == expected.interpreter
+
+    def test_a_differing_surface_is_the_labelled_salt_served_as_attested(
+        self, repos: tuple[Path, str, Path]
+    ) -> None:
+        checkout, _, corpus = repos
+        document = synthetic_document(checkout, corpus, FixtureCase.surface_differs)
+        process, transport = document.observation.process, document.observation.transport
+
+        assert process.tool_surface_sha256 == _salt("surface")
+        assert transport.authenticated.served_tool_surface_sha256 == _salt("surface")
+        assert transport.authenticated.served_tool_count == process.tool_count
+
+    def test_a_differing_served_surface_is_the_labelled_salt_with_one_more_tool(
+        self, repos: tuple[Path, str, Path]
+    ) -> None:
+        checkout, _, corpus = repos
+        document = synthetic_document(checkout, corpus, FixtureCase.served_surface_differs)
+        process, transport = document.observation.process, document.observation.transport
+
+        assert process.tool_count is not None
+        assert process.tool_surface_sha256 == document.state.checkout.expected_tool_surface_sha256
+        assert transport.authenticated.served_tool_surface_sha256 == _salt("served")
+        assert transport.authenticated.served_tool_count == process.tool_count + 1
+
+    def test_a_valid_discovery_document_is_the_labelled_salt(
+        self, repos: tuple[Path, str, Path]
+    ) -> None:
+        checkout, _, corpus = repos
+        document = synthetic_document(checkout, corpus, FixtureCase.oauth_discovery_valid)
+
+        assert document.observation.transport.oauth_discovery.document_sha256 == _salt("discovery")
+
+    @pytest.mark.parametrize(
+        "case", [FixtureCase.process_not_ready, FixtureCase.process_unobserved]
+    )
+    def test_an_absent_process_is_served_an_unattested_salt_and_no_tools(
+        self, repos: tuple[Path, str, Path], case: FixtureCase
+    ) -> None:
+        checkout, _, corpus = repos
+        step = synthetic_document(checkout, corpus, case).observation.transport.authenticated
+
+        assert step.status == "observed" and step.outcome == "ok"
+        assert step.served_tool_surface_sha256 == _salt("unattested")
+        assert step.served_tool_count == 0
 
     def test_the_process_not_ready_case_carries_no_attestation(
         self, repos: tuple[Path, str, Path]
