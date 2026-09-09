@@ -276,15 +276,18 @@ class TestHardlinkUnchanged:
         assert (build / "corpus" / "alias.html").is_symlink()
         assert (build / "corpus" / "lov" / "linked.html").stat().st_nlink == 1
 
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory modes")
-    def test_an_unlinkable_twin_is_a_named_refusal(self, tmp_path: Path) -> None:
+    def test_an_unlinkable_twin_is_a_named_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         build, live = self._trees(tmp_path)
-        (live / "corpus" / "lov").chmod(0o500)
-        (build / "corpus" / "lov").chmod(0o500)
-        try:
-            with pytest.raises(ReleaseError, match="cannot hard-link"):
-                hardlink_unchanged(build, live)
-        finally:
-            (live / "corpus" / "lov").chmod(0o755)
-            (build / "corpus" / "lov").chmod(0o755)
+
+        def refuse_link(source: Path, destination: Path) -> None:
+            del source, destination
+            raise PermissionError("read-only filesystem")
+
+        monkeypatch.setattr("lovspor.release.linking.os.link", refuse_link)
+
+        with pytest.raises(ReleaseError, match="cannot hard-link.*read-only filesystem"):
+            hardlink_unchanged(build, live)
+
         assert not list(build.rglob("*.link"))
