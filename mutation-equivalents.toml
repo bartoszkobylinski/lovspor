@@ -1391,3 +1391,40 @@ only on an unreachable one (KeyError versus a returned None). Argued
 from Python's own dict semantics plus the module's single-remover
 invariant, which the module's concurrency tests pin.
 """
+
+[[equivalent]]
+file = "src/lovspor/tool_surface.py"
+symbol = "describe_tool_surface"
+registered = "2026-09-09, PR #262, from run 34315002166"
+mutation = """
+-    canonical = json.dumps(documents, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
++    canonical = json.dumps(documents, sort_keys=True, separators=(",", ":"), ensure_ascii=None)
+"""
+justification = """
+The standard library's JSON encoder reads `ensure_ascii` only for its truth
+value: the encoder branches on `if self.ensure_ascii:` to pick the ASCII-escaping
+string encoder, and otherwise emits the string as is. `None` is falsy, exactly as
+`False` is, so both arguments select the same encoder and produce the same
+canonical bytes for every input — ASCII or not. The fast-path check that inspects
+the keyword arguments is already bypassed by `sort_keys=True` and the explicit
+`separators`, so no code path sees the two values differently. Same bytes in,
+same SHA-256 out; no test can tell them apart. This argues from Python's own
+`None` semantics, not from a third-party dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/tool_surface.py"
+symbol = "describe_tool_surface"
+registered = "2026-09-09, PR #262, from run 34315002166"
+mutation = """
+-        schema_sha256=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
++        schema_sha256=hashlib.sha256(canonical.encode("UTF-8")).hexdigest(),
+"""
+justification = """
+Codec names are case-insensitive in Python: `str.encode` resolves the name
+through the codec registry, which normalises it (lower-cases, folds spaces and
+hyphens) before lookup, so "utf-8", "UTF-8" and "utf8" all resolve to the same
+UTF-8 codec and encode identical bytes. The digest of identical bytes is
+identical. This is a property of the language's codec registry, not of any
+dependency.
+"""
