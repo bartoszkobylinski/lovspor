@@ -372,6 +372,35 @@ class TestSchema:
                 {**unobserved, "oauth_discovery": observed["oauth_discovery"]}
             )
 
+    @pytest.mark.parametrize(
+        ("step", "message"),
+        [
+            pytest.param(
+                {"status": "observed", "reason": "timeout", "outcome": "protocol_error"},
+                "an observed record carries no reason",
+                id="observed with a reason",
+            ),
+            pytest.param(
+                {"status": "unobserved", "reason": None, "outcome": None},
+                "an unobserved record names its reason",
+                id="unobserved without a reason",
+            ),
+        ],
+    )
+    def test_the_reason_rule_is_reported_in_exactly_these_words(
+        self, step: dict[str, Any], message: str
+    ) -> None:
+        """The `match=` assertions above are substring searches, so they would
+        accept a message with text glued around it; the wording is a documented
+        rule (ADR:737-743) and is pinned whole here."""
+        absent = {"served_tool_surface_sha256": None, "served_tool_count": None}
+
+        with pytest.raises(ValidationError) as caught:
+            AuthenticatedStep.model_validate({**absent, **step})
+
+        (error,) = caught.value.errors()
+        assert error["msg"] == f"Value error, {message}"
+
 
 def _document_unchecked(observation: dict[str, Any]) -> dict[str, Any]:
     """A document body around an observation the schema may refuse."""

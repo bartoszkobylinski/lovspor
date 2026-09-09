@@ -41,13 +41,20 @@ def test_scanner_decodes_character_references_before_numeral_check() -> None:
     [
         ("<script></script>", "<script> element"),
         ('<p onclick="go()">x</p>', "onclick handler on <p>"),
-        ('<p style="url(https://example.invalid/x)">x</p>', "style attribute"),
+        (
+            '<p style="url(https://example.invalid/x)">x</p>',
+            "@import or external url() in style attribute on <p>",
+        ),
         ("<style>@import url(/x)</style>", "@import or external url() in <style>"),
     ],
 )
 def test_scanner_reports_the_exact_no_script_finding(markup: str, message: str) -> None:
-    with pytest.raises(SiteBuildError, match=message.replace("(", "\\(").replace(")", "\\)")):
+    """Whole-message equality: a substring match would accept a finding with
+    text glued around it, and the finding is the only thing the build reports."""
+    with pytest.raises(SiteBuildError) as caught:
         scan_page("/x/", _page(markup))
+
+    assert str(caught.value) == f"page /x/ is outside the no-script rule: {message}"
 
 
 def test_nested_end_tags_restore_body_text_scanning() -> None:
