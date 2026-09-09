@@ -5495,14 +5495,23 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
         def run(self, transport: str) -> None:
             calls.append(f"run:{transport}")
 
+    built = _FakeServer()
+
     def fake_build(path: Path, *, http: HttpConfig | None = None) -> _FakeServer:
         captured["path"] = path
         captured["http"] = http
         calls.append("build")
-        return _FakeServer()
+        return built
+
+    def fake_health(server: object, corpus_path: Path, http: HttpConfig) -> None:
+        # Exact positional contract: the health routes attest the SERVED
+        # instance against THIS corpus under THIS bind config — a swapped,
+        # dropped or None argument would attest something else.
+        captured["health"] = (server, corpus_path, http)
+        calls.append("health")
 
     monkeypatch.setattr(mcp_module, "build_server", fake_build)
-    monkeypatch.setattr(mcp_module, "_add_health_routes", lambda *_: calls.append("health"))
+    monkeypatch.setattr(mcp_module, "_add_health_routes", fake_health)
 
     config = HttpConfig(host="127.0.0.1", port=9001, credentials_path=tmp_path / "creds.json")
     mcp_module.serve_http(tmp_path, config)
@@ -5510,6 +5519,8 @@ def test_serve_http_loads_dotenv_then_serves_over_streamable_http(
     assert calls == ["load_env", "build", "health", "run:streamable-http"]
     assert captured["path"] == tmp_path
     assert captured["http"] == config
+    assert captured["health"] == (built, tmp_path, config)
+    assert captured["health"][0] is built
 
 
 def test_serve_http_refuses_to_start_without_authentication(tmp_path: Path) -> None:
