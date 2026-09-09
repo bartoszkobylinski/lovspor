@@ -117,7 +117,7 @@ class _PageScanner(HTMLParser):
         elif tag == "a" and attributes.get("href") is not None:
             self.links.append(attributes["href"] or "")
         if tag not in _VOID:
-            excluded = tag == "style" or any(name in attributes for name in _EXCLUDING_ATTRIBUTES)
+            excluded = any(name in attributes for name in _EXCLUDING_ATTRIBUTES)
             self._stack.append((tag, excluded))
 
     def handle_endtag(self, tag: str) -> None:
@@ -137,6 +137,7 @@ class _PageScanner(HTMLParser):
             self.text.append(data)
 
     def _in_style(self) -> bool:
+        """``<style>`` content is CDATA to the parser: nothing is pushed above it."""
         return bool(self._stack) and self._stack[-1][0] == "style"
 
     def _in_title(self) -> bool:
@@ -168,8 +169,8 @@ class _PageScanner(HTMLParser):
             self.findings.append(f"<link rel={rel!r}> is not canonical or alternate")
         elif rel == "canonical":
             self.canonicals.append(href)
-        elif attributes.get("hreflang"):
-            self.alternate_links.append((attributes["hreflang"] or "", href))
+        elif hreflang := attributes.get("hreflang"):
+            self.alternate_links.append((hreflang, href))
 
 
 def _scan(markup: str) -> _PageScanner:

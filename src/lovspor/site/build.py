@@ -42,13 +42,7 @@ from pydantic import BaseModel, ConfigDict
 
 import lovspor
 from lovspor.publish.companion import companion_json_bytes
-from lovspor.site.capabilities import (
-    CapabilityDocument,
-    HostedState,
-    derive_comparisons,
-    derive_hosted_state,
-    load_capabilities,
-)
+from lovspor.site.capabilities import CapabilityDocument, HostedState, load_capabilities
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.facts import FactLedger
 from lovspor.site.fingerprint import ReleaseKey, Toolchain, release_key, toolchain_fingerprint
@@ -190,19 +184,20 @@ def _render_pages(artifacts: BuildArtifacts) -> tuple[dict[str, str], FactLedger
 
 
 def _capability_block(document: CapabilityDocument) -> dict[str, object]:
-    """The identities, comparisons and state — recomputed, and asserted equal to the document's."""
+    """The identities, comparisons and state of a validated document.
+
+    ``comparisons`` and ``hosted_state`` are the document's own: a
+    ``CapabilityDocument`` validates that its ``state`` is the derivation
+    of its ``observation``, so they are already the recomputation.
+    """
     observation, state = document.observation, document.state
-    comparisons = derive_comparisons(observation, state.checkout)
-    hosted_state = derive_hosted_state(observation, comparisons)
-    if comparisons != state.comparisons or hosted_state != state.hosted_state:
-        raise SiteBuildError("capability document state is not its own derivation")
     process, transport = observation.process, observation.transport
     identity = process.runtime_identity
     return {
         "expected_runtime_identity": state.checkout.expected_runtime_identity.model_dump(),
         "observed_runtime_identity": None if identity is None else identity.model_dump(),
-        "comparisons": comparisons.model_dump(),
-        "hosted_state": hosted_state,
+        "comparisons": state.comparisons.model_dump(),
+        "hosted_state": state.hosted_state,
         "process": {
             "status": process.status,
             "reason": process.reason,

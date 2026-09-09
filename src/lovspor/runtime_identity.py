@@ -137,7 +137,7 @@ def _direct_url(distribution: importlib.metadata.Distribution) -> str | None:
 
 def _describe(distribution: importlib.metadata.Distribution) -> Distribution:
     return Distribution(
-        name=normalise_name(distribution.metadata["Name"]),
+        name=normalise_name(distribution.name),
         version=distribution.version,
         direct_url=_direct_url(distribution),
     )

@@ -200,41 +200,38 @@ def _state_facts(document: CapabilityDocument) -> tuple[FactSource, ...]:
 
 
 def _process_facts(record: ProcessRecord) -> tuple[FactSource, ...]:
+    """Status and time are always recorded; ``ready`` and the count follow the record."""
     absent = _process_absence(record)
     prefix = "observation.process"
     return (
-        _hosted("hosted.process.status", f"{prefix}.status", record.status, absent),
-        _hosted("hosted.process.observed_at", f"{prefix}.observed_at", record.observed_at, absent),
+        _hosted("hosted.process.status", f"{prefix}.status", record.status),
+        _hosted("hosted.process.observed_at", f"{prefix}.observed_at", record.observed_at),
         _hosted("hosted.process.ready", f"{prefix}.ready", record.ready, absent),
         _hosted("hosted.process.tool_count", f"{prefix}.tool_count", record.tool_count, absent),
     )
 
 
 def _transport_facts(record: TransportRecord) -> tuple[FactSource, ...]:
-    absent = _served_absence(record)
+    """Statuses, time and verdict are always recorded; the served count follows the step."""
     prefix = "observation.transport"
     return (
-        _hosted("hosted.transport.status", f"{prefix}.status", record.status, absent),
-        _hosted(
-            "hosted.transport.observed_at", f"{prefix}.observed_at", record.observed_at, absent
-        ),
+        _hosted("hosted.transport.status", f"{prefix}.status", record.status),
+        _hosted("hosted.transport.observed_at", f"{prefix}.observed_at", record.observed_at),
         _hosted(
             "hosted.transport.authenticated.status",
             f"{prefix}.authenticated.status",
             record.authenticated.status,
-            absent,
         ),
         _hosted(
             "hosted.transport.authenticated.served_tool_count",
             f"{prefix}.authenticated.served_tool_count",
             record.authenticated.served_tool_count,
-            absent,
+            _served_absence(record),
         ),
         _hosted(
             "hosted.transport.oauth_discovery.verdict",
             f"{prefix}.oauth_discovery.verdict",
             record.oauth_discovery.verdict,
-            absent,
         ),
     )
 
