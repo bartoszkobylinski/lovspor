@@ -1,0 +1,43 @@
+{#- The crawler page, migrated verbatim from
+    deploy/digitalocean/site/observatory/index.html:63-101 (ADR-0014
+    Decision 2). Identifier digits are marked literals; no twin. -#}
+{% extends "_base.html" %}
+{% block main %}
+    <span class="tag">Robot</span>
+    <h1>Roboten du ser i loggene</h1>
+    <p class="lede">Hvis du fant <code>lovspor-observatory</code> i webserverloggen din, er dette siden den peker til. Her står hva den gjør, hva den ikke gjør, og hvordan du stopper den.</p>
+
+    <div class="panel">
+      <strong>User-Agent:</strong><br>
+      <code><span data-literal>lovspor-observatory/0.1 (+https://lovspor.no/observatory)</span></code>
+    </div>
+
+    <h2>Hva den gjør</h2>
+    <p>Den henter kunngjøringer og lokale forskrifter fra norske kommuners og fylkeskommuners nettsider, og lagrer sidene slik de så ut på hentetidspunktet. Formålet er å kunne dokumentere <em>når</em> noe ble publisert og endret — noe som ikke lar seg rekonstruere i ettertid når en side først er overskrevet.</p>
+    <p>Prosjektet er åpent og ikke-kommersielt.</p>
+
+    <h2>Hvordan du stopper den</h2>
+    <p>Legg dette i <code>robots.txt</code>:</p>
+    <pre>User-agent: lovspor-observatory
+Disallow: /</pre>
+    <p><strong>Roboten leser <code>robots.txt</code> på nytt før hvert eneste kall</strong>, ikke én gang per døgn. En regel du legger inn nå gjelder fra neste forespørsel. Du trenger ikke kontakte oss, og du trenger ikke vente.</p>
+    <p>Vil du bare begrense den i stedet, virker <code>Crawl-delay</code> og vanlige <code>Disallow</code>-stier på samme måte.</p>
+
+    <h2>Hvordan den oppfører seg</h2>
+    <ul>
+      <li>Leser <code>robots.txt</code> live foran hvert kall, og respekterer <code>Disallow</code> og <code>Crawl-delay</code>.</li>
+      <li>Starter fra sitemapet dere selv oppgir i <code>robots.txt</code>. Den gjetter ikke adresser.</li>
+      <li>Følger ikke videresendinger ut av domenet den har fått klarering for.</li>
+      <li>Er <code>robots.txt</code> utilgjengelig, hentes ingenting. Tvilstilfeller går alltid i retning av å la være.</li>
+      <li>Henter hver side én gang, og bare på nytt når sitemapet deres melder at siden er endret.</li>
+      <li>Kjører ikke JavaScript, fyller ikke ut skjemaer, og logger seg ikke inn noe sted.</li>
+    </ul>
+    <p>Før roboten får hente noe fra et nettsted i det hele tatt, må <strong>et menneske ha gjennomgått nettstedets <code>robots.txt</code> og bruksvilkår</strong> og skrevet ned konklusjonen. Uten den vurderingen nekter programvaren å sende en eneste forespørsel til domenet.</p>
+
+    <h2>Hva som lagres</h2>
+    <p>Sidene lagres som de kom, med tidspunkt og sjekksum, som dokumentasjon på hva som lå ute når. Materialet ligger utenfor de offentlige kodelagrene våre, og <strong>publiseres ikke videre uten et eget rettslig grunnlag for akkurat det</strong>. At noe er offentlig tilgjengelig på nett er ikke i seg selv et slikt grunnlag, og vi behandler det ikke som om det var.</p>
+
+    <h2>Kontakt</h2>
+    <p>Spørsmål, innvendinger eller ønske om at vi holder oss unna: <a href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor-observatory">bartosz.kobylinski@gmail.com</a>. Vi retter oss etter det dere foretrekker, og trenger ingen begrunnelse.</p>
+    <p class="muted">Koden er åpen og kan leses av hvem som helst: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a> (<span data-literal>AGPL-3.0</span>). Alt som står på denne siden er etterprøvbart der.</p>
+{% endblock %}

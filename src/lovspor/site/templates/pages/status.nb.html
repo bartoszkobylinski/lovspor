@@ -1,0 +1,52 @@
+{#- /status/ (ADR-0014 Decision 2): the corpus state at the last release and
+    the hosted observation of that release — never live health. Every value
+    goes through fact(); a hosted value whose record was not observed
+    renders its degraded wording, reason and observed_at included. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<h2>Korpuset</h2>
+<p>Korpustilstanden ble publisert {{ fact("corpus.commit_time", kind="corpus") }}, fra lovverk-commit <code>{{ fact("corpus.commit", kind="corpus") }}</code>: {{ fact("corpus.documents", kind="corpus") }} dokumenter, bygget av motorversjon {{ fact("corpus.engine_version", kind="corpus") }}.</p>
+<p class="muted">Utgivelsesmanifestets sjekksum (<span data-literal>SHA-256</span>): <code>{{ fact("corpus.manifest_sha256", kind="corpus") }}</code></p>
+
+<h2>Den driftede tjenesten</h2>
+<p>Dette er observasjonen fra siste utgivelse, ikke en levende helsesjekk. Avledet tilstand: <strong>{{ fact("hosted.state", kind="hosted") }}</strong>.</p>
+<div class="cover">
+  <div>
+    <p><strong>Prosessen (loopback)</strong></p>
+    <ul>
+      <li>Status: {{ fact("hosted.process.status", kind="hosted") }}, observert {{ fact("hosted.process.observed_at", kind="hosted") }}</li>
+      <li>Klar: {{ fact("hosted.process.ready", kind="hosted") }}</li>
+    </ul>
+  </div>
+  <div>
+    <p><strong>Transporten (offentlig sti)</strong></p>
+    <ul>
+      <li>Status: {{ fact("hosted.transport.status", kind="hosted") }}, observert {{ fact("hosted.transport.observed_at", kind="hosted") }}</li>
+      <li>Autentisert steg: {{ fact("hosted.transport.authenticated.status", kind="hosted") }}</li>
+      <li>OAuth-oppdagelse: {{ fact("hosted.transport.oauth_discovery.verdict", kind="hosted") }}</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Verktøyflaten</h2>
+<ul>
+  <li>Servert gjennom den offentlige stien (driftet): {{ fact("hosted.transport.authenticated.served_tool_count", kind="hosted") }}</li>
+  <li>Attestert av prosessen (driftet): {{ fact("hosted.process.tool_count", kind="hosted") }}</li>
+  <li>I koden ved denne utgivelsen (kode): {{ fact("code.tool_surface.tool_count", kind="code") }}</li>
+</ul>
+
+<h2>Sammenligninger</h2>
+<ul>
+  <li><code>runtime_tree_match</code>: {{ fact("hosted.comparisons.runtime_tree_match", kind="hosted") }}</li>
+  <li><code>environment_match</code>: {{ fact("hosted.comparisons.environment_match", kind="hosted") }}</li>
+  <li><code>tool_surface_match</code>: {{ fact("hosted.comparisons.tool_surface_match", kind="hosted") }}</li>
+  <li><code>transport_surface_match</code>: {{ fact("hosted.comparisons.transport_surface_match", kind="hosted") }}</li>
+  <li><code>oauth_discovery_consistent</code>: {{ fact("hosted.comparisons.oauth_discovery_consistent", kind="hosted") }}</li>
+</ul>
+
+<p class="muted">Bygget fra lovspor-commit <code>{{ fact("code.lovspor_commit", kind="code") }}</code>.</p>
+{% endblock %}

@@ -155,25 +155,25 @@ def _render(path: str) -> str:
 
 class TestBaseTemplate:
     def test_head_carries_lang_title_description_canonical_and_hreflang_pair(self) -> None:
-        html = _render("/status/")
+        html = _render("/docs/")
 
         assert html.startswith('<!doctype html>\n<html lang="nb">\n')
         assert "<title>" in html
         assert '<meta name="description" content="' in html
-        assert f'<link rel="canonical" href="{SITE_ORIGIN}/status/">' in html
-        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/status/">' in html
-        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/status/">' in html
+        assert f'<link rel="canonical" href="{SITE_ORIGIN}/docs/">' in html
+        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/docs/">' in html
+        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/docs/">' in html
         assert html.count("<h1>") == 1
         assert html.endswith("</html>\n")
 
     def test_the_english_twin_mirrors_the_pair_and_switches_back(self) -> None:
-        html = _render("/en/status/")
+        html = _render("/en/docs/")
 
         assert '<html lang="en">' in html
-        assert f'<link rel="canonical" href="{SITE_ORIGIN}/en/status/">' in html
-        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/status/">' in html
-        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/status/">' in html
-        assert '<a href="/status/">NO</a>' in html
+        assert f'<link rel="canonical" href="{SITE_ORIGIN}/en/docs/">' in html
+        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/docs/">' in html
+        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/docs/">' in html
+        assert '<a href="/docs/">NO</a>' in html
 
     def test_a_page_without_a_twin_has_no_hreflang_and_no_switch(self) -> None:
         html = _render("/observatory/")
@@ -202,8 +202,11 @@ class TestBaseTemplate:
         assert "ikke publisert ennå" in nb
         assert "not published yet" in en
 
-    def test_no_script_and_no_external_asset_on_any_emitted_page(self) -> None:
+    def test_no_script_and_no_external_asset_on_any_placeholder_page(self) -> None:
+        """Pages that read facts are covered on the built tree (test_site_build)."""
         for page in emitted_pages():
+            if page.route.template != "placeholder":
+                continue
             html = _render(page.path)
             body = html[html.index("<body>") :]
 
@@ -219,7 +222,12 @@ class TestBaseTemplate:
             "_base.html",
             "_chrome_footer.html",
             "_chrome_header.html",
+            "pages/landing.en.html",
+            "pages/landing.nb.html",
+            "pages/observatory.nb.html",
             "pages/placeholder.en.html",
             "pages/placeholder.nb.html",
+            "pages/status.en.html",
+            "pages/status.nb.html",
         ]
         assert TEMPLATES_DIR.name != "html"

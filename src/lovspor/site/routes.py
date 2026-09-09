@@ -127,7 +127,7 @@ def _route(path: str, status: PageStatus, title: Localised, description: Localis
 SITE_ROUTES: tuple[SiteRoute, ...] = (
     SiteRoute(
         path="/",
-        template="placeholder",
+        template="landing",
         status="current",
         title=Localised(
             nb="lovspor — norsk lovtekst KI-en kan etterprøve",
@@ -198,11 +198,12 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
             en="What PL-Temporal is, where the work stands, and where its repository lives.",
         ),
     ),
-    _route(
-        "/status/",
-        "current",
-        Localised(nb="Status", en="Status"),
-        Localised(
+    SiteRoute(
+        path="/status/",
+        template="status",
+        status="current",
+        title=Localised(nb="Status", en="Status"),
+        description=Localised(
             nb="Korpusets tilstand ved siste utgivelse og observasjonen av den driftede tjenesten.",
             en="The corpus state at the last release and the observation of the hosted service.",
         ),
@@ -248,7 +249,7 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
     ),
     SiteRoute(
         path="/observatory/",
-        template="placeholder",
+        template="observatory",
         status="current",
         twin=False,
         title=Localised(nb="lovspor-observatory — om roboten i loggene dine"),

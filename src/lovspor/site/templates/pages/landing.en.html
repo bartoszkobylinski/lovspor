@@ -1,0 +1,57 @@
+{#- The English landing, migrated from deploy/digitalocean/site/en/index.html:71-122
+    word for word (owner decision 2026-09-09) with exactly these substitutions:
+    the document count and the tool count are facts, example and identifier
+    digits are marked literals, and "Coming shortly" is the planned badge. -#}
+{% extends "_base.html" %}
+{% block main %}
+    <span class="tag">Private beta</span>
+    <h1>Norwegian law your AI won't hallucinate.</h1>
+    <p class="lede">lovspor gives ChatGPT, Claude and the AI tools you already use the <strong>actual text</strong> of Norwegian statutes and regulations — with exact citations you can verify, not invented paragraph numbers.</p>
+
+    <div class="panel">
+      Ask a general AI about <code><span data-literal>folketrygdloven § 8-18</span></code> and it answers confidently — and often cites paragraphs that don't exist. <span class="accent">For law, a plausible answer is a dangerous answer.</span> lovspor makes the AI quote the real provision, or say it doesn't know.
+    </div>
+
+    <h2>What it is</h2>
+    <p>An <a href="https://modelcontextprotocol.io">MCP</a> server over a continuously-refreshed, hash-verified corpus of Norwegian law — <strong>{{ fact("corpus.documents", kind="corpus") }} acts and central regulations</strong> currently in force. {{ fact("code.tool_surface.tool_count", kind="code") }} tools: semantic search, exact citation &amp; quote verification, section lookup, law history and diffs. Every answer traces back to the verbatim source text.</p>
+
+    <h2>Who it's for</h2>
+    <p><strong>Anyone.</strong> The engine is open source under <span data-literal>AGPL-3.0</span> and the corpus is built from Lovdata's open data. If you need Norwegian legal text inside an AI tool, you can run the whole thing yourself — without asking anyone, and without paying for it.</p>
+    <p>The hosted service is in private beta because one person operates it. <span class="accent">The code is not.</span></p>
+
+    <h2>What it covers — honestly</h2>
+    <div class="cover">
+      <div>
+        <p><strong>Covered</strong></p>
+        <ul>
+          <li class="yes">National laws (<em>lover</em>)</li>
+          <li class="yes">Central regulations (<em>forskrifter</em>)</li>
+          <li class="yes">In force, with change history</li>
+        </ul>
+      </div>
+      <div>
+        <p><strong>Not covered</strong></p>
+        <ul>
+          <li class="no">Court case law</li>
+          <li class="no">Municipal zoning plans</li>
+          <li class="no">Proprietary standards (NS contracts)</li>
+        </ul>
+      </div>
+    </div>
+    <p class="muted">Source: Lovdata open data (<span data-literal>NLOD 2.0</span>). lovspor is a research tool that surfaces the law — it is not legal advice.</p>
+
+    <h2>How you use it</h2>
+    <p>Inside the AI you already work in — no new app to learn.</p>
+    <ul>
+      <li><strong>As a connector in ChatGPT &amp; Claude</strong> — one click, nothing to configure. <em>{{ badge("planned") }} — the way most people will use it.</em></li>
+      <li><strong>In Claude Code, Codex or Cursor</strong> — works today; add your token in one line:</li>
+    </ul>
+    <pre>claude mcp add --transport http lovverk \
+  https://lovspor.no/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN"</pre>
+
+    <h2>Get access</h2>
+    <p>Private beta. Email me for a token.</p>
+    <p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20access">Email for a beta token →</a></p>
+    <p class="muted">Or run it yourself — the engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>.</p>
+{% endblock %}
