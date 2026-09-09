@@ -474,7 +474,12 @@ class TestReleaseProbeCommand:
         assert (step.status, step.reason) == ("unobserved", "probe_credential_missing")
         assert document.state.hosted_state == "unknown"
         assert fake.methods() == ["initialize"]
-        assert result.stderr.splitlines() == [line]
+        # Only the probe's own lines: build_server may warn about OPENAI_API_KEY
+        # on a box without it, and that line is the server's, not the probe's.
+        probe_lines = [
+            entry for entry in result.stderr.splitlines() if entry.startswith("probe credential")
+        ]
+        assert probe_lines == [line]
         assert "probe credential" not in result.stdout
 
     def test_the_credential_is_read_as_utf_8_whatever_the_process_locale(
