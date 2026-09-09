@@ -254,6 +254,24 @@ class TestMarker:
         with pytest.raises(IncompleteEnvelopeError, match="not a marker"):
             read_marker(tmp_path)
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.parametrize(
+        "marker",
+        [
+            {"active": "not-a-release-id", "previous": None},
+            {"active": ID_A, "previous": "../outside-the-releases-root"},
+        ],
+    )
+    def test_release_ids_in_a_marker_must_be_valid(
+        self, tmp_path: Path, marker: dict[str, str | None]
+    ) -> None:
+        """ACTIVE names finalized release-id directories, never arbitrary paths."""
+        (tmp_path / MARKER_NAME).write_text(json.dumps(marker), encoding="utf-8")
+
+        with pytest.raises(IncompleteEnvelopeError, match="not a marker"):
+            read_marker(tmp_path)
+
     def test_the_marker_carries_no_extra_fields(self) -> None:
         with pytest.raises(ValidationError):
             Marker.model_validate({"active": ID_A, "previous": None, "current": ID_A})
