@@ -489,6 +489,32 @@ class TestReleaseProbeCommand:
         document = load_capabilities(tmp_path / "c.json")
         assert document.observation.transport.authenticated.outcome == "ok"
 
+    @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
+    def test_a_malformed_utf_8_credential_is_recorded_not_fatal(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An undecodable credential is still a credential that cannot be loaded."""
+        _, _, corpus, _ = repos
+        token_file = tmp_path / "malformed-token"
+        token_file.write_bytes(b"lsp_secret-\xff")
+        monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
+        _host(httpx_mock, corpus)
+        out = tmp_path / "c.json"
+
+        result = runner.invoke(app, _probe_args(corpus, out, "--probe-token-file", str(token_file)))
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(out)
+        step = document.observation.transport.authenticated
+        assert (step.status, step.reason) == ("unobserved", "probe_credential_missing")
+        assert str(token_file) in result.stderr
+        assert "lsp_secret" not in result.output
+
     def test_a_dirty_checkout_is_refused_before_any_request(
         self,
         repos: tuple[Path, str, Path, Path],

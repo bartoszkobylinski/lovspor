@@ -39,6 +39,10 @@ def load_probe_token(explicit: Path | None) -> ProbeCredential:
         token = path.read_text(encoding="utf-8").strip()
     except OSError as error:
         return ProbeCredential(None, f"probe credential unreadable: {path}: {error.strerror}")
+    except UnicodeDecodeError:
+        # An undecodable secret is a credential that cannot be loaded — an observer
+        # failure to record, not a crash; its bytes never reach the message.
+        return ProbeCredential(None, f"probe credential undecodable: {path}: not UTF-8")
     if not token:
         return ProbeCredential(None, f"probe credential empty: {path}")
     return ProbeCredential(SecretStr(token), None)
