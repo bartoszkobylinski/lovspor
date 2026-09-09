@@ -154,6 +154,13 @@ class TestComputeAttestation:
         assert corpus_present(corpus) is False
         assert _attest(corpus, hosted).ready is False
 
+    def test_manifest_path_must_be_a_file(self, corpus: Path) -> None:
+        manifest = corpus / "manifest.json"
+        manifest.unlink()
+        manifest.mkdir()
+
+        assert corpus_present(corpus) is False
+
     def test_runtime_identity_is_what_the_site_build_computes(
         self, corpus: Path, hosted: FastMCP
     ) -> None:
