@@ -14,18 +14,23 @@ work tree is dirty exactly while these tests are being written.
 """
 
 import json
+import locale
 import re
+import sys
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 import click
+import httpx
 import pytest
+from pydantic import BaseModel, ValidationError
 from pytest_httpx import HTTPXMock
 from typer.main import get_command
 from typer.testing import CliRunner
 
 import lovspor.cli
-from lovspor.cli import app
+from lovspor.cli import _first_validation_message, app
 from lovspor.publish.emit import emit_site
 from lovspor.site.build import SiteInputs, build_site, require_clean_work_tree
 from lovspor.site.capabilities import load_capabilities
@@ -312,6 +317,18 @@ def _served_listing(corpus: Path) -> dict[str, object]:
 
 
 @pytest.fixture
+def c_locale() -> Iterator[None]:
+    """The C locale, whose codec is ASCII, for the duration of one test."""
+    if sys.flags.utf8_mode:
+        pytest.skip("UTF-8 mode pins the locale codec to UTF-8")
+    previous = locale.setlocale(locale.LC_CTYPE)
+    locale.setlocale(locale.LC_CTYPE, "C")
+    assert locale.getencoding().lower() in {"us-ascii", "ansi_x3.4-1968", "ascii"}
+    yield
+    locale.setlocale(locale.LC_CTYPE, previous)
+
+
+@pytest.fixture
 def credential(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """The probe credential as systemd ``LoadCredential=site-probe:...`` delivers it."""
     directory = tmp_path / "credentials"
@@ -349,8 +366,11 @@ class TestReleaseProbeCommand:
         observed_at = document.observation.process.observed_at
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", observed_at)
         assert datetime.fromisoformat(observed_at) >= before
-        assert commit[:12] in result.output
-        assert "hosted state available" in result.output
+        assert result.stdout == (
+            f"capability document for lovspor commit {commit[:12]} written to {out}: "
+            "hosted state available, process observed, transport observed, "
+            "authenticated observed, discovery absent\n"
+        )
         assert TOKEN not in result.output
         assert out.read_bytes() == document_bytes(document)
 
@@ -426,16 +446,24 @@ class TestReleaseProbeCommand:
         shape: str,
     ) -> None:
         """A secret that cannot be loaded is ``probe_credential_missing``
-        (ADR:901-903): the document is still written, the release proceeds."""
+        (ADR:901-903): the document is still written, the release proceeds,
+        and one line on stderr — never on stdout, which is the summary — says
+        why, naming the path and never the content."""
         _, _, corpus, _ = repos
         monkeypatch.delenv("CREDENTIALS_DIRECTORY", raising=False)
         monkeypatch.delenv("LOVSPOR_PROBE_TOKEN_FILE", raising=False)
         args = _probe_args(corpus, tmp_path / "c.json")
         if shape == "unreadable":
-            args += ["--probe-token-file", str(tmp_path / "missing" / "site-probe")]
+            token_file = tmp_path / "missing" / "site-probe"
+            args += ["--probe-token-file", str(token_file)]
+            line = f"probe credential unreadable: {token_file}: No such file or directory"
         elif shape == "empty":
-            (tmp_path / "empty").write_text("\n", encoding="utf-8")
-            args += ["--probe-token-file", str(tmp_path / "empty")]
+            token_file = tmp_path / "empty"
+            token_file.write_text("\n", encoding="utf-8")
+            args += ["--probe-token-file", str(token_file)]
+            line = f"probe credential empty: {token_file}"
+        else:
+            line = "probe credential: none configured (step (b) unobserved)"
         fake = _host(httpx_mock, corpus)
 
         result = runner.invoke(app, args)
@@ -446,7 +474,30 @@ class TestReleaseProbeCommand:
         assert (step.status, step.reason) == ("unobserved", "probe_credential_missing")
         assert document.state.hosted_state == "unknown"
         assert fake.methods() == ["initialize"]
-        assert "probe credential" in result.output
+        assert result.stderr.splitlines() == [line]
+        assert "probe credential" not in result.stdout
+
+    def test_the_credential_is_read_as_utf_8_whatever_the_process_locale(
+        self,
+        repos: tuple[Path, str, Path, Path],
+        checkout: Path,
+        tmp_path: Path,
+        httpx_mock: HTTPXMock,
+        credential: Path,
+        c_locale: None,
+    ) -> None:
+        """A unit started without LANG runs under the C locale; the file is
+        still UTF-8, so a non-ASCII space an editor left behind is stripped
+        rather than tripping the locale's codec."""
+        _, _, corpus, _ = repos
+        credential.write_bytes(f"{TOKEN}\u00a0\n".encode())
+        _host(httpx_mock, corpus)
+
+        result = runner.invoke(app, _probe_args(corpus, tmp_path / "c.json"))
+
+        assert result.exit_code == 0, result.output
+        document = load_capabilities(tmp_path / "c.json")
+        assert document.observation.transport.authenticated.outcome == "ok"
 
     def test_a_dirty_checkout_is_refused_before_any_request(
         self,
@@ -480,6 +531,23 @@ class TestReleaseProbeCommand:
         assert "release probe refused:" in result.output
         assert not out.exists()
 
+    @pytest.mark.parametrize(
+        ("transport", "summary"),
+        [
+            (
+                httpx.Response(421),
+                "hosted state unavailable, process unobserved (http_502), transport observed, "
+                "authenticated unobserved (not_attempted), discovery absent",
+            ),
+            (
+                httpx.ConnectError("no route"),
+                "hosted state unknown, process unobserved (http_502), "
+                "transport unobserved (network), authenticated unobserved (not_attempted), "
+                "discovery unobserved",
+            ),
+        ],
+        ids=["subject-failed", "nothing-observed"],
+    )
     def test_the_document_is_written_in_every_observed_state(
         self,
         repos: tuple[Path, str, Path, Path],
@@ -487,12 +555,18 @@ class TestReleaseProbeCommand:
         tmp_path: Path,
         httpx_mock: HTTPXMock,
         credential: Path,
+        transport: httpx.Response | Exception,
+        summary: str,
     ) -> None:
-        """Hosted state never gates the release (ADR:932-946)."""
-        _, _, corpus, _ = repos
+        """Hosted state never gates the release (ADR:932-946); the summary
+        names each record's status with its reason where there is one."""
+        _, commit, corpus, _ = repos
         httpx_mock.add_response(url=READINESS_URL, status_code=502)
-        httpx_mock.add_response(url=MCP_URL, status_code=421)
-        absent_discovery(httpx_mock)
+        if isinstance(transport, Exception):
+            httpx_mock.add_exception(transport, url=MCP_URL)
+        else:
+            httpx_mock.add_callback(lambda _request: transport, url=MCP_URL)
+            absent_discovery(httpx_mock)
         out = tmp_path / "c.json"
 
         result = runner.invoke(app, _probe_args(corpus, out))
@@ -500,9 +574,9 @@ class TestReleaseProbeCommand:
         assert result.exit_code == 0, result.output
         document = load_capabilities(out)
         assert document.observation.process.reason == "http_502"
-        assert document.state.hosted_state == "unavailable"
-        assert "hosted state unavailable" in result.output
-        assert "http_502" in result.output
+        assert result.stdout == (
+            f"capability document for lovspor commit {commit[:12]} written to {out}: {summary}\n"
+        )
 
     def test_the_probe_feeds_the_build_command(
         self,
@@ -647,7 +721,9 @@ class TestSiteDriftCheckCommand:
         )
 
         assert result.exit_code == 2
-        assert "not an http(s) URL" in result.output
+        assert (
+            "Invalid value: public_mcp_url: not an http(s) URL: 'lovspor.no/mcp'" in result.stderr
+        )
         assert not httpx_mock.get_requests()
 
     def test_the_observer_is_the_drift_timer_by_default(
@@ -675,6 +751,35 @@ class TestSiteDriftCheckCommand:
             assert re.search(rf"\b{code}\b", result.output)
         assert "drift" in result.output
         assert "served document" in result.output
+
+
+class TestFirstValidationMessage:
+    """The usage line for a refused option, on the shapes pydantic can report."""
+
+    def test_a_nested_location_is_the_dotted_path_to_the_field(self) -> None:
+        class Inner(BaseModel):
+            seconds: float
+
+        class Outer(BaseModel):
+            timeout: Inner
+
+        with pytest.raises(ValidationError) as caught:
+            Outer.model_validate({"timeout": {"seconds": "soon"}})
+
+        assert _first_validation_message(caught.value) == (
+            f"timeout.seconds: {caught.value.errors()[0]['msg']}"
+        )
+
+    def test_a_model_level_error_is_reported_as_the_option_without_pydantics_prefix(
+        self,
+    ) -> None:
+        error = ValidationError.from_exception_data(
+            "ProbeSettings",
+            [{"type": "value_error", "loc": (), "input": {}, "ctx": {"error": "boom"}}],
+        )
+
+        assert error.errors()[0]["msg"] == "Value error, boom"
+        assert _first_validation_message(error) == "option: boom"
 
 
 class TestProbeHelp:
