@@ -2325,3 +2325,21 @@ short-circuit semantics; the row's precondition is this package's own
 asserts the marker and the report carry the running release's id. The `or`
 exists only to give mypy a `str` for `Marker.active`.
 """
+
+[[equivalent]]
+file = "src/lovspor/release/linking.py"
+symbol = "_sha256"
+registered = "2026-09-10, PR #268, from run 34414685228"
+mutation = """
+-        return hashlib.file_digest(handle, "sha256").hexdigest()
++        return hashlib.file_digest(handle, "SHA256").hexdigest()
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_hashlib_folds_the_digest_name_case"
+justification = """
+`hashlib.file_digest` takes the digest by name and resolves it through
+`hashlib.new`, whose lookup is case-insensitive — "SHA256" and "sha256" name the
+same algorithm and produce the same hexdigest for the same bytes. That folding is
+the hashlib backend's behaviour rather than a language rule, so the assumption
+test pins it: `hashlib.new("SHA256").name == "sha256"` and the two spellings
+digest identical input identically.
+"""

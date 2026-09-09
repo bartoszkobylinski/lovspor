@@ -353,3 +353,19 @@ def test_an_entry_with_no_assumption_test_field_is_not_a_broken_one(tmp_path: Pa
     entries = [{"symbol": "record_to_json_line"}]
 
     assert _broken_assumption_tests(entries, tmp_path) == []
+
+
+def test_hashlib_folds_the_digest_name_case() -> None:
+    """``hashlib.file_digest(f, "SHA256")`` resolves through ``hashlib.new``, whose
+    OpenSSL-backed lookup is case-insensitive; the register entry for
+    ``release/linking.py`` argues from this."""
+    import hashlib  # noqa: PLC0415 — the assumption under test is this module's behaviour
+    import io  # noqa: PLC0415
+
+    payload = b"lovspor"
+    assert hashlib.new("SHA256").name == "sha256"
+    assert (
+        hashlib.file_digest(io.BytesIO(payload), "SHA256").hexdigest()
+        == hashlib.file_digest(io.BytesIO(payload), "sha256").hexdigest()
+        == hashlib.sha256(payload).hexdigest()
+    )
