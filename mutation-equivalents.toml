@@ -1878,9 +1878,9 @@ reach any output.
 """
 
 [[equivalent]]
-file = "src/lovspor/cli.py"
-symbol = "_probe_token"
-registered = "2026-09-09, PR #266, from run 34382097818"
+file = "src/lovspor/site/probe_credential.py"
+symbol = "load_probe_token"
+registered = "2026-09-09, PR #268, from run 34397173401"
 mutation = """
 -        token = path.read_text(encoding="utf-8").strip()
 +        token = path.read_text(encoding="UTF-8").strip()
@@ -1893,6 +1893,13 @@ return the same CodecInfo), so both spellings decode the same bytes to the
 same credential. Python's codec registry, not a dependency. (`encoding=None`
 is NOT equivalent — it is the locale's codec — and is killed under the C
 locale by `test_the_credential_is_read_as_utf_8_whatever_the_process_locale`.)
+
+This supersedes the entry registered for `cli._probe_token` in PR #266, which
+argued the identical point about the same line. PR #268 moved the credential
+read into `site/probe_credential.load_probe_token` so every command that runs
+the probe loads it the same way, and that entry no longer matched any code in
+`cli.py`. An entry that can never match is the drift this register warns
+about, so it is replaced rather than left as decoration.
 """
 
 [[equivalent]]
@@ -2062,4 +2069,259 @@ insignificant whitespace — pinned by the assumption test — so the parsed
 message, or the validation failure, is the same. `lstrip()` was the earlier
 spelling and had no provable twin: it also removed non-breaking spaces,
 which the parser does not ignore; the spec-exact rule replaced it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/caddy.py"
+symbol = "canonical_hash"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-    canonical = json.dumps(subtree, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
++    canonical = json.dumps(subtree, sort_keys=True, separators=(",", ":"), ensure_ascii=None)
+"""
+justification = """
+`json.dumps` reads `ensure_ascii` only for its truth value, and `None` is
+falsy exactly as `False` is, so both select the encoder that keeps non-ASCII
+as is and produce byte-identical canonical text, hence the same SHA-256. Same
+argument as the registered `observatory/model.record_to_json_line` entry;
+Python's own `None` semantics. (`ensure_ascii` removed or `True` is NOT
+equivalent and is killed by the "æøå" value in
+`test_the_hash_is_the_sha256_of_the_compact_sorted_utf_8_serialisation`.)
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/caddy.py"
+symbol = "canonical_hash"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
++    return hashlib.sha256(canonical.encode("UTF-8")).hexdigest()
+"""
+justification = """
+Codec names are case-insensitive: `str.encode` resolves the name through the
+codec registry, which normalises it, so "utf-8" and "UTF-8" encode identical
+bytes and hash to the same digest. Python's codec registry, not a dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/check.py"
+symbol = "_check_site_tree"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        path = site / page.path.lstrip("/") / "index.html"
++        path = site / page.path.lstrip("XX/XX") / "index.html"
+"""
+assumption_test = "tests/unit/test_site_routes.py::TestSiteRoute::test_rejects_a_path_outside_the_directory_shape"
+justification = """
+The argument to `str.lstrip` is a CHARACTER SET, so "XX/XX" is the set {X, /}.
+`page` ranges over `emitted_pages()`, whose paths are `SiteRoute.path` values —
+the `RoutePath` pattern `^/(?:[a-z0-9-]+/)*$` restricts them to "/" and
+lower-case ASCII segments — or that path behind the "/en" prefix. No such
+string can carry an upper-case X anywhere, let alone at its front, so the X in
+the set never matches and the set strips exactly what {/} strips. Same argument
+as the registered `site/build._write_tree` entry, which reads the same paths;
+the path shape is a pydantic constraint, so the route-shape test that rejects
+"/Status/" is named as the assumption test.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/check.py"
+symbol = "_check_site_tree"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        pages[page.path] = path.read_text(encoding="utf-8")
++        pages[page.path] = path.read_text(encoding="UTF-8")
+"""
+justification = """
+Codec names are case-insensitive: `Path.read_text` hands the name to the text
+wrapper, which resolves it through the codec registry, and the registry
+normalises the name, so both spellings decode the same page bytes to the same
+markup. Python's codec registry, not a dependency. (`encoding=None` is NOT
+equivalent — it is the locale's codec — and is killed under the C locale by
+`test_the_pages_are_read_as_utf_8_whatever_the_process_locale`.)
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/build.py"
+symbol = "_corpus_commit"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` reads `check` only for its truth value (`if check and
+retcode:`), and `None` is falsy exactly as `False` is, so neither raises on a
+non-zero exit; the caller reads `returncode` itself and refuses with its own
+message. Same argument as the registered `site/build._git` entry; Python's
+own `None` semantics, not a dependency.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/build.py"
+symbol = "_corpus_commit"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`'s signature, so removing the
+explicit `check=False` leaves the call byte-for-byte equivalent in behaviour.
+It is spelled out only because ruff PLW1510 demands an explicit `check`. Same
+argument as the registered `site/build._git` entry.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/control.py"
+symbol = "_stage"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        atomic_write_text(plane.previous_fragment, plane.fragment.read_text(encoding="utf-8"))
++        atomic_write_text(plane.previous_fragment, plane.fragment.read_text(encoding="UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive: `Path.read_text` resolves the name through
+the codec registry, which normalises it, so both spellings decode the foreign
+fragment's bytes to the same text and the same kept copy is written. Python's
+codec registry, not a dependency. (`encoding=None` is NOT equivalent — it is
+the locale's codec — and is killed under the C locale by
+`test_the_kept_copy_is_read_as_utf_8_whatever_the_process_locale`.)
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/control.py"
+symbol = "revert_source"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        return plane.previous_fragment.read_text(encoding="utf-8")
++        return plane.previous_fragment.read_text(encoding="UTF-8")
+"""
+justification = """
+Same codec-registry argument as the `_stage` entry above: both spellings
+decode the kept copy's bytes to the same text, so the same fragment is put
+back. (`encoding=None` is killed under the C locale by
+`test_the_kept_copy_is_restored_byte_for_byte_whatever_the_process_locale`.)
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/envelope.py"
+symbol = "record_bytes"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-    return companion_json_bytes(record.model_dump(mode="json"))
++    return companion_json_bytes(record.model_dump(mode=None))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+pydantic selects the JSON serialiser only for the exact string "json"; None
+and any other string take the Python path. `ReleaseRecord` holds str, int,
+a `Literal["1"]`, None and nested models of the same, and `Marker` two str
+fields — nothing the Python path renders differently from the JSON path, so
+`companion_json_bytes` (`json.dumps`) produces the same bytes under either
+mode. Same argument as the registered `site/fixture.document_bytes` entries;
+the shared assumption test dumps a record and a marker under every mode
+spelling against the JSON-mode reference, so a field type the Python path
+leaves as an object turns this waiver into a red test.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/envelope.py"
+symbol = "record_bytes"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-    return companion_json_bytes(record.model_dump(mode="json"))
++    return companion_json_bytes(record.model_dump(mode="XXjsonXX"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: any mode other than the exact
+string "json" is pydantic's Python path, whose output for the record and the
+marker serialises to the same bytes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/envelope.py"
+symbol = "record_bytes"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-    return companion_json_bytes(record.model_dump(mode="json"))
++    return companion_json_bytes(record.model_dump(mode="JSON"))
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: pydantic matches the mode string
+case-sensitively, so "JSON" is the Python path, whose output for the record
+and the marker serialises to the same bytes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/envelope.py"
+symbol = "read_fragment"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        return (root / FRAGMENT_NAME).read_text(encoding="utf-8")
++        return (root / FRAGMENT_NAME).read_text(encoding="UTF-8")
+"""
+justification = """
+Codec names are case-insensitive: `Path.read_text` resolves the name through
+the codec registry, which normalises it, so both spellings decode the
+fragment's bytes to the same text. Python's codec registry, not a dependency.
+(`encoding=None` is NOT equivalent — the fragment's header carries an em dash
+— and is killed under the C locale by
+`test_is_read_as_utf_8_whatever_the_process_locale`.)
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "reconcile"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> ReconcileReport:
++def reconcile(plane: ControlPlane, action: ReconcileAction = "XXreportXX") -> ReconcileReport:
+"""
+justification = """
+`action` is read at exactly two places, `if action == "complete"` and
+`if action == "abandon"`, and nowhere else — it is not stored, reported or
+compared with "report". Every value other than those two literals takes the
+same path to the same `UnreconciledError`, so the default's spelling cannot
+reach any output: "report", "XXreportXX" and "REPORT" are all "neither".
+Pure Python string equality; no dependency. The command layer never relies
+on the default (it passes the action it parsed), and the Literal type is a
+static promise mutmut does not run mypy against.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "reconcile"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> ReconcileReport:
++def reconcile(plane: ControlPlane, action: ReconcileAction = "REPORT") -> ReconcileReport:
+"""
+justification = """
+Same argument as the entry above: the default is only ever compared with
+"complete" and "abandon", and "REPORT" is neither exactly as "report" is.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "reconcile"
+registered = "2026-09-09, PR #268, from run 34397173401"
+mutation = """
+-        active = triple.running.release_id or ""
++        active = triple.running.release_id or "XXXX"
+"""
+justification = """
+The right operand of `or` is never evaluated. The line is reached only on
+the `Situation.reloaded` row, and `situation` returns that row from the one
+branch guarded by `running.release_id is not None` — an id is a non-empty
+64-hex string, hence truthy — so the left operand is always a truthy string
+and `or` short-circuits before the literal, whatever it says. Pure Python
+short-circuit semantics; the row's precondition is this package's own
+`situation`, pinned by
+`test_a_crash_after_the_reload_is_completed_by_the_marker_alone`, which
+asserts the marker and the report carry the running release's id. The `or`
+exists only to give mypy a `str` for `Marker.active`.
 """
