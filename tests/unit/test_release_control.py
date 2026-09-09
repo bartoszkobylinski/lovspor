@@ -14,11 +14,13 @@ from typing import Any, NamedTuple
 
 import pytest
 
-from lovspor.release.caddy import FRAGMENT_ENV, ConfigPair, config_pair
+from lovspor.release.caddy import FRAGMENT_ENV, ConfigPair, adapt, config_pair
 from lovspor.release.control import (
     TRANSACTION_STEPS,
+    CommitReport,
     ControlPlane,
     Situation,
+    Triple,
     commit_release,
     live_release,
     read_triple,
@@ -43,7 +45,7 @@ from lovspor.release.errors import (
     UnobservableError,
     UnreconciledError,
 )
-from lovspor.release.reconcile import prune, reconcile
+from lovspor.release.reconcile import ReconcileReport, prune, reconcile
 from tests.unit.caddy_fakes import FakeCaddy, toy_adapt
 from tests.unit.release_fixtures import (
     World,
@@ -57,6 +59,11 @@ from tests.unit.release_fixtures import (
 LATER = "2026-01-02T00:00:00Z"
 PLACEHOLDER = "handle {\n\troot * /var/www/lovspor\n\tfile_server\n}\n"
 """An active fragment from before any envelope release: no ``vars``, no release."""
+NON_ASCII_PLACEHOLDER = "# Ørsta kommune sin side\n" + PLACEHOLDER
+"""The same, with the kind of comment an operator's editor leaves: bytes outside ASCII."""
+RELOAD_FAILURE = (
+    "systemctl reload caddy failed: Job for caddy.service failed because the control process"
+)
 
 
 class Killed(Exception):  # noqa: N818 — a simulated process death, not a lovspor error
@@ -223,6 +230,56 @@ class TestLiveRelease:
         assert f"M=(active {live_a.a})" in caught.value.detail
         assert live_a.snapshot() == before
 
+    def test_unreachable_before_anything_was_live_prints_d_and_no_marker(self, host: Host) -> None:
+        host.caddy.admin_up = False
+        disk = adapt(host.caddy, host.plane.caddyfile, host.plane.fragment)
+
+        with pytest.raises(UnobservableError) as caught:
+            live_release(host.plane)
+        assert caught.value.detail == (
+            f"connect: no such file or directory; D={disk.describe()} M=(active none)"
+        )
+
+    def test_the_marker_release_replaced_by_hand_with_no_release_is_foreign(
+        self, live_a: Host
+    ) -> None:
+        """R names no release while M does: not the staged row, whatever D says."""
+        live_a.plane.fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
+        placeholder = live_a.plane.fragment.with_name("placeholder.caddy")
+        placeholder.write_text(PLACEHOLDER, encoding="utf-8")
+        live_a.caddy.load(
+            toy_adapt(live_a.plane.caddyfile, {"LOVSPOR_RELEASE_FRAGMENT": str(placeholder)})
+        )
+
+        triple = read_triple(live_a.plane)
+
+        assert triple.running.release_id is None and triple.disk.release_id == live_a.b
+        assert triple.marker == Marker(active=live_a.a, previous=None)
+        assert situation(triple) == Situation.foreign
+
+
+class TestTriple:
+    def test_describe_prints_the_three_sources_with_none_for_what_is_absent(self) -> None:
+        running = ConfigPair(release_id="a" * 64, config_hash="1" * 64)
+        disk = ConfigPair(release_id=None, config_hash="2" * 64)
+        prefix = f"R=({'a' * 64}, {'1' * 12}) D=(none, {'2' * 12}) "
+
+        unmarked = Triple(running=running, disk=disk, marker=None, old=None)
+        first = Triple(
+            running=running, disk=disk, marker=Marker(active="a" * 64, previous=None), old=None
+        )
+        second = Triple(
+            running=running,
+            disk=disk,
+            marker=Marker(active="b" * 64, previous="a" * 64),
+            old=None,
+        )
+
+        assert unmarked.describe() == prefix + "M=(active none, previous none)"
+        assert first.describe() == prefix + f"M=(active {'a' * 64}, previous none)"
+        assert second.describe() == prefix + f"M=(active {'b' * 64}, previous {'a' * 64})"
+        assert (unmarked.marked, first.marked, second.marked) == (None, "a" * 64, "b" * 64)
+
 
 class TestCommit:
     def test_makes_b_live_through_the_transaction(self, live_a: Host) -> None:
@@ -239,6 +296,7 @@ class TestCommit:
         assert live_release(live_a.plane) == live_a.b
         assert live_a.caddy.reloads == 1
         assert not live_a.plane.next_fragment.exists()
+        assert not live_a.plane.previous_fragment.exists()
 
     def test_the_first_release_replaces_a_foreign_fragment_and_keeps_a_copy(
         self, host: Host
@@ -250,12 +308,22 @@ class TestCommit:
         assert read_marker(host.releases) == Marker(active=host.a, previous=None)
         assert host.plane.previous_fragment.read_text(encoding="utf-8") == PLACEHOLDER
 
+    def test_the_kept_copy_is_read_as_utf_8_whatever_the_process_locale(
+        self, host: Host, c_locale: None
+    ) -> None:
+        host.plane.fragment.write_bytes(NON_ASCII_PLACEHOLDER.encode("utf-8"))
+        host.caddy.restart()
+
+        commit_release(host.plane, host.a)
+
+        assert host.plane.previous_fragment.read_bytes() == NON_ASCII_PLACEHOLDER.encode("utf-8")
+
     def test_the_live_release_is_not_reloaded_again(self, live_a: Host) -> None:
         before = live_a.snapshot()
 
         report = commit_release(live_a.plane, live_a.a)
 
-        assert report.already_live
+        assert report == CommitReport(active=live_a.a, previous=live_a.a, already_live=True)
         assert live_a.caddy.reloads == 0
         assert live_a.snapshot() == before
 
@@ -308,10 +376,26 @@ class TestCommit:
             encoding="utf-8",
         )
 
-        with pytest.raises(CommitRefusedError, match="does the Caddyfile import the fragment"):
+        with pytest.raises(CommitRefusedError) as caught:
             commit_release(live_a.plane, live_a.b)
+        assert str(caught.value) == (
+            f"the composed configuration names {live_a.a}, not {live_a.b}; "
+            "does the Caddyfile import the fragment?"
+        )
         assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
         assert live_a.caddy.reloads == 0
+
+    def test_a_caddyfile_without_the_import_composes_no_release(self, host: Host) -> None:
+        host.plane.caddyfile.write_text("lovspor.test {\n\tfile_server\n}\n", encoding="utf-8")
+        host.caddy.restart()
+
+        with pytest.raises(CommitRefusedError) as caught:
+            commit_release(host.plane, host.a)
+        assert str(caught.value) == (
+            f"the composed configuration names no release, not {host.a}; "
+            "does the Caddyfile import the fragment?"
+        )
+        assert host.caddy.reloads == 0
 
     def test_a_fragment_caddy_refuses_to_validate_is_refused_before_anything_public(
         self, live_a: Host
@@ -347,9 +431,10 @@ class TestReloadFailure:
     def test_reverts_to_the_previous_fragment_and_reloads_it(self, live_a: Host) -> None:
         live_a.caddy.fail_reloads = 1
 
-        with pytest.raises(ReloadFailedError, match="not switched: systemctl reload caddy failed"):
+        with pytest.raises(ReloadFailedError) as caught:
             commit_release(live_a.plane, live_a.b)
 
+        assert str(caught.value) == f"release {live_a.b[:12]} not switched: {RELOAD_FAILURE}"
         assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
         assert live_a.running() == live_a.pair_of(live_a.a)
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
@@ -380,6 +465,19 @@ class TestReloadFailure:
         assert read_marker(host.releases) is None
         assert live_release(host.plane) is None
 
+    def test_the_kept_copy_is_restored_byte_for_byte_whatever_the_process_locale(
+        self, host: Host, c_locale: None
+    ) -> None:
+        host.plane.fragment.write_bytes(NON_ASCII_PLACEHOLDER.encode("utf-8"))
+        host.caddy.restart()
+        host.caddy.fail_reloads = 1
+
+        with pytest.raises(ReloadFailedError):
+            commit_release(host.plane, host.a)
+
+        assert host.plane.fragment.read_bytes() == NON_ASCII_PLACEHOLDER.encode("utf-8")
+        assert live_release(host.plane) is None
+
     def test_a_revert_that_also_fails_to_reload_is_named(self, live_a: Host) -> None:
         live_a.caddy.fail_reloads = 2
 
@@ -392,9 +490,11 @@ class TestReloadFailure:
 class TestRollback:
     def test_the_previous_release_through_the_same_transaction(self, live_a: Host) -> None:
         commit_release(live_a.plane, live_a.b)
+        reached: list[str] = []
 
-        report = rollback(live_a.plane)
+        report = rollback(live_a.plane, reached.append)
 
+        assert tuple(reached) == TRANSACTION_STEPS
         assert report.active == live_a.a and report.previous == live_a.b
         assert live_release(live_a.plane) == live_a.a
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=live_a.b)
@@ -412,8 +512,9 @@ class TestRollback:
     def test_without_a_previous_release_there_is_nothing_to_roll_back_to(
         self, live_a: Host
     ) -> None:
-        with pytest.raises(ControlPlaneError, match="no previous release"):
+        with pytest.raises(ControlPlaneError) as caught:
             rollback(live_a.plane)
+        assert str(caught.value) == "no previous release in the marker; nothing to roll back to"
 
     def test_refuses_while_unreconciled_or_unobservable(self, live_a: Host) -> None:
         commit_release(live_a.plane, live_a.b)
@@ -441,7 +542,12 @@ class TestTheCrashTable:
             live_a.b
         )
         assert live_release(live_a.plane) == live_a.a
-        assert reconcile(live_a.plane).situation == Situation.reconciled
+        assert reconcile(live_a.plane) == ReconcileReport(
+            situation=Situation.reconciled,
+            live=live_a.a,
+            action="none",
+            triple=read_triple(live_a.plane).describe(),
+        )
 
         commit_release(live_a.plane, live_a.b)
 
@@ -461,8 +567,12 @@ class TestTheCrashTable:
                 refused(live_a.plane)  # type: ignore[operator]
         with pytest.raises(UnreconciledError):
             commit_release(live_a.plane, live_a.b)
-        with pytest.raises(UnreconciledError, match="--complete .* --abandon"):
+        with pytest.raises(UnreconciledError) as caught:
             reconcile(live_a.plane)
+        assert str(caught.value) == (
+            f"host is staged_not_reloaded: {triple.describe()}; resolve with --complete "
+            "(D becomes the truth) or --abandon (M's release is restored)"
+        )
         assert live_a.caddy.reloads == 0
 
     def test_complete_after_the_fragment_rename_reloads_then_marks(self, live_a: Host) -> None:
@@ -490,6 +600,25 @@ class TestTheCrashTable:
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
         assert live_release(live_a.plane) == live_a.a
 
+    def test_a_resolution_whose_reload_fails_is_named_and_leaves_the_marker(
+        self, live_a: Host
+    ) -> None:
+        self._kill(live_a, "committed")
+        live_a.caddy.fail_reloads = 1
+
+        with pytest.raises(ReloadFailedError) as completing:
+            reconcile(live_a.plane, "complete")
+        assert str(completing.value) == f"complete failed: {RELOAD_FAILURE}"
+        assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.b)
+        assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
+
+        live_a.caddy.fail_reloads = 1
+        with pytest.raises(ReloadFailedError) as abandoning:
+            reconcile(live_a.plane, "abandon")
+        assert str(abandoning.value) == f"abandon failed: {RELOAD_FAILURE}"
+        assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
+        assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
+
     def test_a_crash_after_the_reload_is_completed_by_the_marker_alone(self, live_a: Host) -> None:
         self._kill(live_a, "reloaded")
 
@@ -502,7 +631,12 @@ class TestTheCrashTable:
 
         report = reconcile(live_a.plane)
 
-        assert report.action == "marker_written"
+        assert report == ReconcileReport(
+            situation=Situation.reconciled,
+            live=live_a.b,
+            action="marker_written",
+            triple=triple.describe(),
+        )
         assert read_marker(live_a.releases) == Marker(active=live_a.b, previous=live_a.a)
         assert live_a.caddy.reloads == 1
         assert live_release(live_a.plane) == live_a.b
@@ -564,8 +698,9 @@ class TestForeign:
         live_a.plane.fragment.write_text(PLACEHOLDER, encoding="utf-8")
         self._hand_reload(live_a)
 
-        with pytest.raises(CommitRefusedError, match="names no release"):
+        with pytest.raises(CommitRefusedError) as caught:
             reconcile(live_a.plane, "complete")
+        assert str(caught.value) == "the configuration on disk names no release; cannot complete"
 
     def test_abandon_needs_the_markers_release_fragment(self, live_a: Host) -> None:
         live_a.plane.fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
@@ -579,8 +714,9 @@ class TestForeign:
         host.plane.fragment.write_text(host.fragment_of(host.b), encoding="utf-8")
 
         assert situation(read_triple(host.plane)) == Situation.staged
-        with pytest.raises(ControlPlaneError, match="no previous fragment"):
+        with pytest.raises(ControlPlaneError) as caught:
             reconcile(host.plane, "abandon")
+        assert str(caught.value) == "no previous fragment to restore: nothing was live before"
 
     def test_admin_unreachable_refuses_reconcile_with_d_and_m_printed(self, live_a: Host) -> None:
         live_a.caddy.admin_up = False

@@ -14,10 +14,7 @@ work tree is dirty exactly while these tests are being written.
 """
 
 import json
-import locale
 import re
-import sys
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -314,18 +311,6 @@ def _served_listing(corpus: Path) -> dict[str, object]:
 
     listed = ListToolsResult(tools=asyncio.run(build_server(corpus).list_tools()))
     return listed.model_dump(by_alias=True, mode="json", exclude_none=True)
-
-
-@pytest.fixture
-def c_locale() -> Iterator[None]:
-    """The C locale, whose codec is ASCII, for the duration of one test."""
-    if sys.flags.utf8_mode:
-        pytest.skip("UTF-8 mode pins the locale codec to UTF-8")
-    previous = locale.setlocale(locale.LC_CTYPE)
-    locale.setlocale(locale.LC_CTYPE, "C")
-    assert locale.getencoding().lower() in {"us-ascii", "ansi_x3.4-1968", "ascii"}
-    yield
-    locale.setlocale(locale.LC_CTYPE, previous)
 
 
 @pytest.fixture
