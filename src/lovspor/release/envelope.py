@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from lovspor.atomic_io import atomic_write_bytes, atomic_write_text
 from lovspor.publish.companion import companion_json_bytes
@@ -89,6 +89,15 @@ class Marker(BaseModel):
 
     active: str
     previous: str | None
+
+    @field_validator("active", "previous")
+    @classmethod
+    def _release_ids_only(cls, value: str | None) -> str | None:
+        # The marker names finalized release directories by their content id —
+        # never a path, so a foreign value cannot steer prune or rollback.
+        if value is not None and not is_release_id(value):
+            raise ValueError(f"not a release id: {value!r}")
+        return value
 
 
 def is_release_id(name: str) -> bool:

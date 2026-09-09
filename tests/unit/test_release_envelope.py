@@ -254,8 +254,6 @@ class TestMarker:
         with pytest.raises(IncompleteEnvelopeError, match="not a marker"):
             read_marker(tmp_path)
 
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     @pytest.mark.parametrize(
         "marker",
         [
