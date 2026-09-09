@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import lovspor
+from lovspor import runtime_identity
 from lovspor.runtime_identity import (
     Distribution,
     canonical_environment_sha256,
@@ -74,6 +75,15 @@ class TestTreeSha256:
         (package / "__pycache__").mkdir()
         (package / "__pycache__" / "__init__.cpython-312.pyc").write_bytes(b"\x00")
         (package / "publish" / "stray.pyc").write_bytes(b"\x00")
+
+        assert tree_sha256(package) == before
+
+    def test_ignores_a_cache_directory_even_when_it_contains_source(self, tmp_path: Path) -> None:
+        package = _package(tmp_path)
+        before = tree_sha256(package)
+        cache = package / "publish" / "__pycache__"
+        cache.mkdir()
+        (cache / "surprising.py").write_text("executed = True\n", encoding="utf-8")
 
         assert tree_sha256(package) == before
 
@@ -220,3 +230,49 @@ class TestClosureWalk:
         assert by_name["e"].direct_url == "file:///e"
         assert by_name["a-lib"].direct_url is None
         assert by_name["a-lib"].version == "1.0"
+
+    def test_requirement_parser_separates_comma_delimited_extras(self) -> None:
+        parsed = runtime_identity._parse_requirement("Thing[one,Two_Extra]>=1")
+
+        assert parsed == runtime_identity._Requirement(
+            "thing", frozenset({"one", "two-extra"}), frozenset()
+        )
+        assert runtime_identity._parse_requirement("Thing>=1") == runtime_identity._Requirement(
+            "thing", frozenset(), frozenset()
+        )
+
+    def test_direct_url_without_a_url_field_is_the_empty_string(self) -> None:
+        distribution = _StubDistribution({"direct_url.json": "{}"})
+
+        assert runtime_identity._direct_url(distribution) == ""
+
+    def test_revisiting_a_dependency_unions_newly_requested_extras(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stubs = {
+            "root": _StubDistribution({"METADATA": _metadata("root", "1", "left", "right")}),
+            "left": _StubDistribution({"METADATA": _metadata("left", "1", "shared[a]")}),
+            "right": _StubDistribution({"METADATA": _metadata("right", "1", "shared[b]")}),
+            "shared": _StubDistribution(
+                {
+                    "METADATA": _metadata(
+                        "shared", "1", "from-a; extra == 'a'", "from-b; extra == 'b'"
+                    )
+                }
+            ),
+            "from-a": _StubDistribution({"METADATA": _metadata("from-a", "1")}),
+            "from-b": _StubDistribution({"METADATA": _metadata("from-b", "1")}),
+        }
+        monkeypatch.setattr(
+            importlib.metadata,
+            "distribution",
+            lambda name: stubs[normalise_name(name)],
+        )
+
+        assert {item.name for item in installed_distributions("root")} == {
+            "left",
+            "right",
+            "shared",
+            "from-a",
+            "from-b",
+        }

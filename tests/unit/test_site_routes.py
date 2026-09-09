@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from lovspor.publish.pages import SITE_ORIGIN
+from lovspor.site import routes as routes_module
 from lovspor.site.routes import (
     SITE_ROUTES,
     Localised,
@@ -117,6 +118,24 @@ class TestSiteRoute:
 
         assert copy.text("nb") == "norsk"
         assert copy.text("en") == "english"
+
+    def test_missing_localised_text_names_the_language(self) -> None:
+        with pytest.raises(ValueError, match="no en copy"):
+            Localised(nb="norsk").text("en")
+
+    def test_route_helper_preserves_every_argument(self) -> None:
+        title = Localised(nb="tittel", en="title")
+        description = Localised(nb="omtale", en="description")
+
+        route = routes_module._route("/exact/", "research", title, description)
+
+        assert route == SiteRoute(
+            path="/exact/",
+            template="placeholder",
+            status="research",
+            title=title,
+            description=description,
+        )
 
 
 class TestHelpers:

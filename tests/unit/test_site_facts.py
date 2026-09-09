@@ -8,6 +8,7 @@ import pytest
 from markupsafe import Markup
 from pydantic import ValidationError
 
+from lovspor.site import facts as facts_module
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.facts import (
     FactLedger,
@@ -163,6 +164,9 @@ class TestFactRenderer:
         fact = fact_renderer("/status/", "nb", registry, FactLedger())
 
         assert ">true<" in fact("hosted.oauth", kind="hosted")
+
+    def test_renders_false_booleans_lowercase(self) -> None:
+        assert facts_module._format_value(False, "en") == "false"
 
     def test_kind_mismatch_fails_the_build(self, registry: FactRegistry) -> None:
         """A hosted value under a code label, or a code value under a hosted
