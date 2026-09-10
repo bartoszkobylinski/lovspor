@@ -119,6 +119,10 @@ OFFLINE_ADMIN = "offline"
 """What the offline rollback reports it came *from*: nothing answered, so nothing was read."""
 SOCKET_MODE = 0o660
 RUNTIME_DIR_MODE = 0o2770
+PROBE_MODE = 0o600
+"""The preflight's throwaway file is the making process's alone; nothing else ever reads it."""
+_EXCLUSIVE = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+"""Create or refuse: a taken name — a file, a directory, a symlink — is never opened."""
 PRE_ENVELOPE_DROP_IN = f"[Service]\nEnvironmentFile={ENVIRONMENT_FILE}\n"
 """What provisioning wrote before the envelope: restored by abandon and rollback."""
 _UNIX_PREFIX = "unix/"
@@ -278,44 +282,88 @@ def drop_in_text(host: MigrationHost, with_exec_reload: bool) -> str:
 
 @contextmanager
 def _probe_file(plane: ControlPlane, name: str, text: str) -> Iterator[Path]:
-    """A throwaway file beside the Caddyfile, for ``caddy adapt`` alone."""
+    """A throwaway file beside the Caddyfile, for ``caddy adapt`` alone.
+
+    Every way this can fail on the live droplet is a named refusal that
+    prints the path and the cause, and leaves the box as it found it:
+    the preflight's promise is that nothing has moved when it refuses,
+    and a probe that stayed behind is something that moved.
+    """
     preferred = plane.caddyfile.with_name(f"{plane.caddyfile.name}.lovspor-{name}")
-    probe = _probe_path(preferred, text)
+    probe = _probe_path(preferred, _probe_bytes(preferred, text))
     try:
         yield probe
     finally:
-        probe.unlink(missing_ok=True)
+        _discard_probe(probe)
 
 
-def _probe_path(preferred: Path, text: str) -> Path:
-    """``text`` in a file this call created — never one that was already there.
+def _unwritable(path: Path, cause: Exception) -> MigrationRefusedError:
+    """One sentence for every way the probe cannot be made: the path, then the cause."""
+    return MigrationRefusedError(f"the preflight cannot write its probe file {path}: {cause}")
 
-    The preflight runs as root on the live droplet, where a file already
-    at the preferred name is someone else's: opening it would destroy its
-    content and the cleanup would then delete it. So the probe is created
-    exclusively and steps aside to a unique name beside the taken one,
-    which leaves the unlink able to take only what this call made. The
-    bytes are encoded here rather than by the stream, so what Caddy reads
-    is UTF-8 under the C locale too.
+
+def _probe_bytes(preferred: Path, text: str) -> bytes:
+    """The probe's bytes, encoded before anything is created.
+
+    UTF-8 here rather than by the stream, so what Caddy reads is UTF-8
+    under the C locale too; and up front, so an address a strict codec
+    refuses — a socket path carrying undecodable bytes reaches this as
+    surrogates — refuses the preflight instead of leaving a half-written
+    file behind.
     """
     try:
-        with preferred.open("xb") as handle:
-            handle.write(text.encode())
+        return text.encode()
+    except UnicodeError as error:
+        raise _unwritable(preferred, error) from error
+
+
+def _probe_path(preferred: Path, payload: bytes) -> Path:
+    """``payload`` in a file this call created — never one that was already there.
+
+    The preflight runs as root on the live droplet, where a name already
+    taken is someone else's: opening it would destroy its content and the
+    cleanup would then delete it. So the probe is created exclusively —
+    which a directory or a symlink at the name fails too — and steps
+    aside to a unique name beside the taken one, which leaves the unlink
+    able to take only what this call made.
+    """
+    try:
+        descriptor = os.open(preferred, _EXCLUSIVE, PROBE_MODE)
     except FileExistsError:
-        return _probe_beside(preferred, text)
+        return _probe_beside(preferred, payload)
+    except OSError as error:
+        raise _unwritable(preferred, error) from error
+    return _fill_probe(preferred, descriptor, payload)
+
+
+def _probe_beside(preferred: Path, payload: bytes) -> Path:
+    """A unique name in the same directory, so the same relative imports still resolve."""
+    try:
+        descriptor, unique = tempfile.mkstemp(prefix=f"{preferred.name}.", dir=preferred.parent)
+    except OSError as error:
+        raise _unwritable(preferred, error) from error
+    return _fill_probe(Path(unique), descriptor, payload)
+
+
+def _fill_probe(created: Path, descriptor: int, payload: bytes) -> Path:
+    """Fill a file this call just created; a failed write takes it back off the box."""
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+    except OSError as error:
+        _discard_probe(created)
+        raise _unwritable(created, error) from error
+    return created
+
+
+def _discard_probe(probe: Path) -> None:
+    """Take back what this call created; one already gone was taken by someone else."""
+    try:
+        probe.unlink(missing_ok=True)
     except OSError as error:
         raise MigrationRefusedError(
-            f"the preflight cannot write its probe file {preferred}: {error}"
+            f"the preflight cannot remove its probe file {probe}: {error}"
         ) from error
-    return preferred
-
-
-def _probe_beside(preferred: Path, text: str) -> Path:
-    """A unique name in the same directory, so the same relative imports still resolve."""
-    descriptor, unique = tempfile.mkstemp(prefix=f"{preferred.name}.", dir=preferred.parent)
-    with os.fdopen(descriptor, "wb") as handle:
-        handle.write(text.encode())
-    return Path(unique)
 
 
 def _require_no_marker(plane: ControlPlane) -> None:

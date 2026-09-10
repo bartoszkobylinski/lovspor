@@ -6,6 +6,7 @@ checkpoints that stop the procedure at a named step, as the control-plane
 tests do.
 """
 
+import errno
 import grp
 import json
 import os
@@ -395,6 +396,186 @@ class TestPreflight:
             directory.chmod(0o700)
 
         assert "cannot write its probe file" in str(caught.value)
+        assert str(_probe(droplet, "probe")) in str(caught.value)
+
+    def test_a_step_aside_probe_that_cannot_be_created_is_a_named_refusal(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A taken preferred name must not let fallback creation leak a bare OSError."""
+        preferred = _probe(droplet, "probe")
+        preferred.write_text("operator-owned", encoding="utf-8")
+
+        def refuse(*args: object, **kwargs: object) -> tuple[int, str]:
+            del args, kwargs
+            raise OSError("fallback directory is not writable")
+
+        monkeypatch.setattr(migrate.tempfile, "mkstemp", refuse)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+
+        assert "cannot write its probe file" in str(caught.value)
+        assert str(preferred) in str(caught.value)
+        assert preferred.read_text(encoding="utf-8") == "operator-owned"
+
+    def test_a_step_aside_that_runs_out_of_names_is_a_named_refusal(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``mkstemp`` gives its exhaustion as ``FileExistsError``: a refusal, not a retry."""
+        preferred = _probe(droplet, "probe")
+        preferred.write_text("operator-owned", encoding="utf-8")
+
+        def exhausted(*args: object, **kwargs: object) -> tuple[int, str]:
+            del args, kwargs
+            raise FileExistsError("No usable temporary file name found")
+
+        monkeypatch.setattr(migrate.tempfile, "mkstemp", exhausted)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+
+        assert "No usable temporary file name found" in str(caught.value)
+        assert str(preferred) in str(caught.value)
+        assert list(preferred.parent.glob("*.lovspor-*")) == [preferred]
+
+    @pytest.mark.parametrize("taken", [False, True])
+    def test_a_probe_that_cannot_be_filled_is_a_named_refusal_that_leaves_nothing(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch, taken: bool
+    ) -> None:
+        """A full disk stops the write after creation; what this call made goes back off the box."""
+        preferred = _probe(droplet, "probe")
+        if taken:
+            preferred.write_text("operator-owned", encoding="utf-8")
+
+        def refuse(descriptor: int, mode: str) -> object:
+            os.close(descriptor)
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        monkeypatch.setattr(migrate.os, "fdopen", refuse)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+
+        assert "cannot write its probe file" in str(caught.value)
+        assert str(preferred) in str(caught.value)
+        assert list(preferred.parent.glob("*.lovspor-*")) == ([preferred] if taken else [])
+
+    def test_a_socket_address_no_codec_can_encode_is_a_named_refusal(
+        self, droplet: Droplet
+    ) -> None:
+        """A socket path of undecodable bytes reaches the probe's text as lone surrogates.
+
+        Encoding is the probe's first move, before anything is created,
+        so an address strict UTF-8 cannot encode refuses the preflight
+        instead of leaving a half-written probe beside the Caddyfile.
+        """
+        host = replace(droplet.host, socket_admin=f"unix/{droplet.host.runtime_dir}/\udc80.sock")
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, host)
+
+        assert "cannot write its probe file" in str(caught.value)
+        assert str(_probe(droplet, "probe")) in str(caught.value)
+        assert list(droplet.plane.caddyfile.parent.glob("*.lovspor-*")) == []
+
+    def test_a_probe_directory_that_vanished_is_a_named_refusal(self, droplet: Droplet) -> None:
+        """No directory, no probe — and this one names it whether or not the caller is root."""
+        directory = droplet.plane.caddyfile.parent
+
+        def take_the_directory(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            answer = droplet.caddy.run(argv, env)
+            shutil.rmtree(directory, ignore_errors=True)
+            return answer
+
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("caddy", "adapt"), take_the_directory)
+        )
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(plane, droplet.host)
+
+        assert "cannot write its probe file" in str(caught.value)
+        assert str(_probe(droplet, "probe")) in str(caught.value)
+
+    @pytest.mark.parametrize("name", ["probe", "fragment"])
+    def test_a_directory_at_the_probe_name_is_stepped_around(
+        self, droplet: Droplet, name: str
+    ) -> None:
+        """Exclusive creation fails on a directory too, so the step aside covers that name."""
+        taken = _probe(droplet, name)
+        taken.mkdir()
+        (taken / "operator-owned").write_text("kept", encoding="utf-8")
+
+        preflight(droplet.plane, droplet.host)
+
+        assert (taken / "operator-owned").read_text(encoding="utf-8") == "kept"
+        assert list(taken.parent.glob("*.lovspor-*")) == [taken]
+
+    def test_a_symlink_at_the_probe_name_is_stepped_around(self, droplet: Droplet) -> None:
+        """A dangling symlink is the trap: a non-exclusive open would create what it points at."""
+        taken = _probe(droplet, "probe")
+        target = droplet.plane.caddyfile.parent / "pointed-at"
+        taken.symlink_to(target)
+
+        preflight(droplet.plane, droplet.host)
+
+        assert not target.exists()
+        assert taken.is_symlink()
+        assert list(taken.parent.glob("*.lovspor-*")) == [taken]
+
+    def test_the_probe_file_is_private_to_the_call(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The probe is read by this call's own ``caddy adapt`` and by nothing else."""
+        modes: list[int] = []
+        real = migrate.adapt_config
+
+        def recording(runner: object, caddyfile: Path, fragment: Path | None = None) -> object:
+            for path in (caddyfile, fragment):
+                if path is not None and ".lovspor-" in path.name:
+                    modes.append(stat.S_IMODE(path.stat().st_mode))
+            return real(runner, caddyfile, fragment)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(migrate, "adapt_config", recording)
+        preflight(droplet.plane, droplet.host)
+
+        assert len(modes) == 2
+        assert [mode & 0o077 for mode in modes] == [0, 0]
+
+    def test_a_probe_already_gone_at_cleanup_is_not_a_refusal(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cleanup takes what this call created; a probe already gone is nothing left to take."""
+        real = migrate.adapt_config
+
+        def vanishing(runner: object, caddyfile: Path, fragment: Path | None = None) -> object:
+            config = real(runner, caddyfile, fragment)  # type: ignore[arg-type]
+            for path in (caddyfile, fragment):
+                if path is not None and ".lovspor-" in path.name:
+                    path.unlink()
+            return config
+
+        monkeypatch.setattr(migrate, "adapt_config", vanishing)
+
+        assert preflight(droplet.plane, droplet.host).socket_admin == droplet.host.socket_admin
+
+    def test_a_probe_that_cannot_be_removed_is_a_named_refusal(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A probe left behind is state that moved, so the refusal names the file to delete."""
+        real_unlink = Path.unlink
+
+        def refuse(self: Path, missing_ok: bool = False) -> None:
+            if ".lovspor-" in self.name:
+                raise PermissionError(errno.EACCES, "Permission denied")
+            real_unlink(self, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+
+        assert "cannot remove its probe file" in str(caught.value)
         assert str(_probe(droplet, "probe")) in str(caught.value)
 
     def test_the_probe_file_is_utf_8_whatever_the_locale(
