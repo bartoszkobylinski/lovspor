@@ -38,6 +38,10 @@ DEFAULT_TCP = "localhost:2019"
 STOCK_EXEC_RELOAD = "/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force"
 """The stock unit's reload line (``caddyserver/dist``): no ``--address``."""
 _JOB_FAILED = "Job for caddy.service failed because the control process"
+_LOAD_REFUSED = (
+    "Error: sending configuration to instance: caddy responded with error: HTTP 400: "
+    '{"error":"loading config: loading new config: http app module: start: listen tcp :443"}'
+)
 
 
 class AdaptError(Exception):
@@ -309,6 +313,9 @@ class FakeCaddy:
         done = self._adapt(path, env)
         if done.returncode != 0:
             return done
+        if self.fail_reloads:
+            self.fail_reloads -= 1
+            return Completed(1, "", _LOAD_REFUSED)
         if to != self.admin_address:
             return Completed(
                 1,
@@ -366,3 +373,21 @@ class FakeCaddy:
         if self.running is None:
             raise UnobservableError("admin_unreachable", "connection refused")
         return copy.deepcopy(self.running)
+
+
+class FakeOwnership:
+    """``pwd``, ``grp`` and ``chown`` as tables: lookups answer, chowns are recorded, not done."""
+
+    def __init__(self, users: Mapping[str, int], groups: Mapping[str, int]) -> None:
+        self.users = dict(users)
+        self.groups = dict(groups)
+        self.chowns: list[tuple[Path, int, int]] = []
+
+    def uid_of(self, user: str) -> int:
+        return self.users[user]
+
+    def gid_of(self, group: str) -> int:
+        return self.groups[group]
+
+    def chown(self, path: Path, uid: int, gid: int) -> None:
+        self.chowns.append((path, uid, gid))

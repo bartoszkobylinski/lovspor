@@ -184,17 +184,30 @@ def config_pair(config: object) -> ConfigPair:
     return ConfigPair(release_id=ids.pop(), config_hash=canonical_hash(_routes_subtree(route)))
 
 
-def adapt(runner: Runner, caddyfile: Path, fragment: Path) -> ConfigPair:
-    """What Caddy would load from ``caddyfile`` importing ``fragment``."""
+def adapt_config(runner: Runner, caddyfile: Path, fragment: Path) -> object:
+    """The JSON Caddy would load from ``caddyfile`` importing ``fragment``."""
     argv = ("caddy", "adapt", "--config", str(caddyfile), "--adapter", "caddyfile")
     done = runner.run(argv, {FRAGMENT_ENV: str(fragment)})
     if done.returncode != 0:
         raise ControlPlaneError(f"caddy adapt failed for {fragment}: {done.stderr.strip()}")
     try:
-        config = json.loads(done.stdout)
+        return json.loads(done.stdout)
     except ValueError as error:
         raise ControlPlaneError("caddy adapt produced no JSON") from error
-    return config_pair(config)
+
+
+def adapt(runner: Runner, caddyfile: Path, fragment: Path) -> ConfigPair:
+    """What Caddy would load from ``caddyfile`` importing ``fragment``, as a pair."""
+    return config_pair(adapt_config(runner, caddyfile, fragment))
+
+
+def admin_listen(config: object) -> str | None:
+    """The admin address a configuration names — the global ``admin`` option — or ``None``."""
+    if not isinstance(config, dict):
+        return None
+    admin = config.get("admin")
+    listen = admin.get("listen") if isinstance(admin, dict) else None
+    return listen if isinstance(listen, str) and listen else None
 
 
 def validate(runner: Runner, caddyfile: Path, fragment: Path) -> None:

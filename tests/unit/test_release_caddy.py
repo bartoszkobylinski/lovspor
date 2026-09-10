@@ -25,7 +25,9 @@ from lovspor.release.caddy import (
     HttpxAdminClient,
     SubprocessRunner,
     adapt,
+    adapt_config,
     admin_base,
+    admin_listen,
     canonical_hash,
     config_pair,
     reload,
@@ -162,6 +164,21 @@ class TestConfigPair:
         assert pair == ConfigPair(release_id=ID_A, config_hash=canonical_hash(handle))
 
 
+class TestAdminListen:
+    def test_the_global_admin_option_or_none(self) -> None:
+        assert admin_listen(_config(_site(_routes(ID_A)))) == DEFAULT_ADMIN
+        assert admin_listen({"admin": {"listen": "unix//run/x.sock|0660"}}) == (
+            "unix//run/x.sock|0660"
+        )
+
+    @pytest.mark.parametrize(
+        "config",
+        [None, [], {}, {"admin": None}, {"admin": []}, {"admin": {}}, {"admin": {"listen": ""}}],
+    )
+    def test_anything_without_a_listen_address_is_none(self, config: object) -> None:
+        assert admin_listen(config) is None
+
+
 class RecordingRunner:
     def __init__(self, *answers: Completed) -> None:
         self.answers = list(answers)
@@ -195,6 +212,20 @@ class TestCommands:
                 {FRAGMENT_ENV: str(tmp_path / "next")},
             )
         ]
+
+    def test_adapt_config_is_the_json_itself_and_adapt_its_pair(self, tmp_path: Path) -> None:
+        config = _config(_site(_routes(ID_A)))
+        runner = RecordingRunner(Completed(0, json.dumps(config), ""))
+
+        assert adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "next") == config
+        assert runner.calls[0][0][:2] == ("caddy", "adapt")
+        assert runner.calls[0][1] == {FRAGMENT_ENV: str(tmp_path / "next")}
+
+    def test_adapt_config_failures_are_named(self, tmp_path: Path) -> None:
+        with pytest.raises(ControlPlaneError, match="caddy adapt failed .*: boom"):
+            adapt_config(RecordingRunner(Completed(1, "", "boom\n")), tmp_path, tmp_path / "f")
+        with pytest.raises(ControlPlaneError, match="caddy adapt produced no JSON"):
+            adapt_config(RecordingRunner(Completed(0, "{", "")), tmp_path, tmp_path / "f")
 
     def test_adapt_failures_are_named(self, tmp_path: Path) -> None:
         with pytest.raises(ControlPlaneError, match="caddy adapt failed .*: boom"):
