@@ -59,6 +59,14 @@ def _fragment_snippet(fragment: Path) -> str:
     return match.group(0).replace(_FRAGMENT, str(fragment))
 
 
+def _refusal_snippet(caddyfile: Path, marker: Path) -> str:
+    """The live-box refusal, retargeted at writable paths."""
+    guard = r"""if \[ -f "\$CADDYFILE" \].*?\nfi\n"""
+    match = re.search(guard, _script(), re.DOTALL)
+    assert match is not None, "provision.sh no longer refuses a live pre-envelope box"
+    return f"CADDYFILE={caddyfile}\nMARKER={marker}\n{match.group(0)}"
+
+
 def _run(snippet: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["bash", "-c", snippet], check=False, capture_output=True, text=True)
 
@@ -170,6 +178,92 @@ class TestThePlaceholderFragment:
 
         assert 'install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile' in text
         assert text.index("/etc/caddy/Caddyfile") < text.index(f"if [ ! -f {_FRAGMENT} ]")
+
+
+class TestTheLiveBoxRefusal:
+    """A live pre-envelope droplet is the one box this script must not touch.
+
+    Re-running it there installs the socket-admin Caddyfile over the live
+    one with no ``.pre-envelope`` backup and an ``ExecReload=`` line naming
+    a socket that does not exist yet, so the next caddy restart serves the
+    503 placeholder instead of the site. That refusal has to live in the
+    script, not only in the README the operator did not open.
+    """
+
+    def _paths(self, tmp_path: Path) -> tuple[Path, Path]:
+        caddyfile = tmp_path / "Caddyfile"
+        marker = tmp_path / "ACTIVE"
+        return caddyfile, marker
+
+    def test_a_caddyfile_with_no_release_marker_is_refused(self, tmp_path: Path) -> None:
+        caddyfile, marker = self._paths(tmp_path)
+        caddyfile.write_text("lovspor.no {\n}\n", encoding="utf-8")
+
+        result = _run(_refusal_snippet(caddyfile, marker))
+
+        assert result.returncode == 1
+        assert "refusing:" in result.stdout
+        assert "lovspor release migrate" in result.stdout
+        assert "deploy/digitalocean/README.md" in result.stdout
+
+    def test_a_box_with_a_live_release_is_provisioned_again(self, tmp_path: Path) -> None:
+        """Past the first migration the Caddyfile is this repository's own, so a
+        re-run installs what it already installed."""
+        caddyfile, marker = self._paths(tmp_path)
+        caddyfile.write_text("lovspor.no {\n}\n", encoding="utf-8")
+        marker.write_text("release\n", encoding="utf-8")
+
+        result = _run(_refusal_snippet(caddyfile, marker))
+
+        assert result.returncode == 0, result.stdout
+        assert result.stdout == ""
+
+    def test_a_box_with_no_caddyfile_at_all_is_the_fresh_droplet(self, tmp_path: Path) -> None:
+        caddyfile, marker = self._paths(tmp_path)
+
+        result = _run(_refusal_snippet(caddyfile, marker))
+
+        assert result.returncode == 0, result.stdout
+
+    def test_the_override_is_for_a_box_provisioned_but_never_published(
+        self, tmp_path: Path
+    ) -> None:
+        """Pass 2 installs the Caddyfile; interrupted after that, the repair run
+        looks exactly like a live box. The escape is explicit and documented."""
+        caddyfile, marker = self._paths(tmp_path)
+        caddyfile.write_text("lovspor.no {\n}\n", encoding="utf-8")
+        snippet = _refusal_snippet(caddyfile, marker)
+
+        forced = _run(f"export LOVSPOR_PROVISION_FORCE=1\n{snippet}")
+        wrong_value = _run(f"export LOVSPOR_PROVISION_FORCE=yes\n{snippet}")
+
+        assert forced.returncode == 0, forced.stdout
+        assert wrong_value.returncode == 1
+        assert "LOVSPOR_PROVISION_FORCE=1" in wrong_value.stdout
+
+    def test_it_runs_before_anything_is_installed_or_written(self) -> None:
+        text = _script()
+
+        guard = text.index('if [ -f "$CADDYFILE" ]')
+        for later in (
+            "fallocate -l",
+            "apt-get install",
+            "groupadd --system --force lovspor-release",
+            'install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile',
+            "cat >/etc/systemd/system/caddy.service.d/lovspor.conf",
+        ):
+            assert guard < text.index(later), later
+
+    def test_the_header_states_the_precondition_instead_of_plain_idempotence(self) -> None:
+        """The old header said "Idempotent — safe to re-run" with no qualifier,
+        which is exactly the sentence that makes an operator run it on the live
+        droplet."""
+        header = _script()[: _script().index("set -euo pipefail")]
+
+        assert "Idempotent — safe to re-run." not in header
+        assert "REFUSES" in header
+        assert "lovspor release migrate" in header
+        assert "LOVSPOR_PROVISION_FORCE=1" in header
 
 
 class TestTheProbeCredential:

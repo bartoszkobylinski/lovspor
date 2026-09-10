@@ -42,9 +42,11 @@ doctl compute droplet get lovspor-mcp --format PublicIPv4 --no-header   # note t
 
 ## 2. Provision the box
 
-Copy the bootstrap up and run it. It is **idempotent** and runs in **two passes**
-because the lovspor repo is private (`provision.sh` is self-contained — it doesn't
-need the repo cloned to start):
+Copy the bootstrap up and run it. It runs in **two passes** because the lovspor
+repo is private (`provision.sh` is self-contained — it doesn't need the repo
+cloned to start). It is re-runnable on a box it provisioned, and **refuses** one
+that is already serving from the pre-envelope layout — see the note under
+[First migration](#first-migration-once-on-the-existing-droplet):
 
 ```bash
 # from your Mac:
@@ -303,8 +305,18 @@ rather than by hand.
 
 **Do not run `provision.sh` on the live droplet.** It writes the whole drop-in,
 `ExecReload=` pair included, which on a box still answering on TCP points every
-`systemctl reload caddy` at a socket that does not exist yet. That two-phase
-split is the entire reason the migration is a command and not a copy.
+`systemctl reload caddy` at a socket that does not exist yet — and it installs
+the socket-admin Caddyfile over the live one with no `.pre-envelope` backup, so
+the next `systemctl restart caddy` serves the 503 placeholder instead of the
+site. That two-phase split is the entire reason the migration is a command and
+not a copy.
+
+The script refuses this itself: `/etc/caddy/Caddyfile` present and
+`/var/www/lovspor-releases/ACTIVE` absent is a box that has never published
+through the envelope, and it exits 1 naming `lovspor release migrate`. The one
+legitimate re-run that rule also catches — a box this script provisioned that
+has not published yet, e.g. pass 2 interrupted — is
+`LOVSPOR_PROVISION_FORCE=1 sudo -E bash provision.sh`.
 
 Reach the box over the tailnet (`root@<DROPLET_TAILSCALE_IP>`); public SSH is
 firewalled off. All commands below run as root unless they say otherwise.

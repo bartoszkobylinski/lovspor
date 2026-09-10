@@ -277,6 +277,9 @@ class TestRunbook:
         # provision.sh writes the ExecReload= pair, which on a box still on TCP
         # points every `systemctl reload caddy` at a socket that does not exist.
         assert "Do not run `provision.sh` on the live droplet" in text
+        # …and the script enforces it, so the prose is not the only guard.
+        assert "/var/www/lovspor-releases/ACTIVE` absent" in text
+        assert "LOVSPOR_PROVISION_FORCE=1 sudo -E bash provision.sh" in text
 
     def test_the_runbook_carries_the_offline_last_resort(self) -> None:
         """Every other way back dials the admin endpoint first, so all of them

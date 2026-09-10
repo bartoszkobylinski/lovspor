@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Provision a fresh Ubuntu 24.04 droplet to run the lovspor hosted MCP.
 #
-# Idempotent — safe to re-run. Two passes, because the lovspor repo is PRIVATE:
+# Safe to re-run on a box THIS script provisioned. It REFUSES a box that is
+# already serving from the pre-envelope layout — an existing /etc/caddy/Caddyfile
+# with no release marker — because a re-run there overwrites that live Caddyfile
+# with no backup. Moving such a box onto the release envelope is
+# `lovspor release migrate` (README, First migration), never this script.
+# A box provisioned but never published trips the same rule; that one legitimate
+# repair run is LOVSPOR_PROVISION_FORCE=1.
+#
+# Two passes, because the lovspor repo is PRIVATE:
 #   pass 1 generates a read-only deploy key and prints it, then stops;
 #   pass 2 (after you add that key to GitHub) clones the app and finishes.
 #
@@ -17,12 +25,34 @@ APP_DIR="$APP_HOME/app"
 CORPUS_DIR="$APP_HOME/.cache/lovverk"
 ENV_FILE=/etc/lovspor/lovspor.env
 REPO_SSH="git@github.com:bartoszkobylinski/lovspor.git"
+CADDYFILE=/etc/caddy/Caddyfile
+MARKER=/var/www/lovspor-releases/ACTIVE
 KEYS_URL="https://github.com/bartoszkobylinski/lovspor/settings/keys"
 SWAP_GB=2
 
 log()  { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 warn() { printf '\n\033[1;33m!!  %s\033[0m\n' "$*"; }
 [ "$(id -u)" -eq 0 ] || { echo "run as root: sudo bash provision.sh"; exit 1; }
+
+# --- 0. Never provision over a box that is already serving ---
+# On a droplet serving lovspor.no from the pre-envelope layout, step 13 replaces
+# the live Caddyfile with the socket-admin one and writes NO .pre-envelope
+# backup, while step 11 installs an ExecReload= line naming a socket that does
+# not exist yet — so the next `systemctl restart caddy` serves the 503
+# placeholder instead of the site, and there is nothing on disk to go back to.
+# The release marker is what tells the two boxes apart: past the first migration
+# this file is already this repository's own, and a re-run installs what is
+# there. Before it, the only supported move is `lovspor release migrate`.
+if [ -f "$CADDYFILE" ] && [ ! -f "$MARKER" ] && [ "${LOVSPOR_PROVISION_FORCE:-0}" != 1 ]; then
+	echo "refusing: $CADDYFILE exists and no release is live ($MARKER is absent)."
+	echo "This box may already serve lovspor.no; provisioning would overwrite its Caddyfile"
+	echo "with no backup and point ExecReload= at a socket that does not exist yet."
+	echo "Migrate it instead: 'lovspor release migrate' — see deploy/digitalocean/README.md,"
+	echo "First migration (once, on the existing droplet)."
+	echo "If this box was provisioned by this script and has never published, that repair"
+	echo "run is: LOVSPOR_PROVISION_FORCE=1 sudo -E bash provision.sh"
+	exit 1
+fi
 
 # --- 1. Swap (DO droplets ship with none; smooths the ~1.24 GB startup warm peak) ---
 SWAP_ACTIVE="$(swapon --show=NAME --noheadings || true)"
