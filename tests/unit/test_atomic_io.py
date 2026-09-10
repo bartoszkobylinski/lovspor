@@ -67,6 +67,24 @@ def test_atomic_write_text_reraises_the_original_error_when_tmp_was_never_create
         atomic_write_text(target, "payload")
 
 
+def test_atomic_write_text_cleanup_tolerates_a_tmp_that_never_landed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cleanup unlink must tolerate a tmp file that never got created — it
+    must not mask the real failure behind a FileNotFoundError of its own."""
+    target = tmp_path / "f.txt"
+
+    def boom(self: Path, _data: str, encoding: str | None = None) -> None:
+        raise OSError("write failed before any bytes landed")
+
+    monkeypatch.setattr(Path, "write_text", boom)
+    with pytest.raises(OSError, match="write failed before any bytes landed"):
+        atomic_write_text(target, "payload")
+
+    assert not (tmp_path / "f.txt.tmp").exists()
+
+
 def test_atomic_write_bytes_writes_payload_verbatim(tmp_path: Path) -> None:
     """Captured bodies are arbitrary bytes: no decode, no newline translation."""
     target = tmp_path / "blob"
