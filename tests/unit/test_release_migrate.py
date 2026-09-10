@@ -17,7 +17,9 @@ from pathlib import Path
 
 import pytest
 
+from lovspor.release import migrate
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, adapt, config_pair
+from lovspor.release.caddy import validate as validate_caddy
 from lovspor.release.control import Situation, live_release, read_triple, situation
 from lovspor.release.envelope import (
     FRAGMENT_NAME,
@@ -27,6 +29,7 @@ from lovspor.release.envelope import (
     write_marker,
 )
 from lovspor.release.errors import (
+    CommitRefusedError,
     ControlPlaneError,
     MigrationFailedError,
     MigrationRefusedError,
@@ -683,6 +686,81 @@ class TestFirstMigration:
         assert not droplet.host.runtime_dir.exists()
         assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
         assert droplet.caddy.daemon_reloads == 0
+
+
+class TestTheInstallWindow:
+    """(a) writes three files; a crash between two of them must leave a bootable box."""
+
+    def _dying_caddyfile_write(self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The process dies as the new Caddyfile is being installed."""
+        real = migrate.atomic_write_bytes
+
+        def dying(path: Path, payload: bytes, *, mode: int | None = None) -> None:
+            if path == droplet.plane.caddyfile:
+                raise Killed("installing the Caddyfile")
+            real(path, payload, mode=mode)
+
+        monkeypatch.setattr(migrate, "atomic_write_bytes", dying)
+
+    def test_the_fragment_lands_before_the_caddyfile_that_imports_it(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The new Caddyfile imports the active fragment by a plain path. Installed
+        first, a crash before the rename left `import` naming a file that does not
+        exist: `caddy validate` hard-fails, Caddy cannot start, the admin endpoint
+        is unreachable on both addresses, and a re-run of `migrate` refuses on the
+        backup it already wrote. The fragment goes first, so the composed
+        configuration is loadable at every instant of (a)."""
+        self._dying_caddyfile_write(droplet, monkeypatch)
+
+        with pytest.raises(Killed):
+            _migrate(droplet)
+
+        assert droplet.plane.fragment.read_text(encoding="utf-8") == droplet.fragment_of(droplet.a)
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        validate_caddy(droplet.caddy, droplet.plane.caddyfile, droplet.plane.fragment)
+        assert adapt(droplet.caddy, droplet.plane.caddyfile, droplet.plane.fragment) == (
+            droplet.old_pair()
+        )
+
+    def test_the_crash_leaves_a_box_that_still_starts_and_still_answers(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The property the order buys: a restart loads the file on disk whole, so
+        the operator reaches the admin endpoint and `reconcile` can read the host."""
+        self._dying_caddyfile_write(droplet, monkeypatch)
+        with pytest.raises(Killed):
+            _migrate(droplet)
+
+        droplet.caddy.restart()
+
+        assert detect_admin(droplet.host) == DEFAULT_TCP
+        assert situation(read_triple(droplet.over(DEFAULT_TCP))) == Situation.reconciled
+        assert reconcile(droplet.plane, host=droplet.host).action == "none"
+
+    def test_the_reverse_order_is_the_window_this_closes(self, droplet: Droplet) -> None:
+        """Pinned, so the statements are never swapped back: the new Caddyfile with
+        no fragment beside it is exactly what `caddy validate` refuses."""
+        with pytest.raises(CommitRefusedError, match="caddy validate refused"):
+            validate_caddy(droplet.caddy, droplet.host.caddyfile_source, droplet.plane.fragment)
+        assert not droplet.plane.fragment.exists()
+
+    def test_the_backup_is_written_before_either_of_them(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """(a) is only reversible once the previous Caddyfile is beside the new one."""
+        written: list[Path] = []
+        real = migrate.atomic_write_bytes
+
+        def record(path: Path, payload: bytes, *, mode: int | None = None) -> None:
+            written.append(path)
+            real(path, payload, mode=mode)
+
+        monkeypatch.setattr(migrate, "atomic_write_bytes", record)
+
+        _migrate(droplet)
+
+        assert written[:2] == [droplet.host.previous_caddyfile, droplet.plane.caddyfile]
 
 
 class TestCrashRows:

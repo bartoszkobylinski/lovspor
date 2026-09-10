@@ -432,10 +432,19 @@ def _runtime_dir(host: MigrationHost) -> None:
 
 
 def _install_files(plane: ControlPlane, host: MigrationHost) -> None:
-    """(a): D = new from here; the runtime directory and the drop-in's runtime lines with it."""
+    """(a): D = new from here; the runtime directory and the drop-in's runtime lines with it.
+
+    The fragment is renamed into place *before* the Caddyfile that imports
+    it by a plain path. The other order has a window in which the file on
+    disk imports something that does not exist: ``caddy validate`` hard-
+    fails there, Caddy will not start, the admin endpoint is unreachable
+    on both addresses, and a re-run refuses on the backup it already
+    wrote. The pre-envelope Caddyfile does not import the fragment, so
+    the fragment arriving early changes nothing about what is served.
+    """
     atomic_write_bytes(host.previous_caddyfile, plane.caddyfile.read_bytes(), mode=WORLD_READABLE)
-    atomic_write_bytes(plane.caddyfile, host.caddyfile_source.read_bytes(), mode=WORLD_READABLE)
     plane.next_fragment.replace(plane.fragment)
+    atomic_write_bytes(plane.caddyfile, host.caddyfile_source.read_bytes(), mode=WORLD_READABLE)
     _runtime_dir(host)
     _load_drop_in(plane, host, with_exec_reload=False)
 
