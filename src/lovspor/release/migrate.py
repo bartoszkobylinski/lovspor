@@ -61,6 +61,7 @@ from lovspor.release.caddy import (
     FRAGMENT_ENV,
     AdminClient,
     ConfigPair,
+    FallbackAdminClient,
     HttpxAdminClient,
     Runner,
     adapt,
@@ -565,15 +566,23 @@ def first_migration(
 
 def detect_admin(host: MigrationHost) -> str:
     """The address the running instance answers on: the socket first, then TCP."""
-    failures: list[str] = []
-    for address in (host.socket_admin, host.tcp_admin):
-        try:
-            host.admin_client(address).running_config()
-        except UnobservableError as error:
-            failures.append(error.detail)
-            continue
-        return address
-    raise UnobservableError("admin_unreachable", "; ".join(failures))
+    return FallbackAdminClient(host.socket_admin, host.tcp_admin, host.admin_client).probe()
+
+
+def complete_first_migration(
+    plane: ControlPlane, host: MigrationHost, answered: str
+) -> MigrationReport:
+    """A crash after (a): (b)-(f) while R is still on TCP; (d)-(f) once the load crossed.
+
+    On TCP the idempotent half of (a) — the runtime directory and the
+    drop-in's runtime lines — is repeated first, so a crash inside (a)
+    itself is completed too.
+    """
+    if answered == host.socket_admin:
+        return _finish(plane, host, _validated(plane), _no_checkpoint)
+    _runtime_dir(host)
+    _load_drop_in(plane, host, with_exec_reload=False)
+    return _finish(plane, host, _cutover(plane, host, _no_checkpoint), _no_checkpoint)
 
 
 def _remove_marker(plane: ControlPlane) -> bool:

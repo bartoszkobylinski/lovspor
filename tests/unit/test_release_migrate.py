@@ -1,13 +1,9 @@
-"""The first migration: preflight, cutover, crash rows (ADR-0014 Migration).
+"""The first migration: preflight, cutover, crash rows, rollback, retire (ADR-0014 Migration).
 
-A *droplet* is the pre-envelope host in a box: the old Caddyfile — the
-repository's at the merge of #268, verbatim — served by a Caddy whose
-admin endpoint is TCP ``localhost:2019``, no fragment, no marker, no
-runtime directory, the drop-in provisioning wrote; beside it the new
-Caddyfile binding admin to a socket under ``tmp_path`` and importing the
-fragment. Two real envelopes are built once. Ownership is a table, the
-group's gid the temporary directory's own, so the socket file the fake
-creates carries the group the verification asks for.
+The host is the *droplet* of ``migrate_fixtures`` — the pre-envelope box
+as the migration finds it; two real envelopes are built once. Kills are
+checkpoints that stop the procedure at a named step, as the control-plane
+tests do.
 """
 
 import grp
@@ -15,20 +11,18 @@ import os
 import pwd
 import shutil
 import stat
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import NamedTuple
 
 import pytest
 
-from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
-from lovspor.release.control import ControlPlane, Situation, live_release, read_triple, situation
+from lovspor.release.caddy import FRAGMENT_ENV, Completed, adapt, config_pair
+from lovspor.release.control import Situation, live_release, read_triple, situation
 from lovspor.release.envelope import (
     FRAGMENT_NAME,
     MARKER_NAME,
     Marker,
-    read_fragment,
     read_marker,
     write_marker,
 )
@@ -50,6 +44,7 @@ from lovspor.release.migrate import (
     RollbackReport,
     SystemOwnership,
     abandon_first_migration,
+    complete_first_migration,
     detect_admin,
     drop_in_text,
     first_migration,
@@ -58,85 +53,20 @@ from lovspor.release.migrate import (
     rollback_first_migration,
     socket_path,
 )
-from tests.unit.caddy_fakes import (
-    DEFAULT_TCP,
-    STOCK_EXEC_RELOAD,
-    FakeAdmin,
-    FakeCaddy,
-    FakeOwnership,
-    toy_adapt,
+from lovspor.release.reconcile import ReconcileReport, reconcile
+from tests.unit.caddy_fakes import DEFAULT_TCP, STOCK_EXEC_RELOAD, FakeAdmin, FakeCaddy, toy_adapt
+from tests.unit.migrate_fixtures import (
+    CADDY_UID,
+    NON_ASCII_OLD_CADDYFILE,
+    OLD_CADDYFILE,
+    Droplet,
+    Sabotaged,
+    make_droplet,
+    new_caddyfile,
 )
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
 
 LATER = "2026-01-02T00:00:00Z"
-CADDY_UID = 4242
-OLD_CADDYFILE = """\
-# lovspor hosted MCP — TLS terminated here, proxied to the localhost-bound app.
-#
-# {$LOVSPOR_DOMAIN} is read from Caddy's environment (see the caddy.service
-# drop-in that provision.sh installs, sourcing /etc/default/caddy-lovspor).
-# On a public droplet Caddy AUTOMATICALLY obtains and renews a Let's Encrypt
-# certificate for this name on first request, once DNS points the name here —
-# no certbot, no cron, no manual cert steps.
-
-{$LOVSPOR_DOMAIN} {
-	encode zstd gzip
-
-	# MCP app + health probes + OAuth discovery → the localhost-bound server
-	# (TLS stops here).
-	@app path /mcp /mcp/* /healthz /readyz /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
-	handle @app {
-		reverse_proxy 127.0.0.1:8000 {
-			header_up Host {upstream_hostport}
-		}
-	}
-
-	# The published corpus (ADR-0013) → the atomically-switched release symlink.
-	@corpus path /lov /lov/* /forskrift /forskrift/* /sitemap.xml /sitemaps/* /robots.txt
-	handle @corpus {
-		import {$LOVSPOR_SITE_ROOT:/var/www/lovspor-current}/redirects*.caddy
-		root * {$LOVSPOR_SITE_ROOT:/var/www/lovspor-current}
-		file_server
-	}
-
-	# Everything else → the static landing page.
-	handle {
-		root * /var/www/lovspor
-		file_server
-	}
-
-	header {
-		# HSTS: only meaningful once you're confident the domain is HTTPS-only.
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		-Server
-	}
-
-	log {
-		output file /var/log/caddy/lovspor.log {
-			roll_size 10MiB
-			roll_keep 5
-		}
-	}
-}
-"""  # noqa: E501 — the repository's Caddyfile at the merge of #268, verbatim
-NON_ASCII_OLD_CADDYFILE = "# Ørsta kommune sin side\n" + OLD_CADDYFILE
-
-
-def new_caddyfile(socket_admin: str, fragment: Path) -> str:
-    """The new Caddyfile of the first migration, naming this box's socket and fragment."""
-    return (
-        "{\n"
-        f"\tadmin {socket_admin}|0660\n"
-        "}\n"
-        "{$LOVSPOR_DOMAIN} {\n"
-        "\tencode zstd gzip\n"
-        "\t@app path /mcp /mcp/* /healthz /readyz\n"
-        "\thandle @app {\n\t\treverse_proxy 127.0.0.1:8000\n\t}\n"
-        f"\timport {{$LOVSPOR_RELEASE_FRAGMENT:{fragment}}}\n"
-        "\theader {\n\t\tX-Content-Type-Options nosniff\n\t}\n"
-        "}\n"
-    )
 
 
 class Killed(Exception):  # noqa: N818 — a simulated process death, not a lovspor error
@@ -149,27 +79,6 @@ def _kill_at(step: str):  # type: ignore[no-untyped-def]
             raise Killed(step)
 
     return checkpoint
-
-
-Answer = Completed | Callable[[Sequence[str], Mapping[str, str]], Completed]
-
-
-class Sabotaged:
-    """A runner that answers one command with a canned result — or a hook's — and passes the
-    rest through."""
-
-    def __init__(self, inner: FakeCaddy, prefix: tuple[str, ...], answer: Answer) -> None:
-        self.inner = inner
-        self.prefix = prefix
-        self.answer = answer
-
-    def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
-        if tuple(argv[: len(self.prefix)]) != self.prefix:
-            return self.inner.run(argv, env)
-        if isinstance(self.answer, Completed):
-            self.inner.calls.append((tuple(argv), dict(env)))
-            return self.answer
-        return self.answer(argv, env)
 
 
 @pytest.fixture(scope="module")
@@ -187,80 +96,11 @@ def envelopes(world: World, tmp_path_factory: pytest.TempPathFactory) -> tuple[P
     return releases, a, b
 
 
-class Droplet(NamedTuple):
-    plane: ControlPlane
-    host: MigrationHost
-    caddy: FakeCaddy
-    ownership: FakeOwnership
-    a: str
-    b: str
-
-    @property
-    def releases(self) -> Path:
-        return self.plane.releases
-
-    @property
-    def socket_file(self) -> Path:
-        return self.host.socket
-
-    def over(self, address: str) -> ControlPlane:
-        """The plane with its admin client bound to ``address``."""
-        return replace(self.plane, admin=self.caddy.admin_client(address))
-
-    def fragment_of(self, content_id: str) -> str:
-        return read_fragment(self.releases / content_id)
-
-    def pair_of(self, content_id: str) -> ConfigPair:
-        """What the new Caddyfile composes with this release's fragment."""
-        fragment = self.releases / content_id / FRAGMENT_NAME
-        return config_pair(toy_adapt(self.host.caddyfile_source, {FRAGMENT_ENV: str(fragment)}))
-
-    def old_pair(self) -> ConfigPair:
-        return config_pair(toy_adapt(Path(str(self.plane.caddyfile) + ".old"), {}))
-
-    def argvs(self) -> list[tuple[str, ...]]:
-        return [argv for argv, _ in self.caddy.calls]
-
-
 @pytest.fixture
 def droplet(
     envelopes: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Droplet:
-    source, a, b = envelopes
-    releases = tmp_path / "releases"
-    shutil.copytree(source, releases)
-    etc = tmp_path / "etc" / "caddy"
-    etc.mkdir(parents=True)
-    caddyfile = etc / "Caddyfile"
-    caddyfile.write_text(OLD_CADDYFILE, encoding="utf-8")
-    Path(str(caddyfile) + ".old").write_text(OLD_CADDYFILE, encoding="utf-8")
-    fragment = etc / "lovspor-release.caddy"
-    runtime_dir = tmp_path / "run" / "caddy"
-    socket_admin = f"unix/{runtime_dir / 'admin.sock'}"
-    drop_in = tmp_path / "systemd" / "caddy.service.d" / "lovspor.conf"
-    drop_in.parent.mkdir(parents=True)
-    drop_in.write_text(PRE_ENVELOPE_DROP_IN, encoding="utf-8")
-    new = tmp_path / "app" / "Caddyfile"
-    new.parent.mkdir()
-    new.write_text(new_caddyfile(socket_admin, fragment), encoding="utf-8")
-    monkeypatch.setenv("LOVSPOR_DOMAIN", "lovspor.test")
-    monkeypatch.delenv("LOVSPOR_RELEASE_FRAGMENT", raising=False)
-    caddy = FakeCaddy(caddyfile, drop_in)
-    caddy.restart()
-    ownership = FakeOwnership({"caddy": CADDY_UID}, {"lovspor-release": tmp_path.stat().st_gid})
-    host = MigrationHost(
-        caddyfile=caddyfile,
-        caddyfile_source=new,
-        drop_in=drop_in,
-        runtime_dir=runtime_dir,
-        socket_admin=socket_admin,
-        site_root=tmp_path / "www" / "lovspor",
-        current_symlink=tmp_path / "www" / "lovspor-current",
-        admin_client=caddy.admin_client,
-        ownership=ownership,
-    )
-    plane = ControlPlane(releases, caddyfile, fragment, caddy, caddy.admin_client(socket_admin))
-    return Droplet(plane, host, caddy, ownership, a, b)
+    return make_droplet(envelopes, tmp_path, monkeypatch)
 
 
 class TestHost:
@@ -1272,3 +1112,232 @@ class TestRetire:
 
         assert report.removed == ()
         assert link.is_symlink() and (droplet.releases / droplet.b).is_dir()
+
+
+PLACEHOLDER = "handle {\n\troot * /var/www/lovspor\n\tfile_server\n}\n"
+"""A fresh box's active fragment: no ``vars``, no release."""
+
+
+class TestReconcileWindow:
+    """No marker: ``reconcile`` given the host reads whichever address answers (ADR-0014)."""
+
+    def _staged_on_tcp(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+
+    def test_the_pre_envelope_host_is_reconciled_with_nothing_live(self, droplet: Droplet) -> None:
+        report = reconcile(droplet.plane, host=droplet.host)
+
+        assert report == ReconcileReport(
+            situation=Situation.reconciled,
+            live=None,
+            action="none",
+            triple=read_triple(droplet.over(DEFAULT_TCP)).describe(),
+            admin=DEFAULT_TCP,
+        )
+
+    def test_staged_on_tcp_names_the_migrations_two_resolutions(self, droplet: Droplet) -> None:
+        self._staged_on_tcp(droplet)
+        triple = read_triple(droplet.over(DEFAULT_TCP))
+
+        with pytest.raises(UnreconciledError) as caught:
+            reconcile(droplet.plane, host=droplet.host)
+        assert str(caught.value) == (
+            f"host is staged_not_reloaded: {triple.describe()} on localhost:2019; resolve with "
+            "--complete (the cutover: validate, caddy reload --address localhost:2019, verify over "
+            f"{droplet.host.socket_admin}, the ExecReload pair, the marker) or --abandon (the "
+            "previous Caddyfile restored; no reload)"
+        )
+        assert droplet.caddy.reloads == 0 and droplet.caddy.admin_address == DEFAULT_TCP
+
+    def test_complete_on_tcp_runs_the_cutover_through_to_the_marker(self, droplet: Droplet) -> None:
+        self._staged_on_tcp(droplet)
+        triple = read_triple(droplet.over(DEFAULT_TCP))
+
+        report = reconcile(droplet.plane, "complete", droplet.host)
+
+        assert report == ReconcileReport(
+            situation=Situation.reconciled,
+            live=droplet.a,
+            action="completed",
+            triple=triple.describe(),
+            admin=droplet.host.socket_admin,
+        )
+        reloads = [argv for argv in droplet.argvs() if argv[:2] == ("caddy", "reload")]
+        assert [argv[-1] for argv in reloads] == [DEFAULT_TCP]
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
+        assert f"--address {droplet.host.socket_admin}" in droplet.caddy.exec_reload
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+        assert live_release(droplet.plane) == droplet.a
+        assert reconcile(droplet.plane, host=droplet.host).action == "none"
+
+    def test_complete_repeats_the_idempotent_half_of_the_install(self, droplet: Droplet) -> None:
+        """A crash inside (a): the runtime directory and the drop-in lines are redone."""
+        self._staged_on_tcp(droplet)
+        droplet.host.runtime_dir.rmdir()
+        droplet.host.drop_in.write_text(PRE_ENVELOPE_DROP_IN, encoding="utf-8")
+        droplet.caddy.run(("systemctl", "daemon-reload"), {})
+        droplet.ownership.chowns.clear()
+
+        report = reconcile(droplet.plane, "complete", droplet.host)
+
+        assert report.action == "completed" and report.live == droplet.a
+        assert stat.S_IMODE(droplet.host.runtime_dir.stat().st_mode) == 0o2770
+        gid = droplet.ownership.groups["lovspor-release"]
+        assert droplet.ownership.chowns == [(droplet.host.runtime_dir, CADDY_UID, gid)]
+        assert live_release(droplet.plane) == droplet.a
+
+    def test_abandon_on_tcp_is_the_file_restore_with_no_reload(self, droplet: Droplet) -> None:
+        self._staged_on_tcp(droplet)
+        triple = read_triple(droplet.over(DEFAULT_TCP))
+        reloads_before = droplet.caddy.reloads
+
+        report = reconcile(droplet.plane, "abandon", droplet.host)
+
+        assert report == ReconcileReport(
+            situation=Situation.reconciled,
+            live=None,
+            action="abandoned",
+            triple=triple.describe(),
+            admin=DEFAULT_TCP,
+        )
+        assert droplet.caddy.reloads == reloads_before
+        assert not any(argv[:2] == ("caddy", "reload") for argv in droplet.argvs())
+        _assert_pre_envelope(droplet)
+        assert reconcile(droplet.plane, host=droplet.host).live is None
+
+    def test_a_failed_cutover_leaves_the_staged_row_for_reconcile(self, droplet: Droplet) -> None:
+        droplet.caddy.fail_reloads = 1
+        with pytest.raises(MigrationFailedError):
+            _migrate(droplet)
+
+        with pytest.raises(UnreconciledError, match="staged_not_reloaded"):
+            reconcile(droplet.plane, host=droplet.host)
+        report = reconcile(droplet.plane, "complete", droplet.host)
+
+        assert report.action == "completed" and live_release(droplet.plane) == droplet.a
+
+    def test_reloaded_on_the_socket_is_completed_without_a_choice(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("reloaded"))
+        triple = read_triple(droplet.plane)
+        assert "ExecReload" not in droplet.host.drop_in.read_text(encoding="utf-8")
+
+        report = reconcile(droplet.plane, host=droplet.host)
+
+        assert report == ReconcileReport(
+            situation=Situation.reconciled,
+            live=droplet.a,
+            action="completed",
+            triple=triple.describe(),
+            admin=droplet.host.socket_admin,
+        )
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+        assert droplet.caddy.reloads == 1
+        assert live_release(droplet.plane) == droplet.a
+
+    @pytest.mark.parametrize("action", ["report", "complete", "abandon"])
+    def test_reloaded_on_the_socket_ignores_the_flag(self, droplet: Droplet, action: str) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("exec_reload"))
+
+        report = reconcile(droplet.plane, action, droplet.host)  # type: ignore[arg-type]
+
+        assert report.action == "completed" and report.live == droplet.a
+
+    def test_complete_from_the_socket_verifies_before_marking(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("reloaded"))
+        droplet.socket_file.chmod(0o600)
+
+        with pytest.raises(MigrationFailedError, match="has mode 0600, not 0660"):
+            complete_first_migration(droplet.plane, droplet.host, droplet.host.socket_admin)
+        assert read_marker(droplet.releases) is None
+
+    def test_foreign_on_tcp_is_refused_whatever_the_flag(self, droplet: Droplet) -> None:
+        edited = toy_adapt(droplet.plane.caddyfile, {})
+        edited["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"].append(
+            {"handle": [{"handler": "file_server", "hide": ["x"]}]}
+        )
+        droplet.caddy.load(edited)
+        triple = read_triple(droplet.over(DEFAULT_TCP))
+
+        for action in ("report", "complete", "abandon"):
+            with pytest.raises(UnreconciledError) as caught:
+                reconcile(droplet.plane, action, droplet.host)  # type: ignore[arg-type]
+            assert str(caught.value) == (
+                f"host is foreign on localhost:2019: {triple.describe()}; the first migration's "
+                "precondition — the pre-envelope configuration serving — is unmet; nothing is "
+                "resolved automatically"
+            )
+        assert droplet.caddy.reloads == 0
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+
+    def test_nothing_answering_is_unobservable_naming_both_addresses(
+        self, droplet: Droplet
+    ) -> None:
+        droplet.caddy.admin_up = False
+
+        with pytest.raises(UnobservableError) as caught:
+            reconcile(droplet.plane, host=droplet.host)
+        assert droplet.host.socket_admin in caught.value.detail
+        assert "connect: no such file or directory" in caught.value.detail
+
+    def _provisioned_box(self, droplet: Droplet) -> None:
+        """Caddy on the socket serving a placeholder fragment, no marker: a fresh box."""
+        _migrate(droplet)
+        (droplet.releases / MARKER_NAME).unlink()
+        droplet.plane.fragment.write_text(PLACEHOLDER, encoding="utf-8")
+        droplet.caddy.restart()
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+
+    def test_a_provisioned_box_with_nothing_live_is_reconciled_on_the_socket(
+        self, droplet: Droplet
+    ) -> None:
+        self._provisioned_box(droplet)
+
+        report = reconcile(droplet.plane, host=droplet.host)
+
+        assert report.situation == Situation.reconciled and report.live is None
+        assert report.action == "none" and report.admin == droplet.host.socket_admin
+
+    def test_a_provisioned_box_staged_on_the_socket_is_decision_sixs_row(
+        self, droplet: Droplet
+    ) -> None:
+        """Not the migration's window: the drop-in's reload line reaches the socket."""
+        self._provisioned_box(droplet)
+        droplet.plane.fragment.write_text(droplet.fragment_of(droplet.a), encoding="utf-8")
+        triple = read_triple(droplet.plane)
+        assert situation(triple) == Situation.staged
+
+        with pytest.raises(UnreconciledError, match="D becomes the truth"):
+            reconcile(droplet.plane, host=droplet.host)
+        with pytest.raises(ControlPlaneError, match="no previous fragment to restore"):
+            reconcile(droplet.plane, "abandon", droplet.host)
+        report = reconcile(droplet.plane, "complete", droplet.host)
+
+        assert report == ReconcileReport(
+            situation=Situation.reconciled,
+            live=droplet.a,
+            action="completed",
+            triple=triple.describe(),
+            admin=droplet.host.socket_admin,
+        )
+        assert ("systemctl", "reload", "caddy") in droplet.argvs()
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+
+    def test_with_a_marker_the_host_changes_nothing(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        droplet.plane.fragment.write_text(droplet.fragment_of(droplet.b), encoding="utf-8")
+
+        with pytest.raises(UnreconciledError) as with_host:
+            reconcile(droplet.plane, host=droplet.host)
+        with pytest.raises(UnreconciledError) as without:
+            reconcile(droplet.plane)
+        assert str(with_host.value) == str(without.value)
+        assert "D becomes the truth" in str(without.value)
+
+        report = reconcile(droplet.plane, "complete", droplet.host)
+        assert report.admin is None and report.live == droplet.b
+        assert read_marker(droplet.releases) == Marker(active=droplet.b, previous=droplet.a)

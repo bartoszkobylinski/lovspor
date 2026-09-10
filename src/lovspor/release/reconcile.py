@@ -13,6 +13,18 @@ prints the triple and acts only on an explicit flag; either resolution
 ends reconciled, and both go through validate + reload. Admin
 unreachable is not a disagreement and is refused before any of this.
 
+While no marker exists — the first migration's window — ``reconcile``
+given a :class:`MigrationHost` reaches the admin endpoint on whichever
+address answers, the socket first and then TCP, and records which one
+did. R old on TCP with D naming the envelope is the crash after (a):
+*complete* runs the cutover (b)-(f), *abandon* restores the previous
+Caddyfile without a reload, since R never moved. R = D = new over the
+socket is the crash after (c): *complete* finishes (d)-(f), the
+``ExecReload=`` pair included, without a choice. Anything else on TCP
+is foreign and is not resolved automatically; a host already on the
+socket and not mid-cutover — a box provisioned with the envelope — is
+resolved by the rows above.
+
 ``prune`` runs only when reconciled and never deletes the release named
 by R, D or M, nor the marker's ``previous``; it removes every other
 id-named directory — a staged release that never went live included,
@@ -21,6 +33,7 @@ every ``.build-*`` directory but the running build's own.
 """
 
 import shutil
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -43,9 +56,16 @@ from lovspor.release.envelope import (
     Marker,
     is_build_dir,
     is_release_id,
+    read_marker,
     write_marker,
 )
 from lovspor.release.errors import CommitRefusedError, ReloadFailedError, UnreconciledError
+from lovspor.release.migrate import (
+    MigrationHost,
+    abandon_first_migration,
+    complete_first_migration,
+    detect_admin,
+)
 
 ReconcileAction = Literal["report", "complete", "abandon"]
 
@@ -57,6 +77,16 @@ class ReconcileReport(BaseModel):
     live: str | None
     action: str
     triple: str
+    admin: str | None = None
+    """Which address answered, when the marker's absence made that a question."""
+
+
+@dataclass(frozen=True)
+class Window:
+    """The pre-marker window as read: the triple, and the address it was read on."""
+
+    triple: Triple
+    answered: str
 
 
 class PruneReport(BaseModel):
@@ -94,9 +124,8 @@ def _report(triple: Triple, found: Situation, live: str | None, action: str) -> 
     return ReconcileReport(situation=found, live=live, action=action, triple=triple.describe())
 
 
-def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> ReconcileReport:
-    """Name the state; resolve it per the crash table; refuse what needs a choice."""
-    triple = read_triple(plane)
+def _resolve(plane: ControlPlane, triple: Triple, action: ReconcileAction) -> ReconcileReport:
+    """The crash table of Decision 6, on a host whose admin address is settled."""
     found = situation(triple)
     if found == Situation.reconciled:
         return _report(triple, found, triple.running.release_id, "none")
@@ -112,6 +141,69 @@ def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> Reconc
         f"host is {found}: {triple.describe()}; resolve with --complete (D becomes the truth) "
         "or --abandon (M's release is restored)"
     )
+
+
+def _resolve_staged(
+    plane: ControlPlane, host: MigrationHost, window: Window, action: ReconcileAction
+) -> ReconcileReport:
+    """The crash after (a): D names the envelope, R is the pre-envelope configuration on TCP."""
+    triple, answered = window.triple, window.answered
+    if action == "complete":
+        active = complete_first_migration(plane, host, answered).active
+        return _report(triple, Situation.reconciled, active, "completed").model_copy(
+            update={"admin": host.socket_admin}
+        )
+    if action == "abandon":
+        abandon_first_migration(plane, host)
+        return _report(triple, Situation.reconciled, None, "abandoned").model_copy(
+            update={"admin": answered}
+        )
+    raise UnreconciledError(
+        f"host is {Situation.staged}: {triple.describe()} on {answered}; resolve with --complete "
+        f"(the cutover: validate, caddy reload --address {answered}, verify over "
+        f"{host.socket_admin}, the ExecReload pair, the marker) or --abandon (the previous "
+        "Caddyfile restored; no reload)"
+    )
+
+
+def _reconcile_unmarked(
+    plane: ControlPlane, host: MigrationHost, action: ReconcileAction
+) -> ReconcileReport:
+    """No marker: whichever address answers is read, and the migration's rows apply."""
+    answered = detect_admin(host)
+    bound = replace(plane, admin=host.admin_client(answered))
+    triple = read_triple(bound)
+    found = situation(triple)
+    if answered == host.socket_admin and found != Situation.reloaded:
+        # Already on the socket and not mid-cutover: a box provisioned with the envelope.
+        return _resolve(bound, triple, action).model_copy(update={"admin": answered})
+    if found == Situation.reconciled:
+        return _report(triple, found, None, "none").model_copy(update={"admin": answered})
+    if found == Situation.reloaded:
+        active = complete_first_migration(plane, host, answered).active
+        return _report(triple, Situation.reconciled, active, "completed").model_copy(
+            update={"admin": host.socket_admin}
+        )
+    if found == Situation.staged:
+        return _resolve_staged(plane, host, Window(triple, answered), action)
+    raise UnreconciledError(
+        f"host is {found} on {answered}: {triple.describe()}; the first migration's "
+        "precondition — the pre-envelope configuration serving — is unmet; nothing is resolved "
+        "automatically"
+    )
+
+
+def reconcile(
+    plane: ControlPlane, action: ReconcileAction = "report", host: MigrationHost | None = None
+) -> ReconcileReport:
+    """Name the state; resolve it per the crash table; refuse what needs a choice.
+
+    With ``host`` and no marker, the first migration's window is read on
+    whichever address answers and resolved by the migration's own rows.
+    """
+    if host is not None and read_marker(plane.releases) is None:
+        return _reconcile_unmarked(plane, host, action)
+    return _resolve(plane, read_triple(plane), action)
 
 
 def prune(plane: ControlPlane, keep_build: Path | None = None) -> PruneReport:

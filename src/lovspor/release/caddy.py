@@ -27,7 +27,7 @@ import hashlib
 import json
 import os
 import subprocess
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
@@ -113,6 +113,45 @@ class HttpxAdminClient:
             raise UnobservableError(
                 "admin_unreachable", f"{self.address}: /config/ is not JSON"
             ) from error
+
+
+class FallbackAdminClient:
+    """The socket first, then TCP: the first migration's pre-marker window (ADR-0014 Migration).
+
+    While no marker exists the admin endpoint may be on either address —
+    TCP before the cutover, the socket after — so ``reconcile`` asks both in
+    that order and records which one answered in ``answered``. From the
+    marker on, the socket is the only address and this client is not used.
+    """
+
+    def __init__(
+        self,
+        primary: str,
+        secondary: str,
+        connect: Callable[[str], AdminClient] = HttpxAdminClient,
+    ) -> None:
+        self.addresses = (primary, secondary)
+        self.connect = connect
+        self.answered: str | None = None
+
+    def _first(self) -> tuple[str, object]:
+        failures: list[str] = []
+        for address in self.addresses:
+            try:
+                config = self.connect(address).running_config()
+            except UnobservableError as error:
+                failures.append(error.detail)
+                continue
+            self.answered = address
+            return address, config
+        raise UnobservableError("admin_unreachable", "; ".join(failures))
+
+    def running_config(self) -> object:
+        return self._first()[1]
+
+    def probe(self) -> str:
+        """The address that answers; :class:`UnobservableError` naming both when neither does."""
+        return self._first()[0]
 
 
 class ConfigPair(BaseModel):

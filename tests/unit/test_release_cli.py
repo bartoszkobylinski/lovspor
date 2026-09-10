@@ -24,7 +24,9 @@ from lovspor.release import commands
 from lovspor.release.caddy import HttpxAdminClient, SubprocessRunner
 from lovspor.release.control import ControlPlane
 from lovspor.release.envelope import FRAGMENT_NAME, Marker, read_fragment, read_marker, write_marker
+from lovspor.release.migrate import first_migration
 from tests.unit.caddy_fakes import FakeCaddy
+from tests.unit.migrate_fixtures import Droplet, make_droplet
 from tests.unit.probe_fixtures import (
     MCP_URL,
     READINESS_URL,
@@ -189,7 +191,7 @@ class TestReconcileRollbackPrune:
 
         assert result.exit_code == 0, result.output
         assert result.stdout.startswith("reconciled: R=(")
-        assert result.stdout.endswith(f"live: {host.a}\n")
+        assert result.stdout.endswith(f"admin: unix//nowhere.sock\nlive: {host.a}\n")
 
     def test_reconcile_names_the_options_and_completes_on_the_flag(self, host: Host) -> None:
         host.make_live(host.a)
@@ -244,6 +246,117 @@ class TestReconcileRollbackPrune:
 
         assert result.exit_code == 1
         assert "no previous release" in result.output
+
+
+@pytest.fixture
+def droplet(
+    envelopes: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Droplet:
+    """The pre-envelope box, with both factories the commands use replaced."""
+    found = make_droplet(envelopes, tmp_path, monkeypatch)
+    monkeypatch.setattr(commands, "_plane", lambda *_: found.plane)
+    monkeypatch.setattr(commands, "_host", lambda *_: found.host)
+    monkeypatch.setenv("LOVSPOR_CADDY_ADMIN", found.host.socket_admin)
+    return found
+
+
+class Killed(Exception):  # noqa: N818 — a simulated process death, not a lovspor error
+    """The process died right after the named step."""
+
+
+class TestReconcileWindow:
+    def _staged_on_tcp(self, droplet: Droplet) -> None:
+        def kill(step: str) -> None:
+            if step == "installed":
+                raise Killed(step)
+
+        with pytest.raises(Killed):
+            first_migration(droplet.plane, droplet.host, droplet.a, kill)
+
+    def test_a_crash_after_the_install_is_named_with_the_two_options(
+        self, droplet: Droplet
+    ) -> None:
+        self._staged_on_tcp(droplet)
+
+        reported = runner.invoke(app, ["release", "reconcile"])
+
+        assert reported.exit_code == 1
+        assert "release refused: host is staged_not_reloaded" in reported.output
+        assert "on localhost:2019" in reported.output
+        assert "--complete" in reported.output and "--abandon" in reported.output
+
+    def test_complete_runs_the_cutover_and_prints_the_socket(self, droplet: Droplet) -> None:
+        self._staged_on_tcp(droplet)
+
+        completed = runner.invoke(app, ["release", "reconcile", "--complete"])
+
+        assert completed.exit_code == 0, completed.output
+        lines = completed.stdout.splitlines()
+        assert lines[0].startswith("reconciled: R=(none, ") and lines[0].endswith(
+            "action completed"
+        )
+        assert lines[1:] == [f"admin: {droplet.host.socket_admin}", f"live: {droplet.a}"]
+        assert read_marker(droplet.plane.releases) == Marker(active=droplet.a, previous=None)
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+
+    def test_abandon_restores_the_files_and_prints_tcp(self, droplet: Droplet) -> None:
+        self._staged_on_tcp(droplet)
+
+        abandoned = runner.invoke(app, ["release", "reconcile", "--abandon"])
+
+        assert abandoned.exit_code == 0, abandoned.output
+        assert abandoned.stdout.endswith("action abandoned\nadmin: localhost:2019\nlive: none\n")
+        assert not droplet.plane.fragment.exists()
+        assert droplet.caddy.reloads == 0
+
+    def test_the_host_options_are_registered_with_their_environment(self) -> None:
+        root = get_command(app)
+        assert isinstance(root, click.Group)
+        group = root.commands["release"]
+        assert isinstance(group, click.Group)
+        params = {param.name: param for param in group.commands["reconcile"].params}
+
+        assert isinstance(params["tcp_admin"], click.Option)
+        assert params["tcp_admin"].envvar == "LOVSPOR_CADDY_ADMIN_TCP"
+        assert params["tcp_admin"].default == "localhost:2019"
+        assert params["caddyfile_source"].envvar == "LOVSPOR_CADDYFILE_SOURCE"
+        assert params["drop_in"].envvar == "LOVSPOR_CADDY_DROP_IN"
+        assert params["runtime_dir"].envvar == "LOVSPOR_CADDY_RUNTIME_DIR"
+        assert params["release_group"].envvar == "LOVSPOR_RELEASE_GROUP"
+        assert params["release_group"].default == "lovspor-release"
+
+    def test_the_production_host_factory_binds_the_socket_to_the_admin_option(
+        self, tmp_path: Path
+    ) -> None:
+        options = commands.HostOptions(
+            tcp_admin="localhost:2029",
+            caddyfile_source=tmp_path / "src",
+            drop_in=tmp_path / "drop",
+            runtime_dir=tmp_path / "run",
+            release_group="g",
+            site_root=tmp_path / "site",
+            current_symlink=tmp_path / "current",
+        )
+
+        host = commands._host(tmp_path / "Caddyfile", "unix//run/x/admin.sock", options)
+
+        assert host.caddyfile == tmp_path / "Caddyfile"
+        assert host.socket_admin == "unix//run/x/admin.sock"
+        assert host.tcp_admin == "localhost:2029"
+        assert host.caddyfile_source == tmp_path / "src"
+        assert host.drop_in == tmp_path / "drop"
+        assert host.runtime_dir == tmp_path / "run"
+        assert host.release_group == "g"
+        assert (host.site_root, host.current_symlink) == (tmp_path / "site", tmp_path / "current")
+        assert commands.HostOptions() == commands.HostOptions(
+            "localhost:2019",
+            Path("/opt/lovspor/app/deploy/digitalocean/Caddyfile"),
+            Path("/etc/systemd/system/caddy.service.d/lovspor.conf"),
+            Path("/run/caddy"),
+            "lovspor-release",
+            Path("/var/www/lovspor"),
+            Path("/var/www/lovspor-current"),
+        )
 
 
 @pytest.fixture

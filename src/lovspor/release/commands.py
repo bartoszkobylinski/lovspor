@@ -16,6 +16,7 @@ the probe, and passed in.
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
@@ -35,6 +36,16 @@ from lovspor.release.caddy import (
 from lovspor.release.control import ControlPlane, commit_release, live_release, rollback
 from lovspor.release.envelope import is_release_id, read_marker
 from lovspor.release.errors import ReleaseError, UnobservableError, UnreconciledError
+from lovspor.release.migrate import (
+    DEFAULT_CADDYFILE_SOURCE,
+    DEFAULT_CURRENT_SYMLINK,
+    DEFAULT_DROP_IN,
+    DEFAULT_RELEASE_GROUP,
+    DEFAULT_RUNTIME_DIR,
+    DEFAULT_SITE_ROOT,
+    DEFAULT_TCP_ADMIN,
+    MigrationHost,
+)
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
 from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
@@ -79,8 +90,71 @@ _AdminOption = Annotated[
 ]
 
 
+_TcpAdminOption = Annotated[
+    str,
+    typer.Option(
+        "--tcp-admin",
+        envvar="LOVSPOR_CADDY_ADMIN_TCP",
+        help="The pre-envelope admin address, Caddy's default; the migration reloads through it.",
+    ),
+]
+_CaddyfileSourceOption = Annotated[
+    Path,
+    typer.Option(
+        "--caddyfile-source",
+        envvar="LOVSPOR_CADDYFILE_SOURCE",
+        help="The new Caddyfile the first migration installs, from the deployed checkout.",
+    ),
+]
+_DropInOption = Annotated[
+    Path, typer.Option("--drop-in", envvar="LOVSPOR_CADDY_DROP_IN", help="caddy.service drop-in.")
+]
+_RuntimeDirOption = Annotated[
+    Path,
+    typer.Option(
+        "--runtime-dir", envvar="LOVSPOR_CADDY_RUNTIME_DIR", help="The admin socket's directory."
+    ),
+]
+_ReleaseGroupOption = Annotated[
+    str,
+    typer.Option(
+        "--release-group",
+        envvar="LOVSPOR_RELEASE_GROUP",
+        help="The group that may open the admin socket; root is in it, lovspor is not.",
+    ),
+]
+
+
+@dataclass(frozen=True)
+class HostOptions:
+    """The first migration's host, as the options name it."""
+
+    tcp_admin: str = DEFAULT_TCP_ADMIN
+    caddyfile_source: Path = DEFAULT_CADDYFILE_SOURCE
+    drop_in: Path = DEFAULT_DROP_IN
+    runtime_dir: Path = DEFAULT_RUNTIME_DIR
+    release_group: str = DEFAULT_RELEASE_GROUP
+    site_root: Path = DEFAULT_SITE_ROOT
+    current_symlink: Path = DEFAULT_CURRENT_SYMLINK
+
+
 def _plane(releases: Path, caddyfile: Path, fragment: Path, admin: str) -> ControlPlane:
     return ControlPlane(releases, caddyfile, fragment, SubprocessRunner(), HttpxAdminClient(admin))
+
+
+def _host(caddyfile: Path, admin: str, options: HostOptions) -> MigrationHost:
+    """The production host: the socket is the plane's admin address, everything else as given."""
+    return MigrationHost(
+        caddyfile=caddyfile,
+        caddyfile_source=options.caddyfile_source,
+        drop_in=options.drop_in,
+        runtime_dir=options.runtime_dir,
+        tcp_admin=options.tcp_admin,
+        socket_admin=admin,
+        release_group=options.release_group,
+        site_root=options.site_root,
+        current_symlink=options.current_symlink,
+    )
 
 
 @contextmanager
@@ -223,15 +297,26 @@ def reconcile_command(
     caddyfile: _CaddyfileOption = DEFAULT_CADDYFILE,
     fragment: _FragmentOption = DEFAULT_FRAGMENT,
     admin: _AdminOption = DEFAULT_ADMIN,
+    tcp_admin: _TcpAdminOption = DEFAULT_TCP_ADMIN,
+    caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+    drop_in: _DropInOption = DEFAULT_DROP_IN,
+    runtime_dir: _RuntimeDirOption = DEFAULT_RUNTIME_DIR,
+    release_group: _ReleaseGroupOption = DEFAULT_RELEASE_GROUP,
 ) -> None:
-    """Name the host's state — R, D and M — and resolve it per the crash table."""
+    """Name the host's state — R, D and M — and resolve it per the crash table.
+
+    Without a marker the admin endpoint is reached on the socket first, then
+    on --tcp-admin, and the first migration's own resolutions apply.
+    """
     if complete and abandon:
         raise typer.BadParameter("--complete and --abandon exclude each other")
     action: ReconcileAction = "complete" if complete else "abandon" if abandon else "report"
     plane = _plane(releases, caddyfile, fragment, admin)
+    options = HostOptions(tcp_admin, caddyfile_source, drop_in, runtime_dir, release_group)
     with _refusals():
-        report = reconcile(plane, action)
+        report = reconcile(plane, action, _host(caddyfile, admin, options))
     typer.echo(f"{report.situation.value}: {report.triple}; action {report.action}")
+    typer.echo(f"admin: {report.admin or admin}")
     typer.echo(f"live: {report.live or NOTHING_LIVE}")
 
 
