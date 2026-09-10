@@ -596,14 +596,19 @@ def _had_exec_reload(host: MigrationHost) -> bool:
     return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="utf-8")
 
 
+def _require_backup(host: MigrationHost) -> None:
+    """The rollback's only source. ``--retire`` removes it last; after that there is no way back."""
+    if not host.previous_caddyfile.is_file():
+        raise ControlPlaneError(
+            f"{host.previous_caddyfile} is missing: (a) never ran, the rollback already ran, or "
+            "`migrate --retire` removed it with the pre-envelope layout; nothing to restore"
+        )
+
+
 def _restore_files(plane: ControlPlane, host: MigrationHost) -> None:
     """The reverse of (a): the previous Caddyfile back, the fragment gone, the drop-in as
     provisioning wrote it, loaded. The backup is consumed, so a later migration starts clean."""
-    if not host.previous_caddyfile.is_file():
-        raise ControlPlaneError(
-            f"{host.previous_caddyfile} is missing: (a) never ran, or it was already rolled back; "
-            "nothing to restore"
-        )
+    _require_backup(host)
     host.previous_caddyfile.replace(plane.caddyfile)
     plane.fragment.unlink(missing_ok=True)
     plane.next_fragment.unlink(missing_ok=True)
@@ -685,49 +690,75 @@ def rollback_first_migration(plane: ControlPlane, host: MigrationHost) -> Rollba
             f"the marker names a previous release ({marker.previous[:12]}); that is "
             "`lovspor release rollback`, not the first migration's"
         )
+    _require_backup(host)
     if detect_admin(host) == host.tcp_admin:
         return abandon_first_migration(plane, host)
     return _rollback_after_cutover(plane, host)
 
 
-def _remove_symlink(path: Path) -> list[str]:
+def _symlink_target(path: Path) -> list[str]:
     if path.is_symlink():
-        path.unlink()
         return [str(path)]
     if path.exists():
         raise ControlPlaneError(f"{path} is not a symlink; not removed")
     return []
 
 
-def _remove_tree(path: Path) -> list[str]:
+def _tree_target(path: Path) -> list[str]:
     if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
         return [str(path)]
     if path.exists() or path.is_symlink():
         raise ControlPlaneError(f"{path} is not a directory; not removed")
     return []
 
 
-def _remove_flat_releases(releases: Path) -> list[str]:
+def _flat_release_targets(releases: Path) -> list[str]:
     """Only the old flat names; never an id-named directory, a build or the marker."""
-    removed: list[str] = []
-    for entry in sorted(releases.iterdir()):
-        if entry.is_dir() and not entry.is_symlink() and FLAT_RELEASE.match(entry.name):
-            shutil.rmtree(entry)
-            removed.append(str(entry))
-    return removed
+    return [
+        str(entry)
+        for entry in sorted(releases.iterdir())
+        if entry.is_dir() and not entry.is_symlink() and FLAT_RELEASE.match(entry.name)
+    ]
+
+
+def retire_targets(plane: ControlPlane, host: MigrationHost) -> tuple[str, ...]:
+    """What ``retire_pre_envelope`` removes, in the order it removes it; nothing moves here.
+
+    The previous Caddyfile comes last, after every tree it roots at is
+    gone. Left behind, it arms a rollback that puts a configuration
+    serving deleted directories back into service: ``root *`` tolerates a
+    missing directory and ``redirects*.caddy`` tolerates zero matches, so
+    the reload returns 0 and the site 404s.
+    """
+    targets = _symlink_target(host.current_symlink)
+    targets += _tree_target(host.site_root)
+    targets += _flat_release_targets(plane.releases)
+    if host.previous_caddyfile.is_file():
+        targets.append(str(host.previous_caddyfile))
+    return tuple(targets)
+
+
+def _remove(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    shutil.rmtree(path)
+
+
+def _require_retirable(plane: ControlPlane) -> None:
+    if read_marker(plane.releases) is None:
+        raise ControlPlaneError("no marker: the first migration has not finished; nothing retired")
+    live_release(plane)
 
 
 def retire_pre_envelope(plane: ControlPlane, host: MigrationHost) -> RetireReport:
-    """(g): the symlink, the old site root and the flat releases — only once reconciled.
+    """(g): the symlink, the old site root, the flat releases, the way back — once reconciled.
 
     This deletes the first migration's only way back, which is why it is
     its own command and refuses on anything but a marked, reconciled host.
     """
-    if read_marker(plane.releases) is None:
-        raise ControlPlaneError("no marker: the first migration has not finished; nothing retired")
-    live_release(plane)
-    removed = _remove_symlink(host.current_symlink)
-    removed += _remove_tree(host.site_root)
-    removed += _remove_flat_releases(plane.releases)
-    return RetireReport(removed=tuple(removed))
+    _require_retirable(plane)
+    removed = retire_targets(plane, host)
+    for path in removed:
+        _remove(Path(path))
+    return RetireReport(removed=removed)

@@ -812,10 +812,21 @@ class TestRollback:
         with pytest.raises(ControlPlaneError) as caught:
             rollback_first_migration(droplet.plane, droplet.host)
         assert str(caught.value) == (
-            f"{droplet.host.previous_caddyfile} is missing: (a) never ran, or it was already "
-            "rolled back; nothing to restore"
+            f"{droplet.host.previous_caddyfile} is missing: (a) never ran, the rollback already "
+            "ran, or `migrate --retire` removed it with the pre-envelope layout; nothing to restore"
         )
         assert droplet.plane.next_fragment.exists()
+
+    def test_a_missing_backup_is_refused_before_the_admin_is_dialled(
+        self, droplet: Droplet
+    ) -> None:
+        """The state that most needs a refusal is the one where nothing answers."""
+        _migrate(droplet)
+        droplet.host.previous_caddyfile.unlink()
+        droplet.caddy.admin_up = False
+
+        with pytest.raises(ControlPlaneError, match="nothing to restore"):
+            rollback_first_migration(droplet.plane, droplet.host)
 
     @pytest.mark.parametrize(
         ("step", "marker_removed", "pair_removed"),
@@ -1034,8 +1045,10 @@ class TestRetire:
                 str(droplet.host.current_symlink),
                 str(droplet.host.site_root),
                 str(litter["flat"]),
+                str(droplet.host.previous_caddyfile),
             )
         )
+        assert not droplet.host.previous_caddyfile.exists()
         assert not droplet.host.current_symlink.is_symlink()
         assert not droplet.host.site_root.exists()
         assert not litter["flat"].exists()
@@ -1045,9 +1058,53 @@ class TestRetire:
         assert (droplet.releases / MARKER_NAME).is_file()
         assert live_release(droplet.plane) == droplet.a
 
-    def test_nothing_to_retire_is_an_empty_report(self, droplet: Droplet) -> None:
+    def test_the_way_back_goes_last_and_the_rollback_then_refuses(self, droplet: Droplet) -> None:
+        """`--retire` deletes every tree the previous Caddyfile roots at. Leaving
+        that file behind armed a rollback that restores a configuration serving
+        nothing: `root *` tolerates a missing directory and `redirects*.caddy`
+        tolerates zero matches, so the reload returns 0, verification passes, the
+        backup is consumed and the marker removed — and lovspor.no 404s
+        everywhere while the command exits 0."""
         _migrate(droplet)
+        self._litter(droplet)
+        backup = droplet.host.previous_caddyfile
+        assert backup.is_file()
 
+        report = retire_pre_envelope(droplet.plane, droplet.host)
+
+        assert report.removed[-1] == str(backup)
+        assert not backup.exists()
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{backup} is missing: (a) never ran, the rollback already ran, or "
+            "`migrate --retire` removed it with the pre-envelope layout; nothing to restore"
+        )
+        assert live_release(droplet.plane) == droplet.a
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+
+    def test_a_refused_removal_leaves_the_way_back_armed(self, droplet: Droplet) -> None:
+        """The backup is unlinked only after every removal succeeded, so a refusal
+        part-way leaves a host the rollback still returns to the old site."""
+        _migrate(droplet)
+        self._litter(droplet)
+        droplet.host.current_symlink.unlink()
+        droplet.host.current_symlink.mkdir()
+
+        with pytest.raises(ControlPlaneError, match="is not a symlink; not removed"):
+            retire_pre_envelope(droplet.plane, droplet.host)
+
+        assert droplet.host.previous_caddyfile.is_file()
+        assert rollback_first_migration(droplet.plane, droplet.host).reloaded is True
+        _assert_pre_envelope(droplet)
+
+    def test_with_the_trees_already_gone_only_the_way_back_is_left(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        backup = str(droplet.host.previous_caddyfile)
+
+        first = retire_pre_envelope(droplet.plane, droplet.host)
+
+        assert first == RetireReport(removed=(backup,))
         assert retire_pre_envelope(droplet.plane, droplet.host) == RetireReport(removed=())
 
     def test_refuses_without_a_marker(self, droplet: Droplet) -> None:
@@ -1086,6 +1143,7 @@ class TestRetire:
             retire_pre_envelope(droplet.plane, droplet.host)
         assert str(caught.value) == f"{droplet.host.current_symlink} is not a symlink; not removed"
         assert droplet.host.site_root.is_dir() and litter["flat"].is_dir()
+        assert droplet.host.previous_caddyfile.is_file()
 
     def test_a_site_root_that_is_a_symlink_or_a_file_is_refused(self, droplet: Droplet) -> None:
         _migrate(droplet)
@@ -1110,7 +1168,7 @@ class TestRetire:
 
         report = retire_pre_envelope(droplet.plane, droplet.host)
 
-        assert report.removed == ()
+        assert report.removed == (str(droplet.host.previous_caddyfile),)
         assert link.is_symlink() and (droplet.releases / droplet.b).is_dir()
 
 

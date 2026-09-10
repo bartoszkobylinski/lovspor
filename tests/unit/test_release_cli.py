@@ -471,19 +471,24 @@ class TestMigrate:
 
         assert result.exit_code == 0, result.output
         assert result.stdout == (
-            f"retired 3: {droplet.host.current_symlink}, {droplet.host.site_root}, {flat}\n"
+            f"retired 4: {droplet.host.current_symlink}, {droplet.host.site_root}, {flat}, "
+            f"{droplet.host.previous_caddyfile}\n"
         )
         assert not droplet.host.current_symlink.is_symlink()
         assert not droplet.host.site_root.exists()
         assert not flat.exists()
+        assert not droplet.host.previous_caddyfile.exists()
 
-    def test_retire_with_nothing_left_reports_none(self, droplet: Droplet) -> None:
+    def test_retire_with_the_trees_gone_still_removes_the_way_back(self, droplet: Droplet) -> None:
         assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
 
-        result = runner.invoke(app, ["release", "migrate", "--retire"])
+        first = runner.invoke(app, ["release", "migrate", "--retire"])
+        second = runner.invoke(app, ["release", "migrate", "--retire"])
 
-        assert result.exit_code == 0, result.output
-        assert result.stdout == "retired 0: -\n"
+        assert first.exit_code == 0, first.output
+        assert first.stdout == f"retired 1: {droplet.host.previous_caddyfile}\n"
+        assert second.exit_code == 0, second.output
+        assert second.stdout == "retired 0: -\n"
 
     def test_retire_before_the_marker_exits_one(self, droplet: Droplet) -> None:
         result = runner.invoke(app, ["release", "migrate", "--retire"])
