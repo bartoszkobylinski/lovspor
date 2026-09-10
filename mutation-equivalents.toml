@@ -2306,27 +2306,6 @@ Same argument as the entry above: the default is only ever compared with
 """
 
 [[equivalent]]
-file = "src/lovspor/release/reconcile.py"
-symbol = "reconcile"
-registered = "2026-09-09, PR #268, from run 34397173401"
-mutation = """
--        active = triple.running.release_id or ""
-+        active = triple.running.release_id or "XXXX"
-"""
-justification = """
-The right operand of `or` is never evaluated. The line is reached only on
-the `Situation.reloaded` row, and `situation` returns that row from the one
-branch guarded by `running.release_id is not None` — an id is a non-empty
-64-hex string, hence truthy — so the left operand is always a truthy string
-and `or` short-circuits before the literal, whatever it says. Pure Python
-short-circuit semantics; the row's precondition is this package's own
-`situation`, pinned by
-`test_a_crash_after_the_reload_is_completed_by_the_marker_alone`, which
-asserts the marker and the report carry the running release's id. The `or`
-exists only to give mypy a `str` for `Marker.active`.
-"""
-
-[[equivalent]]
 file = "src/lovspor/release/linking.py"
 symbol = "_sha256"
 registered = "2026-09-10, PR #268, from run 34414685228"
@@ -2342,4 +2321,150 @@ same algorithm and produce the same hexdigest for the same bytes. That folding i
 the hashlib backend's behaviour rather than a language rule, so the assumption
 test pins it: `hashlib.new("SHA256").name == "sha256"` and the two spellings
 digest identical input identically.
+"""
+
+[[equivalent]]
+file = "src/lovspor/atomic_io.py"
+symbol = "atomic_write_text"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    path: Path, text: str, *, encoding: str = "utf-8", mode: int | None = None
++    path: Path, text: str, *, encoding: str = "UTF-8", mode: int | None = None
+"""
+justification = """
+The parameter is used in exactly one place, `tmp.write_text(text,
+encoding=encoding)`, so the default's only effect is which codec that call
+selects. Python's codec registry normalises an encoding name before lookup —
+case is folded and hyphens and underscores are interchangeable
+(`encodings.normalize_encoding`), so `codecs.lookup("UTF-8")` and
+`codecs.lookup("utf-8")` return the same CodecInfo. Both spellings therefore
+reach the same encoder and write identical bytes for every input. The same
+registry argument already registered for `decode("UTF-8")` in
+observatory/manifest and for `encode("UTF-8")` in release/caddy; it is
+documented language behaviour of `codecs.lookup`, not a dependency's.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/migrate.py"
+symbol = "_had_exec_reload"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="utf-8")
++    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="UTF-8")
+"""
+justification = """
+`Path.read_text` resolves the encoding name through the codec registry, which
+normalises case before lookup, so "UTF-8" and "utf-8" select the same decoder
+and return the same string for every byte sequence — including the sequences
+that make both raise the same UnicodeDecodeError. The predicate is a
+containment test on that string, so its value cannot differ. Python's own
+codec-registry semantics; the sibling `encoding=None` mutant of this same call
+is a real difference and is killed by
+`tests/unit/test_release_migrate.py::TestRollback::test_the_drop_in_is_read_as_utf8_whatever_the_locale`.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/migrate.py"
+symbol = "_install_files"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    _load_drop_in(plane, host, with_exec_reload=False)
++    _load_drop_in(plane, host, with_exec_reload=None)
+"""
+justification = """
+`with_exec_reload` is consumed in exactly one place. `_load_drop_in` passes it
+straight to `drop_in_text`, whose only use of it is `if with_exec_reload:` —
+a truth test, never a comparison to False or an is-check. None and False are
+both falsy, so the same branch is taken and `drop_in_text` returns the same
+string; `_load_drop_in` then writes that string and runs `daemon-reload`, both
+independent of the argument. Nothing else in the package reads the value
+(`grep with_exec_reload src/` finds the parameter, the truth test and the three
+call sites). The same falsy-None equivalence is already registered for
+`ensure_ascii=None` and `check=None`.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/migrate.py"
+symbol = "complete_first_migration"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    _load_drop_in(plane, host, with_exec_reload=False)
++    _load_drop_in(plane, host, with_exec_reload=None)
+"""
+justification = """
+The second call site of the same argument as in `_install_files`, and the same
+argument holds: `drop_in_text` truth-tests the value and nothing else reads it,
+so None and False produce the same drop-in text. Registered separately because
+the register is keyed by file and symbol, and this call is on the crash-recovery
+path rather than the install path. The `with_exec_reload=True` mutant of this
+same line is NOT equivalent — it is killed by
+`tests/unit/test_release_migrate.py::TestReconcileWindow::test_completing_repeats_the_install_without_the_pair`.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "reconcile"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    plane: ControlPlane, action: ReconcileAction = "report", host: MigrationHost | None = None
++    plane: ControlPlane, action: ReconcileAction = "XXreportXX", host: MigrationHost | None = None
+"""
+justification = """
+`action` is only ever compared to two literals. Tracing every use inside the
+module: `reconcile` passes it to `_reconcile_unmarked` and `_resolve`;
+`_reconcile_unmarked` passes it to `_resolve_window`, which passes it to
+`_resolve_staged`; and the only expressions that read it are `action ==
+"complete"` and `action == "abandon"` in `_resolve` (lines 136, 138) and
+`_resolve_staged` (lines 151, 156). It is never rendered, stored or returned —
+the `action` field of `ReconcileReport` is filled by `_report` from its own
+literal argument ("none", "marker_written", "completed", "abandoned"), not from
+this parameter. So every value that is neither "complete" nor "abandon" drives
+the identical control flow, and "XXreportXX" is such a value exactly as "report"
+is. The default names the reporting run for the reader and for the Literal type;
+it carries no behaviour a test could observe.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "reconcile"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-    plane: ControlPlane, action: ReconcileAction = "report", host: MigrationHost | None = None
++    plane: ControlPlane, action: ReconcileAction = "REPORT", host: MigrationHost | None = None
+"""
+justification = """
+The case-folded spelling of the same default, equivalent for the same reason:
+`action` reaches only `action == "complete"` and `action == "abandon"` in
+`_resolve` and `_resolve_staged`, and `str.__eq__` is case-sensitive, so
+"REPORT" is unequal to both exactly as "report" is. Same control flow on every
+input, and the value is never rendered or stored.
+"""
+
+[[equivalent]]
+file = "src/lovspor/release/reconcile.py"
+symbol = "_resolve_staged"
+registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
+mutation = """
+-        active = complete_first_migration(plane, host, answered).active
++        active = complete_first_migration(plane, host, None).active
+"""
+justification = """
+`complete_first_migration` reads its third argument exactly once, as `if
+answered == host.socket_admin`, so its behaviour depends on that argument only
+through that one equality — any two values unequal to `host.socket_admin` are
+interchangeable there.
+
+At this call site `answered` is always unequal to it. `_resolve_staged` has one
+caller, `_resolve_window` (line 183), which has one caller,
+`_reconcile_unmarked` (line 201); `_reconcile_unmarked` reaches
+`_resolve_window` only after `if answered == host.socket_admin and
+situation(triple) != Situation.reloaded: return _resolve(...)`, with nothing
+running between the guard and the call. `_resolve_window` re-evaluates
+`situation` on that same, unmutated triple and reaches `_resolve_staged` only
+when the row is `Situation.staged`, which is not `Situation.reloaded`. So the
+guard's second conjunct was true, hence its first was false: `answered !=
+host.socket_admin`. And `None != host.socket_admin` always, because
+`MigrationHost.__post_init__` runs `socket_path(self.socket_admin)`, which
+requires a `unix/`-prefixed string. Both values take the same branch on every
+reachable input.
 """
