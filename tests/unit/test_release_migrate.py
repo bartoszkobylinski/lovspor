@@ -458,6 +458,7 @@ class TestPreflight:
 
         assert "cannot write its probe file" in str(caught.value)
         assert str(preferred) in str(caught.value)
+        assert "No space left on device" in str(caught.value)
         assert list(preferred.parent.glob("*.lovspor-*")) == ([preferred] if taken else [])
 
     def test_a_socket_address_no_codec_can_encode_is_a_named_refusal(
@@ -476,6 +477,7 @@ class TestPreflight:
 
         assert "cannot write its probe file" in str(caught.value)
         assert str(_probe(droplet, "probe")) in str(caught.value)
+        assert "surrogates not allowed" in str(caught.value)
         assert list(droplet.plane.caddyfile.parent.glob("*.lovspor-*")) == []
 
     def test_a_probe_directory_that_vanished_is_a_named_refusal(self, droplet: Droplet) -> None:
@@ -494,8 +496,10 @@ class TestPreflight:
         with pytest.raises(MigrationRefusedError) as caught:
             preflight(plane, droplet.host)
 
-        assert "cannot write its probe file" in str(caught.value)
-        assert str(_probe(droplet, "probe")) in str(caught.value)
+        assert str(caught.value).startswith(
+            f"the preflight cannot write its probe file {_probe(droplet, 'probe')}: "
+        )
+        assert "[Errno" in str(caught.value)
 
     @pytest.mark.parametrize("name", ["probe", "fragment"])
     def test_a_directory_at_the_probe_name_is_stepped_around(
