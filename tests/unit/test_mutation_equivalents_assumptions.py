@@ -27,7 +27,9 @@ import pytest
 from mcp.types import JSONRPCMessage
 from pydantic import ValidationError
 
+from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
+from lovspor.site.fingerprint import ReleaseKey
 from tests.unit.site_fixtures import (
     available_observation,
     capability_document,
@@ -148,21 +150,47 @@ def test_assumption_the_json_rpc_parser_ignores_a_space_at_a_line_margin() -> No
         JSONRPCMessage.model_validate_json(f"\u00a0{answer}")
 
 
+def _release_record() -> ReleaseRecord:
+    return ReleaseRecord(
+        schema_version="1",
+        release_content_id="a" * 64,
+        release_key=ReleaseKey(
+            corpus_commit="c" * 40,
+            lovspor_commit="d" * 40,
+            state_sha256="e" * 64,
+            toolchain_fingerprint="f" * 64,
+        ),
+        site_manifest_sha256="1" * 64,
+        capability_sha256="2" * 64,
+        observed_at="2026-01-01T00:00:00Z",
+        observer="release-probe",
+        corpus=CorpusSummary(
+            corpus_commit="c" * 40,
+            corpus_commit_time="2026-01-01T00:00:00+00:00",
+            engine_version="0.0.0",
+            documents=1,
+        ),
+    )
+
+
 def test_assumption_a_python_mode_dump_serialises_like_json_mode() -> None:
     """Pins the argument that waives the ``mode="json"`` -> ``None`` / other
-    string mutants in ``site/capabilities.py::state_sha256`` and
-    ``site/fixture.py::document_bytes``: pydantic takes the JSON serialiser only
-    for the exact string "json" and the Python one otherwise, and these models
-    hold nothing the Python path renders differently under ``json.dumps`` — the
-    one non-JSON-native type is ``tuple[CredentialMode, ...]``, which dumps as a
-    list either way. A field type that the Python path leaves as an object
-    (a datetime, an enum, bytes) would make this test fail, and the mutants
-    real."""
+    string mutants in ``site/capabilities.py::state_sha256``,
+    ``site/fixture.py::document_bytes`` and ``release/envelope.py::record_bytes``:
+    pydantic takes the JSON serialiser only for the exact string "json" and the
+    Python one otherwise, and these models hold nothing the Python path renders
+    differently under ``json.dumps`` — the one non-JSON-native type is
+    ``tuple[CredentialMode, ...]``, which dumps as a list either way. A field
+    type that the Python path leaves as an object (a datetime, an enum, bytes)
+    would make this test fail, and the mutants real."""
     checkout = Checkout.model_validate(checkout_expectations())
     models: list[Any] = [
         derive_state(Observation.model_validate(available_observation()), checkout),
         derive_state(Observation.model_validate(unobserved_transport("network")), checkout),
         CapabilityDocument.model_validate(capability_document()),
+        _release_record(),
+        Marker(active="b" * 64, previous="a" * 64),
+        Marker(active="a" * 64, previous=None),
     ]
 
     for model in models:
@@ -325,3 +353,19 @@ def test_an_entry_with_no_assumption_test_field_is_not_a_broken_one(tmp_path: Pa
     entries = [{"symbol": "record_to_json_line"}]
 
     assert _broken_assumption_tests(entries, tmp_path) == []
+
+
+def test_hashlib_folds_the_digest_name_case() -> None:
+    """``hashlib.file_digest(f, "SHA256")`` resolves through ``hashlib.new``, whose
+    OpenSSL-backed lookup is case-insensitive; the register entry for
+    ``release/linking.py`` argues from this."""
+    import hashlib  # noqa: PLC0415 — the assumption under test is this module's behaviour
+    import io  # noqa: PLC0415
+
+    payload = b"lovspor"
+    assert hashlib.new("SHA256").name == "sha256"
+    assert (
+        hashlib.file_digest(io.BytesIO(payload), "SHA256").hexdigest()
+        == hashlib.file_digest(io.BytesIO(payload), "sha256").hexdigest()
+        == hashlib.sha256(payload).hexdigest()
+    )

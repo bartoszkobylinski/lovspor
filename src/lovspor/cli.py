@@ -1,6 +1,5 @@
 """lovspor command-line interface."""
 
-import os
 import subprocess
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -32,6 +31,10 @@ from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
 from lovspor.publish.pages import SITE_ORIGIN
+from lovspor.release.check import check_envelope
+from lovspor.release.commands import release_app
+from lovspor.release.envelope import CORPUS_DIR, RECORD_NAME, SITE_DIR
+from lovspor.release.errors import ReleaseError
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.site.build import SiteInputs, build_site, discover_checkout
@@ -51,6 +54,7 @@ from lovspor.site.probe import (
     probe,
     require_http_url,
 )
+from lovspor.site.probe_credential import load_probe_token
 from lovspor.storage.manifest import read_manifest
 from lovspor.sync.input_annotation import annotate_embedding_input_identity
 from lovspor.sync.lspe_cutover import migrate_lspe_v2
@@ -71,6 +75,7 @@ tokens_app = typer.Typer(
 )
 app.add_typer(tokens_app)
 app.add_typer(observatory_app)
+app.add_typer(release_app)
 
 _CredentialsOption = Annotated[
     Path | None,
@@ -300,7 +305,6 @@ _OBSERVERS: dict[ObserverName, Observer] = {
     ObserverName.drift_timer: "drift-timer",
 }
 SERVED_CAPABILITIES_URL = f"{SITE_ORIGIN}/deployment-capabilities.json"
-_PROBE_CREDENTIAL_NAME = "site-probe"
 _DRIFT_EXIT_DRIFTED = 1
 _DRIFT_EXIT_SERVED_UNAVAILABLE = 3
 
@@ -334,13 +338,6 @@ _ObserverOption = Annotated[
 ]
 
 
-def _probe_token_path(explicit: Path | None) -> Path | None:
-    if explicit is not None:
-        return explicit
-    directory = os.environ.get("CREDENTIALS_DIRECTORY")
-    return Path(directory) / _PROBE_CREDENTIAL_NAME if directory else None
-
-
 def _probe_token(explicit: Path | None) -> SecretStr | None:
     """The secret, or ``None`` with one line saying why step (b) will be unobserved.
 
@@ -348,19 +345,10 @@ def _probe_token(explicit: Path | None) -> SecretStr | None:
     and is recorded as such (ADR-0014 Decision 4). The line names the path,
     never the content.
     """
-    path = _probe_token_path(explicit)
-    if path is None:
-        typer.echo("probe credential: none configured (step (b) unobserved)", err=True)
-        return None
-    try:
-        token = path.read_text(encoding="utf-8").strip()
-    except OSError as error:
-        typer.echo(f"probe credential unreadable: {path}: {error.strerror}", err=True)
-        return None
-    if not token:
-        typer.echo(f"probe credential empty: {path}", err=True)
-        return None
-    return SecretStr(token)
+    token, notice = load_probe_token(explicit)
+    if notice is not None:
+        typer.echo(notice, err=True)
+    return token
 
 
 def _clock() -> datetime:
@@ -505,26 +493,38 @@ def site_drift_check(
     typer.echo(_drift_line(report, observer))
 
 
+def _is_envelope(release: Path) -> bool:
+    """An envelope has ``corpus/`` and ``site/``; a bare corpus tree has ``lov/`` at its root."""
+    return any((release / name).exists() for name in (CORPUS_DIR, SITE_DIR, RECORD_NAME))
+
+
 @app.command(name="publish-check")
 def publish_check(
     release: Annotated[
         Path,
-        typer.Argument(help="A release tree as written by publish-site."),
+        typer.Argument(help="A release envelope (corpus/ + site/), or a bare corpus tree."),
     ],
 ) -> None:
-    """Refuse to serve a release tree that is not complete and self-consistent.
+    """Refuse to serve a release that is not complete and self-consistent.
 
-    The gate the release script runs before the symlink moves (ADR-0013
-    Decision 8): manifest present and of this engine's schema, every page's
-    JSON twin hashing to its HTML, every sitemap URL and redirect target
-    served by a file in the tree. Exit 1 names the first offending path.
+    For an envelope (ADR-0014 Decision 6): both trees, the cross-tree
+    assertions, the capability document, the site's route closure and the
+    release_content_id recomputed over both trees equal to every id the
+    envelope records. For a bare corpus tree (ADR-0013 Decision 8): manifest
+    present and of this engine's schema, every page's JSON twin hashing to
+    its HTML, every sitemap URL and redirect target served by a file in the
+    tree. Exit 1 names the first offending path.
     """
     try:
-        report = check_release(release)
-    except PublishError as error:
+        summary = (
+            check_envelope(release).summary()
+            if _is_envelope(release)
+            else check_release(release).summary()
+        )
+    except (PublishError, ReleaseError) as error:
         typer.echo(f"release refused: {error}", err=True)
         raise typer.Exit(code=1) from error
-    typer.echo(report.summary())
+    typer.echo(summary)
 
 
 @app.command()

@@ -1,169 +1,108 @@
 #!/usr/bin/env bash
-# publish-release.sh — build the ADR-0013 site, validate it, switch to it atomically.
+# publish-release.sh — drive `lovspor release` (ADR-0014 Decision 6, refining ADR-0013 Decision 8).
 #
-# The binding invariant (ADR-0013 Decision 8): a request must never observe a
-# mixed publication snapshot. So nothing here ever writes into the tree Caddy is
-# serving. A release is built off-path, validated in place, and becomes live by
-# one symlink rename. Rollback is the same rename in the other direction.
+# The logic lives in the lovspor package (src/lovspor/release/), where every
+# step, every crash case and every invariant is unit-tested. This wrapper only
+# prepares the environment, takes the lock, and calls the commands in the one
+# order the ADR fixes:
 #
-#   /var/www/lovspor-releases/<release-id>/   complete, validated release trees
-#   /var/www/lovspor-current -> <release-id>   the one Caddy serves
+#   live     (root)     the reconciled live release: Caddy's running config (R),
+#                       the adapted config on disk (D) and the marker (M) agree —
+#                       an unreconciled host, or one whose admin socket cannot
+#                       be reached, stops here
+#   build    (lovspor)  probe, then the seven steps under .build-<random>/,
+#                       renamed to <release_content_id>/ once finalized; prints
+#                       the id (the live one when the release_key is unchanged)
+#   commit   (root)     stage the release's fragment, validate, commit it,
+#                       reload Caddy, then write the marker; a no-op for the id
+#                       that is already live
+#   prune    (root)     only when reconciled; never R, D, M.active or M.previous
 #
-# Runs as root (it reloads Caddy and owns the symlink); the build itself runs as
-# the lovspor user, which is the only identity that can read the corpus clone.
+# Nothing here ever writes into a tree Caddy is serving, and no symlink exists.
 #
-#   publish-release.sh              build HEAD of the corpus clone and switch
-#   publish-release.sh --ref <sha>  build a specific corpus commit
-#   publish-release.sh --rollback   switch back to the previous release
+#   publish-release.sh                       build HEAD of the corpus clone and switch
+#   publish-release.sh --ref <sha>           build a specific corpus commit
+#   publish-release.sh --rollback            the previous release, same transaction
+#   publish-release.sh --reconcile [--complete|--abandon]
+#   publish-release.sh --prune
 #
 # Exit 0 on a switch or on "already live"; non-zero leaves the live release
-# exactly as it was.
+# exactly as it was (a reload failure puts the previous fragment back).
 set -euo pipefail
 
 # The Caddyfile's site block is `{$LOVSPOR_DOMAIN} {`. Caddy the SERVICE gets
-# that variable from its systemd drop-in; a shell running `caddy validate` does
-# not, the placeholder expands to nothing, the site block parses as a global
-# options block, and validation fails with "unrecognized global option: encode".
-# Seen on the first enablement, 2026-09-08. Read the same file Caddy does —
-# but READ it, do not source it: it is a systemd EnvironmentFile, and the value
-# is `lovspor.no, lovspor.bartoszkobylinski.com` unquoted. systemd takes the
-# rest of the line; a shell takes the first word as the value and runs the
-# second as a command ("lovspor.bartoszkobylinski.com: not found" — also seen
-# 2026-09-08, on the fix for the first one).
+# that variable from its systemd drop-in; `caddy validate`/`caddy adapt` run by
+# the release commands do not, the placeholder expands to nothing, the site
+# block parses as a global options block, and validation fails. Read the same
+# file Caddy does — but READ it, do not source it: it is a systemd
+# EnvironmentFile whose value is `lovspor.no, lovspor.bartoszkobylinski.com`
+# unquoted; a shell would run the second word as a command (seen 2026-09-08).
 if [ -z "${LOVSPOR_DOMAIN:-}" ] && [ -r /etc/default/caddy-lovspor ]; then
 	LOVSPOR_DOMAIN="$(sed -n 's/^LOVSPOR_DOMAIN=//p' /etc/default/caddy-lovspor | tail -n 1 | sed 's/^"\(.*\)"$/\1/')"
-	export LOVSPOR_DOMAIN
 fi
 : "${LOVSPOR_DOMAIN:?LOVSPOR_DOMAIN is unset and /etc/default/caddy-lovspor did not provide it}"
+export LOVSPOR_DOMAIN
 
-RELEASES=/var/www/lovspor-releases
-CURRENT=/var/www/lovspor-current
+# The environment the commands read (each also has a matching option).
+export LOVSPOR_RELEASES_ROOT="${LOVSPOR_RELEASES_ROOT:-/var/www/lovspor-releases}"
+export LOVSPOR_CADDYFILE="${LOVSPOR_CADDYFILE:-/etc/caddy/Caddyfile}"
+export LOVSPOR_RELEASE_FRAGMENT="${LOVSPOR_RELEASE_FRAGMENT:-/etc/caddy/lovspor-release.caddy}"
+# Caddy's own spelling of its admin address. The Unix socket is v1's binding;
+# TCP (`localhost:2019`) is allowed only for the migration window.
+export LOVSPOR_CADDY_ADMIN="${LOVSPOR_CADDY_ADMIN:-unix//run/caddy/admin.sock}"
+
 APP=/opt/lovspor/app
 CORPUS=/opt/lovspor/.cache/lovverk
 LOVSPOR="$APP/.venv/bin/lovspor"
 BUILD_USER=lovspor
-CADDYFILE=/etc/caddy/Caddyfile
-# Releases retained beside the live one, for rollback. Hard links (see rsync
-# below) make each retained release cost roughly the inter-release delta.
-KEEP_PREVIOUS=1
+LOCK=/run/lock/lovspor-publish.lock
 
 log() { printf '%s publish-release: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 die() { log "ERROR: $*" >&2; exit 1; }
 
-live_release() {
-	# The directory the symlink names, or empty when nothing is live yet.
-	[ -L "$CURRENT" ] && readlink -f "$CURRENT" || true
-}
+# One publish at a time on this box. systemd's Conflicts= keeps the unit off
+# the corpus fetch; the lock keeps a manual run off the unit.
+exec 9>"$LOCK"
+flock -n 9 || die "another publish holds $LOCK"
 
-switch_to() {
-	# One rename: the symlink is replaced, never edited in place, so every
-	# request resolves either the old tree or the new one and nothing between.
-	local target="$1"
-	ln -sfn "$target" "$CURRENT.next"
-	mv -T "$CURRENT.next" "$CURRENT"
-}
+# Root, the reconcile identity: it can open the admin socket, write the
+# fragment and reload Caddy. The build user cannot, by design.
+control() { "$LOVSPOR" release "$@"; }
 
-reload_caddy_or_revert() {
-	# The redirect/410 snippet is imported from the live release, so Caddy must
-	# reload to serve the new map. Pages are already switched by now; if the
-	# reload fails we put the old release back rather than serve new pages under
-	# an old map, which would be the mixed snapshot this script exists to prevent.
-	local previous="$1"
-	if ! systemctl reload caddy; then
-		log "caddy reload failed; reverting to $previous"
-		[ -n "$previous" ] && switch_to "$previous" && systemctl reload caddy || true
-		die "release not switched: caddy would not reload"
+build_as_build_user() {
+	# The corpus clone is readable only by the build user, and the build must
+	# not run as root. The probe credential arrives from systemd's
+	# LoadCredential= as a root-only file; it is passed to the build user as
+	# stdin, never as an argument, an environment variable or a file it owns.
+	local ref="$1" live="$2" token="${CREDENTIALS_DIRECTORY:-}/site-probe"
+	local -a args=(release build --corpus "$CORPUS" --ref "$ref" --live "$live" --releases "$LOVSPOR_RELEASES_ROOT")
+	if [ -n "${CREDENTIALS_DIRECTORY:-}" ] && [ -r "$token" ]; then
+		sudo -u "$BUILD_USER" "$LOVSPOR" "${args[@]}" --probe-token-file /dev/stdin <"$token"
+	else
+		sudo -u "$BUILD_USER" "$LOVSPOR" "${args[@]}" </dev/null
 	fi
-}
-
-prune() {
-	# Keep the live release and KEEP_PREVIOUS newest others. Only after a
-	# successful switch, so a failed release never costs the rollback target.
-	local live keep n=0
-	live="$(live_release)"
-	keep=$KEEP_PREVIOUS
-	for dir in $(ls -1d "$RELEASES"/*/ 2>/dev/null | sort -r); do
-		dir="${dir%/}"
-		[ "$dir" = "$live" ] && continue
-		if [ "$n" -lt "$keep" ]; then n=$((n + 1)); continue; fi
-		log "pruning $dir"
-		rm -rf "$dir"
-	done
-}
-
-rollback() {
-	local live previous
-	live="$(live_release)"
-	[ -n "$live" ] || die "nothing is live; nothing to roll back from"
-	previous="$(ls -1d "$RELEASES"/*/ 2>/dev/null | sort -r | sed 's:/$::' | grep -vx "$live" | head -1 || true)"
-	[ -n "$previous" ] || die "no previous release retained; cannot roll back"
-	log "rolling back $live -> $previous"
-	LOVSPOR_SITE_ROOT="$previous" caddy validate --config "$CADDYFILE" >/dev/null \
-		|| die "previous release's redirect map does not validate under the current Caddyfile"
-	switch_to "$previous"
-	reload_caddy_or_revert "$live"
-	log "live: $(live_release)"
 }
 
 publish() {
-	local ref="${1:-HEAD}" sha release_id build new previous
+	local ref="${1:-HEAD}" live release_id
 	[ -x "$LOVSPOR" ] || die "$LOVSPOR not found; is the app deployed?"
 	[ -d "$CORPUS/.git" ] || die "$CORPUS is not a git clone; run lovspor-fetch-corpus first"
-	install -d -o "$BUILD_USER" -g "$BUILD_USER" -m 755 "$RELEASES"
+	install -d -o "$BUILD_USER" -g "$BUILD_USER" -m 755 "$LOVSPOR_RELEASES_ROOT"
 
-	sha="$(sudo -u "$BUILD_USER" git -C "$CORPUS" rev-parse --verify "${ref}^{commit}")" \
-		|| die "not a corpus commit: $ref"
-	release_id="$(date -u +%Y%m%dT%H%M%SZ)-${sha:0:12}"
-	previous="$(live_release)"
-
-	if [ -n "$previous" ] && [ "${previous##*-}" = "${sha:0:12}" ]; then
-		log "corpus $sha is already live as $previous; nothing to publish"
-		return 0
-	fi
-
-	# Build off-path, on the same filesystem as the releases so unchanged files
-	# can become hard links rather than copies.
-	build="$RELEASES/.build-$release_id"
-	new="$RELEASES/$release_id"
-	trap 'rm -rf "$build"' EXIT
-	log "building corpus $sha into $build"
-	sudo -u "$BUILD_USER" "$LOVSPOR" publish-site --corpus "$CORPUS" --out "$build" --ref "$sha"
-
-	if [ -n "$previous" ]; then
-		# --checksum compares content, and -t is deliberately absent: a file whose
-		# bytes did not change becomes a hard link to the previous release's inode
-		# and so KEEPS ITS OLD MTIME. That is what keeps Caddy's ETag/Last-Modified
-		# truthful per page instead of telling every crawler the whole site changed.
-		log "populating $new against $previous (unchanged files hard-linked)"
-		sudo -u "$BUILD_USER" rsync -rlpgoD --checksum --link-dest="$previous" "$build/" "$new/"
-		rm -rf "$build"
-	else
-		mv "$build" "$new"
-	fi
-	trap - EXIT
-
-	# Validate the tree that is about to be served, and the Caddy config that
-	# would import its redirect map — both before anything public changes.
-	log "validating $new"
-	if ! sudo -u "$BUILD_USER" "$LOVSPOR" publish-check "$new"; then
-		rm -rf "$new"
-		die "release $release_id refused by publish-check; live release untouched"
-	fi
-	if ! LOVSPOR_SITE_ROOT="$new" caddy validate --config "$CADDYFILE" >/dev/null; then
-		rm -rf "$new"
-		die "release $release_id: Caddy refuses its redirect map; live release untouched"
-	fi
-
-	log "switching $CURRENT -> $new"
-	switch_to "$new"
-	reload_caddy_or_revert "$previous"
-	prune
-	log "live: $(live_release)"
+	live="$(control live)"
+	log "live release: $live"
+	release_id="$(build_as_build_user "$ref" "$live")"
+	log "finalized release: $release_id"
+	control commit "$release_id"
+	control prune
+	log "live: $(control live)"
 }
 
 case "${1:-}" in
-	--rollback) rollback ;;
+	--rollback) control rollback && control prune ;;
+	--reconcile) shift; control reconcile "$@" ;;
+	--prune) control prune ;;
 	--ref) [ -n "${2:-}" ] || die "--ref needs a commit"; publish "$2" ;;
 	"") publish ;;
-	*) die "usage: $0 [--ref <commit> | --rollback]" ;;
+	*) die "usage: $0 [--ref <commit> | --rollback | --reconcile [--complete|--abandon] | --prune]" ;;
 esac

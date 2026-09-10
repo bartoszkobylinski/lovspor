@@ -91,23 +91,20 @@ sudo systemctl restart caddy lovspor-mcp
 curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
 ```
 
-## Update the landing pages
+## The site is part of the release
 
-`deploy/digitalocean/site/` is the source for everything Caddy serves outside
-`/mcp`. Provisioning copies the whole tree, so adding a page is a matter of
-adding a file — no config change.
-
-Between provisions, copy the changed pages straight over:
-
-```bash
-# from your Mac, in the repo root — over the tailnet, not the public IP:
-rsync -av --delete deploy/digitalocean/site/ root@<DROPLET_TAILSCALE_IP>:/var/www/lovspor/
-```
+Everything Caddy serves outside `/mcp` — the landing page, `/observatory/`,
+`/status/`, the EN twins — is built by `lovspor build-site` from the source
+checkout and released **together with the corpus** as one envelope (ADR-0014
+Decision 6, below). There is no separate site deploy and nothing to rsync: a
+site-source change is a release, made live by the same configuration swap as
+a corpus update. `deploy/digitalocean/site/` still holds the pages provisioning
+copies on a box that has not published yet; once the first envelope is live
+the release's `site/` tree is what is served.
 
 Public SSH is firewalled off the droplet by design, so the public IPv4 that
-serves the site will time out on port 22. Use the Tailscale address.
-
-Caddy serves from disk, so the change is live immediately — nothing to reload.
+serves the site will time out on port 22. Reach the box over the tailnet
+(`root@<DROPLET_TAILSCALE_IP>`), never the public address.
 
 `/observatory/` is not decoration: the crawler's User-Agent advertises that
 address to every site it visits, so it has to answer. A site administrator who
@@ -147,38 +144,65 @@ sudo systemctl restart lovspor-mcp
 sudo journalctl -u lovspor-mcp -n 40 --no-pager
 ```
 
-**Publish the corpus site** (ADR-0013) — build, validate, switch atomically:
+**Publish a release** (ADR-0014 Decision 6, refining ADR-0013) — corpus and
+site as one envelope, made live by one Caddy configuration swap:
 
 ```bash
 sudo systemctl start lovspor-publish          # HEAD of the corpus clone
 sudo journalctl -u lovspor-publish -n 60 --no-pager
 ```
 
-The unit runs `publish-release.sh`, which never writes into the tree Caddy is
-serving. A release is built off-path under `/var/www/lovspor-releases/<id>/`,
-populated with `rsync --checksum --link-dest=<live>` so unchanged pages become
-hard links that keep their old mtimes (Caddy's `ETag`/`Last-Modified` stay
-truthful per page), validated by `lovspor publish-check` and `caddy validate`,
-and only then made live by one rename of the `/var/www/lovspor-current` symlink
-followed by a Caddy reload for the release's 301/410 map. Any failure before the
-rename leaves the live release untouched; a reload failure after it puts the
-previous release back. `~4 min` to build ~93k pages, then rsync and a hash of
-every page.
+The unit runs `publish-release.sh`, a thin wrapper over `lovspor release`;
+the logic and every crash case live in `src/lovspor/release/`, unit-tested.
+In order: `lovspor release live` (root) establishes the **reconciled live
+release** — Caddy's running configuration read from its admin socket (R),
+the configuration adapted from `/etc/caddy/Caddyfile` with the active
+fragment (D) and the marker `/var/www/lovspor-releases/ACTIVE` (M) must name
+one release with equal configuration hashes; an unreconciled host, or one
+whose admin socket cannot be reached, stops here. `lovspor release build`
+(as `lovspor`) runs the release probe, computes the candidate's
+`release_key` and stops with "already live" when it equals the live
+release's; otherwise it builds `corpus/` and `site/` under
+`/var/www/lovspor-releases/.build-<random>/`, hard-links unchanged files to
+the live release (old mtimes, truthful `ETag`/`Last-Modified`), computes
+`release_content_id` over both trees, writes `site-facts.json`'s id,
+`release.json` and `release.caddy` (the per-release Caddy fragment), runs the
+final `lovspor publish-check` on the temporary directory, and only then
+renames it to `/var/www/lovspor-releases/<release_content_id>/` — so nothing
+under an id name is ever incomplete. `lovspor release commit <id>` (root)
+stages the release's fragment as `/etc/caddy/lovspor-release.caddy.next`,
+runs `caddy validate` and `caddy adapt` on the composed configuration,
+renames the fragment into place, `systemctl reload caddy`, reads the running
+configuration back, and only then writes the marker. A reload failure puts
+the previous release's fragment back and exits non-zero; the live release is
+untouched throughout. `~4 min` to build ~93k pages, then the link pass and a
+hash of every page.
 
-Rollback is the same rename in the other direction — one previous release is
-retained for exactly this:
+Rollback is the previous release's own fragment through the same transaction
+— the marker's `previous` is kept for exactly this; run it twice to roll
+forward:
 
 ```bash
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --rollback
 ```
 
-Publish a specific corpus commit, or see what is live:
+Publish a specific corpus commit, see what is live, or resolve a state a
+crash left (`reconcile` names it — R, D and M — and offers `--complete` or
+`--abandon` when there is a choice):
 
 ```bash
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --ref <sha>
-readlink -f /var/www/lovspor-current
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --reconcile
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --reconcile --complete
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --prune
 curl -fsS https://lovspor.no/lov/ | head -c 300
 ```
+
+`prune` runs only on a reconciled host and never removes the release named
+by R, D, the marker's `active` or its `previous`. The commands read
+`LOVSPOR_RELEASES_ROOT`, `LOVSPOR_CADDYFILE`, `LOVSPOR_RELEASE_FRAGMENT` and
+`LOVSPOR_CADDY_ADMIN` (`unix//run/caddy/admin.sock`; TCP only during the
+migration) — the script exports the droplet's values.
 
 On a box provisioned before this existed, enable it once — `provision.sh` does
 this on a fresh box, but is not re-run on a live one:
@@ -194,6 +218,15 @@ sudo systemctl daemon-reload
 The new Caddyfile is safe to load before any release exists: the corpus paths
 answer 404 from an absent symlink until the first publish, and everything else
 (`/`, `/observatory`, `/mcp`) is unchanged.
+
+The Caddyfile in this repository still roots the corpus at the ADR-0013
+symlink and the site at `/var/www/lovspor`. The envelope release needs it to
+import the active fragment instead — `import
+{$LOVSPOR_RELEASE_FRAGMENT:/etc/caddy/lovspor-release.caddy}` in place of the
+two `handle` blocks — together with the admin-socket binding and the
+`ExecReload=` drop-in; that is the first migration (ADR-0014 Migration), the
+PR after this one. Until it lands, `lovspor release commit` refuses with
+"does the Caddyfile import the fragment?" and nothing public changes.
 
 The unit `Conflicts=` with `lovspor-fetch-corpus.service`: a build must not read
 a clone mid-fetch. There is no timer yet — publishing is an operator command

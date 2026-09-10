@@ -194,16 +194,17 @@ def test_landing_and_observatory_pages_agree_on_contact_and_source_link() -> Non
         assert "https://github.com/bartoszkobylinski/lovspor" in text, page
 
 
-def test_readme_documents_the_landing_page_update_workflow_to_the_real_destination() -> None:
+def test_readme_documents_the_site_as_part_of_the_release_not_an_rsync() -> None:
     text = _README.read_text(encoding="utf-8")
 
-    # The rsync target must match provision.sh's actual install destination
-    # (checked in test_provision_installs_the_static_site_into_var_www) —
-    # otherwise the documented shortcut writes to a path Caddy never serves.
-    assert "rsync -av --delete deploy/digitalocean/site/ root@" in text
+    # ADR-0014 Decision 6: the site is built and released with the corpus as
+    # one envelope; an rsync into a live root is the mixed snapshot the
+    # envelope exists to prevent, so the shortcut is gone from the runbook.
+    assert "## The site is part of the release" in text
+    assert "rsync -av --delete deploy/digitalocean/site/" not in text
+    assert "lovspor build-site" in text
     # Public SSH is firewalled off the droplet; documenting the public IPv4
     # here sends the reader into a port-22 timeout, which is exactly how this
     # deploy step failed the first time it was run.
     assert "TAILSCALE" in text
-    assert "/var/www/lovspor/" in text
     assert "lovspor-observatory" in text

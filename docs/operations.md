@@ -126,6 +126,43 @@ OPENAI_API_KEY=sk-...        # also accepts OPENAI_APIKEY for legacy configs
 
 Required for `lovspor sync` to write per-section embedding `.bin` files (Sprint 9), and for the MCP `semantic_search` tool to embed user queries at runtime. Without a key the engine still produces Markdown and runs the rest of the sync pipeline normally — the only casualty is that `.bin` files for documents added or changed in this run will not be written, and the next sync with a key set picks them up via the Sprint 9 backfill migration. Missing key in the MCP server disables only `semantic_search` and leaves the other sixteen tools working normally. Cost is fractions of a cent per query and ~$5-15/year for the production sync cadence — see [`docs/embeddings.md`](embeddings.md) for the model choice rationale.
 
+## Publishing the site: the release envelope (ADR-0014 Decision 6)
+
+The corpus site (ADR-0013) and the ADR-0014 site are released **together**, as
+one envelope under `/var/www/lovspor-releases/<release_content_id>/` with two
+trees, `corpus/` and `site/`, and two root files written once the id is
+known: `release.json` (the record) and `release.caddy` (the per-release Caddy
+fragment: `vars lovspor_release <id>`, both roots and the corpus's own
+redirect map, every path absolute and immutable). The cutover is one Caddy
+configuration swap — the host's Caddyfile imports the active fragment — so a
+request is served entirely by the old release or entirely by the new one, and
+**no symlink exists**. What is live is never a pointer but a reconciled
+triple: Caddy's running configuration read from its admin socket (R), the
+configuration adapted from disk (D) and the marker `ACTIVE` (M) must name one
+release with equal configuration hashes; otherwise every mutating command
+refuses and prints the three, and an unreachable admin socket is its own
+named refusal. The full contract — the seven-step build order, the
+stage/commit/reload/marker transaction, the exhaustive crash table, the
+`prune` invariant and rollback — is ADR-0014 Decision 6; the operator's
+commands and the droplet procedure are in
+[`deploy/digitalocean/README.md`](../deploy/digitalocean/README.md#operating-it).
+
+```bash
+uv run lovspor release live                      # the reconciled live id, or 'none'
+uv run lovspor release build --corpus <clone> --live <id|none>   # probe + seven steps; prints the id
+uv run lovspor release commit <id>               # stage, validate, commit the fragment, reload, mark
+uv run lovspor release reconcile [--complete|--abandon]          # name and resolve a crash state
+uv run lovspor release rollback                  # the marker's previous, same transaction
+uv run lovspor release prune                     # only when reconciled; never R, D, M or previous
+uv run lovspor publish-check <envelope>          # the final check: both trees, cross-tree, ids
+```
+
+Exit codes: `0` done (a `commit` of the live release included), `1` refused
+or unreconciled with one stderr line, `2` usage, `3` the precondition *Caddy
+admin reachable* unmet, with D and M printed. The commands take
+`--releases`/`LOVSPOR_RELEASES_ROOT`, `--caddyfile`/`LOVSPOR_CADDYFILE`,
+`--fragment`/`LOVSPOR_RELEASE_FRAGMENT` and `--admin`/`LOVSPOR_CADDY_ADMIN`.
+
 ## Observatory: registering a capture source (ADR-0010)
 
 Capture is refused until a named human has checked the source's `robots.txt`
