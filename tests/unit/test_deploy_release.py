@@ -246,6 +246,77 @@ class TestRunbook:
         # fixtures the generator's golden comparisons read.
         assert not (_DEPLOY / "site").exists()
 
+    def test_the_readme_carries_the_first_migration_runbook(self) -> None:
+        """ADR-0014 Migration: the cutover is an operator-run procedure whose
+        load is delivered to an address that is about to stop existing. A runbook
+        that omits the explicit address, or the kept previous Caddyfile it rolls
+        back to, is a runbook that cannot be followed."""
+        text = _README.read_text(encoding="utf-8")
+
+        for phrase in (
+            "## First migration (once, on the existing droplet)",
+            "publish-release.sh --migrate",
+            "publish-release.sh --migrate-rollback",
+            "publish-release.sh --retire",
+            "lovspor release migrate --check",
+            "/etc/caddy/Caddyfile.pre-envelope",
+            "caddy reload --address localhost:2019",
+            "groupadd --system --force lovspor-release",
+            "lovspor-site-drift.timer",
+        ):
+            assert phrase in text, phrase
+        # provision.sh writes the ExecReload= pair, which on a box still on TCP
+        # points every `systemctl reload caddy` at a socket that does not exist.
+        assert "Do not run `provision.sh` on the live droplet" in text
+
+    def test_the_runbook_keeps_the_retire_step_separate_and_last(self) -> None:
+        """Owner decision, ADR-0014 Migration step 5 (g): retiring the
+        pre-envelope trees deletes the first migration's only way back, so it is
+        its own explicit run, ordered after verification, and the runbook must
+        say the rollback stays available until it happens."""
+        text = _README.read_text(encoding="utf-8")
+
+        assert text.index("### 8. Retire the pre-envelope layout") < text.index(
+            "### 9. Rollback, at any point before step 8"
+        )
+        assert "deliberately **not** part of the migration" in text
+        assert "no way back afterwards" in text
+
+    def test_the_readme_moves_the_operators_health_check_off_tcp(self) -> None:
+        text = _README.read_text(encoding="utf-8")
+
+        assert "curl --unix-socket /run/caddy/admin.sock http://localhost/config/" in text
+        assert "`curl localhost:2019` no longer answers" in text
+
+    def test_the_probe_credential_is_issued_after_the_cutover_and_has_a_rotation_section(
+        self,
+    ) -> None:
+        """Owner decision: the manual migration runs without the credential — the
+        wrapper takes it from systemd's `LoadCredential=` alone — so the first
+        document legitimately says `hosted_state: unknown` and the token is
+        issued before the first unit-driven release, not before the cutover."""
+        text = _README.read_text(encoding="utf-8")
+
+        assert "## Probe credential rotation" in text
+        assert "tokens issue --label site-probe --expires-in-days 30" in text
+        assert "docs/mcp.md" in text
+        assert text.index("publish-release.sh --migrate\n") < text.index(
+            "tokens issue --label site-probe"
+        )
+        assert "hosted_state: unknown" in text
+
+    def test_the_update_block_carries_the_restart_then_release_advice(self) -> None:
+        """ADR-0014 Operational Consequences: restart and release are
+        independent, and a release before the restart is not refused — it
+        publishes the comparison and says what to do."""
+        flat = " ".join(_README.read_text(encoding="utf-8").split())
+
+        assert "Restart and release are independent" in flat
+        assert "restart `lovspor-mcp`, then release again" in flat
+        assert "run `uv sync --frozen --no-dev`, restart, then release again" in flat
+        assert "A site-only change needs no restart at all" in flat
+        assert "These are advice, not ordered steps." in flat
+
     def test_the_site_is_documented_as_part_of_the_release_not_an_rsync(self) -> None:
         text = _README.read_text(encoding="utf-8")
 
@@ -266,3 +337,17 @@ class TestRunbook:
         assert "## Publishing the site: the release envelope (ADR-0014 Decision 6)" in text
         assert "lovspor release reconcile [--complete|--abandon]" in text
         assert "no symlink exists" in text
+
+    def test_the_operations_doc_lists_the_first_migration_and_its_options(self) -> None:
+        text = _OPERATIONS.read_text(encoding="utf-8")
+
+        for phrase in (
+            "uv run lovspor release migrate <id>",
+            "uv run lovspor release migrate --check",
+            "uv run lovspor release migrate --rollback",
+            "uv run lovspor release migrate --retire",
+            "LOVSPOR_RELEASE_GROUP",
+            "LOVSPOR_CADDY_ADMIN_TCP",
+        ):
+            assert phrase in text, phrase
+        assert "exclude each other and the release id" in text
