@@ -31,7 +31,8 @@ from lovspor.release.caddy import Completed
 from lovspor.release.errors import UnobservableError
 
 _PLACEHOLDER = re.compile(r"\{\$([A-Z_]+)(?::([^}]*))?\}")
-_ADMIN_DOWN = "connect: no such file or directory"
+ADMIN_DOWN = "connect: no such file or directory"
+"""What a client dialling an admin endpoint no process is bound to reports."""
 _UNIX_PREFIX = "unix/"
 DEFAULT_TCP = "localhost:2019"
 """Caddy's default admin address: what an instance without the global option listens on."""
@@ -391,7 +392,7 @@ class FakeCaddy:
 
     def running_config(self) -> object:
         if not self.admin_up:
-            raise UnobservableError("admin_unreachable", _ADMIN_DOWN)
+            raise UnobservableError("admin_unreachable", ADMIN_DOWN)
         if self.running is None:
             raise UnobservableError("admin_unreachable", "connection refused")
         return copy.deepcopy(self.running)

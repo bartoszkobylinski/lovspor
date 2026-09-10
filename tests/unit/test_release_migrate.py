@@ -7,6 +7,7 @@ tests do.
 """
 
 import grp
+import json
 import os
 import pwd
 import shutil
@@ -16,6 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.release import migrate
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, adapt, config_pair
@@ -31,6 +33,7 @@ from lovspor.release.control import (
 from lovspor.release.envelope import (
     FRAGMENT_NAME,
     MARKER_NAME,
+    RELEASE_VAR,
     Marker,
     read_marker,
     write_marker,
@@ -67,7 +70,14 @@ from lovspor.release.migrate import (
     socket_path,
 )
 from lovspor.release.reconcile import ReconcileReport, reconcile
-from tests.unit.caddy_fakes import DEFAULT_TCP, STOCK_EXEC_RELOAD, FakeAdmin, FakeCaddy, toy_adapt
+from tests.unit.caddy_fakes import (
+    ADMIN_DOWN,
+    DEFAULT_TCP,
+    STOCK_EXEC_RELOAD,
+    FakeAdmin,
+    FakeCaddy,
+    toy_adapt,
+)
 from tests.unit.migrate_fixtures import (
     CADDY_UID,
     NON_ASCII_OLD_CADDYFILE,
@@ -193,6 +203,32 @@ class TestSystemOwnership:
             ownership.uid_of("lovspor-no-such-user-3f9c")
 
 
+def _blank_release_var(node: object) -> None:
+    """Empty every ``vars lovspor_release`` in an adapted configuration, in place."""
+    if isinstance(node, dict):
+        if node.get("handler") == "vars" and RELEASE_VAR in node:
+            node[RELEASE_VAR] = ""
+        for value in node.values():
+            _blank_release_var(value)
+    elif isinstance(node, list):
+        for item in node:
+            _blank_release_var(item)
+
+
+def _adapt_call(config: Path, fragment: Path) -> tuple[tuple[str, ...], dict[str, str]]:
+    """One ``caddy adapt`` as the runner records it: the file, and the fragment it imports."""
+    return (
+        ("caddy", "adapt", "--config", str(config), "--adapter", "caddyfile"),
+        {FRAGMENT_ENV: str(fragment)},
+    )
+
+
+def _probe(droplet: Droplet, name: str) -> Path:
+    """A throwaway file of the preflight, beside the Caddyfile it is asked about."""
+    caddyfile = droplet.plane.caddyfile
+    return caddyfile.with_name(f"{caddyfile.name}.lovspor-{name}")
+
+
 class TestPreflight:
     def test_probe_files_and_fragments_are_forwarded_to_adaptation(
         self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
@@ -252,6 +288,60 @@ class TestPreflight:
         assert droplet.caddy.reloads == 0 and droplet.caddy.daemon_reloads == 0
         assert not droplet.plane.fragment.exists() and not droplet.host.previous_caddyfile.exists()
         assert not list(droplet.plane.caddyfile.parent.glob("*.lovspor-*"))
+
+    def test_every_question_is_adapted_with_the_fragment_it_is_about(
+        self, droplet: Droplet
+    ) -> None:
+        """The preflight's three ``caddy adapt`` runs, each with its own fragment.
+
+        The fragment reaches Caddy through the environment, so the file the
+        composed configuration imports is not visible in the argv: an adapt
+        run with the wrong one silently answers a different question. The
+        two throwaway files are named after what they are for and stand
+        beside the Caddyfile, where the same relative imports resolve.
+        """
+        preflight(droplet.plane, droplet.host)
+        bare = list(droplet.caddy.calls)
+        droplet.caddy.calls.clear()
+
+        preflight(droplet.plane, droplet.host, droplet.a)
+
+        assert bare == [
+            _adapt_call(droplet.plane.caddyfile, droplet.plane.fragment),
+            _adapt_call(_probe(droplet, "probe"), droplet.plane.fragment),
+            _adapt_call(droplet.host.caddyfile_source, _probe(droplet, "fragment")),
+        ]
+        assert droplet.caddy.calls == [
+            _adapt_call(droplet.plane.caddyfile, droplet.plane.fragment),
+            _adapt_call(_probe(droplet, "probe"), droplet.plane.fragment),
+            _adapt_call(
+                droplet.host.caddyfile_source, droplet.releases / droplet.a / FRAGMENT_NAME
+            ),
+        ]
+
+    def test_the_release_less_preflight_composes_with_an_empty_fragment(
+        self, droplet: Droplet
+    ) -> None:
+        """No release named means no release imported.
+
+        ``--check`` without an id asks whether the new Caddyfile adapts at
+        all and binds admin where it must; a probe fragment with anything
+        in it would fold that content into the answer.
+        """
+        seen: list[tuple[Path, str | None]] = []
+
+        def record(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            fragment = Path(env[FRAGMENT_ENV])
+            text = fragment.read_text(encoding="utf-8") if fragment.is_file() else None
+            seen.append((fragment, text))
+            return droplet.caddy.run(argv, env)
+
+        adapt_prefix = ("caddy", "adapt")
+        plane = replace(droplet.plane, runner=Sabotaged(droplet.caddy, adapt_prefix, record))
+
+        preflight(plane, droplet.host)
+
+        assert seen[-1] == (_probe(droplet, "fragment"), "")
 
     def test_refuses_once_a_marker_exists(self, droplet: Droplet) -> None:
         write_marker(droplet.releases, Marker(active=droplet.a, previous=None))
@@ -650,8 +740,10 @@ class TestFirstMigration:
             _migrate(droplet, silence)
 
         assert caught.value.reached == "reloaded"
-        assert "the socket does not answer" in str(caught.value)
-        assert "systemctl restart caddy" in str(caught.value)
+        assert str(caught.value) == (
+            f"first migration stopped after reloaded: the socket does not answer: {ADMIN_DOWN}; "
+            "`systemctl restart caddy` loads the new configuration whole and recreates the socket"
+        )
         assert read_marker(droplet.releases) is None
 
     def test_a_socket_serving_something_else_is_named(self, droplet: Droplet) -> None:
@@ -668,8 +760,11 @@ class TestFirstMigration:
             _migrate(droplet, swap)
 
         assert caught.value.reached == "reloaded"
-        assert "over the socket Caddy runs (" in str(caught.value)
-        assert f", not {droplet.pair_of(droplet.a).describe()}" in str(caught.value)
+        running = config_pair(droplet.caddy.running_config())
+        assert str(caught.value) == (
+            f"first migration stopped after reloaded: over the socket Caddy runs "
+            f"{running.describe()}, not {droplet.pair_of(droplet.a).describe()}"
+        )
 
     def test_tcp_still_answering_is_named(self, droplet: Droplet) -> None:
         """A TCP client that answers whatever address the instance is on: the listener stayed."""
@@ -682,8 +777,10 @@ class TestFirstMigration:
         with pytest.raises(MigrationFailedError) as caught:
             first_migration(droplet.plane, host, droplet.a)
 
-        assert str(caught.value).endswith(
-            "localhost:2019 still answers; the admin endpoint did not move"
+        assert caught.value.reached == "reloaded"
+        assert str(caught.value) == (
+            "first migration stopped after reloaded: localhost:2019 still answers; "
+            "the admin endpoint did not move"
         )
 
     def test_a_socket_with_the_wrong_mode_or_group_is_named(self, droplet: Droplet) -> None:
@@ -693,7 +790,11 @@ class TestFirstMigration:
 
         with pytest.raises(MigrationFailedError, match="has mode 0666, not 0660") as caught:
             _migrate(droplet, loosen)
+
         assert caught.value.reached == "reloaded"
+        assert str(caught.value) == (
+            f"first migration stopped after reloaded: {droplet.socket_file} has mode 0666, not 0660"
+        )
 
     def test_a_socket_in_another_group_is_named(self, droplet: Droplet) -> None:
         gid = droplet.ownership.groups["lovspor-release"]
@@ -703,7 +804,10 @@ class TestFirstMigration:
             _migrate(droplet)
 
         assert caught.value.reached == "reloaded"
-        assert str(caught.value).endswith(f"has gid {gid}, not lovspor-release's {gid + 1}")
+        assert str(caught.value) == (
+            f"first migration stopped after reloaded: {droplet.socket_file} has gid {gid}, "
+            f"not lovspor-release's {gid + 1}"
+        )
 
     def test_a_show_that_does_not_name_the_socket_is_named(self, droplet: Droplet) -> None:
         def misplace(step: str) -> None:
@@ -737,6 +841,26 @@ class TestFirstMigration:
             ControlPlaneError, match="daemon-reload failed: Failed to reload daemon"
         ):
             first_migration(replace(droplet.plane, runner=failing), droplet.host, droplet.a)
+
+    def test_the_preflight_is_run_on_the_release_the_migration_was_given(
+        self, droplet: Droplet
+    ) -> None:
+        """The id is the preflight's subject, not only the stage's.
+
+        A preflight that did not receive it never checks that the envelope
+        is complete and never composes the new Caddyfile with *this*
+        release's fragment, so an unstaged id would be refused by the stage
+        instead — after ``_require_no_marker`` has been passed and with a
+        different error for the operator.
+        """
+        (droplet.releases / droplet.b / FRAGMENT_NAME).unlink()
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.b)
+
+        assert str(caught.value) == f"{droplet.b} is not a complete envelope; not staged"
+        assert not droplet.plane.next_fragment.exists()
+        assert not droplet.host.previous_caddyfile.exists()
 
     def test_the_preflight_runs_first_and_a_refusal_moves_nothing(self, droplet: Droplet) -> None:
         droplet.caddy.knows_mode_suffix = False
@@ -954,6 +1078,63 @@ class TestRollback:
         report = abandon_first_migration(droplet.plane, droplet.host)
 
         assert report.reloaded is False and report.admin == DEFAULT_TCP
+        _assert_pre_envelope(droplet)
+
+    def test_abandon_tolerates_a_fragment_that_never_landed(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """(a) writes the backup before it renames the fragment into place.
+
+        A crash in that window leaves a box with a way back and no active
+        fragment; the restore removes what is there and must not trip over
+        what is not, or the one state the rollback exists for has no exit.
+        """
+        real = Path.replace
+
+        def dying(self: Path, target: Path) -> Path:
+            if target == droplet.plane.fragment:
+                raise Killed("renaming the fragment")
+            return real(self, target)
+
+        monkeypatch.setattr(Path, "replace", dying)
+        with pytest.raises(Killed):
+            _migrate(droplet)
+        assert droplet.host.previous_caddyfile.is_file()
+        assert not droplet.plane.fragment.exists()
+
+        report = abandon_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is False and report.marker_removed is False
+        _assert_pre_envelope(droplet)
+
+    def test_the_restored_drop_in_is_world_readable_whatever_the_umask(
+        self, droplet: Droplet, strict_umask: None
+    ) -> None:
+        """The drop-in provisioning wrote is world-readable, and the restore puts
+        back that file — mode included, under whatever umask the operator's shell set."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+
+        abandon_first_migration(droplet.plane, droplet.host)
+
+        assert stat.S_IMODE(droplet.host.drop_in.stat().st_mode) == 0o644
+
+    def test_the_drop_in_is_read_as_utf8_whatever_the_locale(
+        self, droplet: Droplet, c_locale: None
+    ) -> None:
+        """Whether the ExecReload pair is there is read off the drop-in, and the
+        drop-in is UTF-8: a unit started without ``LANG`` must not decode it
+        through the C locale and fail the rollback on a comment."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+        droplet.host.drop_in.write_text(
+            drop_in_text(droplet.host, with_exec_reload=True) + "# Ørsta kommune\n",
+            encoding="utf-8",
+        )
+
+        report = abandon_first_migration(droplet.plane, droplet.host)
+
+        assert report.exec_reload_removed is True
         _assert_pre_envelope(droplet)
 
     def test_before_the_install_there_is_nothing_to_restore(self, droplet: Droplet) -> None:
@@ -1608,6 +1789,26 @@ class TestReconcileWindow:
         assert droplet.ownership.chowns == [(droplet.host.runtime_dir, CADDY_UID, gid)]
         assert live_release(droplet.plane) == droplet.a
 
+    def test_completing_repeats_the_install_without_the_pair(self, droplet: Droplet) -> None:
+        """The ExecReload pair is (e)'s, and (e) is after the verification.
+
+        Completing on TCP redoes (a)'s idempotent half first, so it writes
+        the drop-in a second time — the runtime lines only. Written with the
+        pair there instead, a cutover that then fails would leave a unit
+        whose reload line dials a socket the box does not have.
+        """
+        self._staged_on_tcp(droplet)
+        droplet.caddy.fail_reloads = 1
+
+        with pytest.raises(MigrationFailedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+
+        assert caught.value.reached == "validated"
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(
+            droplet.host, with_exec_reload=False
+        )
+        assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
+
     def test_abandon_on_tcp_is_the_file_restore_with_no_reload(self, droplet: Droplet) -> None:
         self._staged_on_tcp(droplet)
         triple = read_triple(droplet.over(DEFAULT_TCP))
@@ -1626,6 +1827,29 @@ class TestReconcileWindow:
         assert not any(argv[:2] == ("caddy", "reload") for argv in droplet.argvs())
         _assert_pre_envelope(droplet)
         assert reconcile(droplet.plane, host=droplet.host).live is None
+
+    def test_an_empty_release_var_is_named_back_and_never_marked(self, droplet: Droplet) -> None:
+        """R = D carrying an empty ``lovspor_release`` is the *reloaded* row, whose
+        resolution is to write the marker without asking. The running configuration
+        is read off Caddy's admin API, so its release var is untrusted input: the
+        marker refuses a name that is not a release id — never steering a later
+        prune or rollback — and the refusal quotes what was read, empty and all."""
+        config = toy_adapt(
+            droplet.host.caddyfile_source,
+            {FRAGMENT_ENV: str(droplet.releases / droplet.a / FRAGMENT_NAME)},
+        )
+        _blank_release_var(config)
+        droplet.caddy.load(config)
+        canned = Completed(0, json.dumps(config), "")
+        plane = replace(
+            droplet.over(DEFAULT_TCP),
+            runner=Sabotaged(droplet.caddy, ("caddy", "adapt"), canned),
+        )
+
+        with pytest.raises(ValidationError, match="not a release id: ''"):
+            reconcile(plane)
+
+        assert read_marker(droplet.releases) is None
 
     def test_a_failed_cutover_leaves_the_staged_row_for_reconcile(self, droplet: Droplet) -> None:
         droplet.caddy.fail_reloads = 1
