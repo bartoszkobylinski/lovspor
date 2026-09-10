@@ -41,6 +41,7 @@ from lovspor.release.caddy import reload as reload_caddy
 from lovspor.release.caddy import validate as validate_caddy
 from lovspor.release.envelope import (
     FRAGMENT_NAME,
+    WORLD_READABLE,
     Marker,
     fragment_release_id,
     is_complete,
@@ -180,7 +181,9 @@ def _stage(plane: ControlPlane, text: str, marker: Marker | None) -> None:
     """``.next`` beside the active fragment; a foreign active fragment is kept for a revert."""
     if marker is None and plane.fragment.is_file():
         atomic_write_text(plane.previous_fragment, plane.fragment.read_text(encoding="utf-8"))
-    atomic_write_text(plane.next_fragment, text)
+    # The rename in _commit carries this mode to the active fragment, which the
+    # reload line reads as User=caddy — under any umask the operator's shell set.
+    atomic_write_text(plane.next_fragment, text, mode=WORLD_READABLE)
 
 
 def _candidate_pair(plane: ControlPlane, content_id: str) -> ConfigPair:
@@ -215,7 +218,7 @@ def reload_expecting(plane: ControlPlane, expected: ConfigPair) -> str | None:
 
 def _restore(plane: ControlPlane, marker: Marker | None, old: ConfigPair | None) -> None:
     """D = old, then R = old; the previous fragment is immutable inside its release."""
-    atomic_write_text(plane.next_fragment, revert_source(plane, marker))
+    atomic_write_text(plane.next_fragment, revert_source(plane, marker), mode=WORLD_READABLE)
     plane.next_fragment.replace(plane.fragment)
     if old is None:
         reload_caddy(plane.runner)

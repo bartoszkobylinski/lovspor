@@ -9,6 +9,7 @@ Kills are checkpoints that stop the transaction at a named step.
 
 import copy
 import shutil
+import stat
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -318,6 +319,15 @@ class TestCommit:
 
         assert host.plane.previous_fragment.read_bytes() == NON_ASCII_PLACEHOLDER.encode("utf-8")
 
+    def test_the_fragment_and_the_marker_are_world_readable_whatever_the_umask(
+        self, live_a: Host, strict_umask: None
+    ) -> None:
+        """``ExecReload`` runs as ``User=caddy``, which must read what root wrote."""
+        commit_release(live_a.plane, live_a.b)
+
+        assert stat.S_IMODE(live_a.plane.fragment.stat().st_mode) == 0o644
+        assert stat.S_IMODE((live_a.releases / MARKER_NAME).stat().st_mode) == 0o644
+
     def test_the_live_release_is_not_reloaded_again(self, live_a: Host) -> None:
         before = live_a.snapshot()
 
@@ -440,6 +450,17 @@ class TestReloadFailure:
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
         assert live_release(live_a.plane) == live_a.a
         assert live_a.caddy.reloads == 1
+
+    def test_the_reverted_fragment_is_world_readable_whatever_the_umask(
+        self, live_a: Host, strict_umask: None
+    ) -> None:
+        live_a.caddy.fail_reloads = 1
+
+        with pytest.raises(ReloadFailedError):
+            commit_release(live_a.plane, live_a.b)
+
+        assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
+        assert stat.S_IMODE(live_a.plane.fragment.stat().st_mode) == 0o644
 
     def test_a_reload_that_answers_but_serves_something_else_is_reverted(
         self, live_a: Host
@@ -599,6 +620,15 @@ class TestTheCrashTable:
         assert live_a.running() == live_a.pair_of(live_a.a)
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
         assert live_release(live_a.plane) == live_a.a
+
+    def test_the_abandoned_fragment_is_world_readable_whatever_the_umask(
+        self, live_a: Host, strict_umask: None
+    ) -> None:
+        self._kill(live_a, "committed")
+
+        reconcile(live_a.plane, "abandon")
+
+        assert stat.S_IMODE(live_a.plane.fragment.stat().st_mode) == 0o644
 
     def test_a_resolution_whose_reload_fails_is_named_and_leaves_the_marker(
         self, live_a: Host

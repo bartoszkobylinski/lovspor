@@ -38,7 +38,13 @@ from lovspor.release.control import (
     revert_source,
     situation,
 )
-from lovspor.release.envelope import Marker, is_build_dir, is_release_id, write_marker
+from lovspor.release.envelope import (
+    WORLD_READABLE,
+    Marker,
+    is_build_dir,
+    is_release_id,
+    write_marker,
+)
 from lovspor.release.errors import CommitRefusedError, ReloadFailedError, UnreconciledError
 
 ReconcileAction = Literal["report", "complete", "abandon"]
@@ -74,7 +80,7 @@ def _complete(plane: ControlPlane, triple: Triple) -> ReconcileReport:
 
 def _abandon(plane: ControlPlane, triple: Triple) -> ReconcileReport:
     """M becomes the truth: D = M's fragment, validate, reload; M unchanged."""
-    atomic_write_text(plane.next_fragment, revert_source(plane, triple.marker))
+    atomic_write_text(plane.next_fragment, revert_source(plane, triple.marker), mode=WORLD_READABLE)
     validate_caddy(plane.runner, plane.caddyfile, plane.next_fragment)
     expected = adapt(plane.runner, plane.caddyfile, plane.next_fragment)
     plane.next_fragment.replace(plane.fragment)
