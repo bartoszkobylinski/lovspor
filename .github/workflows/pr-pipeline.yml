@@ -51,7 +51,15 @@ jobs:
       - name: Unit tests
         run: uv run pytest tests/unit/
 
-  codex-tests:
+  # The agent lane runs on two machines on purpose. `codex-author` stays on the
+  # small self-hosted box because the Codex session's `auth.json` is a long-lived
+  # ChatGPT credential that cannot be handed to a hosted runner. Everything
+  # downstream of the agent — the full unit suite, the lint, the convergence
+  # verdict, the push — runs hosted. Both legs used to share the box (1 shared
+  # core, 2 GB, no swap): it died twice in one afternoon under a single job, the
+  # second death 28 minutes into `Run tests on Codex additions` (issue #272).
+  # Holding the agent session is what that box is for; running the suite is not.
+  codex-author:
     # Serialization is the single `codex`-labelled runner's job queue, which is a
     # real FIFO. A shared concurrency group is not: GitHub holds ONE pending entry
     # per group, so a second PR's job evicted the first before it ever got a
@@ -64,23 +72,27 @@ jobs:
     timeout-minutes: 60
     # The runner holding Codex auth never executes fork code.
     if: github.event.pull_request.head.repo.full_name == github.repository
+    # No push token and no write scopes on this lane: the box produces a
+    # patch, the hosted verifier is the only leg that can reach the branch.
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
     env:
       CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
       CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
       UV_PYTHON: "3.12"
     outputs:
-      pushed: ${{ steps.push.outputs.pushed }}
+      skip: ${{ steps.antiloop.outputs.skip }}
+      author: ${{ steps.author.outputs.author }}
+      before_sha: ${{ steps.base.outputs.before_sha }}
+      patch: ${{ steps.patch.outputs.patch }}
     steps:
-      # Head branch (not merge ref), with a token that can push and retrigger CI.
+      # Head branch (not merge ref). No credentials persist on this lane: it
+      # writes a patch, it does not push.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-          token: ${{ secrets.LOVSPOR_CI_PUSH_TOKEN }}
+          persist-credentials: false
 
       # Anti-loop: never regenerate tests for an agent-authored HEAD.
       - name: Anti-loop check
@@ -96,12 +108,43 @@ jobs:
           fi
 
       - name: Record base SHA
+        id: base
         if: steps.antiloop.outputs.skip != 'true'
-        run: echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+        # An output as well as an env var: every scope and diff check on the
+        # verifier is anchored to this SHA, and that runs on another machine.
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "BEFORE_SHA=$sha" >> "$GITHUB_ENV"
+          echo "before_sha=$sha" >> "$GITHUB_OUTPUT"
 
+      # The agent still needs an environment: it runs the tests it just wrote,
+      # by path (.github/codex/pr-tests.md). It must NOT run the whole suite
+      # here — that is the verifier's job, on a machine sized for it.
       - name: Sync dependencies
         if: steps.antiloop.outputs.skip != 'true'
         run: uv sync --frozen
+
+      - name: Sample memory while the agent runs
+        id: sampler
+        if: steps.antiloop.outputs.skip != 'true'
+        # Issue #272 could not say which process held 1.7 GB of this box's 2 GB
+        # when it died: nothing was sampling, a container sees no host dmesg,
+        # and the shell stopped answering before `ps` could run. This makes the
+        # next incident attributable instead of inferred. `timeout` bounds the
+        # loop because this runner does not force-kill process trees on
+        # cancellation (runbook: `Force kill process on cancellation: 'False'`),
+        # so an unbounded background loop would outlive the job.
+        run: |
+          nohup timeout 3300 bash -c '
+            while :; do
+              {
+                date -u +%FT%TZ
+                free -m | sed -n 2p
+                ps -eo rss,comm --sort=-rss | head -6
+              } >> "$RUNNER_TEMP/agent-rss.log"
+              sleep 10
+            done' >/dev/null 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       - name: Codex — independent PR test author
         id: author
@@ -149,25 +192,151 @@ jobs:
             echo "author=codex" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Stop the memory sampler
+        if: always() && steps.sampler.outputs.pid != ''
+        run: kill "${{ steps.sampler.outputs.pid }}" 2>/dev/null || true
+
+      - name: Upload the memory sample
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-rss-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/agent-rss.log
+          if-no-files-found: ignore
+
       # Mechanical guard after every Codex run. The prompt is not a boundary.
+      # It runs on both lanes: failing on the machine that produced the violation
+      # keeps a scope break out of the patch entirely.
       - name: Scope guard
         if: steps.antiloop.outputs.skip != 'true'
+        run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
+
+      - name: Hand the agent's work to the verifier
+        id: patch
+        if: steps.antiloop.outputs.skip != 'true'
+        run: |
+          # Diff the INDEX against BEFORE_SHA, not the worktree: the agent
+          # sometimes commits its own work (which is why the push step on the
+          # verifier squashes with `git reset --soft`), and `git add -A` stages
+          # whatever it left untracked. Comparing the index to the base tree
+          # gives the same patch either way.
+          git add -A
+          git diff --cached --binary "$BEFORE_SHA" > "$RUNNER_TEMP/agent-tests.patch"
+          if [ -s "$RUNNER_TEMP/agent-tests.patch" ]; then
+            echo "patch=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "patch=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload the agent's tests
+        if: steps.patch.outputs.patch == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-tests-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/agent-tests.patch
+
+      # #95 and #160: the agent's work must survive the lane failing, or a round
+      # is discarded with nothing to read. On this lane the patch handoff may
+      # never have run, so preserve independently of it.
+      - name: Preserve agent work when the author lane fails
+        if: failure()
+        run: |
+          git add -N tests/
+          git diff "${BEFORE_SHA:-HEAD}" -- tests/ > "$RUNNER_TEMP/agent-work.patch" || true
+
+      - name: Upload preserved agent work
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-work-author-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}/agent-work.patch
+          if-no-files-found: ignore
+
+  # The verdict lane. It runs the suite, so it keeps the name every escalation,
+  # every doc and every downstream job already uses. Hosted for two reasons:
+  # lovspor is public, so hosted minutes are free and its 4 cores / 16 GB cost
+  # nothing — and a lane that does not share a machine with the agent survives
+  # the failure mode it has to report (issue #193).
+  codex-tests:
+    needs: [codex-author]
+    # `!cancelled()` rather than `success()`: when the agent lane dies with its
+    # box this job must still run, because it is the escalation path for exactly
+    # that. A fork PR skips `codex-author`, and a skipped need is not a failure.
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      UV_PYTHON: "3.12"
+      # The authoring lane's HEAD. Every scope check, diff and squash below is
+      # anchored to it, and it was recorded on another machine.
+      BEFORE_SHA: ${{ needs.codex-author.outputs.before_sha }}
+    outputs:
+      pushed: ${{ steps.push.outputs.pushed }}
+    steps:
+      # Head branch (not merge ref), with a token that can push and retrigger CI.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.LOVSPOR_CI_PUSH_TOKEN }}
+
+      - name: The author lane did not finish
+        # Checked after the checkout, because the escalation steps at the end of
+        # this job need the helper scripts in the tree. A green check here would
+        # claim independent tests ran, which is precisely what did not happen.
+        if: needs.codex-author.result != 'success'
+        run: |
+          echo "::error::codex-author finished as '${{ needs.codex-author.result }}'"
+          exit 1
+
+      - name: Install uv
+        if: needs.codex-author.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.10.0"
+          enable-cache: true
+
+      - name: Sync dependencies
+        if: needs.codex-author.outputs.skip != 'true'
+        run: uv sync --frozen
+
+      - name: Download the agent's tests
+        if: needs.codex-author.outputs.patch == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: agent-tests-${{ github.event.pull_request.head.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Apply the agent's tests
+        if: needs.codex-author.outputs.patch == 'true'
+        # --index so the scope guard below sees staged files exactly as it saw
+        # them on the authoring box, and so an unapplyable patch fails loudly
+        # here instead of silently running the pre-existing suite and calling
+        # that an independent round.
+        run: git apply --index --whitespace=nowarn "$RUNNER_TEMP/agent-tests.patch"
+
+      - name: Scope guard
+        if: needs.codex-author.outputs.skip != 'true'
         run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
 
       # Codex output is not always ruff-clean (issue #66): normalize before the
       # pipeline's own lint gate sees it, and hard-fail on unfixable lint.
       - name: Normalize and lint Codex output
-        if: steps.antiloop.outputs.skip != 'true'
+        if: needs.codex-author.outputs.skip != 'true'
         run: |
           uv run ruff format tests/
           uv run ruff check --fix tests/
 
       # The log lives in RUNNER_TEMP, never the workspace: the push step squashes
-      # with `git add -A`, and a self-hosted workspace persists between runs — a
-      # workspace file WILL end up committed to the branch (issue #98).
+      # with `git add -A`, so a workspace file WILL end up committed to the
+      # branch (issue #98).
       - name: Run tests on Codex additions
         id: codex-pytest
-        if: steps.antiloop.outputs.skip != 'true'
+        if: needs.codex-author.outputs.skip != 'true'
         # Never fails on its own: a red suite here is evidence, not a verdict.
         # The convergence step below decides whether the failures block (#248).
         run: |
@@ -186,7 +355,7 @@ jobs:
       # commit, so the comment is the only durable record.
       - name: Convergence verdict
         id: verdict
-        if: steps.antiloop.outputs.skip != 'true'
+        if: needs.codex-author.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CODEX_BLOCKING_CAP: ${{ vars.CODEX_BLOCKING_CAP || '3' }}
@@ -261,14 +430,14 @@ jobs:
       # and the advisory body never contains the counted BLOCKED phrase, so it
       # sits in the history without inflating the round count.
       - name: Report advisory proposals
-        if: steps.antiloop.outputs.skip != 'true' && steps.verdict.outputs.advisory != '0'
+        if: needs.codex-author.outputs.skip != 'true' && steps.verdict.outputs.advisory != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/pr_sticky_comment.sh pipeline "${{ github.event.pull_request.number }}" "$RUNNER_TEMP/escalation.md"
 
       - name: Commit and push test additions
         id: push
-        if: steps.antiloop.outputs.skip != 'true'
+        if: needs.codex-author.outputs.skip != 'true'
         run: |
           if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
             echo "pushed=false" >> "$GITHUB_OUTPUT"
@@ -281,13 +450,13 @@ jobs:
           # marker does. Hardcoding codex-ci attributed the Claude fallback's work
           # to Codex in git blame and `git log --author` — fabricated provenance,
           # caught on a real commit in milamber_assistant.
-          author="${{ steps.author.outputs.author || 'codex' }}"
+          author="${{ needs.codex-author.outputs.author || 'codex' }}"
           git config user.name "${author}-ci"
           git config user.email "${author}-ci@users.noreply.github.com"
           git add -A
           # The marker names the ACTUAL author — a Claude-written commit
           # stamped [agent:codex-tests] would be fabricated provenance.
-          git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:${{ steps.author.outputs.author || 'codex' }}-tests]"
+          git commit -m "test: add independent coverage for PR #${{ github.event.pull_request.number }} [agent:${{ needs.codex-author.outputs.author || 'codex' }}-tests]"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
@@ -338,12 +507,14 @@ jobs:
   # label and no comment. This reporter runs on a hosted runner so it cannot
   # share the failure mode it exists to report.
   codex-tests-report:
-    needs: [codex-tests]
+    # Both lanes: `codex-author` is the one that dies with the box, and
+    # `codex-tests` can still fail before it reaches its own escalation.
+    needs: [codex-author, codex-tests]
     # `always()` would fire on a concurrency cancellation as well, and a run
     # cancelled by the next push is not a blocked PR. `!cancelled()` still runs
     # after a failed dependency, without claiming a cancelled one. A skipped
     # lane (fork PRs) is not a failure either, and `== 'failure'` excludes it.
-    if: ${{ !cancelled() && needs.codex-tests.result == 'failure' }}
+    if: ${{ !cancelled() && (needs.codex-tests.result == 'failure' || needs.codex-author.result == 'failure') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

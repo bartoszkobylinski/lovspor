@@ -41,5 +41,12 @@ mislabelling a violation as a proposal hides a real defect behind an xfail. When
 ask: "which sentence of the PR, ADR, or corpus does this test enforce?" No sentence →
 proposal.
 
-After editing, run the smallest relevant test set: `uv run pytest tests/unit/`
-(add specific integration tests only if the diff touches the pipeline end-to-end).
+After editing, run ONLY the test files you touched, by path — for example
+`uv run pytest tests/unit/test_foo.py tests/unit/test_bar.py::test_case`.
+
+Do NOT run `uv run pytest tests/unit/`, and do not run the integration suite.
+This session holds a 1 shared core and 2 GB with no swap. The box died twice in
+one afternoon under a single job, the second death 28 minutes into a whole-suite
+run (issue #272). The full unit suite runs immediately after you, on a hosted
+runner sized for it, and its verdict — not yours — is what blocks or clears
+the PR.
