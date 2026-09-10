@@ -51,7 +51,9 @@ gh api "repos/bartoszkobylinski/lovspor/rulesets/rule-suites/$sid" \
 PR opened/synchronize
   ├─ fast-ci        (ubuntu, 3.12: conflict-marker check, ruff, mypy, unit tests)
   ├─ Test           (existing workflow, matrix 3.12–3.14 — unchanged)
-  ├─ codex-tests    (self-hosted `codex` runner: independent test author)
+  ├─ codex-author   (self-hosted `codex` runner: independent test author ONLY)
+  │     └─ hands its work to the verdict lane as artifact `agent-tests-<head-sha>`
+  ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
   │     └─ pushes `[agent:codex-tests]` → fresh synchronize run, old run cancelled
   └─ mutation       (ubuntu, no LLM: scripts/mutmut-pr.sh → mutation-result.json)
         └─ gate FAIL → Mutation Remediation workflow (Codex, tests only, max 2 cycles)
@@ -138,7 +140,7 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
 - `concurrency: pr-<PR#>` + `cancel-in-progress` — stale runs die on new SHA.
 - **One Codex run at a time is the runner's job, not a concurrency group's.** There is one
   `codex`-labelled runner and one Codex subscription behind it, and GitHub queues jobs for a
-  busy runner in a real FIFO. `codex-tests` and `remediate` therefore declare no shared group;
+  busy runner in a real FIFO. `codex-author` and `remediate` therefore declare no shared group;
   the box-wide `flock` in the agent step still guards the other repositories' agents on the
   same machine.
 
@@ -154,7 +156,8 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
   Remediation keeps a group **per head branch** (`mutation-remediation-<branch>`), where
   superseding an older head is the wanted behaviour and cannot starve another PR.
 
-- Both agent jobs carry `timeout-minutes: 60` (issue #101). A hung job holds the runner
+- The self-hosted agent jobs (`codex-author`, `remediate`) carry `timeout-minutes: 60`
+  (issue #101); the hosted `codex-tests` lane carries 30. A hung job holds the runner
   against every later PR, and GitHub's default ceiling is 6 h; the box lock alone waits 20
   minutes before giving up, so the job ceiling sits above that and well under the default.
 - `[agent:(codex|claude)-(tests|mutation)]` HEAD markers — an agent-authored HEAD is never
@@ -165,6 +168,46 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
   extra cycles.
 - Codex jobs run only for same-repo PRs (`head.repo.full_name == repository`); the
   fork-PR approval policy is set to "all outside collaborators".
+
+## Two lanes: who runs on the small box (issue #272)
+
+The `codex`-labelled runner is a 1-shared-core / 2 GB container with no swap, shared by
+five repositories. It exists for exactly one thing: the Codex session's `auth.json` is a
+long-lived ChatGPT credential that cannot be handed to a hosted runner. Everything else
+that used to run there was there by accident of job layout.
+
+On 2026-09-10 the box died twice inside one afternoon under a single job (#272): once
+inside the Codex step, once 28 minutes into `Run tests on Codex additions`. Load ~18 on
+one core, 15 MB free of 2048. Both times the job's own step never completed and never
+failed — it was still `in_progress` when GitHub recorded the job as `failure`.
+
+So the lane is split:
+
+| lane | machine | does |
+| --- | --- | --- |
+| `codex-author` | self-hosted `codex` | checkout, anti-loop, `uv sync`, the Codex/Claude session, scope guard, patch handoff |
+| `codex-tests` | `ubuntu-latest` | applies the patch, scope guard, ruff, the **full unit suite**, convergence verdict, escalation, push |
+
+Invariants, enforced in `tests/unit/test_agentic_ci_workflows.py`:
+
+- no step of `codex-author` runs `pytest tests/unit/`, and `.github/codex/pr-tests.md`
+  tells the agent to run only the files it touched, by path — the first death was inside
+  the agent step, where the prompt itself used to ask for a whole-suite run;
+- the work crosses machines as artifact `agent-tests-<head-sha>`, applied with
+  `git apply --index` so the scope guard on the verifier sees exactly what the box saw,
+  and an unapplyable patch fails loudly instead of passing a pre-existing suite off as an
+  independent round;
+- the scope guard runs on **both** lanes;
+- `codex-tests` runs on `!cancelled()`, and its first step fails the job when
+  `codex-author` did not succeed: a box that dies must not leave a green check claiming
+  an independent round happened;
+- `codex-author` samples `free -m` and the top RSS processes every 10 s while the agent
+  runs, uploaded as `agent-rss-<head-sha>`. #272 could not attribute its own deaths —
+  nothing was sampling, and a container sees no host `dmesg`. The sampler is bounded by
+  `timeout` because this runner does not force-kill process trees on cancellation.
+
+Hosted minutes are free on this public repository, so the verdict lane costs nothing and
+runs on 4 cores / 16 GB.
 
 ## Convergence: when does `codex-tests` stop? (issue #248)
 
@@ -258,13 +301,14 @@ Two rules follow, and they are pinned by tests:
   round is preserved as artifact `agent-work-<sha>` instead of being discarded.
 - Remediation escalates on `failure() || cancelled()`, since a job killed by its
   ceiling is not a failed job.
-- A `codex-tests` job that dies **with its runner** is reported from outside it.
+- An agent job that dies **with its runner** is reported from outside it.
   Both escalations are steps of that job, and a step cannot run on a runner that
   no longer exists — so no in-job condition can cover the case (issue #193). On
   #192 five steps ran, the self-hosted box went offline mid-Codex-step, and the
   PR ended red with no label and no comment. The `codex-tests-report` job runs on
   `ubuntu-latest`, so it cannot share the failure mode it reports; it fires on
-  `!cancelled() && needs.codex-tests.result == 'failure'` (never on a concurrency
+  `!cancelled() && (needs.codex-tests.result == 'failure' || needs.codex-author.result
+  == 'failure')` (never on a concurrency
   cancellation, never on the skipped fork lane), stays silent when the in-job
   escalation already labelled, and otherwise applies `needs-human:pipeline` with
   the run link and a pointer at the runner list.
@@ -289,7 +333,9 @@ Two rules follow, and they are pinned by tests:
   `auth.json` to the runner (`chmod 600`, owner `runner`), and deleting the scratch copy
   so exactly one copy of the refresh token exists.
 - Push token: fine-grained PAT (this repo only; Contents RW, Pull requests RW) as secret
-  `LOVSPOR_CI_PUSH_TOKEN`. Codex pushes use it so pushed commits retrigger the pipeline
-  (`GITHUB_TOKEN` pushes would not).
+  `LOVSPOR_CI_PUSH_TOKEN`. The push happens on the hosted `codex-tests` lane, so the
+  commits retrigger the pipeline (`GITHUB_TOKEN` pushes would not). The token is **not**
+  checked out on the agent box: `codex-author` runs with `persist-credentials: false` and
+  `permissions: contents: read`, so an agent session cannot reach the branch.
 - Mutation and fast-ci run on GitHub-hosted runners — free for this public repo, no LLM
   auth anywhere near them.

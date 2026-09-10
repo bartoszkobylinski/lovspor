@@ -86,7 +86,7 @@ def test_fast_ci_conflict_marker_gate_accepts_non_marker_boundaries(
 @pytest.mark.parametrize(
     ("workflow_name", "job_name", "step_name"),
     [
-        ("pr-pipeline.yml", "codex-tests", "Codex — independent PR test author"),
+        ("pr-pipeline.yml", "codex-author", "Codex — independent PR test author"),
         (
             "mutation-remediation.yml",
             "remediate",
@@ -119,7 +119,7 @@ def test_codex_account_homes_are_explicit_repository_configuration(
         (
             "pr-pipeline.yml",
             "codex-tests",
-            "steps.antiloop.outputs.skip != 'true'",
+            "needs.codex-author.outputs.skip != 'true'",
         ),
         (
             "mutation-remediation.yml",
@@ -220,7 +220,7 @@ def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
 @pytest.mark.parametrize(
     ("workflow_name", "job_name", "step_name"),
     [
-        ("pr-pipeline.yml", "codex-tests", "Codex — independent PR test author"),
+        ("pr-pipeline.yml", "codex-author", "Codex — independent PR test author"),
         ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
     ],
 )
@@ -254,7 +254,7 @@ def test_commit_markers_name_the_actual_author() -> None:
         _steps("mutation-remediation.yml", "remediate"), "Commit and push, or report BLOCKED"
     )["run"]
 
-    assert "[agent:${{ steps.author.outputs.author || 'codex' }}-tests]" in pr_push
+    assert "[agent:${{ needs.codex-author.outputs.author || 'codex' }}-tests]" in pr_push
     assert "[agent:${{ steps.author.outputs.author || 'codex' }}-mutation]" in rem_push
 
 
@@ -266,7 +266,7 @@ def test_committer_identity_names_the_actual_author() -> None:
         "run"
     ]
 
-    assert "author=\"${{ steps.author.outputs.author || 'codex' }}\"" in push
+    assert "author=\"${{ needs.codex-author.outputs.author || 'codex' }}\"" in push
     assert 'git config user.name "${author}-ci"' in push
     assert 'git config user.email "${author}-ci@users.noreply.github.com"' in push
     assert 'git config user.name "codex-ci"' not in push
@@ -277,7 +277,7 @@ def test_antiloop_and_cycle_counting_recognise_the_claude_markers() -> None:
     """A fallback-authored HEAD must not retrigger test generation, and a
     Claude remediation commit must count toward the two-cycle limit —
     otherwise the fallback author gets unlimited cycles."""
-    antiloop = _named_step(_steps("pr-pipeline.yml", "codex-tests"), "Anti-loop check")["run"]
+    antiloop = _named_step(_steps("pr-pipeline.yml", "codex-author"), "Anti-loop check")["run"]
     cycle = _named_step(
         _steps("mutation-remediation.yml", "remediate"), "Resolve PR number and remediation cycle"
     )["run"]
@@ -428,7 +428,7 @@ def test_antiloop_matches_the_marker_only_in_the_subject_line() -> None:
     set skip=true, so the independent test author reported success without
     running. The subject is where the push step appends the marker, and only
     at the end of it."""
-    antiloop = _named_step(_steps("pr-pipeline.yml", "codex-tests"), "Anti-loop check")["run"]
+    antiloop = _named_step(_steps("pr-pipeline.yml", "codex-author"), "Anti-loop check")["run"]
 
     assert "--pretty=%s" in antiloop
     assert "--pretty=%B" not in antiloop
@@ -444,6 +444,7 @@ def test_agent_jobs_are_never_serialized_by_a_shared_concurrency_group() -> None
     pipeline_text = (_WORKFLOWS / "pr-pipeline.yml").read_text(encoding="utf-8")
     remediation_text = (_WORKFLOWS / "mutation-remediation.yml").read_text(encoding="utf-8")
 
+    assert "concurrency" not in _workflow("pr-pipeline.yml")["jobs"]["codex-author"]
     assert "concurrency" not in _workflow("pr-pipeline.yml")["jobs"]["codex-tests"]
     assert "lovspor-codex-subscription" not in pipeline_text
     assert "lovspor-codex-subscription" not in remediation_text
@@ -454,7 +455,7 @@ def test_agent_jobs_are_never_serialized_by_a_shared_concurrency_group() -> None
 
 @pytest.mark.parametrize(
     ("workflow_name", "job_name"),
-    [("pr-pipeline.yml", "codex-tests"), ("mutation-remediation.yml", "remediate")],
+    [("pr-pipeline.yml", "codex-author"), ("mutation-remediation.yml", "remediate")],
 )
 def test_agent_jobs_have_a_wallclock_backstop(workflow_name: str, job_name: str) -> None:
     """Issue #101: a job that hangs holds the lane against every later PR until
@@ -502,7 +503,7 @@ class TestEscalationCoversEveryFailure:
         escalation steps that would have reported why. On the STEP, the same
         hang fails the step and the escalation still runs."""
         for workflow_name, job_name, step_name in (
-            ("pr-pipeline.yml", "codex-tests", "Codex — independent PR test author"),
+            ("pr-pipeline.yml", "codex-author", "Codex — independent PR test author"),
             ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
         ):
             step = _named_step(_steps(workflow_name, job_name), step_name)
@@ -690,16 +691,22 @@ class TestAJobThatDiesWithItsRunnerStillReports:
 
     def test_the_reporter_does_not_run_on_the_lane_it_reports_on(self) -> None:
         """A reporter on the `codex` runner would be offline in exactly the
-        case it exists for."""
+        case it exists for. It watches both lanes: `codex-author` is the one
+        that dies with the box, and `codex-tests` can still fail before it
+        reaches its own escalation."""
         assert self._job()["runs-on"] == "ubuntu-latest"
-        assert self._job()["needs"] == ["codex-tests"]
+        assert _workflow("pr-pipeline.yml")["jobs"]["codex-author"]["runs-on"] != "ubuntu-latest"
+        assert self._job()["needs"] == ["codex-author", "codex-tests"]
 
     def test_the_reporter_speaks_for_a_failure_and_stays_out_of_a_cancellation(self) -> None:
         """`always()` would fire on a concurrency cancellation too, and a run
         cancelled by the next push is not a blocked PR — labelling it would put
         `needs-human:pipeline` on healthy work. `!cancelled()` is the form that
         survives a failed dependency without claiming a cancelled one."""
-        assert self._job()["if"] == ("${{ !cancelled() && needs.codex-tests.result == 'failure' }}")
+        assert self._job()["if"] == (
+            "${{ !cancelled() && (needs.codex-tests.result == 'failure'"
+            " || needs.codex-author.result == 'failure') }}"
+        )
 
     def test_the_reporter_is_silent_when_the_job_already_reported_itself(self) -> None:
         """The in-job escalation runs before `codex-tests` completes, so this
@@ -856,3 +863,122 @@ def test_convergence_verdict_cannot_ignore_a_nonzero_pytest_status() -> None:
     assert any(
         "steps.codex-pytest.outputs.status" in value for value in verdict["env"].values()
     ) or ("steps.codex-pytest.outputs.status" in verdict["run"])
+
+
+class TestTheAgentLaneOnlyHoldsTheAgent:
+    """Issue #272. The `codex`-labelled box is 1 shared core and 2 GB with no
+    swap, and it exists for one reason: the Codex session's `auth.json` is a
+    long-lived ChatGPT credential that cannot be handed to a hosted runner.
+    Running the unit suite there as well killed the machine twice in one
+    afternoon, the second death 28 minutes into `Run tests on Codex additions`.
+    The suite now runs on the hosted verdict lane; these tests are what keeps it
+    from drifting back."""
+
+    def _author(self) -> dict[str, Any]:
+        return _workflow("pr-pipeline.yml")["jobs"]["codex-author"]
+
+    def _author_text(self) -> str:
+        return yaml.safe_dump(self._author())
+
+    def test_the_agent_lane_never_runs_the_whole_suite(self) -> None:
+        for step in self._author()["steps"]:
+            assert "pytest tests/unit/" not in str(step.get("run", "")), (
+                f"{step.get('name')} runs the whole suite on the 2 GB box"
+            )
+
+    def test_the_prompt_forbids_a_whole_suite_run_on_the_box(self) -> None:
+        """The workflow cannot stop the agent from typing the command itself:
+        the first death was inside the Codex step, and the prompt used to ask
+        for `uv run pytest tests/unit/` in as many words."""
+        prompt = (
+            Path(__file__).resolve().parents[2] / ".github" / "codex" / "pr-tests.md"
+        ).read_text(encoding="utf-8")
+
+        assert "Do NOT run `uv run pytest tests/unit/`" in prompt
+        assert "run ONLY the test files you touched" in prompt
+
+    def test_the_suite_runs_on_the_hosted_verdict_lane(self) -> None:
+        job = _workflow("pr-pipeline.yml")["jobs"]["codex-tests"]
+        pytest_step = _named_step(job["steps"], "Run tests on Codex additions")
+
+        assert job["runs-on"] == "ubuntu-latest"
+        assert "uv run pytest tests/unit/" in pytest_step["run"]
+
+    def test_the_agent_lane_cannot_reach_the_branch(self) -> None:
+        """The box writes a patch; only the hosted lane pushes. A push token on
+        the machine that runs an agent session is a credential the agent can
+        reach."""
+        text = self._author_text()
+        checkout = next(
+            step
+            for step in self._author()["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        )
+
+        assert self._author()["permissions"] == {"contents": "read"}
+        assert checkout["with"]["persist-credentials"] is False
+        assert "token" not in checkout["with"]
+        assert "LOVSPOR_CI_PUSH_TOKEN" not in text
+        assert "git push" not in text
+
+    def test_the_agent_work_travels_as_a_patch(self) -> None:
+        artifact = "agent-tests-${{ github.event.pull_request.head.sha }}"
+        upload = _named_step(self._author()["steps"], "Upload the agent's tests")
+        download = _named_step(
+            _steps("pr-pipeline.yml", "codex-tests"), "Download the agent's tests"
+        )
+        apply_step = _named_step(
+            _steps("pr-pipeline.yml", "codex-tests"), "Apply the agent's tests"
+        )
+
+        assert self._author()["outputs"] == {
+            "skip": "${{ steps.antiloop.outputs.skip }}",
+            "author": "${{ steps.author.outputs.author }}",
+            "before_sha": "${{ steps.base.outputs.before_sha }}",
+            "patch": "${{ steps.patch.outputs.patch }}",
+        }
+        assert upload["with"]["name"] == artifact
+        assert download["with"]["name"] == artifact
+        assert upload["if"] == "steps.patch.outputs.patch == 'true'"
+        assert download["if"] == "needs.codex-author.outputs.patch == 'true'"
+        assert apply_step["if"] == "needs.codex-author.outputs.patch == 'true'"
+        # --index, so the scope guard on the verifier sees staged files the way
+        # it saw them on the box, and an unapplyable patch fails loudly instead
+        # of leaving a run of the pre-existing suite to pass as a fresh round.
+        assert "git apply --index" in apply_step["run"]
+
+    def test_the_scope_guard_runs_on_both_lanes(self) -> None:
+        """The prompt is not a boundary, and neither is an artifact: the guard
+        must hold on the machine that produced the patch and on the one that
+        pushes it."""
+        for job_name in ("codex-author", "codex-tests"):
+            guard = _named_step(_steps("pr-pipeline.yml", job_name), "Scope guard")
+            assert guard["run"] == 'scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"'
+
+    def test_the_verifier_refuses_to_be_green_when_the_author_lane_died(self) -> None:
+        """A box that dies mid-session leaves `codex-author` failed. The verdict
+        lane still runs — it is the escalation path for exactly that — so it
+        must fail rather than report a green independent round that never
+        happened (issues #193, #272)."""
+        steps = _steps("pr-pipeline.yml", "codex-tests")
+        names = [step.get("name") for step in steps]
+        guard = _named_step(steps, "The author lane did not finish")
+
+        assert guard["if"] == "needs.codex-author.result != 'success'"
+        assert "exit 1" in guard["run"]
+        assert names.index("The author lane did not finish") < names.index(
+            "Run tests on Codex additions"
+        )
+
+    def test_the_memory_sampler_cannot_outlive_the_job(self) -> None:
+        """This runner does not force-kill process trees on cancellation, so a
+        background loop started by a step outlives the job that started it. The
+        sampler is bounded twice: `timeout` in the loop, and a kill step that
+        runs even when the agent step failed."""
+        steps = self._author()["steps"]
+        sampler = _named_step(steps, "Sample memory while the agent runs")
+        stop = _named_step(steps, "Stop the memory sampler")
+
+        assert "nohup timeout " in sampler["run"]
+        assert stop["if"].startswith("always()")
+        assert "kill " in stop["run"]
