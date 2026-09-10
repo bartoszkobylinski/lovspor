@@ -786,6 +786,23 @@ def _flat_release_targets(releases: Path) -> list[str]:
     ]
 
 
+def _require_releases_outside(plane: ControlPlane, host: MigrationHost) -> None:
+    """The envelopes must not live inside what retiring deletes.
+
+    ``LOVSPOR_RELEASES_ROOT=/var/www/lovspor/releases`` — a plausible
+    reading of "keep the releases under the site root" — would take every
+    envelope, the marker that proves the migration finished, and the
+    release the host is serving out with the pre-envelope tree. The
+    symlink is the same hazard: unlinking it orphans everything beneath.
+    """
+    for path in (host.site_root, host.current_symlink):
+        if plane.releases.is_relative_to(path):
+            raise ControlPlaneError(
+                f"the releases root {plane.releases} is inside {path}, which --retire removes; "
+                "nothing retired"
+            )
+
+
 def retire_targets(plane: ControlPlane, host: MigrationHost) -> tuple[str, ...]:
     """What ``retire_pre_envelope`` removes, in the order it removes it; nothing moves here.
 
@@ -795,6 +812,7 @@ def retire_targets(plane: ControlPlane, host: MigrationHost) -> tuple[str, ...]:
     missing directory and ``redirects*.caddy`` tolerates zero matches, so
     the reload returns 0 and the site 404s.
     """
+    _require_releases_outside(plane, host)
     targets = _symlink_target(host.current_symlink)
     targets += _tree_target(host.site_root)
     targets += _flat_release_targets(plane.releases)
@@ -822,6 +840,7 @@ def retire_pre_envelope(plane: ControlPlane, host: MigrationHost) -> RetireRepor
     This deletes the first migration's only way back, which is why it is
     its own command and refuses on anything but a marked, reconciled host.
     """
+    _require_releases_outside(plane, host)
     _require_retirable(plane)
     removed = retire_targets(plane, host)
     for path in removed:

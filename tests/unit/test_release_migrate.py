@@ -61,6 +61,7 @@ from lovspor.release.migrate import (
     offline_rollback,
     preflight,
     retire_pre_envelope,
+    retire_targets,
     rollback_first_migration,
     socket_path,
 )
@@ -1388,6 +1389,59 @@ class TestRetire:
         droplet.host.site_root.write_text("x", encoding="utf-8")
         with pytest.raises(ControlPlaneError, match="is not a directory; not removed"):
             retire_pre_envelope(droplet.plane, droplet.host)
+
+    def test_refuses_when_the_releases_root_is_inside_the_site_root(self, droplet: Droplet) -> None:
+        """`LOVSPOR_RELEASES_ROOT=/var/www/lovspor/releases` — a plausible reading
+        of "keep the releases under the site root" — would take every envelope and
+        the marker out with the pre-envelope tree. The refusal comes before the
+        marker check, which on such a host reads the wrong directory anyway."""
+        _migrate(droplet)
+        self._litter(droplet)
+        inside = replace(droplet.plane, releases=droplet.host.site_root / "releases")
+
+        with pytest.raises(ControlPlaneError) as caught:
+            retire_pre_envelope(inside, droplet.host)
+        assert str(caught.value) == (
+            f"the releases root {inside.releases} is inside {droplet.host.site_root}, which "
+            "--retire removes; nothing retired"
+        )
+        with pytest.raises(ControlPlaneError, match="which --retire removes"):
+            retire_targets(inside, droplet.host)
+        assert droplet.host.site_root.is_dir()
+        assert droplet.host.current_symlink.is_symlink()
+        assert droplet.host.previous_caddyfile.is_file()
+
+    def test_refuses_when_the_releases_root_is_the_site_root_itself(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        self._litter(droplet)
+        same = replace(droplet.plane, releases=droplet.host.site_root)
+
+        with pytest.raises(ControlPlaneError, match="which --retire removes"):
+            retire_pre_envelope(same, droplet.host)
+        assert droplet.host.site_root.is_dir()
+
+    def test_refuses_when_the_releases_root_is_under_the_current_symlink(
+        self, droplet: Droplet
+    ) -> None:
+        """Unlinking the symlink would orphan every envelope beneath it."""
+        _migrate(droplet)
+        self._litter(droplet)
+        under = replace(droplet.plane, releases=droplet.host.current_symlink / "releases")
+
+        with pytest.raises(ControlPlaneError) as caught:
+            retire_pre_envelope(under, droplet.host)
+        assert str(caught.value) == (
+            f"the releases root {under.releases} is inside {droplet.host.current_symlink}, which "
+            "--retire removes; nothing retired"
+        )
+        assert droplet.host.current_symlink.is_symlink()
+
+    def test_the_droplets_own_releases_root_is_outside_both(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+
+        assert retire_targets(droplet.plane, droplet.host) == (
+            str(droplet.host.previous_caddyfile),
+        )
 
     def test_a_flat_named_symlink_in_the_releases_root_is_left_alone(
         self, droplet: Droplet
