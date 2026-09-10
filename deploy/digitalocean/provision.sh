@@ -151,13 +151,44 @@ chmod 640 "$ENV_FILE"
 # Ensure the service's writable dirs exist (ReadWritePaths requires them at start).
 sudo -u "$APP_USER" mkdir -p "$APP_HOME/.cache" "$APP_HOME/.config"
 
-# --- 11. Caddy domain via env (keeps the committed Caddyfile domain-free) ---
+# --- 11. Caddy: the domain, the admin socket's group and the service drop-in ---
 if [ ! -f /etc/default/caddy-lovspor ]; then
 	echo 'LOVSPOR_DOMAIN=lovspor.example.com' >/etc/default/caddy-lovspor
 fi
+
+# The admin API is what makes a release live and the only thing that can say what
+# Caddy actually serves, so it is bound to a Unix socket created 0660 in this
+# group instead of the default localhost:2019, where every process on the box
+# could rewrite the running configuration (ADR-0014 Decision 6). Root — the
+# release and reconcile identity — is in the group; User=lovspor, the
+# network-facing MCP service, deliberately is not.
+groupadd --system --force lovspor-release
+usermod -aG lovspor-release root
+
+# The drop-in a fresh box gets is the whole thing, including the ExecReload=
+# pair: it starts Caddy on the socket, so every `systemctl reload caddy` reaches
+# the address the release commands address. (The first migration of a box that
+# is already serving on TCP installs this in two phases instead — the pair last,
+# after the cutover — which is `lovspor release migrate`'s business, not this
+# script's.) RuntimeDirectory= recreates /run/caddy at every start and the
+# ExecStartPre chgrp gives it the group, so a recreated socket inherits it
+# through the setgid bit.
 mkdir -p /etc/systemd/system/caddy.service.d
-printf '%s\n' '[Service]' 'EnvironmentFile=/etc/default/caddy-lovspor' \
-	>/etc/systemd/system/caddy.service.d/lovspor.conf
+cat >/etc/systemd/system/caddy.service.d/lovspor.conf <<'DROP_IN'
+# Written by lovspor (ADR-0014 Decision 6): provisioning and the first migration.
+[Service]
+EnvironmentFile=/etc/default/caddy-lovspor
+RuntimeDirectory=caddy
+RuntimeDirectoryMode=2770
+ExecStartPre=+/usr/bin/chgrp lovspor-release /run/caddy
+ExecReload=
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force --address unix//run/caddy/admin.sock
+DROP_IN
+
+# The release probe's credential (docs/mcp.md § Release probe and drift check).
+# The directory only: the token is issued once at go-live and written 0600 by
+# the operator, so it is never in this script and never in the repository.
+install -d -m 700 /etc/lovspor/credentials
 
 # --- 12. Verify the checkout before root installs anything from it ---
 # The next step copies unit files into /etc/systemd/system as root, but the checkout
@@ -181,32 +212,49 @@ install -m644 "$APP_DIR/deploy/digitalocean/lovspor-mcp.service" /etc/systemd/sy
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.service" /etc/systemd/system/
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-fetch-corpus.timer" /etc/systemd/system/
 install -m644 "$APP_DIR/deploy/digitalocean/lovspor-publish.service" /etc/systemd/system/
+install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.service" /etc/systemd/system/
+install -m644 "$APP_DIR/deploy/digitalocean/lovspor-site-drift.timer" /etc/systemd/system/
 install -d /etc/caddy
 install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile
-# Every file under site/, not just the landing page. The crawler's User-Agent
-# advertises /observatory as its contact address, so a deploy that ships only
-# index.html leaves that promise pointing at a 404 on every site we visit.
-install -d /var/www/lovspor
-# ADR-0013 release trees; the build runs as the app user, Caddy only reads.
+# The Caddyfile serves everything outside /mcp through a plain `import` of the
+# active release fragment, so that file has to exist before `caddy validate`
+# can pass — a glob matching nothing would leave the site block empty and 404
+# every request with no error recorded anywhere, which is the wrong reading of
+# "no release is published". This placeholder is that reading, said out loud,
+# and it declares no lovspor_release var, so `lovspor release live` answers
+# `none` until the first envelope is committed. Written only when absent: from
+# then on this path is the live release's own fragment.
+if [ ! -f /etc/caddy/lovspor-release.caddy ]; then
+	cat >/etc/caddy/lovspor-release.caddy <<'FRAGMENT'
+handle {
+	respond "lovspor: no release published yet" 503
+}
+FRAGMENT
+fi
+# ADR-0014 release envelopes; the build runs as the app user, Caddy only reads.
+# There is no flat site root: the site is built into the release beside the
+# corpus and served from it.
 install -d -o "$APP_USER" -g "$APP_USER" -m 755 /var/www/lovspor-releases
-while IFS= read -r -d "" page; do
-	rel="${page#"$APP_DIR/deploy/digitalocean/site/"}"
-	install -d "/var/www/lovspor/$(dirname "$rel")"
-	install -m644 "$page" "/var/www/lovspor/$rel"
-done < <(find "$APP_DIR/deploy/digitalocean/site" -type f -print0)
 systemctl daemon-reload
 # mcp stays enable-only (it refuses to start until a credential is issued at go-live);
-# the timer is enabled AND started now (enable alone won't activate it this boot).
+# the timers are enabled AND started now (enable alone won't activate them this boot).
+# The drift check fails hourly until the first release publishes the document it
+# compares against — a visible, truthful state, not a reason to leave it off.
 systemctl enable lovspor-mcp.service >/dev/null
 systemctl enable --now lovspor-fetch-corpus.timer >/dev/null
+systemctl enable --now lovspor-site-drift.timer >/dev/null
 
 log "Base provisioning complete. Finish going live (see README.md § Go live):"
 cat <<EOF
 
   1. OpenAI key:  sudo nano $ENV_FILE            # set OPENAI_API_KEY=...
   2. Beta token:  sudo -u $APP_USER $APP_DIR/.venv/bin/lovspor tokens issue --label "you@beta"
-  3. Domain:      echo 'LOVSPOR_DOMAIN=lovspor.yourdomain.com' | sudo tee /etc/default/caddy-lovspor
-  4. DNS:         point an A record for that domain at this droplet's public IP.
-  5. Start:       sudo systemctl restart caddy lovspor-mcp
-  6. Verify:      curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
+  3. Probe token: sudo -u $APP_USER $APP_DIR/.venv/bin/lovspor tokens issue --label site-probe --expires-in-days 30
+                  sudo sh -c 'umask 077 && printf "%s\n" "<that token>" > /etc/lovspor/credentials/site-probe'
+                  # then set its tiny limits — docs/mcp.md § Release probe and drift check
+  4. Domain:      echo 'LOVSPOR_DOMAIN=lovspor.yourdomain.com' | sudo tee /etc/default/caddy-lovspor
+  5. DNS:         point an A record for that domain at this droplet's public IP.
+  6. Start:       sudo systemctl restart caddy lovspor-mcp
+  7. Verify:      curl -fsS https://lovspor.yourdomain.com/healthz && echo ' OK'
+  8. First site:  sudo systemctl start lovspor-publish    # until it runs, / answers 503
 EOF

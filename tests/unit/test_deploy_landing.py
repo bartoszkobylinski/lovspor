@@ -1,5 +1,4 @@
 import re
-import subprocess
 from pathlib import Path
 
 from lovspor.release.caddy import FRAGMENT_ENV, config_pair
@@ -10,7 +9,6 @@ from tests.unit.caddy_fakes import admin_listen, toy_adapt
 # guarantees pytest is invoked from the repository root.
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
 _CADDYFILE = _DEPLOY / "Caddyfile"
-_PROVISION = _DEPLOY / "provision.sh"
 _LANDING = _DEPLOY / "site" / "index.html"  # Norwegian, canonical
 _LANDING_EN = _DEPLOY / "site" / "en" / "index.html"
 _README = _DEPLOY / "README.md"
@@ -102,17 +100,6 @@ def test_the_composed_configuration_names_the_release_and_the_socket(tmp_path: P
     assert config_pair(config).release_id == content_id
 
 
-def test_provision_installs_the_static_site_into_var_www() -> None:
-    text = _PROVISION.read_text(encoding="utf-8")
-
-    assert "install -d /var/www/lovspor" in text
-    # Every file under site/, not a named list: the landing page stopped being
-    # the only one the moment the crawler started advertising /observatory, and
-    # a deploy step that names files silently omits the next page added.
-    assert 'find "$APP_DIR/deploy/digitalocean/site" -type f -print0' in text
-    assert 'install -m644 "$page" "/var/www/lovspor/$rel"' in text
-
-
 def test_both_languages_keep_the_bearer_token_connection_instructions() -> None:
     """The snippet is the one thing a visitor copies, so it must survive
     translation intact — and identically, since a host or header that differs
@@ -194,49 +181,6 @@ def test_the_crawler_advertises_a_page_that_exists() -> None:
     assert "Disallow: /" in text
     # The block instruction comes before the pitch, not after it.
     assert text.index("Disallow: /") < text.index("Hva som lagres")
-
-
-def _extract_provision_sync_loop() -> str:
-    text = _PROVISION.read_text(encoding="utf-8")
-    match = re.search(
-        r'while IFS= read -r -d "" page; do.*?'
-        r'\ndone < <\(find "\$APP_DIR/deploy/digitalocean/site" -type f -print0\)\n',
-        text,
-        re.DOTALL,
-    )
-    assert match is not None, "provision.sh no longer contains the site-sync loop"
-    return match.group(0)
-
-
-def test_provision_sync_loop_mirrors_the_full_site_tree_including_nested_dirs(
-    tmp_path: Path,
-) -> None:
-    # Runs the exact loop shipped in provision.sh (only the hardcoded
-    # /var/www/lovspor prefix is swapped for a writable tmp path, since the
-    # real destination needs root). A rewrite of this loop's logic here would
-    # test the rewrite, not the deploy step that actually ships.
-    app_dir = tmp_path / "app"
-    site = app_dir / "deploy" / "digitalocean" / "site"
-    (site / "observatory").mkdir(parents=True)
-    (site / "assets" / "img").mkdir(parents=True)
-    (site / "index.html").write_text("root page", encoding="utf-8")
-    (site / "observatory" / "index.html").write_text("observatory page", encoding="utf-8")
-    (site / "assets" / "img" / "logo.svg").write_text("<svg/>", encoding="utf-8")
-
-    dest = tmp_path / "www"
-    loop = _extract_provision_sync_loop().replace("/var/www/lovspor", str(dest))
-
-    result = subprocess.run(
-        ["bash", "-c", f'APP_DIR="{app_dir}"\n{loop}'],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
-
-    assert (dest / "index.html").read_text(encoding="utf-8") == "root page"
-    assert (dest / "observatory" / "index.html").read_text(encoding="utf-8") == "observatory page"
-    assert (dest / "assets" / "img" / "logo.svg").read_text(encoding="utf-8") == "<svg/>"
 
 
 def test_both_landing_pages_link_to_an_observatory_page_that_exists_on_disk() -> None:

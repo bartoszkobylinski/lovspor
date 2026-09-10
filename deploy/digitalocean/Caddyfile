@@ -66,11 +66,13 @@
 	# empty and every request 404s with no error recorded anywhere; a plain
 	# import of a missing file is a hard `caddy validate` failure, which is the
 	# right reading of "no release is published". So this file must not reach
-	# /etc/caddy before a fragment reaches that path — which is why installing
-	# it is a step of `lovspor release migrate` (ADR-0014 Migration), never a
-	# hand copy. The env placeholder lets `caddy validate` and `caddy adapt`
-	# compose the NEXT release's fragment before it is renamed into place; at
-	# runtime the variable is unset and the default applies.
+	# /etc/caddy before a fragment reaches that path: on a fresh box
+	# `provision.sh` writes a placeholder fragment in the same step, and on a
+	# box already serving, installing this file is a step of `lovspor release
+	# migrate` (ADR-0014 Migration) — never a hand copy either way. The env
+	# placeholder lets `caddy validate` and `caddy adapt` compose the NEXT
+	# release's fragment before it is renamed into place; at runtime the
+	# variable is unset and the default applies.
 	import {$LOVSPOR_RELEASE_FRAGMENT:/etc/caddy/lovspor-release.caddy}
 
 	header {

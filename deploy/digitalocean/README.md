@@ -98,9 +98,10 @@ Everything Caddy serves outside `/mcp` — the landing page, `/observatory/`,
 checkout and released **together with the corpus** as one envelope (ADR-0014
 Decision 6, below). There is no separate site deploy and nothing to rsync: a
 site-source change is a release, made live by the same configuration swap as
-a corpus update. `deploy/digitalocean/site/` still holds the pages provisioning
-copies on a box that has not published yet; once the first envelope is live
-the release's `site/` tree is what is served.
+a corpus update. A box that has not published yet has no site at all: it serves
+the placeholder release fragment `provision.sh` writes, a 503 saying so, until
+the first envelope is committed — from then on the release's own `site/` tree
+is what is served.
 
 Public SSH is firewalled off the droplet by design, so the public IPv4 that
 serves the site will time out on port 22. Reach the box over the tailnet
