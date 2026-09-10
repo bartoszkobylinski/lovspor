@@ -194,6 +194,37 @@ class TestSystemOwnership:
 
 
 class TestPreflight:
+    def test_probe_files_and_fragments_are_forwarded_to_adaptation(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[tuple[Path, Path | None, str | None]] = []
+        real = migrate.adapt_config
+
+        def recording(runner: object, caddyfile: Path, fragment: Path | None = None) -> object:
+            seen.append(
+                (
+                    caddyfile,
+                    fragment,
+                    fragment.read_text(encoding="utf-8")
+                    if fragment is not None and fragment.exists()
+                    else None,
+                )
+            )
+            return real(runner, caddyfile, fragment)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(migrate, "adapt_config", recording)
+        preflight(droplet.plane, droplet.host)
+
+        assert seen[0][:2] == (
+            droplet.plane.caddyfile.with_name(f"{droplet.plane.caddyfile.name}.lovspor-probe"),
+            droplet.plane.fragment,
+        )
+        assert seen[1][:2] == (
+            droplet.host.caddyfile_source,
+            droplet.plane.caddyfile.with_name(f"{droplet.plane.caddyfile.name}.lovspor-fragment"),
+        )
+        assert seen[1][2] == ""
+
     def test_the_pre_envelope_host_passes_with_and_without_a_release(
         self, droplet: Droplet
     ) -> None:
@@ -247,8 +278,12 @@ class TestPreflight:
     def test_refuses_to_overwrite_an_existing_backup(self, droplet: Droplet) -> None:
         droplet.host.previous_caddyfile.write_text("old", encoding="utf-8")
 
-        with pytest.raises(MigrationRefusedError, match="rollback's source"):
+        with pytest.raises(MigrationRefusedError) as caught:
             preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_caddyfile} already exists; it is the rollback's source "
+            "and is not overwritten"
+        )
 
     def test_refuses_without_the_new_caddyfile(self, droplet: Droplet) -> None:
         droplet.host.caddyfile_source.unlink()
@@ -419,6 +454,22 @@ def _migrate(droplet: Droplet, checkpoint: Checkpoint | None = None) -> Migratio
 
 
 class TestFirstMigration:
+    def test_passes_the_release_to_preflight(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[str | None] = []
+        real = migrate.preflight
+
+        def recording(
+            plane: ControlPlane, host: MigrationHost, content_id: str | None = None
+        ) -> Preflight:
+            seen.append(content_id)
+            return real(plane, host, content_id)
+
+        monkeypatch.setattr(migrate, "preflight", recording)
+        _migrate(droplet)
+        assert seen == [droplet.a]
+
     def test_walks_the_steps_in_the_adrs_order(self, droplet: Droplet) -> None:
         reached: list[str] = []
         old = OLD_CADDYFILE.encode("utf-8")
@@ -616,6 +667,7 @@ class TestFirstMigration:
         with pytest.raises(MigrationFailedError) as caught:
             _migrate(droplet, swap)
 
+        assert caught.value.reached == "reloaded"
         assert "over the socket Caddy runs (" in str(caught.value)
         assert f", not {droplet.pair_of(droplet.a).describe()}" in str(caught.value)
 
@@ -639,8 +691,9 @@ class TestFirstMigration:
             if step == "reloaded":
                 droplet.socket_file.chmod(0o666)
 
-        with pytest.raises(MigrationFailedError, match="has mode 0666, not 0660"):
+        with pytest.raises(MigrationFailedError, match="has mode 0666, not 0660") as caught:
             _migrate(droplet, loosen)
+        assert caught.value.reached == "reloaded"
 
     def test_a_socket_in_another_group_is_named(self, droplet: Droplet) -> None:
         gid = droplet.ownership.groups["lovspor-release"]
@@ -649,6 +702,7 @@ class TestFirstMigration:
         with pytest.raises(MigrationFailedError) as caught:
             _migrate(droplet)
 
+        assert caught.value.reached == "reloaded"
         assert str(caught.value).endswith(f"has gid {gid}, not lovspor-release's {gid + 1}")
 
     def test_a_show_that_does_not_name_the_socket_is_named(self, droplet: Droplet) -> None:
@@ -767,10 +821,19 @@ class TestTheInstallWindow:
             real(path, payload, mode=mode)
 
         monkeypatch.setattr(migrate, "atomic_write_bytes", record)
+        drop_in_modes: list[bool] = []
+        real_load = migrate._load_drop_in
+
+        def record_load(plane: ControlPlane, host: MigrationHost, with_exec_reload: bool) -> None:
+            drop_in_modes.append(with_exec_reload)
+            real_load(plane, host, with_exec_reload)
+
+        monkeypatch.setattr(migrate, "_load_drop_in", record_load)
 
         _migrate(droplet)
 
         assert written[:2] == [droplet.host.previous_caddyfile, droplet.plane.caddyfile]
+        assert drop_in_modes == [False, True]
 
 
 class TestCrashRows:
@@ -1513,6 +1576,21 @@ class TestReconcileWindow:
         assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
         assert live_release(droplet.plane) == droplet.a
         assert reconcile(droplet.plane, host=droplet.host).action == "none"
+
+    def test_reconcile_forwards_the_answering_tcp_address_to_completion(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._staged_on_tcp(droplet)
+        seen: list[str] = []
+        real = migrate.complete_first_migration
+
+        def recording(plane: ControlPlane, host: MigrationHost, answered: str) -> MigrationReport:
+            seen.append(answered)
+            return real(plane, host, answered)
+
+        monkeypatch.setattr("lovspor.release.reconcile.complete_first_migration", recording)
+        reconcile(droplet.plane, "complete", droplet.host)
+        assert seen == [DEFAULT_TCP]
 
     def test_complete_repeats_the_idempotent_half_of_the_install(self, droplet: Droplet) -> None:
         """A crash inside (a): the runtime directory and the drop-in lines are redone."""

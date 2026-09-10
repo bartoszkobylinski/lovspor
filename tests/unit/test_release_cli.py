@@ -15,6 +15,7 @@ from typing import NamedTuple
 
 import click
 import pytest
+import typer
 from pytest_httpx import HTTPXMock
 from typer.main import get_command
 from typer.testing import CliRunner
@@ -43,6 +44,50 @@ runner = CliRunner()
 LATER = "2026-01-02T00:00:00Z"
 PLACEHOLDER = "handle {\n\troot * /var/www/lovspor\n\tfile_server\n}\n"
 _REPO = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize(
+    ("content_id", "flags", "message"),
+    [
+        (
+            None,
+            commands.MigrateFlags(rollback=True, retire=True),
+            "--rollback and --retire exclude each other",
+        ),
+        (
+            "a" * 64,
+            commands.MigrateFlags(rollback=True),
+            "--rollback and --retire take no release_content_id",
+        ),
+        (
+            None,
+            commands.MigrateFlags(check=True, rollback=True),
+            "--check is the migration's preflight; it excludes --rollback and --retire",
+        ),
+        (
+            None,
+            commands.MigrateFlags(offline=True),
+            "--offline is the rollback's last resort; it needs --rollback",
+        ),
+        (None, commands.MigrateFlags(yes=True), "--yes confirms --retire; no other run asks"),
+    ],
+)
+def test_migrate_flag_conflicts_have_stable_operator_messages(
+    content_id: str | None, flags: commands.MigrateFlags, message: str
+) -> None:
+    with pytest.raises(typer.BadParameter) as caught:
+        commands._migrate_action(content_id, flags)
+    assert str(caught.value) == message
+
+
+def test_no_migration_flags_selects_migrate() -> None:
+    assert commands._migrate_action("a" * 64, commands.MigrateFlags()) == "migrate"
+
+
+def test_migrate_run_without_an_id_has_a_stable_error() -> None:
+    with pytest.raises(typer.BadParameter) as caught:
+        commands._migrate_lines(None, None, commands.Run("migrate"))  # type: ignore[arg-type]
+    assert str(caught.value) == "migrate needs a release_content_id, --rollback or --retire"
 
 
 @pytest.fixture(scope="module")

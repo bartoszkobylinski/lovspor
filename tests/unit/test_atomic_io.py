@@ -53,6 +53,20 @@ def test_atomic_write_text_preserves_original_and_cleans_tmp_on_failure(
     assert not (tmp_path / "f.txt.tmp").exists()
 
 
+def test_atomic_write_text_reraises_the_original_error_when_tmp_was_never_created(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "f.txt"
+
+    def boom(self: Path, _text: str, *, encoding: str) -> None:
+        raise OSError("write failed before the temporary file existed")
+
+    monkeypatch.setattr(Path, "write_text", boom)
+    with pytest.raises(OSError, match="write failed before the temporary file existed"):
+        atomic_write_text(target, "payload")
+
+
 def test_atomic_write_bytes_writes_payload_verbatim(tmp_path: Path) -> None:
     """Captured bodies are arbitrary bytes: no decode, no newline translation."""
     target = tmp_path / "blob"
