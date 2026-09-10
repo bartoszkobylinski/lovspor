@@ -21,6 +21,7 @@ from lovspor.release import migrate
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, adapt, config_pair
 from lovspor.release.caddy import validate as validate_caddy
 from lovspor.release.control import (
+    Checkpoint,
     ControlPlane,
     Situation,
     live_release,
@@ -85,7 +86,7 @@ class Killed(Exception):  # noqa: N818 — a simulated process death, not a lovs
     """The process died right after the named step."""
 
 
-def _kill_at(step: str):  # type: ignore[no-untyped-def]
+def _kill_at(step: str) -> Checkpoint:
     def checkpoint(reached: str) -> None:
         if reached == step:
             raise Killed(step)
@@ -411,7 +412,7 @@ class TestPreflight:
             preflight(droplet.plane, droplet.host)
 
 
-def _migrate(droplet: Droplet, checkpoint=None) -> MigrationReport:  # type: ignore[no-untyped-def]
+def _migrate(droplet: Droplet, checkpoint: Checkpoint | None = None) -> MigrationReport:
     if checkpoint is None:
         return first_migration(droplet.plane, droplet.host, droplet.a)
     return first_migration(droplet.plane, droplet.host, droplet.a, checkpoint)

@@ -500,8 +500,8 @@ def _check_socket_file(host: MigrationHost) -> None:
         )
 
 
-def _verify(host: MigrationHost, expected: ConfigPair) -> None:
-    """(d): the socket answers with the expected pair, TCP refuses, the socket file is right."""
+def _require_socket_running(host: MigrationHost, expected: ConfigPair) -> None:
+    """The socket answers, and with the pair the validated configuration named."""
     try:
         running = config_pair(host.admin_client(host.socket_admin).running_config())
     except UnobservableError as error:
@@ -515,14 +515,23 @@ def _verify(host: MigrationHost, expected: ConfigPair) -> None:
             "reloaded",
             f"over the socket Caddy runs {running.describe()}, not {expected.describe()}",
         )
+
+
+def _require_tcp_silent(host: MigrationHost) -> None:
+    """The endpoint moved, so the old address must be gone, not merely superseded."""
     try:
         host.admin_client(host.tcp_admin).running_config()
     except UnobservableError:
-        pass
-    else:
-        raise MigrationFailedError(
-            "reloaded", f"{host.tcp_admin} still answers; the admin endpoint did not move"
-        )
+        return
+    raise MigrationFailedError(
+        "reloaded", f"{host.tcp_admin} still answers; the admin endpoint did not move"
+    )
+
+
+def _verify(host: MigrationHost, expected: ConfigPair) -> None:
+    """(d): the socket answers with the expected pair, TCP refuses, the socket file is right."""
+    _require_socket_running(host, expected)
+    _require_tcp_silent(host)
     _check_socket_file(host)
 
 

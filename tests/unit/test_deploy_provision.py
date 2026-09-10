@@ -174,10 +174,14 @@ class TestThePlaceholderFragment:
         assert "vars" not in body
 
     def test_is_installed_beside_the_caddyfile_it_belongs_to(self) -> None:
+        """The ordering anchor is the install line itself. `/etc/caddy/Caddyfile`
+        alone matches the drop-in heredoc's `ExecReload=` first, so it passed
+        wherever the install moved to — including after the fragment."""
         text = _script()
+        install = 'install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile'
 
-        assert 'install -m644 "$APP_DIR/deploy/digitalocean/Caddyfile" /etc/caddy/Caddyfile' in text
-        assert text.index("/etc/caddy/Caddyfile") < text.index(f"if [ ! -f {_FRAGMENT} ]")
+        assert install in text
+        assert text.index(install) < text.index(f"if [ ! -f {_FRAGMENT} ]")
 
 
 class TestTheLiveBoxRefusal:

@@ -166,17 +166,12 @@ def _resolve_staged(
     )
 
 
-def _reconcile_unmarked(
-    plane: ControlPlane, host: MigrationHost, action: ReconcileAction
+def _resolve_window(
+    plane: ControlPlane, host: MigrationHost, window: Window, action: ReconcileAction
 ) -> ReconcileReport:
-    """No marker: whichever address answers is read, and the migration's rows apply."""
-    answered = detect_admin(host)
-    bound = replace(plane, admin=host.admin_client(answered))
-    triple = read_triple(bound)
+    """The first migration's own rows, on whichever address answered."""
+    triple, answered = window.triple, window.answered
     found = situation(triple)
-    if answered == host.socket_admin and found != Situation.reloaded:
-        # Already on the socket and not mid-cutover: a box provisioned with the envelope.
-        return _resolve(bound, triple, action).model_copy(update={"admin": answered})
     if found == Situation.reconciled:
         return _report(triple, found, None, "none").model_copy(update={"admin": answered})
     if found == Situation.reloaded:
@@ -185,12 +180,25 @@ def _reconcile_unmarked(
             update={"admin": host.socket_admin}
         )
     if found == Situation.staged:
-        return _resolve_staged(plane, host, Window(triple, answered), action)
+        return _resolve_staged(plane, host, window, action)
     raise UnreconciledError(
         f"host is {found} on {answered}: {triple.describe()}; the first migration's "
         "precondition — the pre-envelope configuration serving — is unmet; nothing is resolved "
         "automatically"
     )
+
+
+def _reconcile_unmarked(
+    plane: ControlPlane, host: MigrationHost, action: ReconcileAction
+) -> ReconcileReport:
+    """No marker: whichever address answers is read, and the migration's rows apply."""
+    answered = detect_admin(host)
+    bound = replace(plane, admin=host.admin_client(answered))
+    triple = read_triple(bound)
+    if answered == host.socket_admin and situation(triple) != Situation.reloaded:
+        # Already on the socket and not mid-cutover: a box provisioned with the envelope.
+        return _resolve(bound, triple, action).model_copy(update={"admin": answered})
+    return _resolve_window(plane, host, Window(triple, answered), action)
 
 
 def reconcile(
