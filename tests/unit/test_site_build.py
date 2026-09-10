@@ -65,7 +65,11 @@ from tests.unit.site_fixtures import (
 )
 
 _REPO = Path(__file__).resolve().parents[2]
-_GOLDEN_OBSERVATORY = _REPO / "deploy" / "digitalocean" / "site" / "observatory" / "index.html"
+# The hand-written pages the site generator replaced, kept as fixtures when
+# `deploy/digitalocean/site/` was retired in the first-migration PR: these
+# comparisons are the ADR-0014 guarantee that the migration changed no copy.
+_PRE_ENVELOPE = Path(__file__).resolve().parent / "fixtures" / "site" / "pre-envelope"
+_GOLDEN_OBSERVATORY = _PRE_ENVELOPE / "observatory" / "index.html"
 _ROOT_FILES = {"site-facts.json", "sitemap-site.xml", "deployment-capabilities.json"}
 _LIVE_CLAIMS = re.compile(r"\b(up now|live now|available now|oppe nå|tilgjengelig nå)\b", re.I)
 _VOID_ELEMENTS = frozenset({"br", "hr", "img", "meta", "link", "input"})
@@ -605,9 +609,7 @@ class TestLanding:
     ) -> None:
         out, _ = built
         for path, source in (("/", "index.html"), ("/en/", "en/index.html")):
-            golden = (_REPO / "deploy" / "digitalocean" / "site" / source).read_text(
-                encoding="utf-8"
-            )
+            golden = (_PRE_ENVELOPE / source).read_text(encoding="utf-8")
             golden_main = _text(golden)
             built_main = _text(_page(out, path))
             for original, replacement in (

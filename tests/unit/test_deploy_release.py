@@ -241,7 +241,24 @@ class TestRunbook:
         assert "install -m644 /opt/lovspor/app/deploy/digitalocean/Caddyfile" not in text
         assert "LOVSPOR_RELEASE_FRAGMENT" in caddyfile
         assert "lovspor-current" not in caddyfile
-        assert (_DEPLOY / "site" / "observatory" / "index.html").is_file()
+        # The hand-written pages are gone from the deploy tree: the site the
+        # release serves is built, and the old pages survive only as the
+        # fixtures the generator's golden comparisons read.
+        assert not (_DEPLOY / "site").exists()
+
+    def test_the_site_is_documented_as_part_of_the_release_not_an_rsync(self) -> None:
+        text = _README.read_text(encoding="utf-8")
+
+        # ADR-0014 Decision 6: the site is built and released with the corpus as
+        # one envelope; an rsync into a live root is the mixed snapshot the
+        # envelope exists to prevent, so the shortcut is gone from the runbook.
+        assert "## The site is part of the release" in text
+        assert "lovspor build-site" in text
+        # Public SSH is firewalled off the droplet; documenting the public IPv4
+        # here sends the reader into a port-22 timeout, which is exactly how this
+        # deploy step failed the first time it was run.
+        assert "TAILSCALE" in text
+        assert "lovspor-observatory" in text
 
     def test_the_operations_doc_points_at_the_adr(self) -> None:
         text = _OPERATIONS.read_text(encoding="utf-8")
