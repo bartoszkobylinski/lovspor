@@ -511,9 +511,12 @@ class TestPreflight:
         assert (taken / "operator-owned").read_text(encoding="utf-8") == "kept"
         assert list(taken.parent.glob("*.lovspor-*")) == [taken]
 
-    def test_a_symlink_at_the_probe_name_is_stepped_around(self, droplet: Droplet) -> None:
+    @pytest.mark.parametrize("name", ["probe", "fragment"])
+    def test_a_symlink_at_the_probe_name_is_stepped_around(
+        self, droplet: Droplet, name: str
+    ) -> None:
         """A dangling symlink is the trap: a non-exclusive open would create what it points at."""
-        taken = _probe(droplet, "probe")
+        taken = _probe(droplet, name)
         target = droplet.plane.caddyfile.parent / "pointed-at"
         taken.symlink_to(target)
 
