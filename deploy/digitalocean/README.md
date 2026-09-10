@@ -204,29 +204,32 @@ by R, D, the marker's `active` or its `previous`. The commands read
 `LOVSPOR_CADDY_ADMIN` (`unix//run/caddy/admin.sock`; TCP only during the
 migration) — the script exports the droplet's values.
 
-On a box provisioned before this existed, enable it once — `provision.sh` does
-this on a fresh box, but is not re-run on a live one:
+On a box provisioned before this existed, install the unit and the releases
+root once — `provision.sh` does this on a fresh box, but is not re-run on a
+live one:
 
 ```bash
 sudo install -m644 /opt/lovspor/app/deploy/digitalocean/lovspor-publish.service /etc/systemd/system/
 sudo install -d -o lovspor -g lovspor -m 755 /var/www/lovspor-releases
-sudo install -m644 /opt/lovspor/app/deploy/digitalocean/Caddyfile /etc/caddy/Caddyfile
-sudo sh -c 'LOVSPOR_DOMAIN="$(sed -n "s/^LOVSPOR_DOMAIN=//p" /etc/default/caddy-lovspor)" caddy validate --config /etc/caddy/Caddyfile' && sudo systemctl reload caddy
 sudo systemctl daemon-reload
 ```
 
-The new Caddyfile is safe to load before any release exists: the corpus paths
-answer 404 from an absent symlink until the first publish, and everything else
-(`/`, `/observatory`, `/mcp`) is unchanged.
-
-The Caddyfile in this repository still roots the corpus at the ADR-0013
-symlink and the site at `/var/www/lovspor`. The envelope release needs it to
-import the active fragment instead — `import
-{$LOVSPOR_RELEASE_FRAGMENT:/etc/caddy/lovspor-release.caddy}` in place of the
-two `handle` blocks — together with the admin-socket binding and the
-`ExecReload=` drop-in; that is the first migration (ADR-0014 Migration), the
-PR after this one. Until it lands, `lovspor release commit` refuses with
-"does the Caddyfile import the fragment?" and nothing public changes.
+The Caddyfile is deliberately not in that list. This repository's
+`deploy/digitalocean/Caddyfile` binds Caddy's admin API to
+`unix//run/caddy/admin.sock|0660` and serves everything outside `/mcp` through
+`import {$LOVSPOR_RELEASE_FRAGMENT:/etc/caddy/lovspor-release.caddy}`; it names
+no release directory and no symlink of its own. Copying it into `/etc/caddy`
+by hand on a box that has not migrated fails two ways at once: the import has
+nothing to import until a fragment exists, and a `systemctl reload caddy`
+through the stock unit line would move the admin endpoint to a socket while
+the release commands are still addressing TCP. Putting it in place is the
+first migration (ADR-0014 Migration), which `lovspor release migrate` performs
+in the ADR's order — preflight, the fragment staged, the new file and the
+runtime directory installed, the reload delivered explicitly to `--address
+localhost:2019`, verified over the socket, the `ExecReload=` pair last — with
+`lovspor release migrate --check` as the dry run and `--rollback` as the way
+back. Until a box has been migrated, `lovspor release commit` refuses there
+with "does the Caddyfile import the fragment?" and nothing public changes.
 
 The unit `Conflicts=` with `lovspor-fetch-corpus.service`: a build must not read
 a clone mid-fetch. There is no timer yet — publishing is an operator command

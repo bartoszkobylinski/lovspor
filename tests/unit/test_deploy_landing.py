@@ -2,11 +2,18 @@ import re
 import subprocess
 from pathlib import Path
 
-_CADDYFILE = Path("deploy/digitalocean/Caddyfile")
-_PROVISION = Path("deploy/digitalocean/provision.sh")
-_LANDING = Path("deploy/digitalocean/site/index.html")  # Norwegian, canonical
-_LANDING_EN = Path("deploy/digitalocean/site/en/index.html")
-_README = Path("deploy/digitalocean/README.md")
+from lovspor.release.caddy import FRAGMENT_ENV, config_pair
+from lovspor.release.envelope import fragment_text
+from tests.unit.caddy_fakes import admin_listen, toy_adapt
+
+# Resolved from this file, never from the working directory: nothing
+# guarantees pytest is invoked from the repository root.
+_DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
+_CADDYFILE = _DEPLOY / "Caddyfile"
+_PROVISION = _DEPLOY / "provision.sh"
+_LANDING = _DEPLOY / "site" / "index.html"  # Norwegian, canonical
+_LANDING_EN = _DEPLOY / "site" / "en" / "index.html"
+_README = _DEPLOY / "README.md"
 
 
 def _app_paths() -> set[str]:
@@ -35,6 +42,64 @@ def test_caddyfile_keeps_the_response_security_headers_declared() -> None:
     assert 'Strict-Transport-Security "max-age=31536000; includeSubDomains"' in text
     assert 'X-Content-Type-Options "nosniff"' in text
     assert "-Server" in text
+
+
+def _significant() -> list[str]:
+    """The Caddyfile without its comments and blank lines, as an adapter reads it."""
+    return [
+        line
+        for line in _CADDYFILE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def test_caddyfile_binds_the_admin_api_to_the_permissioned_socket() -> None:
+    """ADR-0014 Decision 6: the admin API is what makes a release live and the
+    only thing that can say what Caddy serves, so it must not be reachable by
+    anything else on the box. The `|0660` suffix is load-bearing — it is the
+    mode Caddy creates the socket with — so this is pinned exactly, not by
+    substring."""
+    lines = _significant()
+
+    assert lines[0] == "{", lines[0]
+    assert [line.strip() for line in lines[1 : lines.index("}")]] == [
+        "admin unix//run/caddy/admin.sock|0660"
+    ]
+
+
+def test_caddyfile_serves_the_release_through_the_fragment_and_roots_nothing_itself() -> None:
+    """The host's file names no release directory at all: every root, every
+    redirect map and the release id itself come from the imported fragment, so
+    making a release live is a rename plus a reload and never an edit here."""
+    text = _CADDYFILE.read_text(encoding="utf-8")
+
+    assert "\timport {$LOVSPOR_RELEASE_FRAGMENT:/etc/caddy/lovspor-release.caddy}\n" in text
+    for directive in ("root *", "file_server"):
+        assert not any(line.strip().startswith(directive) for line in _significant()), directive
+    # ADR-0014 Decision 6: no symlink exists and the flat site root is retired.
+    assert "lovspor-current" not in text
+    assert "/var/www/lovspor" not in text
+
+
+def test_the_composed_configuration_names_the_release_and_the_socket(tmp_path: Path) -> None:
+    """This file plus one release's fragment is one release, provably.
+
+    The toy adapter of the control-plane tests, never a real `caddy`: CI has
+    none, and what has to hold is that the composed configuration carries the
+    fragment's `lovspor_release` var and this file's admin address — exactly
+    what the first migration's preflight demands of it before it moves
+    anything.
+    """
+    content_id = "b" * 64
+    fragment = tmp_path / "lovspor-release.caddy"
+    fragment.write_text(
+        fragment_text(tmp_path / "releases" / content_id, content_id), encoding="utf-8"
+    )
+
+    config = toy_adapt(_CADDYFILE, {"LOVSPOR_DOMAIN": "lovspor.test", FRAGMENT_ENV: str(fragment)})
+
+    assert admin_listen(config) == "unix//run/caddy/admin.sock|0660"
+    assert config_pair(config).release_id == content_id
 
 
 def test_provision_installs_the_static_site_into_var_www() -> None:

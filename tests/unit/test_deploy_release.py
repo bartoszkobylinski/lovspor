@@ -134,14 +134,21 @@ class TestRunbook:
         assert "readlink -f /var/www/lovspor-current" not in text
         assert "rsync -av --delete deploy/digitalocean/site/" not in text
 
-    def test_the_readme_says_the_caddyfile_switch_is_the_next_migration(self) -> None:
+    def test_the_caddyfile_imports_the_fragment_and_the_readme_says_who_installs_it(self) -> None:
+        """The switch has happened in this repository, so the runbook must stop
+        calling it the next PR — and must stop telling the operator to install
+        this Caddyfile by hand, which on a pre-envelope box moves the admin
+        endpoint to a socket nothing is configured to reach."""
         text = _README.read_text(encoding="utf-8")
         caddyfile = _CADDYFILE.read_text(encoding="utf-8")
 
         assert "LOVSPOR_RELEASE_FRAGMENT" in text
         assert "does the Caddyfile import the fragment?" in text
-        assert "lovspor-current" in caddyfile
-        assert "LOVSPOR_RELEASE_FRAGMENT" not in caddyfile
+        assert "lovspor release migrate" in text
+        assert "the PR after this one" not in text
+        assert "install -m644 /opt/lovspor/app/deploy/digitalocean/Caddyfile" not in text
+        assert "LOVSPOR_RELEASE_FRAGMENT" in caddyfile
+        assert "lovspor-current" not in caddyfile
         assert (_DEPLOY / "site" / "observatory" / "index.html").is_file()
 
     def test_the_operations_doc_points_at_the_adr(self) -> None:

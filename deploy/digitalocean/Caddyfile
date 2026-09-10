@@ -6,6 +6,19 @@
 # certificate for this name on first request, once DNS points the name here —
 # no certbot, no cron, no manual cert steps.
 
+# Caddy's admin API is what makes a release live (`caddy reload`) and the only
+# thing that can say what is actually being served, so the release procedure
+# trusts it the way it trusts nothing on disk. On the default localhost:2019
+# every process on the box — the app's own user included — can rewrite the
+# running configuration without touching a file. Bound to a Unix socket
+# created 0660 in the release group instead, only that group and root can
+# (ADR-0014 Decision 6). The |0660 suffix is part of the address, not a
+# comment on it: it is the mode Caddy creates the socket with, and without it
+# the mode comes from the umask and the group restricts nothing.
+{
+	admin unix//run/caddy/admin.sock|0660
+}
+
 {$LOVSPOR_DOMAIN} {
 	encode zstd gzip
 
@@ -41,28 +54,24 @@
 		}
 	}
 
-	# The published corpus (ADR-0013) → the atomically-switched release symlink.
+	# The corpus (ADR-0013) and the site → the active release fragment, which
+	# `lovspor release commit` renames into place. Every path in it names one
+	# immutable release directory — pages, redirect map and site tree from the
+	# same build — and it declares the release id as a var, so what Caddy is
+	# serving can be read back from the admin API. This file names no release
+	# directory of its own, which is what makes a release a rename plus a reload
+	# rather than an edit here.
 	#
-	# Everything under these paths comes from ONE release tree, including the
-	# 301/410 map the generator emitted alongside the pages, so a request can
-	# never see pages from one build under redirects from another. The env
-	# placeholder exists so publish-release.sh can `caddy validate` the NEXT
-	# release's map before the symlink moves; at runtime it is unset and the
-	# default applies. A glob import matches nothing on a box that has not
-	# published yet, which is what lets provision.sh install this file before
-	# the first release exists.
-	@corpus path /lov /lov/* /forskrift /forskrift/* /sitemap.xml /sitemaps/* /robots.txt
-	handle @corpus {
-		import {$LOVSPOR_SITE_ROOT:/var/www/lovspor-current}/redirects*.caddy
-		root * {$LOVSPOR_SITE_ROOT:/var/www/lovspor-current}
-		file_server
-	}
-
-	# Everything else → the static landing page.
-	handle {
-		root * /var/www/lovspor
-		file_server
-	}
+	# Deliberately not a glob. A glob that matches nothing leaves the site block
+	# empty and every request 404s with no error recorded anywhere; a plain
+	# import of a missing file is a hard `caddy validate` failure, which is the
+	# right reading of "no release is published". So this file must not reach
+	# /etc/caddy before a fragment reaches that path — which is why installing
+	# it is a step of `lovspor release migrate` (ADR-0014 Migration), never a
+	# hand copy. The env placeholder lets `caddy validate` and `caddy adapt`
+	# compose the NEXT release's fragment before it is renamed into place; at
+	# runtime the variable is unset and the default applies.
+	import {$LOVSPOR_RELEASE_FRAGMENT:/etc/caddy/lovspor-release.caddy}
 
 	header {
 		# HSTS: only meaningful once you're confident the domain is HTTPS-only.
