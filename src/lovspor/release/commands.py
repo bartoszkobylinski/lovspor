@@ -5,7 +5,9 @@ the reconcile identity) establishes the reconciled live release;
 ``build`` (the build user) runs the probe and the seven steps, printing
 the finalized id alone on stdout; ``commit`` (root) runs the
 transaction; ``prune`` (root) removes what no record names.
-``reconcile`` and ``rollback`` are the operator's own.
+``reconcile`` and ``rollback`` are the operator's own, and so is
+``migrate`` — the first envelope cutover (ADR-0014 Migration), whose
+``--rollback`` and ``--retire`` are separate runs, never phases of it.
 
 Exit codes: 0 done (``commit`` of the live release included — it is
 already live); 1 refused, unreconciled or failed, one line on stderr;
@@ -19,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 import typer
@@ -45,6 +47,13 @@ from lovspor.release.migrate import (
     DEFAULT_SITE_ROOT,
     DEFAULT_TCP_ADMIN,
     MigrationHost,
+    MigrationReport,
+    RetireReport,
+    RollbackReport,
+    first_migration,
+    preflight,
+    retire_pre_envelope,
+    rollback_first_migration,
 )
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
 from lovspor.site.build import discover_checkout
@@ -318,6 +327,109 @@ def reconcile_command(
     typer.echo(f"{report.situation.value}: {report.triple}; action {report.action}")
     typer.echo(f"admin: {report.admin or admin}")
     typer.echo(f"live: {report.live or NOTHING_LIVE}")
+
+
+MigrateAction = Literal["migrate", "check", "rollback", "retire"]
+
+
+def _migrate_action(
+    content_id: str | None, rollback: bool, retire: bool, check: bool
+) -> MigrateAction:
+    """Which of the four runs the operator asked for; two of them are never combined."""
+    if rollback and retire:
+        raise typer.BadParameter("--rollback and --retire exclude each other")
+    if content_id is not None and (rollback or retire):
+        raise typer.BadParameter("--rollback and --retire take no release_content_id")
+    if check and (rollback or retire):
+        raise typer.BadParameter(
+            "--check is the migration's preflight; it excludes --rollback and --retire"
+        )
+    if content_id is not None and not is_release_id(content_id):
+        raise typer.BadParameter(f"not a release_content_id: {content_id}")
+    if rollback:
+        return "rollback"
+    if retire:
+        return "retire"
+    return "check" if check else "migrate"
+
+
+def _done(happened: bool) -> str:
+    return "yes" if happened else "no"
+
+
+def _migrated(report: MigrationReport) -> tuple[str, ...]:
+    return (
+        f"migrated: {report.active} (admin {report.admin})",
+        f"running: {report.running}",
+        f"previous Caddyfile: {report.previous_caddyfile}",
+    )
+
+
+def _rolled_back(report: RollbackReport) -> tuple[str, ...]:
+    return (
+        f"rolled back from {report.admin_before} to {report.admin}; "
+        f"reloaded {_done(report.reloaded)}",
+        f"marker removed {_done(report.marker_removed)}, "
+        f"ExecReload pair removed {_done(report.exec_reload_removed)}",
+    )
+
+
+def _retired(report: RetireReport) -> tuple[str, ...]:
+    return (f"retired {len(report.removed)}: {', '.join(report.removed) or '-'}",)
+
+
+def _migrate_lines(
+    plane: ControlPlane, host: MigrationHost, action: MigrateAction, content_id: str | None
+) -> tuple[str, ...]:
+    """One run, one report; ``--check`` is the only one that moves nothing."""
+    if action == "check":
+        return (f"preflight: {preflight(plane, host, content_id).describe()}",)
+    if action == "rollback":
+        return _rolled_back(rollback_first_migration(plane, host))
+    if action == "retire":
+        return _retired(retire_pre_envelope(plane, host))
+    if content_id is None:
+        raise typer.BadParameter("migrate needs a release_content_id, --rollback or --retire")
+    return _migrated(first_migration(plane, host, content_id))
+
+
+@release_app.command(name="migrate")
+def migrate_command(
+    content_id: Annotated[
+        str | None, typer.Argument(help="The finalized release_content_id to cut over to.")
+    ] = None,
+    rollback: Annotated[
+        bool, typer.Option("--rollback", help="Back to the pre-envelope host, from any point.")
+    ] = False,
+    retire: Annotated[
+        bool, typer.Option("--retire", help="Remove the pre-envelope layout; no way back after.")
+    ] = False,
+    check: Annotated[
+        bool, typer.Option("--check", help="The preflight alone; nothing on the host moves.")
+    ] = False,
+    releases: _ReleasesOption = DEFAULT_RELEASES,
+    caddyfile: _CaddyfileOption = DEFAULT_CADDYFILE,
+    fragment: _FragmentOption = DEFAULT_FRAGMENT,
+    admin: _AdminOption = DEFAULT_ADMIN,
+    tcp_admin: _TcpAdminOption = DEFAULT_TCP_ADMIN,
+    caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+    drop_in: _DropInOption = DEFAULT_DROP_IN,
+    runtime_dir: _RuntimeDirOption = DEFAULT_RUNTIME_DIR,
+    release_group: _ReleaseGroupOption = DEFAULT_RELEASE_GROUP,
+) -> None:
+    """The first envelope cutover, over the address transition a reload cannot make.
+
+    ``--retire`` is never performed by a migration: it deletes the
+    previous Caddyfile's world, the only way back, so the operator asks
+    for it explicitly once the cutover is verified (ADR-0014 Migration).
+    """
+    action = _migrate_action(content_id, rollback, retire, check)
+    plane = _plane(releases, caddyfile, fragment, admin)
+    options = HostOptions(tcp_admin, caddyfile_source, drop_in, runtime_dir, release_group)
+    with _refusals():
+        lines = _migrate_lines(plane, _host(caddyfile, admin, options), action, content_id)
+    for line in lines:
+        typer.echo(line)
 
 
 @release_app.command(name="rollback")

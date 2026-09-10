@@ -359,6 +359,198 @@ class TestReconcileWindow:
         )
 
 
+class TestMigrate:
+    """``lovspor release migrate``: the cutover, its preflight, its rollback, the retire step.
+
+    Four runs, never combined. ``--retire`` in particular is its own
+    command and never a phase of the migration (decision F2): it deletes
+    the previous Caddyfile's whole world, which is the only way back.
+    """
+
+    def _staged(self, droplet: Droplet) -> None:
+        """The migration killed after (a): D is the new configuration, R still old on TCP."""
+
+        def kill(step: str) -> None:
+            if step == "installed":
+                raise Killed(step)
+
+        with pytest.raises(Killed):
+            first_migration(droplet.plane, droplet.host, droplet.a, kill)
+
+    def test_cuts_over_and_reports_the_release_the_socket_and_the_backup(
+        self, droplet: Droplet
+    ) -> None:
+        result = runner.invoke(app, ["release", "migrate", droplet.a])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines() == [
+            f"migrated: {droplet.a} (admin {droplet.host.socket_admin})",
+            f"running: {droplet.pair_of(droplet.a).describe()}",
+            f"previous Caddyfile: {droplet.host.previous_caddyfile}",
+        ]
+        assert read_marker(droplet.plane.releases) == Marker(active=droplet.a, previous=None)
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+
+    def test_check_names_the_release_and_moves_nothing(self, droplet: Droplet) -> None:
+        result = runner.invoke(app, ["release", "migrate", "--check", droplet.a])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.startswith(f"preflight: release {droplet.a}; R=(none, ")
+        assert result.stdout.endswith(
+            f" on localhost:2019; socket {droplet.host.socket_admin} absent; "
+            f"group lovspor-release (gid {droplet.ownership.groups['lovspor-release']}); "
+            "Caddy accepts |0660\n"
+        )
+        assert not droplet.plane.fragment.exists()
+        assert read_marker(droplet.plane.releases) is None
+        assert droplet.caddy.admin_address == "localhost:2019"
+
+    def test_check_without_a_release_names_none(self, droplet: Droplet) -> None:
+        result = runner.invoke(app, ["release", "migrate", "--check"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.startswith("preflight: no release named; R=(none, ")
+
+    def test_a_refused_precondition_exits_one_and_names_it(self, droplet: Droplet) -> None:
+        write_marker(droplet.plane.releases, Marker(active=droplet.b, previous=None))
+
+        result = runner.invoke(app, ["release", "migrate", droplet.a])
+
+        assert result.exit_code == 1
+        assert (
+            f"release refused: a marker exists (active {droplet.b}); "
+            "the first migration has already happened"
+        ) in result.output.splitlines()
+        assert not droplet.plane.fragment.exists()
+
+    def test_tcp_unreachable_exits_three_naming_the_precondition(self, droplet: Droplet) -> None:
+        droplet.caddy.admin_up = False
+
+        result = runner.invoke(app, ["release", "migrate", "--check"])
+
+        assert result.exit_code == 3
+        assert "precondition Caddy admin reachable unmet" in result.output
+        assert "the first migration needs Caddy answering on localhost:2019" in result.output
+
+    def test_rollback_after_the_cutover_returns_the_host_to_tcp(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+
+        result = runner.invoke(app, ["release", "migrate", "--rollback"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines() == [
+            f"rolled back from {droplet.host.socket_admin} to localhost:2019; reloaded yes",
+            "marker removed yes, ExecReload pair removed yes",
+        ]
+        assert droplet.caddy.admin_address == "localhost:2019"
+        assert read_marker(droplet.plane.releases) is None
+
+    def test_rollback_before_the_cutover_restores_the_files_without_a_reload(
+        self, droplet: Droplet
+    ) -> None:
+        self._staged(droplet)
+
+        result = runner.invoke(app, ["release", "migrate", "--rollback"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines() == [
+            "rolled back from localhost:2019 to localhost:2019; reloaded no",
+            "marker removed no, ExecReload pair removed no",
+        ]
+        assert droplet.caddy.reloads == 0
+        assert not droplet.plane.fragment.exists()
+
+    def test_retire_removes_the_pre_envelope_layout(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        droplet.host.site_root.mkdir(parents=True)
+        flat = droplet.releases / "20260908T120000Z-abcdef123456"
+        flat.mkdir()
+        droplet.host.current_symlink.symlink_to(flat)
+
+        result = runner.invoke(app, ["release", "migrate", "--retire"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == (
+            f"retired 3: {droplet.host.current_symlink}, {droplet.host.site_root}, {flat}\n"
+        )
+        assert not droplet.host.current_symlink.is_symlink()
+        assert not droplet.host.site_root.exists()
+        assert not flat.exists()
+
+    def test_retire_with_nothing_left_reports_none(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+
+        result = runner.invoke(app, ["release", "migrate", "--retire"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == "retired 0: -\n"
+
+    def test_retire_before_the_marker_exits_one(self, droplet: Droplet) -> None:
+        result = runner.invoke(app, ["release", "migrate", "--retire"])
+
+        assert result.exit_code == 1
+        assert "release refused: no marker: the first migration has not finished" in result.output
+
+    @pytest.mark.parametrize(
+        ("args", "phrase"),
+        [
+            (["--rollback", "--retire"], "--rollback and --retire exclude each other"),
+            (["--rollback", "ID"], "--rollback and --retire take no release_content_id"),
+            (["--retire", "ID"], "--rollback and --retire take no release_content_id"),
+            (["--check", "--rollback"], "--check is the migration's preflight"),
+            ([".build-x"], "not a release_content_id: .build-x"),
+            ([], "migrate needs a release_content_id"),
+        ],
+    )
+    def test_the_runs_exclude_each_other(
+        self, droplet: Droplet, args: list[str], phrase: str
+    ) -> None:
+        given = [droplet.a if arg == "ID" else arg for arg in args]
+
+        result = runner.invoke(app, ["release", "migrate", *given])
+
+        assert result.exit_code == 2
+        # rich renders the usage error as a panel wrapped at the runner's
+        # width; compare the words, not the rendering.
+        assert phrase in _plain(result.output)
+        assert read_marker(droplet.plane.releases) is None
+        assert not droplet.plane.fragment.exists()
+
+    def test_the_options_are_registered_with_their_environment(self) -> None:
+        root = get_command(app)
+        assert isinstance(root, click.Group)
+        group = root.commands["release"]
+        assert isinstance(group, click.Group)
+        params = {param.name: param for param in group.commands["migrate"].params}
+
+        assert isinstance(params["content_id"], click.Argument)
+        assert not params["content_id"].required
+        for flag in ("rollback", "retire", "check"):
+            assert isinstance(params[flag], click.Option)
+            assert params[flag].is_flag, flag
+        for name, envvar, default in (
+            ("releases", "LOVSPOR_RELEASES_ROOT", Path("/var/www/lovspor-releases")),
+            ("caddyfile", "LOVSPOR_CADDYFILE", Path("/etc/caddy/Caddyfile")),
+            ("fragment", "LOVSPOR_RELEASE_FRAGMENT", Path("/etc/caddy/lovspor-release.caddy")),
+            ("admin", "LOVSPOR_CADDY_ADMIN", "unix//run/caddy/admin.sock"),
+            ("tcp_admin", "LOVSPOR_CADDY_ADMIN_TCP", "localhost:2019"),
+            (
+                "caddyfile_source",
+                "LOVSPOR_CADDYFILE_SOURCE",
+                Path("/opt/lovspor/app/deploy/digitalocean/Caddyfile"),
+            ),
+            (
+                "drop_in",
+                "LOVSPOR_CADDY_DROP_IN",
+                Path("/etc/systemd/system/caddy.service.d/lovspor.conf"),
+            ),
+            ("runtime_dir", "LOVSPOR_CADDY_RUNTIME_DIR", Path("/run/caddy")),
+            ("release_group", "LOVSPOR_RELEASE_GROUP", "lovspor-release"),
+        ):
+            assert params[name].envvar == envvar, name
+            assert params[name].default == default, name
+
+
 @pytest.fixture
 def checkout(world: World, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(commands, "discover_checkout", lambda: world.checkout)
@@ -547,7 +739,15 @@ class TestPackage:
         group = root.commands["release"]
         assert isinstance(group, click.Group)
 
-        assert {"build", "live", "commit", "reconcile", "rollback", "prune"} <= set(group.commands)
+        assert {
+            "build",
+            "live",
+            "commit",
+            "reconcile",
+            "rollback",
+            "prune",
+            "migrate",
+        } <= set(group.commands)
 
     def test_only_the_command_layer_reads_a_clock(self) -> None:
         clock = re.compile(
