@@ -909,8 +909,15 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
         the machine that runs an agent session is a credential the agent can
         reach."""
         text = self._author_text()
+        checkout = next(
+            step
+            for step in self._author()["steps"]
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+        )
 
         assert self._author()["permissions"] == {"contents": "read"}
+        assert checkout["with"]["persist-credentials"] is False
+        assert "token" not in checkout["with"]
         assert "LOVSPOR_CI_PUSH_TOKEN" not in text
         assert "git push" not in text
 
@@ -924,8 +931,17 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
             _steps("pr-pipeline.yml", "codex-tests"), "Apply the agent's tests"
         )
 
+        assert self._author()["outputs"] == {
+            "skip": "${{ steps.antiloop.outputs.skip }}",
+            "author": "${{ steps.author.outputs.author }}",
+            "before_sha": "${{ steps.base.outputs.before_sha }}",
+            "patch": "${{ steps.patch.outputs.patch }}",
+        }
         assert upload["with"]["name"] == artifact
         assert download["with"]["name"] == artifact
+        assert upload["if"] == "steps.patch.outputs.patch == 'true'"
+        assert download["if"] == "needs.codex-author.outputs.patch == 'true'"
+        assert apply_step["if"] == "needs.codex-author.outputs.patch == 'true'"
         # --index, so the scope guard on the verifier sees staged files the way
         # it saw them on the box, and an unapplyable patch fails loudly instead
         # of leaving a run of the pre-existing suite to pass as a fresh round.
