@@ -20,11 +20,20 @@
 #
 # Nothing here ever writes into a tree Caddy is serving, and no symlink exists.
 #
+# The first envelope on a box that has never published one is the same order
+# with the new Caddyfile installed in the middle of it, and without `live`: the
+# admin socket that command reads does not exist yet. `migrate` performs it
+# (ADR-0014 Migration); its rollback and the retiring of the pre-envelope trees
+# are separate operator runs, never phases of it.
+#
 #   publish-release.sh                       build HEAD of the corpus clone and switch
 #   publish-release.sh --ref <sha>           build a specific corpus commit
 #   publish-release.sh --rollback            the previous release, same transaction
 #   publish-release.sh --reconcile [--complete|--abandon]
 #   publish-release.sh --prune
+#   publish-release.sh --migrate [--ref <sha>]   the FIRST envelope: build, then cut over
+#   publish-release.sh --migrate-rollback    back to the pre-envelope Caddyfile and TCP admin
+#   publish-release.sh --retire              remove the pre-envelope trees; no way back after
 #
 # Exit 0 on a switch or on "already live"; non-zero leaves the live release
 # exactly as it was (a reload failure puts the previous fragment back).
@@ -98,11 +107,36 @@ publish() {
 	log "live: $(control live)"
 }
 
+migrate() {
+	# The first envelope: no `control live`, because the admin socket it reads is
+	# what this run creates — Caddy is still on TCP. `--live none` is the truth
+	# the build needs (nothing to hard-link against), and the preflight of
+	# `release migrate` checks the running configuration over TCP instead.
+	local ref="$1" release_id
+	[ -x "$LOVSPOR" ] || die "$LOVSPOR not found; is the app deployed?"
+	[ -d "$CORPUS/.git" ] || die "$CORPUS is not a git clone; run lovspor-fetch-corpus first"
+	install -d -o "$BUILD_USER" -g "$BUILD_USER" -m 755 "$LOVSPOR_RELEASES_ROOT"
+
+	release_id="$(build_as_build_user "$ref" none)"
+	log "finalized release: $release_id"
+	control migrate "$release_id"
+}
+
 case "${1:-}" in
 	--rollback) control rollback && control prune ;;
 	--reconcile) shift; control reconcile "$@" ;;
 	--prune) control prune ;;
+	--migrate)
+		shift
+		case "${1:-}" in
+			"") migrate HEAD ;;
+			--ref) [ -n "${2:-}" ] || die "--ref needs a commit"; migrate "$2" ;;
+			*) die "usage: $0 --migrate [--ref <commit>]" ;;
+		esac
+		;;
+	--migrate-rollback) control migrate --rollback ;;
+	--retire) control migrate --retire ;;
 	--ref) [ -n "${2:-}" ] || die "--ref needs a commit"; publish "$2" ;;
 	"") publish ;;
-	*) die "usage: $0 [--ref <commit> | --rollback | --reconcile [--complete|--abandon] | --prune]" ;;
+	*) die "usage: $0 [--ref <commit> | --rollback | --reconcile [--complete|--abandon] | --prune | --migrate [--ref <commit>] | --migrate-rollback | --retire]" ;;
 esac

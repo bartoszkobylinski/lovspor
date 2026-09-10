@@ -8,6 +8,7 @@ drifts from the package's contract fails a test rather than a droplet.
 
 import os
 import re
+import subprocess
 from pathlib import Path
 
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
@@ -26,6 +27,41 @@ def _directive(text: str, name: str) -> list[str]:
 def _code(text: str) -> str:
     """The script without its comments."""
     return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
+def _function(code: str, name: str) -> str:
+    """One shell function's body, from its opening line to the next top-level one."""
+    start = code.index(f"{name}() {{")
+    end = code.index("\n}\n", start)
+    return code[start:end]
+
+
+def _dispatcher(code: str) -> str:
+    match = re.search(r'^case "\$\{1:-\}" in\n.*?^esac$', code, re.DOTALL | re.MULTILINE)
+    assert match is not None, "publish-release.sh no longer ends in a dispatcher"
+    return match.group(0)
+
+
+# The dispatcher is bash, so it is tested by running it — with every worker
+# it calls replaced by an echo, so nothing builds, reloads or touches a
+# droplet and the test asserts the routing alone.
+_STUBS = """
+die() { printf 'die: %s\\n' "$*" >&2; exit 1; }
+publish() { printf 'publish %s\\n' "$*"; }
+migrate() { printf 'migrate %s\\n' "$*"; }
+control() { printf 'control %s\\n' "$*"; }
+"""
+
+
+def _dispatch(*argv: str) -> subprocess.CompletedProcess[str]:
+    dispatcher = _dispatcher(_code(_SCRIPT.read_text(encoding="utf-8")))
+    script = f"set -euo pipefail\n{_STUBS}\n{dispatcher}\n"
+    return subprocess.run(
+        ["bash", "-c", script, "publish-release.sh", *argv],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 class TestWrapper:
@@ -88,6 +124,62 @@ class TestWrapper:
         assert '--reconcile) shift; control reconcile "$@"' in code
         assert "--prune) control prune" in code
         assert '--ref) [ -n "${2:-}" ] || die' in code
+        assert "--migrate-rollback) control migrate --rollback" in code
+        assert "--retire) control migrate --retire" in code
+        assert "--migrate)" in code
+
+    def test_the_first_migration_builds_without_asking_what_is_live(self) -> None:
+        """ADR-0014 Migration: on a pre-envelope box the admin socket does not
+        exist yet, so `release live` — which reads Caddy's running configuration
+        over it — cannot answer. The build is told there is no live release, and
+        the preflight of `release migrate` does the equivalent check over TCP."""
+        migrate = _function(_code(_SCRIPT.read_text(encoding="utf-8")), "migrate")
+
+        assert 'build_as_build_user "$ref" none' in migrate
+        assert "control live" not in migrate
+        assert 'control migrate "$release_id"' in migrate
+
+    def test_the_migration_is_never_a_phase_of_an_ordinary_publish(self) -> None:
+        publish = _function(_code(_SCRIPT.read_text(encoding="utf-8")), "publish")
+
+        assert "migrate" not in publish
+
+    def test_migrate_builds_head_by_default_and_the_named_commit_with_ref(self) -> None:
+        assert _dispatch("--migrate").stdout == "migrate HEAD\n"
+        assert _dispatch("--migrate", "--ref", "abc1234").stdout == "migrate abc1234\n"
+
+    def test_migrate_refuses_a_ref_without_a_commit_and_an_unknown_word(self) -> None:
+        missing = _dispatch("--migrate", "--ref")
+        unknown = _dispatch("--migrate", "--now")
+
+        assert missing.returncode == 1 and "--ref needs a commit" in missing.stderr
+        assert unknown.returncode == 1 and "usage" in unknown.stderr
+
+    def test_the_rollback_and_the_retire_reach_the_command_that_owns_them(self) -> None:
+        """`--retire` deletes the pre-envelope trees, the only way back from the
+        first migration, so it is its own run and never part of one."""
+        assert _dispatch("--migrate-rollback").stdout == "control migrate --rollback\n"
+        assert _dispatch("--retire").stdout == "control migrate --retire\n"
+
+    def test_the_ordinary_entry_points_still_route_where_they_did(self) -> None:
+        assert _dispatch().stdout == "publish \n"
+        assert _dispatch("--ref", "abc1234").stdout == "publish abc1234\n"
+        assert _dispatch("--prune").stdout == "control prune\n"
+        assert _dispatch("--reconcile", "--complete").stdout == "control reconcile --complete\n"
+        assert _dispatch("--rollback").stdout == "control rollback\ncontrol prune\n"
+        assert _dispatch("--nope").returncode == 1
+
+    def test_the_usage_line_names_every_entry_point(self) -> None:
+        text = _SCRIPT.read_text(encoding="utf-8")
+        header = text[: text.index("set -euo pipefail")]
+
+        for phrase in (
+            "publish-release.sh --migrate",
+            "publish-release.sh --migrate-rollback",
+            "publish-release.sh --retire",
+        ):
+            assert phrase in header, phrase
+        assert "--migrate [--ref <commit>]" in _code(text)
 
 
 class TestUnit:
