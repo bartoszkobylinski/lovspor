@@ -23,8 +23,16 @@ from typer.testing import CliRunner
 from lovspor.cli import app
 from lovspor.release import commands
 from lovspor.release.caddy import HttpxAdminClient, SubprocessRunner
+from lovspor.release.commands import (
+    MigrateFlags,
+    Run,
+    _migrate_action,
+    _migrate_lines,
+    _retire,
+)
 from lovspor.release.control import ControlPlane
 from lovspor.release.envelope import FRAGMENT_NAME, Marker, read_fragment, read_marker, write_marker
+from lovspor.release.errors import ReleaseError
 from lovspor.release.migrate import first_migration
 from tests.unit.caddy_fakes import FakeCaddy
 from tests.unit.migrate_fixtures import Droplet, make_droplet
@@ -42,6 +50,8 @@ from tests.unit.release_fixtures import World, build, make_world, observer, rena
 
 runner = CliRunner()
 LATER = "2026-01-02T00:00:00Z"
+_AN_ID = "a" * 64
+"""A well-formed release_content_id; the runs that refuse never look it up."""
 PLACEHOLDER = "handle {\n\troot * /var/www/lovspor\n\tfile_server\n}\n"
 _REPO = Path(__file__).resolve().parents[2]
 
@@ -675,6 +685,123 @@ class TestMigrate:
         ):
             assert params[name].envvar == envvar, name
             assert params[name].default == default, name
+
+
+class TestMigrateRunSelection:
+    """``_migrate_action`` and ``_retire`` read as text, not through rich's panel.
+
+    ``test_the_runs_exclude_each_other`` above asserts a *phrase*, because
+    the runner wraps a ``BadParameter`` panel at its own width. The refusal
+    the operator acts on is the whole sentence, and the retire listing is a
+    path per line, so both are compared whole here — one layer below the
+    renderer, where the text is the code's and not the terminal's.
+    """
+
+    @pytest.mark.parametrize(
+        ("content_id", "flags", "message"),
+        [
+            (
+                None,
+                MigrateFlags(rollback=True, retire=True),
+                "--rollback and --retire exclude each other",
+            ),
+            (
+                _AN_ID,
+                MigrateFlags(rollback=True),
+                "--rollback and --retire take no release_content_id",
+            ),
+            (
+                _AN_ID,
+                MigrateFlags(retire=True),
+                "--rollback and --retire take no release_content_id",
+            ),
+            (
+                None,
+                MigrateFlags(rollback=True, check=True),
+                "--check is the migration's preflight; it excludes --rollback and --retire",
+            ),
+            (
+                None,
+                MigrateFlags(retire=True, check=True),
+                "--check is the migration's preflight; it excludes --rollback and --retire",
+            ),
+            (
+                None,
+                MigrateFlags(offline=True),
+                "--offline is the rollback's last resort; it needs --rollback",
+            ),
+            (
+                None,
+                MigrateFlags(retire=True, offline=True),
+                "--offline is the rollback's last resort; it needs --rollback",
+            ),
+            (None, MigrateFlags(yes=True), "--yes confirms --retire; no other run asks"),
+            (
+                None,
+                MigrateFlags(rollback=True, yes=True),
+                "--yes confirms --retire; no other run asks",
+            ),
+            (".build-x", MigrateFlags(), "not a release_content_id: .build-x"),
+        ],
+    )
+    def test_every_excluded_combination_names_itself_whole(
+        self, content_id: str | None, flags: MigrateFlags, message: str
+    ) -> None:
+        with pytest.raises(click.BadParameter) as caught:
+            _migrate_action(content_id, flags)
+
+        assert str(caught.value) == message
+
+    @pytest.mark.parametrize(
+        ("content_id", "flags", "action"),
+        [
+            (_AN_ID, MigrateFlags(), "migrate"),
+            (None, MigrateFlags(), "migrate"),
+            (_AN_ID, MigrateFlags(check=True), "check"),
+            (None, MigrateFlags(check=True), "check"),
+            (None, MigrateFlags(rollback=True), "rollback"),
+            (None, MigrateFlags(rollback=True, offline=True), "offline"),
+            (None, MigrateFlags(retire=True), "retire"),
+            (None, MigrateFlags(retire=True, yes=True), "retire"),
+        ],
+    )
+    def test_the_accepted_combinations_name_their_run(
+        self, content_id: str | None, flags: MigrateFlags, action: str
+    ) -> None:
+        assert _migrate_action(content_id, flags) == action
+
+    def test_a_migrate_run_without_an_id_says_so_whole(self, droplet: Droplet) -> None:
+        with pytest.raises(click.BadParameter) as caught:
+            _migrate_lines(droplet.plane, droplet.host, Run("migrate", None, False))
+
+        assert str(caught.value) == "migrate needs a release_content_id, --rollback or --retire"
+
+    def test_the_unconfirmed_retire_lists_one_path_per_line(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        droplet.host.site_root.mkdir(parents=True)
+
+        with pytest.raises(ReleaseError) as caught:
+            _retire(droplet.plane, droplet.host, confirmed=False)
+
+        assert str(caught.value) == (
+            "--retire permanently removes these paths, the last of them the only way back to "
+            f"the pre-envelope site:\n  {droplet.host.site_root}\n"
+            f"  {droplet.host.previous_caddyfile}\nre-run with --yes to confirm"
+        )
+        assert droplet.host.site_root.is_dir()
+        assert droplet.host.previous_caddyfile.is_file()
+
+    def test_the_unconfirmed_retire_with_nothing_left_names_nothing(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        droplet.host.previous_caddyfile.unlink()
+
+        with pytest.raises(ReleaseError) as caught:
+            _retire(droplet.plane, droplet.host, confirmed=False)
+
+        assert str(caught.value) == (
+            "--retire permanently removes these paths, the last of them the only way back to "
+            "the pre-envelope site:\n  (nothing)\nre-run with --yes to confirm"
+        )
 
 
 @pytest.fixture
