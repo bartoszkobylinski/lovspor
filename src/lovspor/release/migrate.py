@@ -43,6 +43,8 @@ back.
 import grp
 import os
 import pwd
+import re
+import shutil
 import stat
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -67,9 +69,10 @@ from lovspor.release.caddy import (
     config_pair,
 )
 from lovspor.release.caddy import validate as validate_caddy
-from lovspor.release.control import Checkpoint, ControlPlane
+from lovspor.release.control import Checkpoint, ControlPlane, live_release
 from lovspor.release.envelope import (
     FRAGMENT_NAME,
+    MARKER_NAME,
     WORLD_READABLE,
     Marker,
     fragment_release_id,
@@ -84,6 +87,7 @@ from lovspor.release.errors import (
     ControlPlaneError,
     MigrationFailedError,
     MigrationRefusedError,
+    ReloadFailedError,
     UnobservableError,
 )
 
@@ -114,6 +118,8 @@ RUNTIME_DIR_MODE = 0o2770
 PRE_ENVELOPE_DROP_IN = f"[Service]\nEnvironmentFile={ENVIRONMENT_FILE}\n"
 """What provisioning wrote before the envelope: restored by abandon and rollback."""
 _UNIX_PREFIX = "unix/"
+FLAT_RELEASE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{12}$")
+"""The pre-envelope release directory name, ``<YYYYMMDDTHHMMSSZ>-<sha12>``."""
 _STAGED_HINT = (
     "D is the new configuration, R the old; resolve with `lovspor release reconcile --complete` "
     "(run the cutover) or `--abandon` (restore the previous Caddyfile)"
@@ -207,6 +213,24 @@ class MigrationReport(BaseModel):
     admin: str
     running: str
     previous_caddyfile: Path
+
+
+class RollbackReport(BaseModel):
+    """What the first migration's rollback found and did; the admin is TCP afterwards."""
+
+    model_config = ConfigDict(frozen=True)
+
+    admin_before: str
+    reloaded: bool
+    marker_removed: bool
+    exec_reload_removed: bool
+    admin: str
+
+
+class RetireReport(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    removed: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -537,3 +561,164 @@ def first_migration(
     _install_files(plane, host)
     checkpoint("installed")
     return _finish(plane, host, _cutover(plane, host, checkpoint), checkpoint)
+
+
+def detect_admin(host: MigrationHost) -> str:
+    """The address the running instance answers on: the socket first, then TCP."""
+    failures: list[str] = []
+    for address in (host.socket_admin, host.tcp_admin):
+        try:
+            host.admin_client(address).running_config()
+        except UnobservableError as error:
+            failures.append(error.detail)
+            continue
+        return address
+    raise UnobservableError("admin_unreachable", "; ".join(failures))
+
+
+def _remove_marker(plane: ControlPlane) -> bool:
+    path = plane.releases / MARKER_NAME
+    existed = path.exists()
+    path.unlink(missing_ok=True)
+    return existed
+
+
+def _had_exec_reload(host: MigrationHost) -> bool:
+    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="utf-8")
+
+
+def _restore_files(plane: ControlPlane, host: MigrationHost) -> None:
+    """The reverse of (a): the previous Caddyfile back, the fragment gone, the drop-in as
+    provisioning wrote it, loaded. The backup is consumed, so a later migration starts clean."""
+    if not host.previous_caddyfile.is_file():
+        raise ControlPlaneError(
+            f"{host.previous_caddyfile} is missing: (a) never ran, or it was already rolled back; "
+            "nothing to restore"
+        )
+    host.previous_caddyfile.replace(plane.caddyfile)
+    plane.fragment.unlink(missing_ok=True)
+    plane.next_fragment.unlink(missing_ok=True)
+    atomic_write_text(host.drop_in, PRE_ENVELOPE_DROP_IN, mode=WORLD_READABLE)
+    _daemon_reload(plane.runner)
+
+
+def abandon_first_migration(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
+    """Before (c) — D new, R old on TCP: the file restore, no reload, since R never moved."""
+    had_pair = _had_exec_reload(host)
+    _restore_files(plane, host)
+    return RollbackReport(
+        admin_before=host.tcp_admin,
+        reloaded=False,
+        marker_removed=_remove_marker(plane),
+        exec_reload_removed=had_pair,
+        admin=host.tcp_admin,
+    )
+
+
+def _verify_back_on_tcp(host: MigrationHost) -> None:
+    try:
+        running = config_pair(host.admin_client(host.tcp_admin).running_config())
+    except UnobservableError as error:
+        raise ReloadFailedError(
+            f"after the reload {host.tcp_admin} does not answer: {error.detail}"
+        ) from error
+    if running.release_id is not None:
+        raise ReloadFailedError(
+            f"after the reload Caddy still runs release {running.release_id} on {host.tcp_admin}"
+        )
+    if host.socket.exists():
+        raise ReloadFailedError(f"{host.socket} still exists after the reload back to TCP")
+
+
+def _require_stock_exec_reload(plane: ControlPlane, host: MigrationHost) -> None:
+    done = plane.runner.run(("systemctl", "show", host.unit, "-p", "ExecReload"), {})
+    if done.returncode != 0 or f"--address {host.socket_admin}" in done.stdout:
+        shown = done.stdout.strip() or done.stderr.strip()
+        raise ControlPlaneError(
+            f"systemctl show {host.unit} -p ExecReload still names --address "
+            f"{host.socket_admin} after the drop-in was restored: {shown}"
+        )
+
+
+def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
+    """After (c): the previous Caddyfile delivered explicitly to the socket; then the files."""
+    had_pair = _had_exec_reload(host)
+    argv = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter", "caddyfile")
+    done = plane.runner.run((*argv, "--address", host.socket_admin), {})
+    if done.returncode != 0:
+        failure = done.stderr.strip() or f"exit {done.returncode}"
+        raise ReloadFailedError(
+            f"caddy reload --address {host.socket_admin} of {host.previous_caddyfile} failed: "
+            f"{failure}; the envelope is still served"
+        )
+    _verify_back_on_tcp(host)
+    _restore_files(plane, host)
+    marker_removed = _remove_marker(plane)
+    _require_stock_exec_reload(plane, host)
+    return RollbackReport(
+        admin_before=host.socket_admin,
+        reloaded=True,
+        marker_removed=marker_removed,
+        exec_reload_removed=had_pair,
+        admin=host.tcp_admin,
+    )
+
+
+def rollback_first_migration(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
+    """Back to the pre-envelope host from any point of the first migration.
+
+    Refuses once the marker names a previous release: from the second
+    envelope release on, ``lovspor release rollback`` is the way back.
+    """
+    marker = read_marker(plane.releases)
+    if marker is not None and marker.previous is not None:
+        raise ControlPlaneError(
+            f"the marker names a previous release ({marker.previous[:12]}); that is "
+            "`lovspor release rollback`, not the first migration's"
+        )
+    if detect_admin(host) == host.tcp_admin:
+        return abandon_first_migration(plane, host)
+    return _rollback_after_cutover(plane, host)
+
+
+def _remove_symlink(path: Path) -> list[str]:
+    if path.is_symlink():
+        path.unlink()
+        return [str(path)]
+    if path.exists():
+        raise ControlPlaneError(f"{path} is not a symlink; not removed")
+    return []
+
+
+def _remove_tree(path: Path) -> list[str]:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+        return [str(path)]
+    if path.exists() or path.is_symlink():
+        raise ControlPlaneError(f"{path} is not a directory; not removed")
+    return []
+
+
+def _remove_flat_releases(releases: Path) -> list[str]:
+    """Only the old flat names; never an id-named directory, a build or the marker."""
+    removed: list[str] = []
+    for entry in sorted(releases.iterdir()):
+        if entry.is_dir() and not entry.is_symlink() and FLAT_RELEASE.match(entry.name):
+            shutil.rmtree(entry)
+            removed.append(str(entry))
+    return removed
+
+
+def retire_pre_envelope(plane: ControlPlane, host: MigrationHost) -> RetireReport:
+    """(g): the symlink, the old site root and the flat releases — only once reconciled.
+
+    This deletes the first migration's only way back, which is why it is
+    its own command and refuses on anything but a marked, reconciled host.
+    """
+    if read_marker(plane.releases) is None:
+        raise ControlPlaneError("no marker: the first migration has not finished; nothing retired")
+    live_release(plane)
+    removed = _remove_symlink(host.current_symlink)
+    removed += _remove_tree(host.site_root)
+    removed += _remove_flat_releases(plane.releases)
+    return RetireReport(removed=tuple(removed))

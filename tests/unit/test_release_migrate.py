@@ -15,7 +15,7 @@ import os
 import pwd
 import shutil
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
@@ -36,7 +36,9 @@ from lovspor.release.errors import (
     ControlPlaneError,
     MigrationFailedError,
     MigrationRefusedError,
+    ReloadFailedError,
     UnobservableError,
+    UnreconciledError,
 )
 from lovspor.release.migrate import (
     MIGRATION_STEPS,
@@ -44,13 +46,26 @@ from lovspor.release.migrate import (
     MigrationHost,
     MigrationReport,
     Preflight,
+    RetireReport,
+    RollbackReport,
     SystemOwnership,
+    abandon_first_migration,
+    detect_admin,
     drop_in_text,
     first_migration,
     preflight,
+    retire_pre_envelope,
+    rollback_first_migration,
     socket_path,
 )
-from tests.unit.caddy_fakes import DEFAULT_TCP, FakeAdmin, FakeCaddy, FakeOwnership, toy_adapt
+from tests.unit.caddy_fakes import (
+    DEFAULT_TCP,
+    STOCK_EXEC_RELOAD,
+    FakeAdmin,
+    FakeCaddy,
+    FakeOwnership,
+    toy_adapt,
+)
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
 
 LATER = "2026-01-02T00:00:00Z"
@@ -136,19 +151,25 @@ def _kill_at(step: str):  # type: ignore[no-untyped-def]
     return checkpoint
 
 
-class Sabotaged:
-    """A runner that answers one command with a canned failure and passes the rest through."""
+Answer = Completed | Callable[[Sequence[str], Mapping[str, str]], Completed]
 
-    def __init__(self, inner: FakeCaddy, prefix: tuple[str, ...], answer: Completed) -> None:
+
+class Sabotaged:
+    """A runner that answers one command with a canned result — or a hook's — and passes the
+    rest through."""
+
+    def __init__(self, inner: FakeCaddy, prefix: tuple[str, ...], answer: Answer) -> None:
         self.inner = inner
         self.prefix = prefix
         self.answer = answer
 
     def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
-        if tuple(argv[: len(self.prefix)]) == self.prefix:
+        if tuple(argv[: len(self.prefix)]) != self.prefix:
+            return self.inner.run(argv, env)
+        if isinstance(self.answer, Completed):
             self.inner.calls.append((tuple(argv), dict(env)))
             return self.answer
-        return self.inner.run(argv, env)
+        return self.answer(argv, env)
 
 
 @pytest.fixture(scope="module")
@@ -866,3 +887,388 @@ class TestCrashRows:
 
         assert droplet.caddy.admin_address == droplet.host.socket_admin
         assert situation(read_triple(droplet.plane)) == Situation.reloaded
+
+
+def _rollback_reload(droplet: Droplet) -> tuple[str, ...]:
+    return (
+        "caddy",
+        "reload",
+        "--config",
+        str(droplet.host.previous_caddyfile),
+        "--adapter",
+        "caddyfile",
+        "--address",
+        droplet.host.socket_admin,
+    )
+
+
+def _assert_pre_envelope(droplet: Droplet) -> None:
+    """The host as the fixture built it: old Caddyfile served on TCP, no envelope anywhere."""
+    assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+    assert not droplet.host.previous_caddyfile.exists()
+    assert not droplet.plane.fragment.exists()
+    assert not droplet.plane.next_fragment.exists()
+    assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
+    assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
+    assert droplet.caddy.admin_address == DEFAULT_TCP
+    assert config_pair(droplet.caddy.running_config_at(DEFAULT_TCP)) == droplet.old_pair()
+    assert not droplet.socket_file.exists()
+    assert read_marker(droplet.releases) is None
+    assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
+
+
+class TestDetectAdmin:
+    def test_tcp_before_the_cutover_and_the_socket_after(self, droplet: Droplet) -> None:
+        assert detect_admin(droplet.host) == DEFAULT_TCP
+
+        _migrate(droplet)
+
+        assert detect_admin(droplet.host) == droplet.host.socket_admin
+
+    def test_neither_answering_names_both_addresses(self, droplet: Droplet) -> None:
+        droplet.caddy.admin_up = False
+
+        with pytest.raises(UnobservableError) as caught:
+            detect_admin(droplet.host)
+        assert caught.value.reason == "admin_unreachable"
+        assert caught.value.detail == (
+            f"{droplet.host.socket_admin}: connection refused; connect: no such file or directory"
+        )
+
+
+class TestRollback:
+    def test_before_the_cutover_is_the_file_restore_with_no_reload(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+        assert droplet.caddy.daemon_reloads == 1
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report == RollbackReport(
+            admin_before=DEFAULT_TCP,
+            reloaded=False,
+            marker_removed=False,
+            exec_reload_removed=False,
+            admin=DEFAULT_TCP,
+        )
+        assert not any(argv[:2] == ("caddy", "reload") for argv in droplet.argvs())
+        assert droplet.caddy.reloads == 0
+        assert droplet.caddy.daemon_reloads == 2
+        _assert_pre_envelope(droplet)
+
+    def test_abandon_is_the_same_file_restore(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+
+        report = abandon_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is False and report.admin == DEFAULT_TCP
+        _assert_pre_envelope(droplet)
+
+    def test_before_the_install_there_is_nothing_to_restore(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("staged"))
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_caddyfile} is missing: (a) never ran, or it was already "
+            "rolled back; nothing to restore"
+        )
+        assert droplet.plane.next_fragment.exists()
+
+    @pytest.mark.parametrize(
+        ("step", "marker_removed", "pair_removed"),
+        [("reloaded", False, False), ("exec_reload", False, True), ("marked", True, True)],
+    )
+    def test_after_the_cutover_delivers_the_previous_caddyfile_to_the_socket(
+        self, droplet: Droplet, step: str, marker_removed: bool, pair_removed: bool
+    ) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at(step))
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+        calls_before = len(droplet.caddy.calls)
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report == RollbackReport(
+            admin_before=droplet.host.socket_admin,
+            reloaded=True,
+            marker_removed=marker_removed,
+            exec_reload_removed=pair_removed,
+            admin=DEFAULT_TCP,
+        )
+        reloads = [
+            (argv, env) for argv, env in droplet.caddy.calls[calls_before:] if argv[1] == "reload"
+        ]
+        assert reloads == [(_rollback_reload(droplet), {})]
+        shown = droplet.caddy.run(("systemctl", "show", "caddy", "-p", "ExecReload"), {})
+        assert "--address" not in shown.stdout
+        _assert_pre_envelope(droplet)
+
+    def test_after_a_finished_migration_the_migration_can_be_run_again(
+        self, droplet: Droplet
+    ) -> None:
+        _migrate(droplet)
+
+        rollback_first_migration(droplet.plane, droplet.host)
+        _assert_pre_envelope(droplet)
+        again = _migrate(droplet)
+
+        assert again.active == droplet.a
+        assert live_release(droplet.plane) == droplet.a
+
+    def test_refuses_once_a_second_release_has_happened(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        write_marker(droplet.releases, Marker(active=droplet.b, previous=droplet.a))
+        before = droplet.plane.caddyfile.read_bytes()
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"the marker names a previous release ({droplet.a[:12]}); that is "
+            "`lovspor release rollback`, not the first migration's"
+        )
+        assert droplet.plane.caddyfile.read_bytes() == before
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+
+    def test_refuses_while_nothing_answers(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        droplet.caddy.admin_up = False
+
+        with pytest.raises(UnobservableError):
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+
+    def test_a_refused_reload_back_leaves_the_envelope_served(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        droplet.caddy.fail_reloads = 1
+
+        with pytest.raises(ReloadFailedError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+
+        assert str(caught.value).startswith(
+            f"caddy reload --address {droplet.host.socket_admin} of "
+            f"{droplet.host.previous_caddyfile} failed: Error: sending configuration"
+        )
+        assert str(caught.value).endswith("; the envelope is still served")
+        assert live_release(droplet.plane) == droplet.a
+        assert droplet.host.previous_caddyfile.is_file()
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
+
+    def test_a_silent_reload_failure_names_the_exit_code(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        plane = replace(
+            droplet.plane,
+            runner=Sabotaged(droplet.caddy, ("caddy", "reload"), Completed(9, "", "")),
+        )
+
+        with pytest.raises(ReloadFailedError, match="failed: exit 9;"):
+            rollback_first_migration(plane, droplet.host)
+
+    def test_tcp_not_answering_after_the_reload_back_is_named(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        plane = replace(
+            droplet.plane,
+            runner=Sabotaged(droplet.caddy, ("caddy", "reload"), Completed(0, "", "")),
+        )
+
+        with pytest.raises(ReloadFailedError) as caught:
+            rollback_first_migration(plane, droplet.host)
+        assert str(caught.value) == (
+            "after the reload localhost:2019 does not answer: localhost:2019: connection refused"
+        )
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+
+    def test_a_release_still_served_on_tcp_after_the_reload_back_is_named(
+        self, droplet: Droplet
+    ) -> None:
+        _migrate(droplet)
+        served = droplet.caddy.running_config()
+        assert isinstance(served, dict)
+        served.pop("admin")
+
+        def keep_serving(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            droplet.caddy.load(served)
+            droplet.socket_file.unlink()
+            droplet.caddy.admin_address = DEFAULT_TCP
+            return Completed(0, "", "")
+
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("caddy", "reload"), keep_serving)
+        )
+
+        with pytest.raises(ReloadFailedError) as caught:
+            rollback_first_migration(plane, droplet.host)
+        assert str(caught.value) == (
+            f"after the reload Caddy still runs release {droplet.a} on localhost:2019"
+        )
+
+    def test_a_socket_that_survives_the_reload_back_is_named(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+
+        def leave_the_file(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            done = droplet.caddy.run(argv, env)
+            droplet.socket_file.touch()
+            return done
+
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("caddy", "reload"), leave_the_file)
+        )
+
+        with pytest.raises(ReloadFailedError, match="still exists after the reload back to TCP"):
+            rollback_first_migration(plane, droplet.host)
+
+    def test_a_show_still_naming_the_socket_is_named(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        stale = Completed(
+            0, f"ExecReload={{ argv[]=x --address {droplet.host.socket_admin} }}\n", ""
+        )
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("systemctl", "show"), stale)
+        )
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(plane, droplet.host)
+        assert str(caught.value).startswith(
+            f"systemctl show caddy -p ExecReload still names --address {droplet.host.socket_admin} "
+            "after the drop-in was restored: ExecReload={ argv[]=x"
+        )
+
+    def test_a_failing_show_is_named_too(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        plane = replace(
+            droplet.plane,
+            runner=Sabotaged(droplet.caddy, ("systemctl", "show"), Completed(1, "", "boom")),
+        )
+
+        with pytest.raises(ControlPlaneError, match="restored: boom$"):
+            rollback_first_migration(plane, droplet.host)
+
+    def test_a_marker_left_by_a_crashed_rollback_is_removed_on_the_second_run(
+        self, droplet: Droplet
+    ) -> None:
+        """R back on TCP, the marker still there: the file restore finishes the job."""
+        _migrate(droplet)
+        plane = replace(
+            droplet.plane,
+            runner=Sabotaged(droplet.caddy, ("systemctl", "show"), Completed(1, "", "boom")),
+        )
+        with pytest.raises(ControlPlaneError):
+            rollback_first_migration(plane, droplet.host)
+        assert droplet.caddy.admin_address == DEFAULT_TCP
+        write_marker(droplet.releases, Marker(active=droplet.a, previous=None))
+        droplet.host.previous_caddyfile.write_text(OLD_CADDYFILE, encoding="utf-8")
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.marker_removed is True and report.reloaded is False
+        _assert_pre_envelope(droplet)
+
+
+class TestRetire:
+    def _litter(self, droplet: Droplet) -> dict[str, Path]:
+        www = droplet.host.site_root.parent
+        www.mkdir(parents=True)
+        droplet.host.site_root.mkdir()
+        (droplet.host.site_root / "index.html").write_text("<html>", encoding="utf-8")
+        flat = droplet.releases / "20260908T120000Z-abcdef123456"
+        flat.mkdir()
+        (flat / "lov").mkdir()
+        droplet.host.current_symlink.symlink_to(flat)
+        build = droplet.releases / ".build-running"
+        build.mkdir()
+        (droplet.releases / "20260908T120000Z-not-a-release").mkdir()
+        return {"flat": flat, "build": build}
+
+    def test_removes_the_symlink_the_site_root_and_the_flat_releases(
+        self, droplet: Droplet
+    ) -> None:
+        _migrate(droplet)
+        litter = self._litter(droplet)
+
+        report = retire_pre_envelope(droplet.plane, droplet.host)
+
+        assert report == RetireReport(
+            removed=(
+                str(droplet.host.current_symlink),
+                str(droplet.host.site_root),
+                str(litter["flat"]),
+            )
+        )
+        assert not droplet.host.current_symlink.is_symlink()
+        assert not droplet.host.site_root.exists()
+        assert not litter["flat"].exists()
+        assert litter["build"].is_dir()
+        assert (droplet.releases / "20260908T120000Z-not-a-release").is_dir()
+        assert (droplet.releases / droplet.a).is_dir() and (droplet.releases / droplet.b).is_dir()
+        assert (droplet.releases / MARKER_NAME).is_file()
+        assert live_release(droplet.plane) == droplet.a
+
+    def test_nothing_to_retire_is_an_empty_report(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+
+        assert retire_pre_envelope(droplet.plane, droplet.host) == RetireReport(removed=())
+
+    def test_refuses_without_a_marker(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("exec_reload"))
+        self._litter(droplet)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            retire_pre_envelope(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            "no marker: the first migration has not finished; nothing retired"
+        )
+        assert droplet.host.current_symlink.is_symlink()
+
+    def test_refuses_while_unreconciled_or_unobservable(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        self._litter(droplet)
+        droplet.plane.fragment.write_text(droplet.fragment_of(droplet.b), encoding="utf-8")
+        with pytest.raises(UnreconciledError, match="staged_not_reloaded"):
+            retire_pre_envelope(droplet.plane, droplet.host)
+
+        droplet.caddy.admin_up = False
+        with pytest.raises(UnobservableError):
+            retire_pre_envelope(droplet.plane, droplet.host)
+        assert droplet.host.current_symlink.is_symlink() and droplet.host.site_root.is_dir()
+
+    def test_a_current_that_is_a_real_directory_is_refused_before_anything_goes(
+        self, droplet: Droplet
+    ) -> None:
+        _migrate(droplet)
+        litter = self._litter(droplet)
+        droplet.host.current_symlink.unlink()
+        droplet.host.current_symlink.mkdir()
+
+        with pytest.raises(ControlPlaneError) as caught:
+            retire_pre_envelope(droplet.plane, droplet.host)
+        assert str(caught.value) == f"{droplet.host.current_symlink} is not a symlink; not removed"
+        assert droplet.host.site_root.is_dir() and litter["flat"].is_dir()
+
+    def test_a_site_root_that_is_a_symlink_or_a_file_is_refused(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        litter = self._litter(droplet)
+        shutil.rmtree(droplet.host.site_root)
+        droplet.host.site_root.symlink_to(litter["flat"])
+        with pytest.raises(ControlPlaneError, match="is not a directory; not removed"):
+            retire_pre_envelope(droplet.plane, droplet.host)
+        assert litter["flat"].is_dir()
+
+        droplet.host.site_root.unlink()
+        droplet.host.site_root.write_text("x", encoding="utf-8")
+        with pytest.raises(ControlPlaneError, match="is not a directory; not removed"):
+            retire_pre_envelope(droplet.plane, droplet.host)
+
+    def test_a_flat_named_symlink_in_the_releases_root_is_left_alone(
+        self, droplet: Droplet
+    ) -> None:
+        _migrate(droplet)
+        link = droplet.releases / "20260101T000000Z-0123456789ab"
+        link.symlink_to(droplet.releases / droplet.b)
+
+        report = retire_pre_envelope(droplet.plane, droplet.host)
+
+        assert report.removed == ()
+        assert link.is_symlink() and (droplet.releases / droplet.b).is_dir()
