@@ -395,6 +395,28 @@ class TestTheRecord:
             check_envelope(envelope)
         assert str(caught.value) == "release.json corpus summary names another corpus commit"
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("corpus_commit_time", "2030-01-01T00:00:00+00:00"),
+            ("engine_version", "tampered"),
+            ("documents", 999),
+        ],
+    )
+    def test_every_corpus_summary_field_must_describe_the_manifest_beside_it(
+        self, envelope: Path, field: str, value: str | int
+    ) -> None:
+        """The record's corpus summary is evidence about the adjacent corpus tree."""
+        record = _json(envelope / RECORD_NAME)
+        record["corpus"][field] = value
+        _rewrite(envelope / RECORD_NAME, record)
+
+        with pytest.raises(EnvelopeError, match="release.json corpus summary"):
+            check_envelope(envelope)
+
     def test_must_carry_the_documents_instant(self, envelope: Path) -> None:
         record = _json(envelope / RECORD_NAME)
         record["observed_at"] = "2030-01-01T00:00:00Z"
@@ -403,6 +425,16 @@ class TestTheRecord:
         with pytest.raises(EnvelopeError) as caught:
             check_envelope(envelope)
         assert str(caught.value) == "release.json observed_at is not the capability document's"
+
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    def test_must_carry_the_documents_observer(self, envelope: Path) -> None:
+        """Both observation provenance fields must come from the capability document."""
+        record = _json(envelope / RECORD_NAME)
+        record["observer"] = "drift-timer"
+        _rewrite(envelope / RECORD_NAME, record)
+
+        with pytest.raises(EnvelopeError, match="release.json observer"):
+            check_envelope(envelope)
 
 
 class TestTheTrees:
