@@ -625,14 +625,31 @@ def _restore_files(plane: ControlPlane, host: MigrationHost) -> None:
     _daemon_reload(plane.runner)
 
 
+def _restore_pre_envelope(plane: ControlPlane, host: MigrationHost) -> bool:
+    """M goes before the files, and neither moves without a backup to restore.
+
+    ``_restore_files`` consumes ``Caddyfile.pre-envelope``, the rollback's
+    only source. Removing the marker after it left a crash window whose
+    state has no way out: the marker says a release is live while the
+    backup is gone, so every later rollback hits *nothing to restore* and
+    ``reconcile`` — which ignores the host once a marker exists — dials
+    the socket the reload just closed. The other order's window keeps the
+    backup, and a marker-less host is exactly what ``reconcile`` reads on
+    whichever address answers.
+    """
+    _require_backup(host)
+    removed = _remove_marker(plane)
+    _restore_files(plane, host)
+    return removed
+
+
 def abandon_first_migration(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
     """Before (c) — D new, R old on TCP: the file restore, no reload, since R never moved."""
     had_pair = _had_exec_reload(host)
-    _restore_files(plane, host)
     return RollbackReport(
         admin_before=host.tcp_admin,
         reloaded=False,
-        marker_removed=_remove_marker(plane),
+        marker_removed=_restore_pre_envelope(plane, host),
         exec_reload_removed=had_pair,
         admin=host.tcp_admin,
     )
@@ -663,9 +680,8 @@ def _require_stock_exec_reload(plane: ControlPlane, host: MigrationHost) -> None
         )
 
 
-def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
-    """After (c): the previous Caddyfile delivered explicitly to the socket; then the files."""
-    had_pair = _had_exec_reload(host)
+def _reload_previous(plane: ControlPlane, host: MigrationHost) -> None:
+    """The previous Caddyfile delivered explicitly to the socket; R moves back to TCP with it."""
     argv = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter", "caddyfile")
     done = plane.runner.run((*argv, "--address", host.socket_admin), {})
     if done.returncode != 0:
@@ -674,9 +690,14 @@ def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> Rollbac
             f"caddy reload --address {host.socket_admin} of {host.previous_caddyfile} failed: "
             f"{failure}; the envelope is still served"
         )
+
+
+def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
+    """After (c): the previous Caddyfile delivered explicitly to the socket; then the files."""
+    had_pair = _had_exec_reload(host)
+    _reload_previous(plane, host)
     _verify_back_on_tcp(host)
-    _restore_files(plane, host)
-    marker_removed = _remove_marker(plane)
+    marker_removed = _restore_pre_envelope(plane, host)
     _require_stock_exec_reload(plane, host)
     return RollbackReport(
         admin_before=host.socket_admin,

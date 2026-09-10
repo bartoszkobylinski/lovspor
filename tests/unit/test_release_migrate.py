@@ -20,7 +20,13 @@ import pytest
 from lovspor.release import migrate
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, adapt, config_pair
 from lovspor.release.caddy import validate as validate_caddy
-from lovspor.release.control import Situation, live_release, read_triple, situation
+from lovspor.release.control import (
+    ControlPlane,
+    Situation,
+    live_release,
+    read_triple,
+    situation,
+)
 from lovspor.release.envelope import (
     FRAGMENT_NAME,
     MARKER_NAME,
@@ -1074,25 +1080,97 @@ class TestRollback:
         with pytest.raises(ControlPlaneError, match="restored: boom$"):
             rollback_first_migration(plane, droplet.host)
 
-    def test_a_marker_left_by_a_crashed_rollback_is_removed_on_the_second_run(
-        self, droplet: Droplet
+    def _dying_restore(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The process dies between the marker's removal and the file restore — once.
+
+        Only the first call dies, so the second run is the real recovery
+        rather than a test that undid the fixture's environment with it.
+        """
+        real = migrate._restore_files
+        died: list[str] = []
+
+        def dying(plane: ControlPlane, host: MigrationHost) -> None:
+            if not died:
+                died.append("restoring the files")
+                raise Killed(died[0])
+            real(plane, host)
+
+        monkeypatch.setattr(migrate, "_restore_files", dying)
+
+    def test_a_rollback_that_dies_before_the_restore_leaves_the_backup(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """R back on TCP, the marker still there: the file restore finishes the job."""
+        """`_restore_files` consumes `Caddyfile.pre-envelope`. Removing the marker
+        after it meant a crash between the two left the marker with the backup
+        already gone: every later rollback hit the `nothing to restore` refusal,
+        and `reconcile` — which ignores the host once a marker exists — dialled
+        the socket that reload had just closed. The marker goes first, so the
+        crash window keeps the one file the recovery needs."""
         _migrate(droplet)
-        plane = replace(
-            droplet.plane,
-            runner=Sabotaged(droplet.caddy, ("systemctl", "show"), Completed(1, "", "boom")),
-        )
-        with pytest.raises(ControlPlaneError):
-            rollback_first_migration(plane, droplet.host)
+        self._dying_restore(monkeypatch)
+
+        with pytest.raises(Killed):
+            rollback_first_migration(droplet.plane, droplet.host)
+
+        assert read_marker(droplet.releases) is None
+        assert droplet.host.previous_caddyfile.is_file()
         assert droplet.caddy.admin_address == DEFAULT_TCP
-        write_marker(droplet.releases, Marker(active=droplet.a, previous=None))
-        droplet.host.previous_caddyfile.write_text(OLD_CADDYFILE, encoding="utf-8")
+
+    def test_the_second_run_finishes_what_the_crash_left(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _migrate(droplet)
+        self._dying_restore(monkeypatch)
+        with pytest.raises(Killed):
+            rollback_first_migration(droplet.plane, droplet.host)
 
         report = rollback_first_migration(droplet.plane, droplet.host)
 
-        assert report.marker_removed is True and report.reloaded is False
+        assert report.marker_removed is False and report.reloaded is False
         _assert_pre_envelope(droplet)
+
+    def test_reconcile_reads_the_crashed_rollback_on_the_address_that_answers(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The marker's absence is what routes `reconcile` through the host, and
+        the host is what reaches TCP after the socket closed."""
+        _migrate(droplet)
+        self._dying_restore(monkeypatch)
+        with pytest.raises(Killed):
+            rollback_first_migration(droplet.plane, droplet.host)
+
+        report = reconcile(droplet.plane, "abandon", droplet.host)
+
+        assert report.action == "abandoned" and report.admin == DEFAULT_TCP
+        _assert_pre_envelope(droplet)
+
+    def test_abandon_removes_the_marker_before_the_files_too(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The pre-cutover half has the same window and the same ordering."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+        write_marker(droplet.releases, Marker(active=droplet.a, previous=None))
+        self._dying_restore(monkeypatch)
+
+        with pytest.raises(Killed):
+            abandon_first_migration(droplet.plane, droplet.host)
+
+        assert read_marker(droplet.releases) is None
+        assert droplet.host.previous_caddyfile.is_file()
+
+    def test_a_missing_backup_takes_the_marker_with_nothing(self, droplet: Droplet) -> None:
+        """The refusal comes before the marker moves: an unrestorable host keeps
+        its marker, so nothing reads it as a finished rollback."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+        write_marker(droplet.releases, Marker(active=droplet.a, previous=None))
+        droplet.host.previous_caddyfile.unlink()
+
+        with pytest.raises(ControlPlaneError, match="nothing to restore"):
+            abandon_first_migration(droplet.plane, droplet.host)
+
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
 
 
 class TestRetire:
