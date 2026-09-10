@@ -54,6 +54,7 @@ from lovspor.release.migrate import (
     offline_rollback,
     preflight,
     retire_pre_envelope,
+    retire_preview,
     rollback_first_migration,
 )
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
@@ -341,6 +342,7 @@ class MigrateFlags:
     retire: bool = False
     check: bool = False
     offline: bool = False
+    yes: bool = False
 
 
 @dataclass(frozen=True)
@@ -349,6 +351,7 @@ class Run:
 
     action: MigrateAction
     content_id: str | None = None
+    yes: bool = False
 
 
 def _migrate_action(content_id: str | None, flags: MigrateFlags) -> MigrateAction:
@@ -363,6 +366,8 @@ def _migrate_action(content_id: str | None, flags: MigrateFlags) -> MigrateActio
         )
     if flags.offline and not flags.rollback:
         raise typer.BadParameter("--offline is the rollback's last resort; it needs --rollback")
+    if flags.yes and not flags.retire:
+        raise typer.BadParameter("--yes confirms --retire; no other run asks")
     if content_id is not None and not is_release_id(content_id):
         raise typer.BadParameter(f"not a release_content_id: {content_id}")
     if flags.rollback:
@@ -400,6 +405,23 @@ def _retired(report: RetireReport) -> tuple[str, ...]:
     return (f"retired {len(report.removed)}: {', '.join(report.removed) or '-'}",)
 
 
+def _retire(plane: ControlPlane, host: MigrationHost, confirmed: bool) -> tuple[str, ...]:
+    """The paths first, then ``--yes``.
+
+    The confirmation is a flag and never a prompt: this deletes
+    production directories and the rollback's only source, and a run with
+    no terminal — the wrapper under systemd, an ssh one-liner — must fail
+    closed rather than read a yes off a pipe that is not there.
+    """
+    if confirmed:
+        return _retired(retire_pre_envelope(plane, host))
+    listed = "\n".join(f"  {path}" for path in retire_preview(plane, host).removed)
+    raise ReleaseError(
+        "--retire permanently removes these paths, the last of them the only way back to the "
+        f"pre-envelope site:\n{listed or '  (nothing)'}\nre-run with --yes to confirm"
+    )
+
+
 def _migrate_lines(plane: ControlPlane, host: MigrationHost, run: Run) -> tuple[str, ...]:
     """One run, one report; ``--check`` is the only one that moves nothing."""
     if run.action == "check":
@@ -409,7 +431,7 @@ def _migrate_lines(plane: ControlPlane, host: MigrationHost, run: Run) -> tuple[
     if run.action == "offline":
         return _rolled_back(offline_rollback(plane, host))
     if run.action == "retire":
-        return _retired(retire_pre_envelope(plane, host))
+        return _retire(plane, host, run.yes)
     if run.content_id is None:
         raise typer.BadParameter("migrate needs a release_content_id, --rollback or --retire")
     return _migrated(first_migration(plane, host, run.content_id))
@@ -428,6 +450,9 @@ def migrate_command(
     ] = False,
     check: Annotated[
         bool, typer.Option("--check", help="The preflight alone; nothing on the host moves.")
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Confirm --retire, having read the paths it lists.")
     ] = False,
     offline: Annotated[
         bool,
@@ -450,13 +475,14 @@ def migrate_command(
 
     ``--retire`` is never performed by a migration: it deletes the
     previous Caddyfile's world, the only way back, so the operator asks
-    for it explicitly once the cutover is verified (ADR-0014 Migration).
+    for it explicitly once the cutover is verified (ADR-0014 Migration) —
+    and again with ``--yes``, having read the paths the first run lists.
     ``--rollback --offline`` is the last resort when Caddy answers on
     neither address: the files go back and the unit is restarted, with
     nothing read first.
     """
-    flags = MigrateFlags(rollback, retire, check, offline)
-    run = Run(_migrate_action(content_id, flags), content_id)
+    flags = MigrateFlags(rollback, retire, check, offline, yes)
+    run = Run(_migrate_action(content_id, flags), content_id, yes)
     plane = _plane(releases, caddyfile, fragment, admin)
     options = HostOptions(tcp_admin, caddyfile_source, drop_in, runtime_dir, release_group)
     with _refusals():

@@ -125,7 +125,7 @@ class TestWrapper:
         assert "--prune) control prune" in code
         assert '--ref) [ -n "${2:-}" ] || die' in code
         assert "--migrate-rollback) control migrate --rollback" in code
-        assert "--retire) control migrate --retire" in code
+        assert '--retire) shift; control migrate --retire "$@"' in code
         assert "--migrate)" in code
 
     def test_the_first_migration_builds_without_asking_what_is_live(self) -> None:
@@ -160,6 +160,15 @@ class TestWrapper:
         first migration, so it is its own run and never part of one."""
         assert _dispatch("--migrate-rollback").stdout == "control migrate --rollback\n"
         assert _dispatch("--retire").stdout == "control migrate --retire\n"
+        assert _dispatch("--retire", "--yes").stdout == "control migrate --retire --yes\n"
+
+    def test_the_retire_confirmation_reaches_the_command_that_asks_for_it(self) -> None:
+        """`--retire` lists the paths and removes nothing until `--yes` is given,
+        so the wrapper must forward the flag rather than swallow or supply it."""
+        code = _code(_SCRIPT.read_text(encoding="utf-8"))
+
+        assert "control migrate --retire --yes" not in code
+        assert "--retire [--yes]" in _SCRIPT.read_text(encoding="utf-8")
 
     def test_the_ordinary_entry_points_still_route_where_they_did(self) -> None:
         assert _dispatch().stdout == "publish \n"
@@ -299,6 +308,10 @@ class TestRunbook:
         )
         assert "deliberately **not** part of the migration" in text
         assert "no way back afterwards" in text
+        assert "publish-release.sh --retire --yes" in text
+        assert text.index("publish-release.sh --retire\n") < text.index(
+            "publish-release.sh --retire --yes"
+        )
 
     def test_the_readme_moves_the_operators_health_check_off_tcp(self) -> None:
         text = _README.read_text(encoding="utf-8")
@@ -364,6 +377,8 @@ class TestRunbook:
             "uv run lovspor release migrate --check",
             "uv run lovspor release migrate --rollback",
             "uv run lovspor release migrate --retire",
+            "uv run lovspor release migrate --retire --yes",
+            "uv run lovspor release migrate --rollback --offline",
             "LOVSPOR_RELEASE_GROUP",
             "LOVSPOR_CADDY_ADMIN_TCP",
         ):

@@ -157,7 +157,9 @@ uv run lovspor release prune                     # only when reconciled; never R
 uv run lovspor release migrate <id>              # the FIRST envelope: install the Caddyfile and cut over
 uv run lovspor release migrate --check           # that migration's preflight alone; nothing moves
 uv run lovspor release migrate --rollback        # back to the pre-envelope Caddyfile and TCP admin
-uv run lovspor release migrate --retire          # remove the pre-envelope trees; no way back after
+uv run lovspor release migrate --rollback --offline  # the same, dialling nothing: files back, unit restarted
+uv run lovspor release migrate --retire          # list the pre-envelope paths; removes nothing
+uv run lovspor release migrate --retire --yes    # remove them; no way back after
 uv run lovspor publish-check <envelope>          # the final check: both trees, cross-tree, ids
 ```
 
@@ -176,8 +178,12 @@ explicitly to the old address rather than through `systemctl reload caddy`
 `--drop-in`/`LOVSPOR_CADDY_DROP_IN`, `--runtime-dir`/`LOVSPOR_CADDY_RUNTIME_DIR`
 and `--release-group`/`LOVSPOR_RELEASE_GROUP` beside those four. `--check`,
 `--rollback` and `--retire` exclude each other and the release id; `--retire`
-deletes the only way back from the cutover, so it is always a separate,
-later run. The droplet procedure, step by step, is
+deletes the only way back from the cutover — the pre-envelope Caddyfile last of
+all — so it is always a separate, later run, and it lists the paths and removes
+nothing until it is repeated with `--yes` (a flag, never a prompt: an
+unattended run fails closed). `--rollback --offline` is the last resort for a
+box whose Caddy answers on neither address: it dials nothing, restores the
+files and restarts the unit. The droplet procedure, step by step, is
 [`deploy/digitalocean/README.md` § First migration](../deploy/digitalocean/README.md#first-migration-once-on-the-existing-droplet).
 
 ## Observatory: registering a capture source (ADR-0010)

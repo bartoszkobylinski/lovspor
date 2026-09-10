@@ -33,7 +33,7 @@
 #   publish-release.sh --prune
 #   publish-release.sh --migrate [--ref <sha>]   the FIRST envelope: build, then cut over
 #   publish-release.sh --migrate-rollback    back to the pre-envelope Caddyfile and TCP admin
-#   publish-release.sh --retire              remove the pre-envelope trees; no way back after
+#   publish-release.sh --retire [--yes]     list what retiring removes; --yes to do it
 #
 # Exit 0 on a switch or on "already live"; non-zero leaves the live release
 # exactly as it was (a reload failure puts the previous fragment back).
@@ -135,8 +135,8 @@ case "${1:-}" in
 		esac
 		;;
 	--migrate-rollback) control migrate --rollback ;;
-	--retire) control migrate --retire ;;
+	--retire) shift; control migrate --retire "$@" ;;
 	--ref) [ -n "${2:-}" ] || die "--ref needs a commit"; publish "$2" ;;
 	"") publish ;;
-	*) die "usage: $0 [--ref <commit> | --rollback | --reconcile [--complete|--abandon] | --prune | --migrate [--ref <commit>] | --migrate-rollback | --retire]" ;;
+	*) die "usage: $0 [--ref <commit> | --rollback | --reconcile [--complete|--abandon] | --prune | --migrate [--ref <commit>] | --migrate-rollback | --retire [--yes]]" ;;
 esac

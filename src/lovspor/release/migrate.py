@@ -834,6 +834,17 @@ def _require_retirable(plane: ControlPlane) -> None:
     live_release(plane)
 
 
+def retire_preview(plane: ControlPlane, host: MigrationHost) -> RetireReport:
+    """What ``retire_pre_envelope`` would remove, behind the same preconditions.
+
+    The operator's confirmation is shown the paths, and the paths come
+    from the function that removes them, so the two cannot drift.
+    """
+    _require_releases_outside(plane, host)
+    _require_retirable(plane)
+    return RetireReport(removed=retire_targets(plane, host))
+
+
 def retire_pre_envelope(plane: ControlPlane, host: MigrationHost) -> RetireReport:
     """(g): the symlink, the old site root, the flat releases, the way back — once reconciled.
 

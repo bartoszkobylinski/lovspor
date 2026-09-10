@@ -462,19 +462,33 @@ sudo systemctl enable --now lovspor-site-drift.timer
 
 ### 8. Retire the pre-envelope layout — separately, and last
 
-`--retire` removes `/var/www/lovspor-current`, `/var/www/lovspor` and the old
-flat release directories. It refuses unless the host is reconciled and the marker
-exists, and it is deliberately **not** part of the migration: until it is run,
-step 9's rollback is still a working way back to the old site. Run it only after
-steps 6 and 7 have passed, and say out loud that there is no way back afterwards
-except a new envelope release.
+`--retire` removes `/var/www/lovspor-current`, `/var/www/lovspor`, the old flat
+release directories and — last, once every one of those is gone —
+`/etc/caddy/Caddyfile.pre-envelope`, the rollback's only source. It refuses
+unless the host is reconciled and the marker exists, and it is
+deliberately **not** part of the migration: until it is run, step 9's rollback
+is still a working way back to the old site. Run it only after steps 6 and 7
+have passed, and say out loud that there is no way back afterwards except a new
+envelope release.
+
+Run it once without `--yes`. That removes nothing: it prints the exact paths and
+exits 1. Read them, then re-run with `--yes`.
 
 ```bash
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --retire
-ls -la /var/www/
+# read the list, then:
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --retire --yes
+ls -la /var/www/ /etc/caddy/
 ```
 
+The confirmation is a flag, never a prompt: this runs unattended often enough
+that a missing `--yes` must fail closed rather than depend on a terminal.
+
 ### 9. Rollback, at any point before step 8
+
+Once step 8 has run there is no way back: it removes
+`/etc/caddy/Caddyfile.pre-envelope` with everything that Caddyfile serves, and
+`--migrate-rollback` refuses the moment that file is absent.
 
 Before the cutover's reload succeeded, the way back is the file restore —
 `publish-release.sh --reconcile --abandon`, or `--migrate-rollback`, which does

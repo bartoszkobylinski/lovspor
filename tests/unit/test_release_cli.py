@@ -488,14 +488,53 @@ class TestMigrate:
         assert "precondition Caddy admin reachable unmet" in result.output
         assert droplet.host.previous_caddyfile.is_file()
 
-    def test_retire_removes_the_pre_envelope_layout(self, droplet: Droplet) -> None:
-        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+    def _litter(self, droplet: Droplet) -> Path:
         droplet.host.site_root.mkdir(parents=True)
         flat = droplet.releases / "20260908T120000Z-abcdef123456"
         flat.mkdir()
         droplet.host.current_symlink.symlink_to(flat)
+        return flat
+
+    def test_retire_without_yes_lists_every_path_and_removes_none(self, droplet: Droplet) -> None:
+        """`--retire` deletes production directories and the rollback's only
+        source. The confirmation is a flag, never a prompt: a non-tty run — the
+        wrapper under systemd, an ssh one-liner — must fail closed, not read a
+        yes off a pipe that is not there."""
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        flat = self._litter(droplet)
 
         result = runner.invoke(app, ["release", "migrate", "--retire"])
+
+        assert result.exit_code == 1
+        for path in (
+            droplet.host.current_symlink,
+            droplet.host.site_root,
+            flat,
+            droplet.host.previous_caddyfile,
+        ):
+            assert f"  {path}" in result.output, path
+        assert "re-run with --yes to confirm" in result.output
+        assert droplet.host.current_symlink.is_symlink()
+        assert droplet.host.site_root.is_dir()
+        assert flat.is_dir()
+        assert droplet.host.previous_caddyfile.is_file()
+        assert read_marker(droplet.plane.releases) is not None
+
+    def test_retire_with_nothing_left_still_asks(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        assert runner.invoke(app, ["release", "migrate", "--retire", "--yes"]).exit_code == 0
+
+        result = runner.invoke(app, ["release", "migrate", "--retire"])
+
+        assert result.exit_code == 1
+        assert "(nothing)" in result.output
+        assert "re-run with --yes to confirm" in result.output
+
+    def test_retire_removes_the_pre_envelope_layout(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        flat = self._litter(droplet)
+
+        result = runner.invoke(app, ["release", "migrate", "--retire", "--yes"])
 
         assert result.exit_code == 0, result.output
         assert result.stdout == (
@@ -510,8 +549,8 @@ class TestMigrate:
     def test_retire_with_the_trees_gone_still_removes_the_way_back(self, droplet: Droplet) -> None:
         assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
 
-        first = runner.invoke(app, ["release", "migrate", "--retire"])
-        second = runner.invoke(app, ["release", "migrate", "--retire"])
+        first = runner.invoke(app, ["release", "migrate", "--retire", "--yes"])
+        second = runner.invoke(app, ["release", "migrate", "--retire", "--yes"])
 
         assert first.exit_code == 0, first.output
         assert first.stdout == f"retired 1: {droplet.host.previous_caddyfile}\n"
@@ -519,10 +558,14 @@ class TestMigrate:
         assert second.stdout == "retired 0: -\n"
 
     def test_retire_before_the_marker_exits_one(self, droplet: Droplet) -> None:
-        result = runner.invoke(app, ["release", "migrate", "--retire"])
+        confirmed = runner.invoke(app, ["release", "migrate", "--retire", "--yes"])
+        asked = runner.invoke(app, ["release", "migrate", "--retire"])
 
-        assert result.exit_code == 1
-        assert "release refused: no marker: the first migration has not finished" in result.output
+        for result in (confirmed, asked):
+            assert result.exit_code == 1
+            assert (
+                "release refused: no marker: the first migration has not finished"
+            ) in result.output
 
     @pytest.mark.parametrize(
         ("args", "phrase"),
@@ -535,6 +578,8 @@ class TestMigrate:
             (["--offline"], "--offline is the rollback's last resort"),
             (["--offline", "--retire"], "--offline is the rollback's last resort"),
             (["--offline", "--check"], "--offline is the rollback's last resort"),
+            (["--yes"], "--yes confirms --retire"),
+            (["--yes", "--rollback"], "--yes confirms --retire"),
             ([], "migrate needs a release_content_id"),
         ],
     )
@@ -561,7 +606,7 @@ class TestMigrate:
 
         assert isinstance(params["content_id"], click.Argument)
         assert not params["content_id"].required
-        for flag in ("rollback", "retire", "check", "offline"):
+        for flag in ("rollback", "retire", "check", "offline", "yes"):
             assert isinstance(params[flag], click.Option)
             assert params[flag].is_flag, flag
         for name, envvar, default in (
