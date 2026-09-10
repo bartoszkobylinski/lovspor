@@ -25,6 +25,8 @@ from tests.unit.caddy_fakes import (
 )
 
 SITE = "lovspor.test {\n\thandle {\n\t\troot * /srv/site\n\t\tfile_server\n\t}\n}\n"
+UNKNOWN_OPTION = "{\n\temail x@y\n}\n"
+"""A Caddyfile the toy adapter refuses, as ``caddy validate`` would."""
 
 
 class Box:
@@ -276,6 +278,34 @@ class TestSystemctl:
         assert loaded.returncode == 0
         assert box.caddy.reloads == 3
 
+    def test_restart_loads_the_file_on_disk_whole_and_needs_no_admin_endpoint(
+        self, box: Box
+    ) -> None:
+        """The offline rollback's last step: a restart reads the Caddyfile itself,
+        so it works on a box whose admin endpoint answers nowhere."""
+        box.reload(box.new, DEFAULT_TCP)
+        box.caddy.admin_up = False
+        box.caddyfile.write_text(SITE, encoding="utf-8")
+
+        done = box.caddy.run(("systemctl", "restart", "caddy"), {})
+
+        assert done.returncode == 0
+        assert box.caddy.restarts == 1
+        assert box.caddy.admin_up is True
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert not box.socket_file.exists()
+
+    def test_a_restart_of_a_caddyfile_that_does_not_adapt_fails(self, box: Box) -> None:
+        box.caddyfile.write_text(UNKNOWN_OPTION, encoding="utf-8")
+
+        done = box.caddy.run(("systemctl", "restart", "caddy"), {})
+
+        assert done.returncode == 1
+        assert done.stderr.startswith("Job for caddy.service failed")
+        assert box.caddy.restarts == 0
+
     def test_an_unknown_command_is_an_assertion(self, box: Box) -> None:
         with pytest.raises(AssertionError, match="unexpected command"):
-            box.caddy.run(("systemctl", "restart", "caddy"), {})
+            box.caddy.run(("systemctl", "isolate", "rescue.target"), {})
+        with pytest.raises(AssertionError, match="unexpected command"):
+            box.caddy.run(("journalctl", "-u", "caddy"), {})

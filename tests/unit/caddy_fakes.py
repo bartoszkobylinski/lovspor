@@ -246,6 +246,7 @@ class FakeCaddy:
         self.knows_mode_suffix = True
         self.calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
         self.reloads = 0
+        self.restarts = 0
         self.daemon_reloads = 0
         self.exec_reload = _exec_reload_of(drop_in)
 
@@ -259,13 +260,21 @@ class FakeCaddy:
                 return Completed(done.returncode, "", done.stderr)
             case ["caddy", "reload", "--config", path, "--adapter", "caddyfile", "--address", to]:
                 return self._reload(Path(path), env, to)
-            case ["systemctl", "reload", "caddy"]:
+            case ["systemctl", *rest]:
+                return self._systemctl(rest, argv)
+        raise AssertionError(f"unexpected command: {argv}")
+
+    def _systemctl(self, words: list[str], argv: Sequence[str]) -> Completed:
+        match words:
+            case ["reload", "caddy"]:
                 return self._systemctl_reload()
-            case ["systemctl", "daemon-reload"]:
+            case ["restart", _]:
+                return self._systemctl_restart()
+            case ["daemon-reload"]:
                 self.daemon_reloads += 1
                 self.exec_reload = _exec_reload_of(self.drop_in)
                 return Completed(0, "", "")
-            case ["systemctl", "show", _, "-p", "ExecReload"]:
+            case ["show", _, "-p", "ExecReload"]:
                 return Completed(0, self._show_exec_reload(), "")
         raise AssertionError(f"unexpected command: {argv}")
 
@@ -289,6 +298,19 @@ class FakeCaddy:
                 1, "", f"Error: adapting config: parsing 'admin': invalid address '{listen}'"
             )
         return Completed(0, json.dumps(config), "")
+
+    def _systemctl_restart(self) -> Completed:
+        """The unit restarted: the composed Caddyfile loaded whole, the admin endpoint with it.
+
+        Unlike a reload this needs no reachable admin endpoint, which is
+        why it is the offline rollback's last step.
+        """
+        done = self._adapt(self.caddyfile, {})
+        if done.returncode != 0 or self._apply(json.loads(done.stdout)) is not None:
+            return Completed(1, "", _JOB_FAILED)
+        self.admin_up = True
+        self.restarts += 1
+        return Completed(0, "", "")
 
     def _systemctl_reload(self) -> Completed:
         """The unit's ``ExecReload=`` line: the composed file, delivered where the line says."""

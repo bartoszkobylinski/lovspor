@@ -489,10 +489,46 @@ systemctl show caddy -p ExecReload                      # back to the stock line
 
 It delivers `/etc/caddy/Caddyfile.pre-envelope` explicitly to the socket — the
 previous Caddyfile has no global options block, so the stock reload line would
-derive TCP and reach nothing — then puts the files back, removes the marker and
-the `ExecReload=` pair, and leaves the admin endpoint on TCP. It refuses once a
-second envelope release has happened (the marker has a `previous`): that is
-`publish-release.sh --rollback`, the ordinary one.
+derive TCP and reach nothing — then removes the marker, puts the files back and
+the `ExecReload=` pair with them, and leaves the admin endpoint on TCP. It
+refuses once a second envelope release has happened (the marker has a
+`previous`): that is `publish-release.sh --rollback`, the ordinary one. It also
+refuses the moment `/etc/caddy/Caddyfile.pre-envelope` is gone — after step 8
+there is no way back to the old site, only a new envelope release.
+
+#### Last resort: Caddy answers on neither address
+
+Every command above reads Caddy's running configuration first, so all of them
+refuse with `precondition Caddy admin reachable unmet` (exit 3) on a box that
+will not load the configuration on disk — no socket, and nothing on TCP either.
+That is the state with the fewest ways out, so it has an explicit one:
+
+```bash
+sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --rollback --offline
+```
+
+It dials nothing. It removes the marker, restores `/etc/caddy/Caddyfile` from
+`/etc/caddy/Caddyfile.pre-envelope`, puts the pre-envelope drop-in back and runs
+`systemctl restart caddy`, which loads the file on disk whole. Then verify by
+hand — it reports what it did, it does not observe the result:
+
+```bash
+systemctl status caddy --no-pager | head -5
+curl -fsS localhost:2019/config/ | head -c 100; echo    # TCP answers again
+curl -fsS https://lovspor.no/ | head -c 200; echo
+```
+
+If the CLI itself is what is broken — a bad `uv sync`, a checkout mid-pull —
+the same two files, by hand:
+
+```bash
+sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile && sudo systemctl restart caddy
+```
+
+That leaves the marker and the release fragment behind, so afterwards run
+`lovspor release migrate --rollback --offline` (or delete
+`/var/www/lovspor-releases/ACTIVE`) before attempting the migration again — a
+marker with the pre-envelope Caddyfile serving is a state `migrate` refuses.
 
 ## Probe credential rotation
 

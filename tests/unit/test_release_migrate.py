@@ -45,6 +45,7 @@ from lovspor.release.errors import (
 )
 from lovspor.release.migrate import (
     MIGRATION_STEPS,
+    OFFLINE_ADMIN,
     PRE_ENVELOPE_DROP_IN,
     MigrationHost,
     MigrationReport,
@@ -57,6 +58,7 @@ from lovspor.release.migrate import (
     detect_admin,
     drop_in_text,
     first_migration,
+    offline_rollback,
     preflight,
     retire_pre_envelope,
     rollback_first_migration,
@@ -1171,6 +1173,78 @@ class TestRollback:
             abandon_first_migration(droplet.plane, droplet.host)
 
         assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+
+
+class TestOfflineRollback:
+    """The last resort: Caddy answers on neither address, so nothing is dialled."""
+
+    def test_restores_the_files_and_restarts_the_unit(self, droplet: Droplet) -> None:
+        """`rollback_first_migration` dials `detect_admin` first, so it raises
+        `UnobservableError` in exactly the state an operator most needs a way
+        back — a box that will not load the configuration on disk. This path
+        skips the dial: files back, unit restarted, endpoint on TCP again."""
+        _migrate(droplet)
+        droplet.caddy.admin_up = False
+        with pytest.raises(UnobservableError):
+            detect_admin(droplet.host)
+        calls_before = len(droplet.caddy.calls)
+
+        report = offline_rollback(droplet.plane, droplet.host)
+
+        assert report == RollbackReport(
+            admin_before=OFFLINE_ADMIN,
+            reloaded=False,
+            marker_removed=True,
+            exec_reload_removed=True,
+            admin=DEFAULT_TCP,
+            restarted="caddy",
+        )
+        assert droplet.caddy.restarts == 1
+        after = [argv for argv, _ in droplet.caddy.calls[calls_before:]]
+        assert ("systemctl", "restart", "caddy") in after
+        assert not any(argv[:2] == ("caddy", "reload") for argv in after)
+        _assert_pre_envelope(droplet)
+
+    def test_before_the_cutover_it_is_the_same_restore(self, droplet: Droplet) -> None:
+        """The crash window of (a) is where a box refuses to start at all."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+        droplet.caddy.admin_up = False
+
+        report = offline_rollback(droplet.plane, droplet.host)
+
+        assert report.marker_removed is False and report.restarted == "caddy"
+        _assert_pre_envelope(droplet)
+
+    def test_refuses_without_the_backup(self, droplet: Droplet) -> None:
+        with pytest.raises(ControlPlaneError, match="nothing to restore"):
+            offline_rollback(droplet.plane, droplet.host)
+        assert not droplet.plane.fragment.exists()
+
+    def test_a_failing_restart_is_named_after_the_files_are_back(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        plane = replace(
+            droplet.plane,
+            runner=Sabotaged(
+                droplet.caddy, ("systemctl", "restart"), Completed(1, "", "Job for caddy failed")
+            ),
+        )
+
+        with pytest.raises(ControlPlaneError) as caught:
+            offline_rollback(plane, droplet.host)
+        assert str(caught.value) == "systemctl restart caddy failed: Job for caddy failed"
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert read_marker(droplet.releases) is None
+
+    def test_a_silent_restart_failure_names_the_exit_code(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        plane = replace(
+            droplet.plane,
+            runner=Sabotaged(droplet.caddy, ("systemctl", "restart"), Completed(4, "", "")),
+        )
+
+        with pytest.raises(ControlPlaneError, match="restart caddy failed: exit 4$"):
+            offline_rollback(plane, droplet.host)
 
 
 class TestRetire:

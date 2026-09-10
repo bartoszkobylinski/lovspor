@@ -114,6 +114,8 @@ ENVIRONMENT_FILE = Path("/etc/default/caddy-lovspor")
 CADDY_USER = "caddy"
 PREVIOUS_SUFFIX = ".pre-envelope"
 """The previous Caddyfile is kept beside the new one: the rollback's source."""
+OFFLINE_ADMIN = "offline"
+"""What the offline rollback reports it came *from*: nothing answered, so nothing was read."""
 SOCKET_MODE = 0o660
 RUNTIME_DIR_MODE = 0o2770
 PRE_ENVELOPE_DROP_IN = f"[Service]\nEnvironmentFile={ENVIRONMENT_FILE}\n"
@@ -226,6 +228,8 @@ class RollbackReport(BaseModel):
     marker_removed: bool
     exec_reload_removed: bool
     admin: str
+    restarted: str | None = None
+    """The unit restarted, when the way back was the offline one; no reload happened."""
 
 
 class RetireReport(BaseModel):
@@ -705,6 +709,37 @@ def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> Rollbac
         marker_removed=marker_removed,
         exec_reload_removed=had_pair,
         admin=host.tcp_admin,
+    )
+
+
+def _systemctl_restart(plane: ControlPlane, host: MigrationHost) -> None:
+    """The load that needs no reachable admin endpoint: the unit reads the file on disk."""
+    done = plane.runner.run(("systemctl", "restart", host.unit), {})
+    if done.returncode != 0:
+        failure = done.stderr.strip() or f"exit {done.returncode}"
+        raise ControlPlaneError(f"systemctl restart {host.unit} failed: {failure}")
+
+
+def offline_rollback(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
+    """The last resort: put the files back and restart, without dialling anything.
+
+    Every other way back reads the running configuration first, which is
+    unanswerable in the one state that most needs a way back — a box
+    whose Caddyfile Caddy will not load, so neither the socket nor TCP
+    exists. Nothing here is observed, so nothing here can be blocked by
+    an observation: the previous Caddyfile is restored and the unit is
+    restarted, which loads it whole. Verify afterwards, by hand.
+    """
+    had_pair = _had_exec_reload(host)
+    marker_removed = _restore_pre_envelope(plane, host)
+    _systemctl_restart(plane, host)
+    return RollbackReport(
+        admin_before=OFFLINE_ADMIN,
+        reloaded=False,
+        marker_removed=marker_removed,
+        exec_reload_removed=had_pair,
+        admin=host.tcp_admin,
+        restarted=host.unit,
     )
 
 

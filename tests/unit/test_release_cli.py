@@ -460,6 +460,34 @@ class TestMigrate:
         assert droplet.caddy.reloads == 0
         assert not droplet.plane.fragment.exists()
 
+    def test_offline_rollback_restores_the_files_with_caddy_dead(self, droplet: Droplet) -> None:
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        droplet.caddy.admin_up = False
+
+        result = runner.invoke(app, ["release", "migrate", "--rollback", "--offline"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines() == [
+            "rolled back from offline to localhost:2019; reloaded no",
+            "marker removed yes, ExecReload pair removed yes",
+            "restarted caddy",
+        ]
+        assert read_marker(droplet.plane.releases) is None
+        assert droplet.caddy.restarts == 1
+
+    def test_the_dialling_rollback_exits_three_when_nothing_answers(self, droplet: Droplet) -> None:
+        """The state `--offline` exists for: the ordinary rollback reads the
+        running configuration first and refuses in the one moment the operator
+        has no other way back."""
+        assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        droplet.caddy.admin_up = False
+
+        result = runner.invoke(app, ["release", "migrate", "--rollback"])
+
+        assert result.exit_code == 3
+        assert "precondition Caddy admin reachable unmet" in result.output
+        assert droplet.host.previous_caddyfile.is_file()
+
     def test_retire_removes_the_pre_envelope_layout(self, droplet: Droplet) -> None:
         assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
         droplet.host.site_root.mkdir(parents=True)
@@ -504,6 +532,9 @@ class TestMigrate:
             (["--retire", "ID"], "--rollback and --retire take no release_content_id"),
             (["--check", "--rollback"], "--check is the migration's preflight"),
             ([".build-x"], "not a release_content_id: .build-x"),
+            (["--offline"], "--offline is the rollback's last resort"),
+            (["--offline", "--retire"], "--offline is the rollback's last resort"),
+            (["--offline", "--check"], "--offline is the rollback's last resort"),
             ([], "migrate needs a release_content_id"),
         ],
     )
@@ -530,7 +561,7 @@ class TestMigrate:
 
         assert isinstance(params["content_id"], click.Argument)
         assert not params["content_id"].required
-        for flag in ("rollback", "retire", "check"):
+        for flag in ("rollback", "retire", "check", "offline"):
             assert isinstance(params[flag], click.Option)
             assert params[flag].is_flag, flag
         for name, envvar, default in (

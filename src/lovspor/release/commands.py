@@ -51,6 +51,7 @@ from lovspor.release.migrate import (
     RetireReport,
     RollbackReport,
     first_migration,
+    offline_rollback,
     preflight,
     retire_pre_envelope,
     rollback_first_migration,
@@ -329,28 +330,46 @@ def reconcile_command(
     typer.echo(f"live: {report.live or NOTHING_LIVE}")
 
 
-MigrateAction = Literal["migrate", "check", "rollback", "retire"]
+MigrateAction = Literal["migrate", "check", "rollback", "offline", "retire"]
 
 
-def _migrate_action(
-    content_id: str | None, rollback: bool, retire: bool, check: bool
-) -> MigrateAction:
-    """Which of the four runs the operator asked for; two of them are never combined."""
-    if rollback and retire:
+@dataclass(frozen=True)
+class MigrateFlags:
+    """The migrate command's flags, so choosing the run is one argument, not five."""
+
+    rollback: bool = False
+    retire: bool = False
+    check: bool = False
+    offline: bool = False
+
+
+@dataclass(frozen=True)
+class Run:
+    """One run of ``migrate``: which one, on what, and whether it was confirmed."""
+
+    action: MigrateAction
+    content_id: str | None = None
+
+
+def _migrate_action(content_id: str | None, flags: MigrateFlags) -> MigrateAction:
+    """Which of the runs the operator asked for; none of them are ever combined."""
+    if flags.rollback and flags.retire:
         raise typer.BadParameter("--rollback and --retire exclude each other")
-    if content_id is not None and (rollback or retire):
+    if content_id is not None and (flags.rollback or flags.retire):
         raise typer.BadParameter("--rollback and --retire take no release_content_id")
-    if check and (rollback or retire):
+    if flags.check and (flags.rollback or flags.retire):
         raise typer.BadParameter(
             "--check is the migration's preflight; it excludes --rollback and --retire"
         )
+    if flags.offline and not flags.rollback:
+        raise typer.BadParameter("--offline is the rollback's last resort; it needs --rollback")
     if content_id is not None and not is_release_id(content_id):
         raise typer.BadParameter(f"not a release_content_id: {content_id}")
-    if rollback:
-        return "rollback"
-    if retire:
+    if flags.rollback:
+        return "offline" if flags.offline else "rollback"
+    if flags.retire:
         return "retire"
-    return "check" if check else "migrate"
+    return "check" if flags.check else "migrate"
 
 
 def _done(happened: bool) -> str:
@@ -366,31 +385,34 @@ def _migrated(report: MigrationReport) -> tuple[str, ...]:
 
 
 def _rolled_back(report: RollbackReport) -> tuple[str, ...]:
-    return (
+    lines = (
         f"rolled back from {report.admin_before} to {report.admin}; "
         f"reloaded {_done(report.reloaded)}",
         f"marker removed {_done(report.marker_removed)}, "
         f"ExecReload pair removed {_done(report.exec_reload_removed)}",
     )
+    if report.restarted is None:
+        return lines
+    return (*lines, f"restarted {report.restarted}")
 
 
 def _retired(report: RetireReport) -> tuple[str, ...]:
     return (f"retired {len(report.removed)}: {', '.join(report.removed) or '-'}",)
 
 
-def _migrate_lines(
-    plane: ControlPlane, host: MigrationHost, action: MigrateAction, content_id: str | None
-) -> tuple[str, ...]:
+def _migrate_lines(plane: ControlPlane, host: MigrationHost, run: Run) -> tuple[str, ...]:
     """One run, one report; ``--check`` is the only one that moves nothing."""
-    if action == "check":
-        return (f"preflight: {preflight(plane, host, content_id).describe()}",)
-    if action == "rollback":
+    if run.action == "check":
+        return (f"preflight: {preflight(plane, host, run.content_id).describe()}",)
+    if run.action == "rollback":
         return _rolled_back(rollback_first_migration(plane, host))
-    if action == "retire":
+    if run.action == "offline":
+        return _rolled_back(offline_rollback(plane, host))
+    if run.action == "retire":
         return _retired(retire_pre_envelope(plane, host))
-    if content_id is None:
+    if run.content_id is None:
         raise typer.BadParameter("migrate needs a release_content_id, --rollback or --retire")
-    return _migrated(first_migration(plane, host, content_id))
+    return _migrated(first_migration(plane, host, run.content_id))
 
 
 @release_app.command(name="migrate")
@@ -407,6 +429,13 @@ def migrate_command(
     check: Annotated[
         bool, typer.Option("--check", help="The preflight alone; nothing on the host moves.")
     ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="With --rollback: restore the files and restart, dialling no admin endpoint.",
+        ),
+    ] = False,
     releases: _ReleasesOption = DEFAULT_RELEASES,
     caddyfile: _CaddyfileOption = DEFAULT_CADDYFILE,
     fragment: _FragmentOption = DEFAULT_FRAGMENT,
@@ -422,12 +451,16 @@ def migrate_command(
     ``--retire`` is never performed by a migration: it deletes the
     previous Caddyfile's world, the only way back, so the operator asks
     for it explicitly once the cutover is verified (ADR-0014 Migration).
+    ``--rollback --offline`` is the last resort when Caddy answers on
+    neither address: the files go back and the unit is restarted, with
+    nothing read first.
     """
-    action = _migrate_action(content_id, rollback, retire, check)
+    flags = MigrateFlags(rollback, retire, check, offline)
+    run = Run(_migrate_action(content_id, flags), content_id)
     plane = _plane(releases, caddyfile, fragment, admin)
     options = HostOptions(tcp_admin, caddyfile_source, drop_in, runtime_dir, release_group)
     with _refusals():
-        lines = _migrate_lines(plane, _host(caddyfile, admin, options), action, content_id)
+        lines = _migrate_lines(plane, _host(caddyfile, admin, options), run)
     for line in lines:
         typer.echo(line)
 

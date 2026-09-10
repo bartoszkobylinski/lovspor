@@ -269,6 +269,24 @@ class TestRunbook:
         # points every `systemctl reload caddy` at a socket that does not exist.
         assert "Do not run `provision.sh` on the live droplet" in text
 
+    def test_the_runbook_carries_the_offline_last_resort(self) -> None:
+        """Every other way back dials the admin endpoint first, so all of them
+        refuse on a box whose Caddyfile Caddy will not load — the state with the
+        fewest ways out. The runbook names the flag, and the two raw commands for
+        the case where the CLI itself is what is broken."""
+        text = _README.read_text(encoding="utf-8")
+
+        assert "#### Last resort: Caddy answers on neither address" in text
+        assert "lovspor release migrate --rollback --offline" in text
+        assert (
+            "sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile && "
+            "sudo systemctl restart caddy"
+        ) in text
+        assert "precondition Caddy admin reachable unmet" in text
+        assert text.index("--rollback --offline") > text.index(
+            "### 9. Rollback, at any point before step 8"
+        )
+
     def test_the_runbook_keeps_the_retire_step_separate_and_last(self) -> None:
         """Owner decision, ADR-0014 Migration step 5 (g): retiring the
         pre-envelope trees deletes the first migration's only way back, so it is
