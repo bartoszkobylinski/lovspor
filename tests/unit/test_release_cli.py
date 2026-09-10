@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 from lovspor.cli import app
 from lovspor.release import commands
+from lovspor.release.caddy import HttpxAdminClient, SubprocessRunner
 from lovspor.release.control import ControlPlane
 from lovspor.release.envelope import FRAGMENT_NAME, Marker, read_fragment, read_marker, write_marker
 from tests.unit.caddy_fakes import FakeCaddy
@@ -401,6 +402,29 @@ class TestPublishCheck:
 
         assert result.exit_code == 1
         assert "release refused: .build-copy: missing site/" in result.output
+
+
+class TestPlane:
+    def test_the_real_plane_wires_the_subprocess_runner_and_the_admin_address(
+        self, tmp_path: Path
+    ) -> None:
+        """The CLI's one production factory: the three paths as given, the real
+        Runner, and an admin client bound to exactly the address the wrapper
+        passes (the socket in steady state, TCP during the migration). Every
+        CLI test replaces it, so it is pinned here without any I/O."""
+        releases, caddyfile, fragment = tmp_path / "r", tmp_path / "Caddyfile", tmp_path / "f"
+
+        plane = commands._plane(releases, caddyfile, fragment, "unix//run/caddy/admin.sock")
+
+        assert isinstance(plane, ControlPlane)
+        assert (plane.releases, plane.caddyfile, plane.fragment) == (releases, caddyfile, fragment)
+        assert isinstance(plane.runner, SubprocessRunner)
+        assert isinstance(plane.admin, HttpxAdminClient)
+        assert plane.admin.address == "unix//run/caddy/admin.sock"
+
+        tcp = commands._plane(releases, caddyfile, fragment, "localhost:2019")
+        assert isinstance(tcp.admin, HttpxAdminClient)
+        assert tcp.admin.address == "localhost:2019"
 
 
 class TestPackage:
