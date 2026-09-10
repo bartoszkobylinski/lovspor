@@ -343,6 +343,77 @@ class TestPreflight:
 
         assert seen[-1] == (_probe(droplet, "fragment"), "")
 
+    @pytest.mark.parametrize("name", ["probe", "fragment"])
+    def test_preflight_does_not_overwrite_a_pre_existing_probe_file(
+        self, droplet: Droplet, name: str
+    ) -> None:
+        """Preflight's throwaway files must not move unrelated sibling state."""
+        existing = _probe(droplet, name)
+        original = b"operator-owned\x00probe"
+        existing.write_bytes(original)
+
+        preflight(droplet.plane, droplet.host)
+
+        assert existing.read_bytes() == original
+
+    @pytest.mark.parametrize(("name", "call"), [("probe", 0), ("fragment", 1)])
+    def test_a_taken_probe_name_is_stepped_around_and_the_step_aside_cleans_up(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch, name: str, call: int
+    ) -> None:
+        """The file the preflight adapts is its own, in the directory it must stand in.
+
+        A unique name only helps if it is unique *beside* the taken one:
+        the same relative imports have to resolve, and the cleanup must
+        take the step-aside file with it — leaving the operator's the one
+        thing still there.
+        """
+        taken = _probe(droplet, name)
+        taken.write_text("operator-owned", encoding="utf-8")
+        seen: list[tuple[Path, Path | None]] = []
+        real = migrate.adapt_config
+
+        def recording(runner: object, caddyfile: Path, fragment: Path | None = None) -> object:
+            seen.append((caddyfile, fragment))
+            return real(runner, caddyfile, fragment)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(migrate, "adapt_config", recording)
+        preflight(droplet.plane, droplet.host)
+
+        used = seen[call][0] if name == "probe" else seen[call][1]
+        assert used is not None and used != taken and used.parent == taken.parent
+        assert used.name.startswith(f"{taken.name}.")
+        assert list(taken.parent.glob("*.lovspor-*")) == [taken]
+
+    @pytest.mark.skipif(os.getuid() == 0, reason="root writes through a read-only directory")
+    def test_a_probe_file_that_cannot_be_written_is_a_named_refusal(self, droplet: Droplet) -> None:
+        directory = droplet.plane.caddyfile.parent
+        directory.chmod(0o500)
+        try:
+            with pytest.raises(MigrationRefusedError) as caught:
+                preflight(droplet.plane, droplet.host)
+        finally:
+            directory.chmod(0o700)
+
+        assert "cannot write its probe file" in str(caught.value)
+        assert str(_probe(droplet, "probe")) in str(caught.value)
+
+    def test_the_probe_file_is_utf_8_whatever_the_locale(
+        self, droplet: Droplet, c_locale: None
+    ) -> None:
+        """The probe carries the socket address, and a socket path can be non-ASCII.
+
+        The C locale's codec is ASCII, so a probe written through a text
+        stream's default encoding would refuse the address instead of
+        asking Caddy the question the preflight came to ask.
+        """
+        socket_admin = f"unix/{droplet.host.runtime_dir / 'ådmin.sock'}"
+        host = replace(droplet.host, socket_admin=socket_admin)
+        host.caddyfile_source.write_text(
+            new_caddyfile(socket_admin, droplet.plane.fragment), encoding="utf-8"
+        )
+
+        assert preflight(droplet.plane, host).socket_admin == socket_admin
+
     def test_refuses_once_a_marker_exists(self, droplet: Droplet) -> None:
         write_marker(droplet.releases, Marker(active=droplet.a, previous=None))
 

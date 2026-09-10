@@ -46,6 +46,7 @@ import pwd
 import re
 import shutil
 import stat
+import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -278,12 +279,43 @@ def drop_in_text(host: MigrationHost, with_exec_reload: bool) -> str:
 @contextmanager
 def _probe_file(plane: ControlPlane, name: str, text: str) -> Iterator[Path]:
     """A throwaway file beside the Caddyfile, for ``caddy adapt`` alone."""
-    probe = plane.caddyfile.with_name(f"{plane.caddyfile.name}.lovspor-{name}")
-    probe.write_text(text, encoding="utf-8")
+    preferred = plane.caddyfile.with_name(f"{plane.caddyfile.name}.lovspor-{name}")
+    probe = _probe_path(preferred, text)
     try:
         yield probe
     finally:
         probe.unlink(missing_ok=True)
+
+
+def _probe_path(preferred: Path, text: str) -> Path:
+    """``text`` in a file this call created — never one that was already there.
+
+    The preflight runs as root on the live droplet, where a file already
+    at the preferred name is someone else's: opening it would destroy its
+    content and the cleanup would then delete it. So the probe is created
+    exclusively and steps aside to a unique name beside the taken one,
+    which leaves the unlink able to take only what this call made. The
+    bytes are encoded here rather than by the stream, so what Caddy reads
+    is UTF-8 under the C locale too.
+    """
+    try:
+        with preferred.open("xb") as handle:
+            handle.write(text.encode())
+    except FileExistsError:
+        return _probe_beside(preferred, text)
+    except OSError as error:
+        raise MigrationRefusedError(
+            f"the preflight cannot write its probe file {preferred}: {error}"
+        ) from error
+    return preferred
+
+
+def _probe_beside(preferred: Path, text: str) -> Path:
+    """A unique name in the same directory, so the same relative imports still resolve."""
+    descriptor, unique = tempfile.mkstemp(prefix=f"{preferred.name}.", dir=preferred.parent)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(text.encode())
+    return Path(unique)
 
 
 def _require_no_marker(plane: ControlPlane) -> None:
