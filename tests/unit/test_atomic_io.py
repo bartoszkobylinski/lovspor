@@ -156,3 +156,20 @@ class TestMode:
 
         assert stat.S_IMODE(target.stat().st_mode) == 0o644
         assert target.read_text(encoding="utf-8") == "new"
+
+    def test_a_chmod_failure_preserves_the_original_and_cleans_the_temp_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        target = tmp_path / "t"
+        target.write_text("original", encoding="utf-8")
+
+        def fail_chmod(self: Path, _mode: int) -> None:
+            raise OSError("chmod failed")
+
+        monkeypatch.setattr(Path, "chmod", fail_chmod)
+
+        with pytest.raises(OSError, match="chmod failed"):
+            atomic_write_text(target, "replacement", mode=0o644)
+
+        assert target.read_text(encoding="utf-8") == "original"
+        assert not (tmp_path / "t.tmp").exists()
