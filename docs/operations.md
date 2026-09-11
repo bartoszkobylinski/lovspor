@@ -154,6 +154,7 @@ uv run lovspor release commit <id>               # stage, validate, commit the f
 uv run lovspor release reconcile [--complete|--abandon]          # name and resolve a crash state
 uv run lovspor release rollback                  # the marker's previous, same transaction
 uv run lovspor release prune                     # only when reconciled; never R, D, M or previous
+uv run lovspor release rehearse <id> --unit <unit> …  # walk that migration on a SECOND instance first
 uv run lovspor release migrate <id>              # the FIRST envelope: install the Caddyfile and cut over
 uv run lovspor release migrate --check           # that migration's preflight alone; nothing moves
 uv run lovspor release migrate --rollback        # back to the pre-envelope Caddyfile and TCP admin
@@ -194,6 +195,39 @@ alike. `--rollback --offline` is the
 last resort for a box whose Caddy answers on neither address: it dials nothing,
 restores the files and restarts the unit. The droplet procedure, step by step, is
 [`deploy/digitalocean/README.md` § First migration](../deploy/digitalocean/README.md#first-migration-once-on-the-existing-droplet).
+
+`rehearse` is what authorises that one run, and it is run **before** it
+(ADR-0014 Validation (g)). The cutover's load moves the admin endpoint onto the
+socket and the rollback's load is delivered to that socket, so neither can be
+tried twice on the box that serves the site: both are walked first on a second
+Caddy instance with its own unit, ports, runtime directory, drop-in directory
+and releases root, every one of them an option. It drives the same
+`first_migration`, `abandon_first_migration` and `rollback_first_migration` as
+the real run — the procedure is never forked — and asserts, in the ADR's order:
+(i) TCP answering the previous configuration with no socket; (ii) a load Caddy
+rejects leaving R unmoved, then the cutover with the socket absent immediately
+before it and answering immediately after, TCP refusing, R naming the envelope
+and `ExecReload=` naming the explicit socket address; (iii) the rollback
+reaching the socket; (iv) one steady-state `systemctl reload` through the
+drop-in; (v) two restarts, each followed by the admin socket's four facts. Two
+of its fixtures must **fail**: a plain `systemctl reload` of the previous
+Caddyfile through the stock line while the socket is running (`caddy reload`
+derives the address from the file it supplies — which is what makes the
+rollback's explicit `--address` load-bearing), and a socket whose mode and
+group were set once by hand, which a restart takes away. `--unit caddy` and
+`--caddyfile /etc/caddy/Caddyfile` are refused by name, before anything is
+read.
+
+The rehearsal **cannot run in CI**: there is no `caddy` binary and no systemd
+on the runner. What CI proves is that the sequence and every assertion are
+sound against `FakeCaddy` (`tests/unit/test_release_rehearsal.py`, with a test
+per negative fixture proving it really does fail). Whether this Caddy build
+accepts the `|0660` suffix, whether its adapted JSON hashes equal to what `GET
+/config/` returns and whether a restart recreates the socket `0660` in the
+group are facts only the droplet reports — which is the reason the rehearsal
+exists. The harness that starts the instance,
+[`deploy/digitalocean/rehearse-migration.sh`](../deploy/digitalocean/rehearse-migration.sh),
+carries no assertion of its own.
 
 ## Observatory: registering a capture source (ADR-0010)
 

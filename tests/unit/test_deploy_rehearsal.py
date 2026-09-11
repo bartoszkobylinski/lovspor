@@ -23,6 +23,8 @@ _UNIT = _DEPLOY / "caddy-rehearsal.service"
 _CADDY_UNIT_NAME = "caddy-rehearsal"
 _NEW_CADDYFILE = _DEPLOY / "Caddyfile"
 _README = _DEPLOY / "README.md"
+_OPERATIONS = _DEPLOY.parents[1] / "docs" / "operations.md"
+_MCP_DOC = _DEPLOY.parents[1] / "docs" / "mcp.md"
 _REH_ADMIN = "unix//run/caddy-rehearsal/admin.sock"
 
 
@@ -221,3 +223,18 @@ class TestRunbook:
         text = _README.read_text(encoding="utf-8")
 
         assert "cannot run in CI" in text
+
+    def test_operations_puts_the_rehearsal_before_the_migration(self) -> None:
+        text = _OPERATIONS.read_text(encoding="utf-8")
+
+        assert "release rehearse" in text
+        assert "cannot run in CI" in text
+        assert text.index("release rehearse") < text.index("Observatory: registering")
+
+    def test_the_mcp_doc_names_the_drift_checks_first_action_and_its_exit(self) -> None:
+        text = _MCP_DOC.read_text(encoding="utf-8")
+        timer = text[text.index("**The drift timer.**") :]
+
+        assert "first action" in timer[:600]
+        assert "`0660`" in timer[:900]
+        assert "admin socket precondition unmet" in text
