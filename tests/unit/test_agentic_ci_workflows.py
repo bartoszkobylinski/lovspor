@@ -6,6 +6,7 @@ import importlib.util
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -1160,3 +1161,54 @@ class TestADeadMachineIsNotAVerdictOnTheDiff:
 
         assert "codex-tests BLOCKED and reported nothing itself" in report
         assert 'gh pr edit "$PR" --add-label "needs-human:pipeline"' in report
+
+
+class TestEveryExpressionResolvesInItsOwnJob:
+    """Both defects the independent author caught while the agent lanes were
+    being split were the same mistake: a step moved to another job kept an
+    expression that only resolved in the job it came from.
+
+    `remediate-verify` inherited `if: steps.gate.outputs.run == 'true'` on its
+    checkout. `steps.gate` lives on the agent lane, so on the hosted lane the
+    expression evaluated to empty — falsy — and the checkout would never have
+    run, leaving every later step against an empty workspace. GitHub does not
+    error on an unresolvable `steps.<id>`; it silently yields nothing, which
+    reads as false in a condition and as an empty string in a message.
+
+    Contract tests that check step names and ordering do not see this. This one
+    is mechanical: every `steps.<id>` must name a step in the same job, and every
+    `needs.<job>` must be declared in that job's `needs`."""
+
+    @staticmethod
+    def _strings(node: Any) -> Iterator[str]:
+        if isinstance(node, str):
+            yield node
+        elif isinstance(node, dict):
+            for value in node.values():
+                yield from TestEveryExpressionResolvesInItsOwnJob._strings(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from TestEveryExpressionResolvesInItsOwnJob._strings(value)
+
+    @pytest.mark.parametrize("workflow_name", sorted(p.name for p in _WORKFLOWS.glob("*.yml")))
+    def test_step_references_name_a_step_of_the_same_job(self, workflow_name: str) -> None:
+        for job_name, job in _workflow(workflow_name)["jobs"].items():
+            ids = {step["id"] for step in job.get("steps", []) if step.get("id")}
+            for text in self._strings(job):
+                for ref in re.findall(r"\bsteps\.([A-Za-z0-9_-]+)\.", text):
+                    assert ref in ids, (
+                        f"{workflow_name}:{job_name} refers to steps.{ref}, which is not a "
+                        f"step of that job — the expression resolves to empty, not to an error"
+                    )
+
+    @pytest.mark.parametrize("workflow_name", sorted(p.name for p in _WORKFLOWS.glob("*.yml")))
+    def test_needs_references_are_declared_dependencies(self, workflow_name: str) -> None:
+        for job_name, job in _workflow(workflow_name)["jobs"].items():
+            declared = job.get("needs") or []
+            declared = [declared] if isinstance(declared, str) else declared
+            for text in self._strings(job):
+                for ref in re.findall(r"\bneeds\.([A-Za-z0-9_-]+)\.", text):
+                    assert ref in declared, (
+                        f"{workflow_name}:{job_name} refers to needs.{ref} without declaring it "
+                        f"in `needs` — the expression resolves to empty, not to an error"
+                    )
