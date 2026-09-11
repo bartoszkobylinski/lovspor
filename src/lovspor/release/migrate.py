@@ -433,9 +433,26 @@ def _require_drop_in(host: MigrationHost) -> None:
         )
 
 
-def _require_untouched(host: MigrationHost) -> None:
+def _require_no_fragments(plane: ControlPlane) -> None:
+    """Both fragment names are free on a host that has no envelope layout yet.
+
+    ``_stage`` writes ``.next`` and (a) renames it over the active
+    fragment; migrate keeps no ``.previous`` copy of either — the
+    Caddyfile backup is its whole way back — so a file already at one of
+    those names would go with no record that it existed.
+    """
+    for path in (plane.fragment, plane.next_fragment):
+        if path.exists() or path.is_symlink():
+            raise MigrationRefusedError(
+                f"{path} already exists; the first migration writes it and keeps no copy of what "
+                "was there, so move it aside and re-run"
+            )
+
+
+def _require_untouched(plane: ControlPlane, host: MigrationHost) -> None:
     """The state (a) writes over, and whether this migration may write over it."""
     _require_drop_in(host)
+    _require_no_fragments(plane)
 
 
 def _require_old_config_on_tcp(plane: ControlPlane, host: MigrationHost) -> ConfigPair:
@@ -523,7 +540,7 @@ def preflight(plane: ControlPlane, host: MigrationHost, content_id: str | None =
     """Every precondition of the first migration, in the order a refusal is cheapest."""
     _require_no_marker(plane)
     _require_files(plane, host)
-    _require_untouched(host)
+    _require_untouched(plane, host)
     running = _require_old_config_on_tcp(plane, host)
     gid = _require_group(host)
     _require_mode_suffix(plane, host)

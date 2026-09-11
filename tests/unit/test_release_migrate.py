@@ -686,6 +686,27 @@ class TestPreflight:
             "and is not overwritten"
         )
 
+    @pytest.mark.parametrize("staged", [False, True])
+    def test_refuses_a_fragment_already_at_either_name(
+        self, droplet: Droplet, staged: bool
+    ) -> None:
+        """``_stage`` writes ``.next`` and (a) renames it over the active fragment.
+
+        Neither keeps a ``.previous`` copy — the Caddyfile backup is this
+        migration's whole way back — so a file already at either name
+        would go with no record that it existed.
+        """
+        path = droplet.plane.next_fragment if staged else droplet.plane.fragment
+        path.write_text("# someone else's\n", encoding="utf-8")
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host, droplet.a)
+        assert str(caught.value) == (
+            f"{path} already exists; the first migration writes it and keeps no copy of what "
+            "was there, so move it aside and re-run"
+        )
+        assert path.read_text(encoding="utf-8") == "# someone else's\n"
+
     def test_refuses_without_the_new_caddyfile(self, droplet: Droplet) -> None:
         droplet.host.caddyfile_source.unlink()
 
