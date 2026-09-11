@@ -32,9 +32,10 @@ from lovspor.release.commands import (
 )
 from lovspor.release.control import ControlPlane
 from lovspor.release.envelope import FRAGMENT_NAME, Marker, read_fragment, read_marker, write_marker
-from lovspor.release.errors import ReleaseError
+from lovspor.release.errors import RehearsalFailedError, ReleaseError
 from lovspor.release.migrate import first_migration
-from lovspor.release.rehearsal import Rehearsal, RehearsalReport
+from lovspor.release.rehearsal import Rehearsal, RehearsalReport, Step
+from lovspor.release.staged import StagedPlan
 from tests.unit.caddy_fakes import FakeCaddy
 from tests.unit.migrate_fixtures import Droplet, make_droplet
 from tests.unit.probe_fixtures import (
@@ -48,6 +49,7 @@ from tests.unit.probe_fixtures import (
     tools_listing,
 )
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
+from tests.unit.staged_fixtures import RELEASE_ID
 
 runner = CliRunner()
 LATER = "2026-01-02T00:00:00Z"
@@ -1232,3 +1234,84 @@ class TestPackage:
         package = _REPO / "src" / "lovspor" / "release"
         for path in package.glob("*.py"):
             assert "shell=True" not in path.read_text(encoding="utf-8"), path.name
+
+
+class TestRehearseUrls:
+    """``lovspor release rehearse-urls``: the staged rehearsal's URL dry-run (ADR-0014).
+
+    The run itself cannot happen in CI — it shells out to a ``caddy``
+    binary the runner does not have — so what is pinned here is the
+    wiring, the two refusals that stop a vacuous or a nonsense run, and
+    that the report reaches stdout.
+    """
+
+    def _paths(self, tmp_path: Path) -> dict[str, Path]:
+        return {
+            "releases": tmp_path / "releases",
+            "previous": tmp_path / "etc" / "Caddyfile",
+            "source": tmp_path / "app" / "Caddyfile",
+        }
+
+    def _invoke(self, content_id: str, paths: dict[str, Path]) -> object:
+        return runner.invoke(
+            app,
+            [
+                "release",
+                "rehearse-urls",
+                content_id,
+                "--releases",
+                str(paths["releases"]),
+                "--previous-caddyfile",
+                str(paths["previous"]),
+                "--caddyfile-source",
+                str(paths["source"]),
+            ],
+        )
+
+    def test_every_path_is_wired_from_its_option(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        captured: list[StagedPlan] = []
+
+        def capture(plan: StagedPlan) -> RehearsalReport:
+            captured.append(plan)
+            return RehearsalReport(steps=(Step(name="staged.corpus", detail="8 corpus URLs"),))
+
+        monkeypatch.setattr(commands, "staged_rehearsal", capture)
+        paths = self._paths(tmp_path)
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 0, result.output
+        (plan,) = captured
+        assert plan.previous == paths["previous"] and plan.proposed == paths["source"]
+        assert plan.release == paths["releases"] / RELEASE_ID
+        assert isinstance(plan.runner, SubprocessRunner)
+        assert "staged.corpus: 8 corpus URLs" in result.stdout
+
+    def test_a_name_that_is_not_a_release_id_is_a_usage_error(self, tmp_path: Path) -> None:
+        result = self._invoke("not-an-id", self._paths(tmp_path))
+
+        assert result.exit_code == 2
+
+    def test_one_file_for_both_configurations_is_a_usage_error(self, tmp_path: Path) -> None:
+        """Comparing a configuration with itself passes every assertion and proves nothing."""
+        paths = self._paths(tmp_path)
+        paths["source"] = paths["previous"]
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def test_a_refusal_is_one_line_and_exit_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def refuse(plan: StagedPlan) -> RehearsalReport:
+            raise RehearsalFailedError("staged.symlinks", "served through a symlink")
+
+        monkeypatch.setattr(commands, "staged_rehearsal", refuse)
+
+        result = self._invoke(RELEASE_ID, self._paths(tmp_path))
+
+        assert result.exit_code == 1
+        assert "staged.symlinks" in result.output

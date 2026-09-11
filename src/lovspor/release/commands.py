@@ -61,6 +61,7 @@ from lovspor.release.migrate import (
 )
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
 from lovspor.release.rehearsal import Rehearsal, RehearsalFixtures, rehearse
+from lovspor.release.staged import StagedPlan, staged_rehearsal
 from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
 from lovspor.site.errors import SiteBuildError
@@ -582,6 +583,52 @@ def rehearse_command(
     )
     with _refusals():
         report = rehearse(plan)
+    for line in report.describe():
+        typer.echo(line)
+
+
+@release_app.command(name="rehearse-urls")
+def rehearse_urls_command(
+    content_id: Annotated[
+        str, typer.Argument(help="The finalized release_content_id to compare against.")
+    ],
+    releases: _ReleasesOption = DEFAULT_RELEASES,
+    previous_caddyfile: Annotated[
+        Path,
+        typer.Option(
+            "--previous-caddyfile",
+            envvar="LOVSPOR_PREVIOUS_CADDYFILE",
+            help="The Caddyfile serving now; before the migration that is the live one.",
+        ),
+    ] = DEFAULT_CADDYFILE,
+    caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+) -> None:
+    """The staged first-migration rehearsal: the URL dry-run (ADR-0014 Validation).
+
+    `caddy validate` and `caddy adapt` over both Caddyfiles against a
+    fully built envelope, then a route-by-route comparison: every corpus
+    URL the old configuration answers answered the same by the new one
+    from <release>/corpus, / and /observatory/ from <release>/site, no
+    symlink on any serving path, and the previous Caddyfile still
+    answering as it did with every file as it was found. Nothing is
+    loaded and nothing is written.
+
+    Exit 0 is half of what authorises the production cutover; the other
+    half is `lovspor release rehearse` on a second instance. Exit 1 names
+    the assertion that did not hold and what it read instead.
+    """
+    if not is_release_id(content_id):
+        raise typer.BadParameter(f"not a release_content_id: {content_id}")
+    if previous_caddyfile == caddyfile_source:
+        raise typer.BadParameter(
+            "--previous-caddyfile and --caddyfile-source name one file; "
+            "the dry-run would compare a configuration with itself"
+        )
+    plan = StagedPlan(
+        SubprocessRunner(), previous_caddyfile, caddyfile_source, releases / content_id
+    )
+    with _refusals():
+        report = staged_rehearsal(plan)
     for line in report.describe():
         typer.echo(line)
 
