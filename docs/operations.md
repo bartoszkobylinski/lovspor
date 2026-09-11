@@ -178,12 +178,21 @@ explicitly to the old address rather than through `systemctl reload caddy`
 `--drop-in`/`LOVSPOR_CADDY_DROP_IN`, `--runtime-dir`/`LOVSPOR_CADDY_RUNTIME_DIR`
 and `--release-group`/`LOVSPOR_RELEASE_GROUP` beside those four. `--check`,
 `--rollback` and `--retire` exclude each other and the release id; `--retire`
-deletes the only way back from the cutover — the pre-envelope Caddyfile last of
-all — so it is always a separate, later run, and it lists the paths and removes
-nothing until it is repeated with `--yes` (a flag, never a prompt: an
-unattended run fails closed). `--rollback --offline` is the last resort for a
-box whose Caddy answers on neither address: it dials nothing, restores the
-files and restarts the unit. The droplet procedure, step by step, is
+deletes the only way back from the cutover — the drop-in's record and then,
+last of all, the pre-envelope Caddyfile — so it is always a separate, later run,
+and
+it lists the paths and removes nothing until it is repeated with `--yes` (a
+flag, never a prompt: an unattended run fails closed). No path this command
+writes to or removes may be a symlink: `exists()` calls a dangling one absent
+and a live one would hand root's write to whatever it points at, so every one
+of those names is refused rather than followed, and every one is re-asked
+immediately before the write rather than trusted from the preflight. What stood
+at the drop-in's name is recorded under one of two names — `.pre-envelope` for
+its bytes, `.pre-envelope.absent` for a name that held no file — because an
+empty drop-in and an absent one are the same zero bytes and must not restore
+alike. `--rollback --offline` is the
+last resort for a box whose Caddy answers on neither address: it dials nothing,
+restores the files and restarts the unit. The droplet procedure, step by step, is
 [`deploy/digitalocean/README.md` § First migration](../deploy/digitalocean/README.md#first-migration-once-on-the-existing-droplet).
 
 ## Observatory: registering a capture source (ADR-0010)

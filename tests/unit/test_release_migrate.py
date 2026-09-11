@@ -13,7 +13,7 @@ import os
 import pwd
 import shutil
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,6 +35,7 @@ from lovspor.release.envelope import (
     FRAGMENT_NAME,
     MARKER_NAME,
     RELEASE_VAR,
+    WORLD_READABLE,
     Marker,
     read_marker,
     write_marker,
@@ -136,6 +137,9 @@ class TestHost:
         assert host.previous_caddyfile == Path("/etc/caddy/Caddyfile.pre-envelope")
         assert host.caddyfile_source == Path("/opt/lovspor/app/deploy/digitalocean/Caddyfile")
         assert host.drop_in == Path("/etc/systemd/system/caddy.service.d/lovspor.conf")
+        assert host.previous_drop_in == Path(
+            "/etc/systemd/system/caddy.service.d/lovspor.conf.pre-envelope"
+        )
         assert host.runtime_dir == Path("/run/caddy")
         assert (host.tcp_admin, host.socket_admin) == (
             "localhost:2019",
@@ -618,12 +622,51 @@ class TestPreflight:
         with pytest.raises(MigrationRefusedError, match="is not the host's"):
             preflight(other, droplet.host)
 
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_refuses_a_symlink_at_the_live_caddyfile(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """(a) renames the new file over this name and the restore renames the backup back.
+
+        Both take the link and leave a regular file, so the shape the box
+        had does not round-trip; a live link also hands root's write to
+        whatever it points at.
+        """
+        caddyfile = droplet.plane.caddyfile
+        elsewhere = caddyfile.with_name("Caddyfile.elsewhere")
+        if not dangling:
+            elsewhere.write_text(OLD_CADDYFILE, encoding="utf-8")
+        caddyfile.unlink()
+        caddyfile.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host, droplet.a)
+        assert str(caught.value) == (
+            f"{caddyfile} is a symlink; the first migration installs the new Caddyfile over it "
+            "and follows no symlink, so move it aside and re-run"
+        )
+        assert caddyfile.is_symlink()
+        assert not droplet.host.previous_caddyfile.exists()
+
     def test_refuses_when_the_socket_already_exists(self, droplet: Droplet) -> None:
         droplet.host.runtime_dir.mkdir(parents=True)
         droplet.socket_file.touch()
 
         with pytest.raises(MigrationRefusedError, match="admin socket .* already exists"):
             preflight(droplet.plane, droplet.host)
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_refuses_a_symlink_at_the_socket_name(self, droplet: Droplet, dangling: bool) -> None:
+        """The name is taken: Caddy binds through the link, and the preflight promised it free."""
+        droplet.host.runtime_dir.mkdir(parents=True)
+        elsewhere = droplet.host.runtime_dir / "other.sock"
+        if not dangling:
+            elsewhere.touch()
+        droplet.socket_file.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError, match="admin socket .* already exists"):
+            preflight(droplet.plane, droplet.host)
+        assert droplet.socket_file.is_symlink()
 
     def test_refuses_to_overwrite_an_existing_backup(self, droplet: Droplet) -> None:
         droplet.host.previous_caddyfile.write_text("old", encoding="utf-8")
@@ -634,6 +677,245 @@ class TestPreflight:
             f"{droplet.host.previous_caddyfile} already exists; it is the rollback's source "
             "and is not overwritten"
         )
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_refuses_a_symlink_at_the_caddyfile_backup_name(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """The reserved backup name is occupied; a dangling link is not an empty name."""
+        backup = droplet.host.previous_caddyfile
+        elsewhere = backup.with_name("somewhere-else")
+        if not dangling:
+            elsewhere.write_text("old", encoding="utf-8")
+        backup.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{backup} already exists; it is the rollback's source and is not overwritten"
+        )
+        assert backup.is_symlink()
+
+    @pytest.mark.parametrize(
+        "content", ["", "[Service]\n", PRE_ENVELOPE_DROP_IN + "LimitNOFILE=1048576\n"]
+    )
+    def test_refuses_a_drop_in_that_is_neither_absent_nor_the_pre_envelope_one(
+        self, droplet: Droplet, content: str
+    ) -> None:
+        """(a) overwrites the drop-in whole and the rollback puts the backup back.
+
+        Which lines of a drop-in nobody recognises were wanted is not the
+        module's guess to make, so the operator decides before anything
+        is written.
+        """
+        droplet.host.drop_in.write_text(content, encoding="utf-8")
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.drop_in} is neither absent nor the pre-envelope drop-in; "
+            "move it aside and re-run"
+        )
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == content
+        assert not droplet.host.previous_drop_in.exists()
+
+    def test_a_drop_in_that_cannot_be_read_is_a_named_refusal(self, droplet: Droplet) -> None:
+        """A directory at the drop-in's name would reach the comparison as an OSError."""
+        droplet.host.drop_in.unlink()
+        droplet.host.drop_in.mkdir()
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value).startswith(f"{droplet.host.drop_in} cannot be read: ")
+
+    def test_an_absent_drop_in_passes(self, droplet: Droplet) -> None:
+        """Absence is a state the backup records and the rollback restores, not a refusal."""
+        droplet.host.drop_in.unlink()
+
+        assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
+
+    def test_refuses_a_dangling_symlink_at_the_drop_in_name(self, droplet: Droplet) -> None:
+        """A dangling symlink occupies the name; it is not the admitted absent state."""
+        droplet.host.drop_in.unlink()
+        target = droplet.host.drop_in.with_name("missing-drop-in.conf")
+        droplet.host.drop_in.symlink_to(target)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.drop_in} is neither absent nor the pre-envelope drop-in; "
+            "move it aside and re-run"
+        )
+        assert droplet.host.drop_in.is_symlink()
+        assert droplet.host.drop_in.readlink() == target
+
+    def test_refuses_a_live_symlink_at_the_drop_in_name(self, droplet: Droplet) -> None:
+        """Even pointing at the admitted two lines: (a)'s write would take the link's target."""
+        elsewhere = droplet.host.drop_in.with_name("elsewhere.conf")
+        elsewhere.write_text(PRE_ENVELOPE_DROP_IN, encoding="utf-8")
+        droplet.host.drop_in.unlink()
+        droplet.host.drop_in.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.drop_in} is neither absent nor the pre-envelope drop-in; "
+            "move it aside and re-run"
+        )
+        assert elsewhere.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
+        assert not droplet.host.previous_drop_in.exists()
+
+    def test_refuses_a_leftover_drop_in_backup(self, droplet: Droplet) -> None:
+        droplet.host.previous_drop_in.write_text("stale", encoding="utf-8")
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_drop_in} already exists; it is the rollback's source "
+            "and is not overwritten"
+        )
+
+    def test_refuses_a_dangling_symlink_at_the_drop_in_backup_name(self, droplet: Droplet) -> None:
+        """The reserved backup name is occupied even when its symlink target is absent."""
+        target = droplet.host.previous_drop_in.with_name("missing-backup")
+        droplet.host.previous_drop_in.symlink_to(target)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_drop_in} already exists; it is the rollback's source "
+            "and is not overwritten"
+        )
+        assert droplet.host.previous_drop_in.is_symlink()
+        assert droplet.host.previous_drop_in.readlink() == target
+
+    @pytest.mark.parametrize("kind", ["file", "symlink", "dangling"])
+    def test_refuses_a_leftover_absent_drop_in_record(self, droplet: Droplet, kind: str) -> None:
+        """The second reserved name. A stale one would be read as *there was no drop-in*."""
+        record = droplet.host.absent_drop_in
+        if kind == "file":
+            record.write_text("stale", encoding="utf-8")
+        else:
+            elsewhere = record.with_name("elsewhere")
+            if kind == "symlink":
+                elsewhere.write_text("stale", encoding="utf-8")
+            record.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{record} already exists; it is the rollback's source and is not overwritten"
+        )
+        assert record.is_symlink() or record.is_file()
+
+    def test_refuses_a_live_symlink_at_the_drop_in_backup_name(self, droplet: Droplet) -> None:
+        """A link to a real file is not the backup either: the restore would move the link."""
+        elsewhere = droplet.host.previous_drop_in.with_name("kept-elsewhere")
+        elsewhere.write_text("stale", encoding="utf-8")
+        droplet.host.previous_drop_in.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_drop_in} already exists; it is the rollback's source "
+            "and is not overwritten"
+        )
+        assert elsewhere.read_text(encoding="utf-8") == "stale"
+
+    @pytest.mark.parametrize("staged", [False, True])
+    def test_refuses_a_fragment_already_at_either_name(
+        self, droplet: Droplet, staged: bool
+    ) -> None:
+        """``_stage`` writes ``.next`` and (a) renames it over the active fragment.
+
+        Neither keeps a ``.previous`` copy — the Caddyfile backup is this
+        migration's whole way back — so a file already at either name
+        would go with no record that it existed. The staging name's
+        refusal names the remedy that state has of its own: a crash
+        between ``_stage`` and (a) leaves exactly that file, and
+        ``--abandon`` refuses there too, having no backup to restore.
+        """
+        path = droplet.plane.next_fragment if staged else droplet.plane.fragment
+        path.write_text("# someone else's\n", encoding="utf-8")
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host, droplet.a)
+        assert str(caught.value).startswith(
+            f"{path} already exists; the first migration writes it and keeps no copy of what "
+            "was there, so move it aside and re-run"
+        )
+        assert ("`rm` it" in str(caught.value)) is staged
+        assert path.read_text(encoding="utf-8") == "# someone else's\n"
+
+    def test_the_staging_name_refusal_names_a_remedy_abandon_cannot_give(
+        self, droplet: Droplet
+    ) -> None:
+        """A crash between ``_stage`` and (a) leaves a state both ways out refuse."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("staged"))
+
+        with pytest.raises(ControlPlaneError) as abandoned:
+            abandon_first_migration(droplet.plane, droplet.host)
+        assert str(abandoned.value).endswith("nothing to restore")
+        with pytest.raises(MigrationRefusedError) as refused:
+            preflight(droplet.plane, droplet.host, droplet.a)
+        assert "so there `rm` it" in str(refused.value)
+        assert droplet.plane.next_fragment.is_file()
+
+    @pytest.mark.parametrize("staged", [False, True])
+    def test_refuses_a_dangling_symlink_at_either_fragment_name(
+        self, droplet: Droplet, staged: bool
+    ) -> None:
+        """The rename in (a) would take the link, and nothing would record it stood there."""
+        path = droplet.plane.next_fragment if staged else droplet.plane.fragment
+        path.symlink_to(path.with_name("gone.caddy"))
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host, droplet.a)
+        assert str(caught.value).startswith(f"{path} already exists; ")
+        assert path.is_symlink()
+
+    def test_refuses_a_runtime_directory_with_anything_in_it(self, droplet: Droplet) -> None:
+        """(a) chowns and chmods the directory; what is in it is not this migration's."""
+        droplet.host.runtime_dir.mkdir(parents=True)
+        (droplet.host.runtime_dir / "other.sock").touch()
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"the runtime directory {droplet.host.runtime_dir} is not empty; (a) would give it "
+            "and everything in it caddy:lovspor-release mode 2770"
+        )
+        assert (droplet.host.runtime_dir / "other.sock").exists()
+
+    @pytest.mark.parametrize("kind", ["file", "symlink", "dangling"])
+    def test_refuses_a_runtime_directory_that_is_not_a_directory(
+        self, droplet: Droplet, kind: str
+    ) -> None:
+        """``mkdir(exist_ok=True)`` raises on the first two and the chown follows the third."""
+        droplet.host.runtime_dir.parent.mkdir(parents=True)
+        if kind == "file":
+            droplet.host.runtime_dir.write_text("x", encoding="utf-8")
+        else:
+            elsewhere = droplet.host.runtime_dir.parent / kind
+            if kind == "symlink":
+                elsewhere.mkdir()
+            droplet.host.runtime_dir.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"the runtime directory {droplet.host.runtime_dir} exists and is not a directory; "
+            "(a) would give what it names caddy:lovspor-release mode 2770"
+        )
+
+    def test_an_empty_runtime_directory_is_what_its_own_rollback_leaves(
+        self, droplet: Droplet
+    ) -> None:
+        """The rollback does not remove the directory (a) made, so a re-run must not trip on it."""
+        droplet.host.runtime_dir.mkdir(parents=True)
+
+        assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
 
     def test_refuses_without_the_new_caddyfile(self, droplet: Droplet) -> None:
         droplet.host.caddyfile_source.unlink()
@@ -1216,7 +1498,11 @@ class TestTheInstallWindow:
 
         _migrate(droplet)
 
-        assert written[:2] == [droplet.host.previous_caddyfile, droplet.plane.caddyfile]
+        assert written[:3] == [
+            droplet.host.previous_drop_in,
+            droplet.host.previous_caddyfile,
+            droplet.plane.caddyfile,
+        ]
         assert drop_in_modes == [False, True]
 
 
@@ -1264,6 +1550,336 @@ class TestCrashRows:
         assert situation(read_triple(droplet.plane)) == Situation.reloaded
 
 
+class TestSymlinksAtTheNamesItWrites:
+    """A symlink at every name this module writes to or removes, past the preflight.
+
+    ``exists()`` and ``is_file()`` answer about a link's target: a
+    dangling one reads as absent and a live one hands the write — root's,
+    on the droplet — to whatever it points at. The preflight guards the
+    names it reaches; these are the paths reached without it.
+    """
+
+    def _staged(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("staged"))
+
+    def test_the_runtime_directory_is_never_chowned_through_a_symlink(
+        self, droplet: Droplet
+    ) -> None:
+        """``complete_first_migration`` repeats (a)'s idempotent half with no preflight."""
+        self._staged(droplet)
+        droplet.host.runtime_dir.parent.mkdir(parents=True, exist_ok=True)
+        target = droplet.host.runtime_dir.parent / "someone-elses"
+        target.mkdir()
+
+        droplet.host.runtime_dir.symlink_to(target)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+        assert str(caught.value) == (
+            f"{droplet.host.runtime_dir} is a symlink; the first migration creates the runtime "
+            "directory and chowns it and follows no symlink, so move it aside and re-run"
+        )
+        assert droplet.ownership.chowns == []
+        assert target.is_dir() and droplet.host.runtime_dir.is_symlink()
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_the_drop_in_is_never_backed_up_through_a_symlink(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """A live link would record its target's bytes; a dangling one, an unreadable name."""
+        self._staged(droplet)
+        elsewhere = droplet.host.drop_in.with_name("elsewhere.conf")
+        if not dangling:
+            elsewhere.write_text(PRE_ENVELOPE_DROP_IN, encoding="utf-8")
+        droplet.host.drop_in.unlink()
+        droplet.host.drop_in.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+        assert str(caught.value) == (
+            f"{droplet.host.drop_in} is a symlink; the first migration overwrites the drop-in "
+            "and keeps the bytes it replaces and follows no symlink, so move it aside and re-run"
+        )
+        assert not droplet.host.previous_drop_in.exists()
+        assert droplet.host.drop_in.is_symlink()
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_a_symlink_at_the_backup_name_is_neither_written_nor_trusted(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """A dangling one would read as "the backup is already taken" and skip it."""
+        self._staged(droplet)
+        elsewhere = droplet.host.previous_drop_in.with_name("kept-elsewhere")
+        if not dangling:
+            elsewhere.write_text("someone else's", encoding="utf-8")
+        droplet.host.previous_drop_in.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_drop_in} is a symlink; the first migration keeps the "
+            "drop-in's backup at that name and follows no symlink, so move it aside and re-run"
+        )
+        assert droplet.host.previous_drop_in.is_symlink()
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_a_symlink_at_the_absent_record_name_is_neither_written_nor_trusted(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """The alternate drop-in record is reserved on completion just like the byte backup."""
+        self._staged(droplet)
+        elsewhere = droplet.host.absent_drop_in.with_name("kept-absence-elsewhere")
+        if not dangling:
+            elsewhere.write_text("someone else's", encoding="utf-8")
+        droplet.host.absent_drop_in.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+        assert str(caught.value) == (
+            f"{droplet.host.absent_drop_in} is a symlink; the first migration records an absent "
+            "drop-in at that name and follows no symlink, so move it aside and re-run"
+        )
+        assert droplet.host.absent_drop_in.is_symlink()
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
+
+    def test_the_absent_record_name_is_never_written_through_a_symlink(
+        self, droplet: Droplet
+    ) -> None:
+        """The third name (a) may create, named in its own refusal so the two cannot be swapped."""
+        self._staged(droplet)
+        droplet.host.drop_in.unlink()
+        droplet.host.absent_drop_in.symlink_to(droplet.host.absent_drop_in.with_name("gone"))
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+        assert str(caught.value) == (
+            f"{droplet.host.absent_drop_in} is a symlink; the first migration records an absent "
+            "drop-in at that name and follows no symlink, so move it aside and re-run"
+        )
+        assert droplet.host.absent_drop_in.is_symlink()
+
+    def test_a_dangling_symlink_at_the_marker_is_removed_and_reported_removed(
+        self, droplet: Droplet
+    ) -> None:
+        """``unlink`` takes the link, so an ``exists()`` would report a removal it just made."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+        marker = droplet.releases / MARKER_NAME
+        marker.symlink_to(droplet.releases / "gone")
+
+        report = abandon_first_migration(droplet.plane, droplet.host)
+
+        assert report.marker_removed is True
+        assert not marker.is_symlink() and not marker.exists()
+
+    @pytest.mark.parametrize("which", ["previous_caddyfile", "previous_drop_in"])
+    def test_the_rollback_refuses_a_symlink_at_either_backup_name(
+        self, droplet: Droplet, which: str
+    ) -> None:
+        """The restore moves and reads the *name*; a link would carry someone else's file in."""
+        _migrate(droplet)
+        backup: Path = getattr(droplet.host, which)
+        elsewhere = backup.with_name("elsewhere")
+        elsewhere.write_bytes(backup.read_bytes())
+        backup.unlink()
+        backup.symlink_to(elsewhere)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{backup} is a symlink, not the backup the migration wrote; the restore reads and "
+            "moves the name, never what it points at — move it aside and restore by hand"
+        )
+        assert backup.is_symlink() and elsewhere.is_file()
+        assert live_release(droplet.plane) == droplet.a
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_the_rollback_refuses_a_symlink_at_the_absent_record_name(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """The no-drop-in record is a rollback source, so its name is never followed."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        backup = droplet.host.absent_drop_in
+        elsewhere = backup.with_name("absence-elsewhere")
+        if not dangling:
+            elsewhere.write_bytes(backup.read_bytes())
+        backup.unlink()
+        backup.symlink_to(elsewhere)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{backup} is a symlink, not the backup the migration wrote; the restore reads and "
+            "moves the name, never what it points at — move it aside and restore by hand"
+        )
+        assert backup.is_symlink()
+        assert live_release(droplet.plane) == droplet.a
+
+    @pytest.mark.parametrize("which", ["previous_caddyfile", "previous_drop_in"])
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_retire_refuses_a_symlink_at_either_backup_name(
+        self, droplet: Droplet, which: str, dangling: bool
+    ) -> None:
+        """Listed and unlinked, a live one removes the link and leaves the way back; a
+        dangling one is skipped silently and leaves the name taken."""
+        _migrate(droplet)
+        backup: Path = getattr(droplet.host, which)
+        elsewhere = backup.with_name("elsewhere")
+        if not dangling:
+            elsewhere.write_bytes(backup.read_bytes())
+        backup.unlink()
+        backup.symlink_to(elsewhere)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            retire_preview(droplet.plane, droplet.host)
+        assert str(caught.value) == f"{backup} is a symlink, not the backup; not removed"
+        assert backup.is_symlink()
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_retire_refuses_a_symlink_at_the_absent_record_name(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """Retirement protects the alternate rollback record from symlink removal too."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        backup = droplet.host.absent_drop_in
+        elsewhere = backup.with_name("absence-elsewhere")
+        if not dangling:
+            elsewhere.write_bytes(backup.read_bytes())
+        backup.unlink()
+        backup.symlink_to(elsewhere)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            retire_preview(droplet.plane, droplet.host)
+        assert str(caught.value) == f"{backup} is a symlink, not the backup; not removed"
+        assert backup.is_symlink()
+
+
+class TestThePreflightsAnswersGoStale:
+    """The preflight and the writes are separate moments, and a rename destroys what it lands on.
+
+    Every name (a) writes is re-asked immediately before the write. That
+    shrinks the window from the whole preflight — two subprocess calls,
+    an HTTP round trip and the staging write — to one statement; it does
+    not close it, and nothing here pretends otherwise.
+    """
+
+    def _after_the_preflight(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch, plant: Callable[[], None]
+    ) -> None:
+        """Run ``plant`` in the gap between the preflight returning and ``_stage``."""
+        real = migrate.preflight
+
+        def spy(
+            plane: ControlPlane, host: MigrationHost, content_id: str | None = None
+        ) -> Preflight:
+            answer = real(plane, host, content_id)
+            plant()
+            return answer
+
+        monkeypatch.setattr(migrate, "preflight", spy)
+
+    def test_a_staging_name_taken_after_the_preflight_is_not_written_over(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``_stage`` renames over the name, so an unguarded write destroys it silently."""
+        self._after_the_preflight(
+            droplet,
+            monkeypatch,
+            lambda: droplet.plane.next_fragment.write_text("# someone else's\n", encoding="utf-8"),
+        )
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a)
+        assert str(caught.value) == (
+            f"{droplet.plane.next_fragment} already exists; the first migration writes it and "
+            "keeps no copy of what was there, so move it aside and re-run; a crash between "
+            "staging and (a) leaves exactly this file and nothing has read it, so there `rm` it "
+            "— `--abandon` cannot, having no backup to restore"
+        )
+        assert droplet.plane.next_fragment.read_text(encoding="utf-8") == "# someone else's\n"
+        assert not droplet.plane.fragment.exists()
+        assert not droplet.host.previous_caddyfile.exists()
+        assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+
+    @pytest.mark.parametrize("name", ["fragment", "previous_caddyfile"])
+    def test_a_target_of_the_install_taken_after_the_preflight_is_not_written_over(
+        self, droplet: Droplet, name: str
+    ) -> None:
+        """(a) renames over both names; the refusal stands before anything of (a) moves."""
+        path = droplet.plane.fragment if name == "fragment" else droplet.host.previous_caddyfile
+
+        def plant(step: str) -> None:
+            if step == "staged":
+                path.write_text("# someone else's\n", encoding="utf-8")
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a, plant)
+        if name == "fragment":
+            assert str(caught.value) == (
+                f"{path} already exists; the first migration writes it and keeps no copy of what "
+                "was there, so move it aside and re-run"
+            )
+        else:
+            assert str(caught.value) == (
+                f"{path} already exists; it is the rollback's source and is not overwritten"
+            )
+        assert path.read_text(encoding="utf-8") == "# someone else's\n"
+        assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+
+    def test_a_caddyfile_that_became_a_symlink_after_the_preflight_is_refused(
+        self, droplet: Droplet
+    ) -> None:
+        """Root's write would land on the link's target, and the restore would not undo it."""
+        elsewhere = droplet.plane.caddyfile.with_name("Caddyfile.elsewhere")
+
+        def plant(step: str) -> None:
+            if step == "staged":
+                elsewhere.write_text(OLD_CADDYFILE, encoding="utf-8")
+                droplet.plane.caddyfile.unlink()
+                droplet.plane.caddyfile.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a, plant)
+        assert str(caught.value) == (
+            f"{droplet.plane.caddyfile} is a symlink; the first migration installs the new "
+            "Caddyfile over it and follows no symlink, so move it aside and re-run"
+        )
+        assert elsewhere.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert not droplet.host.previous_caddyfile.exists()
+
+    def test_a_runtime_directory_filled_after_the_preflight_is_not_chowned(
+        self, droplet: Droplet
+    ) -> None:
+        """The chown and chmod reach everything in it, so (a) re-asks before it runs them.
+
+        This one refuses with (a) part-done — the backups are both there,
+        so ``reconcile --abandon`` is the way out, and that is a better
+        state than root having given away someone else's file.
+        """
+
+        def plant(step: str) -> None:
+            if step == "staged":
+                droplet.host.runtime_dir.mkdir(parents=True)
+                (droplet.host.runtime_dir / "other.sock").touch()
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a, plant)
+        assert str(caught.value).startswith(
+            f"the runtime directory {droplet.host.runtime_dir} is not empty; "
+        )
+        assert droplet.ownership.chowns == []
+        abandon_first_migration(droplet.plane, droplet.host)
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+
+
 def _rollback_reload(droplet: Droplet) -> tuple[str, ...]:
     return (
         "caddy",
@@ -1284,6 +1900,7 @@ def _assert_pre_envelope(droplet: Droplet) -> None:
     assert not droplet.plane.fragment.exists()
     assert not droplet.plane.next_fragment.exists()
     assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
+    assert not droplet.host.previous_drop_in.exists()
     assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
     assert droplet.caddy.admin_address == DEFAULT_TCP
     assert config_pair(droplet.caddy.running_config_at(DEFAULT_TCP)) == droplet.old_pair()
@@ -1681,6 +2298,289 @@ class TestRollback:
         assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
 
 
+HAND_EDITED_DROP_IN = (
+    "[Service]\n"
+    "EnvironmentFile=/etc/default/caddy-lovspor\n"
+    "# the operator's own, for the corpus's file_server\n"
+    "LimitNOFILE=1048576\n"
+)
+"""A drop-in nobody but a human wrote: neither absent nor the pre-envelope text."""
+
+
+class TestTheDropInBackup:
+    """The drop-in (a) overwrites is kept, and the rollback puts *that* back.
+
+    The rollback used to write the ``PRE_ENVELOPE_DROP_IN`` constant —
+    the module's idea of what provisioning should have written — and
+    report success either way. A drop-in that had been absent came back
+    as a file, and an edited one came back as an invention.
+    """
+
+    def test_the_backup_holds_the_bytes_the_first_write_replaced(self, droplet: Droplet) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+
+        assert droplet.host.previous_drop_in.read_bytes() == PRE_ENVELOPE_DROP_IN.encode()
+        assert stat.S_IMODE(droplet.host.previous_drop_in.stat().st_mode) == 0o644
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(
+            droplet.host, with_exec_reload=False
+        )
+
+    def test_the_second_write_does_not_record_the_migrations_own_drop_in(
+        self, droplet: Droplet
+    ) -> None:
+        """(e) writes the drop-in again, with the ``ExecReload=`` pair.
+
+        A backup taken at every write would record the migration's own
+        text as the prior state, and the rollback would then restore the
+        file it is undoing.
+        """
+        _migrate(droplet)
+
+        assert droplet.host.previous_drop_in.read_bytes() == PRE_ENVELOPE_DROP_IN.encode()
+
+    def test_a_drop_in_edited_between_the_preflight_and_the_install_comes_back(
+        self, droplet: Droplet
+    ) -> None:
+        """The preflight refuses a drop-in it does not recognise, so the migration
+        never overwrites one it has read. The backup covers the one window the
+        preflight cannot read: an edit landing after it, restored byte for byte
+        rather than as the module's assumption about what it should have been."""
+
+        def edit(step: str) -> None:
+            if step == "staged":
+                droplet.host.drop_in.write_text(HAND_EDITED_DROP_IN, encoding="utf-8")
+
+        first_migration(droplet.plane, droplet.host, droplet.a, edit)
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(
+            droplet.host, with_exec_reload=True
+        )
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True and report.exec_reload_removed is True
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == HAND_EDITED_DROP_IN
+        assert not droplet.host.previous_drop_in.exists()
+        assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
+
+    def test_a_drop_in_emptied_between_the_preflight_and_the_install_comes_back(
+        self, droplet: Droplet
+    ) -> None:
+        """The backup distinguishes an empty file from a name that was absent.
+
+        This is the same post-preflight edit window as the non-empty case above:
+        rollback must restore the bytes and the fact that the file existed.
+        """
+
+        def empty(step: str) -> None:
+            if step == "staged":
+                droplet.host.drop_in.write_bytes(b"")
+
+        first_migration(droplet.plane, droplet.host, droplet.a, empty)
+        assert droplet.host.previous_drop_in.read_bytes() == b""
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True and report.exec_reload_removed is True
+        assert droplet.host.drop_in.is_file()
+        assert droplet.host.drop_in.read_bytes() == b""
+        assert not droplet.host.previous_drop_in.exists()
+        assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
+
+    def test_an_absent_drop_in_round_trips_as_absent(self, droplet: Droplet) -> None:
+        """The failure that reported success: a box with no drop-in got one back.
+
+        Absence is recorded by its own name rather than by a zero-byte
+        backup, which an empty drop-in is indistinguishable from.
+        """
+        droplet.host.drop_in.unlink()
+
+        _migrate(droplet)
+        assert droplet.host.absent_drop_in.is_file()
+        assert stat.S_IMODE(droplet.host.absent_drop_in.stat().st_mode) == 0o644
+        assert not droplet.host.previous_drop_in.exists()
+        assert droplet.host.drop_in.is_file()
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+        assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
+        assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
+
+    def test_restoring_an_absent_drop_in_tolerates_it_already_missing(
+        self, droplet: Droplet
+    ) -> None:
+        """A repeated restore still consumes the absence record after the deletion landed."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        droplet.host.drop_in.unlink()
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+
+    @pytest.mark.parametrize("state", ["absent", "empty", "bytes"])
+    def test_the_three_prior_states_are_distinct_records_and_distinct_restores(
+        self, droplet: Droplet, state: str
+    ) -> None:
+        """Absent, present-but-empty and present-with-bytes, each round-tripping as itself.
+
+        The first two are both zero bytes of content, so the record
+        cannot be the content's length: one name says *these were the
+        bytes* and the other says *there was no file*.
+
+        An empty drop-in only ever reaches the write through the
+        post-preflight window — the preflight refuses one on sight, since
+        it is neither absent nor ``PRE_ENVELOPE_DROP_IN``.
+        """
+        if state == "absent":
+            droplet.host.drop_in.unlink()
+
+        def edit(step: str) -> None:
+            if step == "staged" and state == "empty":
+                droplet.host.drop_in.write_bytes(b"")
+
+        first_migration(droplet.plane, droplet.host, droplet.a, edit)
+
+        assert droplet.host.absent_drop_in.is_file() is (state == "absent")
+        assert droplet.host.previous_drop_in.is_file() is (state != "absent")
+
+        rollback_first_migration(droplet.plane, droplet.host)
+
+        assert droplet.host.drop_in.is_file() is (state != "absent")
+        if state != "absent":
+            expected = b"" if state == "empty" else PRE_ENVELOPE_DROP_IN.encode()
+            assert droplet.host.drop_in.read_bytes() == expected
+        assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+
+    def test_the_record_of_an_absent_drop_in_survives_a_crash_inside_the_install(
+        self, droplet: Droplet
+    ) -> None:
+        """One file is created either way, so no crash can leave the record half-made."""
+        droplet.host.drop_in.unlink()
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+
+        assert droplet.host.absent_drop_in.is_file()
+        assert not droplet.host.previous_drop_in.exists()
+
+        report = offline_rollback(droplet.plane, droplet.host)
+
+        assert report.marker_removed is False
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+
+    @pytest.mark.parametrize("state", ["absent", "bytes"])
+    def test_either_record_is_world_readable_whatever_the_umask(
+        self, droplet: Droplet, state: str, strict_umask: None
+    ) -> None:
+        """Both records are written for Caddy's box to be read on, not for the shell's umask.
+
+        The release commands are run from a shell ``docs/mcp.md`` tells
+        the operator to ``umask 077``, so a write that does not say its
+        mode leaves a record only root can read — and the operator
+        comparing the two names on the droplet then cannot.
+        """
+        if state == "absent":
+            droplet.host.drop_in.unlink()
+
+        _migrate(droplet)
+
+        record = droplet.host.absent_drop_in if state == "absent" else droplet.host.previous_drop_in
+        assert record.is_file()
+        assert stat.S_IMODE(record.stat().st_mode) == WORLD_READABLE
+
+    def test_the_restore_tolerates_a_drop_in_already_gone(self, droplet: Droplet) -> None:
+        """The absent record asks for a name with no file at it, which it may already be.
+
+        (a) writes the record before it writes the drop-in, so a crash
+        between the two leaves exactly this state — and a hand-removed
+        drop-in reaches it too. Either way the rollback wants the file
+        gone, and finding it gone already is not a failure.
+        """
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        droplet.host.drop_in.unlink()
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True and report.exec_reload_removed is False
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+
+    def test_a_drop_in_with_undecodable_bytes_does_not_break_the_way_back(
+        self, droplet: Droplet
+    ) -> None:
+        """``_had_exec_reload`` opens the first door of every rollback, offline included.
+
+        It reads a file a human may have edited, so decoding it would
+        raise ``UnicodeDecodeError`` — not an ``OSError``, so nothing
+        catches it — and the last resort would die on the box with the
+        fewest ways out. The needle is ASCII; the rest of the bytes are
+        not this question's business.
+        """
+        _migrate(droplet)
+        droplet.host.drop_in.write_bytes(b"[Service]\n# \xff\xfe\nExecReload=\n")
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.exec_reload_removed is True
+        assert droplet.host.drop_in.read_bytes() == PRE_ENVELOPE_DROP_IN.encode()
+
+    def test_the_rollback_refuses_when_both_records_exist(self, droplet: Droplet) -> None:
+        """One write makes one of them, so both is a human's edit and not a state to guess at."""
+        _migrate(droplet)
+        droplet.host.absent_drop_in.write_text("hand-made", encoding="utf-8")
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_drop_in} and {droplet.host.absent_drop_in} both exist; the "
+            "first says the drop-in held bytes and the second that there was none, and the "
+            "migration writes only one — remove the wrong one by hand"
+        )
+        assert live_release(droplet.plane) == droplet.a
+
+    def test_the_rollback_refuses_once_the_absent_record_is_gone(self, droplet: Droplet) -> None:
+        """Removing it is removing the way back, exactly as removing the bytes would be."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        droplet.host.absent_drop_in.unlink()
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value).startswith(f"{droplet.host.previous_drop_in} is missing: ")
+        assert live_release(droplet.plane) == droplet.a
+
+    def test_the_rollback_refuses_once_the_drop_in_backup_is_gone(self, droplet: Droplet) -> None:
+        """The backup is a source of the restore, so its absence is the same refusal."""
+        _migrate(droplet)
+        droplet.host.previous_drop_in.unlink()
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value).startswith(f"{droplet.host.previous_drop_in} is missing: ")
+        assert str(caught.value).endswith("nothing to restore")
+        assert live_release(droplet.plane) == droplet.a
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(
+            droplet.host, with_exec_reload=True
+        )
+
+    def test_the_backup_is_not_read_as_the_drop_in_by_systemd(self, droplet: Droplet) -> None:
+        """It stands in the drop-in directory, which systemd reads ``*.conf`` from alone."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+
+        assert droplet.host.previous_drop_in.parent == droplet.host.drop_in.parent
+        assert not droplet.host.previous_drop_in.name.endswith(".conf")
+
+
 class TestOfflineRollback:
     """The last resort: Caddy answers on neither address, so nothing is dialled."""
 
@@ -1781,10 +2681,12 @@ class TestRetire:
                 str(droplet.host.current_symlink),
                 str(droplet.host.site_root),
                 str(litter["flat"]),
+                str(droplet.host.previous_drop_in),
                 str(droplet.host.previous_caddyfile),
             )
         )
         assert not droplet.host.previous_caddyfile.exists()
+        assert not droplet.host.previous_drop_in.exists()
         assert not droplet.host.current_symlink.is_symlink()
         assert not droplet.host.site_root.exists()
         assert not litter["flat"].exists()
@@ -1793,6 +2695,28 @@ class TestRetire:
         assert (droplet.releases / droplet.a).is_dir() and (droplet.releases / droplet.b).is_dir()
         assert (droplet.releases / MARKER_NAME).is_file()
         assert live_release(droplet.plane) == droplet.a
+
+    def test_removes_the_absent_record_where_that_is_the_drop_ins_way_back(
+        self, droplet: Droplet
+    ) -> None:
+        """On a box that had no drop-in, that record is the way back and goes with the rest."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        litter = self._litter(droplet)
+
+        report = retire_pre_envelope(droplet.plane, droplet.host)
+
+        assert report == RetireReport(
+            removed=(
+                str(droplet.host.current_symlink),
+                str(droplet.host.site_root),
+                str(litter["flat"]),
+                str(droplet.host.absent_drop_in),
+                str(droplet.host.previous_caddyfile),
+            )
+        )
+        assert not droplet.host.absent_drop_in.exists()
+        assert not droplet.host.previous_caddyfile.exists()
 
     def test_preview_names_the_exact_targets_without_removing_them(self, droplet: Droplet) -> None:
         _migrate(droplet)
@@ -1821,8 +2745,8 @@ class TestRetire:
 
         report = retire_pre_envelope(droplet.plane, droplet.host)
 
-        assert report.removed[-1] == str(backup)
-        assert not backup.exists()
+        assert report.removed[-2:] == (str(droplet.host.previous_drop_in), str(backup))
+        assert not backup.exists() and not droplet.host.previous_drop_in.exists()
         with pytest.raises(ControlPlaneError) as caught:
             rollback_first_migration(droplet.plane, droplet.host)
         assert str(caught.value) == (
@@ -1853,7 +2777,7 @@ class TestRetire:
 
         first = retire_pre_envelope(droplet.plane, droplet.host)
 
-        assert first == RetireReport(removed=(backup,))
+        assert first == RetireReport(removed=(str(droplet.host.previous_drop_in), backup))
         assert retire_pre_envelope(droplet.plane, droplet.host) == RetireReport(removed=())
 
     def test_refuses_without_a_marker(self, droplet: Droplet) -> None:
@@ -1958,6 +2882,7 @@ class TestRetire:
         _migrate(droplet)
 
         assert retire_targets(droplet.plane, droplet.host) == (
+            str(droplet.host.previous_drop_in),
             str(droplet.host.previous_caddyfile),
         )
 
@@ -1970,7 +2895,10 @@ class TestRetire:
 
         report = retire_pre_envelope(droplet.plane, droplet.host)
 
-        assert report.removed == (str(droplet.host.previous_caddyfile),)
+        assert report.removed == (
+            str(droplet.host.previous_drop_in),
+            str(droplet.host.previous_caddyfile),
+        )
         assert link.is_symlink() and (droplet.releases / droplet.b).is_dir()
 
 
