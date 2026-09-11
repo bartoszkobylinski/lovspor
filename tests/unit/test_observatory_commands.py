@@ -877,7 +877,13 @@ class TestTwoSourcesCannotShareADomain:
         assert result.exit_code == 1
         assert "Refused:" in result.stderr
         assert "more than one activated source" in result.stderr
-        assert "abandoned" in result.stderr
+        # The remedy is the operator's next move, so it is asserted rather than
+        # matched on the word "abandoned": which repair the line names is the
+        # whole difference between the two ways a pass stops early.
+        assert (
+            f"  abandoned: {BAERUM_ID} partway — the archive for this source is "
+            "incomplete until the register names one authority for that host"
+        ) in result.stderr
         assert "captured: 1" in result.output
         assert contested_url not in [str(r.url) for r in httpx_mock.get_requests()]
 
@@ -3103,7 +3109,10 @@ class TestASweepRebindsToTheRegisterBeforeEachSource:
         result = runner.invoke(app, ["observatory", "capture-all"])
 
         assert result.exit_code == 0, result.output
-        assert f"withdrawn: {ASKER_ID}" in result.output
+        # The header too: a lane that vanished from the report entirely would
+        # leave the operator reading a sweep over one source, not two.
+        assert f"== {ASKER_ID}\n" in result.output
+        assert f"  withdrawn: {ASKER_ID} is no longer an activated source" in result.output
         assert "sources withdrawn mid-sweep: 1 of 2" in result.output
         run = latest_sweep_run(sweeps_path(ObservatoryRoot(root, ())))
         assert run is not None
@@ -3135,7 +3144,10 @@ class TestASweepRebindsToTheRegisterBeforeEachSource:
         result = runner.invoke(app, ["observatory", "capture-all"])
 
         assert result.exit_code == 1
-        assert f"refused: {BAERUM_ID} abandoned partway" in result.stderr
+        assert (
+            f"  refused: {BAERUM_ID} abandoned partway — the register row it was "
+            "bound to is not the row on disk any more"
+        ) in result.stderr
         assert "sources refused: 1 of 2" in result.stderr
         assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
         assert PAGE_URL not in _logged_urls(root)
@@ -4264,7 +4276,10 @@ class TestTheRegisterIsRereadWhileACaptureRuns:
 
         assert result.exit_code == 1
         assert "the register changed under this run" in result.stderr
-        assert f"abandoned: {BAERUM_ID} partway" in result.stderr
+        assert (
+            f"  abandoned: {BAERUM_ID} partway — the archive for this source is "
+            "incomplete until it is captured again under the row the register holds now"
+        ) in result.stderr
         assert _logged_urls(root) == [SITEMAP_URL]
 
     def test_an_unchanged_register_captures_exactly_as_it_always_did(
