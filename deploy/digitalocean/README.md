@@ -330,6 +330,7 @@ curl -fsS localhost:2019/config/ | head -c 200; echo    # TCP answers today
 ls -la /run/caddy 2>&1                                  # must not exist yet, or be empty
 cat /etc/systemd/system/caddy.service.d/lovspor.conf 2>&1   # absent, or the two lines below
 ls -l /etc/systemd/system/caddy.service.d/              # no leftover *.pre-envelope backup
+ls -l /etc/caddy/lovspor-release.caddy* 2>&1            # both names must be free (see below)
 ls -ld /var/www/lovspor-current /var/www/lovspor; ls /var/www/lovspor-releases/ 2>&1
 df -h /var/www
 systemctl status lovspor-publish --no-pager | head -5
@@ -347,8 +348,39 @@ refuses anything that is neither absent nor exactly
 EnvironmentFile=/etc/default/caddy-lovspor
 ```
 
-so an edited drop-in is a decision for you, not a guess for the code: move it
-aside and re-run.
+— a symlink at the name included, since that is neither those bytes nor, when
+it dangles, absence. So an edited drop-in is a decision for you, not a guess for
+the code. The refusal says *move it aside and re-run*; read what that costs
+before you take it.
+
+**Moving the drop-in aside makes it absent, and absence is what the rollback
+puts back.** Nothing breaks in between — the migration installs its own drop-in,
+`EnvironmentFile=` included — but after `--migrate-rollback` or `--rollback
+--offline` the name is empty again, `caddy.service` stops reading
+`/etc/default/caddy-lovspor`, `{$LOVSPOR_DOMAIN}` is unset, and the next
+`systemctl restart caddy` brings Caddy up with no site name. So replace the
+drop-in rather than removing it, and keep your copy:
+
+```bash
+cp /etc/systemd/system/caddy.service.d/lovspor.conf /root/lovspor.conf.mine
+printf '%s\n' '[Service]' 'EnvironmentFile=/etc/default/caddy-lovspor' \
+	>/etc/systemd/system/caddy.service.d/lovspor.conf
+systemctl daemon-reload
+```
+
+Keep `/root/lovspor.conf.mine`: whatever your drop-in added beyond those two
+lines, the migration does not carry it forward and no rollback puts it back. If
+you do move the drop-in aside instead, restore your copy by hand after any
+rollback — the migration will have recorded "there was no drop-in", faithfully.
+
+Both fragment names — `/etc/caddy/lovspor-release.caddy` and its `.next` — must
+be free. The migration writes them and keeps no copy of what was there, so it
+refuses either one and names what to do: move an unknown file aside; `rm` a
+leftover `.next`, which is what a crash between staging and step (a) leaves and
+is a file nothing has read. (`--abandon` cannot clear that one: step (a) never
+ran, so there is no backup for it to restore.) A box provisioned by the current
+`provision.sh` has a placeholder at the first name — but that is an envelope box
+already, and the preflight refuses it several ways before this one.
 
 The first envelope has no live release to hard-link against, so its `corpus/`
 tree is a full second copy beside the old flat releases until step 8 retires
@@ -519,9 +551,10 @@ that a missing `--yes` must fail closed rather than depend on a terminal.
 
 ### 9. Rollback, at any point before step 8
 
-Once step 8 has run there is no way back: it removes
-`/etc/caddy/Caddyfile.pre-envelope` with everything that Caddyfile serves, and
-`--migrate-rollback` refuses the moment that file is absent.
+Once step 8 has run there is no way back: it removes both `.pre-envelope`
+backups with everything that Caddyfile serves, and `--migrate-rollback` refuses
+the moment either of those two files is absent — or is a symlink rather than the
+file the migration wrote, which is not a source it will read or move.
 
 Before the cutover's reload succeeded, the way back is the file restore —
 `publish-release.sh --reconcile --abandon`, or `--migrate-rollback`, which does
@@ -567,14 +600,27 @@ curl -fsS https://lovspor.no/ | head -c 200; echo
 ```
 
 If the CLI itself is what is broken — a bad `uv sync`, a checkout mid-pull —
-the same two files, by hand:
+both restored files, by hand. The Caddyfile alone is not enough: the drop-in on
+disk is the migration's, and leaving it is a `caddy.service` whose `ExecReload=`
+dials a socket that is about to stop existing.
 
 ```bash
-sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile && sudo systemctl restart caddy
+BACKUP=/etc/systemd/system/caddy.service.d/lovspor.conf.pre-envelope
+sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile
+# The drop-in backup holds the bytes that were at the name — and ZERO bytes
+# means there was no drop-in, so the way back is to remove it, never to install
+# an empty one. Check before you copy: `ls -l "$BACKUP"`.
+if sudo test -s "$BACKUP"; then
+	sudo cp "$BACKUP" /etc/systemd/system/caddy.service.d/lovspor.conf
+else
+	sudo rm -f /etc/systemd/system/caddy.service.d/lovspor.conf
+fi
+sudo systemctl daemon-reload
+sudo systemctl restart caddy
 ```
 
-That leaves the marker and the release fragment behind, so afterwards run
-`lovspor release migrate --rollback --offline` (or delete
+That leaves the marker, the release fragment and both backups behind, so
+afterwards run `lovspor release migrate --rollback --offline` (or delete
 `/var/www/lovspor-releases/ACTIVE`) before attempting the migration again — a
 marker with the pre-envelope Caddyfile serving is a state `migrate` refuses.
 

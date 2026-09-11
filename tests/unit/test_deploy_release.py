@@ -284,20 +284,46 @@ class TestRunbook:
     def test_the_runbook_carries_the_offline_last_resort(self) -> None:
         """Every other way back dials the admin endpoint first, so all of them
         refuse on a box whose Caddyfile Caddy will not load — the state with the
-        fewest ways out. The runbook names the flag, and the two raw commands for
-        the case where the CLI itself is what is broken."""
+        fewest ways out. The runbook names the flag, and the raw commands for
+        the case where the CLI itself is what is broken.
+
+        Both restored files, not just the Caddyfile: the drop-in on disk is
+        the migration's own, and a zero-byte backup is a drop-in that was
+        not there — installing it as an empty file is not the way back.
+        """
         text = _README.read_text(encoding="utf-8")
 
         assert "#### Last resort: Caddy answers on neither address" in text
         assert "lovspor release migrate --rollback --offline" in text
-        assert (
-            "sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile && "
-            "sudo systemctl restart caddy"
-        ) in text
+        assert "sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile" in text
+        assert 'sudo cp "$BACKUP" /etc/systemd/system/caddy.service.d/lovspor.conf' in text
+        assert "sudo rm -f /etc/systemd/system/caddy.service.d/lovspor.conf" in text
+        assert "sudo systemctl daemon-reload" in text
         assert "precondition Caddy admin reachable unmet" in text
         assert text.index("--rollback --offline") > text.index(
             "### 9. Rollback, at any point before step 8"
         )
+
+    def test_the_runbook_says_what_an_absent_drop_in_costs_after_a_rollback(self) -> None:
+        """The preflight's refusal says *move it aside and re-run*, and two
+        independent tests pin that sentence byte for byte — so the cost of taking
+        the advice belongs here. A drop-in moved aside is an absent drop-in,
+        absence round-trips as absence (PR #269), and the restored box then has no
+        `EnvironmentFile=`: `{$LOVSPOR_DOMAIN}` is unset and Caddy comes up
+        nameless at the next restart. The runbook must offer the replacement that
+        loses nothing instead of only the move-aside."""
+        text = _README.read_text(encoding="utf-8")
+
+        for phrase in (
+            "absence is what the rollback",
+            "`{$LOVSPOR_DOMAIN}` is unset",
+            "brings Caddy up with no site name",
+            "/root/lovspor.conf.mine",
+            "restore your copy by hand after any",
+            "leftover `.next`",
+            "ls -l /etc/caddy/lovspor-release.caddy*",
+        ):
+            assert phrase in text, phrase
 
     def test_the_runbook_keeps_the_retire_step_separate_and_last(self) -> None:
         """Owner decision, ADR-0014 Migration step 5 (g): retiring the

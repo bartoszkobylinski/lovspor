@@ -409,7 +409,7 @@ def _retire(plane: ControlPlane, host: MigrationHost, confirmed: bool) -> tuple[
     """The paths first, then ``--yes``.
 
     The confirmation is a flag and never a prompt: this deletes
-    production directories and the rollback's only source, and a run with
+    production directories and the rollback's only sources, and a run with
     no terminal — the wrapper under systemd, an ssh one-liner — must fail
     closed rather than read a yes off a pipe that is not there.
     """
@@ -417,7 +417,7 @@ def _retire(plane: ControlPlane, host: MigrationHost, confirmed: bool) -> tuple[
         return _retired(retire_pre_envelope(plane, host))
     listed = "\n".join(f"  {path}" for path in retire_preview(plane, host).removed)
     raise ReleaseError(
-        "--retire permanently removes these paths, the last of them the only way back to the "
+        "--retire permanently removes these paths, the last two of them the only way back to the "
         f"pre-envelope site:\n{listed or '  (nothing)'}\nre-run with --yes to confirm"
     )
 

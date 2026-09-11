@@ -788,7 +788,7 @@ class TestMigrateRunSelection:
             _retire(droplet.plane, droplet.host, confirmed=False)
 
         assert str(caught.value) == (
-            "--retire permanently removes these paths, the last of them the only way back to "
+            "--retire permanently removes these paths, the last two of them the only way back to "
             f"the pre-envelope site:\n  {droplet.host.site_root}\n"
             f"  {droplet.host.previous_drop_in}\n"
             f"  {droplet.host.previous_caddyfile}\nre-run with --yes to confirm"
@@ -805,7 +805,7 @@ class TestMigrateRunSelection:
             _retire(droplet.plane, droplet.host, confirmed=False)
 
         assert str(caught.value) == (
-            "--retire permanently removes these paths, the last of them the only way back to "
+            "--retire permanently removes these paths, the last two of them the only way back to "
             "the pre-envelope site:\n  (nothing)\nre-run with --yes to confirm"
         )
 

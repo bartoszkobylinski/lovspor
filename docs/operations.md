@@ -181,10 +181,12 @@ and `--release-group`/`LOVSPOR_RELEASE_GROUP` beside those four. `--check`,
 deletes the only way back from the cutover — the drop-in backup and then, last
 of all, the pre-envelope Caddyfile — so it is always a separate, later run, and
 it lists the paths and removes nothing until it is repeated with `--yes` (a
-flag, never a prompt: an
-unattended run fails closed). `--rollback --offline` is the last resort for a
-box whose Caddy answers on neither address: it dials nothing, restores the
-files and restarts the unit. The droplet procedure, step by step, is
+flag, never a prompt: an unattended run fails closed). No path this command
+writes to or removes may be a symlink: `exists()` calls a dangling one absent
+and a live one would hand root's write to whatever it points at, so every one
+of those names is refused rather than followed. `--rollback --offline` is the
+last resort for a box whose Caddy answers on neither address: it dials nothing,
+restores the files and restarts the unit. The droplet procedure, step by step, is
 [`deploy/digitalocean/README.md` § First migration](../deploy/digitalocean/README.md#first-migration-once-on-the-existing-droplet).
 
 ## Observatory: registering a capture source (ADR-0010)
