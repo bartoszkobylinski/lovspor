@@ -321,6 +321,10 @@ class TestTheUrlSetTheOldConfigurationOffers:
     def test_a_wildcard_anywhere_but_the_end_is_not_asked_about(self) -> None:
         assert matcher_urls(("/lov/*/paragraf",)) == ()
 
+    def test_a_matcher_that_is_not_a_path_is_not_asked_about(self) -> None:
+        """``*`` alone, or anything without a leading slash, is not a URL this can ask."""
+        assert matcher_urls(("*", "lov")) == ()
+
     def test_candidates_come_from_both_the_trees_and_the_matchers(self, world: Path) -> None:
         found = candidate_urls(load_adapted("previous.json", world))
 

@@ -63,6 +63,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lovspor.release.answers import (
+    INDEX_FILE,
     NOT_FOUND,
     Answer,
     answer_for,
@@ -187,7 +188,7 @@ def tree_urls(root: Path) -> tuple[str, ...]:
         if not path.is_file():
             continue
         relative = path.relative_to(root)
-        if relative.name == "index.html":
+        if relative.name == INDEX_FILE:
             parent = relative.parent.as_posix()
             found.append("/" if parent == "." else f"/{parent}/")
         else:
@@ -195,12 +196,17 @@ def tree_urls(root: Path) -> tuple[str, ...]:
     return tuple(found)
 
 
+def _asks_about(pattern: str) -> bool:
+    """A matcher this dry-run can turn into one URL: absolute, and wildcarded only at the end."""
+    return pattern.startswith("/") and "*" not in pattern[:-1]
+
+
 def matcher_urls(patterns: Sequence[str]) -> tuple[str, ...]:
     """Each matcher path as a URL: literal as it stands, a trailing ``*`` as one probe."""
     found = [
         pattern[:-1] + PROBE_SEGMENT if pattern.endswith("*") else pattern
         for pattern in patterns
-        if "*" not in pattern[:-1]
+        if _asks_about(pattern)
     ]
     return tuple(found)
 
