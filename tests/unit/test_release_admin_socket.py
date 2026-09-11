@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from lovspor.release.admin_socket import (
+    CONFIG_URL,
     DEFAULT_UNPRIVILEGED_USER,
     AdminSocket,
     check_admin_socket,
@@ -105,10 +106,28 @@ class TestTheFourFacts:
             check_admin_socket(socketed.access())
 
     def test_the_wrong_group_is_a_named_refusal(self, socketed: Socketed) -> None:
-        socketed.ownership.groups["lovspor-release"] = socketed.file.stat().st_gid + 1
+        found = socketed.file.stat().st_gid
+        socketed.ownership.groups["lovspor-release"] = found + 1
 
-        with pytest.raises(AdminSocketError, match="lovspor-release"):
+        with pytest.raises(AdminSocketError) as raised:
             check_admin_socket(socketed.access())
+
+        assert str(raised.value) == (
+            f"admin socket precondition unmet: {socketed.file} has gid {found}, not "
+            f"lovspor-release's {found + 1}; the runtime directory needs the setgid bit "
+            "and the group"
+        )
+
+    def test_the_wrong_mode_names_the_creation_mode_suffix(self, socketed: Socketed) -> None:
+        socketed.file.chmod(0o600)
+
+        with pytest.raises(AdminSocketError) as raised:
+            check_admin_socket(socketed.access())
+
+        assert str(raised.value) == (
+            f"admin socket precondition unmet: {socketed.file} has mode 0600, not 0660; "
+            "the admin address needs the |0660 creation-mode suffix"
+        )
 
     def test_a_group_that_does_not_exist_is_a_named_refusal(self, socketed: Socketed) -> None:
         with pytest.raises(AdminSocketError, match="group nosuchgroup does not exist"):
@@ -127,27 +146,46 @@ class TestTheFourFacts:
     ) -> None:
         socketed.caddy.socket_users.add(DEFAULT_UNPRIVILEGED_USER)
 
-        with pytest.raises(AdminSocketError, match="can GET /config/"):
+        with pytest.raises(AdminSocketError) as raised:
             check_admin_socket(socketed.access())
+
+        assert str(raised.value) == (
+            f"admin socket precondition unmet: {DEFAULT_UNPRIVILEGED_USER} can GET /config/ "
+            f"over {socketed.file}; that user must not be in lovspor-release, and the socket "
+            "must not be world-reachable"
+        )
 
     def test_a_stray_tcp_listener_beside_the_socket_is_a_named_refusal(
         self, socketed: Socketed
     ) -> None:
         """The three other facts hold; only the address the migration closed is back."""
-        with pytest.raises(AdminSocketError, match="answers") as raised:
+        with pytest.raises(AdminSocketError) as raised:
             check_admin_socket(socketed.access(admin_client=socketed.answering_everywhere))
 
-        assert TCP in str(raised.value)
+        assert str(raised.value) == (
+            f"admin socket precondition unmet: {TCP} answers; on that address every process "
+            "on the box can rewrite the running configuration"
+        )
 
 
 class TestTheUnprivilegedCall:
     def test_is_the_same_call_through_sudo_with_no_shell(self, socketed: Socketed) -> None:
+        """Fixed argv, every flag of it: a call that silently succeeded would pass fact four."""
         argv = unprivileged_argv(socketed.access())
 
-        assert argv[:4] == ("sudo", "-u", DEFAULT_UNPRIVILEGED_USER, "curl")
-        assert "--unix-socket" in argv
-        assert argv[argv.index("--unix-socket") + 1] == str(socketed.file)
-        assert argv[-1].startswith("http://")
+        assert argv == (
+            "sudo",
+            "-u",
+            DEFAULT_UNPRIVILEGED_USER,
+            "curl",
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--unix-socket",
+            str(socketed.file),
+            CONFIG_URL,
+        )
+        assert CONFIG_URL.startswith("http://")
 
     def test_names_the_user_the_access_names(self, socketed: Socketed) -> None:
         argv = unprivileged_argv(socketed.access(unprivileged_user="someone"))

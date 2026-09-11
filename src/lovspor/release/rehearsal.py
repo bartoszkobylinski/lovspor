@@ -272,11 +272,11 @@ def rejected_cutover(plan: Rehearsal) -> tuple[Step, ...]:
     abandon_first_migration(plan.plane, plan.host)
     return (
         Step(name="ii.rejected", detail=f"R unmoved on {plan.host.tcp_admin}: {failure}"),
-        _abandoned(plan),
+        abandoned(plan),
     )
 
 
-def _abandoned(plan: Rehearsal) -> Step:
+def abandoned(plan: Rehearsal) -> Step:
     """After *abandon*: the previous Caddyfile is back, and neither record survives it."""
     for path, role in ((plan.plane.fragment, "fragment"), (plan.host.previous_caddyfile, "backup")):
         _require(not _present(path), "ii.rejected", f"the {role} {path} survived the abandon")

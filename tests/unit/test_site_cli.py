@@ -631,12 +631,16 @@ class TestReleaseProbeCommand:
         )
 
 
+SUDO_CALLS: list[tuple[str, ...]] = []
+"""What the drift check tried to run as another identity; one list, cleared per run."""
+
+
 class _RefusingSudo:
     """The unprivileged call as the unit makes it, refused — without running a real ``sudo``."""
 
     def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
         del env
-        assert argv[:2] == ("sudo", "-u"), argv
+        SUDO_CALLS.append(tuple(argv))
         return Completed(7, "", "curl: (7) Couldn't connect to server")
 
 
@@ -660,6 +664,7 @@ def admin_socket(
         group = grp.getgrgid(socket.stat().st_gid).gr_name
     except KeyError:  # pragma: no cover — a machine whose tmp gid has no group entry
         pytest.skip("the temporary directory's gid has no group entry")
+    SUDO_CALLS.clear()
     monkeypatch.setattr(lovspor.cli, "SubprocessRunner", _RefusingSudo)
     httpx_mock.add_response(url="http://127.0.0.1/config/", json={})
     # The fourth fact: the pre-envelope TCP address must refuse, as a closed port does.
@@ -765,8 +770,8 @@ class TestSiteDriftCheckCommand:
         result = runner.invoke(app, _drift_args(*admin_socket))
 
         assert result.exit_code == 3
-        assert "site-drift-check: served_document_unavailable" in result.output
-        assert "reason=http_503" in result.output
+        assert "site-drift-check: served_document_unavailable" in result.stderr
+        assert "reason=http_503" in result.stderr
         assert not httpx_mock.get_requests(url=READINESS_URL)
 
     def test_a_target_outside_http_is_a_usage_error(
@@ -838,8 +843,8 @@ class TestSiteDriftCheckCommand:
         result = runner.invoke(app, _drift_args("--admin", f"unix/{tmp_path / 'gone.sock'}"))
 
         assert result.exit_code == 4
-        assert "admin socket precondition unmet" in result.output
-        assert str(tmp_path / "gone.sock") in result.output
+        assert "admin socket precondition unmet" in result.stderr
+        assert str(tmp_path / "gone.sock") in result.stderr
         assert not httpx_mock.get_requests()
 
     def test_an_admin_address_that_is_not_a_socket_is_a_usage_error(
@@ -850,6 +855,22 @@ class TestSiteDriftCheckCommand:
         assert result.exit_code == 2
         assert "Unix-socket" in result.stderr
         assert not httpx_mock.get_requests()
+
+    def test_the_call_as_the_other_identity_is_made_as_the_option_names_it(
+        self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock, admin_socket: list[str]
+    ) -> None:
+        """Fact four is attempted, and attempted as the identity the unit was told about."""
+        corpus, document, fake = released
+        httpx_mock.add_response(url=SERVED_URL, content=document.read_bytes())
+        self._host_again(httpx_mock, corpus, fake)
+
+        result = runner.invoke(
+            app, _drift_args(*admin_socket, "--unprivileged-user", "someone-else")
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(SUDO_CALLS) == 1
+        assert SUDO_CALLS[0][:4] == ("sudo", "-u", "someone-else", "curl")
 
     def test_the_socket_options_carry_the_droplets_defaults(self) -> None:
         command = get_command(app)
