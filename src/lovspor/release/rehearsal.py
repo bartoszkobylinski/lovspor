@@ -342,20 +342,37 @@ def plain_reload_refused(plan: Rehearsal) -> Step:
     return Step(name="iii.plain-reload", detail="the stock reload line reached nothing, as it must")
 
 
-def rollback(plan: Rehearsal) -> tuple[Step, ...]:
-    """(iii) The first-migration rollback, delivered to the socket, and its negative fixture."""
-    plain = plain_reload_refused(plan)
-    previous = adapt(plan.plane.runner, plan.host.previous_caddyfile, plan.plane.fragment)
-    report = rollback_first_migration(plan.plane, plan.host)
+def rolled_back(plan: Rehearsal, previous: ConfigPair) -> ConfigPair:
+    """(iii) What must hold after the way back: the previous configuration, on TCP, no socket.
+
+    ``previous`` is the pre-envelope Caddyfile adapted, so the equality
+    covers what the ADR spells out — no ``vars`` handler and the symlink
+    roots — rather than only the release id.
+    """
     running = _running(plan, plan.host.tcp_admin)
     if running is None:
         raise RehearsalFailedError("iii", f"{plan.host.tcp_admin} does not answer afterwards")
+    _require(running.release_id is None, "iii", f"it still names release {running.release_id}")
     _require(
         running == previous,
         "iii",
         f"{plan.host.tcp_admin} runs {running.describe()}, not the previous {previous.describe()}",
     )
+    _require(
+        _running(plan, plan.host.socket_admin) is None,
+        "iii",
+        f"{plan.host.socket_admin} still answers after the way back",
+    )
     _require(not _present(plan.host.socket), "iii", f"{plan.host.socket} survived the rollback")
+    return running
+
+
+def rollback(plan: Rehearsal) -> tuple[Step, ...]:
+    """(iii) The first-migration rollback, delivered to the socket, and its negative fixture."""
+    plain = plain_reload_refused(plan)
+    previous = adapt(plan.plane.runner, plan.host.previous_caddyfile, plan.plane.fragment)
+    report = rollback_first_migration(plan.plane, plan.host)
+    rolled_back(plan, previous)
     wanted = f"--address {plan.host.socket_admin}"
     _require(wanted not in _exec_reload(plan, "iii"), "iii", f"ExecReload still names {wanted}")
     return (

@@ -20,7 +20,7 @@ from typing import NamedTuple
 
 import pytest
 
-from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, config_pair
+from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
 from lovspor.release.envelope import read_marker
 from lovspor.release.errors import RehearsalFailedError
 from lovspor.release.migrate import SOCKET_MODE, drop_in_text
@@ -37,6 +37,7 @@ from lovspor.release.rehearsal import (
     rejected_cutover,
     restarts,
     rollback,
+    rolled_back,
     start_on_previous,
     steady_reload,
     steady_state,
@@ -345,6 +346,33 @@ class TestRollback:
 
         assert staged.running(REHEARSAL_TCP) == before
         assert staged.running(REHEARSAL_TCP).release_id is None
+
+    def test_a_configuration_that_still_names_a_release_ends_the_rehearsal(
+        self, staged: Staged
+    ) -> None:
+        """The ADR's own wording: no `vars` handler afterwards, the symlink roots."""
+        previous = self._previous(staged)
+        host = replace(staged.plan.host, admin_client=_everywhere(staged))
+
+        with pytest.raises(RehearsalFailedError, match="still names release"):
+            rolled_back(replace(staged.plan, host=host), previous)
+
+    def test_a_socket_that_still_answers_ends_the_rehearsal(self, staged: Staged) -> None:
+        previous = self._previous(staged)
+        rollback(staged.plan)
+        host = replace(staged.plan.host, admin_client=_everywhere(staged))
+
+        with pytest.raises(RehearsalFailedError, match="still answers after the way back"):
+            rolled_back(replace(staged.plan, host=host), previous)
+
+    def _previous(self, staged: Staged) -> ConfigPair:
+        """The pre-envelope pair, read while the backup still exists; then the envelope is live."""
+        cutover(staged.plan)
+        return adapt(
+            staged.plan.plane.runner,
+            staged.plan.host.previous_caddyfile,
+            staged.plan.plane.fragment,
+        )
 
     def test_an_exec_reload_still_naming_the_socket_ends_the_rehearsal(
         self, staged: Staged
