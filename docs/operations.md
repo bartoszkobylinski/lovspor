@@ -384,6 +384,45 @@ uv run lovspor observatory activate-source --id 4202 --check <fresh-check>.json
 Records already written under the wrong authority are a separate question: the log is
 append-only and its history is not rewritten.
 
+### A repair reaches the run that is already going
+
+**The register is read again before every source, and every fetch is checked
+against the file.** A sweep used to load it once and hold it for the whole pass.
+That pass is not a moment: the run of 2026-09-03 took 141 hours.
+
+It happened, and it is the tail of #215. The 4202 repair above was made at
+07:20:44 on 2026-09-03, into a sweep that was already running —
+`source-events.jsonl` carries the `source_domain_replaced`, and
+`verdicts/4202-grimstad-check.json` sits beside it. The sweep never looked at
+the file again: **669 further observations of `arendal.kommune.no` were filed
+under authority 4202 after the repair**, taking the misattributed body from
+5,980 to 7,872 (issue #221). `observatory status` showed no collision the whole
+time, because by then there was none.
+
+What holds it shut now:
+
+- **Between sources**, the register is read again. A source deactivated while
+  an earlier one was being swept is never asked; a source whose domain changed
+  is swept under the domain it has now.
+- **Inside a source**, each fetch is authorised against the file. If the row the
+  lane bound itself to is no longer the row on disk, the lane is abandoned: the
+  source is counted as refused, the sweep degrades, and the records already
+  written stay. It fails closed rather than re-filing the rest of the lane
+  under whatever the register says now — that would be a second guess about who
+  publishes those pages, made by a process minutes after an operator made the
+  first one by hand. A record not written can be captured again on the next
+  pass; a misattributed one cannot be undone, because nothing in this engine
+  rewrites `authority_id`.
+- **The scope of a run** is the ids the register held when it began. A source
+  activated mid-run waits for the next sweep.
+- **A withdrawal is counted**, as `sources_withdrawn` in the run record and on
+  the `status` report. It does not degrade the sweep — the operator asked for
+  it — but a source that quietly stopped being swept would read as an archive
+  with nothing missing.
+
+Nothing about a binding is persisted, so a sweep killed mid-run needs no
+resuming: the next invocation reads the register from scratch.
+
 ### Reading the archive's failure rate: `observatory composition`
 
 **A followed redirect is recorded as `fetch_failure`, and it is not a
@@ -518,14 +557,14 @@ registry. Process telemetry, not an observation:
 ```json
 {"run_id":"2026-08-25T01:00:00+00:00","started_at":"...","finished_at":"...",
  "active_sources":201,"sources_completed":198,"sources_refused":3,
- "captured":47,"failed_fetches":2,"unchanged":4218,"deferred":36,
- "status":"degraded"}
+ "sources_withdrawn":0,"captured":47,"failed_fetches":2,"unchanged":4218,
+ "deferred":36,"status":"degraded"}
 ```
 
 | status | meaning | who records it |
 | --- | --- | --- |
 | `success` | every active source was swept to the end of its sitemap | `capture-all` |
-| `degraded` | the sweep ran, and at least one source was refused **or capped** (a source held under a verdict does not degrade it — it is counted, not asked) | `capture-all` |
+| `degraded` | the sweep ran, and at least one source was refused **or capped** (a source held under a verdict, or withdrawn from the register mid-run, does not degrade it — it is counted, not asked) | `capture-all` |
 | `failed` | the sweep could not execute — archive not mounted, log damaged, or the host reserved for a benchmark (`deferred_exclusive_workload`) | the nightly wrapper |
 
 `capture-all` still exits 1 on `degraded`. The `failed` state belongs to the
@@ -759,6 +798,7 @@ Last sweep
   refused:    2
   capped:     0
   held:       0
+  withdrawn:  0
   captured:   47 | unchanged: 4218 | deferred: 36
   status:     DEGRADED
 
