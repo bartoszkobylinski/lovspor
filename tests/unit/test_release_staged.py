@@ -113,6 +113,16 @@ APP_ROUTE, CORPUS_ROUTE, CATCH_ALL = 1, 2, 3
 """The site block's routes, in the order Caddy adapts both Caddyfiles."""
 
 
+def hosting(config: object, *names: str) -> object:
+    """One capture with the site block matched on ``names``, or on no host at all."""
+    route = config["apps"]["http"]["servers"]["srv0"]["routes"][0]  # type: ignore[index]
+    if names:
+        route["match"] = [{"host": list(names)}]
+    else:
+        route.pop("match", None)
+    return config
+
+
 def corpus_of(world: Path) -> Path:
     return world / "www" / "lovspor-releases" / RELEASE_ID / "corpus"
 
@@ -172,13 +182,45 @@ class TestTheHostBothConfigurationsServe:
             staged_rehearsal(plan)
 
         assert caught.value.step == "staged.host"
-        assert "lovspor.example" in caught.value.detail
+        assert caught.value.detail == (
+            "the old configuration serves ('lovspor.test',) and the new ('lovspor.example',)"
+        )
 
-    def test_the_step_names_the_host(self, world: Path) -> None:
-        report = staged_rehearsal(make_plan(world))
-        step = next(one for one in report.steps if one.name == "staged.host")
+    def test_an_old_configuration_matching_on_no_host_is_named_as_such(self, world: Path) -> None:
+        plan = plan_for(
+            world,
+            [hosting(load_adapted("previous.json", world))],
+            [load_adapted("proposed.json", world)],
+        )
 
-        assert "lovspor.test" in step.detail
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.detail.startswith("the old configuration serves no host and the new")
+
+    def test_a_new_configuration_matching_on_no_host_is_named_as_such(self, world: Path) -> None:
+        plan = plan_for(
+            world,
+            [load_adapted("previous.json", world)],
+            [hosting(load_adapted("proposed.json", world))],
+        )
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.detail.endswith("and the new no host")
+
+    def test_the_step_lists_every_host_they_both_serve(self, world: Path) -> None:
+        names = ("lovspor.test", "www.lovspor.test")
+        plan = plan_for(
+            world,
+            [hosting(load_adapted("previous.json", world), *names)],
+            [hosting(load_adapted("proposed.json", world), *names)],
+        )
+
+        step = next(one for one in staged_rehearsal(plan).steps if one.name == "staged.host")
+
+        assert step.detail == "both configurations serve lovspor.test, www.lovspor.test"
 
 
 class TestACorpusUrlTheNewConfigurationDrops:
@@ -274,7 +316,9 @@ class TestTheRollback:
             staged_rehearsal(plan)
 
         assert caught.value.step == "staged.rollback"
-        assert "no longer answers as it did" in caught.value.detail
+        assert caught.value.detail.startswith(
+            "the previous configuration no longer answers as it did — /"
+        )
 
     def test_the_previous_configuration_must_come_back_on_tcp(self, world: Path) -> None:
         socketed = load_adapted("previous.json", world)
@@ -493,7 +537,7 @@ class TestAConfigurationThatReachesNoRouteAtAll:
             staged_rehearsal(plan)
 
         assert caught.value.step == "staged.corpus"
-        assert "no corpus URL at all" in caught.value.detail
+        assert caught.value.detail == "the old configuration answers no corpus URL at all"
 
 
 class TestTheStepsCountWhatTheyChecked:
@@ -551,6 +595,15 @@ class TestTheTwoMessagesTheRollbackComposes:
         taken = (("/a", "one"), ("/b", "two"))
 
         assert _changed(taken, (("/a", "one"), ("/b", "three"))) == "/b"
+
+    def test_the_first_by_name_when_two_files_moved(self) -> None:
+        assert _changed((("/a", "one"),), (("/b", "two"),)) == "/a"
+
+    def test_urls_the_previous_configuration_gained_are_counted(self) -> None:
+        """Reachable only by calling this directly: the caller passes the same key set."""
+        answer = self._answer(200)
+
+        assert _first_difference({"/a": answer}, {"/a": answer, "/b": answer}).startswith("1 URLs")
 
     def test_two_identical_readings_name_nothing(self) -> None:
         taken = (("/a", "one"),)

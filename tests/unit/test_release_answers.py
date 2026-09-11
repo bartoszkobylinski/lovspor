@@ -116,15 +116,22 @@ class TestWhatTheOldConfigurationAnswers:
         assert (answer.handler, answer.upstream) == ("reverse_proxy", "127.0.0.1:8000")
 
     def test_the_manifest_is_outside_the_old_matcher_and_is_not_answered(
-        self, previous: object
+        self, previous: object, world: Path
     ) -> None:
         """The old ``@corpus`` list predates ADR-0013's manifest, so it falls to the landing
         root, which does not hold it. The new configuration answers it — a difference in the
         direction the dry-run allows."""
         answer = answer_for(previous, "/site-manifest.json")
 
-        assert answer is not None
-        assert answer.status == NOT_FOUND and answer.served is None
+        assert answer == Answer(
+            handler="file_server",
+            root=site(world, "lovspor").as_posix(),
+            served=None,
+            digest=None,
+            status=NOT_FOUND,
+            location=None,
+            upstream=None,
+        )
 
 
 class TestWhatTheNewConfigurationAnswers:
@@ -377,8 +384,9 @@ class TestHandlersWithAShapeCaddyDoesNotEmit:
 
         assert answer is not None and answer.location is None
 
-    def test_upstreams_that_are_not_a_list_name_no_upstream(self) -> None:
-        config = _one_route([{"handler": "reverse_proxy", "upstreams": "127.0.0.1:8000"}])
+    @pytest.mark.parametrize("upstreams", ["127.0.0.1:8000", [], None])
+    def test_upstreams_caddy_would_not_write_name_no_upstream(self, upstreams: Any) -> None:
+        config = _one_route([{"handler": "reverse_proxy", "upstreams": upstreams}])
 
         answer = answer_for(config, "/")
 
