@@ -274,19 +274,34 @@ def _in(path: str | None, tree: Path) -> bool:
     return path is not None and Path(path).resolve() == tree.resolve()
 
 
+def unreadable_reason(path: Path) -> str | None:
+    """Why the dry-run cannot read ``path``, or ``None``; a directory is said to be one.
+
+    Separated from the raising so the refusal is composed in one place:
+    three reasons through three ``raise`` sites means three copies of the
+    sub-step's name, and only one of the three is reachable without a
+    particular identity — the other two would then be pinned by nothing
+    the gate can measure on every machine.
+    """
+    if path.is_dir():
+        return "is a directory"
+    if not path.is_file():
+        return "is not a file"
+    if not os.access(path, os.R_OK):
+        return "is not readable"
+    return None
+
+
 def _readable(path: Path, role: str) -> None:
     """A file the dry-run must read, named here rather than through ``caddy``'s stderr.
 
-    A directory is said to be one: ``caddy validate`` on a directory
-    reports a read error the operator then has to interpret, and the seam
-    this rehearsal is built on puts what decides in Python.
+    ``caddy validate`` on a missing or unopenable file reports a read error
+    the operator then has to interpret; the seam this rehearsal is built on
+    puts what decides in Python.
     """
-    if path.is_dir():
-        raise RehearsalFailedError("staged.validate", f"the {role} {path} is a directory")
-    if not path.is_file():
-        raise RehearsalFailedError("staged.validate", f"the {role} {path} is not a file")
-    if not os.access(path, os.R_OK):
-        raise RehearsalFailedError("staged.validate", f"the {role} {path} is not readable")
+    broken = unreadable_reason(path)
+    if broken is not None:
+        raise RehearsalFailedError("staged.validate", f"the {role} {path} {broken}")
 
 
 def validated(plan: StagedPlan) -> Step:

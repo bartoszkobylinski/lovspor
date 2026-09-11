@@ -38,6 +38,7 @@ from lovspor.release.staged import (
     staged_rehearsal,
     symlinked_component,
     tree_urls,
+    unreadable_reason,
 )
 from tests.unit.staged_fixtures import (
     FLAT_RELEASE,
@@ -676,7 +677,18 @@ class TestACaddyfileTheDryRunCannotRead:
         with pytest.raises(RehearsalFailedError) as caught:
             staged_rehearsal(plan)
 
+        assert caught.value.step == "staged.validate"
         assert caught.value.detail.endswith("is not readable")
+
+    def test_each_reason_is_read_off_the_path_alone(self, world: Path) -> None:
+        """The three reasons, asked directly: every one of them composes the same refusal,
+        so the sub-step's name is pinned by the two that need no particular identity."""
+        plan = make_plan(world)
+        (world / "adir").mkdir()
+
+        assert unreadable_reason(world / "adir") == "is a directory"
+        assert unreadable_reason(world / "gone") == "is not a file"
+        assert unreadable_reason(plan.previous) is None
 
     def test_both_configurations_are_checked(self, world: Path) -> None:
         """The proposed one too: only checking the first leaves half the run unguarded."""
