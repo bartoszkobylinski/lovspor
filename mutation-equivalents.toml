@@ -2332,9 +2332,10 @@ mutation = """
 +    path: Path, text: str, *, encoding: str = "UTF-8", mode: int | None = None
 """
 justification = """
-The parameter is used in exactly one place, `tmp.write_text(text,
-encoding=encoding)`, so the default's only effect is which codec that call
-selects. Python's codec registry normalises an encoding name before lookup —
+The parameter is used in exactly one place, `text.encode(encoding)` (it was
+`tmp.write_text(text, encoding=encoding)` when this entry was registered; PR
+for #280 moved the encode ahead of the staging file), so the default's only
+effect is which codec that call selects. Python's codec registry normalises an encoding name before lookup —
 case is folded and hyphens and underscores are interchangeable
 (`encodings.normalize_encoding`), so `codecs.lookup("UTF-8")` and
 `codecs.lookup("utf-8")` return the same CodecInfo. Both spellings therefore
