@@ -2695,6 +2695,23 @@ class TestRetire:
         assert (droplet.releases / MARKER_NAME).is_file()
         assert live_release(droplet.plane) == droplet.a
 
+    def test_a_flat_name_plus_a_newline_is_not_a_retire_target(self, droplet: Droplet) -> None:
+        """`retire` deletes by name, and `<flat>\n` is not the name it promises.
+
+        A POSIX directory name may contain a newline and `$` matched just
+        before one, so a directory beside the real pre-envelope releases was
+        swept up by `rmtree` on a name no release procedure ever wrote.
+        """
+        _migrate(droplet)
+        self._litter(droplet)
+        foreign = droplet.releases / "20260908T120000Z-abcdef123457\n"
+        foreign.mkdir()
+
+        report = retire_preview(droplet.plane, droplet.host)
+
+        assert str(foreign) not in report.removed
+        assert foreign.is_dir()
+
     def test_removes_the_absent_record_where_that_is_the_drop_ins_way_back(
         self, droplet: Droplet
     ) -> None:

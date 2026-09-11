@@ -124,7 +124,18 @@ class TestConfigPair:
 
     @pytest.mark.parametrize(
         "value",
-        ["", " ", "\t", "not-an-id", "A" * 64, "a" * 63, "a" * 65, ID_A + " ", " " + ID_A],
+        [
+            "",
+            " ",
+            "\t",
+            "not-an-id",
+            "A" * 64,
+            "a" * 63,
+            "a" * 65,
+            ID_A + " ",
+            " " + ID_A,
+            ID_A + "\n",
+        ],
     )
     def test_a_release_var_that_is_not_a_release_id_names_no_release(self, value: str) -> None:
         """R is read back off Caddy's own admin API, so the var is untrusted input.

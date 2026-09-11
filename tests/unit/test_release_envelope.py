@@ -80,6 +80,18 @@ class TestNames:
         assert not is_release_id(ID_A.upper())
         assert not is_release_id("20260908T120000Z-abcdef123456")
 
+    @pytest.mark.parametrize(
+        "value", [ID_A + "\n", ID_A + "\r\n", "\n" + ID_A, ID_A + "\n\n", ID_A + "\n ", ID_A + " "]
+    )
+    def test_a_release_id_may_not_carry_a_trailing_newline(self, value: str) -> None:
+        """`$` also matches just before one trailing newline, and ids are read out of files.
+
+        A file's last line normally ends in `\n`, and the id becomes a path
+        component: an id that keeps the newline makes `releases/<id>\n/`, a
+        directory beside the real one that no other reader can name.
+        """
+        assert not is_release_id(value)
+
     def test_a_build_name_is_never_a_release_id(self, tmp_path: Path) -> None:
         build = tmp_path / f"{BUILD_PREFIX}{ID_A}"
         build.mkdir()
@@ -283,6 +295,22 @@ class TestMarker:
         self, tmp_path: Path, marker: dict[str, str | None]
     ) -> None:
         """ACTIVE names finalized release-id directories, never arbitrary paths."""
+        (tmp_path / MARKER_NAME).write_text(json.dumps(marker), encoding="utf-8")
+
+        with pytest.raises(IncompleteEnvelopeError, match="not a marker"):
+            read_marker(tmp_path)
+
+    @pytest.mark.parametrize("field", ["active", "previous"])
+    def test_a_marker_id_with_a_trailing_newline_is_refused(
+        self, tmp_path: Path, field: str
+    ) -> None:
+        """`ACTIVE` is JSON, and a JSON string carries a newline unescaped by the reader.
+
+        `marker.active` is handed straight to `release_dir`, so an id that kept
+        a trailing newline would send `prune` and `rollback` at
+        `releases/<id>\n/` — a directory no build ever wrote.
+        """
+        marker = {"active": ID_A, "previous": ID_B} | {field: ID_A + "\n"}
         (tmp_path / MARKER_NAME).write_text(json.dumps(marker), encoding="utf-8")
 
         with pytest.raises(IncompleteEnvelopeError, match="not a marker"):

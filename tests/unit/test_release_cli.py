@@ -232,8 +232,12 @@ class TestCommit:
         assert "not switched" in result.output
         assert read_marker(host.plane.releases) == Marker(active=host.a, previous=None)
 
-    def test_a_name_that_is_not_an_id_is_a_usage_error(self, host: Host) -> None:
-        result = runner.invoke(app, ["release", "commit", ".build-x"])
+    @pytest.mark.parametrize("name", [".build-x", _AN_ID + "\n"])
+    def test_a_name_that_is_not_an_id_is_a_usage_error(self, host: Host, name: str) -> None:
+        """A newline can reach argv, and `$` used to let an id keep one: the
+        command then looked up `releases/<id>\n/` and reported a missing
+        envelope instead of refusing the name it was given."""
+        result = runner.invoke(app, ["release", "commit", name])
 
         assert result.exit_code == 2
 

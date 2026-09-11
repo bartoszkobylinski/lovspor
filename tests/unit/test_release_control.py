@@ -830,6 +830,24 @@ class TestPrune:
 
         assert not stale.exists() and not running.exists()
 
+    def test_a_directory_whose_name_is_an_id_plus_a_newline_is_not_pruned(
+        self, live_a: Host
+    ) -> None:
+        """`prune` deletes what it can name, and it cannot name this.
+
+        A POSIX directory name may contain a newline, and `$` used to match
+        just before one, so `<id>\n` read as an id-named release and was
+        deleted — a foreign directory removed by a command whose contract is
+        to remove only the release directories no record names.
+        """
+        foreign = live_a.releases / (live_a.b + "\n")
+        foreign.mkdir()
+
+        report = prune(live_a.plane)
+
+        assert foreign.name not in report.removed
+        assert foreign.is_dir()
+
     def test_refuses_while_unreconciled_and_removes_nothing(self, live_a: Host) -> None:
         self._litter(live_a)
         live_a.plane.fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
