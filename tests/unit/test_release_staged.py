@@ -322,6 +322,21 @@ class TestTheRollback:
             "the previous configuration no longer answers as it did — /"
         )
 
+    def test_the_previous_configuration_must_not_gain_an_answer(self, world: Path) -> None:
+        """The promised exact rollback includes a candidate that initially reached no route."""
+        initially_unanswered = dropping(load_adapted("previous.json", world), CATCH_ALL)
+        plan = plan_for(
+            world,
+            [initially_unanswered, load_adapted("previous.json", world)],
+            [load_adapted("proposed.json", world)],
+        )
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.rollback"
+        assert "/: file_server 200" in caught.value.detail
+
     def test_the_previous_configuration_must_come_back_on_tcp(self, world: Path) -> None:
         socketed = load_adapted("previous.json", world)
         socketed["admin"] = {"listen": "unix//run/caddy/admin.sock"}  # type: ignore[index]
@@ -601,11 +616,28 @@ class TestTheTwoMessagesTheRollbackComposes:
     def test_the_first_by_name_when_two_files_moved(self) -> None:
         assert _changed((("/a", "one"),), (("/b", "two"),)) == "/a"
 
-    def test_urls_the_previous_configuration_gained_are_counted(self) -> None:
-        """Reachable only by calling this directly: the caller passes the same key set."""
+    def test_a_url_the_previous_configuration_gained_is_named(self) -> None:
+        """Named, not counted: the count was what a comparison over one side's keys could
+        manage, and it could not say which URL had appeared."""
         answer = self._answer(200)
 
-        assert _first_difference({"/a": answer}, {"/a": answer, "/b": answer}).startswith("1 URLs")
+        found = _first_difference({"/a": answer}, {"/a": answer, "/b": answer})
+
+        assert found is not None
+        assert found.startswith("/b: file_server 200") and found.endswith("not nothing")
+
+    def test_two_identical_readings_differ_nowhere(self) -> None:
+        answer = self._answer(200)
+
+        assert _first_difference({"/a": answer}, {"/a": answer}) is None
+
+    def test_the_earliest_url_by_name_is_the_one_reported(self) -> None:
+        """Ordered by the URL, so the line an operator reads is the same on every machine."""
+        answer, moved = self._answer(200), self._answer(410)
+
+        found = _first_difference({"/b": answer, "/a": answer}, {"/b": moved, "/a": moved})
+
+        assert found is not None and found.startswith("/a: ")
 
     def test_two_identical_readings_name_nothing(self) -> None:
         taken = (("/a", "one"),)

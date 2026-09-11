@@ -55,9 +55,14 @@ would simply stop being asked about it.
   passing. It reads the adapted routes, so a symlink arriving through an
   imported fragment is as visible as one written in the file.
 * ``staged.rollback`` — the previous Caddyfile, adapted again afterwards,
-  answers exactly as it did (roots included: it is the same
-  configuration), names no Unix-socket admin endpoint, and every tree the
-  dry-run read is byte-identical to how it found it.
+  answers **exactly** as it did over the whole question set: no answer
+  lost, none changed, and none *gained*, roots included, since it is the
+  same configuration. It names no Unix-socket admin endpoint, and every
+  tree the dry-run read is byte-identical to how it found it. The
+  one-directional allowance of ``staged.corpus`` — the new configuration
+  answering more than the old is legitimate, the site tree grew — has no
+  counterpart here: a rollback that answers *more* has not put the host
+  back, it has produced a third state nobody specified.
 
 Nothing here can run in CI: there is no ``caddy`` binary on the runner, so
 CI proves only that this module is sound against the committed captures.
@@ -151,6 +156,11 @@ class Reading:
     the proposed one is: it is the reading the untouched-files assertion
     compares against, so anything the dry-run's own second half writes has
     to fall on this side of it.
+
+    ``urls`` is the set of questions asked, kept because it is not
+    recoverable from ``before``: a URL the old configuration answers
+    nothing for is absent there, and the rollback has to be able to tell
+    "it answered nothing, as before" from "it was never asked".
     """
 
     previous: object
@@ -159,6 +169,7 @@ class Reading:
     after: Mapping[str, Answer]
     trees: tuple[Path, ...]
     taken: tuple[tuple[str, str], ...]
+    urls: tuple[str, ...]
 
 
 def _require(held: bool, step: str, detail: str) -> None:
@@ -442,12 +453,23 @@ def no_symlink_served(plan: StagedPlan, reading: Reading) -> Step:
     return Step(name="staged.symlinks", detail=f"{len(paths)} serving paths, no symlink on any")
 
 
-def _first_difference(before: Mapping[str, Answer], after: Mapping[str, Answer]) -> str:
-    for url, answer in before.items():
-        if after.get(url) != answer:
-            found = after.get(url)
-            return f"{url}: {found.describe() if found else 'nothing'}, not {answer.describe()}"
-    return f"{len(after) - len(before)} URLs it did not answer before"
+def _shown(answer: Answer | None) -> str:
+    """An answer, or the absence of one — which is a value here and not a gap."""
+    return answer.describe() if answer is not None else "nothing"
+
+
+def _first_difference(before: Mapping[str, Answer], after: Mapping[str, Answer]) -> str | None:
+    """The first URL, by name, the two readings disagree about — in either direction.
+
+    Over the union of both key sets, so a URL that has *gained* an answer
+    is a difference and not an absence. Ordered by the URL so the line an
+    operator reads is the same on every machine.
+    """
+    for url in sorted({*before, *after}):
+        old, new = before.get(url), after.get(url)
+        if old != new:
+            return f"{url}: {_shown(new)}, not {_shown(old)}"
+    return None
 
 
 def _changed(taken: Sequence[tuple[str, str]], now: Sequence[tuple[str, str]]) -> str:
@@ -456,11 +478,12 @@ def _changed(taken: Sequence[tuple[str, str]], now: Sequence[tuple[str, str]]) -
 
 
 def _still_answers(reading: Reading, restored: Mapping[str, Answer]) -> None:
+    """Exactly what it answered: no answer lost, none changed, and none gained."""
+    difference = _first_difference(reading.before, restored)
     _require(
-        restored == dict(reading.before),
+        difference is None,
         "staged.rollback",
-        "the previous configuration no longer answers as it did — "
-        + _first_difference(reading.before, restored),
+        f"the previous configuration no longer answers as it did — {difference}",
     )
 
 
@@ -473,7 +496,7 @@ def rollback_restores(plan: StagedPlan, reading: Reading) -> Step:
         "staged.rollback",
         f"the previous Caddyfile binds the admin endpoint to {listen}, not to TCP",
     )
-    _still_answers(reading, answers_for(again, tuple(reading.before)))
+    _still_answers(reading, answers_for(again, reading.urls))
     now = digests(reading.trees)
     _require(
         now == reading.taken,
@@ -498,7 +521,8 @@ def _read(plan: StagedPlan) -> Reading:
     urls = tuple(dict.fromkeys((*candidate_urls(previous), *SITE_URLS)))
     before, taken = answers_for(previous, urls), digests(trees)
     proposed = adapt_config(plan.runner, plan.proposed, plan.fragment)
-    return Reading(previous, proposed, before, answers_for(proposed, urls), trees, taken)
+    after = answers_for(proposed, urls)
+    return Reading(previous, proposed, before, after, trees, taken, urls)
 
 
 def staged_rehearsal(plan: StagedPlan) -> RehearsalReport:
