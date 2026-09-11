@@ -66,6 +66,7 @@ from lovspor.release.migrate import (
     offline_rollback,
     preflight,
     retire_pre_envelope,
+    retire_preview,
     retire_targets,
     rollback_first_migration,
     socket_path,
@@ -1792,6 +1793,19 @@ class TestRetire:
         assert (droplet.releases / droplet.a).is_dir() and (droplet.releases / droplet.b).is_dir()
         assert (droplet.releases / MARKER_NAME).is_file()
         assert live_release(droplet.plane) == droplet.a
+
+    def test_preview_names_the_exact_targets_without_removing_them(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        litter = self._litter(droplet)
+        expected = retire_targets(droplet.plane, droplet.host)
+
+        report = retire_preview(droplet.plane, droplet.host)
+
+        assert report == RetireReport(removed=expected)
+        assert droplet.host.current_symlink.is_symlink()
+        assert droplet.host.site_root.is_dir()
+        assert litter["flat"].is_dir()
+        assert droplet.host.previous_caddyfile.is_file()
 
     def test_the_way_back_goes_last_and_the_rollback_then_refuses(self, droplet: Droplet) -> None:
         """`--retire` deletes every tree the previous Caddyfile roots at. Leaving
