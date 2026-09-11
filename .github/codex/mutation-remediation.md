@@ -32,4 +32,8 @@ For every survivor classify it as one of:
 Only edit tests for killable_by_correct_test.
 For every other class, report it as BLOCKED and explain why human review is required.
 
-After editing, run the smallest relevant tests: `uv run pytest tests/unit/`.
+After editing, run ONLY the test files you touched, by path — for example
+`uv run pytest tests/unit/test_foo.py`. Do NOT run `uv run pytest tests/unit/`:
+this session holds 1 shared core and 2 GB with no swap, and the box died twice
+in one afternoon under a single job (issue #272). The full unit suite runs
+straight after you on a hosted runner sized for it.

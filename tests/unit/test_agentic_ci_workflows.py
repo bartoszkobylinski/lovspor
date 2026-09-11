@@ -6,6 +6,7 @@ import importlib.util
 import re
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -123,8 +124,8 @@ def test_codex_account_homes_are_explicit_repository_configuration(
         ),
         (
             "mutation-remediation.yml",
-            "remediate",
-            "steps.cycle.outputs.run == 'true'",
+            "remediate-verify",
+            "needs.remediate.outputs.run == 'true'",
         ),
     ],
 )
@@ -145,7 +146,7 @@ def test_codex_output_is_formatted_and_linted_before_tests(
 
 
 def test_remediation_rejected_push_is_ignored_only_for_a_superseded_head() -> None:
-    steps = _steps("mutation-remediation.yml", "remediate")
+    steps = _steps("mutation-remediation.yml", "remediate-verify")
     push = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
 
     assert 'if ! git push origin "HEAD:$HEAD_BRANCH"; then' in push
@@ -251,11 +252,12 @@ def test_commit_markers_name_the_actual_author() -> None:
         _steps("pr-pipeline.yml", "codex-tests"), "Commit and push test additions"
     )["run"]
     rem_push = _named_step(
-        _steps("mutation-remediation.yml", "remediate"), "Commit and push, or report BLOCKED"
+        _steps("mutation-remediation.yml", "remediate-verify"),
+        "Commit and push, or report BLOCKED",
     )["run"]
 
     assert "[agent:${{ needs.codex-author.outputs.author || 'codex' }}-tests]" in pr_push
-    assert "[agent:${{ steps.author.outputs.author || 'codex' }}-mutation]" in rem_push
+    assert "[agent:${{ needs.remediate.outputs.author || 'codex' }}-mutation]" in rem_push
 
 
 def test_committer_identity_names_the_actual_author() -> None:
@@ -597,13 +599,19 @@ class TestEscalationCoversEveryFailure:
 
     def test_remediation_escalation_runs_after_every_step_it_reports_on(self) -> None:
         """A failure can only be reported by a later step. In particular, a
-        rejected push must not become another red, silent remediation run."""
-        names = [step.get("name") for step in _steps("mutation-remediation.yml", "remediate")]
+        rejected push must not become another red, silent remediation run. Both
+        remediation lanes end in their own escalation: the agent lane can die
+        with its box before the verifier ever starts."""
+        for job_name in ("remediate", "remediate-verify"):
+            names = [step.get("name") for step in _steps("mutation-remediation.yml", job_name)]
+            assert names[-1] == "Escalate on remediation failure"
 
-        assert names.index("Escalate on remediation failure") > names.index(
+        verify_names = [
+            step.get("name") for step in _steps("mutation-remediation.yml", "remediate-verify")
+        ]
+        assert verify_names.index("Escalate on remediation failure") > verify_names.index(
             "Commit and push, or report BLOCKED"
         )
-        assert names[-1] == "Escalate on remediation failure"
 
 
 class TestAGreenRunRetractsItsOwnVerdict:
@@ -828,7 +836,7 @@ class TestEscalationsShareOneCommentPerWorkflow:
     def test_a_remediation_cycle_reports_progress_without_mailing_the_author(self) -> None:
         """The cycle notice carries no label and asks nothing of a human, so it
         belongs in the run summary. It was two of PR #230's ten mails."""
-        steps = _steps("mutation-remediation.yml", "remediate")
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
         push = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
 
         assert "pipeline rerunning." in push
@@ -982,3 +990,225 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
         assert "nohup timeout " in sampler["run"]
         assert stop["if"].startswith("always()")
         assert "kill " in stop["run"]
+
+
+class TestTheRemediationLaneOnlyHoldsTheAgent:
+    """Issue #272, second half. The remediation workflow ran the same shape as
+    the PR pipeline did — agent session AND `uv run pytest tests/unit/` on the
+    same 2 GB box, and a remediation job overlapping a PR-pipeline job is the
+    pair that wedged the machine on 2026-09-06."""
+
+    def _agent(self) -> dict[str, Any]:
+        return _workflow("mutation-remediation.yml")["jobs"]["remediate"]
+
+    def test_the_agent_lane_never_runs_the_whole_suite(self) -> None:
+        for step in self._agent()["steps"]:
+            assert "pytest tests/unit/" not in str(step.get("run", "")), (
+                f"{step.get('name')} runs the whole suite on the 2 GB box"
+            )
+
+    def test_the_prompt_forbids_a_whole_suite_run_on_the_box(self) -> None:
+        prompt = (
+            Path(__file__).resolve().parents[2] / ".github" / "codex" / "mutation-remediation.md"
+        ).read_text(encoding="utf-8")
+
+        assert "Do NOT run `uv run pytest tests/unit/`" in prompt
+
+    def test_the_suite_runs_on_the_hosted_verifier(self) -> None:
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        suite = _named_step(job["steps"], "Run tests on Codex additions")
+
+        assert job["runs-on"] == "ubuntu-latest"
+        assert job["needs"] == ["remediate"]
+        assert "uv run pytest tests/unit/" in suite["run"]
+
+    def test_the_hosted_verifier_checks_out_an_allowed_remediation_cycle(self) -> None:
+        """The gate belongs to the agent lane. The hosted lane must consume its
+        output before it can apply the patch or run any repository command."""
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
+        checkout = next(
+            step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+        )
+
+        assert checkout["if"] == "needs.remediate.outputs.run == 'true'"
+
+    def test_the_agent_work_travels_as_a_patch(self) -> None:
+        artifact = "remediation-tests-${{ github.event.workflow_run.head_sha }}"
+        upload = _named_step(self._agent()["steps"], "Upload the agent's tests")
+        download = _named_step(
+            _steps("mutation-remediation.yml", "remediate-verify"), "Download the agent's tests"
+        )
+        apply_step = _named_step(
+            _steps("mutation-remediation.yml", "remediate-verify"), "Apply the agent's tests"
+        )
+
+        assert self._agent()["outputs"] == {
+            "run": "${{ steps.cycle.outputs.run }}",
+            "pr": "${{ steps.cycle.outputs.pr }}",
+            "count": "${{ steps.cycle.outputs.count }}",
+            "author": "${{ steps.author.outputs.author }}",
+            "before_sha": "${{ steps.base.outputs.before_sha }}",
+            "patch": "${{ steps.patch.outputs.patch }}",
+        }
+        assert upload["with"]["name"] == artifact
+        assert download["with"]["name"] == artifact
+        assert upload["if"] == "steps.patch.outputs.patch == 'true'"
+        assert download["if"] == "needs.remediate.outputs.patch == 'true'"
+        assert apply_step["if"] == "needs.remediate.outputs.patch == 'true'"
+        assert "git apply --index" in apply_step["run"]
+
+    def test_the_scope_guard_runs_on_both_lanes_against_the_recorded_base(self) -> None:
+        for job_name in ("remediate", "remediate-verify"):
+            guard = _named_step(_steps("mutation-remediation.yml", job_name), "Scope guard")
+            assert guard["run"] == 'scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"'
+
+        verifier = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        assert verifier["env"]["BEFORE_SHA"] == "${{ needs.remediate.outputs.before_sha }}"
+
+    def test_the_verifier_refuses_to_be_green_when_the_agent_lane_died(self) -> None:
+        """The verifier is the external verdict path when the small box dies,
+        so it must run and fail before claiming that remediation was tested."""
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        steps = job["steps"]
+        names = [step.get("name") for step in steps]
+        guard = _named_step(steps, "The remediation lane did not finish")
+
+        assert "!cancelled()" in job["if"]
+        assert guard["if"] == "needs.remediate.result != 'success'"
+        assert "exit 1" in guard["run"]
+        assert names.index(guard["name"]) < names.index("Run tests on Codex additions")
+
+    def test_the_memory_sampler_cannot_outlive_the_agent_lane(self) -> None:
+        steps = self._agent()["steps"]
+        sampler = _named_step(steps, "Sample memory while the agent runs")
+        stop = _named_step(steps, "Stop the memory sampler")
+
+        assert "nohup timeout " in sampler["run"]
+        assert stop["if"].startswith("always()")
+        assert "kill " in stop["run"]
+
+    def test_the_verifier_only_runs_for_a_cycle_the_gate_allowed(self) -> None:
+        """The gate, the cycle count and both BLOCKED paths stay on the agent
+        lane, so the verifier must not start a round the gate refused."""
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+
+        assert job["if"] == "${{ !cancelled() && needs.remediate.outputs.run == 'true' }}"
+        assert self._agent()["outputs"]["run"] == "${{ steps.cycle.outputs.run }}"
+
+
+class TestADeadMachineIsNotAVerdictOnTheDiff:
+    """Issue #272, option 4. Both deaths on PR #269 were reported as
+    `codex-tests BLOCKED before the tests ran`, which reads as a claim about the
+    pull request. The tests had in fact run; the machine stopped. The signature
+    is mechanical — the job is `failure` while its own step is still
+    `in_progress` — so the message can be mechanical too."""
+
+    JOB = "codex-tests-report"
+
+    def _steps(self) -> list[dict[str, Any]]:
+        return _steps("pr-pipeline.yml", self.JOB)
+
+    def test_the_reporter_classifies_before_it_speaks(self) -> None:
+        names = [step.get("name") for step in self._steps()]
+        classify = _named_step(self._steps(), "Classify the lane failure")
+
+        assert "scripts/ci/classify_lane_failure.py" in classify["run"]
+        assert "--lane codex-author" in classify["run"]
+        assert "--lane codex-tests" in classify["run"]
+        assert classify["id"] == "classify"
+        assert names.index("Classify the lane failure") < names.index(
+            "Report a codex-tests job that never reached its own escalation"
+        )
+
+    def test_a_classifier_failure_cannot_silence_the_external_reporter(self) -> None:
+        """The reporter exists because the agent lane can fail without speaking.
+        A transient jobs-API or classifier failure must not make this hosted
+        fallback skip its own reporting step for the same reason."""
+        report = _named_step(
+            self._steps(), "Report a codex-tests job that never reached its own escalation"
+        )
+
+        assert report.get("if") == "always()"
+
+    def test_the_classifier_is_reachable_from_the_sparse_checkout(self) -> None:
+        """The reporter checks out `scripts/ci` only. A classifier outside that
+        path would make this job die on a missing file — the silent BLOCKED of
+        issue #193, reintroduced by the fix for #272."""
+        checkout = _named_step(self._steps(), "Check out the escalation helper")
+
+        assert checkout["with"]["sparse-checkout"] == "scripts/ci"
+        assert (_WORKFLOWS.parents[1] / "scripts" / "ci" / "classify_lane_failure.py").exists()
+
+    def test_an_infrastructure_death_is_reported_as_the_machine_not_the_diff(self) -> None:
+        report = _named_step(
+            self._steps(), "Report a codex-tests job that never reached its own escalation"
+        )["run"]
+
+        assert "steps.classify.outputs.kind" in report
+        assert "INFRASTRUCTURE failure — the machine, not the diff" in report
+        assert "steps.classify.outputs.job" in report
+        assert "steps.classify.outputs.step" in report
+        # The operator's next two moves, in the comment they are already reading.
+        assert "gh api repos/${{ github.repository }}/actions/runners" in report
+        assert "gh run rerun ${{ github.run_id }} --failed" in report
+
+    def test_an_ordinary_failure_keeps_the_old_message(self) -> None:
+        """Only the death-with-the-runner case changes wording. A lane that
+        failed on its own still reports as a pipeline failure."""
+        report = _named_step(
+            self._steps(), "Report a codex-tests job that never reached its own escalation"
+        )["run"]
+
+        assert "codex-tests BLOCKED and reported nothing itself" in report
+        assert 'gh pr edit "$PR" --add-label "needs-human:pipeline"' in report
+
+
+class TestEveryExpressionResolvesInItsOwnJob:
+    """Both defects the independent author caught while the agent lanes were
+    being split were the same mistake: a step moved to another job kept an
+    expression that only resolved in the job it came from.
+
+    `remediate-verify` inherited `if: steps.gate.outputs.run == 'true'` on its
+    checkout. `steps.gate` lives on the agent lane, so on the hosted lane the
+    expression evaluated to empty — falsy — and the checkout would never have
+    run, leaving every later step against an empty workspace. GitHub does not
+    error on an unresolvable `steps.<id>`; it silently yields nothing, which
+    reads as false in a condition and as an empty string in a message.
+
+    Contract tests that check step names and ordering do not see this. This one
+    is mechanical: every `steps.<id>` must name a step in the same job, and every
+    `needs.<job>` must be declared in that job's `needs`."""
+
+    @staticmethod
+    def _strings(node: Any) -> Iterator[str]:
+        if isinstance(node, str):
+            yield node
+        elif isinstance(node, dict):
+            for value in node.values():
+                yield from TestEveryExpressionResolvesInItsOwnJob._strings(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from TestEveryExpressionResolvesInItsOwnJob._strings(value)
+
+    @pytest.mark.parametrize("workflow_name", sorted(p.name for p in _WORKFLOWS.glob("*.yml")))
+    def test_step_references_name_a_step_of_the_same_job(self, workflow_name: str) -> None:
+        for job_name, job in _workflow(workflow_name)["jobs"].items():
+            ids = {step["id"] for step in job.get("steps", []) if step.get("id")}
+            for text in self._strings(job):
+                for ref in re.findall(r"\bsteps\.([A-Za-z0-9_-]+)\.", text):
+                    assert ref in ids, (
+                        f"{workflow_name}:{job_name} refers to steps.{ref}, which is not a "
+                        f"step of that job — the expression resolves to empty, not to an error"
+                    )
+
+    @pytest.mark.parametrize("workflow_name", sorted(p.name for p in _WORKFLOWS.glob("*.yml")))
+    def test_needs_references_are_declared_dependencies(self, workflow_name: str) -> None:
+        for job_name, job in _workflow(workflow_name)["jobs"].items():
+            declared = job.get("needs") or []
+            declared = [declared] if isinstance(declared, str) else declared
+            for text in self._strings(job):
+                for ref in re.findall(r"\bneeds\.([A-Za-z0-9_-]+)\.", text):
+                    assert ref in declared, (
+                        f"{workflow_name}:{job_name} refers to needs.{ref} without declaring it "
+                        f"in `needs` — the expression resolves to empty, not to an error"
+                    )
