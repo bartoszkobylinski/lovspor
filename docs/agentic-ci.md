@@ -187,6 +187,8 @@ So the lane is split:
 | --- | --- | --- |
 | `codex-author` | self-hosted `codex` | checkout, anti-loop, `uv sync`, the Codex/Claude session, scope guard, patch handoff |
 | `codex-tests` | `ubuntu-latest` | applies the patch, scope guard, ruff, the **full unit suite**, convergence verdict, escalation, push |
+| `remediate` | self-hosted `codex` | artifact gate, cycle count, both BLOCKED paths, the remediation session, scope guard, patch handoff |
+| `remediate-verify` | `ubuntu-latest` | applies the patch, scope guard, ruff, the **full unit suite**, push or BLOCKED, escalation |
 
 Invariants, enforced in `tests/unit/test_agentic_ci_workflows.py`:
 
@@ -206,8 +208,16 @@ Invariants, enforced in `tests/unit/test_agentic_ci_workflows.py`:
   nothing was sampling, and a container sees no host `dmesg`. The sampler is bounded by
   `timeout` because this runner does not force-kill process trees on cancellation.
 
-Hosted minutes are free on this public repository, so the verdict lane costs nothing and
-runs on 4 cores / 16 GB.
+Both agent lanes keep their own `Escalate…` step: the verifier cannot report a box that
+died before it ever started, and `codex-tests-report` covers the PR lane from outside.
+
+Measured on PR #269, the first real PR through the split: the agent job on the box went
+from **877 s** (the old single job) to **225 s**, with the suite moving to a hosted lane
+that took 200 s. The sampler recorded the Codex session at ~165 MB RSS with ~1.5 GB of the
+box free — the agent session was never the expensive half.
+
+Hosted minutes are free on this public repository, so the verdict lanes cost nothing and
+run on 4 cores / 16 GB.
 
 ## Convergence: when does `codex-tests` stop? (issue #248)
 

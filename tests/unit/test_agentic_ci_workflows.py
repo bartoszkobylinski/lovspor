@@ -123,8 +123,8 @@ def test_codex_account_homes_are_explicit_repository_configuration(
         ),
         (
             "mutation-remediation.yml",
-            "remediate",
-            "steps.cycle.outputs.run == 'true'",
+            "remediate-verify",
+            "needs.remediate.outputs.run == 'true'",
         ),
     ],
 )
@@ -145,7 +145,7 @@ def test_codex_output_is_formatted_and_linted_before_tests(
 
 
 def test_remediation_rejected_push_is_ignored_only_for_a_superseded_head() -> None:
-    steps = _steps("mutation-remediation.yml", "remediate")
+    steps = _steps("mutation-remediation.yml", "remediate-verify")
     push = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
 
     assert 'if ! git push origin "HEAD:$HEAD_BRANCH"; then' in push
@@ -251,11 +251,12 @@ def test_commit_markers_name_the_actual_author() -> None:
         _steps("pr-pipeline.yml", "codex-tests"), "Commit and push test additions"
     )["run"]
     rem_push = _named_step(
-        _steps("mutation-remediation.yml", "remediate"), "Commit and push, or report BLOCKED"
+        _steps("mutation-remediation.yml", "remediate-verify"),
+        "Commit and push, or report BLOCKED",
     )["run"]
 
     assert "[agent:${{ needs.codex-author.outputs.author || 'codex' }}-tests]" in pr_push
-    assert "[agent:${{ steps.author.outputs.author || 'codex' }}-mutation]" in rem_push
+    assert "[agent:${{ needs.remediate.outputs.author || 'codex' }}-mutation]" in rem_push
 
 
 def test_committer_identity_names_the_actual_author() -> None:
@@ -597,13 +598,19 @@ class TestEscalationCoversEveryFailure:
 
     def test_remediation_escalation_runs_after_every_step_it_reports_on(self) -> None:
         """A failure can only be reported by a later step. In particular, a
-        rejected push must not become another red, silent remediation run."""
-        names = [step.get("name") for step in _steps("mutation-remediation.yml", "remediate")]
+        rejected push must not become another red, silent remediation run. Both
+        remediation lanes end in their own escalation: the agent lane can die
+        with its box before the verifier ever starts."""
+        for job_name in ("remediate", "remediate-verify"):
+            names = [step.get("name") for step in _steps("mutation-remediation.yml", job_name)]
+            assert names[-1] == "Escalate on remediation failure"
 
-        assert names.index("Escalate on remediation failure") > names.index(
+        verify_names = [
+            step.get("name") for step in _steps("mutation-remediation.yml", "remediate-verify")
+        ]
+        assert verify_names.index("Escalate on remediation failure") > verify_names.index(
             "Commit and push, or report BLOCKED"
         )
-        assert names[-1] == "Escalate on remediation failure"
 
 
 class TestAGreenRunRetractsItsOwnVerdict:
@@ -828,7 +835,7 @@ class TestEscalationsShareOneCommentPerWorkflow:
     def test_a_remediation_cycle_reports_progress_without_mailing_the_author(self) -> None:
         """The cycle notice carries no label and asks nothing of a human, so it
         belongs in the run summary. It was two of PR #230's ten mails."""
-        steps = _steps("mutation-remediation.yml", "remediate")
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
         push = _named_step(steps, "Commit and push, or report BLOCKED")["run"]
 
         assert "pipeline rerunning." in push
@@ -982,3 +989,56 @@ class TestTheAgentLaneOnlyHoldsTheAgent:
         assert "nohup timeout " in sampler["run"]
         assert stop["if"].startswith("always()")
         assert "kill " in stop["run"]
+
+
+class TestTheRemediationLaneOnlyHoldsTheAgent:
+    """Issue #272, second half. The remediation workflow ran the same shape as
+    the PR pipeline did — agent session AND `uv run pytest tests/unit/` on the
+    same 2 GB box, and a remediation job overlapping a PR-pipeline job is the
+    pair that wedged the machine on 2026-09-06."""
+
+    def _agent(self) -> dict[str, Any]:
+        return _workflow("mutation-remediation.yml")["jobs"]["remediate"]
+
+    def test_the_agent_lane_never_runs_the_whole_suite(self) -> None:
+        for step in self._agent()["steps"]:
+            assert "pytest tests/unit/" not in str(step.get("run", "")), (
+                f"{step.get('name')} runs the whole suite on the 2 GB box"
+            )
+
+    def test_the_prompt_forbids_a_whole_suite_run_on_the_box(self) -> None:
+        prompt = (
+            Path(__file__).resolve().parents[2] / ".github" / "codex" / "mutation-remediation.md"
+        ).read_text(encoding="utf-8")
+
+        assert "Do NOT run `uv run pytest tests/unit/`" in prompt
+
+    def test_the_suite_runs_on_the_hosted_verifier(self) -> None:
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        suite = _named_step(job["steps"], "Run tests on Codex additions")
+
+        assert job["runs-on"] == "ubuntu-latest"
+        assert job["needs"] == ["remediate"]
+        assert "uv run pytest tests/unit/" in suite["run"]
+
+    def test_the_agent_work_travels_as_a_patch(self) -> None:
+        artifact = "remediation-tests-${{ github.event.workflow_run.head_sha }}"
+        upload = _named_step(self._agent()["steps"], "Upload the agent's tests")
+        download = _named_step(
+            _steps("mutation-remediation.yml", "remediate-verify"), "Download the agent's tests"
+        )
+        apply_step = _named_step(
+            _steps("mutation-remediation.yml", "remediate-verify"), "Apply the agent's tests"
+        )
+
+        assert upload["with"]["name"] == artifact
+        assert download["with"]["name"] == artifact
+        assert "git apply --index" in apply_step["run"]
+
+    def test_the_verifier_only_runs_for_a_cycle_the_gate_allowed(self) -> None:
+        """The gate, the cycle count and both BLOCKED paths stay on the agent
+        lane, so the verifier must not start a round the gate refused."""
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+
+        assert job["if"] == "${{ !cancelled() && needs.remediate.outputs.run == 'true' }}"
+        assert self._agent()["outputs"]["run"] == "${{ steps.cycle.outputs.run }}"
