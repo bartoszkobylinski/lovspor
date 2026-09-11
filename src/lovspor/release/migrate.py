@@ -449,10 +449,35 @@ def _require_no_fragments(plane: ControlPlane) -> None:
             )
 
 
+def _require_runtime_dir(host: MigrationHost) -> None:
+    """(a) creates the runtime directory and gives it ``caddy:<release group>`` mode ``2770``.
+
+    An empty directory loses nothing to that, and is exactly what this
+    migration's own rollback leaves behind — refusing it would block the
+    re-run the rollback exists to allow. Anything in it belongs to
+    something else, and the chown and chmod change who may reach it.
+    """
+    path = host.runtime_dir
+    if not path.exists() and not path.is_symlink():
+        return
+    owners = f"{host.caddy_user}:{host.release_group} mode {RUNTIME_DIR_MODE:04o}"
+    if path.is_symlink() or not path.is_dir():
+        raise MigrationRefusedError(
+            f"the runtime directory {path} exists and is not a directory; (a) would give what it "
+            f"names {owners}"
+        )
+    if any(path.iterdir()):
+        raise MigrationRefusedError(
+            f"the runtime directory {path} is not empty; (a) would give it and everything in it "
+            f"{owners}"
+        )
+
+
 def _require_untouched(plane: ControlPlane, host: MigrationHost) -> None:
-    """The state (a) writes over, and whether this migration may write over it."""
+    """The state (a) writes over: the drop-in it backs up, and the three it does not."""
     _require_drop_in(host)
     _require_no_fragments(plane)
+    _require_runtime_dir(host)
 
 
 def _require_old_config_on_tcp(plane: ControlPlane, host: MigrationHost) -> ConfigPair:

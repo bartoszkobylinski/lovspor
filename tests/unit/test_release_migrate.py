@@ -707,6 +707,46 @@ class TestPreflight:
         )
         assert path.read_text(encoding="utf-8") == "# someone else's\n"
 
+    def test_refuses_a_runtime_directory_with_anything_in_it(self, droplet: Droplet) -> None:
+        """(a) chowns and chmods the directory; what is in it is not this migration's."""
+        droplet.host.runtime_dir.mkdir(parents=True)
+        (droplet.host.runtime_dir / "other.sock").touch()
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value).startswith(
+            f"the runtime directory {droplet.host.runtime_dir} is not empty; "
+        )
+        assert (droplet.host.runtime_dir / "other.sock").exists()
+
+    @pytest.mark.parametrize("kind", ["file", "symlink", "dangling"])
+    def test_refuses_a_runtime_directory_that_is_not_a_directory(
+        self, droplet: Droplet, kind: str
+    ) -> None:
+        """``mkdir(exist_ok=True)`` raises on the first two and the chown follows the third."""
+        droplet.host.runtime_dir.parent.mkdir(parents=True)
+        if kind == "file":
+            droplet.host.runtime_dir.write_text("x", encoding="utf-8")
+        else:
+            elsewhere = droplet.host.runtime_dir.parent / kind
+            if kind == "symlink":
+                elsewhere.mkdir()
+            droplet.host.runtime_dir.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value).startswith(
+            f"the runtime directory {droplet.host.runtime_dir} exists and is not a directory; "
+        )
+
+    def test_an_empty_runtime_directory_is_what_its_own_rollback_leaves(
+        self, droplet: Droplet
+    ) -> None:
+        """The rollback does not remove the directory (a) made, so a re-run must not trip on it."""
+        droplet.host.runtime_dir.mkdir(parents=True)
+
+        assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
+
     def test_refuses_without_the_new_caddyfile(self, droplet: Droplet) -> None:
         droplet.host.caddyfile_source.unlink()
 

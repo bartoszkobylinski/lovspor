@@ -179,8 +179,9 @@ explicitly to the old address rather than through `systemctl reload caddy`
 and `--release-group`/`LOVSPOR_RELEASE_GROUP` beside those four. `--check`,
 `--rollback` and `--retire` exclude each other and the release id; `--retire`
 deletes the only way back from the cutover — the drop-in backup and then, last
-of all, the pre-envelope Caddyfile — so it is always a separate, later run, and it lists the paths and removes
-nothing until it is repeated with `--yes` (a flag, never a prompt: an
+of all, the pre-envelope Caddyfile — so it is always a separate, later run, and
+it lists the paths and removes nothing until it is repeated with `--yes` (a
+flag, never a prompt: an
 unattended run fails closed). `--rollback --offline` is the last resort for a
 box whose Caddy answers on neither address: it dials nothing, restores the
 files and restarts the unit. The droplet procedure, step by step, is
