@@ -31,15 +31,21 @@ from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
 from lovspor.publish.pages import SITE_ORIGIN
+from lovspor.release.admin_socket import (
+    DEFAULT_UNPRIVILEGED_USER,
+    AdminSocket,
+)
+from lovspor.release.caddy import DEFAULT_ADMIN, SubprocessRunner
 from lovspor.release.check import check_envelope
 from lovspor.release.commands import release_app
 from lovspor.release.envelope import CORPUS_DIR, RECORD_NAME, SITE_DIR
-from lovspor.release.errors import ReleaseError
+from lovspor.release.errors import AdminSocketError, ControlPlaneError, ReleaseError
+from lovspor.release.migrate import DEFAULT_RELEASE_GROUP
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.settings import Settings, load_env
 from lovspor.site.build import SiteInputs, build_site, discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Observer, state_sha256
-from lovspor.site.drift import DriftReport, drift_check
+from lovspor.site.drift import DriftInputs, DriftReport, checked_drift
 from lovspor.site.errors import ProbeError, ServedDocumentError, SiteBuildError
 from lovspor.site.fixture import (
     FixtureCase,
@@ -307,6 +313,32 @@ _OBSERVERS: dict[ObserverName, Observer] = {
 SERVED_CAPABILITIES_URL = f"{SITE_ORIGIN}/deployment-capabilities.json"
 _DRIFT_EXIT_DRIFTED = 1
 _DRIFT_EXIT_SERVED_UNAVAILABLE = 3
+_DRIFT_EXIT_SOCKET = 4
+"""The admin socket's four facts: the check's first action, and its own exit."""
+
+_AdminOption = Annotated[
+    str,
+    typer.Option(
+        "--admin",
+        envvar="LOVSPOR_CADDY_ADMIN",
+        help="Caddy's admin socket; its four facts are the drift check's first action.",
+    ),
+]
+_ReleaseGroupOption = Annotated[
+    str,
+    typer.Option(
+        "--release-group",
+        envvar="LOVSPOR_RELEASE_GROUP",
+        help="The group that may open the admin socket.",
+    ),
+]
+_UnprivilegedUserOption = Annotated[
+    str,
+    typer.Option(
+        "--unprivileged-user",
+        help="The identity that must NOT reach the admin socket; the call is attempted as it.",
+    ),
+]
 
 _ReadinessUrlOption = Annotated[
     str,
@@ -442,6 +474,36 @@ def _drift_line(report: DriftReport, observer: ObserverName) -> str:
     return line
 
 
+def _socket_access(admin: str, release_group: str, unprivileged_user: str) -> AdminSocket:
+    """The admin socket as the unit's options name it; a bad address is a usage error."""
+    try:
+        return AdminSocket(
+            socket_admin=admin,
+            release_group=release_group,
+            unprivileged_user=unprivileged_user,
+            runner=SubprocessRunner(),
+        )
+    except ControlPlaneError as error:
+        raise typer.BadParameter(f"admin: {error}") from error
+
+
+def _drift_report(inputs: DriftInputs) -> DriftReport:
+    """The socket precondition, then the comparison; each refusal has its own exit code."""
+    try:
+        with httpx.Client() as client:
+            return checked_drift(inputs, client=client, clock=_clock)
+    except AdminSocketError as error:
+        typer.echo(f"site-drift-check: {error}", err=True)
+        raise typer.Exit(code=_DRIFT_EXIT_SOCKET) from error
+    except ServedDocumentError as error:
+        typer.echo(
+            f"site-drift-check: served_document_unavailable reason={error.reason} "
+            f"url={inputs.served_url}",
+            err=True,
+        )
+        raise typer.Exit(code=_DRIFT_EXIT_SERVED_UNAVAILABLE) from error
+
+
 @app.command(name="site-drift-check")
 def site_drift_check(
     served_url: Annotated[
@@ -452,17 +514,25 @@ def site_drift_check(
     probe_token_file: _ProbeTokenFileOption = None,
     timeout_seconds: _TimeoutOption = 10.0,
     observer: _ObserverOption = ObserverName.drift_timer,
+    admin: _AdminOption = DEFAULT_ADMIN,
+    release_group: _ReleaseGroupOption = DEFAULT_RELEASE_GROUP,
+    unprivileged_user: _UnprivilegedUserOption = DEFAULT_UNPRIVILEGED_USER,
 ) -> None:
     """Re-observe the host and compare its state with the served deployment-capabilities.json.
 
-    The hourly timer's check (ADR-0014 Decision 4): the same probe as
+    The hourly timer's check (ADR-0014 Decision 4). Its first action is the
+    admin socket's four facts (Decision 6) — mode 0660, the release group,
+    the release identity can GET /config/ over it, the unprivileged user
+    cannot and nothing listens on TCP — so a permission regression after a
+    Caddy restart surfaces within the hour. Then the same probe as
     release-probe, deriving state against the served document's own checkout,
     compared field by field — state only, never observed_at, observer or an
     unobserved reason. Reads no checkout and no corpus.
 
     Exit codes: 0 no drift; 1 drift — one line on stderr names the differing
     fields as dotted paths; 2 usage error; 3 the served document could not be
-    fetched or is invalid — its own failure, never reported as drift.
+    fetched or is invalid — its own failure, never reported as drift; 4 the
+    admin socket precondition is unmet, named, before anything was observed.
     """
     try:
         settings = ProbeSettings(
@@ -478,15 +548,8 @@ def site_drift_check(
         raise typer.BadParameter(_first_validation_message(error)) from error
     except ValueError as error:
         raise typer.BadParameter(f"served_url: {error}") from error
-    try:
-        with httpx.Client() as client:
-            report = drift_check(served_url, settings, client=client, clock=_clock)
-    except ServedDocumentError as error:
-        typer.echo(
-            f"site-drift-check: served_document_unavailable reason={error.reason} url={served_url}",
-            err=True,
-        )
-        raise typer.Exit(code=_DRIFT_EXIT_SERVED_UNAVAILABLE) from error
+    access = _socket_access(admin, release_group, unprivileged_user)
+    report = _drift_report(DriftInputs(served_url, settings, access))
     if report.drifted:
         typer.echo(_drift_line(report, observer), err=True)
         raise typer.Exit(code=_DRIFT_EXIT_DRIFTED)

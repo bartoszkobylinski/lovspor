@@ -13,8 +13,10 @@ monkeypatched to a throwaway checkout here, because the developer's own
 work tree is dirty exactly while these tests are being written.
 """
 
+import grp
 import json
 import re
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +31,7 @@ from typer.testing import CliRunner
 import lovspor.cli
 from lovspor.cli import _first_validation_message, app
 from lovspor.publish.emit import emit_site
+from lovspor.release.caddy import Completed
 from lovspor.site.build import SiteInputs, build_site, require_clean_work_tree
 from lovspor.site.capabilities import load_capabilities
 from lovspor.site.errors import SiteBuildError
@@ -53,6 +56,8 @@ from tests.unit.probe_fixtures import (
 from tests.unit.site_fixtures import run_git, throwaway_checkout, throwaway_corpus
 
 SERVED_URL = "https://lovspor.no/deployment-capabilities.json"
+TCP_CONFIG_URL = "http://localhost:2019/config/"
+"""The pre-envelope admin address the four facts assert nothing listens on."""
 
 runner = CliRunner()
 
@@ -626,6 +631,42 @@ class TestReleaseProbeCommand:
         )
 
 
+class _RefusingSudo:
+    """The unprivileged call as the unit makes it, refused — without running a real ``sudo``."""
+
+    def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+        del env
+        assert argv[:2] == ("sudo", "-u"), argv
+        return Completed(7, "", "curl: (7) Couldn't connect to server")
+
+
+@pytest.fixture
+def admin_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+) -> list[str]:
+    """A socket holding the four facts, so a drift run reaches its comparison.
+
+    The four facts are the check's first action, so every drift run has to
+    get past them; what they assert is pinned in
+    ``test_release_admin_socket.py``. The release group is the temporary
+    file's own, so the group fact is about the code and not the machine;
+    the one boundary that cannot be exercised here is the call made as
+    another identity, which is a real ``sudo``.
+    """
+    socket = tmp_path / "admin.sock"
+    socket.touch()
+    socket.chmod(0o660)
+    try:
+        group = grp.getgrgid(socket.stat().st_gid).gr_name
+    except KeyError:  # pragma: no cover — a machine whose tmp gid has no group entry
+        pytest.skip("the temporary directory's gid has no group entry")
+    monkeypatch.setattr(lovspor.cli, "SubprocessRunner", _RefusingSudo)
+    httpx_mock.add_response(url="http://127.0.0.1/config/", json={})
+    # The fourth fact: the pre-envelope TCP address must refuse, as a closed port does.
+    httpx_mock.add_exception(httpx.ConnectError("connection refused"), url=TCP_CONFIG_URL)
+    return ["--admin", f"unix/{socket}", "--release-group", group]
+
+
 def _drift_args(*extra: str) -> list[str]:
     return [
         "site-drift-check",
@@ -674,6 +715,7 @@ class TestSiteDriftCheckCommand:
         released: tuple[Path, Path, FakeMcp],
         httpx_mock: HTTPXMock,
         monkeypatch: pytest.MonkeyPatch,
+        admin_socket: list[str],
     ) -> None:
         corpus, document, fake = released
         httpx_mock.add_response(url=SERVED_URL, content=document.read_bytes())
@@ -683,7 +725,7 @@ class TestSiteDriftCheckCommand:
             raise SiteBuildError("the drift check must not read a checkout")
 
         monkeypatch.setattr(lovspor.cli, "discover_checkout", no_checkout)
-        result = runner.invoke(app, _drift_args())
+        result = runner.invoke(app, _drift_args(*admin_socket))
 
         assert result.exit_code == 0, result.output
         assert result.output.count("\n") == 1
@@ -692,7 +734,7 @@ class TestSiteDriftCheckCommand:
         assert TOKEN not in result.output
 
     def test_drift_exits_one_naming_the_differing_fields(
-        self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock
+        self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock, admin_socket: list[str]
     ) -> None:
         _, document, fake = released
         httpx_mock.add_response(url=SERVED_URL, content=document.read_bytes())
@@ -700,7 +742,7 @@ class TestSiteDriftCheckCommand:
         absent_discovery(httpx_mock)
         install(httpx_mock, fake)
 
-        result = runner.invoke(app, _drift_args())
+        result = runner.invoke(app, _drift_args(*admin_socket))
 
         assert result.exit_code == 1
         lines = [line for line in result.output.splitlines() if line]
@@ -716,11 +758,11 @@ class TestSiteDriftCheckCommand:
         assert "observed_state_sha256=" in line
 
     def test_an_unreadable_served_document_exits_three_with_its_reason(
-        self, httpx_mock: HTTPXMock, credential: Path
+        self, httpx_mock: HTTPXMock, credential: Path, admin_socket: list[str]
     ) -> None:
         httpx_mock.add_response(url=SERVED_URL, status_code=503)
 
-        result = runner.invoke(app, _drift_args())
+        result = runner.invoke(app, _drift_args(*admin_socket))
 
         assert result.exit_code == 3
         assert "site-drift-check: served_document_unavailable" in result.output
@@ -753,7 +795,7 @@ class TestSiteDriftCheckCommand:
             nonlocal called
             called = True
 
-        monkeypatch.setattr(lovspor.cli, "drift_check", forbidden_drift_check)
+        monkeypatch.setattr(lovspor.cli, "checked_drift", forbidden_drift_check)
         result = runner.invoke(
             app,
             _drift_args("--served-url", "lovspor.no/deployment-capabilities.json"),
@@ -764,7 +806,7 @@ class TestSiteDriftCheckCommand:
         assert called is False
 
     def test_the_observer_is_the_drift_timer_by_default(
-        self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock
+        self, released: tuple[Path, Path, FakeMcp], httpx_mock: HTTPXMock, admin_socket: list[str]
     ) -> None:
         corpus, document, fake = released
         httpx_mock.add_response(url=SERVED_URL, content=document.read_bytes())
@@ -778,16 +820,46 @@ class TestSiteDriftCheckCommand:
         )
 
         assert observer.default == "drift-timer"
-        assert runner.invoke(app, _drift_args()).exit_code == 0
+        assert runner.invoke(app, _drift_args(*admin_socket)).exit_code == 0
 
     def test_exit_codes_are_documented_in_the_help(self) -> None:
         result = runner.invoke(app, ["site-drift-check", "--help"])
 
         assert result.exit_code == 0
-        for code in ("0", "1", "2", "3"):
+        for code in ("0", "1", "2", "3", "4"):
             assert re.search(rf"\b{code}\b", result.output)
         assert "drift" in result.output
         assert "served document" in result.output
+
+    def test_the_admin_socket_is_the_first_action_and_its_own_exit(
+        self, tmp_path: Path, httpx_mock: HTTPXMock, credential: Path
+    ) -> None:
+        """Exit 4, named, with nothing observed: a broken permission model is not drift."""
+        result = runner.invoke(app, _drift_args("--admin", f"unix/{tmp_path / 'gone.sock'}"))
+
+        assert result.exit_code == 4
+        assert "admin socket precondition unmet" in result.output
+        assert str(tmp_path / "gone.sock") in result.output
+        assert not httpx_mock.get_requests()
+
+    def test_an_admin_address_that_is_not_a_socket_is_a_usage_error(
+        self, httpx_mock: HTTPXMock, credential: Path
+    ) -> None:
+        result = runner.invoke(app, _drift_args("--admin", "localhost:2019"))
+
+        assert result.exit_code == 2
+        assert "Unix-socket" in result.stderr
+        assert not httpx_mock.get_requests()
+
+    def test_the_socket_options_carry_the_droplets_defaults(self) -> None:
+        command = get_command(app)
+        assert isinstance(command, click.Group)
+        params = {p.name: p for p in command.commands["site-drift-check"].params}
+
+        assert params["admin"].default == "unix//run/caddy/admin.sock"
+        assert params["admin"].envvar == "LOVSPOR_CADDY_ADMIN"
+        assert params["release_group"].default == "lovspor-release"
+        assert params["unprivileged_user"].default == "lovspor"
 
 
 class TestFirstValidationMessage:
@@ -836,4 +908,11 @@ class TestProbeHelp:
         assert "--checkout" not in probe_options
         assert {"--corpus", "--out", "--probe-token-file", "--observer"} <= probe_options
         assert "--corpus" not in drift_options
-        assert {"--served-url", "--probe-token-file", "--observer"} <= drift_options
+        assert {
+            "--served-url",
+            "--probe-token-file",
+            "--observer",
+            "--admin",
+            "--release-group",
+            "--unprivileged-user",
+        } <= drift_options

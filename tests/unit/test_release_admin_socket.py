@@ -19,7 +19,7 @@ from lovspor.release.admin_socket import (
 from lovspor.release.caddy import DEFAULT_ADMIN
 from lovspor.release.errors import AdminSocketError, ControlPlaneError
 from lovspor.release.migrate import DEFAULT_RELEASE_GROUP, DEFAULT_TCP_ADMIN, SOCKET_MODE
-from tests.unit.caddy_fakes import FakeCaddy, FakeOwnership
+from tests.unit.caddy_fakes import socketed_caddy
 
 TCP = "localhost:2019"
 
@@ -28,16 +28,7 @@ class Socketed:
     """A Caddy listening on a socket file this fixture made, and the access that asks."""
 
     def __init__(self, tmp_path: Path) -> None:
-        runtime = tmp_path / "run"
-        runtime.mkdir()
-        self.file = runtime / "admin.sock"
-        self.file.touch()
-        self.file.chmod(SOCKET_MODE)
-        self.address = f"unix/{self.file}"
-        self.caddy = FakeCaddy(tmp_path / "Caddyfile")
-        self.caddy.admin_address = self.address
-        self.caddy.load({"apps": {}})
-        self.ownership = FakeOwnership({}, {"lovspor-release": self.file.stat().st_gid})
+        self.caddy, self.file, self.address, self.ownership = socketed_caddy(tmp_path)
 
     def answering_everywhere(self, address: str) -> object:
         """An admin client that answers on every address: a stray TCP listener beside the socket."""

@@ -25,7 +25,7 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from lovspor.release.caddy import Completed
 from lovspor.release.errors import UnobservableError
@@ -435,6 +435,33 @@ class FakeCaddy:
         if self.running is None:
             raise UnobservableError("admin_unreachable", "connection refused")
         return copy.deepcopy(self.running)
+
+
+class SocketedCaddy(NamedTuple):
+    """An instance already listening on a real socket file, for the four facts.
+
+    The group's gid is the file's own, so the group fact is about the
+    code under test and not about the machine the tests run on.
+    """
+
+    caddy: FakeCaddy
+    socket: Path
+    address: str
+    ownership: "FakeOwnership"
+
+
+def socketed_caddy(tmp_path: Path, group: str = "lovspor-release") -> SocketedCaddy:
+    """A Caddy on a ``0660`` socket under ``tmp_path``; nothing is bound, the file is stat'd."""
+    runtime = tmp_path / "run"
+    runtime.mkdir(exist_ok=True)
+    socket = runtime / "admin.sock"
+    socket.touch()
+    socket.chmod(0o660)
+    caddy = FakeCaddy(tmp_path / "Caddyfile")
+    caddy.admin_address = f"unix/{socket}"
+    caddy.load({"apps": {}})
+    ownership = FakeOwnership({}, {group: socket.stat().st_gid})
+    return SocketedCaddy(caddy, socket, caddy.admin_address, ownership)
 
 
 class FakeOwnership:
