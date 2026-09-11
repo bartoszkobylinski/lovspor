@@ -34,6 +34,7 @@ from lovspor.release.control import ControlPlane
 from lovspor.release.envelope import FRAGMENT_NAME, Marker, read_fragment, read_marker, write_marker
 from lovspor.release.errors import ReleaseError
 from lovspor.release.migrate import first_migration
+from lovspor.release.rehearsal import Rehearsal, RehearsalReport
 from tests.unit.caddy_fakes import FakeCaddy
 from tests.unit.migrate_fixtures import Droplet, make_droplet
 from tests.unit.probe_fixtures import (
@@ -914,6 +915,80 @@ class TestRehearse:
         assert len(lines) == 17
         assert lines[0].startswith("i: ")
         assert lines[-1].startswith("v.by-hand: ")
+
+    def test_every_host_path_address_and_identity_is_wired_from_its_option(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The rehearsal must stay wholly on the second instance named by the wrapper."""
+        captured: list[Rehearsal] = []
+
+        def capture(plan: Rehearsal) -> RehearsalReport:
+            captured.append(plan)
+            return RehearsalReport(steps=())
+
+        monkeypatch.setattr(commands, "rehearse", capture)
+        paths = {
+            "releases": tmp_path / "releases",
+            "caddyfile": tmp_path / "etc" / "Caddyfile",
+            "fragment": tmp_path / "etc" / "release.caddy",
+            "source": tmp_path / "app" / "Caddyfile.new",
+            "rejected": tmp_path / "app" / "Caddyfile.rejected",
+            "unsuffixed": tmp_path / "app" / "Caddyfile.unsuffixed",
+            "drop_in": tmp_path / "systemd" / "lovspor.conf",
+            "runtime_dir": tmp_path / "run" / "caddy-rehearsal",
+        }
+        result = runner.invoke(
+            app,
+            [
+                "release",
+                "rehearse",
+                _AN_ID,
+                "--unit",
+                "caddy-rehearsal",
+                "--releases",
+                str(paths["releases"]),
+                "--caddyfile",
+                str(paths["caddyfile"]),
+                "--fragment",
+                str(paths["fragment"]),
+                "--admin",
+                f"unix/{paths['runtime_dir'] / 'admin.sock'}",
+                "--tcp-admin",
+                "localhost:2029",
+                "--caddyfile-source",
+                str(paths["source"]),
+                "--rejected-source",
+                str(paths["rejected"]),
+                "--unsuffixed-source",
+                str(paths["unsuffixed"]),
+                "--drop-in",
+                str(paths["drop_in"]),
+                "--runtime-dir",
+                str(paths["runtime_dir"]),
+                "--release-group",
+                "rehearsal-release",
+                "--unprivileged-user",
+                "rehearsal-service",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(captured) == 1
+        plan = captured[0]
+        assert plan.content_id == _AN_ID
+        assert plan.plane.releases == paths["releases"]
+        assert plan.plane.caddyfile == paths["caddyfile"]
+        assert plan.plane.fragment == paths["fragment"]
+        assert plan.host.caddyfile_source == paths["source"]
+        assert plan.host.drop_in == paths["drop_in"]
+        assert plan.host.runtime_dir == paths["runtime_dir"]
+        assert plan.host.socket_admin == f"unix/{paths['runtime_dir'] / 'admin.sock'}"
+        assert plan.host.tcp_admin == "localhost:2029"
+        assert plan.host.release_group == "rehearsal-release"
+        assert plan.host.unit == "caddy-rehearsal"
+        assert plan.fixtures.rejected == paths["rejected"]
+        assert plan.fixtures.unsuffixed == paths["unsuffixed"]
+        assert plan.unprivileged_user == "rehearsal-service"
 
     def test_a_sub_step_that_does_not_hold_exits_one_naming_it(
         self, droplet: Droplet, tmp_path: Path
