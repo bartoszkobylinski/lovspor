@@ -30,6 +30,11 @@ would simply stop being asked about it.
   inside the release envelope: that is "under the new release's map", and
   without it a fragment could serve the release's pages under the old
   tree's redirects and the response comparison would not notice.
+* ``staged.host`` — both configurations match on the same host names. The
+  walk treats a ``host`` matcher as satisfied, because it is asking about
+  paths; that simplification is safe only while this holds, and a new
+  site block on another name would otherwise answer every URL here and
+  none of them on the box.
 * ``staged.proxied`` — every URL the old configuration answers by proxy
   keeps the same upstream. The migration moves no part of the app surface,
   so this is an equality that costs nothing and catches a rewritten
@@ -68,6 +73,7 @@ from lovspor.release.answers import (
     Answer,
     answer_for,
     hidden_paths,
+    hosts,
     matcher_paths,
     matches_path,
     roots,
@@ -311,6 +317,17 @@ def _maps_are_the_releases_own(plan: StagedPlan, reading: Reading) -> None:
         )
 
 
+def hosts_agree(reading: Reading) -> Step:
+    """Both site blocks match on the same names; the walk's host simplification rests on it."""
+    before, after = hosts(reading.previous), hosts(reading.proposed)
+    _require(
+        before == after,
+        "staged.host",
+        f"the old configuration serves {before or 'no host'} and the new {after or 'no host'}",
+    )
+    return Step(name="staged.host", detail=f"both configurations serve {', '.join(before)}")
+
+
 def corpus_preserved(plan: StagedPlan, reading: Reading) -> Step:
     """Every corpus URL the old answers, answered the same by the new from ``<release>/corpus``."""
     urls = _class_of(reading, corpus=True)
@@ -440,6 +457,7 @@ def staged_rehearsal(plan: StagedPlan) -> RehearsalReport:
     """ADR-0014's staged first-migration rehearsal: the URL half, in its order."""
     steps = [validated(plan)]
     reading = _read(plan)
+    steps.append(hosts_agree(reading))
     steps.append(corpus_preserved(plan, reading))
     steps.append(proxied_preserved(reading))
     steps.append(site_answered(plan, reading))

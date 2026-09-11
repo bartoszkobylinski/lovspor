@@ -103,6 +103,7 @@ class TestThePassingDryRun:
 
         assert [step.name for step in report.steps] == [
             "staged.validate",
+            "staged.host",
             "staged.corpus",
             "staged.proxied",
             "staged.site",
@@ -133,6 +134,27 @@ class TestThePassingDryRun:
         (site_of(world) / "index.html").write_text("<h1>rebuilt</h1>\n", encoding="utf-8")
 
         assert staged_rehearsal(make_plan(world)).steps
+
+
+class TestTheHostBothConfigurationsServe:
+    def test_a_new_site_block_on_another_name_is_refused(self, world: Path) -> None:
+        """The walk takes a ``host`` matcher as satisfied — it is asking about paths — so a
+        renamed site block would answer every URL here and none of them on the box."""
+        text = json.dumps(load_adapted("proposed.json", world))
+        renamed = json.loads(text.replace("lovspor.test", "lovspor.example"))
+        plan = plan_for(world, [load_adapted("previous.json", world)], [renamed])
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.host"
+        assert "lovspor.example" in caught.value.detail
+
+    def test_the_step_names_the_host(self, world: Path) -> None:
+        report = staged_rehearsal(make_plan(world))
+        step = next(one for one in report.steps if one.name == "staged.host")
+
+        assert "lovspor.test" in step.detail
 
 
 class TestACorpusUrlTheNewConfigurationDrops:
