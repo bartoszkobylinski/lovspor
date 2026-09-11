@@ -43,6 +43,7 @@ from lovspor.release.staged import (
 from tests.unit.staged_fixtures import (
     FLAT_RELEASE,
     LIVE_SYMLINK,
+    REDIRECT_TARGET,
     RELEASE_ID,
     build_world,
     load_adapted,
@@ -234,6 +235,28 @@ class TestACorpusUrlTheNewConfigurationDrops:
 
         assert caught.value.step == "staged.corpus"
         assert "/robots.txt" in caught.value.detail
+
+    def test_changed_corpus_bytes_are_refused(self, world: Path) -> None:
+        """The contract compares the served file's SHA-256, not only its name and status."""
+        (corpus_of(world) / "robots.txt").write_text("User-agent: changed\n", encoding="utf-8")
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(make_plan(world))
+
+        assert caught.value.step == "staged.corpus"
+        assert "/robots.txt" in caught.value.detail
+
+    def test_changed_redirect_location_is_refused(self, world: Path) -> None:
+        """A redirect's Location is explicitly part of the response owed by the new config."""
+        text = json.dumps(load_adapted("proposed.json", world))
+        moved = json.loads(text.replace(REDIRECT_TARGET, "/lov/another-successor/"))
+        plan = plan_for(world, [load_adapted("previous.json", world)], [moved])
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.corpus"
+        assert "the old answers static_response 301" in caught.value.detail
 
 
 class TestACorpusUrlAnsweredFromTheWrongTree:
