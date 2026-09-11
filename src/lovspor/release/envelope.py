@@ -53,7 +53,16 @@ CORPUS_PATHS = (
 )
 """The ``@corpus`` matcher of ADR-0013, plus the manifest the site consumed."""
 
-_RELEASE_ID = re.compile(r"^[0-9a-f]{64}$")
+_RELEASE_ID = re.compile(r"\A[0-9a-f]{64}\Z")
+"""Whole-string anchors, not line anchors.
+
+``$`` matches at the end of the string *or* just before a single trailing
+newline, and an id is routinely read out of a file whose last line ends in
+one. The id becomes a path component, so the line anchors let an id keep
+that newline and sent every reader at ``releases/<id and a newline>/``
+(found on PR #282). The two patterns below run under ``re.MULTILINE`` over
+whole files and mean the line reading deliberately.
+"""
 _VARS_LINE = re.compile(rf"^vars {RELEASE_VAR} (\S+)$", re.MULTILINE)
 _PATH_LINE = re.compile(r"^\s*(?:root \* |import )(\S+)$", re.MULTILINE)
 

@@ -232,8 +232,12 @@ class TestCommit:
         assert "not switched" in result.output
         assert read_marker(host.plane.releases) == Marker(active=host.a, previous=None)
 
-    def test_a_name_that_is_not_an_id_is_a_usage_error(self, host: Host) -> None:
-        result = runner.invoke(app, ["release", "commit", ".build-x"])
+    @pytest.mark.parametrize("name", [".build-x", _AN_ID + "\n"])
+    def test_a_name_that_is_not_an_id_is_a_usage_error(self, host: Host, name: str) -> None:
+        """A newline can reach argv, and `$` used to let an id keep one: the
+        command then looked up `releases/<id>\n/` and reported a missing
+        envelope instead of refusing the name it was given."""
+        result = runner.invoke(app, ["release", "commit", name])
 
         assert result.exit_code == 2
 
@@ -270,6 +274,32 @@ class TestReconcileRollbackPrune:
         assert result.exit_code == 0, result.output
         assert "action abandoned" in result.stdout
         assert host.plane.fragment.read_text() == read_fragment(host.plane.releases / host.a)
+
+    def test_reconcile_refuses_a_running_release_var_that_is_not_an_id(self, host: Host) -> None:
+        """The traceback of issue #271, from the operator's side.
+
+        `reconcile` is what the first-migration runbook names when the cutover
+        crashed part-way, run as root on the droplet. A release var that is not
+        a release id used to reach the marker and come back as a pydantic
+        `ValidationError` -- outside the `LovsporError` families the command
+        layer catches, so past `_refusals()` and onto the terminal as a
+        traceback. It is a named refusal with the triple, and exit code 1.
+        """
+        host.make_live(host.a)
+        fragment = read_fragment(host.plane.releases / host.a)
+        host.plane.fragment.write_text(
+            fragment.replace(f"vars lovspor_release {host.a}\n", 'vars lovspor_release ""\n'),
+            encoding="utf-8",
+        )
+        host.caddy.restart()
+
+        result = runner.invoke(app, ["release", "reconcile"])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "release refused: host is foreign" in result.output
+        assert "R=(none, " in result.output
+        assert read_marker(host.plane.releases) == Marker(active=host.a, previous=None)
 
     def test_both_flags_are_a_usage_error(self, host: Host) -> None:
         result = runner.invoke(app, ["release", "reconcile", "--complete", "--abandon"])

@@ -158,8 +158,13 @@ Never what a rollback restores — that is the backup, which holds what
 was actually on the box.
 """
 _UNIX_PREFIX = "unix/"
-FLAT_RELEASE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{12}$")
-"""The pre-envelope release directory name, ``<YYYYMMDDTHHMMSSZ>-<sha12>``."""
+FLAT_RELEASE = re.compile(r"\A\d{8}T\d{6}Z-[0-9a-f]{12}\Z")
+"""The pre-envelope release directory name, ``<YYYYMMDDTHHMMSSZ>-<sha12>``.
+
+Whole-string anchors for the reason `envelope._RELEASE_ID` carries them: a
+directory name may contain a newline, `$` matches just before one, and this
+name selects what ``retire`` hands to ``rmtree``.
+"""
 _STAGED_HINT = (
     "D is the new configuration, R the old; resolve with `lovspor release reconcile --complete` "
     "(run the cutover) or `--abandon` (restore the previous Caddyfile)"

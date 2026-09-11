@@ -122,6 +122,55 @@ class TestConfigPair:
         assert pair.config_hash == canonical_hash(config["apps"]["http"]["servers"])
         assert pair.describe().startswith("(none, ")
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",
+            " ",
+            "\t",
+            "not-an-id",
+            "A" * 64,
+            "a" * 63,
+            "a" * 65,
+            ID_A + " ",
+            " " + ID_A,
+            ID_A + "\n",
+        ],
+    )
+    def test_a_release_var_that_is_not_a_release_id_names_no_release(self, value: str) -> None:
+        """R is read back off Caddy's own admin API, so the var is untrusted input.
+
+        A Caddyfile placeholder that expands to nothing leaves the var present and
+        empty; a hand edit leaves whatever was typed. Neither names a release, and
+        neither may reach the marker, which refuses anything but a release id --
+        as a traceback, where the operator is owed a named refusal (issue #271).
+        """
+        config = _config(_site(_routes(value)))
+
+        pair = config_pair(config)
+
+        assert pair.release_id is None
+        assert pair.config_hash == canonical_hash(config["apps"]["http"]["servers"])
+        assert pair.describe().startswith("(none, ")
+
+    @pytest.mark.parametrize("value", [None, 42, True, [ID_A], {"id": ID_A}])
+    def test_a_release_var_that_is_not_a_string_names_no_release(self, value: object) -> None:
+        """The admin API answers JSON: the var can be any node, not only a string."""
+        routes = [{"handle": [{"handler": "vars", "lovspor_release": value}]}]
+
+        assert config_pair(_config(_site(routes))).release_id is None
+
+    def test_the_key_names_a_release_only_on_a_vars_handler(self) -> None:
+        routes = [{"handle": [{"handler": "file_server", "lovspor_release": ID_A}]}]
+
+        assert config_pair(_config(_site(routes))).release_id is None
+
+    def test_a_var_that_is_not_a_release_id_never_makes_the_pair_ambiguous(self) -> None:
+        """Only names of releases can disagree about which release is served."""
+        mixed = _config(_site(_routes(ID_A) + _routes("")))
+
+        assert config_pair(mixed).release_id == ID_A
+
     def test_two_release_vars_are_refused_as_ambiguous(self) -> None:
         both = _config(_site(_routes(ID_A)), _site(_routes(ID_B), host="other"))
         with pytest.raises(ControlPlaneError, match="more than one lovspor_release"):

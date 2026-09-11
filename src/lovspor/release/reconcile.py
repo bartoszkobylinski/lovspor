@@ -127,12 +127,14 @@ def _report(triple: Triple, found: Situation, live: str | None, action: str) -> 
 def _resolve(plane: ControlPlane, triple: Triple, action: ReconcileAction) -> ReconcileReport:
     """The crash table of Decision 6, on a host whose admin address is settled."""
     found = situation(triple)
+    live = triple.running.release_id
     if found == Situation.reconciled:
-        return _report(triple, found, triple.running.release_id, "none")
-    if found == Situation.reloaded:
-        active = triple.running.release_id or ""
-        write_marker(plane.releases, Marker(active=active, previous=triple.marked))
-        return _report(triple, Situation.reconciled, active, "marker_written")
+        return _report(triple, found, live, "none")
+    # R is untrusted input and the marker takes only a release id; config_pair
+    # yields None for anything else, so every other R ends in a named refusal.
+    if found == Situation.reloaded and live is not None:
+        write_marker(plane.releases, Marker(active=live, previous=triple.marked))
+        return _report(triple, Situation.reconciled, live, "marker_written")
     if action == "complete":
         return _complete(plane, triple)
     if action == "abandon":
