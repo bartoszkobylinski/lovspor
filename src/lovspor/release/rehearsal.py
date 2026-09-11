@@ -434,7 +434,16 @@ def _facts_refused(plan: Rehearsal) -> str:
 
 
 def hand_provisioned_socket_fails(plan: Rehearsal) -> Step:
-    """(v) The negative fixture: a restart takes back a mode and a group set once by hand."""
+    """(v) The negative fixture: a restart takes back a mode and a group set once by hand.
+
+    The ADR pairs "without the creation-mode suffix" with "and the setgid
+    directory". Only the suffix is taken away here: ``RuntimeDirectory=``
+    and ``RuntimeDirectoryMode=2770`` recreate the setgid directory at
+    every start, so taking that away too would mean editing the drop-in
+    as well — three changes where the fixture is about one. The mode
+    assertion is what fails either way, and ``_facts_refused`` insists
+    the refusal names the mode or the group and nothing else.
+    """
     kept = plan.plane.caddyfile.read_bytes()
     try:
         _install(plan, plan.fixtures.unsuffixed.read_bytes())
