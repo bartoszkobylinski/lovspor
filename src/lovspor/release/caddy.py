@@ -27,7 +27,7 @@ import hashlib
 import json
 import os
 import subprocess
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
@@ -115,6 +115,45 @@ class HttpxAdminClient:
             ) from error
 
 
+class FallbackAdminClient:
+    """The socket first, then TCP: the first migration's pre-marker window (ADR-0014 Migration).
+
+    While no marker exists the admin endpoint may be on either address —
+    TCP before the cutover, the socket after — so ``reconcile`` asks both in
+    that order and records which one answered in ``answered``. From the
+    marker on, the socket is the only address and this client is not used.
+    """
+
+    def __init__(
+        self,
+        primary: str,
+        secondary: str,
+        connect: Callable[[str], AdminClient] = HttpxAdminClient,
+    ) -> None:
+        self.addresses = (primary, secondary)
+        self.connect = connect
+        self.answered: str | None = None
+
+    def _first(self) -> tuple[str, object]:
+        failures: list[str] = []
+        for address in self.addresses:
+            try:
+                config = self.connect(address).running_config()
+            except UnobservableError as error:
+                failures.append(error.detail)
+                continue
+            self.answered = address
+            return address, config
+        raise UnobservableError("admin_unreachable", "; ".join(failures))
+
+    def running_config(self) -> object:
+        return self._first()[1]
+
+    def probe(self) -> str:
+        """The address that answers; :class:`UnobservableError` naming both when neither does."""
+        return self._first()[0]
+
+
 class ConfigPair(BaseModel):
     """What names a configuration: the release var and the site block's routes hash."""
 
@@ -184,17 +223,30 @@ def config_pair(config: object) -> ConfigPair:
     return ConfigPair(release_id=ids.pop(), config_hash=canonical_hash(_routes_subtree(route)))
 
 
-def adapt(runner: Runner, caddyfile: Path, fragment: Path) -> ConfigPair:
-    """What Caddy would load from ``caddyfile`` importing ``fragment``."""
+def adapt_config(runner: Runner, caddyfile: Path, fragment: Path) -> object:
+    """The JSON Caddy would load from ``caddyfile`` importing ``fragment``."""
     argv = ("caddy", "adapt", "--config", str(caddyfile), "--adapter", "caddyfile")
     done = runner.run(argv, {FRAGMENT_ENV: str(fragment)})
     if done.returncode != 0:
         raise ControlPlaneError(f"caddy adapt failed for {fragment}: {done.stderr.strip()}")
     try:
-        config = json.loads(done.stdout)
+        return json.loads(done.stdout)
     except ValueError as error:
         raise ControlPlaneError("caddy adapt produced no JSON") from error
-    return config_pair(config)
+
+
+def adapt(runner: Runner, caddyfile: Path, fragment: Path) -> ConfigPair:
+    """What Caddy would load from ``caddyfile`` importing ``fragment``, as a pair."""
+    return config_pair(adapt_config(runner, caddyfile, fragment))
+
+
+def admin_listen(config: object) -> str | None:
+    """The admin address a configuration names — the global ``admin`` option — or ``None``."""
+    if not isinstance(config, dict):
+        return None
+    admin = config.get("admin")
+    listen = admin.get("listen") if isinstance(admin, dict) else None
+    return listen if isinstance(listen, str) and listen else None
 
 
 def validate(runner: Runner, caddyfile: Path, fragment: Path) -> None:

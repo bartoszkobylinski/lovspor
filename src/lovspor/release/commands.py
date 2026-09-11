@@ -5,7 +5,9 @@ the reconcile identity) establishes the reconciled live release;
 ``build`` (the build user) runs the probe and the seven steps, printing
 the finalized id alone on stdout; ``commit`` (root) runs the
 transaction; ``prune`` (root) removes what no record names.
-``reconcile`` and ``rollback`` are the operator's own.
+``reconcile`` and ``rollback`` are the operator's own, and so is
+``migrate`` — the first envelope cutover (ADR-0014 Migration), whose
+``--rollback`` and ``--retire`` are separate runs, never phases of it.
 
 Exit codes: 0 done (``commit`` of the live release included — it is
 already live); 1 refused, unreconciled or failed, one line on stderr;
@@ -16,9 +18,10 @@ the probe, and passed in.
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 import typer
@@ -35,6 +38,25 @@ from lovspor.release.caddy import (
 from lovspor.release.control import ControlPlane, commit_release, live_release, rollback
 from lovspor.release.envelope import is_release_id, read_marker
 from lovspor.release.errors import ReleaseError, UnobservableError, UnreconciledError
+from lovspor.release.migrate import (
+    DEFAULT_CADDYFILE_SOURCE,
+    DEFAULT_CURRENT_SYMLINK,
+    DEFAULT_DROP_IN,
+    DEFAULT_RELEASE_GROUP,
+    DEFAULT_RUNTIME_DIR,
+    DEFAULT_SITE_ROOT,
+    DEFAULT_TCP_ADMIN,
+    MigrationHost,
+    MigrationReport,
+    RetireReport,
+    RollbackReport,
+    first_migration,
+    offline_rollback,
+    preflight,
+    retire_pre_envelope,
+    retire_preview,
+    rollback_first_migration,
+)
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
 from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
@@ -79,8 +101,71 @@ _AdminOption = Annotated[
 ]
 
 
+_TcpAdminOption = Annotated[
+    str,
+    typer.Option(
+        "--tcp-admin",
+        envvar="LOVSPOR_CADDY_ADMIN_TCP",
+        help="The pre-envelope admin address, Caddy's default; the migration reloads through it.",
+    ),
+]
+_CaddyfileSourceOption = Annotated[
+    Path,
+    typer.Option(
+        "--caddyfile-source",
+        envvar="LOVSPOR_CADDYFILE_SOURCE",
+        help="The new Caddyfile the first migration installs, from the deployed checkout.",
+    ),
+]
+_DropInOption = Annotated[
+    Path, typer.Option("--drop-in", envvar="LOVSPOR_CADDY_DROP_IN", help="caddy.service drop-in.")
+]
+_RuntimeDirOption = Annotated[
+    Path,
+    typer.Option(
+        "--runtime-dir", envvar="LOVSPOR_CADDY_RUNTIME_DIR", help="The admin socket's directory."
+    ),
+]
+_ReleaseGroupOption = Annotated[
+    str,
+    typer.Option(
+        "--release-group",
+        envvar="LOVSPOR_RELEASE_GROUP",
+        help="The group that may open the admin socket; root is in it, lovspor is not.",
+    ),
+]
+
+
+@dataclass(frozen=True)
+class HostOptions:
+    """The first migration's host, as the options name it."""
+
+    tcp_admin: str = DEFAULT_TCP_ADMIN
+    caddyfile_source: Path = DEFAULT_CADDYFILE_SOURCE
+    drop_in: Path = DEFAULT_DROP_IN
+    runtime_dir: Path = DEFAULT_RUNTIME_DIR
+    release_group: str = DEFAULT_RELEASE_GROUP
+    site_root: Path = DEFAULT_SITE_ROOT
+    current_symlink: Path = DEFAULT_CURRENT_SYMLINK
+
+
 def _plane(releases: Path, caddyfile: Path, fragment: Path, admin: str) -> ControlPlane:
     return ControlPlane(releases, caddyfile, fragment, SubprocessRunner(), HttpxAdminClient(admin))
+
+
+def _host(caddyfile: Path, admin: str, options: HostOptions) -> MigrationHost:
+    """The production host: the socket is the plane's admin address, everything else as given."""
+    return MigrationHost(
+        caddyfile=caddyfile,
+        caddyfile_source=options.caddyfile_source,
+        drop_in=options.drop_in,
+        runtime_dir=options.runtime_dir,
+        tcp_admin=options.tcp_admin,
+        socket_admin=admin,
+        release_group=options.release_group,
+        site_root=options.site_root,
+        current_symlink=options.current_symlink,
+    )
 
 
 @contextmanager
@@ -223,16 +308,187 @@ def reconcile_command(
     caddyfile: _CaddyfileOption = DEFAULT_CADDYFILE,
     fragment: _FragmentOption = DEFAULT_FRAGMENT,
     admin: _AdminOption = DEFAULT_ADMIN,
+    tcp_admin: _TcpAdminOption = DEFAULT_TCP_ADMIN,
+    caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+    drop_in: _DropInOption = DEFAULT_DROP_IN,
+    runtime_dir: _RuntimeDirOption = DEFAULT_RUNTIME_DIR,
+    release_group: _ReleaseGroupOption = DEFAULT_RELEASE_GROUP,
 ) -> None:
-    """Name the host's state — R, D and M — and resolve it per the crash table."""
+    """Name the host's state — R, D and M — and resolve it per the crash table.
+
+    Without a marker the admin endpoint is reached on the socket first, then
+    on --tcp-admin, and the first migration's own resolutions apply.
+    """
     if complete and abandon:
         raise typer.BadParameter("--complete and --abandon exclude each other")
     action: ReconcileAction = "complete" if complete else "abandon" if abandon else "report"
     plane = _plane(releases, caddyfile, fragment, admin)
+    options = HostOptions(tcp_admin, caddyfile_source, drop_in, runtime_dir, release_group)
     with _refusals():
-        report = reconcile(plane, action)
+        report = reconcile(plane, action, _host(caddyfile, admin, options))
     typer.echo(f"{report.situation.value}: {report.triple}; action {report.action}")
+    typer.echo(f"admin: {report.admin or admin}")
     typer.echo(f"live: {report.live or NOTHING_LIVE}")
+
+
+MigrateAction = Literal["migrate", "check", "rollback", "offline", "retire"]
+
+
+@dataclass(frozen=True)
+class MigrateFlags:
+    """The migrate command's flags, so choosing the run is one argument, not five."""
+
+    rollback: bool = False
+    retire: bool = False
+    check: bool = False
+    offline: bool = False
+    yes: bool = False
+
+
+@dataclass(frozen=True)
+class Run:
+    """One run of ``migrate``: which one, on what, and whether it was confirmed."""
+
+    action: MigrateAction
+    content_id: str | None = None
+    yes: bool = False
+
+
+def _migrate_action(content_id: str | None, flags: MigrateFlags) -> MigrateAction:
+    """Which of the runs the operator asked for; none of them are ever combined."""
+    if flags.rollback and flags.retire:
+        raise typer.BadParameter("--rollback and --retire exclude each other")
+    if content_id is not None and (flags.rollback or flags.retire):
+        raise typer.BadParameter("--rollback and --retire take no release_content_id")
+    if flags.check and (flags.rollback or flags.retire):
+        raise typer.BadParameter(
+            "--check is the migration's preflight; it excludes --rollback and --retire"
+        )
+    if flags.offline and not flags.rollback:
+        raise typer.BadParameter("--offline is the rollback's last resort; it needs --rollback")
+    if flags.yes and not flags.retire:
+        raise typer.BadParameter("--yes confirms --retire; no other run asks")
+    if content_id is not None and not is_release_id(content_id):
+        raise typer.BadParameter(f"not a release_content_id: {content_id}")
+    if flags.rollback:
+        return "offline" if flags.offline else "rollback"
+    if flags.retire:
+        return "retire"
+    return "check" if flags.check else "migrate"
+
+
+def _done(happened: bool) -> str:
+    return "yes" if happened else "no"
+
+
+def _migrated(report: MigrationReport) -> tuple[str, ...]:
+    return (
+        f"migrated: {report.active} (admin {report.admin})",
+        f"running: {report.running}",
+        f"previous Caddyfile: {report.previous_caddyfile}",
+    )
+
+
+def _rolled_back(report: RollbackReport) -> tuple[str, ...]:
+    lines = (
+        f"rolled back from {report.admin_before} to {report.admin}; "
+        f"reloaded {_done(report.reloaded)}",
+        f"marker removed {_done(report.marker_removed)}, "
+        f"ExecReload pair removed {_done(report.exec_reload_removed)}",
+    )
+    if report.restarted is None:
+        return lines
+    return (*lines, f"restarted {report.restarted}")
+
+
+def _retired(report: RetireReport) -> tuple[str, ...]:
+    return (f"retired {len(report.removed)}: {', '.join(report.removed) or '-'}",)
+
+
+def _retire(plane: ControlPlane, host: MigrationHost, confirmed: bool) -> tuple[str, ...]:
+    """The paths first, then ``--yes``.
+
+    The confirmation is a flag and never a prompt: this deletes
+    production directories and the rollback's only source, and a run with
+    no terminal — the wrapper under systemd, an ssh one-liner — must fail
+    closed rather than read a yes off a pipe that is not there.
+    """
+    if confirmed:
+        return _retired(retire_pre_envelope(plane, host))
+    listed = "\n".join(f"  {path}" for path in retire_preview(plane, host).removed)
+    raise ReleaseError(
+        "--retire permanently removes these paths, the last of them the only way back to the "
+        f"pre-envelope site:\n{listed or '  (nothing)'}\nre-run with --yes to confirm"
+    )
+
+
+def _migrate_lines(plane: ControlPlane, host: MigrationHost, run: Run) -> tuple[str, ...]:
+    """One run, one report; ``--check`` is the only one that moves nothing."""
+    if run.action == "check":
+        return (f"preflight: {preflight(plane, host, run.content_id).describe()}",)
+    if run.action == "rollback":
+        return _rolled_back(rollback_first_migration(plane, host))
+    if run.action == "offline":
+        return _rolled_back(offline_rollback(plane, host))
+    if run.action == "retire":
+        return _retire(plane, host, run.yes)
+    if run.content_id is None:
+        raise typer.BadParameter("migrate needs a release_content_id, --rollback or --retire")
+    return _migrated(first_migration(plane, host, run.content_id))
+
+
+@release_app.command(name="migrate")
+def migrate_command(
+    content_id: Annotated[
+        str | None, typer.Argument(help="The finalized release_content_id to cut over to.")
+    ] = None,
+    rollback: Annotated[
+        bool, typer.Option("--rollback", help="Back to the pre-envelope host, from any point.")
+    ] = False,
+    retire: Annotated[
+        bool, typer.Option("--retire", help="Remove the pre-envelope layout; no way back after.")
+    ] = False,
+    check: Annotated[
+        bool, typer.Option("--check", help="The preflight alone; nothing on the host moves.")
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="Confirm --retire, having read the paths it lists.")
+    ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="With --rollback: restore the files and restart, dialling no admin endpoint.",
+        ),
+    ] = False,
+    releases: _ReleasesOption = DEFAULT_RELEASES,
+    caddyfile: _CaddyfileOption = DEFAULT_CADDYFILE,
+    fragment: _FragmentOption = DEFAULT_FRAGMENT,
+    admin: _AdminOption = DEFAULT_ADMIN,
+    tcp_admin: _TcpAdminOption = DEFAULT_TCP_ADMIN,
+    caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+    drop_in: _DropInOption = DEFAULT_DROP_IN,
+    runtime_dir: _RuntimeDirOption = DEFAULT_RUNTIME_DIR,
+    release_group: _ReleaseGroupOption = DEFAULT_RELEASE_GROUP,
+) -> None:
+    """The first envelope cutover, over the address transition a reload cannot make.
+
+    ``--retire`` is never performed by a migration: it deletes the
+    previous Caddyfile's world, the only way back, so the operator asks
+    for it explicitly once the cutover is verified (ADR-0014 Migration) —
+    and again with ``--yes``, having read the paths the first run lists.
+    ``--rollback --offline`` is the last resort when Caddy answers on
+    neither address: the files go back and the unit is restarted, with
+    nothing read first.
+    """
+    flags = MigrateFlags(rollback, retire, check, offline, yes)
+    run = Run(_migrate_action(content_id, flags), content_id, yes)
+    plane = _plane(releases, caddyfile, fragment, admin)
+    options = HostOptions(tcp_admin, caddyfile_source, drop_in, runtime_dir, release_group)
+    with _refusals():
+        lines = _migrate_lines(plane, _host(caddyfile, admin, options), run)
+    for line in lines:
+        typer.echo(line)
 
 
 @release_app.command(name="rollback")

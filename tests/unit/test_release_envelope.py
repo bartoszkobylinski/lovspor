@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import stat
 from pathlib import Path
 
 import pytest
@@ -258,6 +259,13 @@ class TestMarker:
             b'{\n "active": "' + ID_B.encode() + b'",\n "previous": "' + ID_A.encode() + b'"\n}\n'
         )
         assert not (tmp_path / f"{MARKER_NAME}.tmp").exists()
+
+    def test_the_marker_is_world_readable_whatever_the_umask(
+        self, tmp_path: Path, strict_umask: None
+    ) -> None:
+        write_marker(tmp_path, Marker(active=ID_A, previous=None))
+
+        assert stat.S_IMODE((tmp_path / MARKER_NAME).stat().st_mode) == 0o644
 
     def test_a_malformed_marker_is_refused_not_guessed(self, tmp_path: Path) -> None:
         (tmp_path / MARKER_NAME).write_text('{"active": "x"}', encoding="utf-8")

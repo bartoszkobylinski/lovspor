@@ -22,10 +22,13 @@ from lovspor.release.caddy import (
     FRAGMENT_ENV,
     Completed,
     ConfigPair,
+    FallbackAdminClient,
     HttpxAdminClient,
     SubprocessRunner,
     adapt,
+    adapt_config,
     admin_base,
+    admin_listen,
     canonical_hash,
     config_pair,
     reload,
@@ -162,6 +165,21 @@ class TestConfigPair:
         assert pair == ConfigPair(release_id=ID_A, config_hash=canonical_hash(handle))
 
 
+class TestAdminListen:
+    def test_the_global_admin_option_or_none(self) -> None:
+        assert admin_listen(_config(_site(_routes(ID_A)))) == DEFAULT_ADMIN
+        assert admin_listen({"admin": {"listen": "unix//run/x.sock|0660"}}) == (
+            "unix//run/x.sock|0660"
+        )
+
+    @pytest.mark.parametrize(
+        "config",
+        [None, [], {}, {"admin": None}, {"admin": []}, {"admin": {}}, {"admin": {"listen": ""}}],
+    )
+    def test_anything_without_a_listen_address_is_none(self, config: object) -> None:
+        assert admin_listen(config) is None
+
+
 class RecordingRunner:
     def __init__(self, *answers: Completed) -> None:
         self.answers = list(answers)
@@ -195,6 +213,20 @@ class TestCommands:
                 {FRAGMENT_ENV: str(tmp_path / "next")},
             )
         ]
+
+    def test_adapt_config_is_the_json_itself_and_adapt_its_pair(self, tmp_path: Path) -> None:
+        config = _config(_site(_routes(ID_A)))
+        runner = RecordingRunner(Completed(0, json.dumps(config), ""))
+
+        assert adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "next") == config
+        assert runner.calls[0][0][:2] == ("caddy", "adapt")
+        assert runner.calls[0][1] == {FRAGMENT_ENV: str(tmp_path / "next")}
+
+    def test_adapt_config_failures_are_named(self, tmp_path: Path) -> None:
+        with pytest.raises(ControlPlaneError, match="caddy adapt failed .*: boom"):
+            adapt_config(RecordingRunner(Completed(1, "", "boom\n")), tmp_path, tmp_path / "f")
+        with pytest.raises(ControlPlaneError, match="caddy adapt produced no JSON"):
+            adapt_config(RecordingRunner(Completed(0, "{", "")), tmp_path, tmp_path / "f")
 
     def test_adapt_failures_are_named(self, tmp_path: Path) -> None:
         with pytest.raises(ControlPlaneError, match="caddy adapt failed .*: boom"):
@@ -387,3 +419,73 @@ class TestHttpxAdminClient:
         assert config == json.loads(body)
         assert admin.received.startswith(b"GET /config/ HTTP/1.1\r\n")
         assert b"host: 127.0.0.1\r\n" in admin.received.lower()
+
+
+class _Table:
+    """Admin clients by address: a config, or the refusal ``UnobservableError`` carries."""
+
+    def __init__(self, answers: dict[str, object]) -> None:
+        self.answers = answers
+        self.asked: list[str] = []
+
+    def __call__(self, address: str) -> "_Table._Client":
+        return _Table._Client(self, address)
+
+    class _Client:
+        def __init__(self, table: "_Table", address: str) -> None:
+            self.table = table
+            self.address = address
+
+        def running_config(self) -> object:
+            self.table.asked.append(self.address)
+            answer = self.table.answers[self.address]
+            if isinstance(answer, UnobservableError):
+                raise answer
+            return answer
+
+
+class TestFallbackAdminClient:
+    def test_the_primary_answering_is_never_followed_by_the_secondary(self) -> None:
+        table = _Table({"unix//s": {"apps": {}}, "localhost:2019": {"other": 1}})
+        client = FallbackAdminClient("unix//s", "localhost:2019", table)
+
+        assert client.answered is None
+        assert client.running_config() == {"apps": {}}
+        assert client.answered == "unix//s"
+        assert table.asked == ["unix//s"]
+
+    def test_the_secondary_answers_when_the_primary_refuses(self) -> None:
+        refused = UnobservableError("admin_unreachable", "unix//s: connection refused")
+        table = _Table({"unix//s": refused, "localhost:2019": {"other": 1}})
+        client = FallbackAdminClient("unix//s", "localhost:2019", table)
+
+        assert client.probe() == "localhost:2019"
+        assert client.answered == "localhost:2019"
+        assert client.running_config() == {"other": 1}
+        assert table.asked == ["unix//s", "localhost:2019", "unix//s", "localhost:2019"]
+
+    def test_neither_answering_names_both_in_the_details_order(self) -> None:
+        table = _Table(
+            {
+                "unix//s": UnobservableError("admin_unreachable", "unix//s: no such file"),
+                "localhost:2019": UnobservableError("admin_unreachable", "localhost:2019: refused"),
+            }
+        )
+        client = FallbackAdminClient("unix//s", "localhost:2019", table)
+
+        with pytest.raises(UnobservableError) as caught:
+            client.probe()
+        assert caught.value.reason == "admin_unreachable"
+        assert caught.value.detail == "unix//s: no such file; localhost:2019: refused"
+        assert client.answered is None
+        assert client.addresses == ("unix//s", "localhost:2019")
+
+    def test_connects_through_httpx_by_default(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_exception(httpx.ConnectError("refused"), url="http://localhost:2019/config/")
+        httpx_mock.add_response(url="http://localhost:2020/config/", json={"apps": {}})
+
+        client = FallbackAdminClient("localhost:2019", "localhost:2020")
+
+        assert client.connect is HttpxAdminClient
+        assert client.running_config() == {"apps": {}}
+        assert client.answered == "localhost:2020"

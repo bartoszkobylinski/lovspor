@@ -63,3 +63,16 @@ class CommitRefusedError(ControlPlaneError):
 
 class ReloadFailedError(ControlPlaneError):
     """Caddy would not load the new configuration; the previous one was put back."""
+
+
+class MigrationRefusedError(ControlPlaneError):
+    """The first migration's preflight found its precondition unmet; nothing moved."""
+
+
+class MigrationFailedError(ControlPlaneError):
+    """The first migration stopped after a named checkpoint; the message says what to run."""
+
+    def __init__(self, reached: str, detail: str) -> None:
+        super().__init__(f"first migration stopped after {reached}: {detail}")
+        self.reached = reached
+        self.detail = detail

@@ -154,6 +154,12 @@ uv run lovspor release commit <id>               # stage, validate, commit the f
 uv run lovspor release reconcile [--complete|--abandon]          # name and resolve a crash state
 uv run lovspor release rollback                  # the marker's previous, same transaction
 uv run lovspor release prune                     # only when reconciled; never R, D, M or previous
+uv run lovspor release migrate <id>              # the FIRST envelope: install the Caddyfile and cut over
+uv run lovspor release migrate --check           # that migration's preflight alone; nothing moves
+uv run lovspor release migrate --rollback        # back to the pre-envelope Caddyfile and TCP admin
+uv run lovspor release migrate --rollback --offline  # the same, dialling nothing: files back, unit restarted
+uv run lovspor release migrate --retire          # list the pre-envelope paths; removes nothing
+uv run lovspor release migrate --retire --yes    # remove them; no way back after
 uv run lovspor publish-check <envelope>          # the final check: both trees, cross-tree, ids
 ```
 
@@ -162,6 +168,23 @@ or unreconciled with one stderr line, `2` usage, `3` the precondition *Caddy
 admin reachable* unmet, with D and M printed. The commands take
 `--releases`/`LOVSPOR_RELEASES_ROOT`, `--caddyfile`/`LOVSPOR_CADDYFILE`,
 `--fragment`/`LOVSPOR_RELEASE_FRAGMENT` and `--admin`/`LOVSPOR_CADDY_ADMIN`.
+
+`migrate` is the one command a host runs once: the first envelope's cutover,
+where the configuration being installed is also what moves Caddy's admin
+endpoint from `localhost:2019` onto the socket, so the load is delivered
+explicitly to the old address rather than through `systemctl reload caddy`
+(ADR-0014 Migration). It takes `--tcp-admin`/`LOVSPOR_CADDY_ADMIN_TCP`,
+`--caddyfile-source`/`LOVSPOR_CADDYFILE_SOURCE`,
+`--drop-in`/`LOVSPOR_CADDY_DROP_IN`, `--runtime-dir`/`LOVSPOR_CADDY_RUNTIME_DIR`
+and `--release-group`/`LOVSPOR_RELEASE_GROUP` beside those four. `--check`,
+`--rollback` and `--retire` exclude each other and the release id; `--retire`
+deletes the only way back from the cutover — the pre-envelope Caddyfile last of
+all — so it is always a separate, later run, and it lists the paths and removes
+nothing until it is repeated with `--yes` (a flag, never a prompt: an
+unattended run fails closed). `--rollback --offline` is the last resort for a
+box whose Caddy answers on neither address: it dials nothing, restores the
+files and restarts the unit. The droplet procedure, step by step, is
+[`deploy/digitalocean/README.md` § First migration](../deploy/digitalocean/README.md#first-migration-once-on-the-existing-droplet).
 
 ## Observatory: registering a capture source (ADR-0010)
 

@@ -19,8 +19,9 @@ from lovspor.site.routes import (
 )
 from lovspor.site.templates import TEMPLATES_DIR
 
-_REPO = Path(__file__).resolve().parents[2]
-_SITE = _REPO / "deploy" / "digitalocean" / "site"
+# The hand-written pages the generator replaced, kept as fixtures when
+# `deploy/digitalocean/site/` was retired in the first-migration PR.
+_SITE = Path(__file__).resolve().parent / "fixtures" / "site" / "pre-envelope"
 
 EXPECTED_STATUS = {
     "/": "current",

@@ -12,8 +12,10 @@ from lovspor.site.routes import emitted_pages
 from lovspor.site.templates import TEMPLATES_DIR, page_globals, site_environment
 from tests.unit.site_fixtures import available_observation, checkout_expectations, readyz_503
 
-_REPO = Path(__file__).resolve().parents[2]
-_LANDING = _REPO / "deploy" / "digitalocean" / "site" / "index.html"
+# The pre-envelope landing page, a fixture since the first-migration PR
+# retired `deploy/digitalocean/site/`.
+_PRE_ENVELOPE = Path(__file__).resolve().parent / "fixtures" / "site" / "pre-envelope"
+_LANDING = _PRE_ENVELOPE / "index.html"
 _EXTERNAL = re.compile(r"https?://|<script|<link|<img|@import|url\(|\bon\w+=", re.IGNORECASE)
 
 
@@ -183,7 +185,7 @@ class TestBaseTemplate:
         assert ">EN</a>" not in html
 
     def test_the_stylesheet_is_the_landing_stylesheet_verbatim(self) -> None:
-        """One inline stylesheet, migrated from deploy/digitalocean/site/index.html."""
+        """One inline stylesheet, migrated from the pre-envelope landing page."""
         landing = _LANDING.read_text(encoding="utf-8")
         golden = landing[landing.index("<style>") : landing.index("</style>") + len("</style>")]
         html = _render("/docs/")

@@ -35,6 +35,8 @@ SITE_DIR = "site"
 RECORD_NAME = "release.json"
 FRAGMENT_NAME = "release.caddy"
 MARKER_NAME = "ACTIVE"
+WORLD_READABLE = 0o644
+"""What Caddy's own user must read — the marker, the active fragment — whatever root's umask."""
 BUILD_PREFIX = ".build-"
 """A name that is never a valid ``release_content_id``: the dot prefix."""
 RELEASE_VAR = "lovspor_release"
@@ -217,4 +219,4 @@ def read_marker(releases: Path) -> Marker | None:
 
 def write_marker(releases: Path, marker: Marker) -> None:
     """M by atomic rename, never in place; the record's serialisation."""
-    atomic_write_bytes(releases / MARKER_NAME, record_bytes(marker))
+    atomic_write_bytes(releases / MARKER_NAME, record_bytes(marker), mode=WORLD_READABLE)
