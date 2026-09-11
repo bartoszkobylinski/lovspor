@@ -1119,6 +1119,16 @@ class TestADeadMachineIsNotAVerdictOnTheDiff:
             "Report a codex-tests job that never reached its own escalation"
         )
 
+    def test_a_classifier_failure_cannot_silence_the_external_reporter(self) -> None:
+        """The reporter exists because the agent lane can fail without speaking.
+        A transient jobs-API or classifier failure must not make this hosted
+        fallback skip its own reporting step for the same reason."""
+        report = _named_step(
+            self._steps(), "Report a codex-tests job that never reached its own escalation"
+        )
+
+        assert report.get("if") == "always()"
+
     def test_the_classifier_is_reachable_from_the_sparse_checkout(self) -> None:
         """The reporter checks out `scripts/ci` only. A classifier outside that
         path would make this job die on a missing file — the silent BLOCKED of

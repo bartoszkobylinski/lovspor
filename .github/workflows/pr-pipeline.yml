@@ -540,6 +540,11 @@ jobs:
       # about three hours. The classifier is mechanical, so the message can be.
       - name: Classify the lane failure
         id: classify
+        # Never fatal. This job exists because the agent lane can fail without
+        # speaking; a transient jobs-API hiccup here must not make the fallback
+        # itself go silent — that is the failure of #193, reintroduced one level
+        # up. A missing verdict downgrades the wording, it does not remove it.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -552,6 +557,11 @@ jobs:
             --lane codex-tests >> "$GITHUB_OUTPUT"
 
       - name: Report a codex-tests job that never reached its own escalation
+        # always(): the classifier above is best-effort, and a skipped reporting
+        # step would leave the PR red and silent — the one outcome this job was
+        # added to prevent. The job's own `if` already keeps it out of a
+        # concurrency cancellation.
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
