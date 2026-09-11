@@ -177,8 +177,8 @@
 																	"handler": "file_server",
 																	"hide": [
 																		"/etc/caddy/Caddyfile.proposed",
-																		"/var/www/lovspor-releases-flat/20260901T120000Z-abcdef123456/redirects.caddy",
-																		"/var/www/lovspor-releases/release-wrong-root.caddy"
+																		"/etc/caddy/release-wrong-root.caddy",
+																		"/var/www/lovspor-releases-flat/20260901T120000Z-abcdef123456/redirects.caddy"
 																	]
 																}
 															]
@@ -217,8 +217,8 @@
 																	"handler": "file_server",
 																	"hide": [
 																		"/etc/caddy/Caddyfile.proposed",
-																		"/var/www/lovspor-releases-flat/20260901T120000Z-abcdef123456/redirects.caddy",
-																		"/var/www/lovspor-releases/release-wrong-root.caddy"
+																		"/etc/caddy/release-wrong-root.caddy",
+																		"/var/www/lovspor-releases-flat/20260901T120000Z-abcdef123456/redirects.caddy"
 																	]
 																}
 															]

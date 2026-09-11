@@ -177,8 +177,8 @@
 																	"handler": "file_server",
 																	"hide": [
 																		"/etc/caddy/Caddyfile.proposed",
-																		"/var/www/lovspor-live/corpus/redirects.caddy",
-																		"/var/www/lovspor-releases/release-symlinked-root.caddy"
+																		"/etc/caddy/release-symlinked-root.caddy",
+																		"/var/www/lovspor-live/corpus/redirects.caddy"
 																	]
 																}
 															]
@@ -217,8 +217,8 @@
 																	"handler": "file_server",
 																	"hide": [
 																		"/etc/caddy/Caddyfile.proposed",
-																		"/var/www/lovspor-live/corpus/redirects.caddy",
-																		"/var/www/lovspor-releases/release-symlinked-root.caddy"
+																		"/etc/caddy/release-symlinked-root.caddy",
+																		"/var/www/lovspor-live/corpus/redirects.caddy"
 																	]
 																}
 															]

@@ -177,8 +177,8 @@
 																	"handler": "file_server",
 																	"hide": [
 																		"/etc/caddy/Caddyfile.proposed",
-																		"/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947/corpus/redirects.caddy",
-																		"/var/www/lovspor-releases/release-drops-robots.caddy"
+																		"/etc/caddy/release-drops-robots.caddy",
+																		"/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947/corpus/redirects.caddy"
 																	]
 																}
 															]
@@ -216,8 +216,8 @@
 																	"handler": "file_server",
 																	"hide": [
 																		"/etc/caddy/Caddyfile.proposed",
-																		"/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947/corpus/redirects.caddy",
-																		"/var/www/lovspor-releases/release-drops-robots.caddy"
+																		"/etc/caddy/release-drops-robots.caddy",
+																		"/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947/corpus/redirects.caddy"
 																	]
 																}
 															]

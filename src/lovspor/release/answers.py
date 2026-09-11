@@ -286,6 +286,21 @@ def matcher_paths(config: object) -> tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
+def hidden_paths(config: object) -> tuple[str, ...]:
+    """Every path a ``file_server`` hides — Caddy's own record of what the file imported.
+
+    The adapter puts the Caddyfile and every file it imported into the
+    ``hide`` list beside the ``file_server``, so this is where a
+    configuration says which redirect map it is actually serving under.
+    """
+    found: list[str] = []
+    for node in _nodes(config):
+        hide = node.get("hide")
+        if node.get("handler") == "file_server" and isinstance(hide, list):
+            found.extend(str(entry) for entry in hide)
+    return tuple(dict.fromkeys(found))
+
+
 def hosts(config: object) -> tuple[str, ...]:
     """Every host name the routes match on; the dry-run asks both configurations to agree."""
     found: list[str] = []

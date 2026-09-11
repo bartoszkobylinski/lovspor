@@ -96,18 +96,22 @@ class World(NamedTuple):
     previous: Path
     proposed: Path
     release: Path
-    flat: Path
-
-    @property
-    def www(self) -> Path:
-        return self.root / "www"
 
     @property
     def fragment(self) -> Path:
         return self.release / FRAGMENT_NAME
 
     def variant(self, name: str) -> Path:
-        return self.release.parent / name
+        """A negative fixture's fragment, beside the Caddyfiles rather than in the envelope.
+
+        Where the real one lives on the droplet: the host's Caddyfile
+        imports ``/etc/caddy/lovspor-release.caddy``, and ``caddy adapt``
+        composes the next release's fragment through the environment
+        placeholder. A fragment left inside ``/var/www`` would be caught
+        by the corpus step's import assertion before its own property was
+        ever reached.
+        """
+        return self.root / name
 
 
 def _write(root: Path, files: dict[str, str]) -> None:
@@ -123,12 +127,11 @@ def _corpus_tree(root: Path) -> None:
     (root / "redirects.caddy").write_text(REDIRECT_MAP, encoding="utf-8")
 
 
-def _flat_release(www: Path) -> Path:
+def _flat_release(www: Path) -> None:
     """The pre-envelope layout: a dated directory and the symlink Caddy's root names."""
     flat = www / "lovspor-releases-flat" / FLAT_RELEASE
     _corpus_tree(flat)
     (www / CURRENT_SYMLINK).symlink_to(flat)
-    return flat
 
 
 def _envelope(www: Path) -> Path:
@@ -144,8 +147,8 @@ def _envelope(www: Path) -> Path:
     return release
 
 
-def _variants(release: Path) -> None:
-    """The three fragments the negative fixtures are adapted from, beside the real one.
+def _variants(root: Path, release: Path) -> None:
+    """The three fragments the negative fixtures are adapted from, beside the Caddyfiles.
 
     Each takes away exactly one of the properties the dry-run asserts and
     leaves the others intact, so a fixture that fails names which assertion
@@ -154,7 +157,7 @@ def _variants(release: Path) -> None:
     live = release.parent.parent / LIVE_SYMLINK
     real = fragment_text(release, RELEASE_ID)
     _write(
-        release.parent,
+        root,
         {
             DROPS_ROBOTS: real.replace(" /robots.txt", "", 1),
             WRONG_ROOT: real.replace(
@@ -186,11 +189,11 @@ def build_world(root: Path, repo: Path) -> World:
     www = root / "www"
     www.mkdir(parents=True, exist_ok=True)
     _write(www / "lovspor", LANDING_FILES)
-    flat = _flat_release(www)
+    _flat_release(www)
     release = _envelope(www)
-    _variants(release)
+    _variants(root, release)
     previous, proposed = _caddyfiles(root, release, repo)
-    return World(root, previous, proposed, release, flat)
+    return World(root, previous, proposed, release)
 
 
 def rehost(text: str, root: Path) -> str:
