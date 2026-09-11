@@ -30,6 +30,24 @@ the three terminals. It models a subset — and refuses, by name, anything
 outside it: a matcher or a handler the dry-run does not understand raises
 :class:`UnroutableConfigError` rather than being skipped, because a
 comparison that silently ignores what it cannot read proves nothing.
+
+The same applies to the *question*. A URL this module answers is a
+canonical absolute POSIX path and nothing else — :func:`broken_url_rule`
+is the whole rule set, and it is read at both ends: :func:`request_path`
+refuses, and ``staged``'s URL derivers filter with
+:func:`is_servable_url`, so the dry-run can never fail on a question it
+asked itself. Nothing is normalised into shape. The two configurations'
+answers are compared *keyed by URL*, so two spellings collapsing to one
+key would hide a difference behind a normalisation this model invented;
+the one resolution that does happen is a trailing slash naming a
+directory, which is ``file_server``'s own behaviour and not a rewrite.
+
+And a path that passes the rules is still not trusted to stay put:
+:func:`served_file` joins it segment by segment — ``root / url`` is
+``url`` alone the moment the URL is absolute — and :func:`contained`
+proves the result is inside the root *with both sides resolved*, so
+neither a sibling tree sharing a name prefix nor a symlink inside the
+root can be answered for.
 """
 
 import hashlib
