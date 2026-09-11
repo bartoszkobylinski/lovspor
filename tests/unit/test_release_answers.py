@@ -521,28 +521,32 @@ class TestWhatCountsAsAUrlToAskAbout:
     @pytest.mark.parametrize(
         ("url", "rule"),
         [
-            ("", "absolute"),
-            ("lov/nl-1/", "absolute"),
-            ("http://lovspor.test/lov/nl-1/", "absolute"),
-            ("//etc/passwd", "network-path reference"),
-            ("/lov/../../etc/passwd", "climbs out"),
-            ("/lov/./nl-1/", "not a path segment"),
-            ("/lov//nl-1/", "empty path segment"),
-            ("/lov/%2e%2e%2fetc/passwd", "percent-encoding"),
-            ("/lov\\..\\..\\etc/passwd", "backslash"),
-            ("/lov/nl-1/?x=1", "query string"),
-            ("/lov/nl-1/#top", "fragment"),
+            ("", "a served URL is absolute"),
+            ("lov/nl-1/", "a served URL is absolute"),
+            ("http://lovspor.test/lov/nl-1/", "a served URL is absolute"),
+            ("//etc/passwd", "a second leading slash is a network-path reference, not a path"),
+            ("/lov/../../etc/passwd", ".. climbs out of the root"),
+            ("/../etc/passwd", ".. climbs out of the root"),
+            ("/lov/./nl-1/", ". is not a path segment"),
+            ("/./lov/", ". is not a path segment"),
+            ("/lov//nl-1/", "an empty path segment"),
+            ("/lov//", "an empty path segment"),
+            ("/lov/%2e%2e%2fetc/passwd", "percent-encoding is not decoded here"),
+            ("/lov\\..\\..\\etc/passwd", "a backslash is not a path separator here"),
+            ("/lov/nl-1/?x=1", "a query string is not part of the path"),
+            ("/lov/nl-1/#top", "a fragment is not part of the path"),
         ],
     )
     def test_a_shape_that_is_not_a_path_is_refused_by_name(
         self, rooted: object, url: str, rule: str
     ) -> None:
+        """The whole message, not a substring of it: a refusal that does not say which rule
+        it applied leaves the operator to guess, and the first offending segment is as much
+        a refusal as the last."""
         with pytest.raises(UnroutableConfigError) as caught:
             answer_for(rooted, url)
 
-        assert "not a served URL" in str(caught.value)
-        assert rule in str(caught.value)
-        assert repr(url) in str(caught.value)
+        assert str(caught.value) == f"not a served URL ({rule}): {url!r}"
 
     @pytest.mark.parametrize("url", ["/", "/robots.txt", "/lov/nl-19140101-001/", "/en/"])
     def test_the_shapes_the_derivers_produce_are_asked(self, previous: object, url: str) -> None:
@@ -569,7 +573,18 @@ class TestContainment:
         with pytest.raises(UnroutableConfigError) as caught:
             served_file(root, "/escape.txt")
 
-        assert "resolves outside" in str(caught.value)
+        assert str(caught.value) == f"not a served URL (it resolves outside {root}): '/escape.txt'"
+
+    def test_a_directorys_index_that_lands_outside_the_root_is_refused(self, world: Path) -> None:
+        """The second join is checked too: the escape can be the index file, not the path."""
+        root = site(world, "lovspor")
+        (root / "kapittel").mkdir()
+        (root / "kapittel" / "index.html").symlink_to(site(world, "lovspor-current", "robots.txt"))
+
+        with pytest.raises(UnroutableConfigError) as caught:
+            served_file(root, "/kapittel/")
+
+        assert str(caught.value) == f"not a served URL (it resolves outside {root}): '/kapittel/'"
 
     def test_a_sibling_root_sharing_a_name_prefix_is_outside(self, world: Path) -> None:
         """``/var/www/lovspor-current`` starts with ``/var/www/lovspor`` and is another tree."""
