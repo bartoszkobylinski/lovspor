@@ -4,11 +4,12 @@
 # production cutover.
 #
 # The ADR lists TWO rehearsals and the migration is authorised by both.
-# rehearse-migration.sh walks the address transitions, the kills and the
-# socket's four facts on a second Caddy instance; it covers no routing. This
-# one covers exactly that: `caddy validate` + `caddy adapt` over the old and
-# the new Caddyfiles against a fully built envelope and the flat release still
-# behind the lovspor-current symlink, compared route by route.
+# rehearse-migration.sh walks the address transitions, a load Caddy rejects, the
+# rollback and the admin socket's four facts on a second Caddy instance; it
+# looks at no URL. This one is exactly that: `caddy validate` + `caddy adapt`
+# over the old and the new Caddyfiles against a fully built envelope and the
+# flat release still behind the lovspor-current symlink, compared route by
+# route.
 #
 # Every assertion is Python, in src/lovspor/release/staged.py, unit-tested
 # against committed `caddy adapt` captures. This wrapper only builds an

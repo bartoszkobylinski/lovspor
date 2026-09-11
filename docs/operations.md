@@ -231,7 +231,8 @@ exists. The harness that starts the instance,
 carries no assertion of its own.
 
 `rehearse-urls` is the other half, and the migration is authorised by **both**.
-(g) covers addresses and kills and looks at no URL; this covers routing, which
+(g) covers the addresses, the loads and the socket and looks at no URL; this
+covers routing, which
 nothing else in the sequence does — a Caddyfile can hold its admin socket
 correctly, pass every one of (i)–(v), and serve 404 on `/lov/…`. It starts
 nothing: `caddy validate` and `caddy adapt` over the serving Caddyfile and the

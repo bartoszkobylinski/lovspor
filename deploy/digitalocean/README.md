@@ -430,10 +430,11 @@ sudo usermod -aG lovspor-release root
 **Rehearse the migration before you run it. The cutover is authorised by BOTH
 rehearsals, never by either alone** (ADR-0014 Validation). They cover different
 things and neither covers the other's: `rehearse-migration.sh` walks the
-address transitions, the kills and the admin socket's four facts on a running
-second instance, and looks at no URL; `rehearse-urls.sh` compares what the two
-configurations *answer*, and starts nothing. A Caddyfile can pass every one of
-(g)'s sub-steps and serve 404 on `/lov/…`.
+address transitions, a load Caddy rejects, the rollback and the admin socket's
+four facts on a running second instance, and looks at no URL;
+`rehearse-urls.sh` compares what the two configurations *answer*, and starts
+nothing. A Caddyfile can pass every one of (g)'s sub-steps and serve 404 on
+`/lov/…`.
 
 #### 4a. The second instance (ADR-0014 Validation (g))
 
