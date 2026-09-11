@@ -974,8 +974,19 @@ def _remove_marker(plane: ControlPlane) -> bool:
 
 
 def _had_exec_reload(host: MigrationHost) -> bool:
-    """The one place following a symlink is right: this asks what *systemd* read, and it follows."""
-    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="utf-8")
+    """Whether the drop-in systemd read carries the pair — asked of bytes, not of text.
+
+    Following a symlink is right here and only here: this asks what
+    *systemd* read, and systemd follows one.
+
+    Decoding is not right. This is the first call of every way back, the
+    offline one included, and a drop-in a human edited with one non-UTF-8
+    byte in it would raise ``UnicodeDecodeError`` — a ``ValueError``, so
+    outside the ``OSError`` family anything here catches — on the box that
+    most needs a way back. The needle is ASCII, so bytes answer exactly
+    the same question and cannot fail on the file's other bytes.
+    """
+    return host.drop_in.is_file() and b"ExecReload=" in host.drop_in.read_bytes()
 
 
 def _missing_backup(backup: Path) -> ControlPlaneError:

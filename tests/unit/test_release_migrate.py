@@ -35,6 +35,7 @@ from lovspor.release.envelope import (
     FRAGMENT_NAME,
     MARKER_NAME,
     RELEASE_VAR,
+    WORLD_READABLE,
     Marker,
     read_marker,
     write_marker,
@@ -1643,6 +1644,22 @@ class TestSymlinksAtTheNamesItWrites:
         assert droplet.host.absent_drop_in.is_symlink()
         assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
 
+    def test_the_absent_record_name_is_never_written_through_a_symlink(
+        self, droplet: Droplet
+    ) -> None:
+        """The third name (a) may create, named in its own refusal so the two cannot be swapped."""
+        self._staged(droplet)
+        droplet.host.drop_in.unlink()
+        droplet.host.absent_drop_in.symlink_to(droplet.host.absent_drop_in.with_name("gone"))
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+        assert str(caught.value) == (
+            f"{droplet.host.absent_drop_in} is a symlink; the first migration records an absent "
+            "drop-in at that name and follows no symlink, so move it aside and re-run"
+        )
+        assert droplet.host.absent_drop_in.is_symlink()
+
     def test_a_dangling_symlink_at_the_marker_is_removed_and_reported_removed(
         self, droplet: Droplet
     ) -> None:
@@ -2458,6 +2475,63 @@ class TestTheDropInBackup:
         assert report.marker_removed is False
         assert not droplet.host.drop_in.exists()
         assert not droplet.host.absent_drop_in.exists()
+
+    @pytest.mark.parametrize("state", ["absent", "bytes"])
+    def test_either_record_is_world_readable_whatever_the_umask(
+        self, droplet: Droplet, state: str, strict_umask: None
+    ) -> None:
+        """Both records are written for Caddy's box to be read on, not for the shell's umask.
+
+        The release commands are run from a shell ``docs/mcp.md`` tells
+        the operator to ``umask 077``, so a write that does not say its
+        mode leaves a record only root can read — and the operator
+        comparing the two names on the droplet then cannot.
+        """
+        if state == "absent":
+            droplet.host.drop_in.unlink()
+
+        _migrate(droplet)
+
+        record = droplet.host.absent_drop_in if state == "absent" else droplet.host.previous_drop_in
+        assert record.is_file()
+        assert stat.S_IMODE(record.stat().st_mode) == WORLD_READABLE
+
+    def test_the_restore_tolerates_a_drop_in_already_gone(self, droplet: Droplet) -> None:
+        """The absent record asks for a name with no file at it, which it may already be.
+
+        (a) writes the record before it writes the drop-in, so a crash
+        between the two leaves exactly this state — and a hand-removed
+        drop-in reaches it too. Either way the rollback wants the file
+        gone, and finding it gone already is not a failure.
+        """
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        droplet.host.drop_in.unlink()
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True and report.exec_reload_removed is False
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+
+    def test_a_drop_in_with_undecodable_bytes_does_not_break_the_way_back(
+        self, droplet: Droplet
+    ) -> None:
+        """``_had_exec_reload`` opens the first door of every rollback, offline included.
+
+        It reads a file a human may have edited, so decoding it would
+        raise ``UnicodeDecodeError`` — not an ``OSError``, so nothing
+        catches it — and the last resort would die on the box with the
+        fewest ways out. The needle is ASCII; the rest of the bytes are
+        not this question's business.
+        """
+        _migrate(droplet)
+        droplet.host.drop_in.write_bytes(b"[Service]\n# \xff\xfe\nExecReload=\n")
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.exec_reload_removed is True
+        assert droplet.host.drop_in.read_bytes() == PRE_ENVELOPE_DROP_IN.encode()
 
     def test_the_rollback_refuses_when_both_records_exist(self, droplet: Droplet) -> None:
         """One write makes one of them, so both is a human's edit and not a state to guess at."""
