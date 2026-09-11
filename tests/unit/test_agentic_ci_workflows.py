@@ -1021,6 +1021,16 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
         assert job["needs"] == ["remediate"]
         assert "uv run pytest tests/unit/" in suite["run"]
 
+    def test_the_hosted_verifier_checks_out_an_allowed_remediation_cycle(self) -> None:
+        """The gate belongs to the agent lane. The hosted lane must consume its
+        output before it can apply the patch or run any repository command."""
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
+        checkout = next(
+            step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")
+        )
+
+        assert checkout["if"] == "needs.remediate.outputs.run == 'true'"
+
     def test_the_agent_work_travels_as_a_patch(self) -> None:
         artifact = "remediation-tests-${{ github.event.workflow_run.head_sha }}"
         upload = _named_step(self._agent()["steps"], "Upload the agent's tests")

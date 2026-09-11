@@ -317,8 +317,11 @@ jobs:
       # to it.
       BEFORE_SHA: ${{ needs.remediate.outputs.before_sha }}
     steps:
+      # `steps.gate` lives on the agent lane — naming it here would evaluate to
+      # empty, skip the checkout, and leave every later step running against an
+      # empty workspace. The gate's verdict reaches this lane as a job output.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.gate.outputs.run == 'true'
+        if: needs.remediate.outputs.run == 'true'
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
