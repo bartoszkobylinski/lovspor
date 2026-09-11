@@ -27,7 +27,12 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from lovspor.atomic_io import atomic_write_text
-from lovspor.errors import AmbiguousSourceError, ParseError, SourceNotActivatedError
+from lovspor.errors import (
+    AmbiguousSourceError,
+    ParseError,
+    SourceNotActivatedError,
+    StaleSourceError,
+)
 from lovspor.observatory.model import AuthorityType, require_utc
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -606,3 +611,70 @@ def read_capture_verdict(path: Path) -> CaptureVerdict:
         return CaptureVerdict.model_validate(data)
     except ValidationError as exc:
         raise ParseError(f"{path}: invalid capture verdict: {exc}") from exc
+
+
+class Register:
+    """The register a run authorises against: a bound snapshot, kept honest.
+
+    Bound once, then checked against the file on every authorisation. A pass
+    over the whole register is not a moment — the sweep of 2026-09-03 ran for
+    141 hours — so the register a run loaded at the start is not the register
+    an operator is looking at by the end. Issue #221: a row repaired at
+    07:20:44 was ignored for the remaining 134 hours, and 669 further
+    observations were filed under the authority the run remembered.
+
+    It fails closed rather than re-filing under whatever the register says now.
+    The candidates in flight were proposed by the row this run bound itself to,
+    and moving them to a row that replaced it would be a second guess about who
+    publishes them — made by a process, minutes after an operator made the
+    first one by hand. A record not written is recoverable; a misattributed one
+    is not, because nothing in this engine rewrites ``authority_id``.
+
+    ``path`` is None for a caller holding a register with no file behind it.
+    Then the snapshot is the whole truth and nothing is re-read, which is
+    exactly how every caller behaved before this type existed.
+    """
+
+    def __init__(self, bound: SourceRegistry, path: Path | None = None) -> None:
+        self._bound = bound
+        self._path = path
+
+    @property
+    def bound(self) -> SourceRegistry:
+        """The register as this run bound itself to it."""
+        return self._bound
+
+    def activated(self, authority_id: str) -> SourceRecord | None:
+        """The bound row for ``authority_id``, or None if it is not activated."""
+        record = self._bound.sources.get(authority_id)
+        return record if record is not None and record.active else None
+
+    def authorise(self, url: str) -> SourceRecord:
+        """The source ``url`` is filed under, if the file still says the same.
+
+        Raises:
+            SourceNotActivatedError: the bound register does not clear this URL
+                — every refusal :func:`authorise_capture` already makes.
+            StaleSourceError: it does, but the file no longer agrees.
+        """
+        bound = authorise_capture(self._bound, url)
+        if self._path is None or _on_disk(self._path, url) == bound:
+            return bound
+        raise StaleSourceError(
+            f"the register changed under this run: {url} was bound to "
+            f"{bound.authority_id} {bound.name} on {bound.canonical_domain}, "
+            f"which is not what {self._path} says now"
+        )
+
+
+def _on_disk(path: Path, url: str) -> SourceRecord | None:
+    """How the register file answers for ``url`` now, or None when it cannot.
+
+    Unreadable, absent and newly contested all collapse to None on purpose.
+    Each means the file no longer names one authority for this URL, and the
+    caller's next act is a write that would name one anyway.
+    """
+    try:
+        return authorise_capture(read_registry(path), url)
+    except (OSError, ParseError, SourceNotActivatedError):
+        return None

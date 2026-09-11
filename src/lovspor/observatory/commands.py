@@ -30,6 +30,7 @@ from lovspor.errors import (
     LogIntegrityError,
     ParseError,
     SourceNotActivatedError,
+    StaleSourceError,
     StorageBoundaryError,
 )
 from lovspor.exclusive_workload import ExclusiveWorkloadHeldError, exclusive_workload
@@ -52,6 +53,7 @@ from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.outcomes import ArchiveComposition, collect_composition
 from lovspor.observatory.registry import (
     CaptureVerdict,
+    Register,
     SourceRecord,
     SourceRegistry,
     activate,
@@ -108,6 +110,17 @@ def _root() -> ObservatoryRoot:
 
 def _registry_file() -> Path:
     return registry_path(_root())
+
+
+def _bound_register() -> Register:
+    """The register this run works from, and the file it must keep agreeing with.
+
+    Bound rather than snapshotted: a capture over one municipality is hours of
+    politely-spaced requests and a sweep over the register is days, so the file
+    the run started from is not the file an operator is looking at (issue #221).
+    """
+    path = _registry_file()
+    return Register(_load(path), path)
 
 
 def _load(path: Path) -> SourceRegistry:
@@ -731,7 +744,7 @@ def discover(
     exactly the evidence this archive exists to keep.
     """
     record = _activated_source(authority_id)
-    fetcher = Fetcher(_load(_registry_file()), ObservationLog(_root()), httpx.Client())
+    fetcher = Fetcher(_bound_register(), ObservationLog(_root()), httpx.Client())
     starts = _entry_points(fetcher, record, entry_point)
     result = Discoverer(fetcher, ObservationLog(_root())).discover(record, starts.urls)
     if not entry_point:
@@ -828,6 +841,11 @@ class _CaptureCounts(NamedTuple):
     #: failure (#188), and the pass that stopped counting them as failures
     #: must not be the pass that stopped mentioning them at all.
     redirects: int = 0
+    #: The pass stopped because the register stopped filing a candidate under
+    #: the row this run bound itself to. Apart from `contested` because the
+    #: repair differs: that one needs a human to say which authority publishes
+    #: a host, this one is already repaired and needs only a re-run (#221).
+    stale: bool = False
 
 
 def _capture_candidates(
@@ -856,13 +874,19 @@ def _capture_candidates(
             return _CaptureCounts(captured, failed, skipped, True, False, deferred, hops)
         try:
             record = fetcher.capture(candidate.url, candidate.discovery_method)
-        except AmbiguousSourceError as exc:
-            # Discovery cleared this source's own host, but a candidate may sit
-            # on a subdomain a second source also claims. Reaching that as a
-            # traceback would end the pass with an empty stderr and the records
-            # already appended unexplained (#208's shape, #215's cause).
+        except (AmbiguousSourceError, StaleSourceError) as exc:
+            # A refusal about the register, not about the page. Either it cannot
+            # name one authority for this host — discovery cleared the source's
+            # own host, but a candidate may sit on a subdomain a second source
+            # also claims (#215) — or it no longer names the one this run bound
+            # itself to (#221). Reaching either as a traceback would end the
+            # pass with an empty stderr and the records already appended
+            # unexplained (#208's shape).
             typer.echo(f"Refused: {exc}", err=True)
-            return _CaptureCounts(captured, failed, skipped, False, True, deferred, hops)
+            stale = isinstance(exc, StaleSourceError)
+            return _CaptureCounts(
+                captured, failed, skipped, False, not stale, deferred, hops, stale
+            )
         hops += len(record.provenance.redirect_chain)
         if isinstance(record, ArtifactObservation):
             captured += 1
@@ -897,27 +921,39 @@ def capture(
     record = _activated_source(authority_id)
     log = ObservationLog(_root())
     state = _capture_state(log, record.authority_id)
-    fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
+    fetcher = Fetcher(_bound_register(), log, httpx.Client())
     try:
         starts = _entry_points(fetcher, record, None)
         result = Discoverer(fetcher, log).discover(record, starts.urls)
-    except AmbiguousSourceError as exc:
+    except (AmbiguousSourceError, StaleSourceError) as exc:
         typer.echo(f"Refused: {exc}", err=True)
         raise typer.Exit(1) from exc
     _require_documents(record, result, starts.probed)
     typer.echo(f"candidates: {len(result.candidates)}")
     counts = _capture_candidates(fetcher, result.candidates, state, limit)
     typer.echo(_capture_summary(counts))
+    _refuse_incomplete(record, counts)
+
+
+def _refuse_incomplete(record: SourceRecord, counts: _CaptureCounts) -> None:
+    """Name what is missing from this source's archive, then exit 1.
+
+    The records already appended stay; what stopped is the rest of the pass.
+    Saying so is the difference between an incomplete archive an operator knows
+    about and one that reads as finished.
+    """
     if counts.contested:
-        # The records already appended stay; what stopped is the rest of the
-        # pass. Saying so is the difference between an incomplete archive an
-        # operator knows about and one that reads as finished.
-        typer.echo(
-            f"  abandoned: {record.authority_id} partway — the archive for this source "
-            "is incomplete until the register names one authority for that host",
-            err=True,
-        )
-        raise typer.Exit(1)
+        remedy = "the register names one authority for that host"
+    elif counts.stale:
+        remedy = "it is captured again under the row the register holds now"
+    else:
+        return
+    typer.echo(
+        f"  abandoned: {record.authority_id} partway — the archive for this source "
+        f"is incomplete until {remedy}",
+        err=True,
+    )
+    raise typer.Exit(1)
 
 
 def _capture_summary(counts: _CaptureCounts) -> str:
@@ -981,6 +1017,7 @@ class _SweepTotals(NamedTuple):
     capped: int = 0
     held: int = 0
     deferred: int = 0
+    withdrawn: int = 0
 
     def plus(self, other: "_SweepTotals") -> "_SweepTotals":
         return _SweepTotals(
@@ -991,7 +1028,17 @@ class _SweepTotals(NamedTuple):
             capped=self.capped + other.capped,
             held=self.held + other.held,
             deferred=self.deferred + other.deferred,
+            withdrawn=self.withdrawn + other.withdrawn,
         )
+
+
+class _Lane(NamedTuple):
+    """What every source's pass shares, so re-binding stays a per-source act."""
+
+    log: ObservationLog
+    state: CaptureState
+    client: httpx.Client
+    limit: int
 
 
 def _sweep_one(
@@ -1011,11 +1058,11 @@ def _sweep_one(
     try:
         starts = _entry_points(fetcher, record, None)
         result = Discoverer(fetcher, log).discover(record, starts.urls)
-    except AmbiguousSourceError as exc:
-        # A refusal, not a crash. One unreconcilable row must not cost the
-        # other two hundred municipalities their night's observations — and it
-        # must not pass quietly either, so it moves the sweep's exit code the
-        # way every other refusal does.
+    except (AmbiguousSourceError, StaleSourceError) as exc:
+        # A refusal, not a crash. One unreconcilable row — or one repaired
+        # under this run — must not cost the other two hundred municipalities
+        # their night's observations, and it must not pass quietly either, so
+        # it moves the sweep's exit code the way every other refusal does.
         typer.echo(f"  refused: {record.authority_id} {exc}", err=True)
         return _SweepTotals(refused=1)
     if not result.documents_read:
@@ -1031,23 +1078,39 @@ def _sweep_one(
         # truncated, and the whole point of #172 is that this is otherwise
         # indistinguishable from a source that simply ran out of pages.
         typer.echo(f"  capped: {record.authority_id} stopped at --limit {limit}", err=True)
-    if counts.contested:
-        # Counted as a refusal so the sweep degrades, but the counts it did
-        # collect are kept: those pages are in the archive whatever the
-        # register says, and reporting zero would be a second untruth.
-        typer.echo(
-            f"  refused: {record.authority_id} abandoned partway — a candidate's host "
-            "is claimed by more than one activated source",
-            err=True,
-        )
     return _SweepTotals(
-        refused=1 if counts.contested else 0,
+        refused=1 if _abandoned(record, counts) else 0,
         captured=counts.captured,
         failed=counts.failed,
         unchanged=counts.unchanged,
         capped=1 if counts.capped else 0,
         deferred=counts.deferred,
     )
+
+
+#: Why a pass stopped before the source ran out of candidates. Both leave that
+#: source's archive incomplete and both are the register's fault, but they are
+#: different repairs: one needs a human to say which authority publishes a host,
+#: the other has already had one and needs only another pass.
+_CONTESTED = "a candidate's host is claimed by more than one activated source"
+_STALE = "the register row it was bound to is not the row on disk any more"
+
+
+def _abandoned(record: SourceRecord, counts: _CaptureCounts) -> bool:
+    """Report a pass that stopped early, and say whether it was a refusal.
+
+    Counted as a refusal so the sweep degrades, but the counts it did collect
+    are kept: those pages are in the archive whatever the register says, and
+    reporting zero would be a second untruth.
+    """
+    if counts.contested:
+        reason = _CONTESTED
+    elif counts.stale:
+        reason = _STALE
+    else:
+        return False
+    typer.echo(f"  refused: {record.authority_id} abandoned partway — {reason}", err=True)
+    return True
 
 
 @observatory_app.command("capture-all")
@@ -1091,25 +1154,60 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
     a timestamp, and a timestamp cannot say which invocation wrote something.
     Two sweeps overlapping — an operator running one by hand while the nightly
     fires — is enough to make one report the other's outcome as its own.
+
+    The register is bound once per source rather than once per run. A pass over
+    two hundred municipalities takes days — 141 hours on 2026-09-03 — and the
+    register loaded at the start is not the one an operator is looking at by
+    the end (issue #221).
     """
     started_at = datetime.now(UTC)
-    active = _active_sources()
+    active = [record.authority_id for record in _active_sources()]
     log, state = _sweep_inputs(root)
-    fetcher = Fetcher(_load(_registry_file()), log, httpx.Client())
+    lane = _Lane(log, state, httpx.Client(), limit)
     totals = _SweepTotals()
-    for record in active:
-        typer.echo(f"== {record.authority_id} {record.name}")
-        if _held(record, started_at):
-            totals = totals.plus(_SweepTotals(held=1))
-            continue
-        totals = totals.plus(_sweep_one(fetcher, log, record, state, limit))
-    if totals.refused:
-        typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
-    if totals.capped:
-        typer.echo(f"sources capped: {totals.capped} of {len(active)}", err=True)
-    if totals.held:
-        typer.echo(f"sources held under a verdict: {totals.held} of {len(active)}")
+    for authority_id in active:
+        totals = totals.plus(_sweep_source(authority_id, lane, started_at))
+    _echo_sweep_outcome(totals, len(active))
     return _record_sweep(root, started_at, len(active), totals)
+
+
+def _sweep_source(authority_id: str, lane: _Lane, now: datetime) -> _SweepTotals:
+    """One source's pass, bound to the register as it stands at its turn.
+
+    The scope of the run is the ids the register held when it began; which row
+    each id names is read again here. Growing the list under the loop would
+    make "197 of 198" a number nothing could check, and a source activated
+    mid-run loses nothing: the next sweep begins with it.
+    """
+    register = _bound_register()
+    record = register.activated(authority_id)
+    if record is None:
+        typer.echo(f"== {authority_id}")
+        typer.echo(f"  withdrawn: {authority_id} is no longer an activated source")
+        return _SweepTotals(withdrawn=1)
+    typer.echo(f"== {record.authority_id} {record.name}")
+    if _held(record, now):
+        return _SweepTotals(held=1)
+    fetcher = Fetcher(register, lane.log, lane.client)
+    return _sweep_one(fetcher, lane.log, record, lane.state, lane.limit)
+
+
+def _echo_sweep_outcome(totals: _SweepTotals, active: int) -> None:
+    """Every tally the run did not end clean on, each on its own stream.
+
+    A withdrawal is stdout rather than stderr: the operator asked for it, so it
+    is a fact about the run and not a fault in it. It is still said aloud — a
+    source that quietly stopped being swept reads as an archive with nothing
+    missing, which is #151's silent zero (issue #221).
+    """
+    if totals.refused:
+        typer.echo(f"sources refused: {totals.refused} of {active}", err=True)
+    if totals.capped:
+        typer.echo(f"sources capped: {totals.capped} of {active}", err=True)
+    if totals.held:
+        typer.echo(f"sources held under a verdict: {totals.held} of {active}")
+    if totals.withdrawn:
+        typer.echo(f"sources withdrawn mid-sweep: {totals.withdrawn} of {active}")
 
 
 def _held(record: SourceRecord, now: datetime) -> bool:
@@ -1166,10 +1264,11 @@ def _record_sweep(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         active_sources=active,
-        sources_completed=active - totals.refused - totals.held,
+        sources_completed=active - totals.refused - totals.held - totals.withdrawn,
         sources_refused=totals.refused,
         sources_capped=totals.capped,
         sources_held=totals.held,
+        sources_withdrawn=totals.withdrawn,
         captured=totals.captured,
         failed_fetches=totals.failed,
         unchanged=totals.unchanged,
@@ -1252,6 +1351,7 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(f"  refused:    {run.sources_refused}")
     typer.echo(f"  capped:     {run.sources_capped}")
     typer.echo(f"  held:       {run.sources_held}")
+    typer.echo(f"  withdrawn:  {run.sources_withdrawn}")
     typer.echo(
         f"  captured:   {run.captured} | unchanged: {run.unchanged} | deferred: {run.deferred}"
     )
