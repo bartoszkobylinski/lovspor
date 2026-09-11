@@ -14,7 +14,7 @@ import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
-from lovspor.errors import SourceNotActivatedError
+from lovspor.errors import SourceNotActivatedError, StaleSourceError
 from lovspor.observatory import fetch as fetch_module
 from lovspor.observatory.fetch import (
     CaptureSettings,
@@ -26,9 +26,11 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, FetchFailure
 from lovspor.observatory.registry import (
     AccessPolicyCheck,
+    Register,
     SourceRecord,
     SourceRegistry,
     activate,
+    write_registry,
 )
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -122,7 +124,7 @@ def log(tmp_path: Path) -> ObservationLog:
 def _fetcher(
     log: ObservationLog, settings: CaptureSettings | None = None, **kwargs: float
 ) -> Fetcher:
-    return Fetcher(_registry(**kwargs), log, httpx.Client(), settings or _settings())
+    return Fetcher(Register(_registry(**kwargs)), log, httpx.Client(), settings or _settings())
 
 
 def _allow_robots(httpx_mock: HTTPXMock, body: str = "User-agent: *\nAllow: /\n") -> None:
@@ -917,7 +919,7 @@ class TestRateLimiterHostKey:
         httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
         httpx_mock.add_response(url=OSLO_URL, content=PAYLOAD)
         clock = _Clock()
-        fetcher = Fetcher(_two_host_registry(5.0), log, httpx.Client(), _settings(clock))
+        fetcher = Fetcher(Register(_two_host_registry(5.0)), log, httpx.Client(), _settings(clock))
 
         fetcher.capture(PAGE_URL, "sitemap")
         fetcher.capture(OSLO_URL, "sitemap")
@@ -955,7 +957,7 @@ class TestTimeoutIsHonored:
         httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
         settings = CaptureSettings(timeout_seconds=12.5, max_bytes=1024)
 
-        Fetcher(_registry(), log, httpx.Client(), settings).capture(PAGE_URL, "sitemap")
+        Fetcher(Register(_registry()), log, httpx.Client(), settings).capture(PAGE_URL, "sitemap")
 
         robots_request = next(r for r in httpx_mock.get_requests() if str(r.url) == ROBOTS_URL)
         assert robots_request.extensions["timeout"] == httpx.Timeout(12.5).as_dict()
@@ -967,7 +969,7 @@ class TestTimeoutIsHonored:
         httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
         settings = CaptureSettings(timeout_seconds=12.5, max_bytes=1024)
 
-        Fetcher(_registry(), log, httpx.Client(), settings).capture(PAGE_URL, "sitemap")
+        Fetcher(Register(_registry()), log, httpx.Client(), settings).capture(PAGE_URL, "sitemap")
 
         page_request = next(r for r in httpx_mock.get_requests() if str(r.url) == PAGE_URL)
         assert page_request.extensions["timeout"] == httpx.Timeout(12.5).as_dict()
@@ -1043,7 +1045,7 @@ class TestDefaults:
             active=True,
         )
         registry = SourceRegistry.model_construct(version=1, sources={BAERUM_ID: bypassed})
-        fetcher = Fetcher(registry, log, httpx.Client(), _settings())
+        fetcher = Fetcher(Register(registry), log, httpx.Client(), _settings())
 
         with pytest.raises(SourceNotActivatedError, match="without an access-policy check"):
             fetcher.capture(PAGE_URL, "sitemap")
@@ -1131,3 +1133,40 @@ class TestDeclaredSitemaps:
         fetcher.capture(PAGE_URL, "sitemap")
 
         assert [r.url for r in httpx_mock.get_requests()].count(ROBOTS_URL) == 1
+
+
+class TestAFetchIsAuthorisedAgainstTheRegisterOnDisk:
+    """Issue #221. The fetcher is the single door every observation passes
+    through, so it is the only place a guarantee about `authority_id` can be
+    made. Discovery's own document reads go through it too."""
+
+    def _register(self, tmp_path: Path) -> Register:
+        path = tmp_path / "sources.json"
+        write_registry(_registry(), path)
+        return Register(_registry(), path)
+
+    def test_an_unchanged_register_captures_exactly_as_before(
+        self, tmp_path: Path, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+        fetcher = Fetcher(self._register(tmp_path), log, httpx.Client(), _settings())
+
+        record = fetcher.capture(PAGE_URL, "sitemap")
+
+        assert isinstance(record, ArtifactObservation)
+        assert record.authority_id == BAERUM_ID
+
+    def test_a_row_replaced_mid_run_is_refused_before_the_request(
+        self, tmp_path: Path, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Nothing is fetched and nothing is logged: pytest-httpx would fail
+        the test on any unregistered request, which is the assertion."""
+        register = self._register(tmp_path)
+        write_registry(SourceRegistry(), tmp_path / "sources.json")
+        fetcher = Fetcher(register, log, httpx.Client(), _settings())
+
+        with pytest.raises(StaleSourceError):
+            fetcher.capture(PAGE_URL, "sitemap")
+
+        assert list(log.records()) == []

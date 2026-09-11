@@ -56,8 +56,7 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, FetchFailure, RetrievalProvenance
 from lovspor.observatory.outcomes import REDIRECT_FOLLOWED, is_redirect_hop
 from lovspor.observatory.registry import (
-    SourceRegistry,
-    authorise_capture,
+    Register,
     capture_host,
     host_within_domain,
 )
@@ -253,12 +252,12 @@ class Fetcher:
 
     def __init__(
         self,
-        registry: SourceRegistry,
+        register: Register,
         log: ObservationLog,
         client: httpx.Client,
         settings: CaptureSettings | None = None,
     ) -> None:
-        self._registry = registry
+        self._register = register
         self._log = log
         self._client = client
         self._settings = settings or CaptureSettings()
@@ -285,6 +284,8 @@ class Fetcher:
                 host is globally denied. Nothing is fetched and nothing is
                 recorded — no observation happened, and a record for a request
                 never made would be fiction in an evidence log.
+            StaleSourceError: the register on disk no longer files this URL
+                under the row this run bound itself to (issue #221).
         """
         request = _Request(url, discovery_method, adapter)
         hops_left = _MAX_REDIRECT_HOPS
@@ -302,7 +303,7 @@ class Fetcher:
         """One hop: every gate, then the request. A redirect target is a new
         request and passes the gates again — a redirect must never smuggle a
         fetch past a rule that covers where it lands."""
-        source = authorise_capture(self._registry, url)
+        source = self._register.authorise(url)
         policy = source.access_policy
         if policy is None:
             raise SourceNotActivatedError(

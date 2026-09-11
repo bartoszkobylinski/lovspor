@@ -8,10 +8,16 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lovspor.errors import AmbiguousSourceError, ParseError, SourceNotActivatedError
+from lovspor.errors import (
+    AmbiguousSourceError,
+    ParseError,
+    SourceNotActivatedError,
+    StaleSourceError,
+)
 from lovspor.observatory.registry import (
     AccessPolicyCheck,
     CaptureVerdict,
+    Register,
     SourceRecord,
     SourceRegistry,
     _host_matches,
@@ -1336,3 +1342,115 @@ class TestReplacingTheDomain:
         replaced = replace_domain(self._activated(), "haugesund.kommune.no")
 
         assert SourceRecord.model_validate(replaced.model_dump()) == replaced
+
+
+class TestTheRegisterIsReReadUnderALongRun:
+    """Issue #221. A sweep is not a moment: the pass of 2026-09-03 ran for 141
+    hours. The register it loaded at the start is not the register an operator
+    is looking at by the end, and every observation carries the authority id
+    the register answered with."""
+
+    def _written(self, path: Path, record: SourceRecord) -> SourceRegistry:
+        registry = SourceRegistry(sources={record.authority_id: record})
+        write_registry(registry, path)
+        return registry
+
+    def _bound(self, tmp_path: Path) -> Register:
+        path = tmp_path / "sources.json"
+        registry = self._written(path, activate(eligible_source(), check()))
+        return Register(registry, path)
+
+    def test_an_unchanged_file_authorises_exactly_as_the_snapshot_does(
+        self, tmp_path: Path
+    ) -> None:
+        register = self._bound(tmp_path)
+
+        record = register.authorise("https://testby.example.invalid/forskrift")
+
+        assert record == authorise_capture(register.bound, "https://testby.example.invalid/f")
+
+    def test_a_snapshot_with_no_file_behind_it_is_the_whole_truth(self) -> None:
+        """The non-sweep callers hold a register nothing can change under them,
+        and must keep behaving exactly as they did."""
+        registry = SourceRegistry(sources={"9999": activate(eligible_source(), check())})
+
+        record = Register(registry).authorise("https://testby.example.invalid/f")
+
+        assert record.authority_id == "9999"
+
+    def test_a_url_the_bound_register_never_cleared_is_refused_as_before(
+        self, tmp_path: Path
+    ) -> None:
+        """Staleness is a second gate, not a replacement for the first."""
+        register = self._bound(tmp_path)
+
+        with pytest.raises(SourceNotActivatedError, match="no registered source covers"):
+            register.authorise("https://elsewhere.example.invalid/f")
+
+    def test_a_source_deactivated_on_disk_stops_being_written(self, tmp_path: Path) -> None:
+        register = self._bound(tmp_path)
+        self._written(tmp_path / "sources.json", eligible_source())
+
+        with pytest.raises(StaleSourceError, match="the register changed under this run"):
+            register.authorise("https://testby.example.invalid/f")
+
+    def test_a_domain_replaced_on_disk_stops_being_written(self, tmp_path: Path) -> None:
+        """The Grimstad repair: the row stays, its domain does not. Nothing
+        more may be filed under the authority the run bound itself to."""
+        register = self._bound(tmp_path)
+        moved = replace_domain(register.bound.sources["9999"], "moved.example.invalid")
+        self._written(tmp_path / "sources.json", moved)
+
+        with pytest.raises(StaleSourceError, match="9999 Testby on testby.example.invalid"):
+            register.authorise("https://testby.example.invalid/f")
+
+    def test_a_second_claimant_appearing_mid_run_stops_the_write(self, tmp_path: Path) -> None:
+        """#215's collision, arriving after the run began. The register can no
+        longer name one publisher, so this run must not pick one."""
+        path = tmp_path / "sources.json"
+        register = self._bound(tmp_path)
+        rival = SourceRecord(
+            authority_type="kommune",
+            authority_id="8888",
+            name="Rival",
+            canonical_domain="www.testby.example.invalid",
+        )
+        rival = activate(
+            rival, check(robots_txt_url="https://www.testby.example.invalid/robots.txt")
+        )
+        write_registry(
+            SourceRegistry(sources={"9999": register.bound.sources["9999"], "8888": rival}), path
+        )
+
+        with pytest.raises(StaleSourceError):
+            register.authorise("https://www.testby.example.invalid/f")
+
+    def test_a_register_that_vanished_stops_the_write(self, tmp_path: Path) -> None:
+        register = self._bound(tmp_path)
+        (tmp_path / "sources.json").unlink()
+
+        with pytest.raises(StaleSourceError):
+            register.authorise("https://testby.example.invalid/f")
+
+    def test_a_register_that_no_longer_parses_stops_the_write(self, tmp_path: Path) -> None:
+        """Fails closed. An unreadable register is not evidence that the row
+        the run remembers is still the row an operator would read."""
+        register = self._bound(tmp_path)
+        (tmp_path / "sources.json").write_text("{ not json", encoding="utf-8")
+
+        with pytest.raises(StaleSourceError):
+            register.authorise("https://testby.example.invalid/f")
+
+    def test_the_bound_row_is_returned_for_an_activated_source(self, tmp_path: Path) -> None:
+        register = self._bound(tmp_path)
+
+        assert register.activated("9999") == register.bound.sources["9999"]
+
+    def test_a_deactivated_row_is_not_an_activated_source(self, tmp_path: Path) -> None:
+        path = tmp_path / "sources.json"
+        registry = self._written(path, eligible_source())
+
+        assert Register(registry, path).activated("9999") is None
+
+    def test_an_unregistered_id_is_not_an_activated_source(self, tmp_path: Path) -> None:
+        assert self._bound(tmp_path).activated("0000") is None

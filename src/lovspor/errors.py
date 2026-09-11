@@ -152,3 +152,24 @@ class AmbiguousSourceError(SourceNotActivatedError):
     Arendal's site were filed under Grimstad, while Grimstad itself was never
     fetched once and every pass over it reported success (issue #215).
     """
+
+
+class StaleSourceError(SourceNotActivatedError):
+    """The register no longer answers for this URL the way the run bound it.
+
+    A subclass for the same reason ``AmbiguousSourceError`` is one: every
+    existing handler reads this family as "do not fetch that", and that answer
+    stays right. Distinct, because this one is about *time* rather than about
+    the register's shape — the row was good when the run bound itself to it and
+    is not the row on disk now.
+
+    It happened, and #215's fix did not cover it. `4202 Grimstad` carried
+    `arendal.kommune.no`; the owner repaired the row on 2026-09-03 at 07:20:44.
+    The sweep already running had loaded the register once, at the start, and
+    ran for 141 hours — so it kept filing under the row it remembered, and 669
+    further observations of Arendal's site landed under authority 4202 after
+    the repair, taking the misattributed body from 5,980 to 7,872 (issue #221).
+
+    Refusing is the recoverable outcome and writing is not: nothing in this
+    engine rewrites ``authority_id``, and nothing appends a tombstone.
+    """

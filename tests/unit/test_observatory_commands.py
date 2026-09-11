@@ -58,6 +58,7 @@ from lovspor.observatory.registry import (
     read_access_policy_check,
     read_registry,
     registry_path,
+    replace_domain,
     write_registry,
 )
 from lovspor.observatory.storage import (
@@ -2775,7 +2776,7 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, candidates, CaptureState.empty(), limit=2)
 
-        assert counts == (2, 0, 0, True, False, 0, 5)
+        assert counts == (2, 0, 0, True, False, 0, 5, False)
         assert fetcher.capture.call_count == 2
 
     def test_every_candidate_in_a_pass_uses_the_same_clock_read(
@@ -2829,7 +2830,7 @@ class TestCaptureAll:
             limit=1,
         )
 
-        assert counts == (1, 0, 1, False, False, 0, 0)
+        assert counts == (1, 0, 1, False, False, 0, 0, False)
         fetcher.capture.assert_called_once_with(OTHER_PAGE_URL, "sitemap")
 
     def test_multiple_held_candidates_are_all_counted_as_deferred(
@@ -2867,7 +2868,7 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
-        assert counts == (1, 0, 0, True, False, 1, 0)
+        assert counts == (1, 0, 0, True, False, 1, 0, False)
 
     def test_contested_counts_preserve_every_prior_outcome(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2913,7 +2914,7 @@ class TestCaptureAll:
 
         counts = _capture_candidates(fetcher, candidates, state, limit=0)
 
-        assert counts == (1, 1, 1, False, True, 1, 3)
+        assert counts == (1, 1, 1, False, True, 1, 3, False)
 
     def test_one_sweep_source_preserves_deferred_counts(
         self, monkeypatch: pytest.MonkeyPatch
@@ -4054,6 +4055,88 @@ class TestCapture:
         assert "captured: 0 | failed: 1" in first.output
         assert "captured: 1 | failed: 0" in second.output
         assert f"200  {OTHER_PAGE_URL}" in second.output
+
+
+class TestTheRegisterIsRereadWhileACaptureRuns:
+    """Issue #221. A capture over one municipality is hours of politely-spaced
+    requests, and a sweep over the register is days. The row an operator
+    repaired at 07:20:44 on 2026-09-03 must not go on receiving that
+    authority's pages until the run that loaded it happens to end: it did, for
+    another 134 hours, and 669 observations of `arendal.kommune.no` were filed
+    under authority 4202 after the repair."""
+
+    def _repair(self, root: Path) -> None:
+        """The operator's move, as `replace-source-domain` performs it: the row
+        keeps its identity and loses the domain, the clearance and the
+        activation."""
+        path = registry_path(ObservatoryRoot(root, ()))
+        record = read_registry(path).sources[BAERUM_ID]
+        write_registry(
+            SourceRegistry(sources={BAERUM_ID: replace_domain(record, "grimstad.kommune.no")}),
+            path,
+        )
+
+    def _logged(self, root: Path) -> list[str]:
+        return [record.url for record in ObservationLog(ObservatoryRoot(root, ())).records()]
+
+    def test_a_capture_stops_when_the_row_it_was_bound_to_is_repaired(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The page is never requested. pytest-httpx holds no response for it,
+        so a fetch after the repair fails the test rather than passing
+        unnoticed — which is the assertion that matters here."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+
+        def repaired_mid_pass(_request: httpx.Request) -> httpx.Response:
+            self._repair(root)
+            return httpx.Response(200, content=_urlset(PAGE_URL))
+
+        httpx_mock.add_callback(repaired_mid_pass, url=SITEMAP_URL)
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 1
+        assert "the register changed under this run" in result.stderr
+        assert f"abandoned: {BAERUM_ID} partway" in result.stderr
+        assert self._logged(root) == [SITEMAP_URL]
+
+    def test_an_unchanged_register_captures_exactly_as_it_always_did(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The guard is a second gate, not a new refusal: nothing about a run
+        over a register nobody touched may change."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert result.exit_code == 0, result.output
+        assert "captured: 1 | failed: 0 | unchanged since last seen: 0" in result.output
+        assert self._logged(root) == [SITEMAP_URL, PAGE_URL]
+
+    def test_a_repair_between_two_runs_is_picked_up_by_the_next_one(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The interrupted run's resume path. Nothing about the binding is
+        persisted, so a second invocation reads the register from scratch and
+        refuses the source the repair deactivated — it does not go on from
+        where the first one was bound."""
+        _activate(root)
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        first = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+        self._repair(root)
+        second = runner.invoke(app, ["observatory", "capture", "--id", BAERUM_ID])
+
+        assert first.exit_code == 0, first.output
+        assert second.exit_code == 1
+        assert f"Refused: {BAERUM_ID} is not an activated source." in second.stderr
+        assert self._logged(root) == [SITEMAP_URL, PAGE_URL]
 
 
 NEW_BAERUM_DOMAIN = "baerum.no"

@@ -34,6 +34,7 @@ from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation, Tombstone
 from lovspor.observatory.registry import (
     AccessPolicyCheck,
+    Register,
     SourceRecord,
     SourceRegistry,
     activate,
@@ -127,7 +128,7 @@ def _discoverer(
 ) -> tuple[Discoverer, SourceRecord]:
     source = _source(listing_entry_points=listing_entry_points)
     fetcher = Fetcher(
-        SourceRegistry(sources={BAERUM_ID: source}),
+        Register(SourceRegistry(sources={BAERUM_ID: source})),
         log,
         httpx.Client(),
         CaptureSettings(now=lambda: OBSERVED_AT, sleep=lambda _: None),
@@ -815,7 +816,7 @@ class TestDiscovery:
             canonical_domain=BAERUM_DOMAIN,
         )
         fetcher = Fetcher(
-            SourceRegistry(sources={BAERUM_ID: source}),
+            Register(SourceRegistry(sources={BAERUM_ID: source})),
             log,
             httpx.Client(),
             CaptureSettings(now=lambda: OBSERVED_AT, sleep=lambda _: None),
