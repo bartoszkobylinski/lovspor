@@ -420,15 +420,25 @@ Not a precondition — a release before the restart publishes
 `runtime_tree_match: false` and says so — but doing it first is one fewer
 comparison to explain on the first public page.
 
-### 4. The socket's group, the rehearsal, then the preflight
+### 4. The socket's group, the two rehearsals, then the preflight
 
 ```bash
 sudo groupadd --system --force lovspor-release
 sudo usermod -aG lovspor-release root
 ```
 
-**Rehearse the migration before you run it. Its result is what authorises the
-cutover** (ADR-0014 Validation (g)): the load that installs the new
+**Rehearse the migration before you run it. The cutover is authorised by BOTH
+rehearsals, never by either alone** (ADR-0014 Validation). They cover different
+things and neither covers the other's: `rehearse-migration.sh` walks the
+address transitions, a load Caddy rejects, the rollback and the admin socket's
+four facts on a running second instance, and looks at no URL;
+`rehearse-urls.sh` compares what the two configurations *answer*, and starts
+nothing. A Caddyfile can pass every one of (g)'s sub-steps and serve 404 on
+`/lov/…`.
+
+#### 4a. The second instance (ADR-0014 Validation (g))
+
+The load that installs the new
 configuration is the load that moves the admin endpoint onto the socket, and
 the way back is a load delivered to that socket — neither can be tried twice on
 the box that serves the site. So both are walked first on a *second* Caddy
@@ -459,9 +469,9 @@ release group, root can `GET /config/` over it, `lovspor` cannot, nothing on
 TCP — and a socket whose mode and group were set once *by hand*, which must
 fail those facts after a restart.
 
-Exit 0 authorises step 5. Exit 1 names the sub-step that did not hold: **stop,
-and do not cut over.** The instance and its whole tree are removed when the
-script exits, however it exits; `--keep` leaves it up for inspection, and
+Exit 1 names the sub-step that did not hold: **stop, and do not cut over.** The
+instance and its whole tree are removed when the script exits, however it
+exits; `--keep` leaves it up for inspection, and
 `systemctl stop caddy-rehearsal` plus `rm -rf /etc/caddy/rehearsal
 /var/www/lovspor-rehearsal /etc/systemd/system/caddy-rehearsal.service*` takes
 it down by hand.
@@ -476,7 +486,61 @@ returns, and whether a restart really recreates the socket `0660` in the group
 are facts only the droplet can report. That is the whole reason this step
 exists.
 
-Then the preflight, which moves nothing:
+#### 4b. The URL dry-run (ADR-0014 Validation, first-migration rehearsal, staged)
+
+The other half, and the only check in the whole sequence that looks at what the
+site serves:
+
+```bash
+df -h /var/www     # this one builds an envelope of its own too
+sudo bash /opt/lovspor/app/deploy/digitalocean/rehearse-urls.sh
+```
+
+It starts nothing. `caddy validate` and `caddy adapt` over `/etc/caddy/Caddyfile`
+— the configuration serving right now — and over the new one from the checkout,
+against a freshly built envelope and the flat release still behind
+`lovspor-current`, and then a route-by-route comparison of the two adapted
+configurations. One line per assertion:
+
+* `staged.corpus` — every corpus URL the old configuration **answers** gets the
+  same response from the new one, served from exactly `<release>/corpus`, and
+  every Caddy snippet the new configuration imports from inside `/var/www` lives
+  inside the release envelope. "Answers" means the same handler, the same file
+  by root-relative name and by SHA-256 of its bytes, the same status and the
+  same `Location` — everything but the **root**, which the migration moves on
+  purpose. A URL the new configuration answers and the old one does not (the
+  ADR-0013 manifest, say) is no obstacle: the comparison is one-directional.
+* `staged.proxied` — `/mcp`, the health probes and the OAuth document keep their
+  upstream.
+* `staged.site` — `/` and `/observatory/`, and everything the old configuration
+  served outside the corpus, answered by `file_server` from exactly
+  `<release>/site`. Their **bytes are not compared**: the migrated site is a
+  rebuild of the hand-written landing page, and the Observatory golden test is
+  what compares its text.
+* `staged.symlinks` — no root the new configuration names and no file it
+  resolves passes through a symlink below `/var/www`. This is the assertion for
+  the configuration that works today and rots later: serving `<release>/corpus`
+  through a symlink answers every URL correctly and is one `ln -sfn` away from
+  serving something else.
+* `staged.rollback` — the previous Caddyfile, adapted again afterwards, answers
+  exactly as it did (roots included: it is the same configuration), binds its
+  admin endpoint to no Unix socket, and every tree the dry-run read is
+  byte-identical to how it found it.
+
+Exit 1 names the assertion that did not hold and what it read instead: **stop,
+and do not cut over.** The envelope is removed when the script exits; `--keep`
+leaves it under `/var/www/lovspor-urls-rehearsal`.
+
+**This one cannot run in CI either**, for the same reason: no `caddy` binary on
+the runner. CI proves the comparison against committed `caddy adapt` captures
+(`tests/unit/fixtures/caddy_adapt/`, with a negative fixture per assertion —
+a configuration that drops a corpus URL, one that answers it from the wrong
+tree, one that reaches the right tree through a symlink, and a tree changed
+under the run). Whether *this* Caddy build adapts *this* box's two Caddyfiles
+to those routes is a fact only the droplet reports.
+
+Each rehearsal authorises half of the cutover; only both exiting 0 authorises
+step 5. Then the preflight, which moves nothing:
 
 ```bash
 sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --check

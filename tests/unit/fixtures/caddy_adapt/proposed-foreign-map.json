@@ -1,0 +1,247 @@
+{
+	"admin": {
+		"listen": "unix//run/caddy/admin.sock|0660"
+	},
+	"logging": {
+		"logs": {
+			"default": {
+				"exclude": [
+					"http.log.access.log0"
+				]
+			},
+			"log0": {
+				"writer": {
+					"filename": "/var/log/caddy/lovspor.log",
+					"output": "file",
+					"roll_keep": 5,
+					"roll_size_mb": 10
+				},
+				"include": [
+					"http.log.access.log0"
+				]
+			}
+		}
+	},
+	"apps": {
+		"http": {
+			"servers": {
+				"srv0": {
+					"listen": [
+						":443"
+					],
+					"routes": [
+						{
+							"match": [
+								{
+									"host": [
+										"lovspor.test"
+									]
+								}
+							],
+							"handle": [
+								{
+									"handler": "subroute",
+									"routes": [
+										{
+											"handle": [
+												{
+													"handler": "vars",
+													"lovspor_release": "3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947"
+												},
+												{
+													"handler": "headers",
+													"response": {
+														"deferred": true,
+														"delete": [
+															"Server"
+														],
+														"set": {
+															"Strict-Transport-Security": [
+																"max-age=31536000; includeSubDomains"
+															],
+															"X-Content-Type-Options": [
+																"nosniff"
+															]
+														}
+													}
+												},
+												{
+													"encodings": {
+														"gzip": {},
+														"zstd": {}
+													},
+													"handler": "encode",
+													"prefer": [
+														"zstd",
+														"gzip"
+													]
+												}
+											]
+										},
+										{
+											"group": "group3",
+											"handle": [
+												{
+													"handler": "subroute",
+													"routes": [
+														{
+															"handle": [
+																{
+																	"handler": "reverse_proxy",
+																	"headers": {
+																		"request": {
+																			"set": {
+																				"Host": [
+																					"{http.reverse_proxy.upstream.hostport}"
+																				]
+																			}
+																		}
+																	},
+																	"upstreams": [
+																		{
+																			"dial": "127.0.0.1:8000"
+																		}
+																	]
+																}
+															]
+														}
+													]
+												}
+											],
+											"match": [
+												{
+													"path": [
+														"/mcp",
+														"/mcp/*",
+														"/healthz",
+														"/readyz",
+														"/.well-known/oauth-protected-resource",
+														"/.well-known/oauth-protected-resource/*"
+													]
+												}
+											]
+										},
+										{
+											"group": "group3",
+											"handle": [
+												{
+													"handler": "subroute",
+													"routes": [
+														{
+															"handle": [
+																{
+																	"handler": "vars",
+																	"root": "/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947/corpus"
+																}
+															]
+														},
+														{
+															"handle": [
+																{
+																	"handler": "static_response",
+																	"headers": {
+																		"Location": [
+																			"/lov/nl-19140101-001/"
+																		]
+																	},
+																	"status_code": 301
+																}
+															],
+															"match": [
+																{
+																	"path": [
+																		"/lov/nl-19140101-001-gammel/"
+																	]
+																}
+															]
+														},
+														{
+															"handle": [
+																{
+																	"handler": "static_response",
+																	"status_code": 410
+																}
+															],
+															"match": [
+																{
+																	"path": [
+																		"/lov/nl-18990101-009/",
+																		"/lov/nl-18990101-009/*"
+																	]
+																}
+															]
+														},
+														{
+															"handle": [
+																{
+																	"handler": "file_server",
+																	"hide": [
+																		"/etc/caddy/Caddyfile.proposed",
+																		"/etc/caddy/release-foreign-map.caddy",
+																		"/var/www/lovspor-current/redirects.caddy"
+																	]
+																}
+															]
+														}
+													]
+												}
+											],
+											"match": [
+												{
+													"path": [
+														"/lov",
+														"/lov/*",
+														"/forskrift",
+														"/forskrift/*",
+														"/sitemap.xml",
+														"/sitemaps/*",
+														"/robots.txt",
+														"/site-manifest.json"
+													]
+												}
+											]
+										},
+										{
+											"group": "group3",
+											"handle": [
+												{
+													"handler": "subroute",
+													"routes": [
+														{
+															"handle": [
+																{
+																	"handler": "vars",
+																	"root": "/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947/site"
+																},
+																{
+																	"handler": "file_server",
+																	"hide": [
+																		"/etc/caddy/Caddyfile.proposed",
+																		"/etc/caddy/release-foreign-map.caddy",
+																		"/var/www/lovspor-current/redirects.caddy"
+																	]
+																}
+															]
+														}
+													]
+												}
+											]
+										}
+									]
+								}
+							],
+							"terminal": true
+						}
+					],
+					"logs": {
+						"logger_names": {
+							"lovspor.test": [
+								"log0"
+							]
+						}
+					}
+				}
+			}
+		}
+	}
+}

@@ -19,6 +19,7 @@ from pathlib import Path
 
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
 _SCRIPT = _DEPLOY / "rehearse-migration.sh"
+_URL_SCRIPT = _DEPLOY / "rehearse-urls.sh"
 _UNIT = _DEPLOY / "caddy-rehearsal.service"
 _CADDY_UNIT_NAME = "caddy-rehearsal"
 _NEW_CADDYFILE = _DEPLOY / "Caddyfile"
@@ -238,3 +239,104 @@ class TestRunbook:
         assert "first action" in timer[:600]
         assert "`0660`" in timer[:900]
         assert "admin socket precondition unmet" in text
+
+    def test_the_readme_says_the_migration_is_authorised_by_both_rehearsals(self) -> None:
+        """The ADR lists two, and one passing is not the authorisation."""
+        text = _README.read_text(encoding="utf-8")
+
+        assert "rehearse-urls.sh" in text
+        assert "authorised by BOTH" in text
+
+    def test_the_readme_says_this_one_cannot_run_in_ci_either(self) -> None:
+        text = _README.read_text(encoding="utf-8")
+        section = text[text.index("rehearse-urls.sh") :]
+
+        assert "cannot run in CI either" in section
+
+    def test_the_readme_says_what_answers_means_and_what_may_differ(self) -> None:
+        """An over-strict comparison is as useless as none, so the runbook states the line."""
+        text = _README.read_text(encoding="utf-8")
+        section = text[text.index("#### 4b.") :]
+
+        assert "everything but the **root**" in section
+        assert "bytes are not compared" in section
+        assert "one-directional" in section
+
+    def test_operations_names_the_url_dry_run_and_its_captures(self) -> None:
+        text = _OPERATIONS.read_text(encoding="utf-8")
+
+        assert "release rehearse-urls" in text
+        assert "scripts/capture_caddy_adapt.py" in text
+        assert text.index("release rehearse-urls") < text.index("Observatory: registering")
+
+
+class TestTheUrlDryRunsHarness:
+    """``rehearse-urls.sh``: the staged rehearsal's other half (ADR-0014 Validation).
+
+    The same seam as the harness above, and for the same reason — a
+    rehearsal whose assertions live in shell is one nobody can test until
+    the night it matters. This one starts nothing at all, so what is
+    pinned is that it reads no state, writes outside every production
+    path, and hands the command both Caddyfiles.
+    """
+
+    def test_asserts_nothing_the_dry_run_asserts(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        for reading in ("curl", "systemctl show", "config/", "stat -c", "caddy adapt", "sha256sum"):
+            assert reading not in code, reading
+
+    def test_starts_nothing_and_reloads_nothing(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        for verb in ("systemctl start", "systemctl reload", "systemctl restart", "daemon-reload"):
+            assert verb not in code, verb
+
+    def test_hands_the_command_both_caddyfiles_and_its_own_releases_root(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert '"$LOVSPOR" release rehearse-urls "$RELEASE_ID"' in code
+        assert '--previous-caddyfile "$PREVIOUS_CADDYFILE"' in code
+        assert '--caddyfile-source "$PROPOSED_CADDYFILE"' in code
+        assert '--releases "$REH_ROOT/releases"' in code
+
+    def test_writes_under_a_root_of_its_own_and_never_a_production_one(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert "REH_ROOT=/var/www/lovspor-urls-rehearsal" in code
+        for production in ("/var/www/lovspor-releases", "/run/caddy", "caddy.service.d"):
+            assert production not in code, production
+
+    def test_compares_this_boxs_two_configurations(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert "PREVIOUS_CADDYFILE=/etc/caddy/Caddyfile" in code
+        assert 'PROPOSED_CADDYFILE="$APP/deploy/digitalocean/Caddyfile"' in code
+
+    def test_reads_the_host_name_from_the_file_the_unit_sources(self) -> None:
+        """Both site blocks expand it, so a dry-run without it is of another box's site."""
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert "ENVIRONMENT=/etc/default/caddy-lovspor" in code
+        assert '. "$ENVIRONMENT"' in code
+        assert '[ -n "${LOVSPOR_DOMAIN:-}" ]' in code
+
+    def test_builds_the_envelope_as_the_build_user(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert 'sudo -u "$BUILD_USER" "$LOVSPOR" release build' in code
+        assert "--live none" in code
+
+    def test_refuses_to_run_as_anyone_but_root(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert '[ "$(id -u)" -eq 0 ] || die' in code
+
+    def test_takes_its_envelope_away_however_it_ends(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert "trap teardown EXIT" in code
+        assert 'rm -rf "$REH_ROOT"' in _function(code, "teardown")
+
+    def test_is_valid_bash(self) -> None:
+        subprocess.run(["bash", "-n", str(_URL_SCRIPT)], check=True)

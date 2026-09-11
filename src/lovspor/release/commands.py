@@ -61,6 +61,7 @@ from lovspor.release.migrate import (
 )
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
 from lovspor.release.rehearsal import Rehearsal, RehearsalFixtures, rehearse
+from lovspor.release.staged import StagedPlan, staged_rehearsal
 from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
 from lovspor.site.errors import SiteBuildError
@@ -582,6 +583,70 @@ def rehearse_command(
     )
     with _refusals():
         report = rehearse(plan)
+    for line in report.describe():
+        typer.echo(line)
+
+
+def _one_configuration(previous: Path, proposed: Path) -> bool:
+    """Whether two option values name one configuration, by identity and not by the strings.
+
+    A symlink alias, a ``..`` spelling and a hard link are each two names
+    for one file, and a dry-run handed the same configuration twice passes
+    every assertion it makes — the one outcome worse than failing.
+    ``resolve`` settles the first two and the case where neither name is on
+    disk yet; ``samefile`` settles the third, and answers no when either
+    name cannot be stat'd.
+    """
+    if previous.resolve() == proposed.resolve():
+        return True
+    try:
+        return previous.samefile(proposed)
+    except OSError:
+        return False
+
+
+@release_app.command(name="rehearse-urls")
+def rehearse_urls_command(
+    content_id: Annotated[
+        str, typer.Argument(help="The finalized release_content_id to compare against.")
+    ],
+    releases: _ReleasesOption = DEFAULT_RELEASES,
+    previous_caddyfile: Annotated[
+        Path,
+        typer.Option(
+            "--previous-caddyfile",
+            envvar="LOVSPOR_PREVIOUS_CADDYFILE",
+            help="The Caddyfile serving now; before the migration that is the live one.",
+        ),
+    ] = DEFAULT_CADDYFILE,
+    caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+) -> None:
+    """The staged first-migration rehearsal: the URL dry-run (ADR-0014 Validation).
+
+    `caddy validate` and `caddy adapt` over both Caddyfiles against a
+    fully built envelope, then a route-by-route comparison: every corpus
+    URL the old configuration answers answered the same by the new one
+    from <release>/corpus, / and /observatory/ from <release>/site, no
+    symlink on any serving path, and the previous Caddyfile still
+    answering as it did with every file as it was found. Nothing is
+    loaded and nothing is written.
+
+    Exit 0 is half of what authorises the production cutover; the other
+    half is `lovspor release rehearse` on a second instance. Exit 1 names
+    the assertion that did not hold and what it read instead.
+    """
+    if not is_release_id(content_id):
+        raise typer.BadParameter(f"not a release_content_id: {content_id}")
+    if _one_configuration(previous_caddyfile, caddyfile_source):
+        raise typer.BadParameter(
+            "--previous-caddyfile and --caddyfile-source name one configuration; "
+            "the dry-run would compare it with itself"
+        )
+    plan = StagedPlan(
+        SubprocessRunner(), previous_caddyfile, caddyfile_source, releases / content_id
+    )
+    with _refusals():
+        report = staged_rehearsal(plan)
     for line in report.describe():
         typer.echo(line)
 

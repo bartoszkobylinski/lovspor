@@ -7,6 +7,7 @@ in a box; ``discover_checkout`` is environment discovery, monkeypatched to
 the throwaway checkout as the site CLI tests do.
 """
 
+import os
 import re
 import shutil
 from datetime import UTC, datetime
@@ -32,9 +33,10 @@ from lovspor.release.commands import (
 )
 from lovspor.release.control import ControlPlane
 from lovspor.release.envelope import FRAGMENT_NAME, Marker, read_fragment, read_marker, write_marker
-from lovspor.release.errors import ReleaseError
+from lovspor.release.errors import RehearsalFailedError, ReleaseError
 from lovspor.release.migrate import first_migration
-from lovspor.release.rehearsal import Rehearsal, RehearsalReport
+from lovspor.release.rehearsal import Rehearsal, RehearsalReport, Step
+from lovspor.release.staged import StagedPlan
 from tests.unit.caddy_fakes import FakeCaddy
 from tests.unit.migrate_fixtures import Droplet, make_droplet
 from tests.unit.probe_fixtures import (
@@ -48,6 +50,7 @@ from tests.unit.probe_fixtures import (
     tools_listing,
 )
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
+from tests.unit.staged_fixtures import RELEASE_ID
 
 runner = CliRunner()
 LATER = "2026-01-02T00:00:00Z"
@@ -1232,3 +1235,268 @@ class TestPackage:
         package = _REPO / "src" / "lovspor" / "release"
         for path in package.glob("*.py"):
             assert "shell=True" not in path.read_text(encoding="utf-8"), path.name
+
+
+class TestRehearseUrls:
+    """``lovspor release rehearse-urls``: the staged rehearsal's URL dry-run (ADR-0014).
+
+    The run itself cannot happen in CI — it shells out to a ``caddy``
+    binary the runner does not have — so what is pinned here is the
+    wiring, the two refusals that stop a vacuous or a nonsense run, and
+    that the report reaches stdout.
+    """
+
+    def _paths(self, tmp_path: Path) -> dict[str, Path]:
+        return {
+            "releases": tmp_path / "releases",
+            "previous": tmp_path / "etc" / "Caddyfile",
+            "source": tmp_path / "app" / "Caddyfile",
+        }
+
+    def _invoke(self, content_id: str, paths: dict[str, Path]) -> object:
+        return runner.invoke(
+            app,
+            [
+                "release",
+                "rehearse-urls",
+                content_id,
+                "--releases",
+                str(paths["releases"]),
+                "--previous-caddyfile",
+                str(paths["previous"]),
+                "--caddyfile-source",
+                str(paths["source"]),
+            ],
+        )
+
+    def test_every_path_is_wired_from_its_option(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        captured: list[StagedPlan] = []
+
+        def capture(plan: StagedPlan) -> RehearsalReport:
+            captured.append(plan)
+            return RehearsalReport(steps=(Step(name="staged.corpus", detail="8 corpus URLs"),))
+
+        monkeypatch.setattr(commands, "staged_rehearsal", capture)
+        paths = self._paths(tmp_path)
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 0, result.output
+        (plan,) = captured
+        assert plan.previous == paths["previous"] and plan.proposed == paths["source"]
+        assert plan.release == paths["releases"] / RELEASE_ID
+        assert isinstance(plan.runner, SubprocessRunner)
+        assert "staged.corpus: 8 corpus URLs" in result.stdout
+
+    def test_a_name_that_is_not_a_release_id_is_a_usage_error(self, tmp_path: Path) -> None:
+        result = self._invoke("not-an-id", self._paths(tmp_path))
+
+        assert result.exit_code == 2
+
+    def test_one_file_for_both_configurations_is_a_usage_error(self, tmp_path: Path) -> None:
+        """Comparing a configuration with itself passes every assertion and proves nothing."""
+        paths = self._paths(tmp_path)
+        paths["source"] = paths["previous"]
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def test_two_names_for_one_configuration_are_a_usage_error(self, tmp_path: Path) -> None:
+        """A symlink alias is still one file, so comparing it with itself proves nothing."""
+        paths = self._paths(tmp_path)
+        paths["previous"].parent.mkdir(parents=True)
+        paths["previous"].write_text("configuration\n", encoding="utf-8")
+        paths["source"].parent.mkdir(parents=True)
+        paths["source"].symlink_to(paths["previous"])
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def _written(self, paths: dict[str, Path], *names: str) -> None:
+        for name in names:
+            paths[name].parent.mkdir(parents=True, exist_ok=True)
+            paths[name].write_text(f"# {name}\n", encoding="utf-8")
+
+    def test_a_relative_spelling_of_one_file_is_a_usage_error(self, tmp_path: Path) -> None:
+        """``etc/../etc/Caddyfile`` is the same file by another name."""
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous")
+        paths["source"] = tmp_path / "etc" / ".." / "etc" / "Caddyfile"
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def test_a_hard_link_to_one_file_is_a_usage_error(self, tmp_path: Path) -> None:
+        """Two real names, one inode: `resolve` cannot see it and `samefile` can."""
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous")
+        paths["source"].parent.mkdir(parents=True)
+        os.link(paths["previous"], paths["source"])
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def test_the_refusal_names_both_options(self, tmp_path: Path) -> None:
+        """Asserted on the exception, never on the rendered panel.
+
+        Rich lays a ``BadParameter`` out in a box at the console's width and
+        splits a token that does not fit *mid-word*, so ``--previous-caddyfile``
+        is only contiguous while the console happens to be wide enough. Neither
+        stripping ANSI nor rejoining the wrapped lines puts it back, because the
+        break is inside the word. The message is a property of the refusal; the
+        box is a property of the terminal, and only the first is under test.
+        """
+        paths = self._paths(tmp_path)
+
+        with pytest.raises(typer.BadParameter) as caught:
+            commands.rehearse_urls_command(
+                RELEASE_ID, paths["releases"], paths["previous"], paths["previous"]
+            )
+
+        assert caught.value.message == (
+            "--previous-caddyfile and --caddyfile-source name one configuration; "
+            "the dry-run would compare it with itself"
+        )
+
+    def test_the_refusal_the_operator_sees_is_that_refusal(self, tmp_path: Path) -> None:
+        """The exit code is the runner's business; the wording is the exception's."""
+        paths = self._paths(tmp_path)
+        paths["source"] = paths["previous"]
+
+        assert self._invoke(RELEASE_ID, paths).exit_code == 2
+
+    def test_two_distinct_files_are_accepted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(commands, "staged_rehearsal", lambda plan: RehearsalReport(steps=()))
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous", "source")
+
+        assert self._invoke(RELEASE_ID, paths).exit_code == 0
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["release", "rehearse-urls"],
+            ["release", "rehearse-urls", RELEASE_ID, "extra"],
+            ["release", "rehearse-urls", RELEASE_ID, "--no-such-option"],
+            ["release", "rehearse-urls", RELEASE_ID, "--releases"],
+            ["release", "rehearse-urls", RELEASE_ID, "--previous-caddyfile"],
+        ],
+    )
+    def test_a_request_click_cannot_parse_is_a_usage_error(self, argv: list[str]) -> None:
+        """A missing argument, an extra one, an unknown option and an option given no value."""
+        assert runner.invoke(app, argv).exit_code == 2
+
+    def test_a_repeated_option_takes_the_last_value(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """None of this module's options is `multiple`; the last wins, as everywhere else."""
+        captured: list[StagedPlan] = []
+
+        def capture(plan: StagedPlan) -> RehearsalReport:
+            captured.append(plan)
+            return RehearsalReport(steps=())
+
+        monkeypatch.setattr(commands, "staged_rehearsal", capture)
+        paths = self._paths(tmp_path)
+
+        result = runner.invoke(
+            app,
+            [
+                "release",
+                "rehearse-urls",
+                RELEASE_ID,
+                "--releases",
+                str(tmp_path / "first"),
+                "--releases",
+                str(paths["releases"]),
+                "--previous-caddyfile",
+                str(paths["previous"]),
+                "--caddyfile-source",
+                str(paths["source"]),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured[0].release == paths["releases"] / RELEASE_ID
+
+    def test_the_command_declares_no_flags_to_combine(self) -> None:
+        """Introspected, never read off --help: there is no pair to exclude here, unlike
+        `migrate` and `reconcile`, and that is why no such refusal exists."""
+        root = get_command(app)
+        assert isinstance(root, click.Group)
+        group = root.commands["release"]
+        assert isinstance(group, click.Group)
+        params = group.commands["rehearse-urls"].params
+
+        assert not [param for param in params if getattr(param, "is_flag", False)]
+        assert {param.name for param in params} == {
+            "content_id",
+            "releases",
+            "previous_caddyfile",
+            "caddyfile_source",
+        }
+
+    def test_both_paths_are_reachable_from_the_environment(self) -> None:
+        root = get_command(app)
+        assert isinstance(root, click.Group)
+        group = root.commands["release"]
+        assert isinstance(group, click.Group)
+        params = {param.name: param for param in group.commands["rehearse-urls"].params}
+
+        assert params["previous_caddyfile"].envvar == "LOVSPOR_PREVIOUS_CADDYFILE"
+        assert params["caddyfile_source"].envvar == "LOVSPOR_CADDYFILE_SOURCE"
+        assert params["releases"].envvar == "LOVSPOR_RELEASES_ROOT"
+
+    def test_one_file_named_twice_through_the_environment_is_the_same_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The env var is the same request by another route, and gets the same answer."""
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous")
+        monkeypatch.setenv("LOVSPOR_CADDYFILE_SOURCE", str(paths["previous"]))
+
+        result = runner.invoke(
+            app,
+            [
+                "release",
+                "rehearse-urls",
+                RELEASE_ID,
+                "--releases",
+                str(paths["releases"]),
+                "--previous-caddyfile",
+                str(paths["previous"]),
+            ],
+        )
+
+        assert result.exit_code == 2
+
+    def test_a_configuration_that_is_not_there_is_a_refusal_not_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        """The world's state is the library's to name, at exit 1 — the convention every
+        other command in this module follows; the CLI judges the request alone."""
+        result = self._invoke(RELEASE_ID, self._paths(tmp_path))
+
+        assert result.exit_code == 1
+        assert "release refused" in result.output
+
+    def test_a_refusal_is_one_line_and_exit_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        def refuse(plan: StagedPlan) -> RehearsalReport:
+            raise RehearsalFailedError("staged.symlinks", "served through a symlink")
+
+        monkeypatch.setattr(commands, "staged_rehearsal", refuse)
+
+        result = self._invoke(RELEASE_ID, self._paths(tmp_path))
+
+        assert result.exit_code == 1
+        assert "staged.symlinks" in result.output
