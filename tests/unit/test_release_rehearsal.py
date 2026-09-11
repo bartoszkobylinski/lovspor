@@ -554,6 +554,25 @@ class TestPlainReloadRefused:
 
         assert raised.value.detail == "systemctl daemon-reload failed: 3"
 
+    def test_the_daemon_reload_that_puts_the_drop_in_back_names_the_fixture_too(
+        self, staged: Staged
+    ) -> None:
+        """The restore runs in a `finally`, so its own failure is what the operator reads."""
+        cutover(staged.plan)
+        seen: list[int] = []
+
+        def daemon_reload(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            seen.append(1)
+            return Completed(1, "", "nope") if len(seen) == 2 else staged.caddy.run(argv, env)
+
+        plan = staged.with_runner(("systemctl", "daemon-reload"), daemon_reload)
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            plain_reload_refused(plan)
+
+        assert raised.value.step == "iii.plain-reload"
+        assert raised.value.detail == "systemctl daemon-reload failed: nope"
+
     def test_the_instance_is_left_on_the_socket(self, staged: Staged) -> None:
         cutover(staged.plan)
 
@@ -858,20 +877,41 @@ class TestRestarts:
         gid = staged.droplet.ownership.groups["lovspor-release"]
         assert staged.droplet.ownership.chowns == [(staged.plan.host.socket, -1, gid)]
 
-    def test_a_restart_inside_the_fixture_that_fails_names_the_fixture(
-        self, staged: Staged
+    @pytest.mark.parametrize("nth", [3, 4, 5])
+    def test_any_restart_inside_the_fixture_that_fails_names_the_fixture(
+        self, staged: Staged, nth: int
     ) -> None:
+        """Three restarts: the one that loads the fixture, the one that takes the mode
+        away, and the one that puts the instance back. All three are the fixture's."""
         cutover(staged.plan)
         seen: list[int] = []
 
         def restart(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
             seen.append(1)
-            return Completed(1, "", "nope") if len(seen) > 2 else staged.caddy.run(argv, env)
+            return Completed(1, "", "nope") if len(seen) == nth else staged.caddy.run(argv, env)
 
         with pytest.raises(RehearsalFailedError) as raised:
             restarts(staged.with_runner(("systemctl", "restart"), restart))
 
         assert raised.value.step == "v.by-hand"
+        assert raised.value.detail == f"systemctl restart {REHEARSAL_UNIT} failed: nope"
+
+    def test_a_recreated_socket_that_lost_its_group_is_the_fixture_failing_too(
+        self, staged: Staged
+    ) -> None:
+        """The ADR says the mode *or* the group; a group-only failure is the fixture holding."""
+        cutover(staged.plan)
+        staged.droplet.ownership.groups["lovspor-release"] += 1
+        plan = replace(
+            staged.plan,
+            fixtures=replace(staged.plan.fixtures, unsuffixed=staged.plan.host.caddyfile_source),
+        )
+
+        step = hand_provisioned_socket_fails(plan)
+
+        assert step.name == "v.by-hand"
+        assert "gid" in step.detail
+        assert "mode" not in step.detail
 
     def test_the_fixture_leaves_the_instance_as_it_found_it(self, staged: Staged) -> None:
         cutover(staged.plan)
