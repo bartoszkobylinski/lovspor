@@ -23,10 +23,12 @@ from lovspor.release.answers import (
     NOT_FOUND,
     Answer,
     answer_for,
+    hidden_paths,
     hosts,
     matcher_paths,
     matches_path,
     roots,
+    served_file,
 )
 from lovspor.release.errors import UnroutableConfigError
 from tests.unit.staged_fixtures import (
@@ -285,3 +287,65 @@ def _one_route(handle: list[dict[str, Any]], match: Any = None) -> dict[str, Any
     if match is not None:
         route["match"] = match
     return _routes([route])
+
+
+class TestResolvingAFileUnderARoot:
+    def test_a_directory_url_resolves_to_its_index(self, world: Path) -> None:
+        root = site(world, "lovspor-current")
+
+        assert served_file(root, LAW_URL) == root / LAW_FILE
+
+    def test_a_named_file_resolves_to_itself(self, world: Path) -> None:
+        root = site(world, "lovspor-current")
+
+        assert served_file(root, "/robots.txt") == root / "robots.txt"
+
+    def test_the_root_url_resolves_to_the_roots_own_index(self, world: Path) -> None:
+        root = site(world, "lovspor")
+
+        assert served_file(root, "/") == root / "index.html"
+
+    def test_a_directory_without_an_index_resolves_to_nothing(self, world: Path) -> None:
+        assert served_file(site(world, "lovspor-current"), "/lov/") is None
+
+    def test_a_name_no_file_carries_resolves_to_nothing(self, world: Path) -> None:
+        assert served_file(site(world, "lovspor"), "/nowhere.txt") is None
+
+
+class TestWhatTheConfigurationHides:
+    def test_the_imported_snippets_and_the_caddyfile_itself(self, proposed: object) -> None:
+        found = hidden_paths(proposed)
+
+        assert any(name.endswith("/corpus/redirects.caddy") for name in found)
+        assert any(name.endswith("/release.caddy") for name in found)
+
+    def test_a_configuration_that_hides_nothing_names_nothing(self) -> None:
+        assert hidden_paths({"apps": {}}) == ()
+
+
+class TestDescribingAnAnswer:
+    def test_a_served_file_names_its_root(self) -> None:
+        answer = Answer(
+            handler="file_server",
+            root="/var/www/x",
+            served="robots.txt",
+            digest="d",
+            status=200,
+            location=None,
+            upstream=None,
+        )
+
+        assert answer.describe() == "file_server 200 robots.txt from /var/www/x"
+
+    def test_a_static_response_says_it_serves_no_file(self) -> None:
+        answer = Answer(
+            handler="static_response",
+            root=None,
+            served=None,
+            digest=None,
+            status=410,
+            location=None,
+            upstream=None,
+        )
+
+        assert answer.describe() == "static_response 410 no file from no root"

@@ -24,10 +24,15 @@ from lovspor.release.envelope import RECORD_NAME
 from lovspor.release.errors import RehearsalFailedError
 from lovspor.release.staged import (
     OBSERVATORY_URL,
+    PROBE_SEGMENT,
     StagedPlan,
+    answers_for,
+    candidate_urls,
     digests,
+    matcher_urls,
     staged_rehearsal,
     symlinked_component,
+    tree_urls,
 )
 from tests.unit.staged_fixtures import (
     FLAT_RELEASE,
@@ -294,3 +299,52 @@ class TestSymlinkedComponent:
     def test_a_path_the_boundary_is_no_ancestor_of_is_refused(self, world: Path) -> None:
         with pytest.raises(RehearsalFailedError, match="outside"):
             symlinked_component(world / "elsewhere" / "corpus", world / "www")
+
+
+class TestTheUrlSetTheOldConfigurationOffers:
+    """Derived from the old configuration alone, so the new one cannot narrow it."""
+
+    def test_a_tree_offers_its_files_and_its_index_directories(self, world: Path) -> None:
+        found = tree_urls(corpus_of(world))
+
+        assert "/robots.txt" in found
+        assert "/lov/nl-19140101-001/" in found
+        assert "/lov/nl-19140101-001/index.html" not in found
+        assert "/sitemaps/sitemap-lover-1.xml" in found
+
+    def test_a_root_index_is_the_root_url(self, world: Path) -> None:
+        assert tree_urls(world / "www" / "lovspor") == ("/",)
+
+    def test_a_matcher_path_is_a_url_and_a_trailing_wildcard_is_one_probe(self) -> None:
+        assert matcher_urls(("/robots.txt", "/lov/*")) == ("/robots.txt", f"/lov/{PROBE_SEGMENT}")
+
+    def test_a_wildcard_anywhere_but_the_end_is_not_asked_about(self) -> None:
+        assert matcher_urls(("/lov/*/paragraf",)) == ()
+
+    def test_candidates_come_from_both_the_trees_and_the_matchers(self, world: Path) -> None:
+        found = candidate_urls(load_adapted("previous.json", world))
+
+        assert "/lov/nl-19140101-001/" in found
+        assert "/mcp" in found and "/" in found
+        assert list(found) == list(dict.fromkeys(found))
+
+    def test_a_root_that_is_not_a_directory_contributes_nothing(self, world: Path) -> None:
+        (world / "www" / "lovspor-current").unlink()
+
+        found = candidate_urls(load_adapted("previous.json", world))
+
+        assert "/lov/nl-19140101-001/" not in found
+        assert "/robots.txt" in found  # still named by the old @corpus matcher
+
+
+class TestAnswersFor:
+    def test_a_url_no_route_reaches_is_left_out(self, world: Path) -> None:
+        config = {"apps": {"http": {"servers": {"srv0": {"routes": []}}}}}
+
+        assert answers_for(config, ("/", "/robots.txt")) == {}
+
+    def test_each_url_is_asked_once_and_keyed_by_itself(self, world: Path) -> None:
+        found = answers_for(load_adapted("previous.json", world), ("/", "/robots.txt"))
+
+        assert sorted(found) == ["/", "/robots.txt"]
+        assert found["/robots.txt"].served == "robots.txt"
