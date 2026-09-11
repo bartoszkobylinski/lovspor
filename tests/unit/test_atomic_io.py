@@ -164,6 +164,43 @@ def test_atomic_write_bytes_preserves_original_and_cleans_tmp_on_failure(
     assert not (tmp_path / "blob.tmp").exists()
 
 
+def test_atomic_write_bytes_preserves_original_and_cleans_staging_on_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An OSError while filling the new descriptor has the same rollback guarantee."""
+    target = tmp_path / "blob"
+    target.write_bytes(b"ORIGINAL")
+    original_fdopen = os.fdopen
+
+    class FailingHandle:
+        def __init__(self, descriptor: int) -> None:
+            self._handle = original_fdopen(descriptor, "wb")
+
+        def __enter__(self) -> "FailingHandle":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            self._handle.close()
+
+        def fileno(self) -> int:
+            return self._handle.fileno()
+
+        def write(self, _payload: bytes) -> None:
+            raise OSError("simulated write failure")
+
+    def failing_fdopen(descriptor: int, _mode: str) -> FailingHandle:
+        return FailingHandle(descriptor)
+
+    monkeypatch.setattr(os, "fdopen", failing_fdopen)
+
+    with pytest.raises(OSError, match="simulated write failure"):
+        atomic_write_bytes(target, b"NEW")
+
+    assert target.read_bytes() == b"ORIGINAL"
+    assert not (tmp_path / "blob.tmp").exists()
+
+
 @pytest.mark.skipif(os.getuid() == 0, reason="root writes through a read-only directory")
 def test_atomic_write_bytes_reraises_the_error_when_the_staging_file_cannot_be_made(
     tmp_path: Path,
