@@ -3176,6 +3176,46 @@ class TestASweepRebindsToTheRegisterBeforeEachSource:
         assert run is not None
         assert (run.active_sources, run.sources_completed) == (1, 1)
 
+    def test_a_source_moved_before_its_lane_is_swept_under_the_new_domain(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The register is re-bound, not merely checked for withdrawal. A
+        repaired and freshly activated row must use its current domain when
+        its turn arrives; asking the old host would fail through pytest-httpx."""
+        self._both(root, httpx_mock)
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        moved_domain = "new.asker.example.invalid"
+        moved_robots = f"https://{moved_domain}/robots.txt"
+        moved_sitemap = f"https://{moved_domain}/sitemap.xml"
+        moved_page = f"https://{moved_domain}/forskrift"
+
+        def move_asker(_request: httpx.Request) -> httpx.Response:
+            current = read_registry(root / "sources.json").sources[ASKER_ID]
+            moved = replace_domain(current, moved_domain)
+            assert current.access_policy is not None
+            check = current.access_policy.model_copy(update={"robots_txt_url": moved_robots})
+            _rewrite_source(root, activate(moved, check))
+            return httpx.Response(200, content=b"<html>forskrift</html>")
+
+        httpx_mock.add_callback(move_asker, url=PAGE_URL)
+        httpx_mock.add_response(
+            url=moved_robots,
+            text=f"User-agent: *\nAllow: /\nSitemap: {moved_sitemap}\n",
+            is_reusable=True,
+        )
+        httpx_mock.add_response(url=moved_sitemap, content=_urlset(moved_page))
+        httpx_mock.add_response(url=moved_page, content=b"<html>ny forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "capture-all"])
+
+        assert result.exit_code == 0, result.output
+        assert f"== {ASKER_ID} Asker" in result.output
+        assert moved_page in _logged_urls(root)
+        assert ASKER_ROBOTS_URL not in {str(request.url) for request in httpx_mock.get_requests()}
+        run = latest_sweep_run(sweeps_path(ObservatoryRoot(root, ())))
+        assert run is not None
+        assert (run.sources_completed, run.sources_withdrawn, run.status) == (2, 0, "success")
+
     def test_an_untouched_register_sweeps_exactly_as_it_always_did(
         self, root: Path, httpx_mock: HTTPXMock
     ) -> None:
