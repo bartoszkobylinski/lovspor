@@ -1041,9 +1041,50 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
             _steps("mutation-remediation.yml", "remediate-verify"), "Apply the agent's tests"
         )
 
+        assert self._agent()["outputs"] == {
+            "run": "${{ steps.cycle.outputs.run }}",
+            "pr": "${{ steps.cycle.outputs.pr }}",
+            "count": "${{ steps.cycle.outputs.count }}",
+            "author": "${{ steps.author.outputs.author }}",
+            "before_sha": "${{ steps.base.outputs.before_sha }}",
+            "patch": "${{ steps.patch.outputs.patch }}",
+        }
         assert upload["with"]["name"] == artifact
         assert download["with"]["name"] == artifact
+        assert upload["if"] == "steps.patch.outputs.patch == 'true'"
+        assert download["if"] == "needs.remediate.outputs.patch == 'true'"
+        assert apply_step["if"] == "needs.remediate.outputs.patch == 'true'"
         assert "git apply --index" in apply_step["run"]
+
+    def test_the_scope_guard_runs_on_both_lanes_against_the_recorded_base(self) -> None:
+        for job_name in ("remediate", "remediate-verify"):
+            guard = _named_step(_steps("mutation-remediation.yml", job_name), "Scope guard")
+            assert guard["run"] == 'scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"'
+
+        verifier = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        assert verifier["env"]["BEFORE_SHA"] == "${{ needs.remediate.outputs.before_sha }}"
+
+    def test_the_verifier_refuses_to_be_green_when_the_agent_lane_died(self) -> None:
+        """The verifier is the external verdict path when the small box dies,
+        so it must run and fail before claiming that remediation was tested."""
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        steps = job["steps"]
+        names = [step.get("name") for step in steps]
+        guard = _named_step(steps, "The remediation lane did not finish")
+
+        assert "!cancelled()" in job["if"]
+        assert guard["if"] == "needs.remediate.result != 'success'"
+        assert "exit 1" in guard["run"]
+        assert names.index(guard["name"]) < names.index("Run tests on Codex additions")
+
+    def test_the_memory_sampler_cannot_outlive_the_agent_lane(self) -> None:
+        steps = self._agent()["steps"]
+        sampler = _named_step(steps, "Sample memory while the agent runs")
+        stop = _named_step(steps, "Stop the memory sampler")
+
+        assert "nohup timeout " in sampler["run"]
+        assert stop["if"].startswith("always()")
+        assert "kill " in stop["run"]
 
     def test_the_verifier_only_runs_for_a_cycle_the_gate_allowed(self) -> None:
         """The gate, the cycle count and both BLOCKED paths stay on the agent
