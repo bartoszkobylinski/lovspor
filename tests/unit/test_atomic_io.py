@@ -411,6 +411,24 @@ class TestMode:
         assert stat.S_IMODE(victim.stat().st_mode) == 0o600
         assert stat.S_IMODE((tmp_path / "t").stat().st_mode) == 0o644
 
+    def test_the_staging_file_is_never_created_wider_than_the_mode_asked_for(
+        self, tmp_path: Path, loose_umask: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The window between the create and the fchmod is the one moment the content
+        exists under a mode this call did not pick; it must not be a wider one."""
+        created: list[int] = []
+        original = os.fchmod
+
+        def recording_fchmod(descriptor: int, mode: int) -> None:
+            created.append(stat.S_IMODE(os.fstat(descriptor).st_mode))
+            original(descriptor, mode)
+
+        monkeypatch.setattr(os, "fchmod", recording_fchmod)
+        atomic_write_text(tmp_path / "t", "x", mode=0o600)
+        atomic_write_bytes(tmp_path / "b", b"x", mode=0o600)
+
+        assert created == [0o600, 0o600]
+
     def test_an_explicit_mode_survives_stepping_aside(
         self, tmp_path: Path, strict_umask: None
     ) -> None:
