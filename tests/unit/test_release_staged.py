@@ -14,11 +14,13 @@ assertion — and not one of its neighbours — is what detected the change.
 
 import hashlib
 import json
+import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
 
+from lovspor.release.answers import Answer
 from lovspor.release.caddy import FRAGMENT_ENV, Completed
 from lovspor.release.envelope import RECORD_NAME
 from lovspor.release.errors import RehearsalFailedError
@@ -26,6 +28,8 @@ from lovspor.release.staged import (
     OBSERVATORY_URL,
     PROBE_SEGMENT,
     StagedPlan,
+    _changed,
+    _first_difference,
     answers_for,
     candidate_urls,
     digests,
@@ -56,12 +60,14 @@ class FixtureRunner:
     def __init__(self, previous: list[object], proposed: list[object], files: tuple[Path, Path]):
         self.adapted = {files[0]: list(previous), files[1]: list(proposed)}
         self.proposed = files[1]
+        self.fragment = files[0].parent / "www" / "lovspor-releases" / RELEASE_ID / "release.caddy"
         self.validate_returncode = 0
         self.tamper: Path | None = None
 
     def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
         caddyfile = Path(argv[argv.index("--config") + 1])
-        assert env[FRAGMENT_ENV]
+        assert caddyfile in self.adapted, f"neither Caddyfile: {caddyfile}"
+        assert env[FRAGMENT_ENV] == str(self.fragment), env[FRAGMENT_ENV]
         if argv[1] == "validate":
             refusal = "the fixture refuses this file" if self.validate_returncode else ""
             return Completed(self.validate_returncode, "", refusal)
@@ -87,6 +93,24 @@ def plan_for(world: Path, previous: list[object], proposed: list[object]) -> Sta
     files = (world / "Caddyfile.previous", world / "Caddyfile.proposed")
     runner = FixtureRunner(previous, proposed, files)
     return StagedPlan(runner, files[0], files[1], world / "www" / "lovspor-releases" / RELEASE_ID)
+
+
+def dropping(config: object, *indices: int) -> object:
+    """One capture with named routes of the site block taken out, by index.
+
+    A hand edit of real `caddy adapt` output, and labelled as one: the
+    route shapes below are ones neither Caddyfile produces — a
+    configuration that reaches no route at all for a URL — so there is
+    nothing to capture.
+    """
+    routes = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]  # type: ignore[index]
+    for index in sorted(indices, reverse=True):
+        del routes[index]
+    return config
+
+
+APP_ROUTE, CORPUS_ROUTE, CATCH_ALL = 1, 2, 3
+"""The site block's routes, in the order Caddy adapts both Caddyfiles."""
 
 
 def corpus_of(world: Path) -> Path:
@@ -176,7 +200,9 @@ class TestACorpusUrlAnsweredFromTheWrongTree:
             staged_rehearsal(plan)
 
         assert caught.value.step == "staged.corpus"
+        assert "is served from" in caught.value.detail
         assert FLAT_RELEASE in caught.value.detail
+        assert corpus_of(world).as_posix() in caught.value.detail
 
 
 class TestASymlinkOnAServingPath:
@@ -224,6 +250,17 @@ class TestTheRollback:
         assert caught.value.step == "staged.rollback"
         assert RECORD_NAME in caught.value.detail
 
+    def test_a_file_of_the_old_tree_changed_under_the_dry_run_is_refused(self, world: Path) -> None:
+        """The old redirect map: hidden from ``file_server``, so no answer moves with it."""
+        plan = make_plan(world)
+        plan.runner.tamper = world / "www" / "lovspor-current" / "redirects.caddy"  # type: ignore[union-attr]
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.rollback"
+        assert "redirects.caddy changed under the dry-run" in caught.value.detail
+
     def test_the_previous_configuration_must_still_answer_as_it_did(self, world: Path) -> None:
         moved = load_adapted("proposed.json", world)
         del moved["admin"]  # type: ignore[union-attr]
@@ -237,6 +274,7 @@ class TestTheRollback:
             staged_rehearsal(plan)
 
         assert caught.value.step == "staged.rollback"
+        assert "no longer answers as it did" in caught.value.detail
 
     def test_the_previous_configuration_must_come_back_on_tcp(self, world: Path) -> None:
         socketed = load_adapted("previous.json", world)
@@ -285,6 +323,16 @@ class TestWhatIsCheckedBeforeAnythingIsAdapted:
         assert caught.value.step == "staged.validate"
         assert RECORD_NAME in caught.value.detail
 
+    def test_every_missing_part_is_named_in_one_line(self, world: Path) -> None:
+        release = world / "www" / "lovspor-releases" / RELEASE_ID
+        (release / RECORD_NAME).unlink()
+        shutil.rmtree(release / "site")
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(make_plan(world))
+
+        assert f"site/, {RECORD_NAME}" in caught.value.detail
+
     def test_a_configuration_caddy_refuses_is_the_first_refusal(self, world: Path) -> None:
         plan = make_plan(world)
         plan.runner.validate_returncode = 1  # type: ignore[union-attr]
@@ -293,6 +341,14 @@ class TestWhatIsCheckedBeforeAnythingIsAdapted:
             staged_rehearsal(plan)
 
         assert caught.value.step == "staged.validate"
+        assert "the fixture refuses this file" in caught.value.detail
+
+    def test_the_step_names_both_files_it_had_caddy_accept(self, world: Path) -> None:
+        report = staged_rehearsal(make_plan(world))
+
+        assert report.steps[0].detail == (
+            "caddy validate accepts Caddyfile.previous and Caddyfile.proposed"
+        )
 
 
 class TestDigests:
@@ -319,8 +375,11 @@ class TestSymlinkedComponent:
         assert found == world / "www" / LIVE_SYMLINK
 
     def test_a_path_the_boundary_is_no_ancestor_of_is_refused(self, world: Path) -> None:
-        with pytest.raises(RehearsalFailedError, match="outside"):
+        with pytest.raises(RehearsalFailedError) as caught:
             symlinked_component(world / "elsewhere" / "corpus", world / "www")
+
+        assert caught.value.step == "staged.symlinks"
+        assert "outside the deployment" in caught.value.detail
 
 
 class TestTheUrlSetTheOldConfigurationOffers:
@@ -335,13 +394,14 @@ class TestTheUrlSetTheOldConfigurationOffers:
         assert "/sitemaps/sitemap-lover-1.xml" in found
 
     def test_a_root_index_is_the_root_url(self, world: Path) -> None:
-        assert tree_urls(world / "www" / "lovspor") == ("/",)
+        assert tree_urls(world / "www" / "lovspor") == ("/", "/om/")
 
     def test_a_matcher_path_is_a_url_and_a_trailing_wildcard_is_one_probe(self) -> None:
         assert matcher_urls(("/robots.txt", "/lov/*")) == ("/robots.txt", f"/lov/{PROBE_SEGMENT}")
 
-    def test_a_wildcard_anywhere_but_the_end_is_not_asked_about(self) -> None:
-        assert matcher_urls(("/lov/*/paragraf",)) == ()
+    @pytest.mark.parametrize("pattern", ["/lov/*/paragraf", "/lov/*x"])
+    def test_a_wildcard_anywhere_but_the_end_is_not_asked_about(self, pattern: str) -> None:
+        assert matcher_urls((pattern,)) == ()
 
     def test_a_matcher_that_is_not_a_path_is_not_asked_about(self) -> None:
         """``*`` alone, or anything without a leading slash, is not a URL this can ask."""
@@ -374,3 +434,125 @@ class TestAnswersFor:
 
         assert sorted(found) == ["/", "/robots.txt"]
         assert found["/robots.txt"].served == "robots.txt"
+
+
+class TestASiteUrlAnsweredFromTheWrongTree:
+    def test_the_landing_page_from_outside_the_envelope_is_refused(self, world: Path) -> None:
+        """It answers 200 with the right text — from the tree the migration is retiring."""
+        plan = make_plan(world, "proposed-wrong-site-root.json")
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.site"
+        assert "is served from" in caught.value.detail
+        assert site_of(world).as_posix() in caught.value.detail
+
+
+class TestTheMapTheNewConfigurationServesUnder:
+    def test_the_old_trees_redirect_map_is_refused(self, world: Path) -> None:
+        """Every response compares equal — the old map is what the old answers came from —
+        so only Caddy's own record of what the file imported catches this."""
+        plan = make_plan(world, "proposed-foreign-map.json")
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.corpus"
+        assert "not the release's own" in caught.value.detail
+        assert "lovspor-current" in caught.value.detail
+
+
+class TestAConfigurationThatReachesNoRouteAtAll:
+    def test_a_corpus_url_no_route_reaches_is_refused(self, world: Path) -> None:
+        stripped = dropping(load_adapted("proposed.json", world), CORPUS_ROUTE, CATCH_ALL)
+        plan = plan_for(world, [load_adapted("previous.json", world)], [stripped])
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.corpus"
+        assert "the new nothing" in caught.value.detail
+
+    def test_a_site_url_no_route_reaches_is_refused(self, world: Path) -> None:
+        stripped = dropping(load_adapted("proposed.json", world), CATCH_ALL)
+        plan = plan_for(world, [load_adapted("previous.json", world)], [stripped])
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.site"
+        assert "answers nothing" in caught.value.detail
+
+    def test_an_old_configuration_with_no_corpus_at_all_is_refused(self, world: Path) -> None:
+        """Nothing to compare is not a pass: it is the dry-run reading the wrong old file."""
+        stripped = dropping(load_adapted("previous.json", world), CORPUS_ROUTE)
+        plan = plan_for(world, [stripped], [load_adapted("proposed.json", world)])
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.corpus"
+        assert "no corpus URL at all" in caught.value.detail
+
+
+class TestTheStepsCountWhatTheyChecked:
+    def test_the_site_step_counts_the_two_named_urls_and_the_old_tree(self, world: Path) -> None:
+        """``/om/`` is in the class because the old configuration answers it, not by name."""
+        report = staged_rehearsal(make_plan(world))
+        site = next(step for step in report.steps if step.name == "staged.site")
+
+        assert site.detail.startswith("3 site URLs")
+
+    def test_the_symlink_step_counts_the_roots_as_well_as_the_files(self, world: Path) -> None:
+        report = staged_rehearsal(make_plan(world))
+        symlinks = next(step for step in report.steps if step.name == "staged.symlinks")
+
+        assert symlinks.detail.startswith("11 serving paths")
+
+    def test_the_proxied_step_counts_the_app_surface(self, world: Path) -> None:
+        report = staged_rehearsal(make_plan(world))
+        proxied = next(step for step in report.steps if step.name == "staged.proxied")
+
+        assert proxied.detail.startswith("6 proxied URLs")
+
+    def test_the_rollback_step_counts_the_files_it_found(self, world: Path) -> None:
+        report = staged_rehearsal(make_plan(world))
+        rollback = next(step for step in report.steps if step.name == "staged.rollback")
+
+        assert "files as found" in rollback.detail
+        assert rollback.detail.split()[-4].isdigit()
+
+
+class TestTheTwoMessagesTheRollbackComposes:
+    def _answer(self, status: int) -> Answer:
+        return Answer(
+            handler="file_server",
+            root="/var/www/x",
+            served="robots.txt",
+            digest="d",
+            status=status,
+            location=None,
+            upstream=None,
+        )
+
+    def test_the_first_url_whose_answer_moved(self) -> None:
+        before = {"/a": self._answer(200), "/b": self._answer(200)}
+        after = {"/a": self._answer(200), "/b": self._answer(410)}
+
+        assert _first_difference(before, after).startswith("/b: file_server 410")
+
+    def test_a_url_the_previous_configuration_stopped_answering(self) -> None:
+        before = {"/a": self._answer(200)}
+
+        assert "nothing, not file_server 200" in _first_difference(before, {})
+
+    def test_the_first_file_whose_bytes_moved(self) -> None:
+        taken = (("/a", "one"), ("/b", "two"))
+
+        assert _changed(taken, (("/a", "one"), ("/b", "three"))) == "/b"
+
+    def test_two_identical_readings_name_nothing(self) -> None:
+        taken = (("/a", "one"),)
+
+        assert _changed(taken, taken) == "nothing"

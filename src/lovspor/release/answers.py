@@ -147,8 +147,13 @@ def _proxy(handler: dict[str, object]) -> Answer:
 
 
 def served_file(root: Path, url: str) -> Path | None:
-    """The file Caddy's ``file_server`` resolves ``url`` to under ``root``, or ``None``."""
-    target = root / url.lstrip("/")
+    """The file Caddy's ``file_server`` resolves ``url`` to under ``root``, or ``None``.
+
+    ``removeprefix`` and not ``lstrip``: the latter takes a *set* of
+    characters, so it would also eat a leading path segment that happens
+    to start with one of them.
+    """
+    target = root / url.removeprefix("/")
     if target.is_dir():
         target = target / INDEX_FILE
     return target if target.is_file() else None
@@ -159,18 +164,32 @@ def _hidden(path: Path, hide: tuple[str, ...]) -> bool:
     return path.as_posix() in hide or path.name in hide
 
 
+def _nothing_served(root: str | None) -> Answer:
+    """``file_server`` with no file under ``root`` for this URL: a 404, and nothing else."""
+    return Answer(
+        handler="file_server",
+        root=root,
+        served=None,
+        digest=None,
+        status=NOT_FOUND,
+        location=None,
+        upstream=None,
+    )
+
+
 def _file_server(handler: dict[str, object], request: _Request) -> Answer:
     raw = handler.get("hide")
     hide = tuple(str(entry) for entry in raw) if isinstance(raw, list) else ()
-    found = served_file(Path(request.root), request.url) if request.root else None
-    if found is not None and _hidden(found, hide):
-        found = None
+    root = Path(request.root) if request.root is not None else None
+    found = served_file(root, request.url) if root is not None else None
+    if root is None or found is None or _hidden(found, hide):
+        return _nothing_served(request.root)
     return Answer(
         handler="file_server",
         root=request.root,
-        served=found.relative_to(request.root).as_posix() if found and request.root else None,
-        digest=hashlib.sha256(found.read_bytes()).hexdigest() if found else None,
-        status=200 if found else NOT_FOUND,
+        served=found.relative_to(root).as_posix(),
+        digest=hashlib.sha256(found.read_bytes()).hexdigest(),
+        status=200,
         location=None,
         upstream=None,
     )

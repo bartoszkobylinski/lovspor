@@ -36,8 +36,10 @@ sys.path.insert(0, str(REPO))
 
 from tests.unit.staged_fixtures import (  # noqa: E402
     DROPS_ROBOTS,
+    FOREIGN_MAP,
     SYMLINKED_ROOT,
     WRONG_ROOT,
+    WRONG_SITE_ROOT,
     World,
     build_world,
     capture_form,
@@ -52,6 +54,8 @@ VARIANTS = {
     "proposed.json": None,
     "proposed-drops-robots.json": DROPS_ROBOTS,
     "proposed-wrong-root.json": WRONG_ROOT,
+    "proposed-wrong-site-root.json": WRONG_SITE_ROOT,
+    "proposed-foreign-map.json": FOREIGN_MAP,
     "proposed-symlinked-root.json": SYMLINKED_ROOT,
 }
 """Each committed fixture, and the release fragment the proposed Caddyfile imports for it."""

@@ -30,4 +30,6 @@ each configuration answers.
 | `proposed.json` | the migration's Caddyfile with the release's own fragment: the corpus from `<release>/corpus`, everything else from `<release>/site` |
 | `proposed-drops-robots.json` | the same, with `/robots.txt` gone from `@lovspor_corpus` — a corpus URL the old answers and the new does not |
 | `proposed-wrong-root.json` | the same, with the corpus root left on the old flat release — the right bytes from the wrong tree |
+| `proposed-wrong-site-root.json` | the same, with the site root left on the hand-written landing page — 200 with the right text, from the tree being retired |
+| `proposed-foreign-map.json` | the same, importing the OLD tree's redirect map — every response compares equal, and only Caddy's record of what was imported catches it |
 | `proposed-symlinked-root.json` | the same, with both roots reached through a symlink — identical answers today, a moved symlink away from serving something else |

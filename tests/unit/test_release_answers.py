@@ -349,3 +349,128 @@ class TestDescribingAnAnswer:
         )
 
         assert answer.describe() == "static_response 410 no file from no root"
+
+
+class TestJsonTheWalkCannotRead:
+    """Refused by name, never skipped: what a walk cannot read it cannot report on."""
+
+    def test_a_route_that_is_not_an_object(self) -> None:
+        with pytest.raises(UnroutableConfigError, match="not a route"):
+            answer_for(_routes(["a route"]), "/")  # type: ignore[list-item]
+
+    def test_a_handler_that_is_not_an_object(self) -> None:
+        with pytest.raises(UnroutableConfigError, match="not a handler"):
+            answer_for(_one_route(["file_server"]), "/")  # type: ignore[list-item]
+
+    def test_a_matcher_set_that_is_not_an_object(self) -> None:
+        with pytest.raises(UnroutableConfigError, match="not a matcher set"):
+            answer_for(_one_route([{"handler": "file_server"}], match=["/lov"]), "/")
+
+
+class TestHandlersWithAShapeCaddyDoesNotEmit:
+    def test_a_location_that_is_not_a_list_is_not_read(self) -> None:
+        config = _one_route(
+            [{"handler": "static_response", "status_code": 301, "headers": {"Location": "/x"}}]
+        )
+
+        answer = answer_for(config, "/")
+
+        assert answer is not None and answer.location is None
+
+    def test_upstreams_that_are_not_a_list_name_no_upstream(self) -> None:
+        config = _one_route([{"handler": "reverse_proxy", "upstreams": "127.0.0.1:8000"}])
+
+        answer = answer_for(config, "/")
+
+        assert answer is not None and answer.upstream is None
+
+    def test_a_status_code_that_is_not_a_number_is_a_404(self) -> None:
+        config = _one_route([{"handler": "static_response", "status_code": "410"}])
+
+        answer = answer_for(config, "/")
+
+        assert answer is not None and answer.status == NOT_FOUND
+
+    def test_a_proxied_url_is_answered_and_the_status_is_the_upstreams_to_give(self) -> None:
+        """The dry-run cannot know what the upstream replies; both sides get the same
+        placeholder, and `_answered` must not read it as a 404."""
+        config = _one_route([{"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:1"}]}])
+
+        answer = answer_for(config, "/")
+
+        assert answer is not None and answer.status == 200
+
+    def test_a_file_server_with_no_root_in_effect_answers_nothing(self) -> None:
+        answer = answer_for(_one_route([{"handler": "file_server"}]), "/")
+
+        assert answer is not None
+        assert answer.status == NOT_FOUND and answer.root is None
+
+    def test_a_file_server_whose_hide_is_not_a_list_hides_nothing(self, world: Path) -> None:
+        root = site(world, "lovspor")
+        config = _one_route(
+            [
+                {"handler": "vars", "root": root.as_posix()},
+                {"handler": "file_server", "hide": "index.html"},
+            ]
+        )
+
+        answer = answer_for(config, "/")
+
+        assert answer is not None and answer.status == 200
+
+    def test_a_hidden_bare_name_hides_the_file_wherever_it_sits(self, world: Path) -> None:
+        root = site(world, "lovspor")
+        config = _one_route(
+            [
+                {"handler": "vars", "root": root.as_posix()},
+                {"handler": "file_server", "hide": ["index.html"]},
+            ]
+        )
+
+        answer = answer_for(config, "/")
+
+        assert answer is not None and answer.status == NOT_FOUND
+
+    def test_a_file_server_that_hides_nothing_at_all_serves(self, world: Path) -> None:
+        assert hidden_paths({"handler": "file_server"}) == ()
+
+
+class TestAConsumedGroupIsSkipped:
+    def test_a_matched_group_member_that_answers_nothing_still_consumes_its_group(
+        self, world: Path
+    ) -> None:
+        """Caddy's ``handle`` blocks are mutually exclusive whether or not the chosen one
+        responds — so a later member of the same group must not be reached."""
+        root = site(world, "lovspor").as_posix()
+        config = _routes(
+            [
+                {"group": "g", "handle": [{"handler": "vars", "root": root}]},
+                {"group": "g", "handle": [{"handler": "static_response", "status_code": 410}]},
+            ]
+        )
+
+        assert answer_for(config, "/") is None
+
+    def test_a_route_outside_the_group_is_still_reached(self, world: Path) -> None:
+        root = site(world, "lovspor").as_posix()
+        config = _routes(
+            [
+                {"group": "g", "handle": [{"handler": "vars", "root": root}]},
+                {"group": "g", "handle": [{"handler": "static_response", "status_code": 410}]},
+                {"handle": [{"handler": "file_server"}]},
+            ]
+        )
+
+        answer = answer_for(config, "/")
+
+        assert answer is not None and answer.status == 200
+
+
+class TestUrlsWithAwkwardNames:
+    def test_a_leading_segment_is_not_eaten_character_by_character(self, world: Path) -> None:
+        """`lstrip` takes a character SET; a name starting with one of them would lose it."""
+        root = site(world, "lovspor")
+        (root / "X.txt").write_text("x\n", encoding="utf-8")
+
+        assert served_file(root, "/X.txt") == root / "X.txt"
