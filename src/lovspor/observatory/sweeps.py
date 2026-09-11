@@ -77,6 +77,13 @@ class SweepRun(BaseModel):
     #: that quietly stopped being asked would read as an archive with nothing
     #: missing, which is #151's silent zero one level up.
     sources_held: int = Field(default=0, ge=0)
+    #: Sources this sweep set out to observe and never asked, because the
+    #: register no longer listed them as activated when their turn came
+    #: (issue #221). Counted rather than quietly dropped from
+    #: ``active_sources``: a denominator that shrinks under the run makes a
+    #: deliberate deactivation and a source skipped by accident read as the
+    #: same clean record.
+    sources_withdrawn: int = Field(default=0, ge=0)
     captured: int = Field(ge=0)
     failed_fetches: int = Field(ge=0)
     unchanged: int = Field(ge=0)
@@ -108,18 +115,24 @@ class SweepRun(BaseModel):
 
     @model_validator(mode="after")
     def _outcomes_account_for_every_source(self) -> "SweepRun":
-        """Every active source ends in exactly one of completed, refused or held.
+        """Every active source ends in one of completed, refused, held, withdrawn.
 
         These are not independent counters. A record where they disagree
         describes a sweep that cannot have happened, and the disagreement is
         precisely what would let "196 of 198" sit above a refusal count that
         says otherwise.
         """
-        outcomes = self.sources_completed + self.sources_refused + self.sources_held
+        outcomes = (
+            self.sources_completed
+            + self.sources_refused
+            + self.sources_held
+            + self.sources_withdrawn
+        )
         if outcomes != self.active_sources:
             raise ValueError(
                 f"{self.sources_completed} completed + {self.sources_refused} refused "
-                f"+ {self.sources_held} held != {self.active_sources} active"
+                f"+ {self.sources_held} held + {self.sources_withdrawn} withdrawn "
+                f"!= {self.active_sources} active"
             )
         if self.sources_capped > self.sources_completed:
             raise ValueError(

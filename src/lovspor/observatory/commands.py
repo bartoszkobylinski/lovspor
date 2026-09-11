@@ -1017,6 +1017,7 @@ class _SweepTotals(NamedTuple):
     capped: int = 0
     held: int = 0
     deferred: int = 0
+    withdrawn: int = 0
 
     def plus(self, other: "_SweepTotals") -> "_SweepTotals":
         return _SweepTotals(
@@ -1027,7 +1028,17 @@ class _SweepTotals(NamedTuple):
             capped=self.capped + other.capped,
             held=self.held + other.held,
             deferred=self.deferred + other.deferred,
+            withdrawn=self.withdrawn + other.withdrawn,
         )
+
+
+class _Lane(NamedTuple):
+    """What every source's pass shares, so re-binding stays a per-source act."""
+
+    log: ObservationLog
+    state: CaptureState
+    client: httpx.Client
+    limit: int
 
 
 def _sweep_one(
@@ -1143,29 +1154,60 @@ def _sweep(root: ObservatoryRoot, limit: int) -> SweepRun:
     a timestamp, and a timestamp cannot say which invocation wrote something.
     Two sweeps overlapping — an operator running one by hand while the nightly
     fires — is enough to make one report the other's outcome as its own.
+
+    The register is bound once per source rather than once per run. A pass over
+    two hundred municipalities takes days — 141 hours on 2026-09-03 — and the
+    register loaded at the start is not the one an operator is looking at by
+    the end (issue #221).
     """
     started_at = datetime.now(UTC)
-    active = _active_sources()
+    active = [record.authority_id for record in _active_sources()]
     log, state = _sweep_inputs(root)
-    # Still bound once for the whole run, which is the defect of #221; the
-    # sweep needs a per-source rebind rather than a per-run one, and that is
-    # the next commit's work. Path-less on purpose until then, so this
-    # intermediate state behaves exactly as it always did.
-    fetcher = Fetcher(Register(_load(_registry_file())), log, httpx.Client())
+    lane = _Lane(log, state, httpx.Client(), limit)
     totals = _SweepTotals()
-    for record in active:
-        typer.echo(f"== {record.authority_id} {record.name}")
-        if _held(record, started_at):
-            totals = totals.plus(_SweepTotals(held=1))
-            continue
-        totals = totals.plus(_sweep_one(fetcher, log, record, state, limit))
-    if totals.refused:
-        typer.echo(f"sources refused: {totals.refused} of {len(active)}", err=True)
-    if totals.capped:
-        typer.echo(f"sources capped: {totals.capped} of {len(active)}", err=True)
-    if totals.held:
-        typer.echo(f"sources held under a verdict: {totals.held} of {len(active)}")
+    for authority_id in active:
+        totals = totals.plus(_sweep_source(authority_id, lane, started_at))
+    _echo_sweep_outcome(totals, len(active))
     return _record_sweep(root, started_at, len(active), totals)
+
+
+def _sweep_source(authority_id: str, lane: _Lane, now: datetime) -> _SweepTotals:
+    """One source's pass, bound to the register as it stands at its turn.
+
+    The scope of the run is the ids the register held when it began; which row
+    each id names is read again here. Growing the list under the loop would
+    make "197 of 198" a number nothing could check, and a source activated
+    mid-run loses nothing: the next sweep begins with it.
+    """
+    register = _bound_register()
+    record = register.activated(authority_id)
+    if record is None:
+        typer.echo(f"== {authority_id}")
+        typer.echo(f"  withdrawn: {authority_id} is no longer an activated source")
+        return _SweepTotals(withdrawn=1)
+    typer.echo(f"== {record.authority_id} {record.name}")
+    if _held(record, now):
+        return _SweepTotals(held=1)
+    fetcher = Fetcher(register, lane.log, lane.client)
+    return _sweep_one(fetcher, lane.log, record, lane.state, lane.limit)
+
+
+def _echo_sweep_outcome(totals: _SweepTotals, active: int) -> None:
+    """Every tally the run did not end clean on, each on its own stream.
+
+    A withdrawal is stdout rather than stderr: the operator asked for it, so it
+    is a fact about the run and not a fault in it. It is still said aloud — a
+    source that quietly stopped being swept reads as an archive with nothing
+    missing, which is #151's silent zero (issue #221).
+    """
+    if totals.refused:
+        typer.echo(f"sources refused: {totals.refused} of {active}", err=True)
+    if totals.capped:
+        typer.echo(f"sources capped: {totals.capped} of {active}", err=True)
+    if totals.held:
+        typer.echo(f"sources held under a verdict: {totals.held} of {active}")
+    if totals.withdrawn:
+        typer.echo(f"sources withdrawn mid-sweep: {totals.withdrawn} of {active}")
 
 
 def _held(record: SourceRecord, now: datetime) -> bool:
@@ -1222,10 +1264,11 @@ def _record_sweep(
         started_at=started_at,
         finished_at=datetime.now(UTC),
         active_sources=active,
-        sources_completed=active - totals.refused - totals.held,
+        sources_completed=active - totals.refused - totals.held - totals.withdrawn,
         sources_refused=totals.refused,
         sources_capped=totals.capped,
         sources_held=totals.held,
+        sources_withdrawn=totals.withdrawn,
         captured=totals.captured,
         failed_fetches=totals.failed,
         unchanged=totals.unchanged,
@@ -1308,6 +1351,7 @@ def _echo_last_sweep(run: SweepRun | None) -> None:
     typer.echo(f"  refused:    {run.sources_refused}")
     typer.echo(f"  capped:     {run.sources_capped}")
     typer.echo(f"  held:       {run.sources_held}")
+    typer.echo(f"  withdrawn:  {run.sources_withdrawn}")
     typer.echo(
         f"  captured:   {run.captured} | unchanged: {run.unchanged} | deferred: {run.deferred}"
     )

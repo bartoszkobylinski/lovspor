@@ -46,6 +46,7 @@ def _run(
     started: datetime = START,
     capped: int = 0,
     held: int = 0,
+    withdrawn: int = 0,
 ) -> SweepRun:
     """A valid run. `completed` defaults to whatever `refused` leaves over —
     the helper used to take it independently and could build a record with more
@@ -55,10 +56,11 @@ def _run(
         started_at=started,
         finished_at=started + timedelta(minutes=76),
         active_sources=2,
-        sources_completed=2 - refused - held if completed is None else completed,
+        sources_completed=(2 - refused - held - withdrawn if completed is None else completed),
         sources_refused=refused,
         sources_capped=capped,
         sources_held=held,
+        sources_withdrawn=withdrawn,
         captured=47,
         failed_fetches=1,
         unchanged=4218,
@@ -294,6 +296,7 @@ class TestDamageIsRefused:
             "sources_refused",
             "sources_capped",
             "sources_held",
+            "sources_withdrawn",
             "captured",
             "failed_fetches",
             "unchanged",
@@ -316,6 +319,7 @@ class TestDamageIsRefused:
             {"sources_completed": 2, "sources_refused": 1},
             {"sources_completed": 1, "sources_refused": 0},
             {"sources_held": 1},
+            {"sources_withdrawn": 1},
         ],
         ids=[
             "too-many-completed",
@@ -323,13 +327,15 @@ class TestDamageIsRefused:
             "too-many-outcomes",
             "missing-outcome",
             "held-on-top-of-a-full-account",
+            "withdrawn-on-top-of-a-full-account",
         ],
     )
     def test_inconsistent_source_totals_are_log_damage(
         self, root: ObservatoryRoot, updates: dict[str, int]
     ) -> None:
         """Counts are operational evidence, not independent counters: every
-        active source must end in exactly one of completed, refused or held."""
+        active source must end in exactly one of completed, refused, held or
+        withdrawn."""
         line = _run().model_dump(mode="json")
         line.update(updates)
         sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
@@ -388,6 +394,37 @@ class TestAHeldSourceIsCountedNotHidden:
         sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
 
         assert read_sweep_runs(sweeps_path(root))[0].sources_held == 0
+
+
+class TestAWithdrawnSourceIsCountedNotHidden:
+    """Issue #221. A sweep re-reads the register before each source, so a
+    source the operator deactivated while an earlier one was being swept is
+    never asked. It is counted rather than dropped from `active_sources`: a
+    denominator that quietly shrinks makes a deliberate deactivation and a
+    source skipped by accident read as the same clean record, which is #151's
+    silent zero at fleet scale."""
+
+    def test_a_withdrawn_source_accounts_for_one_active_source(self) -> None:
+        run = SweepRun.model_validate(_run(withdrawn=1).model_dump())
+        assert (run.sources_withdrawn, run.sources_completed, run.status) == (1, 1, "success")
+
+    def test_withdrawing_does_not_degrade_the_sweep(self) -> None:
+        """Nothing went wrong. The operator withdrew the source, the sweep
+        honoured it before sending a single request, and the next run's
+        register will not list it at all."""
+        assert sweep_status(active=2, refused=0, capped=0) == "success"
+
+    def test_a_run_written_before_withdrawal_telemetry_reads_back(
+        self, root: ObservatoryRoot
+    ) -> None:
+        """Every run already in the archive predates this counter, and the
+        accounting validator has to keep accepting them."""
+        line = _run().model_dump(mode="json")
+        del line["sources_withdrawn"]
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        assert read_sweep_runs(sweeps_path(root))[0].sources_withdrawn == 0
 
 
 class TestDeferredCandidatesAreCountedNotHidden:
