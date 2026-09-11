@@ -77,6 +77,7 @@ from lovspor.release.answers import (
     answer_for,
     hidden_paths,
     hosts,
+    is_servable_url,
     matcher_paths,
     matches_path,
     roots,
@@ -191,7 +192,14 @@ def symlinked_component(path: Path, boundary: Path) -> Path | None:
 
 
 def tree_urls(root: Path) -> tuple[str, ...]:
-    """Every URL the files under ``root`` offer; ``index.html`` is its directory."""
+    """Every URL the files under ``root`` offer; ``index.html`` is its directory.
+
+    A name that is not a servable URL is skipped rather than asked about:
+    the evaluator would refuse it, and a dry-run failing on its own
+    question says nothing about either configuration. ADR-0013's publish
+    check refuses such a slug, so a corpus that reached here cannot hold
+    one — this is the guarantee, not a silent repair of a broken tree.
+    """
     found: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
@@ -202,22 +210,26 @@ def tree_urls(root: Path) -> tuple[str, ...]:
             found.append("/" if parent == "." else f"/{parent}/")
         else:
             found.append(f"/{relative.as_posix()}")
-    return tuple(found)
+    return tuple(url for url in found if is_servable_url(url))
 
 
-def _asks_about(pattern: str) -> bool:
-    """A matcher this dry-run can turn into one URL: absolute, and wildcarded only at the end."""
-    return pattern.startswith("/") and "*" not in pattern[:-1]
+def _as_url(pattern: str) -> str | None:
+    """The one URL a matcher path can be asked about, or ``None`` when it is not one.
+
+    A wildcard anywhere but the end names a set no single URL stands for;
+    a trailing one names a namespace, and the probe asks inside it.
+    Whatever comes out is held to the evaluator's own rules, so a matcher
+    the dry-run cannot ask about is dropped here and never refused later.
+    """
+    if "*" in pattern[:-1]:
+        return None
+    url = pattern[:-1] + PROBE_SEGMENT if pattern.endswith("*") else pattern
+    return url if is_servable_url(url) else None
 
 
 def matcher_urls(patterns: Sequence[str]) -> tuple[str, ...]:
     """Each matcher path as a URL: literal as it stands, a trailing ``*`` as one probe."""
-    found = [
-        pattern[:-1] + PROBE_SEGMENT if pattern.endswith("*") else pattern
-        for pattern in patterns
-        if _asks_about(pattern)
-    ]
-    return tuple(found)
+    return tuple(url for pattern in patterns if (url := _as_url(pattern)) is not None)
 
 
 def candidate_urls(config: object) -> tuple[str, ...]:

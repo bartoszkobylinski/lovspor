@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.release.answers import Answer
+from lovspor.release.answers import Answer, is_servable_url
 from lovspor.release.caddy import FRAGMENT_ENV, Completed
 from lovspor.release.envelope import RECORD_NAME
 from lovspor.release.errors import RehearsalFailedError
@@ -609,3 +609,30 @@ class TestTheTwoMessagesTheRollbackComposes:
         taken = (("/a", "one"),)
 
         assert _changed(taken, taken) == "nothing"
+
+
+class TestTheDeriversAskNothingTheEvaluatorRefuses:
+    """One predicate, both ends: a dry-run must never fail on its own question."""
+
+    @pytest.mark.parametrize("name", ["q?x.html", "a%2e.html", "b#c.html", "d\\e.html"])
+    def test_a_file_name_that_was_never_a_url_is_skipped(self, world: Path, name: str) -> None:
+        (corpus_of(world) / name).write_text("x\n", encoding="utf-8")
+
+        assert all(is_servable_url(url) for url in tree_urls(corpus_of(world)))
+        assert f"/{name}" not in tree_urls(corpus_of(world))
+
+    def test_every_url_a_tree_offers_is_one_the_evaluator_answers(self, world: Path) -> None:
+        found = tree_urls(corpus_of(world))
+
+        assert found
+        assert all(is_servable_url(url) for url in found)
+
+    @pytest.mark.parametrize("pattern", ["//etc/passwd", "/lov/../x", "/lov?x", "*", "lov"])
+    def test_a_matcher_that_is_not_a_servable_url_is_dropped(self, pattern: str) -> None:
+        assert matcher_urls((pattern,)) == ()
+
+    def test_every_candidate_of_the_old_configuration_is_askable(self, world: Path) -> None:
+        found = candidate_urls(load_adapted("previous.json", world))
+
+        assert found
+        assert all(is_servable_url(url) for url in found)

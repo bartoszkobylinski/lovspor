@@ -36,7 +36,7 @@ import hashlib
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
@@ -51,6 +51,22 @@ _TRANSPARENT = frozenset({"headers", "encode", "subroute", "vars"})
 _KNOWN_MATCHERS = frozenset({"path", "host"})
 """``host`` is satisfied unconditionally — both Caddyfiles derive it from the same
 ``{$LOVSPOR_DOMAIN}`` placeholder, and :func:`hosts` is what asserts they agree."""
+_NEVER_IN_A_PATH = (
+    ("%", "percent-encoding is not decoded here"),
+    ("\\", "a backslash is not a path separator here"),
+    ("?", "a query string is not part of the path"),
+    ("#", "a fragment is not part of the path"),
+)
+"""Characters that end the question rather than being interpreted.
+
+Decoding ``%2e%2e%2f`` would make this module a URL parser and give one
+tree two names; taking it literally would let a traversal through. A
+backslash separates nothing on this host and is the usual way to smuggle
+one past a POSIX-only check. A query and a fragment are not part of the
+path Caddy matches or the file it serves. None of them can appear in a
+URL the dry-run derives — ADR-0013's publish check refuses such a slug —
+so refusing costs nothing and guessing would cost containment.
+"""
 
 
 class Answer(BaseModel):
@@ -149,13 +165,17 @@ def _proxy(handler: dict[str, object]) -> Answer:
 def served_file(root: Path, url: str) -> Path | None:
     """The file Caddy's ``file_server`` resolves ``url`` to under ``root``, or ``None``.
 
-    ``removeprefix`` and not ``lstrip``: the latter takes a *set* of
-    characters, so it would also eat a leading path segment that happens
-    to start with one of them.
+    Joined segment by segment from a path :func:`request_path` has already
+    accepted — never ``root / url``, which Python resolves to ``url``
+    alone the moment it is absolute — and proven contained afterwards, so
+    a name that passes the rules and a symlink that does not both stop
+    here. A trailing slash is the one thing resolved rather than refused:
+    it names a directory, and serving its index is Caddy's own
+    ``file_server`` behaviour, not a rewrite of the URL.
     """
-    target = root / url.removeprefix("/")
+    target = _inside(root, root.joinpath(*request_path(url)), url)
     if target.is_dir():
-        target = target / INDEX_FILE
+        target = _inside(root, target / INDEX_FILE, url)
     return target if target.is_file() else None
 
 
@@ -253,16 +273,73 @@ def _servers(config: object) -> Iterator[dict[str, object]]:
             yield server
 
 
-def _checked(url: str) -> str:
-    """A URL the dry-run will ask about: absolute, and not climbing out of any root."""
-    if not url.startswith("/") or ".." in PurePosixPath(url).parts:
-        raise UnroutableConfigError(f"not a served URL: {url!r}")
-    return url
+def broken_url_rule(url: str) -> str | None:
+    """Which rule ``url`` breaks as a path this dry-run can ask about, or ``None``.
+
+    One rule set, read by the evaluator to refuse and by ``staged``'s URL
+    derivers to skip, so nothing the dry-run asks is something it would
+    then decline to answer. Everything outside the shape is refused
+    rather than normalised: the two configurations' answers are compared
+    *keyed by URL*, so two spellings that collapse to one key would hide
+    a difference behind a normalisation this model invented.
+    """
+    if not url.startswith("/"):
+        return "a served URL is absolute"
+    if url.startswith("//"):
+        return "a second leading slash is a network-path reference, not a path"
+    for character, rule in _NEVER_IN_A_PATH:
+        if character in url:
+            return rule
+    return _broken_segment(url.split("/")[1:])
+
+
+def _broken_segment(segments: list[str]) -> str | None:
+    """A trailing empty segment is the directory form; every other oddity is refused."""
+    if "" in segments[:-1]:
+        return "an empty path segment"
+    if ".." in segments:
+        return ".. climbs out of the root"
+    if "." in segments:
+        return ". is not a path segment"
+    return None
+
+
+def is_servable_url(url: str) -> bool:
+    """Whether ``url`` is a path this dry-run can ask either configuration about."""
+    return broken_url_rule(url) is None
+
+
+def request_path(url: str) -> list[str]:
+    """``url``'s segments, or :class:`UnroutableConfigError` naming it and the rule it broke."""
+    broken = broken_url_rule(url)
+    if broken is not None:
+        raise UnroutableConfigError(f"not a served URL ({broken}): {url!r}")
+    return url.split("/")[1:]
+
+
+def contained(root: Path, target: Path) -> bool:
+    """Whether ``target`` is ``root`` or under it, with both sides fully resolved.
+
+    Normalised containment, never a string prefix: ``lovspor-current``
+    starts with ``lovspor`` and is a different tree. Resolving both sides
+    is also what keeps the OLD configuration legitimate — its root *is* a
+    symlink — while a symlink inside a root that lands elsewhere is not.
+    """
+    anchor, resolved = root.resolve(), target.resolve()
+    return anchor == resolved or anchor in resolved.parents
+
+
+def _inside(root: Path, target: Path, url: str) -> Path:
+    """``target``, proven to be inside ``root``; a path that escapes ends the question."""
+    if not contained(root, target):
+        raise UnroutableConfigError(f"not a served URL (it resolves outside {root}): {url!r}")
+    return target
 
 
 def answer_for(config: object, url: str) -> Answer | None:
     """What ``config`` answers for ``url``; ``None`` when no route reaches a response."""
-    request = _Request(_checked(url))
+    request_path(url)
+    request = _Request(url)
     for server in _servers(config):
         answer = _walk(server.get("routes"), request)
         if answer is not None:

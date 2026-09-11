@@ -23,8 +23,10 @@ from lovspor.release.answers import (
     NOT_FOUND,
     Answer,
     answer_for,
+    contained,
     hidden_paths,
     hosts,
+    is_servable_url,
     matcher_paths,
     matches_path,
     roots,
@@ -209,6 +211,19 @@ class TestTheEvaluatorsOwnRules:
     def test_a_url_that_climbs_out_of_the_root_is_refused(self, proposed: object) -> None:
         with pytest.raises(UnroutableConfigError, match="not a served URL"):
             answer_for(proposed, "/lov/../../etc/passwd")
+
+    def test_an_absolute_path_disguised_as_a_url_is_refused(self, world: Path) -> None:
+        """A second leading slash must not make the root-relative target absolute."""
+        root = site(world, "lovspor")
+        config = _one_route(
+            [
+                {"handler": "vars", "root": root.as_posix()},
+                {"handler": "file_server"},
+            ]
+        )
+
+        with pytest.raises(UnroutableConfigError, match="not a served URL"):
+            answer_for(config, "//etc/passwd")
 
     def test_only_the_first_matching_route_of_a_group_runs(self, world: Path) -> None:
         """``handle`` blocks are mutually exclusive; Caddy marks them with one group name."""
@@ -482,3 +497,96 @@ class TestUrlsWithAwkwardNames:
         (root / "X.txt").write_text("x\n", encoding="utf-8")
 
         assert served_file(root, "/X.txt") == root / "X.txt"
+
+
+class TestWhatCountsAsAUrlToAskAbout:
+    """One rule set, stated once: the evaluator refuses every input the derivers skip.
+
+    The dry-run's URL set comes from filenames and from Caddy matcher
+    literals, so an input outside that shape is not a URL this model can
+    answer — it is a question about something else. Each refusal names the
+    input and the rule it broke, and each shape below reaches an answer
+    only by escaping the root the answer would claim to come from.
+    """
+
+    @pytest.fixture
+    def rooted(self, world: Path) -> object:
+        return _one_route(
+            [
+                {"handler": "vars", "root": site(world, "lovspor").as_posix()},
+                {"handler": "file_server"},
+            ]
+        )
+
+    @pytest.mark.parametrize(
+        ("url", "rule"),
+        [
+            ("", "absolute"),
+            ("lov/nl-1/", "absolute"),
+            ("http://lovspor.test/lov/nl-1/", "absolute"),
+            ("//etc/passwd", "network-path reference"),
+            ("/lov/../../etc/passwd", "climbs out"),
+            ("/lov/./nl-1/", "not a path segment"),
+            ("/lov//nl-1/", "empty path segment"),
+            ("/lov/%2e%2e%2fetc/passwd", "percent-encoding"),
+            ("/lov\\..\\..\\etc/passwd", "backslash"),
+            ("/lov/nl-1/?x=1", "query string"),
+            ("/lov/nl-1/#top", "fragment"),
+        ],
+    )
+    def test_a_shape_that_is_not_a_path_is_refused_by_name(
+        self, rooted: object, url: str, rule: str
+    ) -> None:
+        with pytest.raises(UnroutableConfigError) as caught:
+            answer_for(rooted, url)
+
+        assert "not a served URL" in str(caught.value)
+        assert rule in str(caught.value)
+        assert repr(url) in str(caught.value)
+
+    @pytest.mark.parametrize("url", ["/", "/robots.txt", "/lov/nl-19140101-001/", "/en/"])
+    def test_the_shapes_the_derivers_produce_are_asked(self, previous: object, url: str) -> None:
+        assert answer_for(previous, url) is not None
+
+    def test_a_trailing_slash_is_the_one_thing_resolved_rather_than_refused(
+        self, world: Path
+    ) -> None:
+        """Caddy's own ``file_server`` serves a directory's index; that is not a URL rewrite,
+        and ``/lov`` and ``/lov/`` stay two different URLs to every matcher."""
+        root = site(world, "lovspor-current")
+
+        assert served_file(root, "/lov/nl-19140101-001/") == root / LAW_FILE
+        assert is_servable_url("/lov") and is_servable_url("/lov/")
+
+
+class TestContainment:
+    def test_a_symlink_inside_the_root_that_lands_outside_it_is_refused(self, world: Path) -> None:
+        """Name-level containment is not containment: the join stays under the root and the
+        resolution does not. Proven after resolving both sides, never by string prefix."""
+        root = site(world, "lovspor")
+        (root / "escape.txt").symlink_to(world / "www" / "lovspor-current" / "robots.txt")
+
+        with pytest.raises(UnroutableConfigError) as caught:
+            served_file(root, "/escape.txt")
+
+        assert "resolves outside" in str(caught.value)
+
+    def test_a_sibling_root_sharing_a_name_prefix_is_outside(self, world: Path) -> None:
+        """``/var/www/lovspor-current`` starts with ``/var/www/lovspor`` and is another tree."""
+        root = site(world, "lovspor")
+        neighbour = site(world, "lovspor-current") / "robots.txt"
+
+        assert not contained(root, neighbour)
+        assert contained(root, root / "index.html")
+
+    def test_the_root_itself_is_inside_itself(self, world: Path) -> None:
+        root = site(world, "lovspor")
+
+        assert contained(root, root)
+
+    def test_a_root_that_is_a_symlink_still_contains_its_own_files(self, world: Path) -> None:
+        """The OLD configuration serves through ``lovspor-current``; resolving both sides is
+        what keeps that legitimate while the escape above is not."""
+        root = site(world, "lovspor-current")
+
+        assert contained(root, root / "robots.txt")
