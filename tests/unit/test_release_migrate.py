@@ -1612,6 +1612,23 @@ class TestSymlinksAtTheNamesItWrites:
         assert droplet.host.previous_drop_in.is_symlink()
         assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
 
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_a_symlink_at_the_absent_record_name_is_neither_written_nor_trusted(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """The alternate drop-in record is reserved on completion just like the byte backup."""
+        self._staged(droplet)
+        elsewhere = droplet.host.absent_drop_in.with_name("kept-absence-elsewhere")
+        if not dangling:
+            elsewhere.write_text("someone else's", encoding="utf-8")
+        droplet.host.absent_drop_in.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
+        assert str(caught.value).startswith(f"{droplet.host.absent_drop_in} is a symlink; ")
+        assert droplet.host.absent_drop_in.is_symlink()
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
+
     def test_a_dangling_symlink_at_the_marker_is_removed_and_reported_removed(
         self, droplet: Droplet
     ) -> None:
@@ -1644,6 +1661,26 @@ class TestSymlinksAtTheNamesItWrites:
         assert backup.is_symlink() and elsewhere.is_file()
         assert live_release(droplet.plane) == droplet.a
 
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_the_rollback_refuses_a_symlink_at_the_absent_record_name(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """The no-drop-in record is a rollback source, so its name is never followed."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        backup = droplet.host.absent_drop_in
+        elsewhere = backup.with_name("absence-elsewhere")
+        if not dangling:
+            elsewhere.write_bytes(backup.read_bytes())
+        backup.unlink()
+        backup.symlink_to(elsewhere)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value).startswith(f"{backup} is a symlink, not the backup ")
+        assert backup.is_symlink()
+        assert live_release(droplet.plane) == droplet.a
+
     @pytest.mark.parametrize("which", ["previous_caddyfile", "previous_drop_in"])
     @pytest.mark.parametrize("dangling", [False, True])
     def test_retire_refuses_a_symlink_at_either_backup_name(
@@ -1654,6 +1691,25 @@ class TestSymlinksAtTheNamesItWrites:
         _migrate(droplet)
         backup: Path = getattr(droplet.host, which)
         elsewhere = backup.with_name("elsewhere")
+        if not dangling:
+            elsewhere.write_bytes(backup.read_bytes())
+        backup.unlink()
+        backup.symlink_to(elsewhere)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            retire_preview(droplet.plane, droplet.host)
+        assert str(caught.value) == f"{backup} is a symlink, not the backup; not removed"
+        assert backup.is_symlink()
+
+    @pytest.mark.parametrize("dangling", [False, True])
+    def test_retire_refuses_a_symlink_at_the_absent_record_name(
+        self, droplet: Droplet, dangling: bool
+    ) -> None:
+        """Retirement protects the alternate rollback record from symlink removal too."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        backup = droplet.host.absent_drop_in
+        elsewhere = backup.with_name("absence-elsewhere")
         if not dangling:
             elsewhere.write_bytes(backup.read_bytes())
         backup.unlink()
