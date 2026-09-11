@@ -18,7 +18,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from lovspor.release import migrate
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, adapt, config_pair
@@ -3029,12 +3028,16 @@ class TestReconcileWindow:
         _assert_pre_envelope(droplet)
         assert reconcile(droplet.plane, host=droplet.host).live is None
 
-    def test_an_empty_release_var_is_named_back_and_never_marked(self, droplet: Droplet) -> None:
-        """R = D carrying an empty ``lovspor_release`` is the *reloaded* row, whose
-        resolution is to write the marker without asking. The running configuration
-        is read off Caddy's admin API, so its release var is untrusted input: the
-        marker refuses a name that is not a release id — never steering a later
-        prune or rollback — and the refusal quotes what was read, empty and all."""
+    def test_an_empty_release_var_names_no_release_and_is_never_marked(
+        self, droplet: Droplet
+    ) -> None:
+        """R = D carrying an empty ``lovspor_release`` — a Caddyfile placeholder that
+        expanded to nothing — names no release at all, so the host reads as the
+        pre-envelope row and nothing is written. The running configuration is read
+        off Caddy's admin API, so its release var is untrusted input, and before
+        issue #271 the empty string was taken for a name: the *reloaded* row handed
+        it to the marker, which refused it as a raw ``ValidationError`` — a traceback
+        on the production droplet, where the operator is owed a named refusal."""
         config = toy_adapt(
             droplet.host.caddyfile_source,
             {FRAGMENT_ENV: str(droplet.releases / droplet.a / FRAGMENT_NAME)},
@@ -3047,9 +3050,11 @@ class TestReconcileWindow:
             runner=Sabotaged(droplet.caddy, ("caddy", "adapt"), canned),
         )
 
-        with pytest.raises(ValidationError, match="not a release id: ''"):
-            reconcile(plane)
+        report = reconcile(plane)
 
+        assert report.situation == Situation.reconciled
+        assert report.live is None and report.action == "none"
+        assert report.triple.startswith("R=(none, ")
         assert read_marker(droplet.releases) is None
 
     def test_a_failed_cutover_leaves_the_staged_row_for_reconcile(self, droplet: Droplet) -> None:

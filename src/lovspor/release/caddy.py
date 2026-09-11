@@ -34,7 +34,7 @@ from typing import NamedTuple, Protocol
 import httpx
 from pydantic import BaseModel, ConfigDict
 
-from lovspor.release.envelope import RELEASE_VAR
+from lovspor.release.envelope import RELEASE_VAR, is_release_id
 from lovspor.release.errors import CommitRefusedError, ControlPlaneError, UnobservableError
 
 FRAGMENT_ENV = "LOVSPOR_RELEASE_FRAGMENT"
@@ -173,8 +173,14 @@ def canonical_hash(subtree: object) -> str:
 
 def _release_vars(node: object) -> Iterator[str]:
     if isinstance(node, dict):
-        if node.get("handler") == "vars" and isinstance(node.get(RELEASE_VAR), str):
-            yield node[RELEASE_VAR]
+        found = node.get(RELEASE_VAR)
+        # The running configuration is read back off Caddy's own admin API, so this
+        # var is untrusted input: a placeholder that expanded to nothing, or a hand
+        # edit, leaves it present and not a release id. Only an id names a release —
+        # the reading the fragment's own parser takes — so nothing the marker would
+        # refuse can leave here and reach it (issue #271).
+        if node.get("handler") == "vars" and isinstance(found, str) and is_release_id(found):
+            yield found
         for value in node.values():
             yield from _release_vars(value)
     elif isinstance(node, list):
@@ -212,7 +218,7 @@ def _routes_subtree(route: dict[str, object]) -> object:
 
 
 def config_pair(config: object) -> ConfigPair:
-    """The pair of an adapted or running configuration; no var means no release."""
+    """The pair of an adapted or running configuration; no var, or no id in it, means no release."""
     named = [(set(_release_vars(route)), route) for route in _site_routes(config)]
     named = [(ids, route) for ids, route in named if ids]
     if not named:
