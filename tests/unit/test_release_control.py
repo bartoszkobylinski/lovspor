@@ -748,6 +748,38 @@ class TestForeign:
             reconcile(host.plane, "abandon")
         assert str(caught.value) == "no previous fragment to restore: nothing was live before"
 
+    def test_a_release_var_that_is_not_an_id_is_refused_by_name_not_by_traceback(
+        self, live_a: Host
+    ) -> None:
+        """A hand-edited ``vars`` line whose value is no longer a release id.
+
+        R and D agree on it, which before issue #271 put the host on the
+        *reloaded* row and handed the marker a name pydantic refuses --
+        a raw ``ValidationError`` past the command layer's refusal families,
+        reaching the operator as a traceback in the middle of a half-done
+        cutover. The var names no release, so the row is *foreign*: every
+        command refuses in one line and the marker is left alone.
+        """
+        edited = live_a.fragment_of(live_a.a).replace(
+            f"vars lovspor_release {live_a.a}\n", 'vars lovspor_release ""\n'
+        )
+        live_a.plane.fragment.write_text(edited, encoding="utf-8")
+        live_a.caddy.restart()
+        before = live_a.snapshot()
+
+        triple = read_triple(live_a.plane)
+
+        assert triple.running == triple.disk
+        assert triple.running.release_id is None
+        assert situation(triple) == Situation.foreign
+        for refused in (live_release, rollback, prune):
+            with pytest.raises(UnreconciledError, match="host is foreign"):
+                refused(live_a.plane)  # type: ignore[operator]
+        with pytest.raises(UnreconciledError, match="host is foreign"):
+            reconcile(live_a.plane)
+        assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
+        assert live_a.snapshot() == before
+
     def test_admin_unreachable_refuses_reconcile_with_d_and_m_printed(self, live_a: Host) -> None:
         live_a.caddy.admin_up = False
 
