@@ -533,6 +533,24 @@ jobs:
           sparse-checkout: scripts/ci
           persist-credentials: false
 
+      # Issue #272: a job that died with its runner is recorded as `failure`
+      # while the step it was running is still `in_progress` — it never
+      # completed and never failed. Reporting that as "BLOCKED before the tests
+      # ran" reads as a verdict about the diff; on PR #269 that misreading cost
+      # about three hours. The classifier is mechanical, so the message can be.
+      - name: Classify the lane failure
+        id: classify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --paginate > "$RUNNER_TEMP/jobs.json"
+          python3 scripts/ci/classify_lane_failure.py \
+            --jobs "$RUNNER_TEMP/jobs.json" \
+            --lane codex-author \
+            --lane codex-tests >> "$GITHUB_OUTPUT"
+
       - name: Report a codex-tests job that never reached its own escalation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -552,17 +570,32 @@ jobs:
             fi
           done
           gh pr edit "$PR" --add-label "needs-human:pipeline"
-          {
-            echo "codex-tests BLOCKED and reported nothing itself — the job ended"
-            echo "without reaching its own escalation steps, which is what happens"
-            echo "when the agent lane's runner goes away mid-job."
-            echo ""
-            echo "This is a pipeline failure, not evidence about the implementation."
-            echo "Check the runner before re-reading the diff:"
-            echo "\`gh api repos/${{ github.repository }}/actions/runners\`"
-            echo ""
-            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          } > "$RUNNER_TEMP/lane-escalation.md"
+          if [ "${{ steps.classify.outputs.kind }}" = "infrastructure" ]; then
+            {
+              echo "codex-tests BLOCKED by an INFRASTRUCTURE failure — the machine, not the diff."
+              echo ""
+              echo "Job \`${{ steps.classify.outputs.job }}\` was recorded as failed while its step"
+              echo "\`${{ steps.classify.outputs.step }}\` was still running: that step never completed"
+              echo "and never failed, which is what a runner going away mid-job looks like (#272)."
+              echo ""
+              echo "Nothing here is evidence about the implementation. Check the machine, then re-run:"
+              echo "\`gh api repos/${{ github.repository }}/actions/runners\`"
+              echo "\`gh run rerun ${{ github.run_id }} --failed\`"
+              echo ""
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > "$RUNNER_TEMP/lane-escalation.md"
+          else
+            {
+              echo "codex-tests BLOCKED and reported nothing itself — the job ended"
+              echo "without reaching its own escalation steps."
+              echo ""
+              echo "This is a pipeline failure, not evidence about the implementation."
+              echo "Check the runner before re-reading the diff:"
+              echo "\`gh api repos/${{ github.repository }}/actions/runners\`"
+              echo ""
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > "$RUNNER_TEMP/lane-escalation.md"
+          fi
           scripts/ci/pr_sticky_comment.sh pipeline "$PR" "$RUNNER_TEMP/lane-escalation.md"
 
   mutation:

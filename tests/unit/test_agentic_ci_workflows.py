@@ -1093,3 +1093,60 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
 
         assert job["if"] == "${{ !cancelled() && needs.remediate.outputs.run == 'true' }}"
         assert self._agent()["outputs"]["run"] == "${{ steps.cycle.outputs.run }}"
+
+
+class TestADeadMachineIsNotAVerdictOnTheDiff:
+    """Issue #272, option 4. Both deaths on PR #269 were reported as
+    `codex-tests BLOCKED before the tests ran`, which reads as a claim about the
+    pull request. The tests had in fact run; the machine stopped. The signature
+    is mechanical — the job is `failure` while its own step is still
+    `in_progress` — so the message can be mechanical too."""
+
+    JOB = "codex-tests-report"
+
+    def _steps(self) -> list[dict[str, Any]]:
+        return _steps("pr-pipeline.yml", self.JOB)
+
+    def test_the_reporter_classifies_before_it_speaks(self) -> None:
+        names = [step.get("name") for step in self._steps()]
+        classify = _named_step(self._steps(), "Classify the lane failure")
+
+        assert "scripts/ci/classify_lane_failure.py" in classify["run"]
+        assert "--lane codex-author" in classify["run"]
+        assert "--lane codex-tests" in classify["run"]
+        assert classify["id"] == "classify"
+        assert names.index("Classify the lane failure") < names.index(
+            "Report a codex-tests job that never reached its own escalation"
+        )
+
+    def test_the_classifier_is_reachable_from_the_sparse_checkout(self) -> None:
+        """The reporter checks out `scripts/ci` only. A classifier outside that
+        path would make this job die on a missing file — the silent BLOCKED of
+        issue #193, reintroduced by the fix for #272."""
+        checkout = _named_step(self._steps(), "Check out the escalation helper")
+
+        assert checkout["with"]["sparse-checkout"] == "scripts/ci"
+        assert (_WORKFLOWS.parents[1] / "scripts" / "ci" / "classify_lane_failure.py").exists()
+
+    def test_an_infrastructure_death_is_reported_as_the_machine_not_the_diff(self) -> None:
+        report = _named_step(
+            self._steps(), "Report a codex-tests job that never reached its own escalation"
+        )["run"]
+
+        assert "steps.classify.outputs.kind" in report
+        assert "INFRASTRUCTURE failure — the machine, not the diff" in report
+        assert "steps.classify.outputs.job" in report
+        assert "steps.classify.outputs.step" in report
+        # The operator's next two moves, in the comment they are already reading.
+        assert "gh api repos/${{ github.repository }}/actions/runners" in report
+        assert "gh run rerun ${{ github.run_id }} --failed" in report
+
+    def test_an_ordinary_failure_keeps_the_old_message(self) -> None:
+        """Only the death-with-the-runner case changes wording. A lane that
+        failed on its own still reports as a pipeline failure."""
+        report = _named_step(
+            self._steps(), "Report a codex-tests job that never reached its own escalation"
+        )["run"]
+
+        assert "codex-tests BLOCKED and reported nothing itself" in report
+        assert 'gh pr edit "$PR" --add-label "needs-human:pipeline"' in report
