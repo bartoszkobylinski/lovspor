@@ -311,6 +311,17 @@ Two rules follow, and they are pinned by tests:
   round is preserved as artifact `agent-work-<sha>` instead of being discarded.
 - Remediation escalates on `failure() || cancelled()`, since a job killed by its
   ceiling is not a failed job.
+- **A dead machine is not a verdict on the diff (issue #272).** Before it writes
+  anything, `codex-tests-report` reads the run's jobs payload and asks
+  `scripts/ci/classify_lane_failure.py` which kind of failure this was. A lane job
+  recorded as `failure` while one of its own steps is still `in_progress` never
+  reached a verdict — that is a runner going away mid-job, and the comment says so,
+  names the job and the frozen step, and gives the two next moves (`gh api
+  …/actions/runners`, `gh run rerun <id> --failed`). A lane that failed on a
+  completed step keeps the old pipeline-failure wording. Both still label
+  `needs-human:pipeline`. Until this existed, both deaths on PR #269 were reported
+  as `codex-tests BLOCKED before the tests ran` — the tests had run; the machine
+  stopped.
 - An agent job that dies **with its runner** is reported from outside it.
   Both escalations are steps of that job, and a step cannot run on a runner that
   no longer exists — so no in-job condition can cover the case (issue #193). On
