@@ -45,6 +45,16 @@ _LOAD_REFUSED = (
 )
 
 
+UMASK_MODE = 0o644
+"""The mode a socket gets when the admin address carries no ``|mode`` suffix.
+
+Caddy takes it from the umask, so the real value is the unit's; the fake
+pins umask 022's so a test asserting *not* ``0660`` says the same thing on
+every machine. The point the fixtures make is that the mode is not the
+one the suffix would have set, never which mode it is instead.
+"""
+
+
 class AdaptError(Exception):
     """The toy adapter refuses the Caddyfile, as ``caddy adapt`` would."""
 
@@ -245,6 +255,8 @@ class FakeCaddy:
         self.admin_up = True
         self.fail_reloads = 0
         self.knows_mode_suffix = True
+        self.socket_users: set[str] = set()
+        """Identities other than the caller's that can open the admin socket."""
         self.calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
         self.reloads = 0
         self.restarts = 0
@@ -263,11 +275,26 @@ class FakeCaddy:
                 return self._reload(Path(path), env, to)
             case ["systemctl", *rest]:
                 return self._systemctl(rest, argv)
+            case ["sudo", "-u", user, "curl", *rest]:
+                return self._as_user(user, rest)
         raise AssertionError(f"unexpected command: {argv}")
+
+    def _as_user(self, user: str, argv: list[str]) -> Completed:
+        """``curl --unix-socket`` run as another identity; only a listed user gets through.
+
+        A socket the user may not open refuses the connection, which is
+        what ``curl`` reports as exit 7 — the same exit as a socket that
+        is not there, since neither answered.
+        """
+        wanted = argv[argv.index("--unix-socket") + 1] if "--unix-socket" in argv else ""
+        listening = _socket_path(self.admin_address)
+        if listening is None or str(listening) != wanted or user not in self.socket_users:
+            return Completed(7, "", f"curl: (7) Couldn't connect to server ({wanted})")
+        return Completed(0, json.dumps(self.running), "")
 
     def _systemctl(self, words: list[str], argv: Sequence[str]) -> Completed:
         match words:
-            case ["reload", "caddy"]:
+            case ["reload", _]:
                 return self._systemctl_reload()
             case ["restart", _]:
                 return self._systemctl_restart()
@@ -307,11 +334,24 @@ class FakeCaddy:
         why it is the offline rollback's last step.
         """
         done = self._adapt(self.caddyfile, {})
-        if done.returncode != 0 or self._apply(json.loads(done.stdout)) is not None:
+        if done.returncode != 0:
+            return Completed(1, "", _JOB_FAILED)
+        self._stop()
+        if self._apply(json.loads(done.stdout)) is not None:
             return Completed(1, "", _JOB_FAILED)
         self.admin_up = True
         self.restarts += 1
         return Completed(0, "", "")
+
+    def _stop(self) -> None:
+        """The process exits: Go unlinks its socket and ``RuntimeDirectory=`` clears its directory.
+
+        So a restart never inherits a mode or a group a hand set on the
+        file that was there — the whole point of the creation-mode suffix.
+        """
+        socket = _socket_path(self.admin_address)
+        if socket is not None:
+            socket.unlink(missing_ok=True)
 
     def _systemctl_reload(self) -> Completed:
         """The unit's ``ExecReload=`` line: the composed file, delivered where the line says."""
@@ -361,8 +401,7 @@ class FakeCaddy:
                 socket.touch()
             except OSError as error:
                 return f"Error: loading new config: admin: listen unix {socket}: {error}"
-            if mode is not None:
-                socket.chmod(mode)
+            socket.chmod(mode if mode is not None else UMASK_MODE)
         previous = _socket_path(self.admin_address)
         if previous is not None and address != self.admin_address:
             # Go's net.UnixListener unlinks its socket file on Close.
