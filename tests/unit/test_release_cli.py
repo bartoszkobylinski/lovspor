@@ -1343,15 +1343,33 @@ class TestRehearseUrls:
         assert result.exit_code == 2
 
     def test_the_refusal_names_both_options(self, tmp_path: Path) -> None:
-        """Short substrings only: rich wraps the panel at the runner's width."""
+        """Asserted on the exception, never on the rendered panel.
+
+        Rich lays a ``BadParameter`` out in a box at the console's width and
+        splits a token that does not fit *mid-word*, so ``--previous-caddyfile``
+        is only contiguous while the console happens to be wide enough. Neither
+        stripping ANSI nor rejoining the wrapped lines puts it back, because the
+        break is inside the word. The message is a property of the refusal; the
+        box is a property of the terminal, and only the first is under test.
+        """
+        paths = self._paths(tmp_path)
+
+        with pytest.raises(typer.BadParameter) as caught:
+            commands.rehearse_urls_command(
+                RELEASE_ID, paths["releases"], paths["previous"], paths["previous"]
+            )
+
+        assert caught.value.message == (
+            "--previous-caddyfile and --caddyfile-source name one configuration; "
+            "the dry-run would compare it with itself"
+        )
+
+    def test_the_refusal_the_operator_sees_is_that_refusal(self, tmp_path: Path) -> None:
+        """The exit code is the runner's business; the wording is the exception's."""
         paths = self._paths(tmp_path)
         paths["source"] = paths["previous"]
 
-        result = self._invoke(RELEASE_ID, paths)
-
-        assert "--previous-caddyfile" in result.output
-        assert "--caddyfile-source" in result.output
-        assert "itself" in result.output
+        assert self._invoke(RELEASE_ID, paths).exit_code == 2
 
     def test_two_distinct_files_are_accepted(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
