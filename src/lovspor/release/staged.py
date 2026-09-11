@@ -16,13 +16,21 @@ is reloaded, and nothing on disk is written — which the rehearsal itself
 asserts at the end.
 
 What "answers" means is :mod:`answers`' definition; what the dry-run does
-with it is the ADR's four assertions, one step each, over three classes of
-URL. The URL set is derived from the *old* configuration — every file
+with it is the ADR's four assertions, over three classes of URL, and two
+preconditions those assertions rest on. Each is one step, in this order.
+The URL set is derived from the *old* configuration — every file
 under the trees its own adapted routes name, plus every path its own
 matchers name — never from the new one, which would make the comparison
 circular: a new configuration that stopped speaking about ``/robots.txt``
 would simply stop being asked about it.
 
+* ``staged.validate`` — the envelope is complete and Caddy accepts both
+  files; nothing is compared before this.
+* ``staged.host`` — both configurations match on the same host names. The
+  walk treats a ``host`` matcher as satisfied, because it is asking about
+  paths; that simplification is safe only while this holds, and a new
+  site block on another name would otherwise answer every URL here and
+  none of them on the box.
 * ``staged.corpus`` — every URL matching ADR-0013's corpus paths that the
   old configuration answers must get the **same response** from the new
   one, served from exactly ``<release>/corpus``, and every Caddy snippet
@@ -30,11 +38,6 @@ would simply stop being asked about it.
   inside the release envelope: that is "under the new release's map", and
   without it a fragment could serve the release's pages under the old
   tree's redirects and the response comparison would not notice.
-* ``staged.host`` — both configurations match on the same host names. The
-  walk treats a ``host`` matcher as satisfied, because it is asking about
-  paths; that simplification is safe only while this holds, and a new
-  site block on another name would otherwise answer every URL here and
-  none of them on the box.
 * ``staged.proxied`` — every URL the old configuration answers by proxy
   keeps the same upstream. The migration moves no part of the app surface,
   so this is an equality that costs nothing and catches a rewritten
