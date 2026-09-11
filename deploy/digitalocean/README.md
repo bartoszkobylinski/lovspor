@@ -337,11 +337,22 @@ systemctl status lovspor-publish --no-pager | head -5
 date -u    # stay clear of 05:30 UTC (corpus fetch) and minute :17 (drift timer)
 ```
 
-The migration overwrites that drop-in and its rollback puts back the bytes it
-found, kept as `lovspor.conf.pre-envelope` beside it (systemd reads `*.conf` out
-of a drop-in directory and nothing else, so the backup is invisible to the unit).
-Absence is a state too: a box with no drop-in gets none back. The preflight
-refuses anything that is neither absent nor exactly
+The migration overwrites that drop-in, and its rollback puts back what was at
+the name — which is one of three things, recorded under two names beside it
+(systemd reads `*.conf` out of a drop-in directory and nothing else, so neither
+is visible to the unit):
+
+| What was at `lovspor.conf` | What the migration writes | What the rollback does |
+|---|---|---|
+| the bytes of a drop-in | `lovspor.conf.pre-envelope`, holding them | writes them back |
+| a file with no bytes | `lovspor.conf.pre-envelope`, empty | writes an empty file back |
+| nothing | `lovspor.conf.pre-envelope.absent` | removes the drop-in |
+
+An empty file and an absent one are both zero bytes, so the *length* of a backup
+can never tell them apart — the name that holds the record does. Exactly one of
+the two is written, so `ls -l /etc/systemd/system/caddy.service.d/` after the
+cutover tells you which state the box is going back to. The preflight refuses
+anything that is neither absent nor exactly
 
 ```
 [Service]
@@ -527,8 +538,9 @@ sudo systemctl enable --now lovspor-site-drift.timer
 
 `--retire` removes `/var/www/lovspor-current`, `/var/www/lovspor`, the old flat
 release directories and — last, once every one of those is gone — the two
-backups the rollback restores from:
-`/etc/systemd/system/caddy.service.d/lovspor.conf.pre-envelope` and, the very
+records the rollback restores from: the drop-in's,
+`/etc/systemd/system/caddy.service.d/lovspor.conf.pre-envelope` (or
+`lovspor.conf.pre-envelope.absent`, on a box that had no drop-in), and, the very
 last path of all, `/etc/caddy/Caddyfile.pre-envelope`. It refuses unless the
 host is reconciled and the marker exists, and it is
 deliberately **not** part of the migration: until it is run, step 9's rollback
@@ -605,15 +617,15 @@ disk is the migration's, and leaving it is a `caddy.service` whose `ExecReload=`
 dials a socket that is about to stop existing.
 
 ```bash
-BACKUP=/etc/systemd/system/caddy.service.d/lovspor.conf.pre-envelope
+DROP_IN=/etc/systemd/system/caddy.service.d/lovspor.conf
 sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile
-# The drop-in backup holds the bytes that were at the name — and ZERO bytes
-# means there was no drop-in, so the way back is to remove it, never to install
-# an empty one. Check before you copy: `ls -l "$BACKUP"`.
-if sudo test -s "$BACKUP"; then
-	sudo cp "$BACKUP" /etc/systemd/system/caddy.service.d/lovspor.conf
+# Which of the two records exists is the whole answer, and the bytes of
+# "$DROP_IN.pre-envelope" are never second-guessed: an empty one is an empty
+# drop-in. Look first: `ls -l /etc/systemd/system/caddy.service.d/`.
+if sudo test -e "$DROP_IN.pre-envelope.absent"; then
+	sudo rm -f "$DROP_IN"
 else
-	sudo rm -f /etc/systemd/system/caddy.service.d/lovspor.conf
+	sudo cp "$DROP_IN.pre-envelope" "$DROP_IN"
 fi
 sudo systemctl daemon-reload
 sudo systemctl restart caddy

@@ -13,7 +13,7 @@ import os
 import pwd
 import shutil
 import stat
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 
@@ -787,6 +787,25 @@ class TestPreflight:
         )
         assert droplet.host.previous_drop_in.is_symlink()
         assert droplet.host.previous_drop_in.readlink() == target
+
+    @pytest.mark.parametrize("kind", ["file", "symlink", "dangling"])
+    def test_refuses_a_leftover_absent_drop_in_record(self, droplet: Droplet, kind: str) -> None:
+        """The second reserved name. A stale one would be read as *there was no drop-in*."""
+        record = droplet.host.absent_drop_in
+        if kind == "file":
+            record.write_text("stale", encoding="utf-8")
+        else:
+            elsewhere = record.with_name("elsewhere")
+            if kind == "symlink":
+                elsewhere.write_text("stale", encoding="utf-8")
+            record.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            preflight(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{record} already exists; it is the rollback's source and is not overwritten"
+        )
+        assert record.is_symlink() or record.is_file()
 
     def test_refuses_a_live_symlink_at_the_drop_in_backup_name(self, droplet: Droplet) -> None:
         """A link to a real file is not the backup either: the restore would move the link."""
@@ -1646,6 +1665,112 @@ class TestSymlinksAtTheNamesItWrites:
         assert backup.is_symlink()
 
 
+class TestThePreflightsAnswersGoStale:
+    """The preflight and the writes are separate moments, and a rename destroys what it lands on.
+
+    Every name (a) writes is re-asked immediately before the write. That
+    shrinks the window from the whole preflight — two subprocess calls,
+    an HTTP round trip and the staging write — to one statement; it does
+    not close it, and nothing here pretends otherwise.
+    """
+
+    def _after_the_preflight(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch, plant: Callable[[], None]
+    ) -> None:
+        """Run ``plant`` in the gap between the preflight returning and ``_stage``."""
+        real = migrate.preflight
+
+        def spy(
+            plane: ControlPlane, host: MigrationHost, content_id: str | None = None
+        ) -> Preflight:
+            answer = real(plane, host, content_id)
+            plant()
+            return answer
+
+        monkeypatch.setattr(migrate, "preflight", spy)
+
+    def test_a_staging_name_taken_after_the_preflight_is_not_written_over(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``_stage`` renames over the name, so an unguarded write destroys it silently."""
+        self._after_the_preflight(
+            droplet,
+            monkeypatch,
+            lambda: droplet.plane.next_fragment.write_text("# someone else's\n", encoding="utf-8"),
+        )
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a)
+        assert str(caught.value).startswith(f"{droplet.plane.next_fragment} already exists; ")
+        assert droplet.plane.next_fragment.read_text(encoding="utf-8") == "# someone else's\n"
+        assert not droplet.plane.fragment.exists()
+        assert not droplet.host.previous_caddyfile.exists()
+        assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+
+    @pytest.mark.parametrize("name", ["fragment", "previous_caddyfile"])
+    def test_a_target_of_the_install_taken_after_the_preflight_is_not_written_over(
+        self, droplet: Droplet, name: str
+    ) -> None:
+        """(a) renames over both names; the refusal stands before anything of (a) moves."""
+        path = droplet.plane.fragment if name == "fragment" else droplet.host.previous_caddyfile
+
+        def plant(step: str) -> None:
+            if step == "staged":
+                path.write_text("# someone else's\n", encoding="utf-8")
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a, plant)
+        assert str(caught.value).startswith(f"{path} already exists; ")
+        assert path.read_text(encoding="utf-8") == "# someone else's\n"
+        assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+
+    def test_a_caddyfile_that_became_a_symlink_after_the_preflight_is_refused(
+        self, droplet: Droplet
+    ) -> None:
+        """Root's write would land on the link's target, and the restore would not undo it."""
+        elsewhere = droplet.plane.caddyfile.with_name("Caddyfile.elsewhere")
+
+        def plant(step: str) -> None:
+            if step == "staged":
+                elsewhere.write_text(OLD_CADDYFILE, encoding="utf-8")
+                droplet.plane.caddyfile.unlink()
+                droplet.plane.caddyfile.symlink_to(elsewhere)
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a, plant)
+        assert str(caught.value).startswith(f"{droplet.plane.caddyfile} is a symlink; ")
+        assert elsewhere.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert not droplet.host.previous_caddyfile.exists()
+
+    def test_a_runtime_directory_filled_after_the_preflight_is_not_chowned(
+        self, droplet: Droplet
+    ) -> None:
+        """The chown and chmod reach everything in it, so (a) re-asks before it runs them.
+
+        This one refuses with (a) part-done — the backups are both there,
+        so ``reconcile --abandon`` is the way out, and that is a better
+        state than root having given away someone else's file.
+        """
+
+        def plant(step: str) -> None:
+            if step == "staged":
+                droplet.host.runtime_dir.mkdir(parents=True)
+                (droplet.host.runtime_dir / "other.sock").touch()
+
+        with pytest.raises(MigrationRefusedError) as caught:
+            first_migration(droplet.plane, droplet.host, droplet.a, plant)
+        assert str(caught.value).startswith(
+            f"the runtime directory {droplet.host.runtime_dir} is not empty; "
+        )
+        assert droplet.ownership.chowns == []
+        abandon_first_migration(droplet.plane, droplet.host)
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+
+
 def _rollback_reload(droplet: Droplet) -> tuple[str, ...]:
     return (
         "caddy",
@@ -2128,12 +2253,41 @@ class TestTheDropInBackup:
         assert not droplet.host.previous_drop_in.exists()
         assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
 
+    def test_a_drop_in_emptied_between_the_preflight_and_the_install_comes_back(
+        self, droplet: Droplet
+    ) -> None:
+        """The backup distinguishes an empty file from a name that was absent.
+
+        This is the same post-preflight edit window as the non-empty case above:
+        rollback must restore the bytes and the fact that the file existed.
+        """
+
+        def empty(step: str) -> None:
+            if step == "staged":
+                droplet.host.drop_in.write_bytes(b"")
+
+        first_migration(droplet.plane, droplet.host, droplet.a, empty)
+        assert droplet.host.previous_drop_in.read_bytes() == b""
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True and report.exec_reload_removed is True
+        assert droplet.host.drop_in.is_file()
+        assert droplet.host.drop_in.read_bytes() == b""
+        assert not droplet.host.previous_drop_in.exists()
+        assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
+
     def test_an_absent_drop_in_round_trips_as_absent(self, droplet: Droplet) -> None:
-        """The failure that reported success: a box with no drop-in got one back."""
+        """The failure that reported success: a box with no drop-in got one back.
+
+        Absence is recorded by its own name rather than by a zero-byte
+        backup, which an empty drop-in is indistinguishable from.
+        """
         droplet.host.drop_in.unlink()
 
         _migrate(droplet)
-        assert droplet.host.previous_drop_in.read_bytes() == b""
+        assert droplet.host.absent_drop_in.is_file()
+        assert not droplet.host.previous_drop_in.exists()
         assert droplet.host.drop_in.is_file()
 
         report = rollback_first_migration(droplet.plane, droplet.host)
@@ -2141,8 +2295,86 @@ class TestTheDropInBackup:
         assert report.reloaded is True
         assert not droplet.host.drop_in.exists()
         assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
         assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
         assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
+
+    @pytest.mark.parametrize("state", ["absent", "empty", "bytes"])
+    def test_the_three_prior_states_are_distinct_records_and_distinct_restores(
+        self, droplet: Droplet, state: str
+    ) -> None:
+        """Absent, present-but-empty and present-with-bytes, each round-tripping as itself.
+
+        The first two are both zero bytes of content, so the record
+        cannot be the content's length: one name says *these were the
+        bytes* and the other says *there was no file*.
+
+        An empty drop-in only ever reaches the write through the
+        post-preflight window — the preflight refuses one on sight, since
+        it is neither absent nor ``PRE_ENVELOPE_DROP_IN``.
+        """
+        if state == "absent":
+            droplet.host.drop_in.unlink()
+
+        def edit(step: str) -> None:
+            if step == "staged" and state == "empty":
+                droplet.host.drop_in.write_bytes(b"")
+
+        first_migration(droplet.plane, droplet.host, droplet.a, edit)
+
+        assert droplet.host.absent_drop_in.is_file() is (state == "absent")
+        assert droplet.host.previous_drop_in.is_file() is (state != "absent")
+
+        rollback_first_migration(droplet.plane, droplet.host)
+
+        assert droplet.host.drop_in.is_file() is (state != "absent")
+        if state != "absent":
+            expected = b"" if state == "empty" else PRE_ENVELOPE_DROP_IN.encode()
+            assert droplet.host.drop_in.read_bytes() == expected
+        assert not droplet.host.previous_drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+
+    def test_the_record_of_an_absent_drop_in_survives_a_crash_inside_the_install(
+        self, droplet: Droplet
+    ) -> None:
+        """One file is created either way, so no crash can leave the record half-made."""
+        droplet.host.drop_in.unlink()
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+
+        assert droplet.host.absent_drop_in.is_file()
+        assert not droplet.host.previous_drop_in.exists()
+
+        report = offline_rollback(droplet.plane, droplet.host)
+
+        assert report.marker_removed is False
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+
+    def test_the_rollback_refuses_when_both_records_exist(self, droplet: Droplet) -> None:
+        """One write makes one of them, so both is a human's edit and not a state to guess at."""
+        _migrate(droplet)
+        droplet.host.absent_drop_in.write_text("hand-made", encoding="utf-8")
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value) == (
+            f"{droplet.host.previous_drop_in} and {droplet.host.absent_drop_in} both exist; the "
+            "first says the drop-in held bytes and the second that there was none, and the "
+            "migration writes only one — remove the wrong one by hand"
+        )
+        assert live_release(droplet.plane) == droplet.a
+
+    def test_the_rollback_refuses_once_the_absent_record_is_gone(self, droplet: Droplet) -> None:
+        """Removing it is removing the way back, exactly as removing the bytes would be."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        droplet.host.absent_drop_in.unlink()
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert str(caught.value).startswith(f"{droplet.host.previous_drop_in} is missing: ")
+        assert live_release(droplet.plane) == droplet.a
 
     def test_the_rollback_refuses_once_the_drop_in_backup_is_gone(self, droplet: Droplet) -> None:
         """The backup is a source of the restore, so its absence is the same refusal."""
@@ -2281,6 +2513,28 @@ class TestRetire:
         assert (droplet.releases / droplet.a).is_dir() and (droplet.releases / droplet.b).is_dir()
         assert (droplet.releases / MARKER_NAME).is_file()
         assert live_release(droplet.plane) == droplet.a
+
+    def test_removes_the_absent_record_where_that_is_the_drop_ins_way_back(
+        self, droplet: Droplet
+    ) -> None:
+        """On a box that had no drop-in, that record is the way back and goes with the rest."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        litter = self._litter(droplet)
+
+        report = retire_pre_envelope(droplet.plane, droplet.host)
+
+        assert report == RetireReport(
+            removed=(
+                str(droplet.host.current_symlink),
+                str(droplet.host.site_root),
+                str(litter["flat"]),
+                str(droplet.host.absent_drop_in),
+                str(droplet.host.previous_caddyfile),
+            )
+        )
+        assert not droplet.host.absent_drop_in.exists()
+        assert not droplet.host.previous_caddyfile.exists()
 
     def test_preview_names_the_exact_targets_without_removing_them(self, droplet: Droplet) -> None:
         _migrate(droplet)

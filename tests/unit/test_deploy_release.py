@@ -288,16 +288,19 @@ class TestRunbook:
         the case where the CLI itself is what is broken.
 
         Both restored files, not just the Caddyfile: the drop-in on disk is
-        the migration's own, and a zero-byte backup is a drop-in that was
-        not there — installing it as an empty file is not the way back.
+        the migration's own. Which of the two records exists decides what
+        goes back, and the by-hand path must read the same name the code
+        does — never the length of the backup, which an empty drop-in and
+        an absent one share.
         """
         text = _README.read_text(encoding="utf-8")
 
         assert "#### Last resort: Caddy answers on neither address" in text
         assert "lovspor release migrate --rollback --offline" in text
         assert "sudo cp /etc/caddy/Caddyfile.pre-envelope /etc/caddy/Caddyfile" in text
-        assert 'sudo cp "$BACKUP" /etc/systemd/system/caddy.service.d/lovspor.conf' in text
-        assert "sudo rm -f /etc/systemd/system/caddy.service.d/lovspor.conf" in text
+        assert 'sudo test -e "$DROP_IN.pre-envelope.absent"' in text
+        assert 'sudo cp "$DROP_IN.pre-envelope" "$DROP_IN"' in text
+        assert 'sudo rm -f "$DROP_IN"' in text
         assert "sudo systemctl daemon-reload" in text
         assert "precondition Caddy admin reachable unmet" in text
         assert text.index("--rollback --offline") > text.index(
@@ -322,6 +325,20 @@ class TestRunbook:
             "restore your copy by hand after any",
             "leftover `.next`",
             "ls -l /etc/caddy/lovspor-release.caddy*",
+        ):
+            assert phrase in text, phrase
+
+    def test_the_runbook_names_the_two_records_the_drop_in_comes_back_from(self) -> None:
+        """An empty drop-in and an absent one are the same zero bytes, so the record
+        cannot be the backup's length. The runbook has to say which name means
+        which, or the by-hand restore guesses where the code does not."""
+        text = _README.read_text(encoding="utf-8")
+
+        for phrase in (
+            "lovspor.conf.pre-envelope.absent",
+            "a file with no bytes",
+            "can never tell them apart",
+            "removes the drop-in",
         ):
             assert phrase in text, phrase
 

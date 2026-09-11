@@ -115,6 +115,25 @@ ENVIRONMENT_FILE = Path("/etc/default/caddy-lovspor")
 CADDY_USER = "caddy"
 PREVIOUS_SUFFIX = ".pre-envelope"
 """The previous Caddyfile is kept beside the new one: the rollback's source."""
+ABSENT_SUFFIX = ".pre-envelope.absent"
+"""The drop-in's *other* backup name: this one says there was no file to back up.
+
+A backup that holds bytes cannot say "there were none" — an empty file
+and an absent one are both zero bytes, and encoding absence as a
+zero-byte backup restored an emptied drop-in by deleting it. So absence
+gets a name of its own, and the two names never both exist.
+"""
+ABSENT_DROP_IN_NOTE = (
+    "# Written by lovspor (ADR-0014 Migration): there was NO caddy.service drop-in\n"
+    "# at this name when the first migration ran, so there are no bytes to keep.\n"
+    "# The rollback removes the drop-in rather than restoring one, and consumes\n"
+    "# this file. `migrate --retire` removes it with the rest of the way back.\n"
+)
+"""What stands at the absent-marker name.
+
+The operator reads the directory; the code reads only the name, so this
+text can say anything and the record still means the same thing.
+"""
 OFFLINE_ADMIN = "offline"
 """What the offline rollback reports it came *from*: nothing answered, so nothing was read."""
 SOCKET_MODE = 0o660
@@ -221,6 +240,14 @@ class MigrationHost:
         else, so the suffixed name is invisible to the unit it stands in.
         """
         return self.drop_in.with_name(self.drop_in.name + PREVIOUS_SUFFIX)
+
+    @property
+    def absent_drop_in(self) -> Path:
+        """The backup that records *no drop-in*, rather than a drop-in with no bytes.
+
+        Also outside systemd's ``*.conf``, so the unit never reads it.
+        """
+        return self.drop_in.with_name(self.drop_in.name + ABSENT_SUFFIX)
 
     @property
     def socket(self) -> Path:
@@ -484,16 +511,25 @@ def _require_drop_in(host: MigrationHost) -> None:
     would record "nothing was here", and (a)'s write would go through the
     link as root.
     """
-    if _occupied(host.previous_drop_in):
-        raise MigrationRefusedError(
-            f"{host.previous_drop_in} already exists; it is the rollback's source and is not "
-            "overwritten"
-        )
+    for reserved in (host.previous_drop_in, host.absent_drop_in):
+        if _occupied(reserved):
+            raise MigrationRefusedError(
+                f"{reserved} already exists; it is the rollback's source and is not overwritten"
+            )
     if host.drop_in.is_symlink():
         raise _unrecognised_drop_in(host.drop_in)
     found = _drop_in_bytes(host.drop_in)
     if found is not None and found != PRE_ENVELOPE_DROP_IN.encode():
         raise _unrecognised_drop_in(host.drop_in)
+
+
+def _require_free(path: Path, remedy: str) -> None:
+    """The name is free, or the refusal names what to do with what is standing there."""
+    if _occupied(path):
+        raise MigrationRefusedError(
+            f"{path} already exists; the first migration writes it and keeps no copy of what "
+            f"was there, so {remedy}"
+        )
 
 
 def _require_no_fragments(plane: ControlPlane) -> None:
@@ -503,14 +539,13 @@ def _require_no_fragments(plane: ControlPlane) -> None:
     fragment; migrate keeps no ``.previous`` copy of either — the
     Caddyfile backup is its whole way back — so a file already at one of
     those names would go with no record that it existed.
+
+    Both writes re-ask their own name at the moment they write it: this
+    answer is taken before ``caddy adapt``, ``caddy validate`` and an
+    HTTP round trip, and a rename destroys whatever it lands on.
     """
-    leftovers = ((plane.fragment, _MOVE_ASIDE), (plane.next_fragment, _STAGED_LEFTOVER))
-    for path, remedy in leftovers:
-        if _occupied(path):
-            raise MigrationRefusedError(
-                f"{path} already exists; the first migration writes it and keeps no copy of what "
-                f"was there, so {remedy}"
-            )
+    _require_free(plane.fragment, _MOVE_ASIDE)
+    _require_free(plane.next_fragment, _STAGED_LEFTOVER)
 
 
 def _require_runtime_dir(host: MigrationHost) -> None:
@@ -653,6 +688,8 @@ def preflight(plane: ControlPlane, host: MigrationHost, content_id: str | None =
 
 
 def _stage(plane: ControlPlane, content_id: str) -> None:
+    """The release's fragment at the staging name, which must still be free to take."""
+    _require_free(plane.next_fragment, _STAGED_LEFTOVER)
     text = read_fragment(release_dir(plane.releases, content_id))
     atomic_write_text(plane.next_fragment, text, mode=WORLD_READABLE)
 
@@ -663,28 +700,45 @@ def _daemon_reload(runner: Runner) -> None:
         raise ControlPlaneError(f"systemctl daemon-reload failed: {done.stderr.strip()}")
 
 
+def _backup_taken(host: MigrationHost) -> bool:
+    """Whether a first write already recorded the prior drop-in, under either name."""
+    return host.previous_drop_in.exists() or host.absent_drop_in.exists()
+
+
 def _backup_drop_in(host: MigrationHost) -> None:
-    """The drop-in as it stands, kept beside it; an absent one is an empty backup.
+    """What stood at the drop-in's name when (a) first wrote over it — bytes, or nothing.
 
-    Only the first write takes it: by the second — (e)'s ``ExecReload=``
-    pair, or a ``complete`` after a crash — the file on disk is already
-    the migration's own, and recording *that* as the prior state is how
-    the rollback came to restore an invention. Absence round-trips
-    because no drop-in the preflight admits is empty: it admits absence
-    and ``PRE_ENVELOPE_DROP_IN`` alone, and that text is not empty.
+    The two are different names, not two values of one file. A backup
+    holding bytes cannot also say *there were none*: an empty drop-in and
+    an absent one are both zero bytes, and while the preflight admits
+    only absence or ``PRE_ENVELOPE_DROP_IN`` — which is not empty — the
+    preflight and this write are separate moments. A drop-in emptied in
+    between reached here as zero bytes and came back as a deletion.
 
-    Neither name may be a symlink here. The preflight refuses both, but
-    ``complete_first_migration`` reaches this without one, and there the
-    backup would be written through a link — or skipped as "already
-    taken" by a dangling one, leaving (a) to overwrite the drop-in with
-    no record of what it replaced.
+    Only the first write takes the backup: by the second — (e)'s
+    ``ExecReload=`` pair, or a ``complete`` after a crash — the file on
+    disk is already the migration's own, and recording *that* as the
+    prior state is how the rollback came to restore an invention.
+
+    Exactly one file is created, so there is no window in which a crash
+    leaves the record half-made. What is read here is what is on disk
+    now, not what the preflight saw: the bytes of a drop-in edited after
+    the preflight are backed up and restored as they are, which is the
+    faithful answer and the reason this does not re-validate the content.
+
+    None of the three names may be a symlink. The preflight refuses them,
+    but ``complete_first_migration`` reaches this without one.
     """
     _refuse_symlink(host.drop_in, "overwrites the drop-in and keeps the bytes it replaces")
     _refuse_symlink(host.previous_drop_in, "keeps the drop-in's backup at that name")
-    if host.previous_drop_in.exists():
+    _refuse_symlink(host.absent_drop_in, "records an absent drop-in at that name")
+    if _backup_taken(host):
         return
     prior = _drop_in_bytes(host.drop_in)
-    atomic_write_bytes(host.previous_drop_in, b"" if prior is None else prior, mode=WORLD_READABLE)
+    if prior is None:
+        atomic_write_text(host.absent_drop_in, ABSENT_DROP_IN_NOTE, mode=WORLD_READABLE)
+        return
+    atomic_write_bytes(host.previous_drop_in, prior, mode=WORLD_READABLE)
 
 
 def _load_drop_in(plane: ControlPlane, host: MigrationHost, with_exec_reload: bool) -> None:
@@ -703,10 +757,30 @@ def _runtime_dir(host: MigrationHost) -> None:
     directory it points at.
     """
     _refuse_symlink(host.runtime_dir, "creates the runtime directory and chowns it")
+    _require_runtime_dir(host)
     host.runtime_dir.mkdir(parents=True, exist_ok=True)
     uid = host.ownership.uid_of(host.caddy_user)
     host.ownership.chown(host.runtime_dir, uid, host.ownership.gid_of(host.release_group))
     host.runtime_dir.chmod(RUNTIME_DIR_MODE)
+
+
+def _require_install_targets(plane: ControlPlane, host: MigrationHost) -> None:
+    """The preflight's answers about (a)'s targets, re-asked at the moment (a) writes.
+
+    Between the two lie ``caddy adapt``, ``caddy validate``, an HTTP
+    round trip and the staging write, and every name below is written by
+    a rename that destroys whatever it lands on with no record. Re-asking
+    shrinks that window to one statement — it cannot close it — and the
+    refusal stands before anything of (a) has moved. The staging name is
+    not re-asked here: this run has just written it.
+    """
+    _refuse_symlink(plane.caddyfile, "installs the new Caddyfile over it")
+    if _occupied(host.previous_caddyfile):
+        raise MigrationRefusedError(
+            f"{host.previous_caddyfile} already exists; it is the rollback's source and is not "
+            "overwritten"
+        )
+    _require_free(plane.fragment, _MOVE_ASIDE)
 
 
 def _install_files(plane: ControlPlane, host: MigrationHost) -> None:
@@ -724,6 +798,7 @@ def _install_files(plane: ControlPlane, host: MigrationHost) -> None:
     together are the way back and ``_restore_files`` needs both, so the
     window in which one exists without the other is one statement wide.
     """
+    _require_install_targets(plane, host)
     _backup_drop_in(host)
     atomic_write_bytes(host.previous_caddyfile, plane.caddyfile.read_bytes(), mode=WORLD_READABLE)
     plane.next_fragment.replace(plane.fragment)
@@ -903,52 +978,84 @@ def _had_exec_reload(host: MigrationHost) -> bool:
     return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="utf-8")
 
 
+def _missing_backup(backup: Path) -> ControlPlaneError:
+    """One sentence for every way a source of the restore is not there."""
+    return ControlPlaneError(
+        f"{backup} is missing: (a) never ran, the rollback already ran, or "
+        "`migrate --retire` removed it with the pre-envelope layout; nothing to restore"
+    )
+
+
+def _require_drop_in_backup(host: MigrationHost) -> None:
+    """Exactly one of the drop-in's two backup names, and it says which state to restore.
+
+    ``.pre-envelope`` holds the bytes that stood at the drop-in's name —
+    an empty one means an empty drop-in, which is now a state of its own
+    — and ``.pre-envelope.absent`` says there was no file there. Both at
+    once is a contradiction no single write can produce, so it is a
+    human's edit and a refusal rather than a guess between them.
+    """
+    kept, absent = host.previous_drop_in.is_file(), host.absent_drop_in.is_file()
+    if kept and absent:
+        raise ControlPlaneError(
+            f"{host.previous_drop_in} and {host.absent_drop_in} both exist; the first says the "
+            "drop-in held bytes and the second that there was none, and the migration writes "
+            "only one — remove the wrong one by hand"
+        )
+    if not kept and not absent:
+        raise _missing_backup(host.previous_drop_in)
+
+
 def _require_backup(host: MigrationHost) -> None:
     """The rollback's only sources. ``--retire`` removes them last; after that there is no way
     back.
 
-    A symlink at either name is not a source: ``_restore_files`` renames
-    the Caddyfile backup over the live Caddyfile, which moves the link
-    and not its target, and reads the drop-in backup through it.
+    A symlink at any of the names is not a source: ``_restore_files``
+    renames the Caddyfile backup over the live Caddyfile, which moves the
+    link and not its target, and reads the drop-in backup through it.
     """
-    for backup in (host.previous_caddyfile, host.previous_drop_in):
+    for backup in (host.previous_caddyfile, host.previous_drop_in, host.absent_drop_in):
         if backup.is_symlink():
             raise ControlPlaneError(
                 f"{backup} is a symlink, not the backup the migration wrote; the restore reads "
                 "and moves the name, never what it points at — move it aside and restore by hand"
             )
-        if not backup.is_file():
-            raise ControlPlaneError(
-                f"{backup} is missing: (a) never ran, the rollback already ran, or "
-                "`migrate --retire` removed it with the pre-envelope layout; nothing to restore"
-            )
+    if not host.previous_caddyfile.is_file():
+        raise _missing_backup(host.previous_caddyfile)
+    _require_drop_in_backup(host)
 
 
 def _restore_drop_in(host: MigrationHost) -> None:
     """The drop-in as the backup found it, absence included; the backup is consumed.
 
-    An empty backup is a drop-in that was not there, and restoring it as
-    a file — which the assumed ``PRE_ENVELOPE_DROP_IN`` did — leaves the
-    box carrying a unit fragment it never had, while the report says the
-    rollback succeeded.
+    Which of the three states comes back is read off the *name* that
+    holds the record, never off its length. Restoring an assumed
+    ``PRE_ENVELOPE_DROP_IN`` left the box carrying a unit fragment it
+    never had; then reading absence out of a zero-byte backup deleted a
+    drop-in that was there and empty. The name cannot be short of either
+    answer: bytes at ``.pre-envelope`` are put back as they are, empty
+    included, and ``.pre-envelope.absent`` removes the drop-in.
 
-    Both moves here act on the name and not on a link's target:
-    ``os.replace`` under ``atomic_write_bytes`` replaces a symlink rather
-    than writing through it, and ``unlink`` takes the link. The source is
-    guarded instead, by ``_require_backup``, which will not read a
-    symlink as a backup.
+    The drop-in moves first and the record is consumed second, so a crash
+    between them leaves the record and a re-runnable rollback rather than
+    a restored file with nothing left saying what it was.
+
+    Every move acts on the name and not on a link's target: ``os.replace``
+    under ``atomic_write_bytes`` replaces a symlink rather than writing
+    through it, and ``unlink`` takes the link. The sources are guarded by
+    ``_require_backup``, which will not read a symlink as a backup.
     """
-    prior = host.previous_drop_in.read_bytes()
-    if prior:
-        atomic_write_bytes(host.drop_in, prior, mode=WORLD_READABLE)
-    else:
+    if host.absent_drop_in.is_file():
         host.drop_in.unlink(missing_ok=True)
+        host.absent_drop_in.unlink()
+        return
+    atomic_write_bytes(host.drop_in, host.previous_drop_in.read_bytes(), mode=WORLD_READABLE)
     host.previous_drop_in.unlink()
 
 
 def _restore_files(plane: ControlPlane, host: MigrationHost) -> None:
     """The reverse of (a): the previous Caddyfile back, the fragment gone, the drop-in as it
-    was, loaded. Both backups are consumed, so a later migration starts clean."""
+    was, loaded. Both records are consumed, so a later migration starts clean."""
     _require_backup(host)
     host.previous_caddyfile.replace(plane.caddyfile)
     plane.fragment.unlink(missing_ok=True)
@@ -1153,6 +1260,7 @@ def retire_targets(plane: ControlPlane, host: MigrationHost) -> tuple[str, ...]:
     targets += _tree_target(host.site_root)
     targets += _flat_release_targets(plane.releases)
     targets += _backup_target(host.previous_drop_in)
+    targets += _backup_target(host.absent_drop_in)
     targets += _backup_target(host.previous_caddyfile)
     return tuple(targets)
 
