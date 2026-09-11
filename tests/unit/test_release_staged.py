@@ -14,6 +14,7 @@ assertion — and not one of its neighbours — is what detected the change.
 
 import hashlib
 import json
+import os
 import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -636,3 +637,64 @@ class TestTheDeriversAskNothingTheEvaluatorRefuses:
 
         assert found
         assert all(is_servable_url(url) for url in found)
+
+
+class TestACaddyfileTheDryRunCannotRead:
+    """Named here, before Caddy is asked, so the refusal is the file and not caddy's stderr.
+
+    The world's state, so exit 1 and a named refusal — the convention every
+    command in ``commands.py`` follows. The CLI judges the request alone.
+    """
+
+    def test_a_configuration_that_is_not_there(self, world: Path) -> None:
+        plan = make_plan(world)
+        plan.previous.unlink()
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.validate"
+        assert caught.value.detail == (f"the previous Caddyfile {plan.previous} is not a file")
+
+    def test_a_directory_where_a_configuration_should_be(self, world: Path) -> None:
+        plan = make_plan(world)
+        plan.proposed.unlink()
+        plan.proposed.mkdir()
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.validate"
+        assert caught.value.detail == (f"the proposed Caddyfile {plan.proposed} is a directory")
+
+    def test_a_configuration_the_dry_run_may_not_open(self, world: Path) -> None:
+        plan = make_plan(world)
+        plan.previous.chmod(0o000)
+        if os.access(plan.previous, os.R_OK):
+            pytest.skip("this identity reads a 0000 file; the mode cannot express the refusal")
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.detail.endswith("is not readable")
+
+    def test_both_configurations_are_checked(self, world: Path) -> None:
+        """The proposed one too: only checking the first leaves half the run unguarded."""
+        plan = make_plan(world)
+        plan.proposed.unlink()
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert "proposed Caddyfile" in caught.value.detail
+
+    def test_an_incomplete_envelope_is_named_before_either_configuration(self, world: Path) -> None:
+        """The envelope is what the comparison is against; a missing tree is the first word."""
+        plan = make_plan(world)
+        plan.previous.unlink()
+        (plan.release / RECORD_NAME).unlink()
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert RECORD_NAME in caught.value.detail

@@ -7,6 +7,7 @@ in a box; ``discover_checkout`` is environment discovery, monkeypatched to
 the throwaway checkout as the site CLI tests do.
 """
 
+import os
 import re
 import shutil
 from datetime import UTC, datetime
@@ -1302,6 +1303,172 @@ class TestRehearseUrls:
         result = self._invoke(RELEASE_ID, paths)
 
         assert result.exit_code == 2
+
+    def test_two_names_for_one_configuration_are_a_usage_error(self, tmp_path: Path) -> None:
+        """A symlink alias is still one file, so comparing it with itself proves nothing."""
+        paths = self._paths(tmp_path)
+        paths["previous"].parent.mkdir(parents=True)
+        paths["previous"].write_text("configuration\n", encoding="utf-8")
+        paths["source"].parent.mkdir(parents=True)
+        paths["source"].symlink_to(paths["previous"])
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def _written(self, paths: dict[str, Path], *names: str) -> None:
+        for name in names:
+            paths[name].parent.mkdir(parents=True, exist_ok=True)
+            paths[name].write_text(f"# {name}\n", encoding="utf-8")
+
+    def test_a_relative_spelling_of_one_file_is_a_usage_error(self, tmp_path: Path) -> None:
+        """``etc/../etc/Caddyfile`` is the same file by another name."""
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous")
+        paths["source"] = tmp_path / "etc" / ".." / "etc" / "Caddyfile"
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def test_a_hard_link_to_one_file_is_a_usage_error(self, tmp_path: Path) -> None:
+        """Two real names, one inode: `resolve` cannot see it and `samefile` can."""
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous")
+        paths["source"].parent.mkdir(parents=True)
+        os.link(paths["previous"], paths["source"])
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert result.exit_code == 2
+
+    def test_the_refusal_names_both_options(self, tmp_path: Path) -> None:
+        """Short substrings only: rich wraps the panel at the runner's width."""
+        paths = self._paths(tmp_path)
+        paths["source"] = paths["previous"]
+
+        result = self._invoke(RELEASE_ID, paths)
+
+        assert "--previous-caddyfile" in result.output
+        assert "--caddyfile-source" in result.output
+        assert "itself" in result.output
+
+    def test_two_distinct_files_are_accepted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(commands, "staged_rehearsal", lambda plan: RehearsalReport(steps=()))
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous", "source")
+
+        assert self._invoke(RELEASE_ID, paths).exit_code == 0
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["release", "rehearse-urls"],
+            ["release", "rehearse-urls", RELEASE_ID, "extra"],
+            ["release", "rehearse-urls", RELEASE_ID, "--no-such-option"],
+            ["release", "rehearse-urls", RELEASE_ID, "--releases"],
+            ["release", "rehearse-urls", RELEASE_ID, "--previous-caddyfile"],
+        ],
+    )
+    def test_a_request_click_cannot_parse_is_a_usage_error(self, argv: list[str]) -> None:
+        """A missing argument, an extra one, an unknown option and an option given no value."""
+        assert runner.invoke(app, argv).exit_code == 2
+
+    def test_a_repeated_option_takes_the_last_value(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """None of this module's options is `multiple`; the last wins, as everywhere else."""
+        captured: list[StagedPlan] = []
+
+        def capture(plan: StagedPlan) -> RehearsalReport:
+            captured.append(plan)
+            return RehearsalReport(steps=())
+
+        monkeypatch.setattr(commands, "staged_rehearsal", capture)
+        paths = self._paths(tmp_path)
+
+        result = runner.invoke(
+            app,
+            [
+                "release",
+                "rehearse-urls",
+                RELEASE_ID,
+                "--releases",
+                str(tmp_path / "first"),
+                "--releases",
+                str(paths["releases"]),
+                "--previous-caddyfile",
+                str(paths["previous"]),
+                "--caddyfile-source",
+                str(paths["source"]),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert captured[0].release == paths["releases"] / RELEASE_ID
+
+    def test_the_command_declares_no_flags_to_combine(self) -> None:
+        """Introspected, never read off --help: there is no pair to exclude here, unlike
+        `migrate` and `reconcile`, and that is why no such refusal exists."""
+        root = get_command(app)
+        assert isinstance(root, click.Group)
+        group = root.commands["release"]
+        assert isinstance(group, click.Group)
+        params = group.commands["rehearse-urls"].params
+
+        assert not [param for param in params if getattr(param, "is_flag", False)]
+        assert {param.name for param in params} == {
+            "content_id",
+            "releases",
+            "previous_caddyfile",
+            "caddyfile_source",
+        }
+
+    def test_both_paths_are_reachable_from_the_environment(self) -> None:
+        root = get_command(app)
+        assert isinstance(root, click.Group)
+        group = root.commands["release"]
+        assert isinstance(group, click.Group)
+        params = {param.name: param for param in group.commands["rehearse-urls"].params}
+
+        assert params["previous_caddyfile"].envvar == "LOVSPOR_PREVIOUS_CADDYFILE"
+        assert params["caddyfile_source"].envvar == "LOVSPOR_CADDYFILE_SOURCE"
+        assert params["releases"].envvar == "LOVSPOR_RELEASES_ROOT"
+
+    def test_one_file_named_twice_through_the_environment_is_the_same_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The env var is the same request by another route, and gets the same answer."""
+        paths = self._paths(tmp_path)
+        self._written(paths, "previous")
+        monkeypatch.setenv("LOVSPOR_CADDYFILE_SOURCE", str(paths["previous"]))
+
+        result = runner.invoke(
+            app,
+            [
+                "release",
+                "rehearse-urls",
+                RELEASE_ID,
+                "--releases",
+                str(paths["releases"]),
+                "--previous-caddyfile",
+                str(paths["previous"]),
+            ],
+        )
+
+        assert result.exit_code == 2
+
+    def test_a_configuration_that_is_not_there_is_a_refusal_not_a_usage_error(
+        self, tmp_path: Path
+    ) -> None:
+        """The world's state is the library's to name, at exit 1 — the convention every
+        other command in this module follows; the CLI judges the request alone."""
+        result = self._invoke(RELEASE_ID, self._paths(tmp_path))
+
+        assert result.exit_code == 1
+        assert "release refused" in result.output
 
     def test_a_refusal_is_one_line_and_exit_one(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

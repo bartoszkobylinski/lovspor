@@ -66,6 +66,7 @@ the second-instance rehearsal — both, never either.
 """
 
 import hashlib
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -273,12 +274,29 @@ def _in(path: str | None, tree: Path) -> bool:
     return path is not None and Path(path).resolve() == tree.resolve()
 
 
+def _readable(path: Path, role: str) -> None:
+    """A file the dry-run must read, named here rather than through ``caddy``'s stderr.
+
+    A directory is said to be one: ``caddy validate`` on a directory
+    reports a read error the operator then has to interpret, and the seam
+    this rehearsal is built on puts what decides in Python.
+    """
+    if path.is_dir():
+        raise RehearsalFailedError("staged.validate", f"the {role} {path} is a directory")
+    if not path.is_file():
+        raise RehearsalFailedError("staged.validate", f"the {role} {path} is not a file")
+    if not os.access(path, os.R_OK):
+        raise RehearsalFailedError("staged.validate", f"the {role} {path} is not readable")
+
+
 def validated(plan: StagedPlan) -> Step:
     """The envelope is complete and Caddy accepts both files; nothing is compared before this."""
     missing = missing_parts(plan.release)
     _require(
         not missing, "staged.validate", f"{plan.release.name} is incomplete: {', '.join(missing)}"
     )
+    _readable(plan.previous, "previous Caddyfile")
+    _readable(plan.proposed, "proposed Caddyfile")
     for caddyfile in (plan.previous, plan.proposed):
         try:
             validate_caddy(plan.runner, caddyfile, plan.fragment)

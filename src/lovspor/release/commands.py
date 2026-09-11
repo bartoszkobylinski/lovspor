@@ -587,6 +587,24 @@ def rehearse_command(
         typer.echo(line)
 
 
+def _one_configuration(previous: Path, proposed: Path) -> bool:
+    """Whether two option values name one configuration, by identity and not by the strings.
+
+    A symlink alias, a ``..`` spelling and a hard link are each two names
+    for one file, and a dry-run handed the same configuration twice passes
+    every assertion it makes — the one outcome worse than failing.
+    ``resolve`` settles the first two and the case where neither name is on
+    disk yet; ``samefile`` settles the third, and answers no when either
+    name cannot be stat'd.
+    """
+    if previous.resolve() == proposed.resolve():
+        return True
+    try:
+        return previous.samefile(proposed)
+    except OSError:
+        return False
+
+
 @release_app.command(name="rehearse-urls")
 def rehearse_urls_command(
     content_id: Annotated[
@@ -619,10 +637,10 @@ def rehearse_urls_command(
     """
     if not is_release_id(content_id):
         raise typer.BadParameter(f"not a release_content_id: {content_id}")
-    if previous_caddyfile == caddyfile_source:
+    if _one_configuration(previous_caddyfile, caddyfile_source):
         raise typer.BadParameter(
-            "--previous-caddyfile and --caddyfile-source name one file; "
-            "the dry-run would compare a configuration with itself"
+            "--previous-caddyfile and --caddyfile-source name one configuration; "
+            "the dry-run would compare it with itself"
         )
     plan = StagedPlan(
         SubprocessRunner(), previous_caddyfile, caddyfile_source, releases / content_id
