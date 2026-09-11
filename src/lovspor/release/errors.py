@@ -79,6 +79,21 @@ class MigrationRefusedError(ControlPlaneError):
     """The first migration's preflight found its precondition unmet; nothing moved."""
 
 
+class RehearsalFailedError(ControlPlaneError):
+    """An assertion of the staged rehearsal did not hold (ADR-0014 Validation (g)).
+
+    Names the sub-step — ``i`` through ``v``, or one of the negative
+    fixtures — and what was read instead. The production migration is
+    not authorised while this can be raised: that is the whole purpose
+    of running the sequence on a second instance first.
+    """
+
+    def __init__(self, step: str, detail: str) -> None:
+        super().__init__(f"rehearsal step {step} failed: {detail}")
+        self.step = step
+        self.detail = detail
+
+
 class MigrationFailedError(ControlPlaneError):
     """The first migration stopped after a named checkpoint; the message says what to run."""
 
