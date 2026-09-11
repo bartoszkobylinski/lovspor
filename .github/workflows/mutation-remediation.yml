@@ -21,6 +21,10 @@ permissions:
   contents: read
 
 jobs:
+  # Two lanes, for the reason in issue #272: this box is 1 shared core and 2 GB
+  # with no swap, and it exists to hold the Codex session's auth.json, which
+  # cannot go to a hosted runner. `remediate` runs the agent; `remediate-verify`
+  # runs the lint, the full unit suite and the push, hosted and free.
   remediate:
     runs-on: [self-hosted, linux, codex]
     timeout-minutes: 60
@@ -33,6 +37,13 @@ jobs:
       actions: read
       pull-requests: write
       issues: write
+    outputs:
+      run: ${{ steps.cycle.outputs.run }}
+      pr: ${{ steps.cycle.outputs.pr }}
+      count: ${{ steps.cycle.outputs.count }}
+      author: ${{ steps.author.outputs.author }}
+      before_sha: ${{ steps.base.outputs.before_sha }}
+      patch: ${{ steps.patch.outputs.patch }}
     env:
       CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
       CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
@@ -150,9 +161,38 @@ jobs:
           } > "$RUNNER_TEMP/limit-escalation.md"
           scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}" "$RUNNER_TEMP/limit-escalation.md"
 
+      - name: Record base SHA
+        id: base
+        if: steps.cycle.outputs.run == 'true'
+        # An output as well as an env var: the verifier runs on another machine
+        # and anchors its scope guard, its diff and its squash to this SHA.
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "BEFORE_SHA=$sha" >> "$GITHUB_ENV"
+          echo "before_sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Sync dependencies
         if: steps.cycle.outputs.run == 'true'
         run: uv sync --frozen
+
+      - name: Sample memory while the agent runs
+        id: sampler
+        if: steps.cycle.outputs.run == 'true'
+        # Issue #272: when this box died, nothing was sampling and a container
+        # sees no host dmesg, so the deaths could not be attributed. `timeout`
+        # bounds the loop — this runner does not force-kill process trees on
+        # cancellation, so an unbounded one would outlive the job.
+        run: |
+          nohup timeout 3300 bash -c '
+            while :; do
+              {
+                date -u +%FT%TZ
+                free -m | sed -n 2p
+                ps -eo rss,comm --sort=-rss | head -6
+              } >> "$RUNNER_TEMP/agent-rss.log"
+              sleep 10
+            done' >/dev/null 2>&1 &
+          echo "pid=$!" >> "$GITHUB_OUTPUT"
 
       - name: Codex — mutation remediation (tests only)
         # Below the job ceiling on purpose: a job-level timeout cancels the
@@ -165,7 +205,6 @@ jobs:
           CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
           CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
         run: |
-          echo "BEFORE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           # Serialize with every other agent job on the shared runner box. One
           # unserialized agent run exhausted its 2 GB on 2026-08-18, killed
           # tailscaled and all seven runner agents, and took five unrelated
@@ -204,31 +243,147 @@ jobs:
             echo "author=codex" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Stop the memory sampler
+        if: always() && steps.sampler.outputs.pid != ''
+        run: kill "${{ steps.sampler.outputs.pid }}" 2>/dev/null || true
+
+      - name: Upload the memory sample
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: remediation-rss-${{ github.event.workflow_run.head_sha }}
+          path: ${{ runner.temp }}/agent-rss.log
+          if-no-files-found: ignore
+
       - name: Scope guard
         if: steps.cycle.outputs.run == 'true'
+        run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
+
+      - name: Hand the agent's work to the verifier
+        id: patch
+        if: steps.cycle.outputs.run == 'true'
+        run: |
+          # Diff the INDEX against BEFORE_SHA, not the worktree: the agent
+          # sometimes commits its own work (which is why the push step on the
+          # verifier squashes with `git reset --soft`), and `git add -A` stages
+          # whatever it left untracked.
+          git add -A
+          git diff --cached --binary "$BEFORE_SHA" > "$RUNNER_TEMP/remediation-tests.patch"
+          if [ -s "$RUNNER_TEMP/remediation-tests.patch" ]; then
+            echo "patch=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "patch=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload the agent's tests
+        if: steps.patch.outputs.patch == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: remediation-tests-${{ github.event.workflow_run.head_sha }}
+          path: ${{ runner.temp }}/remediation-tests.patch
+
+      # Issue #67: a remediation job that dies mid-run must never fail silently —
+      # the escalation contract (label + comment) applies to the failure itself.
+      - name: Escalate on remediation failure
+        # cancelled() as well as failure(): a job killed by its ceiling is not
+        # a failed job, and `failure()` alone let that path end in silence.
+        if: (failure() || cancelled()) && steps.cycle.outputs.pr != ''
+        run: |
+          gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
+          {
+            echo "Mutation remediation run FAILED before completing its escalation path. Human review required: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "$RUNNER_TEMP/failure-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}" "$RUNNER_TEMP/failure-escalation.md"
+
+  # The verdict lane: everything the box does not have to do. Hosted minutes are
+  # free on this public repo, and a lane that does not share a machine with the
+  # agent still reports when that machine dies.
+  remediate-verify:
+    needs: [remediate]
+    if: ${{ !cancelled() && needs.remediate.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    env:
+      UV_PYTHON: "3.12"
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      # Recorded on the agent's machine; every diff and squash below is anchored
+      # to it.
+      BEFORE_SHA: ${{ needs.remediate.outputs.before_sha }}
+    steps:
+      # `steps.gate` lives on the agent lane — naming it here would evaluate to
+      # empty, skip the checkout, and leave every later step running against an
+      # empty workspace. The gate's verdict reaches this lane as a job output.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.remediate.outputs.run == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.LOVSPOR_CI_PUSH_TOKEN }}
+
+      - name: The remediation lane did not finish
+        # After the checkout, because the escalation below needs the helper
+        # scripts in the tree.
+        if: needs.remediate.result != 'success'
+        run: |
+          echo "::error::remediate finished as '${{ needs.remediate.result }}'"
+          exit 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.10.0"
+          enable-cache: true
+
+      - name: Sync dependencies
+        if: needs.remediate.outputs.run == 'true'
+        run: uv sync --frozen
+
+      - name: Download the agent's tests
+        if: needs.remediate.outputs.patch == 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: remediation-tests-${{ github.event.workflow_run.head_sha }}
+          path: ${{ runner.temp }}
+
+      - name: Apply the agent's tests
+        if: needs.remediate.outputs.patch == 'true'
+        # --index so the scope guard sees staged files as the box saw them, and
+        # an unapplyable patch fails loudly instead of passing the pre-existing
+        # suite off as a remediation round.
+        run: git apply --index --whitespace=nowarn "$RUNNER_TEMP/remediation-tests.patch"
+
+      - name: Scope guard
+        if: needs.remediate.outputs.run == 'true'
         run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
 
       # Codex output is not always ruff-clean (issue #66): normalize before the
       # pipeline's own lint gate sees it, and hard-fail on unfixable lint.
       - name: Normalize and lint Codex output
-        if: steps.cycle.outputs.run == 'true'
+        if: needs.remediate.outputs.run == 'true'
         run: |
           uv run ruff format tests/
           uv run ruff check --fix tests/
 
       - name: Run tests on Codex additions
-        if: steps.cycle.outputs.run == 'true'
+        if: needs.remediate.outputs.run == 'true'
         run: uv run pytest tests/unit/
 
       - name: Commit and push, or report BLOCKED
-        if: steps.cycle.outputs.run == 'true'
+        if: needs.remediate.outputs.run == 'true'
         run: |
           if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
-            gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
+            gh pr edit "${{ needs.remediate.outputs.pr }}" --add-label "needs-human:mutation"
             {
               echo "Mutation remediation made no safe test-only change (survivors classified non-killable). Human review required. Artifact: mutation-result-$HEAD_SHA."
             } > "$RUNNER_TEMP/nochange-escalation.md"
-            scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}" "$RUNNER_TEMP/nochange-escalation.md"
+            scripts/ci/pr_sticky_comment.sh mutation "${{ needs.remediate.outputs.pr }}" "$RUNNER_TEMP/nochange-escalation.md"
             exit 0
           fi
           # One marker commit, even if Codex committed on its own.
@@ -238,7 +393,7 @@ jobs:
           git add -A
           # The marker names the ACTUAL author — never stamp codex on a
           # Claude-written commit.
-          git commit -m "test: kill mutation survivors for PR #${{ steps.cycle.outputs.pr }} [agent:${{ steps.author.outputs.author || 'codex' }}-mutation]"
+          git commit -m "test: kill mutation survivors for PR #${{ needs.remediate.outputs.pr }} [agent:${{ needs.remediate.outputs.author || 'codex' }}-mutation]"
           # Issue #67: the branch can advance during a long Codex run. A rejected
           # push for a superseded head is benign — the new head's own pipeline
           # owns mutation now. Any other push failure is a real error.
@@ -253,17 +408,17 @@ jobs:
           # Progress, not an escalation: no label is applied and no human acts on
           # it, so it belongs in the run summary rather than in a PR comment that
           # mails the author on every remediation cycle.
-          echo "Mutation gate failed; remediation cycle $(( ${{ steps.cycle.outputs.count }} + 1 ))/2 pushed test-only changes; pipeline rerunning." >> "$GITHUB_STEP_SUMMARY"
+          echo "Mutation gate failed; remediation cycle $(( ${{ needs.remediate.outputs.count }} + 1 ))/2 pushed test-only changes; pipeline rerunning." >> "$GITHUB_STEP_SUMMARY"
 
       # Issue #67: a remediation job that dies mid-run must never fail silently —
       # the escalation contract (label + comment) applies to the failure itself.
       - name: Escalate on remediation failure
         # cancelled() as well as failure(): a job killed by its ceiling is not
         # a failed job, and `failure()` alone let that path end in silence.
-        if: (failure() || cancelled()) && steps.cycle.outputs.pr != ''
+        if: (failure() || cancelled()) && needs.remediate.outputs.pr != ''
         run: |
-          gh pr edit "${{ steps.cycle.outputs.pr }}" --add-label "needs-human:mutation"
+          gh pr edit "${{ needs.remediate.outputs.pr }}" --add-label "needs-human:mutation"
           {
             echo "Mutation remediation run FAILED before completing its escalation path. Human review required: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           } > "$RUNNER_TEMP/failure-escalation.md"
-          scripts/ci/pr_sticky_comment.sh mutation "${{ steps.cycle.outputs.pr }}" "$RUNNER_TEMP/failure-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "${{ needs.remediate.outputs.pr }}" "$RUNNER_TEMP/failure-escalation.md"
