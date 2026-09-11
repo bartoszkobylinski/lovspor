@@ -64,10 +64,10 @@ from lovspor.release.errors import (
     UnobservableError,
 )
 from lovspor.release.migrate import (
-    PRE_ENVELOPE_DROP_IN,
     SOCKET_MODE,
     MigrationHost,
     abandon_first_migration,
+    drop_in_text,
     first_migration,
     rollback_first_migration,
 )
@@ -296,9 +296,19 @@ def _install(plan: Rehearsal, data: bytes) -> None:
 
 
 def _stock_state(plan: Rehearsal) -> None:
-    """The previous Caddyfile on disk under the stock ``ExecReload=``, with the socket running."""
+    """The previous Caddyfile on disk under the stock ``ExecReload=``, with the socket running.
+
+    The drop-in goes back to the migration's *own* (a) text rather than to
+    the pre-envelope one: that state — the runtime-directory lines without
+    the ``ExecReload=`` pair — is exactly the migration between (a) and
+    (e), and it takes away the one thing this fixture is about. Dropping
+    ``RuntimeDirectory=`` as well would change three things at once and
+    put the running socket's directory at systemd's mercy.
+    """
     _install(plan, plan.host.previous_caddyfile.read_bytes())
-    atomic_write_text(plan.host.drop_in, PRE_ENVELOPE_DROP_IN, mode=WORLD_READABLE)
+    atomic_write_text(
+        plan.host.drop_in, drop_in_text(plan.host, with_exec_reload=False), mode=WORLD_READABLE
+    )
     _daemon_reload(plan, "iii.plain-reload")
 
 

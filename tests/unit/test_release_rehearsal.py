@@ -296,6 +296,28 @@ class TestPlainReloadRefused:
 
         assert raised.value.step == "iii.plain-reload"
 
+    def test_takes_away_the_exec_reload_pair_and_nothing_else(self, staged: Staged) -> None:
+        """Dropping RuntimeDirectory= too would change three things and risk the running socket."""
+        cutover(staged.plan)
+        seen: list[tuple[str, bytes]] = []
+
+        def reload(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            del argv, env
+            seen.append(
+                (
+                    staged.plan.host.drop_in.read_text(encoding="utf-8"),
+                    staged.plan.plane.caddyfile.read_bytes(),
+                )
+            )
+            return Completed(1, "", "Job for caddy-rehearsal.service failed")
+
+        runner = Sabotaged(staged.caddy, ("systemctl", "reload"), reload)
+        plain_reload_refused(replace(staged.plan, plane=replace(staged.plan.plane, runner=runner)))
+
+        (drop_in, caddyfile) = seen[0]
+        assert drop_in == drop_in_text(staged.plan.host, with_exec_reload=False)
+        assert caddyfile == staged.plan.host.previous_caddyfile.read_bytes()
+
     def test_the_instance_is_left_on_the_socket(self, staged: Staged) -> None:
         cutover(staged.plan)
 
