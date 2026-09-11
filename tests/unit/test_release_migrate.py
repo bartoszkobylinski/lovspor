@@ -881,8 +881,9 @@ class TestPreflight:
 
         with pytest.raises(MigrationRefusedError) as caught:
             preflight(droplet.plane, droplet.host)
-        assert str(caught.value).startswith(
-            f"the runtime directory {droplet.host.runtime_dir} is not empty; "
+        assert str(caught.value) == (
+            f"the runtime directory {droplet.host.runtime_dir} is not empty; (a) would give it "
+            "and everything in it caddy:lovspor-release mode 2770"
         )
         assert (droplet.host.runtime_dir / "other.sock").exists()
 
@@ -902,8 +903,9 @@ class TestPreflight:
 
         with pytest.raises(MigrationRefusedError) as caught:
             preflight(droplet.plane, droplet.host)
-        assert str(caught.value).startswith(
+        assert str(caught.value) == (
             f"the runtime directory {droplet.host.runtime_dir} exists and is not a directory; "
+            "(a) would give what it names caddy:lovspor-release mode 2770"
         )
 
     def test_an_empty_runtime_directory_is_what_its_own_rollback_leaves(
@@ -1573,7 +1575,10 @@ class TestSymlinksAtTheNamesItWrites:
 
         with pytest.raises(MigrationRefusedError) as caught:
             complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
-        assert str(caught.value).startswith(f"{droplet.host.runtime_dir} is a symlink; ")
+        assert str(caught.value) == (
+            f"{droplet.host.runtime_dir} is a symlink; the first migration creates the runtime "
+            "directory and chowns it and follows no symlink, so move it aside and re-run"
+        )
         assert droplet.ownership.chowns == []
         assert target.is_dir() and droplet.host.runtime_dir.is_symlink()
 
@@ -1591,7 +1596,10 @@ class TestSymlinksAtTheNamesItWrites:
 
         with pytest.raises(MigrationRefusedError) as caught:
             complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
-        assert str(caught.value).startswith(f"{droplet.host.drop_in} is a symlink; ")
+        assert str(caught.value) == (
+            f"{droplet.host.drop_in} is a symlink; the first migration overwrites the drop-in "
+            "and keeps the bytes it replaces and follows no symlink, so move it aside and re-run"
+        )
         assert not droplet.host.previous_drop_in.exists()
         assert droplet.host.drop_in.is_symlink()
 
@@ -1608,7 +1616,10 @@ class TestSymlinksAtTheNamesItWrites:
 
         with pytest.raises(MigrationRefusedError) as caught:
             complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
-        assert str(caught.value).startswith(f"{droplet.host.previous_drop_in} is a symlink; ")
+        assert str(caught.value) == (
+            f"{droplet.host.previous_drop_in} is a symlink; the first migration keeps the "
+            "drop-in's backup at that name and follows no symlink, so move it aside and re-run"
+        )
         assert droplet.host.previous_drop_in.is_symlink()
         assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
 
@@ -1625,7 +1636,10 @@ class TestSymlinksAtTheNamesItWrites:
 
         with pytest.raises(MigrationRefusedError) as caught:
             complete_first_migration(droplet.plane, droplet.host, DEFAULT_TCP)
-        assert str(caught.value).startswith(f"{droplet.host.absent_drop_in} is a symlink; ")
+        assert str(caught.value) == (
+            f"{droplet.host.absent_drop_in} is a symlink; the first migration records an absent "
+            "drop-in at that name and follows no symlink, so move it aside and re-run"
+        )
         assert droplet.host.absent_drop_in.is_symlink()
         assert droplet.host.drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
 
@@ -1657,7 +1671,10 @@ class TestSymlinksAtTheNamesItWrites:
 
         with pytest.raises(ControlPlaneError) as caught:
             rollback_first_migration(droplet.plane, droplet.host)
-        assert str(caught.value).startswith(f"{backup} is a symlink, not the backup ")
+        assert str(caught.value) == (
+            f"{backup} is a symlink, not the backup the migration wrote; the restore reads and "
+            "moves the name, never what it points at — move it aside and restore by hand"
+        )
         assert backup.is_symlink() and elsewhere.is_file()
         assert live_release(droplet.plane) == droplet.a
 
@@ -1677,7 +1694,10 @@ class TestSymlinksAtTheNamesItWrites:
 
         with pytest.raises(ControlPlaneError) as caught:
             rollback_first_migration(droplet.plane, droplet.host)
-        assert str(caught.value).startswith(f"{backup} is a symlink, not the backup ")
+        assert str(caught.value) == (
+            f"{backup} is a symlink, not the backup the migration wrote; the restore reads and "
+            "moves the name, never what it points at — move it aside and restore by hand"
+        )
         assert backup.is_symlink()
         assert live_release(droplet.plane) == droplet.a
 
@@ -1757,7 +1777,12 @@ class TestThePreflightsAnswersGoStale:
 
         with pytest.raises(MigrationRefusedError) as caught:
             first_migration(droplet.plane, droplet.host, droplet.a)
-        assert str(caught.value).startswith(f"{droplet.plane.next_fragment} already exists; ")
+        assert str(caught.value) == (
+            f"{droplet.plane.next_fragment} already exists; the first migration writes it and "
+            "keeps no copy of what was there, so move it aside and re-run; a crash between "
+            "staging and (a) leaves exactly this file and nothing has read it, so there `rm` it "
+            "— `--abandon` cannot, having no backup to restore"
+        )
         assert droplet.plane.next_fragment.read_text(encoding="utf-8") == "# someone else's\n"
         assert not droplet.plane.fragment.exists()
         assert not droplet.host.previous_caddyfile.exists()
@@ -1778,7 +1803,15 @@ class TestThePreflightsAnswersGoStale:
 
         with pytest.raises(MigrationRefusedError) as caught:
             first_migration(droplet.plane, droplet.host, droplet.a, plant)
-        assert str(caught.value).startswith(f"{path} already exists; ")
+        if name == "fragment":
+            assert str(caught.value) == (
+                f"{path} already exists; the first migration writes it and keeps no copy of what "
+                "was there, so move it aside and re-run"
+            )
+        else:
+            assert str(caught.value) == (
+                f"{path} already exists; it is the rollback's source and is not overwritten"
+            )
         assert path.read_text(encoding="utf-8") == "# someone else's\n"
         assert not droplet.host.previous_drop_in.exists()
         assert not droplet.host.absent_drop_in.exists()
@@ -1798,7 +1831,10 @@ class TestThePreflightsAnswersGoStale:
 
         with pytest.raises(MigrationRefusedError) as caught:
             first_migration(droplet.plane, droplet.host, droplet.a, plant)
-        assert str(caught.value).startswith(f"{droplet.plane.caddyfile} is a symlink; ")
+        assert str(caught.value) == (
+            f"{droplet.plane.caddyfile} is a symlink; the first migration installs the new "
+            "Caddyfile over it and follows no symlink, so move it aside and re-run"
+        )
         assert elsewhere.read_text(encoding="utf-8") == OLD_CADDYFILE
         assert not droplet.host.previous_caddyfile.exists()
 
@@ -2268,6 +2304,7 @@ class TestTheDropInBackup:
             _migrate(droplet, _kill_at("installed"))
 
         assert droplet.host.previous_drop_in.read_bytes() == PRE_ENVELOPE_DROP_IN.encode()
+        assert stat.S_IMODE(droplet.host.previous_drop_in.stat().st_mode) == 0o644
         assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(
             droplet.host, with_exec_reload=False
         )
@@ -2343,6 +2380,7 @@ class TestTheDropInBackup:
 
         _migrate(droplet)
         assert droplet.host.absent_drop_in.is_file()
+        assert stat.S_IMODE(droplet.host.absent_drop_in.stat().st_mode) == 0o644
         assert not droplet.host.previous_drop_in.exists()
         assert droplet.host.drop_in.is_file()
 
@@ -2354,6 +2392,20 @@ class TestTheDropInBackup:
         assert not droplet.host.absent_drop_in.exists()
         assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
         assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
+
+    def test_restoring_an_absent_drop_in_tolerates_it_already_missing(
+        self, droplet: Droplet
+    ) -> None:
+        """A repeated restore still consumes the absence record after the deletion landed."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+        droplet.host.drop_in.unlink()
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is True
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
 
     @pytest.mark.parametrize("state", ["absent", "empty", "bytes"])
     def test_the_three_prior_states_are_distinct_records_and_distinct_restores(
