@@ -10,6 +10,7 @@ misreading cost about three hours across two dead runs.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import sys
 from pathlib import Path
@@ -109,6 +110,22 @@ def test_lane_order_decides_which_failure_is_reported() -> None:
     assert verdict.is_infrastructure
 
 
+def test_lane_order_does_not_skip_an_ordinary_failure_for_later_infrastructure() -> None:
+    """The first failed lane is authoritative even when a later lane has the
+    infrastructure signature. Otherwise the result would depend on which kind
+    of failure happened, rather than the caller's explicit lane order."""
+    jobs = [
+        _job("codex-tests", "failure", [("Run tests", "in_progress", None)]),
+        _job("codex-author", "failure", [("Codex", "completed", "failure")]),
+    ]
+
+    verdict = classify_lane_failure.classify(jobs, ["codex-author", "codex-tests"])
+
+    assert verdict.kind == "in_job"
+    assert verdict.job == "codex-author"
+    assert verdict.step == ""
+
+
 def test_a_lane_missing_from_the_payload_is_not_a_verdict() -> None:
     """A fork PR skips the agent lane entirely; absence is not a death."""
     jobs = [_job("fast-ci", "failure", [("Unit tests", "completed", "failure")])]
@@ -145,4 +162,19 @@ def test_the_cli_prints_the_three_output_lines(
         "kind=infrastructure",
         "job=codex-author",
         "step=Codex",
+    ]
+
+
+def test_the_cli_reads_stdin_and_uses_the_documented_default_lanes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    payload = {"jobs": [_job("codex-tests", "failure", [("Run tests", "completed", "failure")])]}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    assert classify_lane_failure.main([]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "kind=in_job",
+        "job=codex-tests",
+        "step=",
     ]
