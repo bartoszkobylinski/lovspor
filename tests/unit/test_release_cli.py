@@ -421,9 +421,12 @@ class TestReconcileWindow:
             release_group="g",
             site_root=tmp_path / "site",
             current_symlink=tmp_path / "current",
+            unit="caddy-rehearsal",
         )
 
         host = commands._host(tmp_path / "Caddyfile", "unix//run/x/admin.sock", options)
+
+        assert host.unit == "caddy-rehearsal"
 
         assert host.caddyfile == tmp_path / "Caddyfile"
         assert host.socket_admin == "unix//run/x/admin.sock"
@@ -872,6 +875,104 @@ def _build_args(world: World, releases: Path, live: str, token: Path | None) -> 
     return args
 
 
+class TestRehearse:
+    """``lovspor release rehearse``: ADR-0014 Validation (g) against a second instance.
+
+    The run cannot happen in CI on a real box — no caddy binary, no
+    systemd — so what is pinned here is the wiring and the two names that
+    keep it off the instance that serves the site.
+    """
+
+    def _fixtures(self, droplet: Droplet, tmp_path: Path) -> list[str]:
+        source = droplet.host.caddyfile_source.read_text(encoding="utf-8")
+        rejected = tmp_path / "Caddyfile.rejected"
+        rejected.write_text(source, encoding="utf-8")
+        unsuffixed = tmp_path / "Caddyfile.unsuffixed"
+        unsuffixed.write_text(source.replace("|0660", ""), encoding="utf-8")
+        return [
+            "--unit",
+            "caddy-rehearsal",
+            "--caddyfile",
+            str(droplet.plane.caddyfile),
+            "--rejected-source",
+            str(rejected),
+            "--unsuffixed-source",
+            str(unsuffixed),
+        ]
+
+    def test_walks_the_sequence_and_prints_what_every_step_read(
+        self, droplet: Droplet, tmp_path: Path
+    ) -> None:
+        droplet.caddy.fail_reloads = 1
+
+        result = runner.invoke(
+            app, ["release", "rehearse", droplet.a, *self._fixtures(droplet, tmp_path)]
+        )
+
+        assert result.exit_code == 0, result.output
+        lines = result.stdout.splitlines()
+        assert len(lines) == 17
+        assert lines[0].startswith("i: ")
+        assert lines[-1].startswith("v.by-hand: ")
+
+    def test_a_sub_step_that_does_not_hold_exits_one_naming_it(
+        self, droplet: Droplet, tmp_path: Path
+    ) -> None:
+        """No fail_reloads, so the rejected fixture loads — which it must not."""
+        result = runner.invoke(
+            app, ["release", "rehearse", droplet.a, *self._fixtures(droplet, tmp_path)]
+        )
+
+        assert result.exit_code == 1
+        assert "rehearsal step ii.rejected failed" in result.output
+
+    def test_refuses_the_production_unit(self, droplet: Droplet, tmp_path: Path) -> None:
+        args = self._fixtures(droplet, tmp_path)
+        args[args.index("--unit") + 1] = "caddy"
+
+        result = runner.invoke(app, ["release", "rehearse", droplet.a, *args])
+
+        assert result.exit_code == 2
+        assert "never the production unit caddy" in _plain(result.output)
+
+    def test_refuses_the_production_caddyfile(self, droplet: Droplet, tmp_path: Path) -> None:
+        args = self._fixtures(droplet, tmp_path)
+        args[args.index("--caddyfile") + 1] = "/etc/caddy/Caddyfile"
+
+        result = runner.invoke(app, ["release", "rehearse", droplet.a, *args])
+
+        assert result.exit_code == 2
+        assert "never /etc/caddy/Caddyfile" in _plain(result.output)
+
+    def test_refuses_anything_that_is_not_a_release_id(
+        self, droplet: Droplet, tmp_path: Path
+    ) -> None:
+        result = runner.invoke(
+            app, ["release", "rehearse", "not-an-id", *self._fixtures(droplet, tmp_path)]
+        )
+
+        assert result.exit_code == 2
+        assert "not a release_content_id" in _plain(result.output)
+
+    def test_the_instance_and_both_fixtures_are_required(self) -> None:
+        """Nothing here has a sensible default: every one of them names the second instance."""
+        root = get_command(app)
+        assert isinstance(root, click.Group)
+        group = root.commands["release"]
+        assert isinstance(group, click.Group)
+        command = group.commands["rehearse"]
+        params = {param.name: param for param in command.params}
+
+        assert [
+            name
+            for name in ("unit", "rejected_source", "unsuffixed_source")
+            if params[name].required
+        ] == ["unit", "rejected_source", "unsuffixed_source"]
+        assert params["unit"].envvar == "LOVSPOR_CADDY_UNIT"
+        assert params["unprivileged_user"].default == "lovspor"
+        assert params["release_group"].default == "lovspor-release"
+
+
 class TestBuild:
     def test_builds_and_prints_the_id_alone_on_stdout(
         self, world: World, checkout: Path, tmp_path: Path, httpx_mock: HTTPXMock
@@ -1036,6 +1137,7 @@ class TestPackage:
             "rollback",
             "prune",
             "migrate",
+            "rehearse",
         } <= set(group.commands)
 
     def test_only_the_command_layer_reads_a_clock(self) -> None:

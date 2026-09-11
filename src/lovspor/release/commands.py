@@ -27,11 +27,13 @@ import httpx
 import typer
 
 from lovspor.publish.inventory import PublishError
+from lovspor.release.admin_socket import DEFAULT_UNPRIVILEGED_USER
 from lovspor.release.build import BuildOutcome, BuildRequest, build_release
 from lovspor.release.caddy import (
     DEFAULT_ADMIN,
     DEFAULT_CADDYFILE,
     DEFAULT_FRAGMENT,
+    DEFAULT_UNIT,
     HttpxAdminClient,
     SubprocessRunner,
 )
@@ -58,6 +60,7 @@ from lovspor.release.migrate import (
     rollback_first_migration,
 )
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
+from lovspor.release.rehearsal import Rehearsal, RehearsalFixtures, rehearse
 from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
 from lovspor.site.errors import SiteBuildError
@@ -134,6 +137,14 @@ _ReleaseGroupOption = Annotated[
         help="The group that may open the admin socket; root is in it, lovspor is not.",
     ),
 ]
+_UnitOption = Annotated[
+    str,
+    typer.Option(
+        "--unit",
+        envvar="LOVSPOR_CADDY_UNIT",
+        help="The systemd unit of the Caddy instance to drive; the rehearsal drives its own.",
+    ),
+]
 
 
 @dataclass(frozen=True)
@@ -147,6 +158,7 @@ class HostOptions:
     release_group: str = DEFAULT_RELEASE_GROUP
     site_root: Path = DEFAULT_SITE_ROOT
     current_symlink: Path = DEFAULT_CURRENT_SYMLINK
+    unit: str = DEFAULT_UNIT
 
 
 def _plane(releases: Path, caddyfile: Path, fragment: Path, admin: str) -> ControlPlane:
@@ -163,6 +175,7 @@ def _host(caddyfile: Path, admin: str, options: HostOptions) -> MigrationHost:
         tcp_admin=options.tcp_admin,
         socket_admin=admin,
         release_group=options.release_group,
+        unit=options.unit,
         site_root=options.site_root,
         current_symlink=options.current_symlink,
     )
@@ -488,6 +501,88 @@ def migrate_command(
     with _refusals():
         lines = _migrate_lines(plane, _host(caddyfile, admin, options), run)
     for line in lines:
+        typer.echo(line)
+
+
+def _rehearsal_instance(unit: str, caddyfile: Path) -> None:
+    """The rehearsal drives a *second* instance, and refuses to be pointed at the first.
+
+    Every path and address is an option, so a run with the defaults left
+    in place would walk the cutover on the Caddy that serves the site —
+    with the production Caddyfile as its scratch file. The two names that
+    identify that instance are refused up front, before anything reads
+    the host.
+    """
+    if unit == DEFAULT_UNIT:
+        raise typer.BadParameter(
+            f"--unit must name the rehearsal instance, never the production unit {DEFAULT_UNIT}"
+        )
+    if caddyfile == DEFAULT_CADDYFILE:
+        raise typer.BadParameter(
+            f"--caddyfile must be the rehearsal instance's, never {DEFAULT_CADDYFILE}"
+        )
+
+
+@release_app.command(name="rehearse")
+def rehearse_command(
+    content_id: Annotated[str, typer.Argument(help="The finalized release_content_id to use.")],
+    unit: _UnitOption,
+    rejected_source: Annotated[
+        Path,
+        typer.Option(
+            "--rejected-source",
+            help="A Caddyfile that validates and fails at load; (c) must leave R unmoved.",
+        ),
+    ],
+    unsuffixed_source: Annotated[
+        Path,
+        typer.Option(
+            "--unsuffixed-source",
+            help="The same Caddyfile without the |0660 suffix; a restart must lose the mode.",
+        ),
+    ],
+    releases: _ReleasesOption = DEFAULT_RELEASES,
+    caddyfile: _CaddyfileOption = DEFAULT_CADDYFILE,
+    fragment: _FragmentOption = DEFAULT_FRAGMENT,
+    admin: _AdminOption = DEFAULT_ADMIN,
+    tcp_admin: _TcpAdminOption = DEFAULT_TCP_ADMIN,
+    caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+    drop_in: _DropInOption = DEFAULT_DROP_IN,
+    runtime_dir: _RuntimeDirOption = DEFAULT_RUNTIME_DIR,
+    release_group: _ReleaseGroupOption = DEFAULT_RELEASE_GROUP,
+    unprivileged_user: Annotated[
+        str,
+        typer.Option(
+            "--unprivileged-user",
+            help="The identity that must NOT reach the admin socket; the call is attempted as it.",
+        ),
+    ] = DEFAULT_UNPRIVILEGED_USER,
+) -> None:
+    """Walk the first migration on a second Caddy instance (ADR-0014 Validation (g)).
+
+    Both address transitions, a load Caddy refuses, the rollback, one
+    steady-state reload and two restarts with the admin socket's four
+    facts after each — plus the two negative fixtures that prove the
+    assertions can fail. Exit 0 is what authorises the production
+    cutover; exit 1 names the sub-step that did not hold, and every path
+    and address it touched is the second instance's.
+    """
+    if not is_release_id(content_id):
+        raise typer.BadParameter(f"not a release_content_id: {content_id}")
+    _rehearsal_instance(unit, caddyfile)
+    options = HostOptions(
+        tcp_admin, caddyfile_source, drop_in, runtime_dir, release_group, unit=unit
+    )
+    plan = Rehearsal(
+        _plane(releases, caddyfile, fragment, admin),
+        _host(caddyfile, admin, options),
+        RehearsalFixtures(rejected_source, unsuffixed_source),
+        content_id,
+        unprivileged_user,
+    )
+    with _refusals():
+        report = rehearse(plan)
+    for line in report.describe():
         typer.echo(line)
 
 
