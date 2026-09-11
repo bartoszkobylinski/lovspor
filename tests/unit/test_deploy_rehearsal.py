@@ -240,6 +240,35 @@ class TestRunbook:
         assert "`0660`" in timer[:900]
         assert "admin socket precondition unmet" in text
 
+    def test_the_readme_says_the_migration_is_authorised_by_both_rehearsals(self) -> None:
+        """The ADR lists two, and one passing is not the authorisation."""
+        text = _README.read_text(encoding="utf-8")
+
+        assert "rehearse-urls.sh" in text
+        assert "authorised by BOTH" in text
+
+    def test_the_readme_says_this_one_cannot_run_in_ci_either(self) -> None:
+        text = _README.read_text(encoding="utf-8")
+        section = text[text.index("rehearse-urls.sh") :]
+
+        assert "cannot run in CI either" in section
+
+    def test_the_readme_says_what_answers_means_and_what_may_differ(self) -> None:
+        """An over-strict comparison is as useless as none, so the runbook states the line."""
+        text = _README.read_text(encoding="utf-8")
+        section = text[text.index("#### 4b.") :]
+
+        assert "everything but the **root**" in section
+        assert "bytes are not compared" in section
+        assert "one-directional" in section
+
+    def test_operations_names_the_url_dry_run_and_its_captures(self) -> None:
+        text = _OPERATIONS.read_text(encoding="utf-8")
+
+        assert "release rehearse-urls" in text
+        assert "scripts/capture_caddy_adapt.py" in text
+        assert text.index("release rehearse-urls") < text.index("Observatory: registering")
+
 
 class TestTheUrlDryRunsHarness:
     """``rehearse-urls.sh``: the staged rehearsal's other half (ADR-0014 Validation).
