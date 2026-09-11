@@ -565,6 +565,7 @@ class TestMigrate:
             droplet.host.current_symlink,
             droplet.host.site_root,
             flat,
+            droplet.host.previous_drop_in,
             droplet.host.previous_caddyfile,
         ):
             assert f"  {path}" in result.output, path
@@ -593,12 +594,13 @@ class TestMigrate:
 
         assert result.exit_code == 0, result.output
         assert result.stdout == (
-            f"retired 4: {droplet.host.current_symlink}, {droplet.host.site_root}, {flat}, "
-            f"{droplet.host.previous_caddyfile}\n"
+            f"retired 5: {droplet.host.current_symlink}, {droplet.host.site_root}, {flat}, "
+            f"{droplet.host.previous_drop_in}, {droplet.host.previous_caddyfile}\n"
         )
         assert not droplet.host.current_symlink.is_symlink()
         assert not droplet.host.site_root.exists()
         assert not flat.exists()
+        assert not droplet.host.previous_drop_in.exists()
         assert not droplet.host.previous_caddyfile.exists()
 
     def test_retire_with_the_trees_gone_still_removes_the_way_back(self, droplet: Droplet) -> None:
@@ -608,7 +610,9 @@ class TestMigrate:
         second = runner.invoke(app, ["release", "migrate", "--retire", "--yes"])
 
         assert first.exit_code == 0, first.output
-        assert first.stdout == f"retired 1: {droplet.host.previous_caddyfile}\n"
+        assert first.stdout == (
+            f"retired 2: {droplet.host.previous_drop_in}, {droplet.host.previous_caddyfile}\n"
+        )
         assert second.exit_code == 0, second.output
         assert second.stdout == "retired 0: -\n"
 
@@ -786,6 +790,7 @@ class TestMigrateRunSelection:
         assert str(caught.value) == (
             "--retire permanently removes these paths, the last of them the only way back to "
             f"the pre-envelope site:\n  {droplet.host.site_root}\n"
+            f"  {droplet.host.previous_drop_in}\n"
             f"  {droplet.host.previous_caddyfile}\nre-run with --yes to confirm"
         )
         assert droplet.host.site_root.is_dir()
@@ -793,6 +798,7 @@ class TestMigrateRunSelection:
 
     def test_the_unconfirmed_retire_with_nothing_left_names_nothing(self, droplet: Droplet) -> None:
         assert runner.invoke(app, ["release", "migrate", droplet.a]).exit_code == 0
+        droplet.host.previous_drop_in.unlink()
         droplet.host.previous_caddyfile.unlink()
 
         with pytest.raises(ReleaseError) as caught:

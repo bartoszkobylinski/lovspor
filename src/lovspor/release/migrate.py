@@ -124,7 +124,11 @@ PROBE_MODE = 0o600
 _EXCLUSIVE = os.O_WRONLY | os.O_CREAT | os.O_EXCL
 """Create or refuse: a taken name — a file, a directory, a symlink — is never opened."""
 PRE_ENVELOPE_DROP_IN = f"[Service]\nEnvironmentFile={ENVIRONMENT_FILE}\n"
-"""What provisioning wrote before the envelope: restored by abandon and rollback."""
+"""What provisioning wrote before the envelope: the one drop-in the preflight recognises.
+
+Never what a rollback restores — that is the backup, which holds what
+was actually on the box.
+"""
 _UNIX_PREFIX = "unix/"
 FLAT_RELEASE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{12}$")
 """The pre-envelope release directory name, ``<YYYYMMDDTHHMMSSZ>-<sha12>``."""
@@ -188,6 +192,15 @@ class MigrationHost:
     @property
     def previous_caddyfile(self) -> Path:
         return self.caddyfile.with_name(self.caddyfile.name + PREVIOUS_SUFFIX)
+
+    @property
+    def previous_drop_in(self) -> Path:
+        """The drop-in's backup, beside it as the Caddyfile's is beside the Caddyfile.
+
+        systemd reads ``*.conf`` out of a drop-in directory and nothing
+        else, so the suffixed name is invisible to the unit it stands in.
+        """
+        return self.drop_in.with_name(self.drop_in.name + PREVIOUS_SUFFIX)
 
     @property
     def socket(self) -> Path:
@@ -390,6 +403,41 @@ def _require_files(plane: ControlPlane, host: MigrationHost) -> None:
         raise MigrationRefusedError(f"the new Caddyfile {host.caddyfile_source} does not exist")
 
 
+def _drop_in_bytes(path: Path) -> bytes | None:
+    """The drop-in as it stands, or ``None`` for an absent one; unreadable is a refusal."""
+    if not path.exists():
+        return None
+    try:
+        return path.read_bytes()
+    except OSError as error:
+        raise MigrationRefusedError(f"{path} cannot be read: {error}") from error
+
+
+def _require_drop_in(host: MigrationHost) -> None:
+    """The drop-in is absent or exactly what provisioning wrote; anything else is a human's.
+
+    (a) overwrites it whole and the rollback puts the backup back, so
+    which lines of an unrecognised drop-in were wanted would be the
+    module's guess. The operator makes it instead, before anything moves.
+    """
+    if host.previous_drop_in.exists():
+        raise MigrationRefusedError(
+            f"{host.previous_drop_in} already exists; it is the rollback's source and is not "
+            "overwritten"
+        )
+    found = _drop_in_bytes(host.drop_in)
+    if found is not None and found != PRE_ENVELOPE_DROP_IN.encode():
+        raise MigrationRefusedError(
+            f"{host.drop_in} is neither absent nor the pre-envelope drop-in; "
+            "move it aside and re-run"
+        )
+
+
+def _require_untouched(host: MigrationHost) -> None:
+    """The state (a) writes over, and whether this migration may write over it."""
+    _require_drop_in(host)
+
+
 def _require_old_config_on_tcp(plane: ControlPlane, host: MigrationHost) -> ConfigPair:
     """R on TCP names no release and is what the Caddyfile on disk adapts to."""
     try:
@@ -475,6 +523,7 @@ def preflight(plane: ControlPlane, host: MigrationHost, content_id: str | None =
     """Every precondition of the first migration, in the order a refusal is cheapest."""
     _require_no_marker(plane)
     _require_files(plane, host)
+    _require_untouched(host)
     running = _require_old_config_on_tcp(plane, host)
     gid = _require_group(host)
     _require_mode_suffix(plane, host)
@@ -502,7 +551,24 @@ def _daemon_reload(runner: Runner) -> None:
         raise ControlPlaneError(f"systemctl daemon-reload failed: {done.stderr.strip()}")
 
 
+def _backup_drop_in(host: MigrationHost) -> None:
+    """The drop-in as it stands, kept beside it; an absent one is an empty backup.
+
+    Only the first write takes it: by the second — (e)'s ``ExecReload=``
+    pair, or a ``complete`` after a crash — the file on disk is already
+    the migration's own, and recording *that* as the prior state is how
+    the rollback came to restore an invention. Absence round-trips
+    because no drop-in the preflight admits is empty: it admits absence
+    and ``PRE_ENVELOPE_DROP_IN`` alone, and that text is not empty.
+    """
+    if host.previous_drop_in.exists():
+        return
+    prior = _drop_in_bytes(host.drop_in)
+    atomic_write_bytes(host.previous_drop_in, b"" if prior is None else prior, mode=WORLD_READABLE)
+
+
 def _load_drop_in(plane: ControlPlane, host: MigrationHost, with_exec_reload: bool) -> None:
+    _backup_drop_in(host)
     atomic_write_text(host.drop_in, drop_in_text(host, with_exec_reload), mode=WORLD_READABLE)
     _daemon_reload(plane.runner)
 
@@ -525,7 +591,12 @@ def _install_files(plane: ControlPlane, host: MigrationHost) -> None:
     on both addresses, and a re-run refuses on the backup it already
     wrote. The pre-envelope Caddyfile does not import the fragment, so
     the fragment arriving early changes nothing about what is served.
+
+    The drop-in's backup is taken first, before the Caddyfile's: the two
+    together are the way back and ``_restore_files`` needs both, so the
+    window in which one exists without the other is one statement wide.
     """
+    _backup_drop_in(host)
     atomic_write_bytes(host.previous_caddyfile, plane.caddyfile.read_bytes(), mode=WORLD_READABLE)
     plane.next_fragment.replace(plane.fragment)
     atomic_write_bytes(plane.caddyfile, host.caddyfile_source.read_bytes(), mode=WORLD_READABLE)
@@ -699,30 +770,48 @@ def _had_exec_reload(host: MigrationHost) -> bool:
 
 
 def _require_backup(host: MigrationHost) -> None:
-    """The rollback's only source. ``--retire`` removes it last; after that there is no way back."""
-    if not host.previous_caddyfile.is_file():
-        raise ControlPlaneError(
-            f"{host.previous_caddyfile} is missing: (a) never ran, the rollback already ran, or "
-            "`migrate --retire` removed it with the pre-envelope layout; nothing to restore"
-        )
+    """The rollback's only sources. ``--retire`` removes them last; after that there is no way
+    back."""
+    for backup in (host.previous_caddyfile, host.previous_drop_in):
+        if not backup.is_file():
+            raise ControlPlaneError(
+                f"{backup} is missing: (a) never ran, the rollback already ran, or "
+                "`migrate --retire` removed it with the pre-envelope layout; nothing to restore"
+            )
+
+
+def _restore_drop_in(host: MigrationHost) -> None:
+    """The drop-in as the backup found it, absence included; the backup is consumed.
+
+    An empty backup is a drop-in that was not there, and restoring it as
+    a file — which the assumed ``PRE_ENVELOPE_DROP_IN`` did — leaves the
+    box carrying a unit fragment it never had, while the report says the
+    rollback succeeded.
+    """
+    prior = host.previous_drop_in.read_bytes()
+    if prior:
+        atomic_write_bytes(host.drop_in, prior, mode=WORLD_READABLE)
+    else:
+        host.drop_in.unlink(missing_ok=True)
+    host.previous_drop_in.unlink()
 
 
 def _restore_files(plane: ControlPlane, host: MigrationHost) -> None:
-    """The reverse of (a): the previous Caddyfile back, the fragment gone, the drop-in as
-    provisioning wrote it, loaded. The backup is consumed, so a later migration starts clean."""
+    """The reverse of (a): the previous Caddyfile back, the fragment gone, the drop-in as it
+    was, loaded. Both backups are consumed, so a later migration starts clean."""
     _require_backup(host)
     host.previous_caddyfile.replace(plane.caddyfile)
     plane.fragment.unlink(missing_ok=True)
     plane.next_fragment.unlink(missing_ok=True)
-    atomic_write_text(host.drop_in, PRE_ENVELOPE_DROP_IN, mode=WORLD_READABLE)
+    _restore_drop_in(host)
     _daemon_reload(plane.runner)
 
 
 def _restore_pre_envelope(plane: ControlPlane, host: MigrationHost) -> bool:
     """M goes before the files, and neither moves without a backup to restore.
 
-    ``_restore_files`` consumes ``Caddyfile.pre-envelope``, the rollback's
-    only source. Removing the marker after it left a crash window whose
+    ``_restore_files`` consumes both ``.pre-envelope`` backups, the
+    rollback's only sources. Removing the marker after it left a crash window whose
     state has no way out: the marker says a release is live while the
     backup is gone, so every later rollback hits *nothing to restore* and
     ``reconcile`` — which ignores the host once a marker exists — dials
@@ -895,16 +984,19 @@ def _require_releases_outside(plane: ControlPlane, host: MigrationHost) -> None:
 def retire_targets(plane: ControlPlane, host: MigrationHost) -> tuple[str, ...]:
     """What ``retire_pre_envelope`` removes, in the order it removes it; nothing moves here.
 
-    The previous Caddyfile comes last, after every tree it roots at is
-    gone. Left behind, it arms a rollback that puts a configuration
-    serving deleted directories back into service: ``root *`` tolerates a
-    missing directory and ``redirects*.caddy`` tolerates zero matches, so
-    the reload returns 0 and the site 404s.
+    The two backups come last, after every tree they root at is gone, and
+    the previous Caddyfile is the very last of all. Left behind, it arms
+    a rollback that puts a configuration serving deleted directories back
+    into service: ``root *`` tolerates a missing directory and
+    ``redirects*.caddy`` tolerates zero matches, so the reload returns 0
+    and the site 404s.
     """
     _require_releases_outside(plane, host)
     targets = _symlink_target(host.current_symlink)
     targets += _tree_target(host.site_root)
     targets += _flat_release_targets(plane.releases)
+    if host.previous_drop_in.is_file():
+        targets.append(str(host.previous_drop_in))
     if host.previous_caddyfile.is_file():
         targets.append(str(host.previous_caddyfile))
     return tuple(targets)

@@ -328,11 +328,27 @@ caddy version
 systemctl show caddy -p ExecReload -p User -p Group
 curl -fsS localhost:2019/config/ | head -c 200; echo    # TCP answers today
 ls -l /run/caddy 2>&1                                   # must not exist yet
+cat /etc/systemd/system/caddy.service.d/lovspor.conf 2>&1   # absent, or the two lines below
+ls -l /etc/systemd/system/caddy.service.d/              # no leftover *.pre-envelope backup
 ls -ld /var/www/lovspor-current /var/www/lovspor; ls /var/www/lovspor-releases/ 2>&1
 df -h /var/www
 systemctl status lovspor-publish --no-pager | head -5
 date -u    # stay clear of 05:30 UTC (corpus fetch) and minute :17 (drift timer)
 ```
+
+The migration overwrites that drop-in and its rollback puts back the bytes it
+found, kept as `lovspor.conf.pre-envelope` beside it (systemd reads `*.conf` out
+of a drop-in directory and nothing else, so the backup is invisible to the unit).
+Absence is a state too: a box with no drop-in gets none back. The preflight
+refuses anything that is neither absent nor exactly
+
+```
+[Service]
+EnvironmentFile=/etc/default/caddy-lovspor
+```
+
+so an edited drop-in is a decision for you, not a guess for the code: move it
+aside and re-run.
 
 The first envelope has no live release to hard-link against, so its `corpus/`
 tree is a full second copy beside the old flat releases until step 8 retires
@@ -373,7 +389,8 @@ sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --check
 `localhost:2019` and its hash, the socket confirmed absent, the group and its
 gid, and that this Caddy accepts the `|0660` creation-mode suffix — and refuses,
 naming the reason, if the marker already exists, the socket is already there, a
-backup Caddyfile is already in place, Caddy is unreachable on TCP, the running
+backup Caddyfile or drop-in backup is already in place, the drop-in is neither
+absent nor the pre-envelope one, Caddy is unreachable on TCP, the running
 configuration already names a release, or the adapted configuration on disk does
 not match the running one. Exit 0 or **stop here**; nothing has moved.
 
@@ -475,8 +492,10 @@ sudo systemctl enable --now lovspor-site-drift.timer
 ### 8. Retire the pre-envelope layout — separately, and last
 
 `--retire` removes `/var/www/lovspor-current`, `/var/www/lovspor`, the old flat
-release directories and — last, once every one of those is gone —
-`/etc/caddy/Caddyfile.pre-envelope`, the rollback's only source. It refuses
+release directories and — last, once every one of those is gone — the two
+backups the rollback restores from:
+`/etc/systemd/system/caddy.service.d/lovspor.conf.pre-envelope` and, the very
+last path of all, `/etc/caddy/Caddyfile.pre-envelope`. It refuses
 unless the host is reconciled and the marker exists, and it is
 deliberately **not** part of the migration: until it is run, step 9's rollback
 is still a working way back to the old site. Run it only after steps 6 and 7
@@ -519,7 +538,7 @@ derive TCP and reach nothing — then removes the marker, puts the files back an
 the `ExecReload=` pair with them, and leaves the admin endpoint on TCP. It
 refuses once a second envelope release has happened (the marker has a
 `previous`): that is `publish-release.sh --rollback`, the ordinary one. It also
-refuses the moment `/etc/caddy/Caddyfile.pre-envelope` is gone — after step 8
+refuses the moment either `.pre-envelope` backup is gone — after step 8
 there is no way back to the old site, only a new envelope release.
 
 #### Last resort: Caddy answers on neither address
@@ -534,7 +553,8 @@ sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --rollback --offline
 ```
 
 It dials nothing. It removes the marker, restores `/etc/caddy/Caddyfile` from
-`/etc/caddy/Caddyfile.pre-envelope`, puts the pre-envelope drop-in back and runs
+`/etc/caddy/Caddyfile.pre-envelope`, puts the drop-in back from its own backup
+(absent if it was absent) and runs
 `systemctl restart caddy`, which loads the file on disk whole. Then verify by
 hand — it reports what it did, it does not observe the result:
 
