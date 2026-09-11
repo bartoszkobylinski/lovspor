@@ -101,3 +101,14 @@ class MigrationFailedError(ControlPlaneError):
         super().__init__(f"first migration stopped after {reached}: {detail}")
         self.reached = reached
         self.detail = detail
+
+
+class UnroutableConfigError(ControlPlaneError):
+    """The dry-run met a matcher, a handler or a URL it does not model.
+
+    Never a verdict about the configuration: the staged rehearsal decides
+    what a configuration answers by walking its adapted routes, and a
+    route it cannot read is a question it cannot answer. Refusing by name
+    is the only honest outcome — skipping the route would let the
+    comparison pass on exactly the change it exists to catch.
+    """
