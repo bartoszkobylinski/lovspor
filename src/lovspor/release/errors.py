@@ -65,8 +65,33 @@ class ReloadFailedError(ControlPlaneError):
     """Caddy would not load the new configuration; the previous one was put back."""
 
 
+class AdminSocketError(ControlPlaneError):
+    """One of the admin socket's four facts does not hold (ADR-0014 Decision 6).
+
+    Never a drift verdict and never an unreconciled host: the permission
+    model the whole control plane rests on is broken, so the caller that
+    asked — the rehearsal, or the drift timer as its first action —
+    stops before it observes anything else.
+    """
+
+
 class MigrationRefusedError(ControlPlaneError):
     """The first migration's preflight found its precondition unmet; nothing moved."""
+
+
+class RehearsalFailedError(ControlPlaneError):
+    """An assertion of the staged rehearsal did not hold (ADR-0014 Validation (g)).
+
+    Names the sub-step — ``i`` through ``v``, or one of the negative
+    fixtures — and what was read instead. The production migration is
+    not authorised while this can be raised: that is the whole purpose
+    of running the sequence on a second instance first.
+    """
+
+    def __init__(self, step: str, detail: str) -> None:
+        super().__init__(f"rehearsal step {step} failed: {detail}")
+        self.step = step
+        self.detail = detail
 
 
 class MigrationFailedError(ControlPlaneError):

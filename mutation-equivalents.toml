@@ -2469,3 +2469,21 @@ host.socket_admin`. And `None != host.socket_admin` always, because
 requires a `unix/`-prefixed string. Both values take the same branch on every
 reachable input.
 """
+
+[[equivalent]]
+file = "src/lovspor/release/rehearsal.py"
+symbol = "_stock_state"
+registered = "2026-09-11, branch feat/migration-rehearsal, local ./scripts/mutmut-pr.sh run"
+mutation = """
+-        plan.host.drop_in, drop_in_text(plan.host, with_exec_reload=False), mode=WORLD_READABLE
++        plan.host.drop_in, drop_in_text(plan.host, with_exec_reload=None), mode=WORLD_READABLE
+"""
+justification = """
+`drop_in_text` reads `with_exec_reload` in exactly one place, `if
+with_exec_reload:`, which tests it for truth. `None` and `False` are both falsy,
+so both select the branch that omits the `ExecReload=` pair, and the function
+returns byte-identical text. The fixture writes those bytes and nothing else
+looks at the flag, so every later read — the `systemctl show` output the unit
+derives from that file included — is the same. No input distinguishes the two,
+so no test can. This is Python's own truthiness, not a dependency's behaviour.
+"""

@@ -15,15 +15,25 @@ then a release.
 
 The served document that cannot be read is ``ServedDocumentError``, the
 check's own failure — reported as such, never as drift.
+
+The check's **first action** is the admin socket's four facts (Decision 6,
+through ``checked_drift``), before any probe runs: the release procedure's
+whole permission model rests on them, a Caddy restart is what takes them
+away, and an hourly timer is the only thing on the box that would notice.
+Observing a host whose admin socket the service user can open and then
+reporting *no drift* would be the worst of both — a green unit over an
+open door.
 """
 
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 import httpx
 from pydantic import BaseModel, ConfigDict
 
+from lovspor.release.admin_socket import AdminSocket, check_admin_socket
 from lovspor.site.capabilities import CapabilityDocument, State, parse_capabilities
 from lovspor.site.errors import CapabilityDocumentError, ServedDocumentError
 from lovspor.site.probe import ProbeSettings, probe
@@ -91,3 +101,27 @@ def drift_check(
         observed=observed,
         differences=state_differences(served.state, observed.state),
     )
+
+
+@dataclass(frozen=True)
+class DriftInputs:
+    """One drift check: the document to compare with, the probe, and the socket asserted first."""
+
+    served_url: str
+    settings: ProbeSettings
+    access: AdminSocket
+
+
+def checked_drift(
+    inputs: DriftInputs, *, client: httpx.Client, clock: Callable[[], datetime]
+) -> DriftReport:
+    """The admin socket's four facts, then the comparison (ADR-0014 Decision 4).
+
+    The order is the contract: *first action*, before the served document
+    is fetched and before either subject is observed. A socket the
+    unprivileged user can open is not drift and is not something the
+    comparison could ever report — it is the precondition of the release
+    procedure itself, so the check stops there and names it.
+    """
+    check_admin_socket(inputs.access)
+    return drift_check(inputs.served_url, inputs.settings, client=client, clock=clock)

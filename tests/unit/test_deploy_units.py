@@ -77,3 +77,22 @@ class TestDriftService:
         (timeout,) = _directive(_SERVICE.read_text(encoding="utf-8"), "TimeoutStartSec")
 
         assert int(timeout) <= 600
+
+
+class TestDriftServiceAdminSocket:
+    """The four facts are the drift check's first action (ADR-0014 Decision 4)."""
+
+    def test_the_unit_records_the_socket_check_and_its_exit_code(self) -> None:
+        text = _SERVICE.read_text(encoding="utf-8")
+
+        assert "FIRST action" in text
+        assert "0660" in text
+        assert "localhost:2019" in text
+        assert "4 = the admin socket precondition" in text
+
+    def test_the_identity_that_drops_for_the_one_call_is_named(self) -> None:
+        text = _SERVICE.read_text(encoding="utf-8")
+
+        assert "drops to" in text
+        assert "`lovspor` cannot" in text
+        assert _directive(text, "User") == ["root"]

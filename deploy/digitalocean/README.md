@@ -420,11 +420,65 @@ Not a precondition — a release before the restart publishes
 `runtime_tree_match: false` and says so — but doing it first is one fewer
 comparison to explain on the first public page.
 
-### 4. The socket's group, then the preflight
+### 4. The socket's group, the rehearsal, then the preflight
 
 ```bash
 sudo groupadd --system --force lovspor-release
 sudo usermod -aG lovspor-release root
+```
+
+**Rehearse the migration before you run it. Its result is what authorises the
+cutover** (ADR-0014 Validation (g)): the load that installs the new
+configuration is the load that moves the admin endpoint onto the socket, and
+the way back is a load delivered to that socket — neither can be tried twice on
+the box that serves the site. So both are walked first on a *second* Caddy
+instance, `caddy-rehearsal.service`, with its own unit, its own loopback port,
+its own admin addresses, its own runtime directory, its own drop-in directory
+and its own releases root. Nothing it touches is this box's serving
+configuration: `lovspor release rehearse` refuses `--unit caddy` and
+`--caddyfile /etc/caddy/Caddyfile` by name, before it reads anything.
+
+```bash
+df -h /var/www     # the rehearsal builds a full envelope of its own
+sudo bash /opt/lovspor/app/deploy/digitalocean/rehearse-migration.sh
+```
+
+About five minutes, most of it the build. It prints one line per assertion, in
+the ADR's order: (i) the instance on the previous Caddyfile with TCP answering
+and no socket; (ii) a load Caddy *rejects*, which must leave TCP answering, no
+socket and R unmoved, then the real cutover with the socket absent immediately
+before the reload and answering immediately after it, TCP refusing, R naming
+the envelope and `ExecReload=` naming the explicit socket address; (iii) the
+rollback delivered to the socket — preceded by a plain `systemctl reload` of
+the previous Caddyfile through the stock line, which **must fail**, because
+`caddy reload` derives `localhost:…` from the file it hands over and that is
+what makes the rollback's explicit `--address` load-bearing; (iv) the cutover
+again and one steady-state `systemctl reload` through the drop-in; (v) two
+restarts, each followed by the admin socket's four facts — mode `0660`, the
+release group, root can `GET /config/` over it, `lovspor` cannot, nothing on
+TCP — and a socket whose mode and group were set once *by hand*, which must
+fail those facts after a restart.
+
+Exit 0 authorises step 5. Exit 1 names the sub-step that did not hold: **stop,
+and do not cut over.** The instance and its whole tree are removed when the
+script exits, however it exits; `--keep` leaves it up for inspection, and
+`systemctl stop caddy-rehearsal` plus `rm -rf /etc/caddy/rehearsal
+/var/www/lovspor-rehearsal /etc/systemd/system/caddy-rehearsal.service*` takes
+it down by hand.
+
+**This rehearsal cannot run in CI, and no test result substitutes for it.**
+There is no `caddy` binary and no systemd on the runner, so CI proves only that
+the Python is sound and that the assertions fire against the fakes
+(`tests/unit/test_release_rehearsal.py`, including a test for each negative
+fixture proving it really does fail). Whether *this* Caddy build accepts the
+`|0660` suffix, whether its adapted JSON hashes equal to what `GET /config/`
+returns, and whether a restart really recreates the socket `0660` in the group
+are facts only the droplet can report. That is the whole reason this step
+exists.
+
+Then the preflight, which moves nothing:
+
+```bash
 sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --check
 ```
 

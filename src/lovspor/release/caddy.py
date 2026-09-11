@@ -262,6 +262,10 @@ def validate(runner: Runner, caddyfile: Path, fragment: Path) -> None:
         raise CommitRefusedError(f"caddy validate refused {fragment}: {done.stderr.strip()}")
 
 
-def reload(runner: Runner) -> Completed:
-    """``systemctl reload caddy`` — the drop-in's explicit-address reload line."""
-    return runner.run(("systemctl", "reload", "caddy"), {})
+DEFAULT_UNIT = "caddy"
+"""The unit every steady-state reload goes through; the rehearsal's second instance has its own."""
+
+
+def reload(runner: Runner, unit: str = DEFAULT_UNIT) -> Completed:
+    """``systemctl reload <unit>`` — the drop-in's explicit-address reload line."""
+    return runner.run(("systemctl", "reload", unit), {})

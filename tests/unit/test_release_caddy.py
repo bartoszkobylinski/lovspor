@@ -304,6 +304,14 @@ class TestCommands:
         assert done.returncode == 0
         assert runner.calls == [(("systemctl", "reload", "caddy"), {})]
 
+    def test_reload_goes_through_the_unit_it_is_given(self) -> None:
+        """The rehearsal drives a second instance, whose unit is not ``caddy``."""
+        runner = RecordingRunner(Completed(0, "", ""))
+
+        reload(runner, "caddy-rehearsal")
+
+        assert runner.calls == [(("systemctl", "reload", "caddy-rehearsal"), {})]
+
     def test_the_defaults_are_the_droplets(self) -> None:
         assert Path("/etc/caddy/Caddyfile") == DEFAULT_CADDYFILE
         assert Path("/etc/caddy/lovspor-release.caddy") == DEFAULT_FRAGMENT

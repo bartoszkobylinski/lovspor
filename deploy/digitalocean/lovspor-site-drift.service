@@ -12,7 +12,10 @@ Conflicts=lovspor-publish.service
 Type=oneshot
 # Root, like lovspor-publish.service: the probe credential is delivered to the
 # unit's own identity and is never readable by User=lovspor, the MCP service's
-# identity. The check itself only reads — loopback /readyz, the public /mcp as a
+# identity. Root is also the release/reconcile identity, which is what the
+# check's first action asserts can open the admin socket — and it drops to
+# `lovspor` for one call (sudo + curl) to assert that identity cannot. The check
+# itself only reads — the admin socket, loopback /readyz, the public /mcp as a
 # client, the served document — and writes nothing.
 User=root
 WorkingDirectory=/opt/lovspor/app
@@ -23,8 +26,16 @@ WorkingDirectory=/opt/lovspor/app
 # then a release. See docs/mcp.md § Release probe and drift check.
 LoadCredential=site-probe:/etc/lovspor/credentials/site-probe
 ExecStart=/opt/lovspor/app/.venv/bin/lovspor site-drift-check --served-url https://lovspor.no/deployment-capabilities.json --observer drift-timer
+# The check's FIRST action is the admin socket's four facts (ADR-0014 Decision 4
+# / Decision 6): mode 0660, the release group, root can GET /config/ over it,
+# `lovspor` cannot, and nothing listens on TCP localhost:2019. A Caddy restart is
+# what takes those away, so the hourly timer is what catches a permission
+# regression within the hour — before any probe runs, and never reported as
+# "no drift".
+#
 # Exit 1 = drift (one log line names the differing fields), 3 = the served
-# document could not be read; both surface as a failed unit (systemctl --failed).
+# document could not be read, 4 = the admin socket precondition is unmet and
+# named; all surface as a failed unit (systemctl --failed).
 # oneshot disables the start timeout by default; every request the check makes
 # is bounded, so a short ceiling keeps a stalled proxy from wedging the timer.
 TimeoutStartSec=120

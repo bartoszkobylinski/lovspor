@@ -16,6 +16,7 @@ produced, never a hand-written one.
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -24,10 +25,14 @@ from mcp.types import ListToolsResult
 from pydantic import SecretStr
 from pytest_httpx import HTTPXMock
 
+from lovspor.release.admin_socket import AdminSocket
+from lovspor.release.errors import AdminSocketError
 from lovspor.site.capabilities import Checkout, State, parse_capabilities
 from lovspor.site.drift import (
+    DriftInputs,
     DriftReport,
     _differences,
+    checked_drift,
     drift_check,
     fetch_served_document,
     state_differences,
@@ -36,6 +41,7 @@ from lovspor.site.errors import CapabilityDocumentError, ServedDocumentError
 from lovspor.site.fixture import document_bytes
 from lovspor.site.probe import ProbeSettings, probe
 from lovspor.tool_surface import describe_listed_tools
+from tests.unit.caddy_fakes import socketed_caddy
 from tests.unit.probe_fixtures import (
     DISCOVERY_URL,
     MCP_URL,
@@ -330,3 +336,66 @@ class TestDriftCheck:
 
         assert caught.value.reason == "http_503"
         assert not httpx_mock.get_requests(url=READINESS_URL)
+
+
+def _access(tmp_path: Path) -> AdminSocket:
+    """An admin socket holding all four facts, on a real file under ``tmp_path``."""
+    socketed = socketed_caddy(tmp_path)
+    return AdminSocket(
+        socket_admin=socketed.address,
+        runner=socketed.caddy,
+        admin_client=socketed.caddy.admin_client,
+        ownership=socketed.ownership,
+    )
+
+
+class TestCheckedDrift:
+    """The four facts are the check's first action (ADR-0014 Decision 4)."""
+
+    def test_a_host_that_holds_the_four_facts_reaches_the_comparison(
+        self, httpx_mock: HTTPXMock, tmp_path: Path
+    ) -> None:
+        host = Host(httpx_mock)
+        serve(httpx_mock, host.released())
+        inputs = DriftInputs(SERVED_URL, settings(), _access(tmp_path))
+
+        with httpx.Client() as client:
+            report = checked_drift(inputs, client=client, clock=clock)
+
+        assert isinstance(report, DriftReport)
+        assert report.drifted is False
+
+    def test_a_socket_that_is_not_there_stops_the_check_before_any_probe(
+        self, httpx_mock: HTTPXMock, tmp_path: Path
+    ) -> None:
+        """A broken permission model is not drift, and must not be observed past."""
+        access = AdminSocket(socket_admin=f"unix/{tmp_path / 'gone.sock'}")
+        inputs = DriftInputs(SERVED_URL, settings(), access)
+
+        with (
+            httpx.Client() as client,
+            pytest.raises(AdminSocketError, match="admin socket precondition unmet"),
+        ):
+            checked_drift(inputs, client=client, clock=clock)
+
+        assert not httpx_mock.get_requests()
+
+    def test_the_served_document_is_not_even_fetched_when_the_socket_fails(
+        self, httpx_mock: HTTPXMock, tmp_path: Path
+    ) -> None:
+        socketed = socketed_caddy(tmp_path)
+        socketed.socket.chmod(0o666)
+        access = AdminSocket(
+            socket_admin=socketed.address,
+            runner=socketed.caddy,
+            admin_client=socketed.caddy.admin_client,
+            ownership=socketed.ownership,
+        )
+
+        with (
+            httpx.Client() as client,
+            pytest.raises(AdminSocketError, match="mode 0666"),
+        ):
+            checked_drift(DriftInputs(SERVED_URL, settings(), access), client=client, clock=clock)
+
+        assert httpx_mock.get_request(url=SERVED_URL) is None

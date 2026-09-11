@@ -1,0 +1,36 @@
+[Unit]
+# The second Caddy instance the first migration is rehearsed against
+# (ADR-0014 Validation (g)). It exists only for the length of one
+# `rehearse-migration.sh` run and is never enabled: there is deliberately no
+# [Install] section, so `systemctl enable caddy-rehearsal` fails rather than
+# leaving a second Caddy on the box after a reboot.
+Description=Caddy, second instance: the first-migration rehearsal (ADR-0014)
+Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
+After=network.target network-online.target
+Requires=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+# Its own configuration, never /etc/caddy/Caddyfile: that file belongs to the
+# instance serving the site, and the rehearsal rewrites the one it is given.
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/rehearsal/Caddyfile
+# The STOCK reload line, with no --address, exactly as caddyserver/dist ships
+# it. That is the point: the migration's drop-in resets it and installs the
+# explicit socket address last, and sub-step (iii)'s negative fixture puts this
+# line back to prove a plain `systemctl reload` of the previous Caddyfile
+# cannot reach a running socket.
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/rehearsal/Caddyfile --force
+# RuntimeDirectory= and RuntimeDirectoryMode= are NOT here, for the same reason
+# they are not in caddy.service: the migration's drop-in installs them, and the
+# rehearsal is what proves a restart then recreates the socket with the right
+# mode and group.
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+# No AmbientCapabilities=CAP_NET_BIND_SERVICE, unlike caddy.service. The
+# rehearsal serves on http://localhost:8443, which needs none — and the
+# rejected-load fixture binds :443, which must fail at load. Without the
+# capability it fails even on a box where nothing else holds that port.
