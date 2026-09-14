@@ -2769,7 +2769,15 @@ class TestOfflineRollback:
 
         report = offline_rollback(droplet.plane, droplet.host)
 
-        assert report.marker_removed is False and report.restarted == "caddy"
+        assert report == RollbackReport(
+            admin_before=OFFLINE_ADMIN,
+            reloaded=False,
+            marker_removed=False,
+            exec_reload_removed=False,
+            admin=DEFAULT_TCP,
+            restarted="caddy",
+            socket_removed=False,
+        )
         _assert_pre_envelope(droplet)
 
     def test_refuses_without_the_backup(self, droplet: Droplet) -> None:
