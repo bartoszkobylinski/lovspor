@@ -75,7 +75,8 @@ trap teardown EXIT
 # shell sourcing it runs the second name as a command and exits 127 (#260, #298).
 # The last assignment wins and surrounding quotes go, as systemd reads it.
 host_names() {
-	sed -n 's/^LOVSPOR_DOMAIN=//p' "$1" | tail -n 1 | sed 's/^"\(.*\)"$/\1/'
+	sed -n 's/^LOVSPOR_DOMAIN=//p' "$1" | tail -n 1 \
+		| sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
 }
 
 [ -f "$ENVIRONMENT" ] || die "$ENVIRONMENT is missing; LOVSPOR_DOMAIN is unknown"
