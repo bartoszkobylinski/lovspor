@@ -355,6 +355,16 @@ class TestTheUrlDryRunsHarness:
 
         assert _host_names(environment) == "lovspor.test, alias.test"
 
+    def test_drops_single_quotes_around_the_last_assignment(self, tmp_path: Path) -> None:
+        """Systemd accepts single-quoted EnvironmentFile values and removes their quotes."""
+        environment = tmp_path / "caddy-lovspor"
+        environment.write_text(
+            "LOVSPOR_DOMAIN=old.test\nLOVSPOR_DOMAIN='lovspor.test, alias.test'\n",
+            encoding="utf-8",
+        )
+
+        assert _host_names(environment) == "lovspor.test, alias.test"
+
     def test_builds_the_envelope_as_the_build_user(self) -> None:
         code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
 
