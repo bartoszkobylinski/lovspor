@@ -686,25 +686,31 @@ backups with everything that Caddyfile serves, and `--migrate-rollback` refuses
 the moment either of those two files is absent — or is a symlink rather than the
 file the migration wrote, which is not a source it will read or move.
 
-Before the cutover's reload succeeded, the way back is the file restore —
-`publish-release.sh --reconcile --abandon`, or `--migrate-rollback`, which does
-the same thing when it finds Caddy still on TCP. After it succeeded:
+Before the cutover's reload succeeded, `--migrate-rollback` reads where Caddy
+answers and takes the matching way back: on TCP it is the file restore (the
+same as `--reconcile --abandon`); on the socket — a refused cutover load
+(step 5) leaves it there — it is the reload below. After the reload succeeded:
 
 ```bash
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --migrate-rollback
 curl -fsS localhost:2019/config/ | head -c 100; echo    # TCP answers again
-ls /run/caddy/ 2>&1                                     # the socket is gone
+sudo ls -la /run/caddy/ 2>&1                            # no admin.sock: the rollback removed it
 systemctl show caddy -p ExecReload                      # back to the stock line
 ```
 
 It delivers `/etc/caddy/Caddyfile.pre-envelope` explicitly to the socket — the
 previous Caddyfile has no global options block, so the stock reload line would
-derive TCP and reach nothing — then removes the marker, puts the files back and
-the `ExecReload=` pair with them, and leaves the admin endpoint on TCP. It
-refuses once a second envelope release has happened (the marker has a
-`previous`): that is `publish-release.sh --rollback`, the ordinary one. It also
-refuses the moment either `.pre-envelope` backup is gone — after step 8 there
-is no way back to the old site, only a new envelope release.
+derive TCP and reach nothing — then checks that TCP answers with a
+configuration naming no release and that nothing answers on the socket any
+more. It does not go by the socket file: Caddy v2.11.4 leaves that file behind
+when it stops a socket admin endpoint, so the rollback removes it — a socket,
+never a symlink or any other file at that name, which it refuses — and only
+then removes the marker, puts the files back and the `ExecReload=` pair with
+them, and leaves the admin endpoint on TCP. It refuses once a second envelope
+release has happened (the marker has a `previous`): that is
+`publish-release.sh --rollback`, the ordinary one. It also refuses the moment
+either `.pre-envelope` backup is gone — after step 8 there is no way back to
+the old site, only a new envelope release.
 
 #### Last resort: Caddy answers on neither address
 
@@ -720,7 +726,10 @@ sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --rollback --offline
 It dials nothing. It removes the marker, restores `/etc/caddy/Caddyfile` from
 `/etc/caddy/Caddyfile.pre-envelope`, puts the drop-in back from its own backup
 (absent if it was absent) and runs `systemctl restart caddy`, which loads the
-file on disk whole. Then verify by
+file on disk whole. After a successful restart it removes a socket file left at
+`/run/caddy/admin.sock`: with the drop-in restored, `RuntimeDirectory=` no
+longer clears `/run/caddy` when Caddy stops, so nothing else would, and
+`migrate --check` refuses a socket that is already there. Then verify by
 hand — it reports what it did, it does not observe the result:
 
 ```bash
@@ -747,6 +756,7 @@ else
 fi
 sudo systemctl daemon-reload
 sudo systemctl restart caddy
+sudo test -S /run/caddy/admin.sock && sudo rm /run/caddy/admin.sock
 ```
 
 That leaves the marker, the release fragment and both backups behind, so
