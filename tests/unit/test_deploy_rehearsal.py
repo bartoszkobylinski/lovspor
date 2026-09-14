@@ -59,6 +59,14 @@ def _rehearsal_form(source: Path) -> str:
     return done.stdout
 
 
+def _host_names(environment: Path) -> str:
+    """Run the URL dry-run's own reading of the EnvironmentFile, strict mode, nothing else."""
+    code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+    script = f'set -euo pipefail\n{_function(code, "host_names")}\nhost_names "{environment}"\n'
+    done = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
+    return done.stdout.rstrip("\n")
+
+
 class TestTheSecondInstancesUnit:
     def test_runs_its_own_configuration_and_never_the_serving_one(self) -> None:
         text = _UNIT.read_text(encoding="utf-8")
@@ -318,8 +326,44 @@ class TestTheUrlDryRunsHarness:
         code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
 
         assert "ENVIRONMENT=/etc/default/caddy-lovspor" in code
-        assert '. "$ENVIRONMENT"' in code
-        assert '[ -n "${LOVSPOR_DOMAIN:-}" ]' in code
+        assert 'LOVSPOR_DOMAIN="$(host_names "$ENVIRONMENT")"' in code
+        assert '[ -n "$LOVSPOR_DOMAIN" ] || die' in code
+        assert "export LOVSPOR_DOMAIN" in code
+
+    def test_never_sources_the_environment_file(self) -> None:
+        """A systemd EnvironmentFile is not shell — #260 in publish-release.sh, #298 here."""
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert re.search(r"^\s*(\.|source)\s", code, flags=re.MULTILINE) is None
+        assert "set -a" not in code
+
+    def test_reads_the_droplets_two_names_as_one_value(self, tmp_path: Path) -> None:
+        """The droplet's line, verbatim: a shell sourcing it runs the second name and exits 127."""
+        environment = tmp_path / "caddy-lovspor"
+        environment.write_text(
+            "LOVSPOR_DOMAIN=lovspor.no, lovspor.bartoszkobylinski.com\n", encoding="utf-8"
+        )
+
+        assert _host_names(environment) == "lovspor.no, lovspor.bartoszkobylinski.com"
+
+    def test_takes_the_last_assignment_and_drops_surrounding_quotes(self, tmp_path: Path) -> None:
+        """What systemd does with the same file, so the dry-run expands the host Caddy serves."""
+        environment = tmp_path / "caddy-lovspor"
+        environment.write_text(
+            'LOVSPOR_DOMAIN=old.test\nLOVSPOR_DOMAIN="lovspor.test, alias.test"\n', encoding="utf-8"
+        )
+
+        assert _host_names(environment) == "lovspor.test, alias.test"
+
+    def test_drops_single_quotes_around_the_last_assignment(self, tmp_path: Path) -> None:
+        """Systemd accepts single-quoted EnvironmentFile values and removes their quotes."""
+        environment = tmp_path / "caddy-lovspor"
+        environment.write_text(
+            "LOVSPOR_DOMAIN=old.test\nLOVSPOR_DOMAIN='lovspor.test, alias.test'\n",
+            encoding="utf-8",
+        )
+
+        assert _host_names(environment) == "lovspor.test, alias.test"
 
     def test_builds_the_envelope_as_the_build_user(self) -> None:
         code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))

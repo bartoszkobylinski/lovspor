@@ -66,15 +66,23 @@ trap teardown EXIT
 
 # LOVSPOR_DOMAIN is what the site block's host name expands from, in BOTH
 # Caddyfiles, so `caddy adapt` needs it the way the running Caddy does. It
-# comes from the same file the caddy.service drop-in sources — read, never
+# comes from the same file the caddy.service drop-in names — read, never
 # written, and never guessed: a dry-run against a different host name would be
 # a dry-run of a configuration this box does not have.
+#
+# READ it, do not source it. It is a systemd EnvironmentFile, not shell: the
+# droplet's value is `lovspor.no, lovspor.bartoszkobylinski.com` unquoted, and a
+# shell sourcing it runs the second name as a command and exits 127 (#260, #298).
+# The last assignment wins and surrounding quotes go, as systemd reads it.
+host_names() {
+	sed -n 's/^LOVSPOR_DOMAIN=//p' "$1" | tail -n 1 \
+		| sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+
 [ -f "$ENVIRONMENT" ] || die "$ENVIRONMENT is missing; LOVSPOR_DOMAIN is unknown"
-set -a
-# shellcheck disable=SC1090
-. "$ENVIRONMENT"
-set +a
-[ -n "${LOVSPOR_DOMAIN:-}" ] || die "$ENVIRONMENT sets no LOVSPOR_DOMAIN"
+LOVSPOR_DOMAIN="$(host_names "$ENVIRONMENT")"
+[ -n "$LOVSPOR_DOMAIN" ] || die "$ENVIRONMENT sets no LOVSPOR_DOMAIN"
+export LOVSPOR_DOMAIN
 
 # An envelope of its own, under a root of its own: this box has no live release
 # to hard-link against yet, so it is a full second copy — check `df -h /var/www`
