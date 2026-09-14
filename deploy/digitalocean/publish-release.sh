@@ -39,6 +39,11 @@
 # exactly as it was (a reload failure puts the previous fragment back).
 set -euo pipefail
 
+# Out of the operator's working directory before anything runs lovspor: a root
+# shell starts in /root (0700), where the build user's FastMCP settings stat
+# ./.env and get EACCES, not "absent" — the build dies (#300).
+cd /
+
 # The Caddyfile's site block is `{$LOVSPOR_DOMAIN} {`. Caddy the SERVICE gets
 # that variable from its systemd drop-in; `caddy validate`/`caddy adapt` run by
 # the release commands do not, the placeholder expands to nothing, the site

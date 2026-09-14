@@ -19,6 +19,11 @@
 # and the production Caddyfile by name, and every other path below is its own.
 set -euo pipefail
 
+# Out of the operator's working directory before anything runs lovspor: a root
+# shell starts in /root (0700), where the build user's FastMCP settings stat
+# ./.env and get EACCES, not "absent" — the build dies (#300).
+cd /
+
 APP=/opt/lovspor/app
 CORPUS=/opt/lovspor/.cache/lovverk
 LOVSPOR="$APP/.venv/bin/lovspor"
