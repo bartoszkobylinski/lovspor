@@ -15,9 +15,15 @@ The admin endpoint has an address. The instance listens where the
 configuration it last loaded says (``admin`` in the global options
 block, else ``localhost:2019``), a load delivered to any other address
 is refused with *connection refused*, and a Unix-socket address is a
-real ``AF_UNIX`` socket file: bound with the ``|mode`` suffix's mode when
-the endpoint moves there or the file is missing, removed when the
-endpoint moves away.
+real ``AF_UNIX`` socket file, bound with the ``|mode`` suffix's mode when
+the endpoint moves there or the file is missing.
+
+Nothing the process does removes that file. On the droplet, Caddy
+v2.11.4 left it behind when a load moved the endpoint back to TCP, and
+it survived two restarts once the drop-in carrying ``RuntimeDirectory=``
+was gone (#303). So the file stays when the endpoint moves away, and a
+stop clears it only while the drop-in systemd last loaded sets
+``RuntimeDirectory=``.
 """
 
 import contextlib
@@ -254,6 +260,16 @@ def _exec_reload_of(drop_in: Path | None) -> str:
     return commands[-1] if commands else ""
 
 
+def _runtime_directory_of(drop_in: Path | None) -> bool:
+    """Whether the drop-in sets ``RuntimeDirectory=``, which systemd clears at every stop."""
+    if drop_in is None or not drop_in.is_file():
+        return False
+    lines = drop_in.read_text(encoding="utf-8").splitlines()
+    return any(
+        line.startswith("RuntimeDirectory=") and line != "RuntimeDirectory=" for line in lines
+    )
+
+
 def _address_flag(command: str) -> str | None:
     words = command.split()
     if "--address" in words:
@@ -290,6 +306,10 @@ class FakeCaddy:
         self.restarts = 0
         self.daemon_reloads = 0
         self.exec_reload = _exec_reload_of(drop_in)
+        self.runtime_directory = _runtime_directory_of(drop_in)
+        """Whether the drop-in systemd last loaded sets ``RuntimeDirectory=``."""
+        self.socket_files: set[Path] = set()
+        """The socket files this instance bound; a stop clears them under ``RuntimeDirectory=``."""
 
     def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
         self.calls.append((tuple(argv), dict(env)))
@@ -329,6 +349,7 @@ class FakeCaddy:
             case ["daemon-reload"]:
                 self.daemon_reloads += 1
                 self.exec_reload = _exec_reload_of(self.drop_in)
+                self.runtime_directory = _runtime_directory_of(self.drop_in)
                 return Completed(0, "", "")
             case ["show", _, "-p", "ExecReload"]:
                 return Completed(0, self._show_exec_reload(), "")
@@ -372,14 +393,20 @@ class FakeCaddy:
         return Completed(0, "", "")
 
     def _stop(self) -> None:
-        """The process exits: Go unlinks its socket and ``RuntimeDirectory=`` clears its directory.
+        """The process exits and leaves its socket files; ``RuntimeDirectory=`` clears them.
 
-        So a restart never inherits a mode or a group a hand set on the
-        file that was there — the whole point of the creation-mode suffix.
+        #303: with the drop-in that set it gone, a dead socket file survived
+        the offline rollback's restart and a second one. Whether a listening
+        socket's file outlives its process was not observed; leaving it is
+        the pessimistic reading. While the line is loaded, a restart never
+        inherits a mode or a group a hand set on the file that was there —
+        the whole point of the creation-mode suffix.
         """
-        socket = _socket_path(self.admin_address)
-        if socket is not None:
-            socket.unlink(missing_ok=True)
+        if not self.runtime_directory:
+            return
+        for path in self.socket_files:
+            path.unlink(missing_ok=True)
+        self.socket_files.clear()
 
     def _systemctl_reload(self) -> Completed:
         """The unit's ``ExecReload=`` line: the composed file, delivered where the line says."""
@@ -421,17 +448,18 @@ class FakeCaddy:
         return Completed(0, "", "")
 
     def _apply(self, config: dict[str, Any]) -> str | None:
-        """The instance runs ``config``; its admin endpoint moves to what the config names."""
+        """The instance runs ``config``; its admin endpoint moves to what the config names.
+
+        The socket file of an endpoint it leaves stays where it is: Caddy
+        v2.11.4 kept it after a load moved the endpoint back to TCP (#303).
+        """
         address, mode = split_address(admin_listen(config))
         path = _socket_path(address)
         if path is not None and (address != self.admin_address or not path.exists()):
             failure = _bind(path, mode)
             if failure is not None:
                 return failure
-        previous = _socket_path(self.admin_address)
-        if previous is not None and address != self.admin_address:
-            # Go's net.UnixListener unlinks its socket file on Close.
-            previous.unlink(missing_ok=True)
+            self.socket_files.add(path)
         self.admin_address = address
         self.running = copy.deepcopy(config)
         return None

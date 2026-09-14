@@ -300,6 +300,8 @@ class RollbackReport(BaseModel):
     admin: str
     restarted: str | None = None
     """The unit restarted, when the way back was the offline one; no reload happened."""
+    socket_removed: bool = False
+    """A socket file stood at the socket's name and was removed: Caddy v2.11.4 leaves one (#303)."""
 
 
 class RetireReport(BaseModel):
@@ -1098,19 +1100,95 @@ def _restore_pre_envelope(plane: ControlPlane, host: MigrationHost) -> bool:
     return removed
 
 
+def _require_socket_silent(host: MigrationHost) -> None:
+    """Nothing answers on the socket — asked by dialling it, never by its file.
+
+    Caddy v2.11.4 leaves the socket file behind when it stops a socket
+    admin endpoint (#303), so a file at the name says nothing about
+    whether anything still listens there.
+    """
+    try:
+        host.admin_client(host.socket_admin).running_config()
+    except UnobservableError:
+        return
+    raise ReloadFailedError(
+        f"{host.socket_admin} still answers; the admin endpoint has not left the socket, "
+        "so nothing is removed"
+    )
+
+
+def _refuse_foreign_socket(host: MigrationHost) -> None:
+    """Only a socket at the socket's name is Caddy's leftover; anything else is someone else's.
+
+    The name is removed as root on the live droplet, so a symlink is
+    refused rather than followed — as ``_refuse_symlink`` and
+    ``_backup_target`` refuse theirs — and the shape is asked of the name
+    itself through ``lstat``: ``stat`` would read a link to a socket as one.
+    """
+    path = host.socket
+    if path.is_symlink():
+        raise ControlPlaneError(
+            f"{path} is a symlink, not the socket Caddy left behind; not removed — {_MOVE_ASIDE}"
+        )
+    if path.exists() and not stat.S_ISSOCK(path.lstat().st_mode):
+        raise ControlPlaneError(
+            f"{path} is not a socket, not the socket Caddy left behind; not removed — {_MOVE_ASIDE}"
+        )
+
+
+def _remove_dead_socket(host: MigrationHost) -> bool:
+    """The socket file Caddy left when its endpoint moved to TCP, removed once nothing answers.
+
+    Nothing else removes it: ``RuntimeDirectory=`` clears the directory
+    only at a stop, and only while the migration's drop-in is loaded; and
+    the preflight refuses a socket that already exists, so a host rolled
+    back with the file still there could never be migrated again.
+    """
+    if not _occupied(host.socket):
+        return False
+    _refuse_foreign_socket(host)
+    _require_socket_silent(host)
+    host.socket.unlink()
+    return True
+
+
+def _remove_socket_after_restart(host: MigrationHost) -> bool:
+    """The offline rollback's removal: after a restart that worked, and without a dial.
+
+    The unit has just loaded the pre-envelope Caddyfile whole, which binds
+    no socket, so there is nothing to ask — and the state this way back is
+    for is the one in which nothing answers anywhere.
+    """
+    if not _occupied(host.socket):
+        return False
+    _refuse_foreign_socket(host)
+    host.socket.unlink()
+    return True
+
+
 def abandon_first_migration(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
-    """Before (c) — D new, R old on TCP: the file restore, no reload, since R never moved."""
+    """Before (c) — D new, R old on TCP: the file restore, no reload, since R never moved.
+
+    A socket file left at the socket's name goes first: a rollback that
+    died after its reload back to TCP leaves one, and its second run lands
+    here because TCP answers. The backups are asked for before it goes, so
+    a refusal still moves nothing.
+    """
     had_pair = _had_exec_reload(host)
+    _require_backup(host)
+    socket_removed = _remove_dead_socket(host)
     return RollbackReport(
         admin_before=host.tcp_admin,
         reloaded=False,
         marker_removed=_restore_pre_envelope(plane, host),
         exec_reload_removed=had_pair,
         admin=host.tcp_admin,
+        socket_removed=socket_removed,
     )
 
 
 def _verify_back_on_tcp(host: MigrationHost) -> None:
+    """TCP answers a configuration naming no release, and nothing answers on the socket."""
     try:
         running = config_pair(host.admin_client(host.tcp_admin).running_config())
     except UnobservableError as error:
@@ -1121,8 +1199,7 @@ def _verify_back_on_tcp(host: MigrationHost) -> None:
         raise ReloadFailedError(
             f"after the reload Caddy still runs release {running.release_id} on {host.tcp_admin}"
         )
-    if _occupied(host.socket):
-        raise ReloadFailedError(f"{host.socket} still exists after the reload back to TCP")
+    _require_socket_silent(host)
 
 
 def _require_stock_exec_reload(plane: ControlPlane, host: MigrationHost) -> None:
@@ -1148,10 +1225,18 @@ def _reload_previous(plane: ControlPlane, host: MigrationHost) -> None:
 
 
 def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
-    """After (c): the previous Caddyfile delivered explicitly to the socket; then the files."""
+    """After (c): the previous Caddyfile delivered explicitly to the socket; then the files.
+
+    The dead socket file goes between the verification and the restore. A
+    crash on either side of it leaves TCP answering with both backups in
+    place, which a second run finishes as the file restore. The other
+    order consumes the backups first and leaves a socket file the
+    preflight refuses and no rollback would take.
+    """
     had_pair = _had_exec_reload(host)
     _reload_previous(plane, host)
     _verify_back_on_tcp(host)
+    socket_removed = _remove_dead_socket(host)
     marker_removed = _restore_pre_envelope(plane, host)
     _require_stock_exec_reload(plane, host)
     return RollbackReport(
@@ -1160,6 +1245,7 @@ def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> Rollbac
         marker_removed=marker_removed,
         exec_reload_removed=had_pair,
         admin=host.tcp_admin,
+        socket_removed=socket_removed,
     )
 
 
@@ -1180,8 +1266,15 @@ def offline_rollback(plane: ControlPlane, host: MigrationHost) -> RollbackReport
     exists. Nothing here is observed, so nothing here can be blocked by
     an observation: the previous Caddyfile is restored and the unit is
     restarted, which loads it whole. Verify afterwards, by hand.
+
+    The socket's name is asked about before anything moves — a symlink or
+    any other file there is refused, never followed — and a socket file
+    standing there goes only after the restart worked. With the drop-in
+    restored, ``RuntimeDirectory=`` no longer clears the directory at the
+    stop, so nothing else would remove it (#303).
     """
     had_pair = _had_exec_reload(host)
+    _refuse_foreign_socket(host)
     marker_removed = _restore_pre_envelope(plane, host)
     _systemctl_restart(plane, host)
     return RollbackReport(
@@ -1191,6 +1284,7 @@ def offline_rollback(plane: ControlPlane, host: MigrationHost) -> RollbackReport
         exec_reload_removed=had_pair,
         admin=host.tcp_admin,
         restarted=host.unit,
+        socket_removed=_remove_socket_after_restart(host),
     )
 
 

@@ -533,6 +533,7 @@ class TestMigrate:
         assert result.stdout.splitlines() == [
             f"rolled back from {droplet.host.socket_admin} to localhost:2019; reloaded yes",
             "marker removed yes, ExecReload pair removed yes",
+            "dead admin socket file removed",
         ]
         assert droplet.caddy.admin_address == "localhost:2019"
         assert read_marker(droplet.plane.releases) is None
@@ -563,6 +564,7 @@ class TestMigrate:
             "rolled back from offline to localhost:2019; reloaded no",
             "marker removed yes, ExecReload pair removed yes",
             "restarted caddy",
+            "dead admin socket file removed",
         ]
         assert read_marker(droplet.plane.releases) is None
         assert droplet.caddy.restarts == 1

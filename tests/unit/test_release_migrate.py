@@ -78,6 +78,7 @@ from tests.unit.caddy_fakes import (
     STOCK_EXEC_RELOAD,
     FakeAdmin,
     FakeCaddy,
+    plant_socket,
     toy_adapt,
 )
 from tests.unit.migrate_fixtures import (
@@ -1908,6 +1909,41 @@ def _assert_pre_envelope(droplet: Droplet) -> None:
     assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
 
 
+def _take_the_socket_name(droplet: Droplet, shape: str) -> Path:
+    """The socket file replaced by ``shape``; returns where a link at the name points."""
+    target = droplet.host.runtime_dir.parent / "elsewhere.sock"
+    droplet.socket_file.unlink()
+    if shape == "regular file":
+        droplet.socket_file.write_text("", encoding="utf-8")
+        return target
+    if shape == "live symlink":
+        plant_socket(target)
+    droplet.socket_file.symlink_to(target)
+    return target
+
+
+def _foreign_socket_refusal(droplet: Droplet, shape: str) -> str:
+    what = "is a symlink, not" if shape.endswith("symlink") else "is not a socket, not"
+    return (
+        f"{droplet.socket_file} {what} the socket Caddy left behind; not removed — move it "
+        "aside and re-run"
+    )
+
+
+def _die_once_in(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """The process dies on entering ``migrate.<name>`` — once, so a re-run is the real one."""
+    real = getattr(migrate, name)
+    died: list[str] = []
+
+    def dying(*args: object) -> object:
+        if not died:
+            died.append(name)
+            raise Killed(name)
+        return real(*args)
+
+    monkeypatch.setattr(migrate, name, dying)
+
+
 class TestDetectAdmin:
     def test_tcp_before_the_cutover_and_the_socket_after(self, droplet: Droplet) -> None:
         assert detect_admin(droplet.host) == DEFAULT_TCP
@@ -2056,6 +2092,7 @@ class TestRollback:
             marker_removed=marker_removed,
             exec_reload_removed=pair_removed,
             admin=DEFAULT_TCP,
+            socket_removed=True,
         )
         reloads = [
             (argv, env) for argv, env in droplet.caddy.calls[calls_before:] if argv[1] == "reload"
@@ -2063,6 +2100,33 @@ class TestRollback:
         assert reloads == [(_rollback_reload(droplet), {})]
         shown = droplet.caddy.run(("systemctl", "show", "caddy", "-p", "ExecReload"), {})
         assert "--address" not in shown.stdout
+        _assert_pre_envelope(droplet)
+
+    def test_the_socket_file_caddy_leaves_after_the_reload_back_is_removed(
+        self, droplet: Droplet
+    ) -> None:
+        """#303: Caddy v2.11.4 stops the socket endpoint and leaves its file.
+
+        Verified by file presence, the rollback refused right after a reload
+        that worked; left there, the file makes the preflight refuse the next
+        migration. So the way back dials the socket, then removes the file.
+        """
+        _migrate(droplet)
+        left: list[bool] = []
+
+        def reload_back(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            done = droplet.caddy.run(argv, env)
+            left.append(stat.S_ISSOCK(droplet.socket_file.lstat().st_mode))
+            return done
+
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("caddy", "reload"), reload_back)
+        )
+
+        report = rollback_first_migration(plane, droplet.host)
+
+        assert left == [True]
+        assert report.socket_removed is True
         _assert_pre_envelope(droplet)
 
     def test_after_a_finished_migration_the_migration_can_be_run_again(
@@ -2149,7 +2213,6 @@ class TestRollback:
 
         def keep_serving(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
             droplet.caddy.load(served)
-            droplet.socket_file.unlink()
             droplet.caddy.admin_address = DEFAULT_TCP
             return Completed(0, "", "")
 
@@ -2163,20 +2226,107 @@ class TestRollback:
             f"after the reload Caddy still runs release {droplet.a} on localhost:2019"
         )
 
-    def test_a_socket_that_survives_the_reload_back_is_named(self, droplet: Droplet) -> None:
+    def test_a_socket_that_still_answers_after_the_reload_back_is_named(
+        self, droplet: Droplet
+    ) -> None:
+        """Whether anything listens is asked by dialling, never by the file (#303).
+
+        The refusal comes before the file goes and before the marker and the
+        files move, so the operator reads the state as it stands.
+        """
         _migrate(droplet)
 
-        def leave_the_file(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
-            done = droplet.caddy.run(argv, env)
-            droplet.socket_file.touch()
-            return done
+        def clients(address: str) -> FakeCaddy | FakeAdmin:
+            if address == droplet.host.socket_admin:
+                return droplet.caddy
+            return droplet.caddy.admin_client(address)
 
-        plane = replace(
-            droplet.plane, runner=Sabotaged(droplet.caddy, ("caddy", "reload"), leave_the_file)
+        host = replace(droplet.host, admin_client=clients)
+
+        with pytest.raises(ReloadFailedError) as caught:
+            rollback_first_migration(droplet.plane, host)
+
+        assert str(caught.value) == (
+            f"{droplet.host.socket_admin} still answers; the admin endpoint has not left the "
+            "socket, so nothing is removed"
         )
+        assert droplet.caddy.admin_address == DEFAULT_TCP
+        assert stat.S_ISSOCK(droplet.socket_file.lstat().st_mode)
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+        assert droplet.host.previous_caddyfile.is_file()
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
 
-        with pytest.raises(ReloadFailedError, match="still exists after the reload back to TCP"):
-            rollback_first_migration(plane, droplet.host)
+    @pytest.mark.parametrize("shape", ["dangling symlink", "live symlink", "regular file"])
+    def test_anything_but_a_socket_at_the_socket_name_is_refused_and_not_followed(
+        self, droplet: Droplet, shape: str
+    ) -> None:
+        """The name is removed as root on the live droplet, so only a socket goes.
+
+        A link is refused, not followed — a live one to a real socket would
+        read as one through ``stat`` — and a regular file is not Caddy's to
+        leave. Moved aside, a re-run finishes: TCP answers, the backups stay.
+        """
+        _migrate(droplet)
+        target = _take_the_socket_name(droplet, shape)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            rollback_first_migration(droplet.plane, droplet.host)
+
+        assert str(caught.value) == _foreign_socket_refusal(droplet, shape)
+        assert droplet.socket_file.is_symlink() is shape.endswith("symlink")
+        assert droplet.socket_file.is_symlink() or droplet.socket_file.is_file()
+        assert target.exists() is (shape == "live symlink")
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+        assert droplet.host.previous_caddyfile.is_file()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") != OLD_CADDYFILE
+
+        droplet.socket_file.unlink()
+        rollback_first_migration(droplet.plane, droplet.host)
+        _assert_pre_envelope(droplet)
+
+    @pytest.mark.parametrize(
+        ("dies_in", "socket_left"),
+        [("_remove_dead_socket", True), ("_restore_pre_envelope", False)],
+    )
+    def test_a_crash_either_side_of_the_socket_removal_is_finished_by_a_second_run(
+        self,
+        droplet: Droplet,
+        monkeypatch: pytest.MonkeyPatch,
+        dies_in: str,
+        socket_left: bool,
+    ) -> None:
+        """The removal sits between the verification and the restore.
+
+        Either crash leaves TCP answering and both backups in place, so the
+        second run takes the TCP branch — the file restore — and removes a
+        socket still standing there first. The other order would consume the
+        backups and leave a dead socket only a hand ``rm`` could clear.
+        """
+        _migrate(droplet)
+        _die_once_in(monkeypatch, dies_in)
+        with pytest.raises(Killed):
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert droplet.caddy.admin_address == DEFAULT_TCP
+        assert droplet.socket_file.exists() is socket_left
+        assert droplet.host.previous_caddyfile.is_file()
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert report.reloaded is False and report.socket_removed is socket_left
+        _assert_pre_envelope(droplet)
+
+    def test_abandon_refuses_a_missing_backup_before_it_removes_a_dead_socket(
+        self, droplet: Droplet
+    ) -> None:
+        """A refusal moves nothing, the socket Caddy left behind included."""
+        _migrate(droplet)
+        assert droplet.caddy.run(_rollback_reload(droplet), {}).returncode == 0
+        droplet.host.previous_caddyfile.unlink()
+
+        with pytest.raises(ControlPlaneError, match="nothing to restore"):
+            abandon_first_migration(droplet.plane, droplet.host)
+
+        assert stat.S_ISSOCK(droplet.socket_file.lstat().st_mode)
 
     def test_a_show_still_naming_the_socket_is_named(self, droplet: Droplet) -> None:
         _migrate(droplet)
@@ -2603,6 +2753,7 @@ class TestOfflineRollback:
             exec_reload_removed=True,
             admin=DEFAULT_TCP,
             restarted="caddy",
+            socket_removed=True,
         )
         assert droplet.caddy.restarts == 1
         after = [argv for argv, _ in droplet.caddy.calls[calls_before:]]
@@ -2650,6 +2801,67 @@ class TestOfflineRollback:
 
         with pytest.raises(ControlPlaneError, match="restart caddy failed: exit 4$"):
             offline_rollback(plane, droplet.host)
+
+    def test_the_socket_file_the_restart_leaves_is_removed_without_a_dial(
+        self, droplet: Droplet
+    ) -> None:
+        """With the drop-in restored, ``RuntimeDirectory=`` no longer clears the
+        directory at the stop, so the file survives the restart (#303) — and the
+        preflight refuses a socket that is already there. The unit has just loaded
+        the pre-envelope Caddyfile whole, which binds no socket: nothing is asked."""
+        _migrate(droplet)
+        left: list[bool] = []
+
+        def restart(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            done = droplet.caddy.run(argv, env)
+            left.append(stat.S_ISSOCK(droplet.socket_file.lstat().st_mode))
+            return done
+
+        def undialled(address: str) -> FakeAdmin:
+            raise AssertionError(f"the offline rollback dialled {address}")
+
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("systemctl", "restart"), restart)
+        )
+
+        report = offline_rollback(plane, replace(droplet.host, admin_client=undialled))
+
+        assert left == [True]
+        assert report.socket_removed is True
+        _assert_pre_envelope(droplet)
+
+    @pytest.mark.parametrize("shape", ["dangling symlink", "live symlink", "regular file"])
+    def test_anything_but_a_socket_at_the_socket_name_is_refused_before_anything_moves(
+        self, droplet: Droplet, shape: str
+    ) -> None:
+        _migrate(droplet)
+        droplet.caddy.admin_up = False
+        target = _take_the_socket_name(droplet, shape)
+        calls_before = len(droplet.caddy.calls)
+
+        with pytest.raises(ControlPlaneError) as caught:
+            offline_rollback(droplet.plane, droplet.host)
+
+        assert str(caught.value) == _foreign_socket_refusal(droplet, shape)
+        assert droplet.caddy.calls[calls_before:] == []
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+        assert droplet.host.previous_caddyfile.is_file()
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
+        assert droplet.socket_file.is_symlink() is shape.endswith("symlink")
+        assert target.exists() is (shape == "live symlink")
+
+    def test_a_failing_restart_leaves_the_socket_file_where_it_is(self, droplet: Droplet) -> None:
+        """The file goes after a restart that worked, never in place of one."""
+        _migrate(droplet)
+        plane = replace(
+            droplet.plane,
+            runner=Sabotaged(droplet.caddy, ("systemctl", "restart"), Completed(1, "", "boom")),
+        )
+
+        with pytest.raises(ControlPlaneError, match="restart caddy failed: boom$"):
+            offline_rollback(plane, droplet.host)
+
+        assert stat.S_ISSOCK(droplet.socket_file.lstat().st_mode)
 
 
 class TestRetire:
