@@ -15,14 +15,17 @@ The admin endpoint has an address. The instance listens where the
 configuration it last loaded says (``admin`` in the global options
 block, else ``localhost:2019``), a load delivered to any other address
 is refused with *connection refused*, and a Unix-socket address is a
-file: created with the ``|mode`` suffix's mode when the configuration
-loads, removed when the endpoint moves away — as Caddy's is.
+real ``AF_UNIX`` socket file: bound with the ``|mode`` suffix's mode when
+the endpoint moves there or the file is missing, removed when the
+endpoint moves away.
 """
 
+import contextlib
 import copy
 import json
 import os
 import re
+import socket
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -213,6 +216,31 @@ def _socket_path(address: str) -> Path | None:
     return None
 
 
+def plant_socket(path: Path) -> None:
+    """A real ``AF_UNIX`` socket file at ``path`` that nothing listens on.
+
+    Bound under its bare name from inside its own directory: macOS caps a
+    socket address near 104 bytes, and pytest's ``tmp_path`` is longer.
+    Closing the socket leaves the file. A name already taken fails as a
+    ``listen unix`` does, with *address already in use*.
+    """
+    with (
+        contextlib.chdir(path.parent),
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as bound,
+    ):
+        bound.bind(path.name)
+
+
+def _bind(path: Path, mode: int | None) -> str | None:
+    """``listen unix``: a fresh socket file with the suffix's mode, or the error Caddy reports."""
+    try:
+        plant_socket(path)
+    except OSError as error:
+        return f"Error: loading new config: admin: listen unix {path}: {error}"
+    path.chmod(mode if mode is not None else UMASK_MODE)
+    return None
+
+
 def _exec_reload_of(drop_in: Path | None) -> str:
     """What ``systemctl show`` reports after a ``daemon-reload``: the drop-in's, else stock."""
     if drop_in is None or not drop_in.is_file():
@@ -395,13 +423,11 @@ class FakeCaddy:
     def _apply(self, config: dict[str, Any]) -> str | None:
         """The instance runs ``config``; its admin endpoint moves to what the config names."""
         address, mode = split_address(admin_listen(config))
-        socket = _socket_path(address)
-        if socket is not None:
-            try:
-                socket.touch()
-            except OSError as error:
-                return f"Error: loading new config: admin: listen unix {socket}: {error}"
-            socket.chmod(mode if mode is not None else UMASK_MODE)
+        path = _socket_path(address)
+        if path is not None and (address != self.admin_address or not path.exists()):
+            failure = _bind(path, mode)
+            if failure is not None:
+                return failure
         previous = _socket_path(self.admin_address)
         if previous is not None and address != self.admin_address:
             # Go's net.UnixListener unlinks its socket file on Close.

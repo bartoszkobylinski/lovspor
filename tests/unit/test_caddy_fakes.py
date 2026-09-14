@@ -7,6 +7,8 @@ with the ``|mode`` suffix's mode while the endpoint is there; and
 ``systemctl`` reflects the drop-in only after a ``daemon-reload``.
 """
 
+import contextlib
+import socket
 import stat
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from tests.unit.caddy_fakes import (
     AdaptError,
     FakeCaddy,
     admin_listen,
+    plant_socket,
     split_address,
     toy_adapt,
 )
@@ -141,6 +144,50 @@ class TestReloadAddress:
         with pytest.raises(UnobservableError):
             box.caddy.admin_client(DEFAULT_TCP).running_config()
 
+    def test_the_socket_file_is_a_real_socket(self, box: Box) -> None:
+        """The rollback removes nothing at the socket's name that is not a socket, so the
+        file the fake makes must be one — a regular file would exercise the refusal instead."""
+        box.reload(box.new, DEFAULT_TCP)
+
+        assert stat.S_ISSOCK(box.socket_file.lstat().st_mode)
+
+    @pytest.mark.parametrize("taken_by", ["socket", "file"])
+    def test_a_load_onto_a_socket_name_already_taken_fails_and_moves_nothing(
+        self, box: Box, taken_by: str
+    ) -> None:
+        """Binding over an existing file fails, as a fresh ``listen unix`` does.
+
+        Whether Caddy clears a stale file before it binds has not been
+        observed, so the fake does not: the pessimistic answer.
+        """
+        if taken_by == "socket":
+            plant_socket(box.socket_file)
+        else:
+            box.socket_file.write_text("", encoding="utf-8")
+        before = box.caddy.running_config()
+
+        done = box.caddy.run(
+            (
+                "caddy",
+                "reload",
+                "--config",
+                str(box.new),
+                "--adapter",
+                "caddyfile",
+                "--address",
+                DEFAULT_TCP,
+            ),
+            {},
+        )
+
+        assert done.returncode == 1
+        assert done.stderr.startswith(
+            f"Error: loading new config: admin: listen unix {box.socket_file}"
+        )
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert box.caddy.running_config() == before
+        assert box.caddy.reloads == 0
+
     def test_a_load_back_over_the_socket_removes_the_socket_file(self, box: Box) -> None:
         box.reload(box.new, DEFAULT_TCP)
 
@@ -218,6 +265,29 @@ class TestReloadAddress:
 
         with pytest.raises(AssertionError, match="listen unix"):
             box.caddy.restart()
+
+
+class TestPlantSocket:
+    def test_leaves_a_socket_nothing_listens_on_under_a_path_too_long_to_bind(
+        self, tmp_path: Path
+    ) -> None:
+        """macOS caps a socket address near 104 bytes, and pytest's ``tmp_path`` is longer."""
+        deep = tmp_path.joinpath(*["a-directory-name-long-enough"] * 4)
+        deep.mkdir(parents=True)
+        path = deep / "admin.sock"
+        assert len(str(path)) > 104
+        cwd = Path.cwd()
+
+        plant_socket(path)
+
+        assert stat.S_ISSOCK(path.lstat().st_mode)
+        assert Path.cwd() == cwd
+        with (
+            contextlib.chdir(deep),
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
+            pytest.raises(ConnectionRefusedError),
+        ):
+            client.connect(path.name)
 
 
 class TestSystemctl:
