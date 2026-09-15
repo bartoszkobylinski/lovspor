@@ -33,7 +33,7 @@ from lovspor.release.commands import (
 )
 from lovspor.release.control import ControlPlane
 from lovspor.release.envelope import FRAGMENT_NAME, Marker, read_fragment, read_marker, write_marker
-from lovspor.release.errors import RehearsalFailedError, ReleaseError
+from lovspor.release.errors import MigrationFailedError, RehearsalFailedError, ReleaseError
 from lovspor.release.migrate import first_migration
 from lovspor.release.rehearsal import Rehearsal, RehearsalReport, Step
 from lovspor.release.staged import StagedPlan
@@ -397,6 +397,31 @@ class TestReconcileWindow:
         assert abandoned.stdout.endswith("action abandoned\nadmin: localhost:2019\nlive: none\n")
         assert not droplet.plane.fragment.exists()
         assert droplet.caddy.reloads == 0
+
+    def test_a_cutover_load_refused_after_the_socket_started_is_refused_until_abandoned(
+        self, droplet: Droplet
+    ) -> None:
+        """#302: the report names --abandon, --complete is refused, --abandon ends on TCP."""
+        droplet.caddy.refuse_at_start = 1
+        with pytest.raises(MigrationFailedError):
+            first_migration(droplet.plane, droplet.host, droplet.a)
+
+        reported = runner.invoke(app, ["release", "reconcile"])
+        completed = runner.invoke(app, ["release", "reconcile", "--complete"])
+        abandoned = runner.invoke(app, ["release", "reconcile", "--abandon"])
+
+        for refused in (reported, completed):
+            assert refused.exit_code == 1
+            assert (
+                f"release refused: host is staged_not_reloaded on {droplet.host.socket_admin}: "
+                in refused.output
+            )
+            assert "resolve with --abandon" in refused.output
+            assert "--complete is refused" in refused.output
+        assert abandoned.exit_code == 0, abandoned.output
+        assert abandoned.stdout.endswith("action abandoned\nadmin: localhost:2019\nlive: none\n")
+        assert not droplet.plane.fragment.exists()
+        assert not droplet.host.socket.exists()
 
     def test_the_host_options_are_registered_with_their_environment(self) -> None:
         root = get_command(app)

@@ -952,6 +952,23 @@ def detect_admin(host: MigrationHost) -> str:
     return FallbackAdminClient(host.socket_admin, host.tcp_admin, host.admin_client).probe()
 
 
+def stranded_on_socket(host: MigrationHost, answered: str) -> bool:
+    """Whether the socket answers with a configuration that binds admin elsewhere (#302).
+
+    A successful cutover and a box provisioned with the envelope both run
+    a configuration whose ``admin`` is the socket. The droplet's Caddy
+    v2.11.4 left the other pairing when it refused the cutover's load at
+    app start: the socket endpoint already started, TCP then stopped, and
+    the previous configuration still running. A configuration without
+    ``admin`` listens on Caddy's default TCP address, so it counts as
+    elsewhere; the ``|mode`` suffix is a creation mode, not the address.
+    """
+    if answered != host.socket_admin:
+        return False
+    listen = admin_listen(host.admin_client(answered).running_config())
+    return listen is None or listen.partition("|")[0] != host.socket_admin
+
+
 def complete_first_migration(
     plane: ControlPlane, host: MigrationHost, answered: str
 ) -> MigrationReport:

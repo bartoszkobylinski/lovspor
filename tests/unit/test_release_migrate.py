@@ -70,6 +70,7 @@ from lovspor.release.migrate import (
     retire_targets,
     rollback_first_migration,
     socket_path,
+    stranded_on_socket,
 )
 from lovspor.release.reconcile import ReconcileReport, reconcile
 from tests.unit.caddy_fakes import (
@@ -3429,3 +3430,192 @@ class TestReconcileWindow:
         report = reconcile(droplet.plane, "complete", droplet.host)
         assert report.admin is None and report.live == droplet.b
         assert read_marker(droplet.releases) == Marker(active=droplet.b, previous=droplet.a)
+
+
+def _refuse_the_cutover(droplet: Droplet) -> None:
+    """(c) refused as the droplet's Caddy v2.11.4 refused it (#302): admin on the socket, R old."""
+    droplet.caddy.refuse_at_start = 1
+    with pytest.raises(MigrationFailedError):
+        _migrate(droplet)
+    assert droplet.caddy.admin_address == droplet.host.socket_admin
+    assert config_pair(droplet.caddy.running_config()) == droplet.old_pair()
+
+
+def _loads(droplet: Droplet, since: int) -> list[tuple[str, ...]]:
+    """Every load issued after the first ``since`` calls: ``caddy reload`` and ``systemctl
+    reload`` alike."""
+    return [argv for argv, _ in droplet.caddy.calls[since:] if argv[1] == "reload"]
+
+
+class TestStrandedOnSocket:
+    """The socket answering a configuration that binds admin elsewhere: a refused (c) (#302)."""
+
+    @pytest.mark.parametrize("previous", ["no admin option", "admin localhost:2019"])
+    def test_a_refused_cutover_leaves_the_socket_running_a_configuration_naming_tcp(
+        self, droplet: Droplet, previous: str
+    ) -> None:
+        if previous != "no admin option":
+            explicit = f"{{\n\t{previous}\n}}\n{OLD_CADDYFILE}"
+            droplet.plane.caddyfile.write_text(explicit, encoding="utf-8")
+            droplet.caddy.restart()
+        _refuse_the_cutover(droplet)
+        running = droplet.caddy.running_config_at(droplet.host.socket_admin)
+        assert isinstance(running, dict)
+        named = None if previous == "no admin option" else {"listen": DEFAULT_TCP}
+        assert running.get("admin") == named
+
+        assert stranded_on_socket(droplet.host, droplet.host.socket_admin) is True
+
+    @pytest.mark.parametrize("state", ["after the cutover", "a provisioned box"])
+    def test_a_socket_running_a_configuration_that_binds_it_is_not_stranded(
+        self, droplet: Droplet, state: str
+    ) -> None:
+        """Both configurations name the socket with its ``|0660`` suffix; the suffix is a
+        creation mode, not part of the address."""
+        _migrate(droplet)
+        if state == "a provisioned box":
+            (droplet.releases / MARKER_NAME).unlink()
+            droplet.plane.fragment.write_text(PLACEHOLDER, encoding="utf-8")
+            droplet.caddy.restart()
+
+        assert stranded_on_socket(droplet.host, droplet.host.socket_admin) is False
+
+    def test_tcp_answering_is_not_stranded_and_nothing_is_dialled(self, droplet: Droplet) -> None:
+        _refuse_the_cutover(droplet)
+        dialled: list[str] = []
+
+        def recording(address: str) -> FakeAdmin:
+            dialled.append(address)
+            return droplet.caddy.admin_client(address)
+
+        host = replace(droplet.host, admin_client=recording)
+
+        assert stranded_on_socket(host, DEFAULT_TCP) is False
+        assert dialled == []
+
+
+def _stranded_refusal(droplet: Droplet, triple: str) -> str:
+    return (
+        f"host is staged_not_reloaded on {droplet.host.socket_admin}: {triple}; Caddy refused "
+        "the cutover's load after moving its admin endpoint to the socket and still runs the "
+        "previous configuration; resolve with --abandon (the previous Caddyfile delivered to the "
+        "socket, which moves the admin endpoint back to TCP, then the files restored), then fix "
+        "what made Caddy refuse the load and start again from the preflight; --complete is "
+        "refused: the Caddyfile on disk is the one Caddy just refused"
+    )
+
+
+def _strand_in(droplet: Droplet, row: Situation) -> None:
+    """The stranded pairing kept, the triple moved by hand to ``row``."""
+    if row == Situation.reconciled:
+        droplet.plane.caddyfile.write_text(OLD_CADDYFILE, encoding="utf-8")
+        droplet.plane.fragment.unlink()
+    elif row == Situation.foreign:
+        droplet.plane.fragment.write_text(PLACEHOLDER, encoding="utf-8")
+    else:
+        served = toy_adapt(
+            droplet.host.caddyfile_source, {FRAGMENT_ENV: str(droplet.plane.fragment)}
+        )
+        served.pop("admin")
+        droplet.caddy.load(served)
+
+
+class TestReconcileRefusedCutover:
+    """#302: the cutover's load refused after Caddy moved its admin endpoint to the socket.
+
+    Owner decisions of 2026-09-15: *complete* is refused there, and *abandon*
+    is the rollback after (c) — the previous Caddyfile delivered to the
+    socket — never the file restore a staged host on TCP gets.
+    """
+
+    @pytest.mark.parametrize("action", ["report", "complete"])
+    def test_report_and_complete_are_refused_naming_abandon_and_nothing_is_loaded(
+        self, droplet: Droplet, action: str
+    ) -> None:
+        _refuse_the_cutover(droplet)
+        triple = read_triple(droplet.over(droplet.host.socket_admin))
+        since = len(droplet.caddy.calls)
+
+        with pytest.raises(UnreconciledError) as caught:
+            reconcile(droplet.plane, action, droplet.host)  # type: ignore[arg-type]
+
+        assert str(caught.value) == _stranded_refusal(droplet, triple.describe())
+        assert _loads(droplet, since) == []
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+        assert droplet.host.previous_caddyfile.is_file()
+        assert read_marker(droplet.releases) is None
+
+    def test_abandon_is_one_load_of_the_previous_caddyfile_to_the_socket(
+        self, droplet: Droplet
+    ) -> None:
+        _refuse_the_cutover(droplet)
+        triple = read_triple(droplet.over(droplet.host.socket_admin))
+        since = len(droplet.caddy.calls)
+
+        report = reconcile(droplet.plane, "abandon", droplet.host)
+
+        assert report == ReconcileReport(
+            situation=Situation.reconciled,
+            live=None,
+            action="abandoned",
+            triple=triple.describe(),
+            admin=DEFAULT_TCP,
+        )
+        assert _loads(droplet, since) == [_rollback_reload(droplet)]
+        with pytest.raises(UnobservableError):
+            droplet.caddy.running_config_at(droplet.host.socket_admin)
+        assert not droplet.host.absent_drop_in.exists()
+        _assert_pre_envelope(droplet)
+
+    def test_after_the_abandon_reconcile_reads_the_host_reconciled_on_tcp(
+        self, droplet: Droplet
+    ) -> None:
+        _refuse_the_cutover(droplet)
+        reconcile(droplet.plane, "abandon", droplet.host)
+
+        again = reconcile(droplet.plane, host=droplet.host)
+
+        assert (again.situation, again.action, again.live, again.admin) == (
+            Situation.reconciled,
+            "none",
+            None,
+            DEFAULT_TCP,
+        )
+
+    def test_after_the_abandon_the_migration_runs_again_from_the_preflight(
+        self, droplet: Droplet
+    ) -> None:
+        _refuse_the_cutover(droplet)
+        reconcile(droplet.plane, "abandon", droplet.host)
+
+        report = _migrate(droplet)
+
+        assert report.active == droplet.a
+        assert live_release(droplet.plane) == droplet.a
+
+    @pytest.mark.parametrize("row", [Situation.reconciled, Situation.reloaded, Situation.foreign])
+    def test_stranded_outside_the_staged_row_is_refused_naming_the_offline_rollback(
+        self, droplet: Droplet, row: Situation
+    ) -> None:
+        _refuse_the_cutover(droplet)
+        _strand_in(droplet, row)
+        triple = read_triple(droplet.over(droplet.host.socket_admin))
+        assert situation(triple) == row
+        before = droplet.plane.caddyfile.read_bytes()
+        since = len(droplet.caddy.calls)
+
+        for action in ("report", "complete", "abandon"):
+            with pytest.raises(UnreconciledError) as caught:
+                reconcile(droplet.plane, action, droplet.host)  # type: ignore[arg-type]
+            assert str(caught.value) == (
+                f"host is {row} on {droplet.host.socket_admin}: {triple.describe()}; the socket "
+                "answers with a configuration that binds the admin endpoint elsewhere, which "
+                "outside the staged row no step of the first migration leaves, so nothing is "
+                "resolved automatically; `lovspor release migrate --rollback --offline` puts the "
+                "previous Caddyfile back and restarts caddy"
+            )
+
+        assert _loads(droplet, since) == []
+        assert read_marker(droplet.releases) is None
+        assert droplet.plane.caddyfile.read_bytes() == before
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
