@@ -1,0 +1,1095 @@
+# Size and complexity ratchet baseline (issue #323).
+#
+# Code under src/ that was already over a CLAUDE.md limit when the ratchet
+# landed, or that a reviewed exception let past it. Rules and exact
+# definitions: scripts/quality/check_ratchets.py. Check:
+#
+#   uv run python scripts/quality/check_ratchets.py
+#
+# An entry is keyed by rule + path + qualified name and holds the measured
+# value. The check fails when that code gets worse, and also when it gets
+# better, so the entry follows it down:
+#
+#   uv run python scripts/quality/check_ratchets.py --tighten
+#
+# lowers values and removes stale entries. It never adds an entry or raises a
+# value. Adding or raising one by hand is a policy exception, reviewed as one,
+# with a `reason` that argues for it: never do it to make your own change pass;
+# split the function or the file instead. --tighten rewrites this file whole,
+# so notes belong in `reason`, not in comments.
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/cli.py"
+value = 985
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/cli.py"
+name = "mcp_http"
+value = 7
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/cli.py"
+name = "release_probe"
+value = 7
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/cli.py"
+name = "site_drift_check"
+value = 9
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/corpus_audit.py"
+name = "_document_findings"
+value = 36
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/corpus_audit.py"
+name = "_language_findings"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/corpus_audit.py"
+name = "_orphan_findings"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/corpus_fetch.py"
+name = "fetch_corpus"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/embeddings/model.py"
+name = "OpenAIEmbedder.__init__"
+value = 7
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/embeddings/model.py"
+name = "OpenAIEmbedder._encode_batch"
+value = 43
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/embeddings/model.py"
+name = "OpenAIEmbedder._extract_aligned_embeddings"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/embeddings/provider.py"
+name = "create_embedder"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/embeddings/search.py"
+name = "EmbeddingIndex._rank_unique"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/embeddings/sections.py"
+name = "iter_sections"
+value = 31
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-complexity"
+path = "src/lovspor/embeddings/store.py"
+name = "read_embeddings"
+value = 12
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/embeddings/store.py"
+name = "read_embeddings"
+value = 60
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/embeddings/store.py"
+name = "write_embeddings"
+value = 33
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/embeddings/store.py"
+name = "write_embeddings"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/exclusive_workload.py"
+name = "exclusive_workload"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/extraction/tarball.py"
+name = "iter_tarball_xml"
+value = 25
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/history.py"
+name = "_classify_commit"
+value = 29
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/citations.py"
+name = "_scan_multi"
+value = 29
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/fairness.py"
+name = "coverage_violations"
+value = 27
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/llhb/freeze.py"
+name = "build_lock"
+value = 6
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/generation.py"
+name = "CorpusSampler.act_info"
+value = 27
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/metrics.py"
+name = "compute_pair_report"
+value = 26
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/openai_chat.py"
+name = "parse_chat_completion"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/orchestrator.py"
+name = "execute_argv"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pair_manifest.py"
+name = "build_pair_manifest"
+value = 35
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/llhb/pool.py"
+value = 855
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_build_c1"
+value = 27
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_build_c2"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_build_c3"
+value = 26
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_build_c4"
+value = 39
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_build_c5"
+value = 33
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_build_c8"
+value = 27
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_c7_fields"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_distribution"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_emit_c6_misattribution"
+value = 31
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_emit_c6_nonexistent"
+value = 27
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_generation_manifest"
+value = 30
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/pool.py"
+name = "_validate_all"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/quotes.py"
+name = "_check_span_and_hash"
+value = 25
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/reporting.py"
+name = "_score_one"
+value = 29
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/resolver.py"
+name = "CitationResolver._classify_invalid"
+value = 26
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/resolver.py"
+name = "CitationResolver._resolve_act"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/review.py"
+name = "_c5_notes"
+value = 25
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/review.py"
+name = "_review_item"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/review.py"
+name = "completeness"
+value = 41
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/run_setup.py"
+name = "compose_run_metadata"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/selection.py"
+name = "select"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/validation.py"
+name = "CandidateValidator._check_c5_occurrences"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/llhb/validation.py"
+name = "CandidateValidator._check_fabricated_quote"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/mcp.py"
+value = 5017
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader.__init__"
+value = 26
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader._coverage_notice"
+value = 38
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader._git_head_info"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader._grounded_hit"
+value = 33
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader._load_body_index"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-complexity"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader._load_embedding_index"
+value = 13
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader._load_embedding_index"
+value = 59
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader._raise_for_empty_embedding_index"
+value = 41
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader.corpus_status"
+value = 50
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader.diff_law_versions"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader.get_law_at"
+value = 25
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader.list_recent_changes"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader.search_eu_implementations"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "CorpusReader.semantic_search"
+value = 47
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_SnapshotState._load_search_bodies"
+value = 30
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_SnapshotState.get_temporal_events"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_build_embedder"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_citation_verdict"
+value = 39
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_diff_section_maps"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_extract_cross_references"
+value = 30
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_parse_sections"
+value = 62
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_quote_verdict"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "_search_body_hits"
+value = 26
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-complexity"
+path = "src/lovspor/mcp.py"
+name = "build_server"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/mcp.py"
+name = "build_server"
+value = 744
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/mcp.py"
+name = "build_server.<locals>.verify_quote"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/observatory/commands.py"
+value = 1528
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/commands.py"
+name = "_capture_candidates"
+value = 28
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/commands.py"
+name = "_sweep_one"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/observatory/commands.py"
+name = "_sweep_one"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/commands.py"
+name = "nightly"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/commands.py"
+name = "register_source"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/observatory/events.py"
+name = "domain_replacement"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/fetch.py"
+name = "Fetcher._attempt"
+value = 25
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/fetch.py"
+name = "Fetcher._read"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/log.py"
+name = "ObservationLog.scan_into"
+value = 34
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/observatory/log.py"
+name = "verify_snapshot"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/check.py"
+name = "_check_caddy_map"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/check.py"
+name = "_check_sitemaps"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/check.py"
+name = "_redirect_map"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/check.py"
+name = "check_release"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/html.py"
+name = "render_body_html"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/inventory.py"
+name = "_check_provenance_shapes"
+value = 38
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/inventory.py"
+name = "_front_matter_fields"
+value = 30
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/publish/inventory.py"
+name = "_plan_document"
+value = 46
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/publish/pages.py"
+name = "provision_page_html"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/quota.py"
+name = "QuotaEnforcer.__init__"
+value = 6
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/quota.py"
+name = "QuotaEnforcer._admit"
+value = 34
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/quota.py"
+name = "QuotaEnforcer._admit_service"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/release/check.py"
+name = "_check_ids"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/release/commands.py"
+value = 701
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/release/commands.py"
+name = "build_command"
+value = 8
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/release/commands.py"
+name = "commit_command"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/release/commands.py"
+name = "migrate_command"
+value = 15
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/release/commands.py"
+name = "reconcile_command"
+value = 11
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/release/commands.py"
+name = "rehearse_command"
+value = 14
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/release/commands.py"
+name = "rehearse_urls_command"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/release/migrate.py"
+value = 1564
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/rendering/document.py"
+name = "build_frontmatter"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/rendering/document.py"
+name = "extract_xml_metadata"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/rendering/markdown_renderer.py"
+value = 826
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/rendering/slug.py"
+name = "resolve_collisions"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/retry.py"
+name = "retry_with_backoff"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/settings.py"
+name = "Settings.from_env"
+value = 47
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/site/build.py"
+name = "_capability_block"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/site/sources.py"
+name = "_code_facts"
+value = 25
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/site/sources.py"
+name = "_transport_facts"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/snapshot.py"
+name = "CorpusSnapshot.read_text"
+value = 23
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sources/lovdata.py"
+name = "LovdataClient._download_once"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/document_io.py"
+name = "generate_index"
+value = 30
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/lspe_cutover.py"
+name = "_apply_cutover"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/lspe_cutover.py"
+name = "_select_items"
+value = 30
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/lspe_cutover.py"
+name = "_verify_staged"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/sync/orchestrator.py"
+value = 2184
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_attest_temporal_conformance"
+value = 30
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_collect_upstream"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_commit_history_followup"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_commit_with_history"
+value = 25
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_commit_with_history"
+value = 9
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_generate_and_apply_history"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_guard_mass_reembed"
+value = 37
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_index_tarball"
+value = 21
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_run_sprint8_eu_basis_migration"
+value = 31
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_run_sprint8_eu_basis_migration"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_run_sprint9_embeddings_migration"
+value = 36
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_run_sprint9_embeddings_migration"
+value = 6
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_select_embedding_backfill"
+value = 27
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_write_embeddings_for_doc"
+value = 24
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_write_embeddings_for_doc"
+value = 6
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "_write_one"
+value = 40
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-complexity"
+path = "src/lovspor/sync/orchestrator.py"
+name = "run_sync"
+value = 29
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/sync/orchestrator.py"
+name = "run_sync"
+value = 272
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "file-lines"
+path = "src/lovspor/temporal.py"
+value = 922
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/temporal.py"
+name = "_event_for"
+value = 22
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-params"
+path = "src/lovspor/temporal.py"
+name = "_event_for"
+value = 5
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/temporal.py"
+name = "_problems_from_note"
+value = 45
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/temporal.py"
+name = "derive_temporal_layer"
+value = 29
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/temporal_attestation.py"
+name = "_read_entries"
+value = 50
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/temporal_attestation.py"
+name = "fetch_attestations"
+value = 29
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/temporal_attestation.py"
+name = "write_attestation"
+value = 34
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
+
+[[entry]]
+rule = "function-lines"
+path = "src/lovspor/timetravel.py"
+name = "_iter_follow_log"
+value = 31
+reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
