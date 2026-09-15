@@ -186,15 +186,19 @@ def _stage(plane: ControlPlane, text: str, marker: Marker | None) -> None:
     atomic_write_text(plane.next_fragment, text, mode=WORLD_READABLE)
 
 
-def _candidate_pair(plane: ControlPlane, content_id: str) -> ConfigPair:
+def _check_candidate(plane: ControlPlane, content_id: str) -> None:
+    """``.next`` validates and composes the candidate, before anything public moves.
+
+    Only its content is asked here. Caddy hides the fragment by the path it
+    imported it from (#317), so no pair adapted at ``.next`` is ever R.
+    """
     validate_caddy(plane.runner, plane.caddyfile, plane.next_fragment)
-    pair = adapt(plane.runner, plane.caddyfile, plane.next_fragment)
-    if pair.release_id != content_id:
+    named = adapt(plane.runner, plane.caddyfile, plane.next_fragment).release_id
+    if named != content_id:
         raise CommitRefusedError(
-            f"the composed configuration names {pair.release_id or 'no release'}, "
+            f"the composed configuration names {named or 'no release'}, "
             f"not {content_id}; does the Caddyfile import the fragment?"
         )
-    return pair
 
 
 def revert_source(plane: ControlPlane, marker: Marker | None) -> str:
@@ -216,29 +220,39 @@ def reload_expecting(plane: ControlPlane, expected: ConfigPair) -> str | None:
     return None
 
 
-def _restore(plane: ControlPlane, marker: Marker | None, old: ConfigPair | None) -> None:
-    """D = old, then R = old; the previous fragment is immutable inside its release."""
+def _restore(plane: ControlPlane, marker: Marker | None) -> None:
+    """D = old, then R = old; the previous fragment is immutable inside its release.
+
+    R is compared with the old fragment adapted once it is back at the active
+    fragment's path, the one the reload reads (#317). With no marker the kept
+    copy is reloaded without a comparison.
+    """
     atomic_write_text(plane.next_fragment, revert_source(plane, marker), mode=WORLD_READABLE)
     plane.next_fragment.replace(plane.fragment)
-    if old is None:
+    if marker is None:
         reload_caddy(plane.runner)
         return
-    failure = reload_expecting(plane, old)
+    failure = reload_expecting(plane, adapt(plane.runner, plane.caddyfile, plane.fragment))
     if failure is not None:
         raise ReloadFailedError(f"revert did not restore the previous configuration: {failure}")
 
 
 def _commit(plane: ControlPlane, content_id: str, triple: Triple, checkpoint: Checkpoint) -> None:
-    """Steps (1) stage and (2) commit of the transaction, (3) the revert on failure."""
+    """Steps (1) stage and (2) commit of the transaction, (3) the revert on failure.
+
+    The pair R must equal is adapted after the rename, from the path the reload
+    reads (#317). Adapting writes nothing: a kill after ``committed``, that adapt
+    included, leaves D = new and R = M = old, the row ``reconcile`` resolves.
+    """
     _stage(plane, read_fragment(release_dir(plane.releases, content_id)), triple.marker)
     checkpoint("staged")
-    pair = _candidate_pair(plane, content_id)
+    _check_candidate(plane, content_id)
     checkpoint("validated")
     plane.next_fragment.replace(plane.fragment)
     checkpoint("committed")
-    failure = reload_expecting(plane, pair)
+    failure = reload_expecting(plane, adapt(plane.runner, plane.caddyfile, plane.fragment))
     if failure is not None:
-        _restore(plane, triple.marker, triple.old)
+        _restore(plane, triple.marker)
         raise ReloadFailedError(f"release {content_id[:12]} not switched: {failure}")
     checkpoint("reloaded")
     write_marker(plane.releases, Marker(active=content_id, previous=triple.marked))

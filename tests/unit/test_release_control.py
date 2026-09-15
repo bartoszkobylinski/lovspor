@@ -10,12 +10,13 @@ Kills are checkpoints that stop the transaction at a named step.
 import copy
 import shutil
 import stat
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import pytest
 
-from lovspor.release.caddy import FRAGMENT_ENV, ConfigPair, adapt, config_pair
+from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
 from lovspor.release.control import (
     TRANSACTION_STEPS,
     CommitReport,
@@ -56,12 +57,6 @@ from tests.unit.release_fixtures import (
     observer,
     rename_document,
 )
-
-COMPARES_AT_ANOTHER_PATH = pytest.mark.xfail(
-    strict=True,
-    reason="#317: commit, revert and abandon compare R with a pair adapted at another path",
-)
-"""Fails while the pair R is compared with names the fragment by a path Caddy never reads."""
 
 OLD_AT_THE_RELEASE_PATH = pytest.mark.xfail(
     strict=True,
@@ -297,7 +292,6 @@ class TestTriple:
 
 
 class TestCommit:
-    @COMPARES_AT_ANOTHER_PATH
     def test_makes_b_live_through_the_transaction(self, live_a: Host) -> None:
         reached: list[str] = []
 
@@ -314,7 +308,6 @@ class TestCommit:
         assert not live_a.plane.next_fragment.exists()
         assert not live_a.plane.previous_fragment.exists()
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_the_first_release_replaces_a_foreign_fragment_and_keeps_a_copy(
         self, host: Host
     ) -> None:
@@ -325,7 +318,6 @@ class TestCommit:
         assert read_marker(host.releases) == Marker(active=host.a, previous=None)
         assert host.plane.previous_fragment.read_text(encoding="utf-8") == PLACEHOLDER
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_the_kept_copy_is_read_as_utf_8_whatever_the_process_locale(
         self, host: Host, c_locale: None
     ) -> None:
@@ -336,7 +328,6 @@ class TestCommit:
 
         assert host.plane.previous_fragment.read_bytes() == NON_ASCII_PLACEHOLDER.encode("utf-8")
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_the_fragment_and_the_marker_are_world_readable_whatever_the_umask(
         self, live_a: Host, strict_umask: None
     ) -> None:
@@ -373,7 +364,6 @@ class TestCommit:
         assert live_a.caddy.reloads == 0
         assert live_a.snapshot() == before
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_the_transaction_validates_and_adapts_next_before_touching_the_fragment(
         self, live_a: Host
     ) -> None:
@@ -476,7 +466,6 @@ class TestCommit:
 
 
 class TestReloadFailure:
-    @COMPARES_AT_ANOTHER_PATH
     def test_reverts_to_the_previous_fragment_and_reloads_it(self, live_a: Host) -> None:
         live_a.caddy.fail_reloads = 1
 
@@ -547,8 +536,73 @@ class TestReloadFailure:
         assert live_release(live_a.plane) == live_a.a
 
 
+class Witness:
+    """The fake's runner, noting which release the active fragment holds whenever a command
+    reads it — ``caddy adapt`` named at that path, or a unit reload through the default."""
+
+    def __init__(self, host: Host) -> None:
+        self.host = host
+        self.seen: list[tuple[str, str]] = []
+
+    def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+        active = self.host.plane.fragment
+        if env.get(FRAGMENT_ENV, str(active)) == str(active):
+            text = active.read_text(encoding="utf-8")
+            names = {
+                self.host.fragment_of(self.host.a): "A",
+                self.host.fragment_of(self.host.b): "B",
+            }
+            self.seen.append((argv[1], names.get(text, "other")))
+        return self.host.caddy.run(argv, env)
+
+    def plane(self) -> ControlPlane:
+        return ControlPlane(
+            self.host.releases,
+            self.host.plane.caddyfile,
+            self.host.plane.fragment,
+            self,
+            self.host.caddy,
+        )
+
+
+class TestWhereRIsComparedFrom:
+    """#317: Caddy hides the fragment by the path it imported it from, so the pair R is compared
+    with is adapted at the active fragment's path once the fragment the reload reads is there;
+    ``.next`` is asked only for its content. The first entry is the triple's own D."""
+
+    def test_the_commit_adapts_the_candidate_where_the_reload_reads_it(self, live_a: Host) -> None:
+        witness = Witness(live_a)
+
+        commit_release(witness.plane(), live_a.b)
+
+        assert witness.seen == [("adapt", "A"), ("adapt", "B"), ("reload", "B")]
+
+    def test_the_revert_adapts_the_old_fragment_once_it_is_back(self, live_a: Host) -> None:
+        witness = Witness(live_a)
+        live_a.caddy.fail_reloads = 1
+
+        with pytest.raises(ReloadFailedError, match="not switched"):
+            commit_release(witness.plane(), live_a.b)
+
+        assert witness.seen == [
+            ("adapt", "A"),
+            ("adapt", "B"),
+            ("reload", "B"),
+            ("adapt", "A"),
+            ("reload", "A"),
+        ]
+
+    def test_abandon_adapts_the_markers_fragment_once_it_is_back(self, live_a: Host) -> None:
+        with pytest.raises(Killed):
+            commit_release(live_a.plane, live_a.b, _kill_at("committed"))
+        witness = Witness(live_a)
+
+        assert reconcile(witness.plane(), "abandon").action == "abandoned"
+
+        assert witness.seen == [("adapt", "B"), ("adapt", "A"), ("reload", "A")]
+
+
 class TestRollback:
-    @COMPARES_AT_ANOTHER_PATH
     def test_the_previous_release_through_the_same_transaction(self, live_a: Host) -> None:
         commit_release(live_a.plane, live_a.b)
         reached: list[str] = []
@@ -561,7 +615,6 @@ class TestRollback:
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=live_a.b)
         assert live_a.running() == live_a.pair_of(live_a.a)
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_rolling_forward_is_the_same_command(self, live_a: Host) -> None:
         commit_release(live_a.plane, live_a.b)
         rollback(live_a.plane)
@@ -578,7 +631,6 @@ class TestRollback:
             rollback(live_a.plane)
         assert str(caught.value) == "no previous release in the marker; nothing to roll back to"
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_refuses_while_unreconciled_or_unobservable(self, live_a: Host) -> None:
         commit_release(live_a.plane, live_a.b)
         live_a.plane.fragment.write_text(live_a.fragment_of(live_a.a), encoding="utf-8")
@@ -595,7 +647,6 @@ class TestTheCrashTable:
         with pytest.raises(Killed):
             commit_release(host.plane, host.b, _kill_at(step))
 
-    @COMPARES_AT_ANOTHER_PATH
     @pytest.mark.parametrize("step", ["staged", "validated"])
     def test_a_crash_during_staging_leaves_the_host_reconciled(
         self, live_a: Host, step: str
@@ -651,7 +702,6 @@ class TestTheCrashTable:
         assert read_marker(live_a.releases) == Marker(active=live_a.b, previous=live_a.a)
         assert live_release(live_a.plane) == live_a.b
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_abandon_after_the_fragment_rename_restores_the_previous_fragment(
         self, live_a: Host
     ) -> None:
@@ -666,7 +716,6 @@ class TestTheCrashTable:
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
         assert live_release(live_a.plane) == live_a.a
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_the_abandoned_fragment_is_world_readable_whatever_the_umask(
         self, live_a: Host, strict_umask: None
     ) -> None:
@@ -695,7 +744,6 @@ class TestTheCrashTable:
         assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_a_crash_after_the_reload_is_completed_by_the_marker_alone(self, live_a: Host) -> None:
         self._kill(live_a, "reloaded")
 
@@ -718,16 +766,13 @@ class TestTheCrashTable:
         assert live_a.caddy.reloads == 1
         assert live_release(live_a.plane) == live_a.b
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_a_crash_after_the_marker_is_a_finished_transaction(self, live_a: Host) -> None:
         self._kill(live_a, "marked")
 
         assert live_release(live_a.plane) == live_a.b
         assert read_marker(live_a.releases) == Marker(active=live_a.b, previous=live_a.a)
 
-    @pytest.mark.parametrize(
-        "step", ["committed", pytest.param("reloaded", marks=COMPARES_AT_ANOTHER_PATH)]
-    )
+    @pytest.mark.parametrize("step", ["committed", "reloaded"])
     def test_a_restart_in_a_killed_state_serves_d_whole(self, live_a: Host, step: str) -> None:
         self._kill(live_a, step)
 
@@ -764,7 +809,6 @@ class TestForeign:
         assert live_a.running() == live_a.pair_of(live_a.a)
         assert live_release(live_a.plane) == live_a.a
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_abandon_makes_the_marker_the_truth(self, live_a: Host) -> None:
         live_a.plane.fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
         self._hand_reload(live_a)
@@ -850,7 +894,6 @@ class TestPrune:
         (host.releases / ("9" * 64)).mkdir()
         return stale, running
 
-    @COMPARES_AT_ANOTHER_PATH
     def test_removes_everything_but_r_d_m_and_previous(self, live_a: Host) -> None:
         commit_release(live_a.plane, live_a.b)
         stale, running = self._litter(live_a)
