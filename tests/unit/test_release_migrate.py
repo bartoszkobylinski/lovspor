@@ -3565,6 +3565,17 @@ class TestStrandedOnSocket:
 
         assert stranded_on_socket(droplet.host, droplet.host.socket_admin) is False
 
+    def test_a_socket_named_without_the_mode_suffix_still_binds_it(self, droplet: Droplet) -> None:
+        """A bare ``unix/…`` admin — the rehearsal's unsuffixed fixture — is the socket too;
+        the address is whatever precedes a suffix, and there may be none."""
+        _migrate(droplet)
+        running = droplet.caddy.running_config_at(droplet.host.socket_admin)
+        assert isinstance(running, dict)
+        running["admin"] = {"listen": droplet.host.socket_admin}
+        droplet.caddy.load(running)
+
+        assert stranded_on_socket(droplet.host, droplet.host.socket_admin) is False
+
     def test_tcp_answering_is_not_stranded_and_nothing_is_dialled(self, droplet: Droplet) -> None:
         _refuse_the_cutover(droplet)
         dialled: list[str] = []
