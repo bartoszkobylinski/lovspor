@@ -21,9 +21,9 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.release.answers import Answer, is_servable_url
+from lovspor.release.answers import Answer, _compiled, _nodes, is_servable_url, matcher_paths
 from lovspor.release.caddy import FRAGMENT_ENV, Completed
-from lovspor.release.envelope import RECORD_NAME
+from lovspor.release.envelope import CORPUS_PATHS, RECORD_NAME
 from lovspor.release.errors import RehearsalFailedError
 from lovspor.release.staged import (
     OBSERVATORY_URL,
@@ -42,6 +42,7 @@ from lovspor.release.staged import (
 )
 from tests.unit.staged_fixtures import (
     FLAT_RELEASE,
+    GONE_PREFIX,
     LIVE_SYMLINK,
     REDIRECT_TARGET,
     RELEASE_ID,
@@ -765,3 +766,49 @@ class TestACaddyfileTheDryRunCannotRead:
             staged_rehearsal(plan)
 
         assert RECORD_NAME in caught.value.detail
+
+
+GONE_PAIRS, UNASKED_GONE = 500, 19_000
+"""20,000 injected 410 patterns: 500 retired prefixes as ``P P*``, and the rest unasked."""
+
+
+def gone_by_the_thousand(config: object) -> object:
+    """One capture whose ``@lovspor_gone`` matcher holds the droplet's order of patterns.
+
+    A hand edit of real `caddy adapt` output, and labelled as one: the world
+    retires one prefix, the droplet's redirect map thousands (#307), and a
+    capture of that size is not worth committing. ``GONE_PAIRS`` prefixes are
+    written as ``publish.redirects`` writes them, so each becomes two questions
+    answered 410. The rest carry their wildcard mid-path, which the dry-run never
+    turns into a question: every corpus URL still walks all of them — the
+    droplet's cost, many URLs by many patterns — without the world asking
+    twenty thousand questions that each walk twenty thousand patterns.
+    """
+    for node in _nodes(config):
+        paths = node.get("path")
+        if isinstance(paths, list) and GONE_PREFIX in paths:
+            for index in range(GONE_PAIRS):
+                prefix = f"/lov/nl-18000101-{index:04d}/"
+                paths.extend((prefix, f"{prefix}*"))
+            paths.extend(f"/lov/*/opphevet-{index}/" for index in range(UNASKED_GONE))
+    return config
+
+
+class TestARedirectMapOfTheDropletsSize:
+    def test_it_passes_compiling_each_pattern_once_however_many_urls_walk_it(
+        self, world: Path
+    ) -> None:
+        """A bound on the work, not on the clock: each distinct pattern is compiled exactly
+        once over all three passes, where the matcher it replaced recompiled one on every
+        URL that walked it once ``re``'s own cache of 512 was full."""
+        previous = gone_by_the_thousand(load_adapted("previous.json", world))
+        proposed = gone_by_the_thousand(load_adapted("proposed.json", world))
+        distinct = {*matcher_paths(previous), *matcher_paths(proposed), *CORPUS_PATHS}
+        _compiled.cache_clear()
+
+        report = staged_rehearsal(plan_for(world, [previous], [proposed]))
+
+        corpus = next(step for step in report.steps if step.name == "staged.corpus")
+        assert corpus.detail.startswith(f"{8 + 2 * GONE_PAIRS} corpus URLs")
+        assert len(distinct) > GONE_PAIRS * 2 + UNASKED_GONE
+        assert _compiled.cache_info().misses == len(distinct)

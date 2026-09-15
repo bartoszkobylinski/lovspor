@@ -54,6 +54,7 @@ import hashlib
 import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -124,7 +125,21 @@ class _Request:
 
 def matches_path(patterns: Sequence[str], url: str) -> bool:
     """Caddy's ``path`` matcher: case-insensitive, ``*`` spanning any characters."""
-    return any(re.fullmatch(_as_regex(pattern), url, re.IGNORECASE) for pattern in patterns)
+    return any(_compiled(pattern).fullmatch(url) for pattern in patterns)
+
+
+@cache
+def _compiled(pattern: str) -> re.Pattern[str]:
+    """One matcher path's regex, compiled once for the whole run (#307).
+
+    ``re.fullmatch`` on the text compiles it first, and ``re`` keeps only 512
+    compiled patterns; a redirect map's 410 matcher holds thousands, so every
+    URL recompiled every pattern it walked. The same text under the same flag
+    is the same answer, by construction. Unbounded on purpose: what fills it
+    is the distinct matcher paths of the configurations one dry-run adapts,
+    and that one-shot command is this module's only caller.
+    """
+    return re.compile(_as_regex(pattern), re.IGNORECASE)
 
 
 def _as_regex(pattern: str) -> str:
