@@ -534,7 +534,10 @@ def rehearse_command(
         Path,
         typer.Option(
             "--rejected-source",
-            help="A Caddyfile that validates and fails at load; (c) must leave R unmoved.",
+            help=(
+                "A Caddyfile that validates and fails at load; R must stay unmoved over its "
+                "socket, and reconcile --abandon must bring TCP back."
+            ),
         ),
     ],
     unsuffixed_source: Annotated[

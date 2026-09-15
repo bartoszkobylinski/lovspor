@@ -950,7 +950,7 @@ class TestRehearse:
     def test_walks_the_sequence_and_prints_what_every_step_read(
         self, droplet: Droplet, tmp_path: Path
     ) -> None:
-        droplet.caddy.fail_reloads = 1
+        droplet.caddy.refuse_at_start = 1
 
         result = runner.invoke(
             app, ["release", "rehearse", droplet.a, *self._fixtures(droplet, tmp_path)]
