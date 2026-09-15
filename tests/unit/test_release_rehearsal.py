@@ -70,9 +70,6 @@ from tests.unit.caddy_fakes import (
 from tests.unit.migrate_fixtures import OLD_CADDYFILE, Droplet, Sabotaged, make_droplet
 from tests.unit.release_fixtures import World, build, make_world
 
-ISSUE_324 = pytest.mark.xfail(
-    strict=True, reason="#324: a start undoes the migration drop-in's chgrp"
-)
 REHEARSAL_TCP = "localhost:2029"
 REHEARSAL_UNIT = "caddy-rehearsal"
 STOCK_SHOWN = "ExecReload={ path=/usr/bin/caddy ; argv[]=/usr/bin/caddy reload }\n"
@@ -1053,7 +1050,6 @@ class TestSteadyState:
 
 
 class TestRestarts:
-    @ISSUE_324
     def test_the_four_facts_hold_after_each_of_two_restarts(self, staged: Staged) -> None:
         cutover(staged.plan)
 
@@ -1064,7 +1060,6 @@ class TestRestarts:
         assert "0660" in steps[1].detail
         assert staged.caddy.restarts >= 2
 
-    @ISSUE_324
     def test_both_restarts_keep_the_release_group_under_the_migrations_drop_in(
         self, staged: Staged
     ) -> None:
@@ -1151,7 +1146,6 @@ class TestRestarts:
         gid = staged.droplet.ownership.groups["lovspor-release"]
         assert staged.droplet.ownership.chowns == [(staged.plan.host.socket, -1, gid)]
 
-    @ISSUE_324
     @pytest.mark.parametrize("nth", [3, 4, 5])
     def test_any_restart_inside_the_fixture_that_fails_names_the_fixture(
         self, staged: Staged, nth: int
@@ -1206,7 +1200,6 @@ class TestRestarts:
 
         assert _mode(staged.plan.plane.caddyfile) == 0o644
 
-    @ISSUE_324
     def test_a_fixture_that_still_carries_the_suffix_ends_the_rehearsal(
         self, staged: Staged
     ) -> None:
@@ -1225,7 +1218,6 @@ class TestRestarts:
             "a socket whose mode and group were set once by hand passed the four facts"
         )
 
-    @ISSUE_324
     def test_a_refusal_about_something_else_than_the_mode_or_the_group_ends_the_rehearsal(
         self, staged: Staged
     ) -> None:
@@ -1245,7 +1237,6 @@ class TestRestarts:
 
 
 class TestRehearse:
-    @ISSUE_324
     def test_walks_every_sub_step_of_validation_g_in_order(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
@@ -1271,7 +1262,6 @@ class TestRehearse:
             "v.by-hand",
         ]
 
-    @ISSUE_324
     def test_leaves_the_second_instance_cut_over_on_its_socket(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
@@ -1282,7 +1272,6 @@ class TestRehearse:
         assert marker is not None
         assert marker.active == staged.plan.content_id
 
-    @ISSUE_324
     def test_every_step_reports_what_it_read(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 

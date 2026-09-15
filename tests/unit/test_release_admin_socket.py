@@ -24,9 +24,6 @@ from lovspor.release.migrate import DEFAULT_RELEASE_GROUP, DEFAULT_TCP_ADMIN, SO
 from tests.unit.caddy_fakes import chgrp_drop_in, socketed_caddy
 
 TCP = "localhost:2019"
-ISSUE_324 = pytest.mark.xfail(
-    strict=True, reason="#324: a start undoes the migration drop-in's chgrp"
-)
 
 
 class Socketed:
@@ -74,7 +71,6 @@ class TestAdminSocket:
 
 
 class TestTheFourFacts:
-    @ISSUE_324
     def test_a_socket_that_holds_all_four_is_reported(self, socketed: Socketed) -> None:
         facts = check_admin_socket(socketed.access())
 
@@ -85,7 +81,6 @@ class TestTheFourFacts:
         assert facts.unprivileged_user == DEFAULT_UNPRIVILEGED_USER
         assert facts.tcp_admin == TCP
 
-    @ISSUE_324
     def test_the_report_names_the_socket_the_mode_and_both_identities(
         self, socketed: Socketed
     ) -> None:
@@ -139,7 +134,6 @@ class TestTheFourFacts:
         with pytest.raises(AdminSocketError, match="group nosuchgroup does not exist"):
             check_admin_socket(socketed.access(release_group="nosuchgroup"))
 
-    @ISSUE_324
     def test_a_release_identity_that_cannot_read_config_is_a_named_refusal(
         self, socketed: Socketed
     ) -> None:
@@ -148,7 +142,6 @@ class TestTheFourFacts:
         with pytest.raises(AdminSocketError, match="the release identity cannot"):
             check_admin_socket(socketed.access())
 
-    @ISSUE_324
     def test_an_unprivileged_user_that_can_read_config_is_a_named_refusal(
         self, socketed: Socketed
     ) -> None:
@@ -163,7 +156,6 @@ class TestTheFourFacts:
             "must not be world-reachable"
         )
 
-    @ISSUE_324
     def test_a_stray_tcp_listener_beside_the_socket_is_a_named_refusal(
         self, socketed: Socketed
     ) -> None:
@@ -201,7 +193,6 @@ class TestTheUnprivilegedCall:
 
         assert argv[2] == "someone"
 
-    @ISSUE_324
     def test_is_made_for_every_check_that_gets_that_far(self, socketed: Socketed) -> None:
         check_admin_socket(socketed.access())
 
@@ -215,7 +206,6 @@ class TestTheUnprivilegedCall:
 
         assert socketed.caddy.calls == []
 
-    @ISSUE_324
     def test_a_call_that_cannot_be_run_at_all_is_a_named_refusal(self, socketed: Socketed) -> None:
         class Unrunnable:
             def run(self, argv: object, env: object) -> object:
@@ -228,7 +218,6 @@ class TestTheUnprivilegedCall:
 class TestTheGroupTheDropInGives:
     """#324: the group fact holds only while the drop-in's ``Group=`` is the release group."""
 
-    @ISSUE_324
     def test_the_migrations_drop_in_runs_the_unit_in_the_release_group(
         self, tmp_path: Path
     ) -> None:

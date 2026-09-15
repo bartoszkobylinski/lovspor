@@ -352,8 +352,6 @@ def _access(tmp_path: Path) -> AdminSocket:
 class TestCheckedDrift:
     """The four facts are the check's first action (ADR-0014 Decision 4)."""
 
-    @pytest.mark.xfail(strict=True, reason="#324: a start undoes the migration drop-in's chgrp")
-    @pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
     def test_a_host_that_holds_the_four_facts_reaches_the_comparison(
         self, httpx_mock: HTTPXMock, tmp_path: Path
     ) -> None:

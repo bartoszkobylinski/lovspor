@@ -90,6 +90,15 @@ class TestTheSecondInstancesUnit:
         assert _directive(text, "RuntimeDirectory") == []
         assert _directive(text, "RuntimeDirectoryMode") == []
 
+    def test_runs_as_the_stock_group_so_the_drop_in_is_what_gives_the_release_group(
+        self,
+    ) -> None:
+        """#324: were the unit itself in the release group, (v) would pass without the drop-in."""
+        text = _code(_UNIT.read_text(encoding="utf-8"))
+
+        assert _directive(text, "Group") == ["caddy"]
+        assert _directive(text, "SupplementaryGroups") == []
+
     def test_cannot_be_enabled(self) -> None:
         """No [Install]: a second Caddy must not survive a reboot."""
         unit = _code(_UNIT.read_text(encoding="utf-8"))
