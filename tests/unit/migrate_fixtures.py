@@ -139,12 +139,16 @@ class Droplet(NamedTuple):
         return read_fragment(self.releases / content_id)
 
     def pair_of(self, content_id: str) -> ConfigPair:
-        """What the new Caddyfile composes with this release's fragment."""
+        """What the new Caddyfile composes with this release's fragment, installed at the
+        Caddyfile's path — the path Caddy hides (#316)."""
         fragment = self.releases / content_id / FRAGMENT_NAME
-        return config_pair(toy_adapt(self.host.caddyfile_source, {FRAGMENT_ENV: str(fragment)}))
+        env = {FRAGMENT_ENV: str(fragment)}
+        return config_pair(toy_adapt(self.host.caddyfile_source, env, self.plane.caddyfile))
 
     def old_pair(self) -> ConfigPair:
-        return config_pair(toy_adapt(Path(str(self.plane.caddyfile) + ".old"), {}))
+        """What ran before the migration: the old Caddyfile, loaded from the Caddyfile's path."""
+        old = Path(str(self.plane.caddyfile) + ".old")
+        return config_pair(toy_adapt(old, {}, self.plane.caddyfile))
 
     def argvs(self) -> list[tuple[str, ...]]:
         return [argv for argv, _ in self.caddy.calls]

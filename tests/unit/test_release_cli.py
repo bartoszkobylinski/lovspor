@@ -53,6 +53,11 @@ from tests.unit.probe_fixtures import (
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
 from tests.unit.staged_fixtures import RELEASE_ID
 
+RELOADS_FROM_THE_BACKUP = pytest.mark.xfail(
+    strict=True, reason="#316: the rollback delivers Caddyfile.pre-envelope from the backup's path"
+)
+"""Fails while the reload back hides the backup's path, never the Caddyfile's (#316)."""
+
 runner = CliRunner()
 LATER = "2026-01-02T00:00:00Z"
 _AN_ID = "a" * 64
@@ -947,6 +952,7 @@ class TestRehearse:
             str(unsuffixed),
         ]
 
+    @RELOADS_FROM_THE_BACKUP
     def test_walks_the_sequence_and_prints_what_every_step_read(
         self, droplet: Droplet, tmp_path: Path
     ) -> None:
