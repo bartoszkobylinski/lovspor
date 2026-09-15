@@ -9,8 +9,12 @@ import importlib.util
 import io
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from types import ModuleType
+
+from hypothesis import given
+from hypothesis import strategies as st
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "quality" / "check_ratchets.py"
 LEGACY = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
@@ -438,3 +442,112 @@ class TestTree:
 
         assert result.returncode == 1
         assert "FAIL ratchet function-lines: src/mod.py:1 long 21 > 20\n" in result.stdout
+
+
+def _baseline_entries(root: Path) -> list[tuple[str, str, str, int, str]]:
+    data = tomllib.loads((root / "baseline.toml").read_text(encoding="utf-8"))
+    return [
+        (entry["rule"], entry["path"], entry.get("name", ""), entry["value"], entry["reason"])
+        for entry in data.get("entry", [])
+    ]
+
+
+class TestTighten:
+    def test_lowers_improved_entries_and_removes_stale_ones(self, tmp_path: Path) -> None:
+        baseline = (
+            _entry("file-lines", "src/big.py", 701)
+            + _entry("file-lines", "src/gone.py", 900)
+            + _entry("function-lines", "src/mod.py", 30, "long")
+            + _entry("function-params", "src/mod.py", 6, "wide")
+        )
+        source = _function("long", 25) + "def wide(a, b):\n    return 0\n"
+        root = _tree(tmp_path, {"big.py": "x = 1\n" * 701, "mod.py": source}, baseline)
+
+        assert _check(root, "--tighten") == (0, [])
+
+        assert _baseline_entries(root) == [
+            ("file-lines", "src/big.py", "", 701, LEGACY),
+            ("function-lines", "src/mod.py", "long", 25, LEGACY),
+        ]
+        assert (root / "baseline.toml").read_text(encoding="utf-8").startswith(ratchets.HEADER)
+        assert _check(root) == (0, [])
+
+    def test_cannot_add_an_entry_for_a_new_violation(self, tmp_path: Path) -> None:
+        root = _tree(tmp_path, {"mod.py": _function("long", 21)})
+
+        code, failures = _check(root, "--tighten")
+
+        assert code == 1
+        assert failures == ["FAIL ratchet function-lines: src/mod.py:1 long 21 > 20"]
+        assert (root / "baseline.toml").read_text(encoding="utf-8") == ""
+
+    def test_cannot_raise_the_entry_of_a_worse_function(self, tmp_path: Path) -> None:
+        baseline = _entry("function-lines", "src/mod.py", 30, "long")
+        root = _tree(tmp_path, {"mod.py": _function("long", 31)}, baseline)
+
+        code, failures = _check(root, "--tighten")
+
+        assert code == 1
+        assert failures == ["FAIL ratchet function-lines: src/mod.py:1 long 31 > baseline 30"]
+        assert (root / "baseline.toml").read_text(encoding="utf-8") == baseline
+
+    def test_a_rewrite_carries_no_addition_and_no_raise(self, tmp_path: Path) -> None:
+        baseline = _entry("function-lines", "src/mod.py", 30, "worse") + _entry(
+            "function-lines", "src/mod.py", 30, "better"
+        )
+        source = _function("worse", 31) + _function("better", 25) + _function("new", 22)
+        root = _tree(tmp_path, {"mod.py": source}, baseline)
+
+        code, failures = _check(root, "--tighten")
+
+        assert code == 1
+        assert _baseline_entries(root) == [
+            ("function-lines", "src/mod.py", "better", 25, LEGACY),
+            ("function-lines", "src/mod.py", "worse", 30, LEGACY),
+        ]
+        assert failures == [
+            "FAIL ratchet function-lines: src/mod.py:1 worse 31 > baseline 30",
+            "FAIL ratchet function-lines: src/mod.py:59 new 22 > 20",
+        ]
+
+    def test_refuses_a_baseline_with_refused_entries(self, tmp_path: Path) -> None:
+        baseline = _entry("function-lines", "src/mod.py", 30, "long").replace(
+            f'reason = "{LEGACY}"\n', ""
+        ) + _entry("file-lines", "src/gone.py", 900)
+        root = _tree(tmp_path, {"mod.py": _function("long", 30)}, baseline)
+        out = io.StringIO()
+
+        with contextlib.redirect_stdout(out):
+            code = ratchets.main(
+                ["--root", str(root), "--baseline", str(root / "baseline.toml"), "--tighten"]
+            )
+
+        assert code == 2
+        assert out.getvalue().startswith("ERROR ratchet: --tighten refused")
+        assert (root / "baseline.toml").read_text(encoding="utf-8") == baseline
+
+    def test_refuses_while_a_source_file_does_not_parse(self, tmp_path: Path) -> None:
+        baseline = _entry("function-lines", "src/mod.py", 30, "long")
+        root = _tree(tmp_path, {"mod.py": _function("long", 30) + "def broken(:\n"}, baseline)
+
+        code, _ = _check(root, "--tighten")
+
+        assert code == 2
+        assert (root / "baseline.toml").read_text(encoding="utf-8") == baseline
+
+
+@given(name=st.text(min_size=1), reason=st.text(min_size=1))
+def test_a_rendered_baseline_round_trips_any_text(name: str, reason: str) -> None:
+    key = ratchets.Key("src/mod.py", name, "function-lines")
+
+    text = ratchets.render_baseline([ratchets.Entry(key, 21, reason)])
+
+    assert tomllib.loads(text)["entry"] == [
+        {
+            "rule": "function-lines",
+            "path": "src/mod.py",
+            "name": name,
+            "value": 21,
+            "reason": reason,
+        }
+    ]

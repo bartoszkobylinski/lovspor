@@ -14,7 +14,10 @@ never by line number -- with the measured value and a mandatory ``reason``. A
 baselined function or file passes while it stays at its recorded value and
 fails when it gets worse. An entry that is better than measured (improved,
 now within the limit, removed or renamed) fails too, naming the edit, so the
-baseline can only shrink.
+baseline can only shrink. ``--tighten`` makes that edit: it lowers values and
+removes stale entries, and never adds an entry or raises a value. It refuses
+to rewrite a baseline with refused entries or a tree with unparseable files,
+either of which would silently drop entries.
 
 Definitions
 -----------
@@ -407,10 +410,87 @@ def _missing(entry: Entry) -> Failure:
     return Failure(2, key.path, 0, key.name, key.rule, text)
 
 
-def check(root: Path, baseline: Path) -> Report:
+HEADER = """\
+# Size and complexity ratchet baseline (issue #323).
+#
+# Code under src/ that was already over a CLAUDE.md limit when the ratchet
+# landed, or that a reviewed exception let past it. Rules and exact
+# definitions: scripts/quality/check_ratchets.py. Check:
+#
+#   uv run python scripts/quality/check_ratchets.py
+#
+# An entry is keyed by rule + path + qualified name and holds the measured
+# value. The check fails when that code gets worse, and also when it gets
+# better, so the entry follows it down:
+#
+#   uv run python scripts/quality/check_ratchets.py --tighten
+#
+# lowers values and removes stale entries. It never adds an entry or raises a
+# value. Adding or raising one by hand is a policy exception, reviewed as one,
+# with a `reason` that argues for it: never do it to make your own change pass;
+# split the function or the file instead. --tighten rewrites this file whole,
+# so notes belong in `reason`, not in comments.
+"""
+CONTROL = frozenset(chr(code) for code in [*range(0x20), 0x7F])
+
+
+def render_baseline(entries: list[Entry]) -> str:
+    blocks = [_render_entry(entry) for entry in sorted(entries, key=lambda entry: entry.key)]
+    return HEADER + "".join(blocks)
+
+
+def _render_entry(entry: Entry) -> str:
+    key = entry.key
+    lines = ["", "[[entry]]", f"rule = {toml_string(key.rule)}", f"path = {toml_string(key.path)}"]
+    if key.name:
+        lines.append(f"name = {toml_string(key.name)}")
+    lines += [f"value = {entry.value}", f"reason = {toml_string(entry.reason)}"]
+    return "\n".join(lines) + "\n"
+
+
+def toml_string(text: str) -> str:
+    return '"' + "".join(_toml_char(char) for char in text) + '"'
+
+
+def _toml_char(char: str) -> str:
+    if char in '"\\':
+        return "\\" + char
+    if char in CONTROL:
+        return f"\\u{ord(char):04X}"
+    return char
+
+
+def tightened(entries: dict[Key, Entry], measures: list[Measure]) -> dict[Key, Entry]:
+    """Lower each entry to its measured value and drop stale ones. Never adds, never raises."""
+    values = {measure.key: measure.value for measure in measures}
+    kept: dict[Key, Entry] = {}
+    for key, entry in entries.items():
+        value = values.get(key, 0)
+        if value > LIMITS[key.rule]:
+            kept[key] = replace(entry, value=min(entry.value, value))
+    return kept
+
+
+def _tighten(
+    baseline: Path, entries: dict[Key, Entry], measures: list[Measure], blockers: list[Failure]
+) -> dict[Key, Entry]:
+    if blockers:
+        raise RatchetError(
+            f"--tighten refused: {len(blockers)} baseline or parse failure(s) would lose "
+            "entries on a rewrite; run without --tighten to see them"
+        )
+    lowered = tightened(entries, measures)
+    if lowered != entries:
+        baseline.write_text(render_baseline(list(lowered.values())), encoding="utf-8")
+    return lowered
+
+
+def check(root: Path, baseline: Path, tighten: bool = False) -> Report:
     sources, parse_failures = load_sources(root)
     measures = measure_tree(root, sources)
     entries, problems = load_baseline(baseline)
+    if tighten:
+        entries = _tighten(baseline, entries, measures, [*problems, *parse_failures])
     unparsed = {failure.path for failure in parse_failures}
     checked = {key: entry for key, entry in entries.items() if key.path not in unparsed}
     failures = sorted([*problems, *parse_failures, *compare(measures, checked)])
@@ -430,6 +510,11 @@ def _parser() -> argparse.ArgumentParser:
         "--root", type=Path, default=ROOT, help="repository root; scope is <root>/src"
     )
     parser.add_argument("--baseline", type=Path, help=f"default: <root>/{BASELINE.as_posix()}")
+    parser.add_argument(
+        "--tighten",
+        action="store_true",
+        help="lower improved baseline entries, remove stale ones; never adds or raises",
+    )
     return parser
 
 
@@ -437,7 +522,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     root = args.root.resolve()
     try:
-        report = check(root, args.baseline or root / BASELINE)
+        report = check(root, args.baseline or root / BASELINE, args.tighten)
     except RatchetError as error:
         print(f"ERROR ratchet: {error}")
         return 2
