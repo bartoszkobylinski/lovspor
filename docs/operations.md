@@ -203,12 +203,16 @@ socket and the rollback's load is delivered to that socket, so neither can be
 tried twice on the box that serves the site: both are walked first on a second
 Caddy instance with its own unit, ports, runtime directory, drop-in directory
 and releases root, every one of them an option. It drives the same
-`first_migration`, `abandon_first_migration` and `rollback_first_migration` as
-the real run — the procedure is never forked — and asserts, in the ADR's order:
-(i) TCP answering the previous configuration with no socket; (ii) a load Caddy
-rejects leaving R unmoved, then the cutover with the socket absent immediately
-before it and answering immediately after, TCP refusing, R naming the envelope
-and `ExecReload=` naming the explicit socket address; (iii) the rollback
+`first_migration` and `rollback_first_migration` as the real run, and resolves a
+refused load through `reconcile --abandon` exactly as an operator would — the
+procedure is never forked — and asserts, in the ADR's order: (i) TCP answering
+the previous configuration with no socket; (ii) a load Caddy rejects leaving R
+unmoved but answering over the rejected configuration's socket with TCP refusing
+— Caddy v2.11.4's ordering, required exactly (ADR-0014 Amendment 1) — then
+`reconcile --abandon` leaving TCP answering the previous configuration and
+nothing of the attempt behind, then the cutover with the socket absent
+immediately before it and answering immediately after, TCP refusing, R naming
+the envelope and `ExecReload=` naming the explicit socket address; (iii) the rollback
 reaching the socket; (iv) one steady-state `systemctl reload` through the
 drop-in; (v) two restarts, each followed by the admin socket's four facts. Two
 of its fixtures must **fail**: a plain `systemctl reload` of the previous
