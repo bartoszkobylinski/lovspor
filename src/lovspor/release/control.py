@@ -88,14 +88,13 @@ class ControlPlane:
 
 
 class Triple(BaseModel):
-    """R, D and M as read; ``old`` is M's own fragment adapted, the reference for R."""
+    """R, D and M as read."""
 
     model_config = ConfigDict(frozen=True)
 
     running: ConfigPair
     disk: ConfigPair
     marker: Marker | None
-    old: ConfigPair | None
 
     def describe(self) -> str:
         active = self.marker.active if self.marker else "none"
@@ -133,15 +132,6 @@ def _disk_and_marker(plane: ControlPlane) -> tuple[ConfigPair, Marker | None]:
     return adapt(plane.runner, plane.caddyfile, plane.fragment), read_marker(plane.releases)
 
 
-def _old_pair(plane: ControlPlane, marker: Marker | None) -> ConfigPair | None:
-    if marker is None:
-        return None
-    fragment = release_dir(plane.releases, marker.active) / FRAGMENT_NAME
-    if not fragment.is_file():
-        return None
-    return adapt(plane.runner, plane.caddyfile, fragment)
-
-
 def read_triple(plane: ControlPlane) -> Triple:
     """D and M from disk, then R from Caddy; unreachable prints D and M for the operator."""
     disk, marker = _disk_and_marker(plane)
@@ -151,11 +141,18 @@ def read_triple(plane: ControlPlane) -> Triple:
         active = marker.active if marker else "none"
         detail = f"{error.detail}; D={disk.describe()} M=(active {active})"
         raise UnobservableError(error.reason, detail) from error
-    return Triple(running=running, disk=disk, marker=marker, old=_old_pair(plane, marker))
+    return Triple(running=running, disk=disk, marker=marker)
 
 
 def situation(triple: Triple) -> Situation:
-    """The row of the crash table this host is on."""
+    """The row of the crash table this host is on.
+
+    With R and D apart, the crash after the fragment rename is recognised by
+    release id alone: D names a release, R names M's — none while no marker
+    exists — and D's is another. No hash can say R is M's fragment: Caddy hides
+    the fragment by the path it imported it from, and D's holds that path now
+    (#317). Both resolutions reload and compare R before they report.
+    """
     running, disk = triple.running, triple.disk
     if running == disk:
         if running.release_id == triple.marked:
@@ -163,8 +160,7 @@ def situation(triple: Triple) -> Situation:
         if running.release_id is not None:
             return Situation.reloaded
         return Situation.foreign
-    r_is_old = running == triple.old or (triple.marker is None and running.release_id is None)
-    if disk.release_id is not None and r_is_old:
+    if disk.release_id not in (None, running.release_id) and running.release_id == triple.marked:
         return Situation.staged
     return Situation.foreign
 
