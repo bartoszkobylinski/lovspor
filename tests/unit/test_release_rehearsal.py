@@ -393,7 +393,9 @@ class TestRejectedCutover:
 
         host = staged.plan.host
         back = ("caddy", "reload", "--config", str(staged.plan.plane.caddyfile), "--adapter")
-        assert _reloads(staged)[1:] == [(*back, "caddyfile", "--address", host.socket_admin)]
+        assert _reloads(staged)[1:] == [
+            (*back, "caddyfile", "--address", host.socket_admin, "--force")
+        ]
         assert len(_reloads(staged)) == 2
 
     def test_the_way_out_calls_reconcile_with_abandon_for_this_host(
