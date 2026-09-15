@@ -203,6 +203,18 @@ class TestHost:
             assert "\nSupplementaryGroups=caddy-user\n" in text
             assert "ExecStartPre" not in text
 
+    def test_the_drop_in_has_one_effective_primary_and_supplementary_group(self) -> None:
+        """#324: no later assignment may silently restore the stock primary group."""
+        host = MigrationHost(release_group="release-group", caddy_user="caddy-user")
+
+        directives = [
+            line
+            for line in drop_in_text(host, with_exec_reload=True).splitlines()
+            if line.startswith(("Group=", "SupplementaryGroups="))
+        ]
+
+        assert directives == ["Group=release-group", "SupplementaryGroups=caddy-user"]
+
 
 class TestSystemOwnership:
     def test_answers_from_pwd_grp_and_chown(self, tmp_path: Path) -> None:
