@@ -387,6 +387,10 @@ class TestRefusedAtStart:
 
 
 CAPTURED_PREVIOUS = Path(__file__).parent / "fixtures" / "caddy_adapt" / "previous.json"
+CAPTURED_PROPOSED = CAPTURED_PREVIOUS.with_name("proposed.json")
+CAPTURED_RELEASE = (
+    "/var/www/lovspor-releases/3d1f7a0c9b2e4856af03c17d5e9b6284fa71c0d38e52194b7c6a0fd8e31b5947"
+)
 
 
 def _hides(node: object) -> list[list[str]]:
@@ -410,10 +414,94 @@ class TestHide:
 
     def test_the_committed_capture_hides_the_path_it_was_adapted_as(self) -> None:
         """Caddy v2.8.4 on the capture's world: ``Caddyfile.previous``, as the script named it;
-        the other entry is the redirect map it imports, which the toy does not list."""
+        the other entry is the redirect map it imports."""
         hides = _hides(json.loads(CAPTURED_PREVIOUS.read_text(encoding="utf-8")))
 
         assert hides and all(hidden[0] == "/etc/caddy/Caddyfile.previous" for hidden in hides)
+
+    def test_the_committed_capture_hides_every_imported_file_sorted(self) -> None:
+        """#317: beside ``Caddyfile.proposed``, the release's fragment and the redirect map the
+        fragment imports — the map first, so the order is sorted, not the order of import."""
+        hides = _hides(json.loads(CAPTURED_PROPOSED.read_text(encoding="utf-8")))
+
+        listed = [
+            "/etc/caddy/Caddyfile.proposed",
+            f"{CAPTURED_RELEASE}/corpus/redirects.caddy",
+            f"{CAPTURED_RELEASE}/release.caddy",
+        ]
+        assert hides == [listed, listed]
+
+    def test_in_the_committed_capture_the_fragment_path_alone_moves_the_release_pair(self) -> None:
+        """#317's evidence: the same capture with only the fragment's path spelled ``.next``."""
+        raw = CAPTURED_PROPOSED.read_text(encoding="utf-8")
+        fragment = f"{CAPTURED_RELEASE}/release.caddy"
+
+        served = config_pair(json.loads(raw))
+        staged = config_pair(json.loads(raw.replace(fragment, fragment + ".next")))
+
+        assert raw.count(fragment) == 2
+        assert staged.release_id == served.release_id == CAPTURED_RELEASE.rsplit("/", 1)[1]
+        assert (served.config_hash[:12], staged.config_hash[:12]) == (
+            "532753583c47",
+            "dbeff478487d",
+        )
+
+    def _release(self, box: Box, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
+        """The Caddyfile importing a fragment through the placeholder; the fragment, a map."""
+        monkeypatch.delenv(FRAGMENT_ENV, raising=False)
+        maps = box.caddyfile.with_name("corpus")
+        maps.mkdir()
+        redirects = maps / "redirects.caddy"
+        redirects.write_text("redir /a /b 301\n", encoding="utf-8")
+        fragment = box.caddyfile.with_name("lovspor-release.caddy")
+        fragment.write_text(
+            f"handle {{\n\tvars lovspor_release {'a' * 64}\n\timport {maps}/redirects*.caddy\n"
+            "\troot * /srv/site\n\tfile_server\n}\n",
+            encoding="utf-8",
+        )
+        box.caddyfile.write_text(
+            f"lovspor.test {{\n\timport {{${FRAGMENT_ENV}:{fragment}}}\n}}\n", encoding="utf-8"
+        )
+        return fragment, redirects
+
+    def test_a_composed_release_hides_the_fragment_by_the_path_it_was_imported_from(
+        self, box: Box, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fragment, redirects = self._release(box, monkeypatch)
+        staged = fragment.with_name(fragment.name + ".next")
+        staged.write_bytes(fragment.read_bytes())
+
+        served = toy_adapt(box.caddyfile, {})
+        at_next = toy_adapt(box.caddyfile, {FRAGMENT_ENV: str(staged)})
+
+        assert _hides(served) == [sorted(map(str, (box.caddyfile, redirects, fragment)))]
+        assert _hides(at_next) == [sorted(map(str, (box.caddyfile, redirects, staged)))]
+        assert config_pair(at_next).release_id == config_pair(served).release_id == "a" * 64
+        assert config_pair(at_next) != config_pair(served)
+        stand_in = toy_adapt(
+            box.caddyfile, {FRAGMENT_ENV: str(staged)}, imported_as={staged: fragment}
+        )
+        assert stand_in == served
+
+    def test_adapt_reload_and_restart_each_hide_the_fragment_they_read(
+        self, box: Box, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``caddy adapt`` and ``caddy reload`` read the fragment the variable names; a unit
+        reload or restart reads the placeholder's default, the active fragment."""
+        fragment, _ = self._release(box, monkeypatch)
+        staged = fragment.with_name(fragment.name + ".next")
+        staged.write_bytes(fragment.read_bytes())
+        argv = ("caddy", "adapt", "--config", str(box.caddyfile), "--adapter", "caddyfile")
+        reload = ("caddy", "reload", *argv[2:], "--address", DEFAULT_TCP)
+
+        adapted = box.caddy.run(argv, {FRAGMENT_ENV: str(staged)})
+        assert str(staged) in _hides(json.loads(adapted.stdout))[0]
+        assert box.caddy.run(reload, {FRAGMENT_ENV: str(staged)}).returncode == 0
+        assert str(staged) in _hides(box.caddy.running_config())[0]
+        for unit in (("systemctl", "restart", "caddy"), ("systemctl", "reload", "caddy")):
+            box.caddy.load({"apps": {}})
+            assert box.caddy.run(unit, {}).returncode == 0
+            assert str(fragment) in _hides(box.caddy.running_config())[0]
 
     def test_the_same_bytes_at_another_path_adapt_to_another_pair(self, box: Box) -> None:
         backup = box.caddyfile.with_name("Caddyfile.pre-envelope")

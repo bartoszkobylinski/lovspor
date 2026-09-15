@@ -53,6 +53,18 @@ from tests.unit.probe_fixtures import (
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
 from tests.unit.staged_fixtures import RELEASE_ID
 
+COMPARES_AT_ANOTHER_PATH = pytest.mark.xfail(
+    strict=True,
+    reason="#317: commit, revert and abandon compare R with a pair adapted at another path",
+)
+"""Fails while the pair R is compared with names the fragment by a path Caddy never reads."""
+
+OLD_AT_THE_RELEASE_PATH = pytest.mark.xfail(
+    strict=True,
+    reason="#317: situation() compares R with M's fragment adapted at <M>/release.caddy",
+)
+"""Fails while the staged row compares R with a pair naming the release's own fragment path."""
+
 runner = CliRunner()
 LATER = "2026-01-02T00:00:00Z"
 _AN_ID = "a" * 64
@@ -186,6 +198,7 @@ class TestLive:
         assert result.exit_code == 0, result.output
         assert result.stdout == f"{host.a}\n"
 
+    @OLD_AT_THE_RELEASE_PATH
     def test_unreconciled_exits_one_with_the_triple(self, host: Host) -> None:
         host.make_live(host.a)
         host.plane.fragment.write_text(read_fragment(host.plane.releases / host.b))
@@ -208,6 +221,7 @@ class TestLive:
 
 
 class TestCommit:
+    @COMPARES_AT_ANOTHER_PATH
     def test_makes_the_release_live(self, host: Host) -> None:
         host.make_live(host.a)
 
@@ -227,6 +241,7 @@ class TestCommit:
         assert "already live; nothing to commit" in result.stdout
         assert host.caddy.reloads == 0
 
+    @COMPARES_AT_ANOTHER_PATH
     def test_a_reload_failure_exits_one_after_the_revert(self, host: Host) -> None:
         host.make_live(host.a)
         host.caddy.fail_reloads = 1
@@ -270,6 +285,7 @@ class TestReconcileRollbackPrune:
         assert "action completed" in completed.stdout
         assert read_marker(host.plane.releases) == Marker(active=host.b, previous=host.a)
 
+    @COMPARES_AT_ANOTHER_PATH
     def test_reconcile_abandon_restores_the_marker_release(self, host: Host) -> None:
         host.make_live(host.a)
         host.plane.fragment.write_text(read_fragment(host.plane.releases / host.b))
@@ -311,6 +327,7 @@ class TestReconcileRollbackPrune:
 
         assert result.exit_code == 2
 
+    @COMPARES_AT_ANOTHER_PATH
     def test_rollback_and_prune(self, host: Host) -> None:
         host.make_live(host.a)
         runner.invoke(app, ["release", "commit", host.b])

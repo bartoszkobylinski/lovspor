@@ -94,6 +94,12 @@ from tests.unit.migrate_fixtures import (
 )
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
 
+OLD_AT_THE_RELEASE_PATH = pytest.mark.xfail(
+    strict=True,
+    reason="#317: situation() compares R with M's fragment adapted at <M>/release.caddy",
+)
+"""Fails while the staged row compares R with a pair naming the release's own fragment path."""
+
 LATER = "2026-01-02T00:00:00Z"
 
 
@@ -3336,6 +3342,7 @@ class TestRetire:
         )
         assert droplet.host.current_symlink.is_symlink()
 
+    @OLD_AT_THE_RELEASE_PATH
     def test_refuses_while_unreconciled_or_unobservable(self, droplet: Droplet) -> None:
         _migrate(droplet)
         self._litter(droplet)
