@@ -1349,13 +1349,19 @@ def _reload_previous(plane: ControlPlane, host: MigrationHost) -> None:
     the reload, TCP answers with no release, and a second run is the file
     restore.
 
+    The load is forced. From the Caddyfile's own path the configuration can
+    equal the one running — a host stranded by a refused cutover already
+    runs it — and Caddy v2.11.4 then answers ``config is unchanged`` and
+    moves nothing, leaving the admin endpoint on the socket (#320). Moving
+    that endpoint is what this load is for.
+
     Its refusal claims nothing about what Caddy serves: after a real
     cutover that is the envelope, after a refused one (#302) it is already
     the previous configuration. It says what is on disk.
     """
     atomic_write_bytes(plane.caddyfile, host.previous_caddyfile.read_bytes(), mode=WORLD_READABLE)
     argv = ("caddy", "reload", "--config", str(plane.caddyfile), "--adapter", "caddyfile")
-    done = plane.runner.run((*argv, "--address", host.socket_admin), {})
+    done = plane.runner.run((*argv, "--address", host.socket_admin, "--force"), {})
     if done.returncode != 0:
         raise ReloadFailedError(_refused_reload_back(plane, host, done))
 

@@ -215,9 +215,11 @@ class TestReloadAddress:
         assert box.caddy.running_config_at(DEFAULT_TCP) == toy_adapt(box.caddyfile, {})
 
     def test_a_reload_to_the_same_socket_keeps_the_socket_file(self, box: Box) -> None:
+        """Forced, so the same configuration is really loaded again (#320) and rebinds nothing."""
         box.reload(box.new, DEFAULT_TCP)
+        forced = ("caddy", "reload", "--config", str(box.new), "--adapter", "caddyfile")
 
-        assert box.reload(box.new, box.socket) == 0
+        assert box.caddy.run((*forced, "--address", box.socket, "--force"), {}).returncode == 0
 
         assert box.socket_file.exists() and box.caddy.admin_address == box.socket
         assert box.caddy.reloads == 2
@@ -314,11 +316,28 @@ class TestRefusedAtStart:
         box.caddy.fail_reloads = 1
         box.load(box.new, DEFAULT_TCP)
 
-        assert box.reload(box.caddyfile, box.socket) == 0
+        forced = ("caddy", "reload", "--config", str(box.caddyfile), "--adapter", "caddyfile")
+        assert box.caddy.run((*forced, "--address", box.socket, "--force"), {}).returncode == 0
 
         assert box.caddy.admin_address == DEFAULT_TCP
         assert box.caddy.running_config_at(DEFAULT_TCP) == before
         assert stat.S_ISSOCK(box.socket_file.lstat().st_mode)
+
+    def test_the_same_configuration_without_force_is_unchanged_and_moves_nothing(
+        self, box: Box
+    ) -> None:
+        """#320: the droplet's Caddy logged ``config is unchanged`` and kept the socket."""
+        before = box.caddy.running_config()
+        box.caddy.fail_reloads = 1
+        box.load(box.new, DEFAULT_TCP)
+
+        done = box.load(box.caddyfile, box.socket)
+
+        assert (done.returncode, done.stderr) == (0, "")
+        assert box.caddy.admin_address == box.socket
+        assert box.caddy.running_config_at(box.socket) == before
+        with pytest.raises(UnobservableError):
+            box.caddy.running_config_at(DEFAULT_TCP)
 
     def test_a_refused_load_back_to_tcp_stops_the_socket_and_leaves_its_file(
         self, box: Box

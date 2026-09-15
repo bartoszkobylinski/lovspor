@@ -372,12 +372,37 @@ class FakeCaddy:
                 done = self._adapt(Path(path), env)
                 return Completed(done.returncode, "", done.stderr)
             case ["caddy", "reload", "--config", path, "--adapter", "caddyfile", "--address", to]:
+                return self._reload_unless_unchanged(Path(path), env, to)
+            case [
+                "caddy",
+                "reload",
+                "--config",
+                path,
+                "--adapter",
+                "caddyfile",
+                "--address",
+                to,
+                "--force",
+            ]:
                 return self._reload(Path(path), env, to)
             case ["systemctl", *rest]:
                 return self._systemctl(rest, argv)
             case ["sudo", "-u", user, "curl", *rest]:
                 return self._as_user(user, rest)
         raise AssertionError(f"unexpected command: {argv}")
+
+    def _reload_unless_unchanged(self, path: Path, env: Mapping[str, str], to: str) -> Completed:
+        """Without ``--force`` Caddy skips a configuration equal to the one it runs (#320).
+
+        The droplet's Caddy v2.11.4 logged ``config is unchanged`` and ``load
+        complete`` for such a load and moved nothing, its admin endpoint
+        included. The address is still dialled first, as for every load.
+        """
+        done = self._adapt(path, env)
+        unchanged = done.returncode == 0 and json.loads(done.stdout) == self.running
+        if unchanged and to == self.admin_address:
+            return Completed(0, "", "")
+        return self._reload(path, env, to)
 
     def _as_user(self, user: str, argv: list[str]) -> Completed:
         """``curl --unix-socket`` run as another identity; only a listed user gets through.

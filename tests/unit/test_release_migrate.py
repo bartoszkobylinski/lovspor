@@ -2025,8 +2025,9 @@ def _reload_to_socket(droplet: Droplet, config: Path) -> tuple[str, ...]:
 
 
 def _rollback_reload(droplet: Droplet) -> tuple[str, ...]:
-    """The rollback's reload back: the previous Caddyfile, from the Caddyfile's own path (#316)."""
-    return _reload_to_socket(droplet, droplet.plane.caddyfile)
+    """The rollback's reload back: the previous Caddyfile, from the Caddyfile's own path (#316),
+    forced, since that configuration can equal the one running (#320)."""
+    return (*_reload_to_socket(droplet, droplet.plane.caddyfile), "--force")
 
 
 def _assert_pre_envelope(droplet: Droplet) -> None:
