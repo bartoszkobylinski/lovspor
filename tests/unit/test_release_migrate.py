@@ -2680,6 +2680,7 @@ class TestAbandonReadsTcp:
         with pytest.raises(UnobservableError) as caught:
             abandon_first_migration(droplet.plane, droplet.host)
 
+        assert caught.value.reason == "admin_unreachable"
         assert caught.value.detail == (
             f"{ADMIN_DOWN}; the file restore reloads nothing, so it needs localhost:2019 "
             "answering with no release; `lovspor release migrate --rollback --offline` puts the "
