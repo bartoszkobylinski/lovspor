@@ -2690,6 +2690,45 @@ class TestAbandonReadsTcp:
         assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, False)
         assert stat.S_ISSOCK(droplet.socket_file.lstat().st_mode)
 
+    def test_rollback_refuses_when_tcp_disappears_after_its_probe(self, droplet: Droplet) -> None:
+        """The TCP branch must re-read R: a host can change after ``detect_admin`` chose it."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at("installed"))
+        droplet.socket_file.parent.mkdir(parents=True, exist_ok=True)
+        droplet.socket_file.write_bytes(b"untouched sentinel")
+        caddyfile = droplet.plane.caddyfile.read_bytes()
+        tcp_reads = 0
+
+        class ChangingAdmin:
+            def running_config(self) -> object:
+                nonlocal tcp_reads
+                tcp_reads += 1
+                if tcp_reads == 1:
+                    return droplet.caddy.running_config_at(DEFAULT_TCP)
+                raise UnobservableError("admin_unreachable", "TCP disappeared after probe")
+
+        def changing_admin(address: str) -> FakeAdmin | ChangingAdmin:
+            if address == DEFAULT_TCP:
+                return ChangingAdmin()
+            return droplet.caddy.admin_client(address)
+
+        host = replace(droplet.host, admin_client=changing_admin)
+
+        with pytest.raises(UnobservableError) as caught:
+            rollback_first_migration(droplet.plane, host)
+
+        assert tcp_reads == 2
+        assert caught.value.detail == (
+            "TCP disappeared after probe; the file restore reloads nothing, so it needs "
+            "localhost:2019 answering with no release; "
+            "`lovspor release migrate --rollback --offline` puts the previous Caddyfile back "
+            "and restarts caddy"
+        )
+        assert droplet.plane.caddyfile.read_bytes() == caddyfile
+        assert droplet.host.previous_caddyfile.is_file() and droplet.plane.fragment.is_file()
+        assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, False)
+        assert droplet.socket_file.read_bytes() == b"untouched sentinel"
+
 
 HAND_EDITED_DROP_IN = (
     "[Service]\n"
