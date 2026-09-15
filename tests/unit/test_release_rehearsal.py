@@ -28,6 +28,7 @@ from typing import NamedTuple
 
 import pytest
 
+import lovspor.release.rehearsal as rehearsal_module
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
 from lovspor.release.control import Situation
 from lovspor.release.envelope import read_marker
@@ -388,6 +389,24 @@ class TestRejectedCutover:
         back = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter")
         assert _reloads(staged)[1:] == [(*back, "caddyfile", "--address", host.socket_admin)]
         assert len(_reloads(staged)) == 2
+
+    def test_the_way_out_calls_reconcile_with_abandon_for_this_host(
+        self, staged: Staged, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR-0014 Amendment 1 names reconcile --abandon as the refused load's way out."""
+        calls: list[tuple[object, str, object]] = []
+        real_reconcile = rehearsal_module.reconcile
+
+        def recording_reconcile(plane: object, action: str, host: object) -> ReconcileReport:
+            calls.append((plane, action, host))
+            return real_reconcile(plane, action, host)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(rehearsal_module, "reconcile", recording_reconcile)
+        staged.caddy.fail_reloads = 1
+
+        rejected_cutover(staged.plan)
+
+        assert calls == [(staged.plan.plane, "abandon", staged.plan.host)]
 
     def test_both_steps_say_what_they_read(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
