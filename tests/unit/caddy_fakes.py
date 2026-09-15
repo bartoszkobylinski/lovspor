@@ -24,6 +24,13 @@ it survived two restarts once the drop-in carrying ``RuntimeDirectory=``
 was gone (#303). So the file stays when the endpoint moves away, and a
 stop clears it only while the drop-in systemd last loaded sets
 ``RuntimeDirectory=``.
+
+A refused load comes in two kinds. ``fail_reloads`` refuses before
+anything moves. ``refuse_at_start`` is what the droplet's Caddy v2.11.4
+did with an explicit-address load whose site could not start (#302): the
+admin endpoint moves to the address the refused configuration names, the
+one it was listening on stops, and the running configuration stays the
+previous one.
 """
 
 import contextlib
@@ -52,6 +59,11 @@ _LOAD_REFUSED = (
     "Error: sending configuration to instance: caddy responded with error: HTTP 400: "
     '{"error":"loading config: loading new config: http app module: start: listen tcp :443"}'
 )
+LOAD_REFUSED_AT_START = (
+    "Error: loading config: loading new config: http app module: start: listening on :443: "
+    "listen tcp :443: bind: permission denied"
+)
+"""What ``refuse_at_start`` answers: the droplet's own refusal, Caddy v2.11.4 (#302)."""
 
 
 UMASK_MODE = 0o644
@@ -298,6 +310,9 @@ class FakeCaddy:
         self.admin_address = DEFAULT_TCP
         self.admin_up = True
         self.fail_reloads = 0
+        """Loads refused before anything moves: the model the rehearsal's (ii.rejected) assumed."""
+        self.refuse_at_start = 0
+        """Explicit-address loads refused at app start after the admin endpoint moved (#302)."""
         self.knows_mode_suffix = True
         self.socket_users: set[str] = set()
         """Identities other than the caller's that can open the admin socket."""
@@ -441,14 +456,29 @@ class FakeCaddy:
                 f'Error: sending configuration to instance: performing request: Post "{to}'
                 '/load": dial: connect: connection refused',
             )
+        if self.refuse_at_start:
+            self.refuse_at_start -= 1
+            return self._refuse_at_start(json.loads(done.stdout))
         failure = self._apply(json.loads(done.stdout))
         if failure is not None:
             return Completed(1, "", failure)
         self.reloads += 1
         return Completed(0, "", "")
 
-    def _apply(self, config: dict[str, Any]) -> str | None:
-        """The instance runs ``config``; its admin endpoint moves to what the config names.
+    def _refuse_at_start(self, config: dict[str, Any]) -> Completed:
+        """A load the instance refuses once its admin endpoint has already moved (#302).
+
+        The droplet's journal, in order: ``POST /load`` on TCP, ``admin
+        endpoint started unix//…/admin.sock|0660``, the site's ``bind:
+        permission denied`` (400), ``stopped previous server localhost:…``.
+        Afterwards the socket answered with the previous configuration. A
+        socket that cannot be bound fails the load before anything moves.
+        """
+        failure = self._move_admin(config)
+        return Completed(1, "", failure or LOAD_REFUSED_AT_START)
+
+    def _move_admin(self, config: dict[str, Any]) -> str | None:
+        """The admin endpoint moves to what ``config`` names; a failed bind moves nothing.
 
         The socket file of an endpoint it leaves stays where it is: Caddy
         v2.11.4 kept it after a load moved the endpoint back to TCP (#303).
@@ -461,8 +491,14 @@ class FakeCaddy:
                 return failure
             self.socket_files.add(path)
         self.admin_address = address
-        self.running = copy.deepcopy(config)
         return None
+
+    def _apply(self, config: dict[str, Any]) -> str | None:
+        """The instance runs ``config``; its admin endpoint moves to what the config names."""
+        failure = self._move_admin(config)
+        if failure is None:
+            self.running = copy.deepcopy(config)
+        return failure
 
     def restart(self) -> None:
         """Load the composed Caddyfile whole, with the active fragment."""
