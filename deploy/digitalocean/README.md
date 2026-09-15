@@ -500,7 +500,15 @@ It starts nothing. `caddy validate` and `caddy adapt` over `/etc/caddy/Caddyfile
 — the configuration serving right now — and over the new one from the checkout,
 against a freshly built envelope and the flat release still behind
 `lovspor-current`, and then a route-by-route comparison of the two adapted
-configurations. One line per assertion:
+configurations.
+
+While it runs it reports progress on **stderr**: how many URLs it will ask each
+configuration, the start of each of its three passes over them (the previous
+configuration, the new one, and the previous one again for the rollback), no
+more often than every 30 seconds a line with how many of them that pass has
+answered, the rate and an ETA, and each assertion as it starts. The ETA is the pass's rate so
+far carried forward, not a measurement of this box. The verdict goes to stdout,
+once, when the run finishes — one line per assertion:
 
 * `staged.corpus` — every corpus URL the old configuration **answers** gets the
   same response from the new one, served from exactly `<release>/corpus`, and
