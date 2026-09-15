@@ -240,6 +240,19 @@ class TestRunbook:
         assert "cannot run in CI" in text
         assert text.index("release rehearse") < text.index("Observatory: registering")
 
+    def test_operations_describes_the_refused_load_and_operator_way_out(self) -> None:
+        """The rehearsal contract follows ADR-0014 Amendment 1 in operator order."""
+        text = _OPERATIONS.read_text(encoding="utf-8")
+        section = text[text.index("`rehearse` is what authorises") :]
+
+        refused = "answering over the rejected configuration's socket with TCP refusing"
+        abandoned = "`reconcile --abandon` leaving TCP answering the previous configuration"
+        cutover = "then the cutover with the socket absent"
+
+        assert "Caddy v2.11.4's ordering, required exactly (ADR-0014 Amendment 1)" in section
+        assert section.index(refused) < section.index(abandoned) < section.index(cutover)
+        assert "`abandon_first_migration`" not in section
+
     def test_the_mcp_doc_names_the_drift_checks_first_action_and_its_exit(self) -> None:
         text = _MCP_DOC.read_text(encoding="utf-8")
         timer = text[text.index("**The drift timer.**") :]
