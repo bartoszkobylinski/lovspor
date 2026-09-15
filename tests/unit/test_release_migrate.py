@@ -4354,6 +4354,7 @@ class TestReconcileUnfinishedRestore:
         ("shape", "why"),
         [
             ("dangling symlink", "is a symlink, not the backup the migration wrote"),
+            ("live symlink", "is a symlink, not the backup the migration wrote"),
             ("directory", "is not a regular file"),
         ],
     )
@@ -4366,14 +4367,17 @@ class TestReconcileUnfinishedRestore:
         if shape == "directory":
             backup.mkdir()
         else:
-            backup.symlink_to(backup.with_name("nowhere"))
+            target = backup.with_name("linked-backup")
+            if shape == "live symlink":
+                target.write_bytes(droplet.plane.caddyfile.read_bytes())
+            backup.symlink_to(target)
         triple = read_triple(droplet.over(DEFAULT_TCP)).describe()
 
         with pytest.raises(UnreconciledError) as caught:
             reconcile(droplet.plane, "abandon", droplet.host)
 
         assert str(caught.value) == _mismatch_refusal(droplet, DEFAULT_TCP, triple, why)
-        assert backup.is_symlink() is (shape == "dangling symlink")
+        assert backup.is_symlink() is ("symlink" in shape)
         assert droplet.plane.fragment.is_file()
 
     @pytest.mark.parametrize("action", ["report", "complete", "abandon"])
