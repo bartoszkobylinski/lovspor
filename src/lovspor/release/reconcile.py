@@ -21,9 +21,19 @@ did. R old on TCP with D naming the envelope is the crash after (a):
 Caddyfile without a reload, since R never moved. R = D = new over the
 socket is the crash after (c): *complete* finishes (d)-(f), the
 ``ExecReload=`` pair included, without a choice. Anything else on TCP
-is foreign and is not resolved automatically; a host already on the
-socket and not mid-cutover — a box provisioned with the envelope — is
-resolved by the rows above.
+is foreign and is not resolved automatically. A host on the socket
+running a configuration that binds admin there, and not mid-cutover — a
+box provisioned with the envelope — is resolved by the rows above.
+
+The socket answering a configuration that binds admin elsewhere is the
+cutover's load refused after Caddy moved its admin endpoint: the
+droplet's Caddy v2.11.4 started the socket endpoint, failed to start the
+site, stopped TCP and kept the previous configuration running (#302).
+Staged there, *abandon* is the rollback after (c) — the previous
+Caddyfile delivered to the socket, which moves the endpoint back to TCP,
+then the file restore — and *complete* is refused, the file on disk
+being the one Caddy just refused. That pairing in any other row is
+refused, naming the offline rollback.
 
 ``prune`` runs only when reconciled and never deletes the release named
 by R, D or M, nor the marker's ``previous``; it removes every other
@@ -65,6 +75,8 @@ from lovspor.release.migrate import (
     abandon_first_migration,
     complete_first_migration,
     detect_admin,
+    rollback_first_migration,
+    stranded_on_socket,
 )
 
 ReconcileAction = Literal["report", "complete", "abandon"]
@@ -83,10 +95,12 @@ class ReconcileReport(BaseModel):
 
 @dataclass(frozen=True)
 class Window:
-    """The pre-marker window as read: the triple, and the address it was read on."""
+    """The pre-marker window as read: the triple, the address it was read on, and whether
+    that address is the socket running a configuration that binds admin elsewhere."""
 
     triple: Triple
     answered: str
+    stranded: bool
 
 
 class PruneReport(BaseModel):
@@ -168,10 +182,51 @@ def _resolve_staged(
     )
 
 
+_STRANDED_WAY_OUT = (
+    "Caddy refused the cutover's load after moving its admin endpoint to the socket and still "
+    "runs the previous configuration; resolve with --abandon (the previous Caddyfile delivered "
+    "to the socket, which moves the admin endpoint back to TCP, then the files restored), then "
+    "fix what made Caddy refuse the load and start again from the preflight; --complete is "
+    "refused: the Caddyfile on disk is the one Caddy just refused"
+)
+
+
+def _offline_only(host: MigrationHost) -> str:
+    return (
+        "the socket answers with a configuration that binds the admin endpoint elsewhere, which "
+        "outside the staged row no step of the first migration leaves, so nothing is resolved "
+        "automatically; `lovspor release migrate --rollback --offline` puts the previous "
+        f"Caddyfile back and restarts {host.unit}"
+    )
+
+
+def _resolve_stranded(
+    plane: ControlPlane, host: MigrationHost, window: Window, action: ReconcileAction
+) -> ReconcileReport:
+    """The cutover's load refused after Caddy moved its admin endpoint to the socket (#302).
+
+    R never moved, but the endpoint did, so *abandon* is the reload back
+    to TCP that the rollback after (c) delivers, not a file restore; and
+    *complete* would deliver again the file Caddy has just refused.
+    """
+    found = situation(window.triple)
+    described = f"host is {found} on {window.answered}: {window.triple.describe()}"
+    if found != Situation.staged:
+        raise UnreconciledError(f"{described}; {_offline_only(host)}")
+    if action != "abandon":
+        raise UnreconciledError(f"{described}; {_STRANDED_WAY_OUT}")
+    rollback_first_migration(plane, host)
+    return _report(window.triple, Situation.reconciled, None, "abandoned").model_copy(
+        update={"admin": host.tcp_admin}
+    )
+
+
 def _resolve_window(
     plane: ControlPlane, host: MigrationHost, window: Window, action: ReconcileAction
 ) -> ReconcileReport:
     """The first migration's own rows, on whichever address answered."""
+    if window.stranded:
+        return _resolve_stranded(plane, host, window, action)
     triple, answered = window.triple, window.answered
     found = situation(triple)
     if found == Situation.reconciled:
@@ -197,10 +252,12 @@ def _reconcile_unmarked(
     answered = detect_admin(host)
     bound = replace(plane, admin=host.admin_client(answered))
     triple = read_triple(bound)
-    if answered == host.socket_admin and situation(triple) != Situation.reloaded:
-        # Already on the socket and not mid-cutover: a box provisioned with the envelope.
+    window = Window(triple, answered, stranded_on_socket(host, answered))
+    on_socket = answered == host.socket_admin and not window.stranded
+    if on_socket and situation(triple) != Situation.reloaded:
+        # Bound to the socket and not mid-cutover: a box provisioned with the envelope.
         return _resolve(bound, triple, action).model_copy(update={"admin": answered})
-    return _resolve_window(plane, host, Window(triple, answered), action)
+    return _resolve_window(plane, host, window, action)
 
 
 def reconcile(

@@ -61,6 +61,7 @@ from lovspor.release.caddy import (
     DEFAULT_CADDYFILE,
     FRAGMENT_ENV,
     AdminClient,
+    Completed,
     ConfigPair,
     FallbackAdminClient,
     HttpxAdminClient,
@@ -168,6 +169,13 @@ name selects what ``retire`` hands to ``rmtree``.
 _STAGED_HINT = (
     "D is the new configuration, R the old; resolve with `lovspor release reconcile --complete` "
     "(run the cutover) or `--abandon` (restore the previous Caddyfile)"
+)
+_STRANDED_HINT = (
+    "Caddy refused the load after moving its admin endpoint to the socket and still runs the "
+    "previous configuration; resolve with `lovspor release reconcile --abandon` (the previous "
+    "Caddyfile delivered to the socket, then the files restored), then fix what made Caddy "
+    "refuse the load and start again from the preflight; `--complete` is refused there: the "
+    "Caddyfile on disk is the one Caddy just refused"
 )
 _MOVE_ASIDE = "move it aside and re-run"
 _STAGED_LEFTOVER = (
@@ -837,13 +845,45 @@ def _cutover(plane: ControlPlane, host: MigrationHost, checkpoint: Checkpoint) -
         (*argv, "--address", host.tcp_admin), {FRAGMENT_ENV: str(plane.fragment)}
     )
     if done.returncode != 0:
-        failure = done.stderr.strip() or f"exit {done.returncode}"
-        raise MigrationFailedError(
-            "validated",
-            f"caddy reload --address {host.tcp_admin} failed: {failure}; {_STAGED_HINT}",
-        )
+        raise _refused_cutover(host, done)
     checkpoint("reloaded")
     return cutover
+
+
+def _refused_hint(host: MigrationHost) -> str:
+    """The way out of a refused (c), read off where the admin endpoint answers now."""
+    try:
+        answered = detect_admin(host)
+        stranded = stranded_on_socket(host, answered)
+    except UnobservableError as error:
+        return (
+            f"Caddy's admin endpoint cannot be read ({error.detail}); `lovspor release migrate "
+            f"--rollback --offline` puts the previous Caddyfile back and restarts {host.unit}"
+        )
+    if answered == host.tcp_admin:
+        return _STAGED_HINT
+    if stranded:
+        return _STRANDED_HINT
+    return (
+        f"Caddy answers on {answered}, running a configuration that binds admin there; "
+        "`lovspor release reconcile` finishes (d)-(f) if R there is the new configuration"
+    )
+
+
+def _refused_cutover(host: MigrationHost, done: Completed) -> MigrationFailedError:
+    """(c) failed: the failure, and the way out from where Caddy answers afterwards.
+
+    A refusal does not leave the admin endpoint where it was: the droplet's
+    Caddy v2.11.4 started the new configuration's socket endpoint and
+    stopped TCP before the site failed to start (#302). The way out is only
+    named, never taken here — a crash in the same window leaves the same
+    state, and resolving it is ``reconcile``'s either way.
+    """
+    failure = done.stderr.strip() or f"exit {done.returncode}"
+    return MigrationFailedError(
+        "validated",
+        f"caddy reload --address {host.tcp_admin} failed: {failure}; {_refused_hint(host)}",
+    )
 
 
 def _check_socket_file(host: MigrationHost) -> None:
@@ -950,6 +990,23 @@ def first_migration(
 def detect_admin(host: MigrationHost) -> str:
     """The address the running instance answers on: the socket first, then TCP."""
     return FallbackAdminClient(host.socket_admin, host.tcp_admin, host.admin_client).probe()
+
+
+def stranded_on_socket(host: MigrationHost, answered: str) -> bool:
+    """Whether the socket answers with a configuration that binds admin elsewhere (#302).
+
+    A successful cutover and a box provisioned with the envelope both run
+    a configuration whose ``admin`` is the socket. The droplet's Caddy
+    v2.11.4 left the other pairing when it refused the cutover's load at
+    app start: the socket endpoint already started, TCP then stopped, and
+    the previous configuration still running. A configuration without
+    ``admin`` listens on Caddy's default TCP address, so it counts as
+    elsewhere; the ``|mode`` suffix is a creation mode, not the address.
+    """
+    if answered != host.socket_admin:
+        return False
+    listen = admin_listen(host.admin_client(answered).running_config())
+    return listen is None or listen.partition("|")[0] != host.socket_admin
 
 
 def complete_first_migration(
@@ -1213,14 +1270,21 @@ def _require_stock_exec_reload(plane: ControlPlane, host: MigrationHost) -> None
 
 
 def _reload_previous(plane: ControlPlane, host: MigrationHost) -> None:
-    """The previous Caddyfile delivered explicitly to the socket; R moves back to TCP with it."""
+    """The previous Caddyfile delivered explicitly to the socket; R moves back to TCP with it.
+
+    Its refusal claims nothing about what Caddy serves: after a real
+    cutover that is the envelope, after a refused one (#302) it is already
+    the previous configuration. What holds after both is that this was the
+    first thing the rollback moved.
+    """
     argv = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter", "caddyfile")
     done = plane.runner.run((*argv, "--address", host.socket_admin), {})
     if done.returncode != 0:
         failure = done.stderr.strip() or f"exit {done.returncode}"
         raise ReloadFailedError(
             f"caddy reload --address {host.socket_admin} of {host.previous_caddyfile} failed: "
-            f"{failure}; the envelope is still served"
+            f"{failure}; nothing was restored — the marker, the Caddyfile and the drop-in are "
+            "as they were"
         )
 
 

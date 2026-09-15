@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.release.caddy import FRAGMENT_ENV
+from lovspor.release.caddy import FRAGMENT_ENV, Completed
 from lovspor.release.errors import UnobservableError
 from tests.unit.caddy_fakes import (
     DEFAULT_TCP,
@@ -32,6 +32,11 @@ from tests.unit.caddy_fakes import (
 SITE = "lovspor.test {\n\thandle {\n\t\troot * /srv/site\n\t\tfile_server\n\t}\n}\n"
 UNKNOWN_OPTION = "{\n\temail x@y\n}\n"
 """A Caddyfile the toy adapter refuses, as ``caddy validate`` would."""
+REFUSED_AT_START = (
+    "Error: loading config: loading new config: http app module: start: listening on :443: "
+    "listen tcp :443: bind: permission denied"
+)
+"""What the droplet's Caddy v2.11.4 reported for a load it refused at app start (#302)."""
 
 
 class Box:
@@ -52,8 +57,11 @@ class Box:
         return self.runtime / "admin.sock"
 
     def reload(self, path: Path, address: str) -> int:
+        return self.load(path, address).returncode
+
+    def load(self, path: Path, address: str) -> Completed:
         argv = ("caddy", "reload", "--config", str(path), "--adapter", "caddyfile")
-        return self.caddy.run((*argv, "--address", address), {}).returncode
+        return self.caddy.run((*argv, "--address", address), {})
 
 
 @pytest.fixture
@@ -270,6 +278,103 @@ class TestReloadAddress:
 
         with pytest.raises(AssertionError, match="listen unix"):
             box.caddy.restart()
+
+
+class TestRefusedAtStart:
+    """#302: on the droplet's Caddy v2.11.4 a load refused at app start still moves the
+    admin endpoint — the refused configuration's endpoint starts, the site fails to start,
+    the endpoint it was listening on stops — and R stays the previous configuration."""
+
+    def test_a_refused_load_moves_the_endpoint_to_the_socket_and_not_the_configuration(
+        self, box: Box
+    ) -> None:
+        before = box.caddy.running_config()
+        box.caddy.refuse_at_start = 1
+
+        done = box.load(box.new, DEFAULT_TCP)
+
+        assert (done.returncode, done.stderr) == (1, REFUSED_AT_START)
+        assert box.caddy.admin_address == box.socket
+        assert stat.S_ISSOCK(box.socket_file.lstat().st_mode)
+        assert stat.S_IMODE(box.socket_file.stat().st_mode) == 0o660
+        assert box.caddy.running_config_at(box.socket) == before
+        with pytest.raises(UnobservableError):
+            box.caddy.running_config_at(DEFAULT_TCP)
+        assert box.caddy.reloads == 0
+        assert box.caddy.refuse_at_start == 0
+
+    def test_the_previous_configuration_delivered_to_the_socket_then_moves_it_back(
+        self, box: Box
+    ) -> None:
+        before = box.caddy.running_config()
+        box.caddy.refuse_at_start = 1
+        box.load(box.new, DEFAULT_TCP)
+
+        assert box.reload(box.caddyfile, box.socket) == 0
+
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert box.caddy.running_config_at(DEFAULT_TCP) == before
+        assert stat.S_ISSOCK(box.socket_file.lstat().st_mode)
+
+    def test_a_refused_load_back_to_tcp_stops_the_socket_and_leaves_its_file(
+        self, box: Box
+    ) -> None:
+        box.reload(box.new, DEFAULT_TCP)
+        running = box.caddy.running_config()
+        box.caddy.refuse_at_start = 1
+
+        done = box.load(box.caddyfile, box.socket)
+
+        assert done.stderr == REFUSED_AT_START
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert box.caddy.running_config_at(DEFAULT_TCP) == running
+        assert stat.S_ISSOCK(box.socket_file.lstat().st_mode)
+        with pytest.raises(UnobservableError):
+            box.caddy.running_config_at(box.socket)
+
+    def test_a_load_to_an_address_nothing_listens_on_never_reaches_the_start(
+        self, box: Box
+    ) -> None:
+        box.caddy.refuse_at_start = 1
+
+        done = box.load(box.new, box.socket)
+
+        assert done.returncode == 1 and "connection refused" in done.stderr
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert not box.socket_file.exists()
+        assert box.caddy.refuse_at_start == 1
+
+    @pytest.mark.parametrize("obstacle", ["socket already there", "no runtime directory"])
+    def test_a_refused_load_whose_socket_cannot_be_bound_moves_nothing(
+        self, box: Box, obstacle: str
+    ) -> None:
+        if obstacle == "socket already there":
+            plant_socket(box.socket_file)
+        else:
+            box.runtime.rmdir()
+        before = box.caddy.running_config()
+        box.caddy.refuse_at_start = 1
+
+        done = box.load(box.new, DEFAULT_TCP)
+
+        assert done.returncode == 1
+        assert done.stderr.startswith(
+            f"Error: loading new config: admin: listen unix {box.socket_file}"
+        )
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert box.caddy.running_config_at(DEFAULT_TCP) == before
+        assert box.caddy.refuse_at_start == 1
+
+    def test_fail_reloads_is_still_the_refusal_that_moves_nothing(self, box: Box) -> None:
+        before = box.caddy.running_config()
+        box.caddy.fail_reloads = 1
+
+        done = box.load(box.new, DEFAULT_TCP)
+
+        assert done.returncode == 1 and done.stderr != REFUSED_AT_START
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert box.caddy.running_config_at(DEFAULT_TCP) == before
+        assert not box.socket_file.exists()
 
 
 class TestPlantSocket:
