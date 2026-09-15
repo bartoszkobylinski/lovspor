@@ -11,6 +11,17 @@ and nothing else — but it adapts real files from disk, so a fragment
 naming release A's root beside release B's redirect map adapts to a
 configuration equal to neither, exactly as Caddy's would.
 
+Every ``file_server`` hides the Caddyfile the adapter was handed, by the
+path it was handed (#316). On the droplet, Caddy v2.11.4 loaded
+``/etc/caddy/rehearsal/Caddyfile.pre-envelope`` and ran a configuration
+whose two ``hide`` lists named that path, where the same bytes adapted at
+``…/Caddyfile`` named ``…/Caddyfile``; with no release the pair hashes the
+whole ``servers`` subtree, so the two configurations are different pairs.
+The committed captures show the same on v2.8.4: ``previous.json``, adapted
+as ``/etc/caddy/Caddyfile.previous``, hides that path. Real Caddy also
+lists every file imported into the site block — the captures name the
+redirect map and the fragment — which the toy does not model.
+
 The admin endpoint has an address. The instance listens where the
 configuration it last loaded says (``admin`` in the global options
 block, else ``localhost:2019``), a load delivered to any other address
@@ -142,7 +153,7 @@ def _directive(line: str, matchers: dict[str, list[str]]) -> dict[str, Any] | No
                 "handler": "static_response",
                 "status_code": 410,
             }
-    return handlers.get(line, _PLAIN.get(line))
+    return handlers.get(line, copy.deepcopy(_PLAIN.get(line)))
 
 
 def _routes(lines: list[str], matchers: dict[str, list[str]]) -> list[dict[str, Any]]:
@@ -190,8 +201,33 @@ def _global_options(lines: list[str]) -> tuple[dict[str, str], list[str]]:
     return options, lines[end + 1 :]
 
 
-def toy_adapt(caddyfile: Path, env: Mapping[str, str]) -> dict[str, Any]:
-    """The Caddyfile as Caddy's JSON: one server, one site route, a subroute of routes."""
+def _hide(node: object, config_file: Path) -> None:
+    """Every ``file_server`` hides the Caddyfile the adapter was handed (#316)."""
+    if isinstance(node, list):
+        for item in node:
+            _hide(item, config_file)
+    elif isinstance(node, dict):
+        if node.get("handler") == "file_server":
+            node["hide"] = [str(config_file)]
+        for value in node.values():
+            _hide(value, config_file)
+
+
+def toy_adapt(
+    caddyfile: Path, env: Mapping[str, str], config_file: Path | None = None
+) -> dict[str, Any]:
+    """The Caddyfile as Caddy's JSON: one server, one site route, a subroute of routes.
+
+    ``config_file`` is the path Caddy is handed, the one every ``file_server``
+    hides; it defaults to ``caddyfile``. A test that keeps a Caddyfile's former
+    text in a copy beside it adapts the copy as the file it stands in for.
+    """
+    config = _adapted(caddyfile, env)
+    _hide(config, config_file or caddyfile)
+    return config
+
+
+def _adapted(caddyfile: Path, env: Mapping[str, str]) -> dict[str, Any]:
     lines = _inline_imports(_resolve(caddyfile.read_text(encoding="utf-8"), env), env)
     lines = [line for line in lines if line and not line.startswith("#")]
     options, lines = _global_options(lines)

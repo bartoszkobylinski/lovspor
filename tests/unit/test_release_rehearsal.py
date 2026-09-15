@@ -29,11 +29,17 @@ from typing import NamedTuple
 import pytest
 
 import lovspor.release.rehearsal as rehearsal_module
-from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
-from lovspor.release.control import Situation
+from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, config_pair
+from lovspor.release.control import ControlPlane, Situation
 from lovspor.release.envelope import read_marker
 from lovspor.release.errors import RehearsalFailedError, UnobservableError
-from lovspor.release.migrate import SOCKET_MODE, drop_in_text, preflight
+from lovspor.release.migrate import (
+    SOCKET_MODE,
+    MigrationHost,
+    RollbackReport,
+    drop_in_text,
+    preflight,
+)
 from lovspor.release.reconcile import ReconcileReport
 from lovspor.release.rehearsal import (
     Rehearsal,
@@ -386,7 +392,7 @@ class TestRejectedCutover:
         rejected_cutover(staged.plan)
 
         host = staged.plan.host
-        back = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter")
+        back = ("caddy", "reload", "--config", str(staged.plan.plane.caddyfile), "--adapter")
         assert _reloads(staged)[1:] == [(*back, "caddyfile", "--address", host.socket_admin)]
         assert len(_reloads(staged)) == 2
 
@@ -782,13 +788,10 @@ class TestPlainReloadRefused:
 
 class TestRollback:
     def _previous(self, staged: Staged) -> ConfigPair:
-        """The pre-envelope pair, read while the backup still exists; then the envelope is live."""
+        """The pair TCP ran before the cutover; then the envelope is live."""
+        previous = staged.running(REHEARSAL_TCP)
         cutover(staged.plan)
-        return adapt(
-            staged.plan.plane.runner,
-            staged.plan.host.previous_caddyfile,
-            staged.plan.plane.fragment,
-        )
+        return previous
 
     def test_the_way_back_reaches_the_socket_and_leaves_tcp_answering(self, staged: Staged) -> None:
         cutover(staged.plan)
@@ -803,11 +806,13 @@ class TestRollback:
         assert not staged.plan.host.socket.exists()
         assert read_marker(staged.plan.plane.releases) is None
 
-    def test_the_previous_configuration_is_read_from_the_backup_with_the_fragment(
+    def test_the_previous_configuration_is_the_backup_adapted_from_the_caddyfiles_own_path(
         self, staged: Staged
     ) -> None:
-        """R is compared with the backup adapted, not with a value remembered from earlier."""
+        """R is compared with the backup's bytes adapted where they serve from, not with a value
+        remembered from earlier: Caddy hides the path of the Caddyfile it loaded (#316)."""
         cutover(staged.plan)
+        since = len(staged.caddy.calls)
 
         rollback(staged.plan)
 
@@ -815,11 +820,12 @@ class TestRollback:
             "caddy",
             "adapt",
             "--config",
-            str(staged.plan.host.previous_caddyfile),
+            str(staged.plan.plane.caddyfile),
             "--adapter",
             "caddyfile",
         )
-        assert (argv, {FRAGMENT_ENV: str(staged.plan.plane.fragment)}) in staged.caddy.calls
+        adapted = [call for call in staged.caddy.calls[since:] if call[0][:2] == argv[:2]]
+        assert adapted == [(argv, {FRAGMENT_ENV: str(staged.plan.plane.fragment)})]
 
     def test_the_previous_configuration_is_what_runs_afterwards(self, staged: Staged) -> None:
         before = staged.running(REHEARSAL_TCP)
@@ -829,6 +835,30 @@ class TestRollback:
 
         assert staged.running(REHEARSAL_TCP) == before
         assert staged.running(REHEARSAL_TCP).release_id is None
+
+    def test_a_caddyfile_that_is_not_the_backup_after_the_way_back_ends_the_rehearsal(
+        self, staged: Staged, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R equal to what the Caddyfile adapts to says nothing unless that file holds the
+        backup's bytes: a comment changes the bytes and not the configuration."""
+        cutover(staged.plan)
+        real = rehearsal_module.rollback_first_migration
+
+        def edited_after(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
+            report = real(plane, host)
+            with plane.caddyfile.open("a", encoding="utf-8") as caddyfile:
+                caddyfile.write("# edited by hand\n")
+            return report
+
+        monkeypatch.setattr(rehearsal_module, "rollback_first_migration", edited_after)
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            rollback(staged.plan)
+
+        assert raised.value.step == "iii"
+        assert raised.value.detail == (
+            f"{staged.plan.plane.caddyfile} is not the previous Caddyfile after the way back"
+        )
 
     def test_an_instance_that_does_not_answer_afterwards_ends_the_rehearsal(
         self, staged: Staged

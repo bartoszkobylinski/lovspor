@@ -13,13 +13,14 @@ a ``daemon-reload``.
 """
 
 import contextlib
+import json
 import socket
 import stat
 from pathlib import Path
 
 import pytest
 
-from lovspor.release.caddy import FRAGMENT_ENV, Completed
+from lovspor.release.caddy import FRAGMENT_ENV, Completed, config_pair
 from lovspor.release.errors import UnobservableError
 from tests.unit.caddy_fakes import (
     DEFAULT_TCP,
@@ -77,7 +78,7 @@ class TestToyAdapt:
         self, box: Box
     ) -> None:
         plain = toy_adapt(box.caddyfile, {})
-        with_block = toy_adapt(box.new, {})
+        with_block = toy_adapt(box.new, {}, config_file=box.caddyfile)
 
         assert with_block["apps"] == plain["apps"]
         assert "admin" not in plain
@@ -385,6 +386,70 @@ class TestRefusedAtStart:
         assert box.caddy.reloads == 0
 
 
+CAPTURED_PREVIOUS = Path(__file__).parent / "fixtures" / "caddy_adapt" / "previous.json"
+
+
+def _hides(node: object) -> list[list[str]]:
+    """Every ``file_server`` handler's ``hide`` list, in document order."""
+    if isinstance(node, list):
+        return [hidden for item in node for hidden in _hides(item)]
+    if not isinstance(node, dict):
+        return []
+    own = [node.get("hide", [])] if node.get("handler") == "file_server" else []
+    return own + [hidden for value in node.values() for hidden in _hides(value)]
+
+
+class TestHide:
+    """#316: every ``file_server`` hides the Caddyfile by the path Caddy was handed.
+
+    On the droplet, Caddy v2.11.4 ran the configuration it loaded from
+    ``/etc/caddy/rehearsal/Caddyfile.pre-envelope`` with that path in both
+    ``hide`` lists, where ``caddy adapt`` of ``…/Caddyfile`` named ``…/Caddyfile``
+    — the whole difference, and a different pair.
+    """
+
+    def test_the_committed_capture_hides_the_path_it_was_adapted_as(self) -> None:
+        """Caddy v2.8.4 on the capture's world: ``Caddyfile.previous``, as the script named it;
+        the other entry is the redirect map it imports, which the toy does not list."""
+        hides = _hides(json.loads(CAPTURED_PREVIOUS.read_text(encoding="utf-8")))
+
+        assert hides and all(hidden[0] == "/etc/caddy/Caddyfile.previous" for hidden in hides)
+
+    def test_the_same_bytes_at_another_path_adapt_to_another_pair(self, box: Box) -> None:
+        backup = box.caddyfile.with_name("Caddyfile.pre-envelope")
+        backup.write_bytes(box.caddyfile.read_bytes())
+
+        served = toy_adapt(box.caddyfile, {})
+        kept = toy_adapt(backup, {})
+
+        assert _hides(served) == [[str(box.caddyfile)]]
+        assert _hides(kept) == [[str(backup)]]
+        assert config_pair(kept) != config_pair(served)
+        assert toy_adapt(backup, {}, config_file=box.caddyfile) == served
+
+    def test_adapt_reload_and_restart_each_hide_the_path_they_were_handed(self, box: Box) -> None:
+        backup = box.caddyfile.with_name("Caddyfile.pre-envelope")
+        backup.write_bytes(box.caddyfile.read_bytes())
+        argv = ("caddy", "adapt", "--config", str(backup), "--adapter", "caddyfile")
+
+        adapted = box.caddy.run(argv, {})
+        assert _hides(json.loads(adapted.stdout)) == [[str(backup)]]
+        assert box.reload(backup, DEFAULT_TCP) == 0
+        assert _hides(box.caddy.running_config()) == [[str(backup)]]
+        assert box.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
+        assert _hides(box.caddy.running_config()) == [[str(box.caddyfile)]]
+
+    def test_an_adapted_configuration_shares_nothing_with_the_next_one(self, box: Box) -> None:
+        """The hide list is written into the handler, so no two adaptations may share one."""
+        other = box.caddyfile.with_name("Caddyfile.other")
+        other.write_bytes(box.caddyfile.read_bytes())
+        first = toy_adapt(box.caddyfile, {})
+
+        toy_adapt(other, {})
+
+        assert _hides(first) == [[str(box.caddyfile)]]
+
+
 class TestPlantSocket:
     def test_leaves_a_socket_nothing_listens_on_under_a_path_too_long_to_bind(
         self, tmp_path: Path
@@ -533,7 +598,7 @@ class TestSystemctl:
         assert box.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
 
         assert stat.S_IMODE(box.socket_file.stat().st_mode) == 0o660
-        assert box.caddy.running_config_at(box.socket) == toy_adapt(box.new, {})
+        assert box.caddy.running_config_at(box.socket) == toy_adapt(box.caddyfile, {})
 
     def test_a_restart_of_a_caddyfile_that_does_not_adapt_fails(self, box: Box) -> None:
         box.caddyfile.write_text(UNKNOWN_OPTION, encoding="utf-8")

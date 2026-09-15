@@ -1308,23 +1308,56 @@ def _require_stock_exec_reload(plane: ControlPlane, host: MigrationHost) -> None
         )
 
 
+def _refused_reload_back(plane: ControlPlane, host: MigrationHost, done: Completed) -> str:
+    """What a refused reload back left on disk, and the way out that holds wherever Caddy answers.
+
+    Refused in #302's order the endpoint may already be on TCP, running the
+    envelope after a real cutover or the previous configuration after a
+    refused one (#305). The offline rollback's restart loads the Caddyfile
+    on disk whole, which is right in both.
+    """
+    failure = done.stderr.strip() or f"exit {done.returncode}"
+    return (
+        f"caddy reload --address {host.socket_admin} of {plane.caddyfile} failed: {failure}; "
+        f"the previous Caddyfile is back at {plane.caddyfile} and {host.previous_caddyfile} is "
+        "kept; the marker, the fragment and the drop-in are as they were; `lovspor release "
+        f"migrate --rollback --offline` finishes the restore and restarts {host.unit}, which "
+        "loads that Caddyfile whole"
+    )
+
+
 def _reload_previous(plane: ControlPlane, host: MigrationHost) -> None:
-    """The previous Caddyfile delivered explicitly to the socket; R moves back to TCP with it.
+    """The previous Caddyfile back at the Caddyfile's own path, then delivered from there.
+
+    Caddy writes the path of the Caddyfile it adapted into every
+    ``file_server`` ``hide`` list (#316). Delivered from the backup's name,
+    the configuration hid ``….pre-envelope`` and equalled neither what the
+    restored Caddyfile adapts to nor what ran before the migration; from its
+    own path it is both. The write is atomic and keeps the backup, so
+    ``_restore_files`` still moves it, over identical bytes.
+
+    Killed after the write and before the reload, the host has the previous
+    Caddyfile on disk while R is still the envelope — or, stranded by a
+    refused cutover, still the previous configuration on the socket — with
+    the marker, both backups, the fragment and the drop-in untouched. The
+    socket still answers, so a second rollback takes this branch again and
+    writes the same bytes. In that window ``systemctl restart`` loads the
+    previous Caddyfile whole onto TCP, and a rollback then takes the file
+    restore; ``systemctl reload`` delivers it to the socket only through
+    (e)'s ``ExecReload=`` pair — before (e), and on a stranded host, the
+    stock line derives TCP from the file and reaches nothing. Killed after
+    the reload, TCP answers with no release, and a second run is the file
+    restore.
 
     Its refusal claims nothing about what Caddy serves: after a real
     cutover that is the envelope, after a refused one (#302) it is already
-    the previous configuration. What holds after both is that this was the
-    first thing the rollback moved.
+    the previous configuration. It says what is on disk.
     """
-    argv = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter", "caddyfile")
+    atomic_write_bytes(plane.caddyfile, host.previous_caddyfile.read_bytes(), mode=WORLD_READABLE)
+    argv = ("caddy", "reload", "--config", str(plane.caddyfile), "--adapter", "caddyfile")
     done = plane.runner.run((*argv, "--address", host.socket_admin), {})
     if done.returncode != 0:
-        failure = done.stderr.strip() or f"exit {done.returncode}"
-        raise ReloadFailedError(
-            f"caddy reload --address {host.socket_admin} of {host.previous_caddyfile} failed: "
-            f"{failure}; nothing was restored — the marker, the Caddyfile and the drop-in are "
-            "as they were"
-        )
+        raise ReloadFailedError(_refused_reload_back(plane, host, done))
 
 
 def _rollback_after_cutover(plane: ControlPlane, host: MigrationHost) -> RollbackReport:

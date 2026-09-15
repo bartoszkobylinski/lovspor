@@ -599,12 +599,13 @@ configuration (#302). The command reads where Caddy answers after the refusal
 and names the way out:
 
 * **Caddy answers on the socket, running the previous configuration** (what
-  v2.11.4 does): `--reconcile --abandon`. It delivers
-  `/etc/caddy/Caddyfile.pre-envelope` to the socket — which moves the admin
-  endpoint back to TCP — checks that nothing answers on the socket any more,
-  removes the socket file Caddy leaves behind, and puts the previous Caddyfile
-  and drop-in back. `--reconcile --complete` refuses here: the file on disk is
-  the one Caddy just refused.
+  v2.11.4 does): `--reconcile --abandon`. It puts the previous Caddyfile back at
+  `/etc/caddy/Caddyfile` (keeping `/etc/caddy/Caddyfile.pre-envelope`) and
+  delivers it from there to the socket — which moves the admin endpoint back to
+  TCP — checks that nothing answers on the socket any more, removes the socket
+  file Caddy leaves behind, then puts the drop-in back and consumes the backups.
+  `--reconcile --complete` refuses here: the file on disk is the one Caddy just
+  refused.
 * **Caddy still answers on TCP**: `--reconcile --complete` (finish the cutover)
   or `--reconcile --abandon` (put the previous Caddyfile back; no reload).
 * **Caddy answers on the socket, running the new configuration** (the load took
@@ -619,6 +620,13 @@ first two it finds:
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --reconcile
 sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --reconcile --abandon
 ```
+
+An interrupted abandon — a killed shell, a dropped SSH session — is finished by
+running `--reconcile --abandon` again. Once the previous Caddyfile is back at
+`/etc/caddy/Caddyfile` with `Caddyfile.pre-envelope` still beside it, holding
+the same bytes, `--reconcile` names that state and `--abandon` finishes the
+restore. If the two files differ it refuses and changes nothing: which one is
+the previous Caddyfile is yours to say.
 
 After an abandon, confirm the box is back where step 4 found it, fix what made
 Caddy refuse the load (the error names it), and start again from the preflight:
@@ -747,9 +755,16 @@ sudo ls -la /run/caddy/ 2>&1                            # no admin.sock: the rol
 systemctl show caddy -p ExecReload                      # back to the stock line
 ```
 
-It delivers `/etc/caddy/Caddyfile.pre-envelope` explicitly to the socket — the
-previous Caddyfile has no global options block, so the stock reload line would
-derive TCP and reach nothing — then checks that TCP answers with a
+If it is interrupted while `Caddyfile.pre-envelope` still stands beside an
+identical `/etc/caddy/Caddyfile`, `--reconcile --abandon` finishes it (step 5).
+
+It puts the previous Caddyfile back at `/etc/caddy/Caddyfile`, keeping
+`/etc/caddy/Caddyfile.pre-envelope`, and delivers it from there explicitly to
+the socket: Caddy writes the path of the Caddyfile it loads into the
+configuration it runs (#316), so only from its own path does it run exactly
+what it ran before the migration. The previous Caddyfile has no global options
+block, so the stock reload line would derive TCP and reach nothing. It then
+checks that TCP answers with a
 configuration naming no release and that nothing answers on the socket any
 more. It does not go by the socket file: Caddy v2.11.4 leaves that file behind
 when it stops a socket admin endpoint, so the rollback removes it — a socket,
