@@ -29,11 +29,17 @@ from typing import NamedTuple
 import pytest
 
 import lovspor.release.rehearsal as rehearsal_module
-from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
-from lovspor.release.control import Situation
+from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, config_pair
+from lovspor.release.control import ControlPlane, Situation
 from lovspor.release.envelope import read_marker
 from lovspor.release.errors import RehearsalFailedError, UnobservableError
-from lovspor.release.migrate import SOCKET_MODE, drop_in_text, preflight
+from lovspor.release.migrate import (
+    SOCKET_MODE,
+    MigrationHost,
+    RollbackReport,
+    drop_in_text,
+    preflight,
+)
 from lovspor.release.reconcile import ReconcileReport
 from lovspor.release.rehearsal import (
     Rehearsal,
@@ -57,11 +63,6 @@ from lovspor.release.rehearsal import (
 from tests.unit.caddy_fakes import LOAD_REFUSED_AT_START, FakeCaddy, plant_socket, toy_adapt
 from tests.unit.migrate_fixtures import OLD_CADDYFILE, Droplet, Sabotaged, make_droplet
 from tests.unit.release_fixtures import World, build, make_world
-
-RELOADS_FROM_THE_BACKUP = pytest.mark.xfail(
-    strict=True, reason="#316: the rollback delivers Caddyfile.pre-envelope from the backup's path"
-)
-"""Fails while the reload back hides the backup's path, never the Caddyfile's (#316)."""
 
 REHEARSAL_TCP = "localhost:2029"
 REHEARSAL_UNIT = "caddy-rehearsal"
@@ -355,7 +356,6 @@ def _refused_then(staged: Staged, after: Mapping[str, object]) -> Rehearsal:
 class TestRejectedCutover:
     """ADR-0014 Amendment 1, decision 3: Caddy v2.11.4's ordering exactly, then its way out."""
 
-    @RELOADS_FROM_THE_BACKUP
     def test_a_refused_load_is_read_over_the_socket_and_abandoned_back_to_tcp(
         self, staged: Staged
     ) -> None:
@@ -372,7 +372,6 @@ class TestRejectedCutover:
         for role, path in _leftovers(staged).items():
             assert not (path.is_symlink() or path.exists()), role
 
-    @RELOADS_FROM_THE_BACKUP
     def test_it_is_the_rejected_fixture_that_is_offered_to_the_instance(
         self, staged: Staged
     ) -> None:
@@ -384,7 +383,6 @@ class TestRejectedCutover:
         adapted = [argv for argv in staged.droplet.argvs() if argv[:2] == ("caddy", "adapt")]
         assert any(str(staged.plan.fixtures.rejected) in argv for argv in adapted)
 
-    @RELOADS_FROM_THE_BACKUP
     def test_the_way_out_is_reconciles_abandon_one_load_back_to_the_socket(
         self, staged: Staged
     ) -> None:
@@ -394,11 +392,10 @@ class TestRejectedCutover:
         rejected_cutover(staged.plan)
 
         host = staged.plan.host
-        back = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter")
+        back = ("caddy", "reload", "--config", str(staged.plan.plane.caddyfile), "--adapter")
         assert _reloads(staged)[1:] == [(*back, "caddyfile", "--address", host.socket_admin)]
         assert len(_reloads(staged)) == 2
 
-    @RELOADS_FROM_THE_BACKUP
     def test_the_way_out_calls_reconcile_with_abandon_for_this_host(
         self, staged: Staged, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -417,7 +414,6 @@ class TestRejectedCutover:
 
         assert calls == [(staged.plan.plane, "abandon", staged.plan.host)]
 
-    @RELOADS_FROM_THE_BACKUP
     def test_both_steps_say_what_they_read(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
         before = staged.running(REHEARSAL_TCP).describe()
@@ -436,7 +432,6 @@ class TestRejectedCutover:
             "socket file, fragment or backup is left"
         )
 
-    @RELOADS_FROM_THE_BACKUP
     def test_the_abandon_leaves_the_host_ready_for_the_real_cutover(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
@@ -793,13 +788,10 @@ class TestPlainReloadRefused:
 
 class TestRollback:
     def _previous(self, staged: Staged) -> ConfigPair:
-        """The pre-envelope pair, read while the backup still exists; then the envelope is live."""
+        """The pair TCP ran before the cutover; then the envelope is live."""
+        previous = staged.running(REHEARSAL_TCP)
         cutover(staged.plan)
-        return adapt(
-            staged.plan.plane.runner,
-            staged.plan.host.previous_caddyfile,
-            staged.plan.plane.fragment,
-        )
+        return previous
 
     def test_the_way_back_reaches_the_socket_and_leaves_tcp_answering(self, staged: Staged) -> None:
         cutover(staged.plan)
@@ -814,11 +806,13 @@ class TestRollback:
         assert not staged.plan.host.socket.exists()
         assert read_marker(staged.plan.plane.releases) is None
 
-    def test_the_previous_configuration_is_read_from_the_backup_with_the_fragment(
+    def test_the_previous_configuration_is_the_backup_adapted_from_the_caddyfiles_own_path(
         self, staged: Staged
     ) -> None:
-        """R is compared with the backup adapted, not with a value remembered from earlier."""
+        """R is compared with the backup's bytes adapted where they serve from, not with a value
+        remembered from earlier: Caddy hides the path of the Caddyfile it loaded (#316)."""
         cutover(staged.plan)
+        since = len(staged.caddy.calls)
 
         rollback(staged.plan)
 
@@ -826,13 +820,13 @@ class TestRollback:
             "caddy",
             "adapt",
             "--config",
-            str(staged.plan.host.previous_caddyfile),
+            str(staged.plan.plane.caddyfile),
             "--adapter",
             "caddyfile",
         )
-        assert (argv, {FRAGMENT_ENV: str(staged.plan.plane.fragment)}) in staged.caddy.calls
+        adapted = [call for call in staged.caddy.calls[since:] if call[0][:2] == argv[:2]]
+        assert adapted == [(argv, {FRAGMENT_ENV: str(staged.plan.plane.fragment)})]
 
-    @RELOADS_FROM_THE_BACKUP
     def test_the_previous_configuration_is_what_runs_afterwards(self, staged: Staged) -> None:
         before = staged.running(REHEARSAL_TCP)
         cutover(staged.plan)
@@ -841,6 +835,30 @@ class TestRollback:
 
         assert staged.running(REHEARSAL_TCP) == before
         assert staged.running(REHEARSAL_TCP).release_id is None
+
+    def test_a_caddyfile_that_is_not_the_backup_after_the_way_back_ends_the_rehearsal(
+        self, staged: Staged, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R equal to what the Caddyfile adapts to says nothing unless that file holds the
+        backup's bytes: a comment changes the bytes and not the configuration."""
+        cutover(staged.plan)
+        real = rehearsal_module.rollback_first_migration
+
+        def edited_after(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
+            report = real(plane, host)
+            with plane.caddyfile.open("a", encoding="utf-8") as caddyfile:
+                caddyfile.write("# edited by hand\n")
+            return report
+
+        monkeypatch.setattr(rehearsal_module, "rollback_first_migration", edited_after)
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            rollback(staged.plan)
+
+        assert raised.value.step == "iii"
+        assert raised.value.detail == (
+            f"{staged.plan.plane.caddyfile} is not the previous Caddyfile after the way back"
+        )
 
     def test_an_instance_that_does_not_answer_afterwards_ends_the_rehearsal(
         self, staged: Staged
@@ -1179,7 +1197,6 @@ class TestRestarts:
 
 
 class TestRehearse:
-    @RELOADS_FROM_THE_BACKUP
     def test_walks_every_sub_step_of_validation_g_in_order(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
@@ -1205,7 +1222,6 @@ class TestRehearse:
             "v.by-hand",
         ]
 
-    @RELOADS_FROM_THE_BACKUP
     def test_leaves_the_second_instance_cut_over_on_its_socket(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
@@ -1216,7 +1232,6 @@ class TestRehearse:
         assert marker is not None
         assert marker.active == staged.plan.content_id
 
-    @RELOADS_FROM_THE_BACKUP
     def test_every_step_reports_what_it_read(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 

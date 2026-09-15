@@ -94,11 +94,6 @@ from tests.unit.migrate_fixtures import (
 )
 from tests.unit.release_fixtures import World, build, make_world, observer, rename_document
 
-RELOADS_FROM_THE_BACKUP = pytest.mark.xfail(
-    strict=True, reason="#316: the rollback delivers Caddyfile.pre-envelope from the backup's path"
-)
-"""Fails while the reload back hides the backup's path, never the Caddyfile's (#316)."""
-
 LATER = "2026-01-02T00:00:00Z"
 
 
@@ -2000,23 +1995,33 @@ class TestThePreflightsAnswersGoStale:
         assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
 
 
-NOTHING_RESTORED = (
-    "; nothing was restored — the marker, the Caddyfile and the drop-in are as they were"
-)
-"""How a refused reload back ends: true after a real cutover and after a refused one alike."""
+def _refused_reload_back(droplet: Droplet) -> str:
+    """How a refused reload back ends: what is on disk, and the way out that holds whether Caddy
+    then serves the envelope or already the previous configuration."""
+    return (
+        f"; the previous Caddyfile is back at {droplet.plane.caddyfile} and "
+        f"{droplet.host.previous_caddyfile} is kept; the marker, the fragment and the drop-in are "
+        "as they were; `lovspor release migrate --rollback --offline` finishes the restore and "
+        "restarts caddy, which loads that Caddyfile whole"
+    )
 
 
-def _rollback_reload(droplet: Droplet) -> tuple[str, ...]:
+def _reload_to_socket(droplet: Droplet, config: Path) -> tuple[str, ...]:
     return (
         "caddy",
         "reload",
         "--config",
-        str(droplet.host.previous_caddyfile),
+        str(config),
         "--adapter",
         "caddyfile",
         "--address",
         droplet.host.socket_admin,
     )
+
+
+def _rollback_reload(droplet: Droplet) -> tuple[str, ...]:
+    """The rollback's reload back: the previous Caddyfile, from the Caddyfile's own path (#316)."""
+    return _reload_to_socket(droplet, droplet.plane.caddyfile)
 
 
 def _assert_pre_envelope(droplet: Droplet) -> None:
@@ -2198,7 +2203,6 @@ class TestRollback:
         with pytest.raises(ControlPlaneError, match="nothing to restore"):
             rollback_first_migration(droplet.plane, droplet.host)
 
-    @RELOADS_FROM_THE_BACKUP
     @pytest.mark.parametrize(
         ("step", "marker_removed", "pair_removed"),
         [("reloaded", False, False), ("exec_reload", False, True), ("marked", True, True)],
@@ -2229,7 +2233,6 @@ class TestRollback:
         assert "--address" not in shown.stdout
         _assert_pre_envelope(droplet)
 
-    @RELOADS_FROM_THE_BACKUP
     def test_the_socket_file_caddy_leaves_after_the_reload_back_is_removed(
         self, droplet: Droplet
     ) -> None:
@@ -2257,7 +2260,6 @@ class TestRollback:
         assert report.socket_removed is True
         _assert_pre_envelope(droplet)
 
-    @RELOADS_FROM_THE_BACKUP
     def test_after_a_finished_migration_the_migration_can_be_run_again(
         self, droplet: Droplet
     ) -> None:
@@ -2303,14 +2305,21 @@ class TestRollback:
 
         assert str(caught.value).startswith(
             f"caddy reload --address {droplet.host.socket_admin} of "
-            f"{droplet.host.previous_caddyfile} failed: {LOAD_REFUSED_AT_START}"
+            f"{droplet.plane.caddyfile} failed: {LOAD_REFUSED_AT_START}"
         )
-        assert str(caught.value).endswith(NOTHING_RESTORED)
-        assert live_release(droplet.over(DEFAULT_TCP)) == droplet.a
+        assert str(caught.value).endswith(_refused_reload_back(droplet))
+        assert config_pair(droplet.caddy.running_config_at(DEFAULT_TCP)).release_id == droplet.a
         with pytest.raises(UnobservableError):
             droplet.caddy.running_config_at(droplet.host.socket_admin)
-        assert droplet.host.previous_caddyfile.is_file()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert droplet.host.previous_caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert droplet.plane.fragment.is_file()
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
         assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
+
+        offline_rollback(droplet.plane, droplet.host)
+
+        _assert_pre_envelope(droplet)
 
     def test_a_silent_reload_failure_names_the_exit_code(self, droplet: Droplet) -> None:
         _migrate(droplet)
@@ -2389,7 +2398,6 @@ class TestRollback:
         assert droplet.host.previous_caddyfile.is_file()
         assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
 
-    @RELOADS_FROM_THE_BACKUP
     @pytest.mark.parametrize("shape", ["dangling symlink", "live symlink", "regular file"])
     def test_anything_but_a_socket_at_the_socket_name_is_refused_and_not_followed(
         self, droplet: Droplet, shape: str
@@ -2412,13 +2420,13 @@ class TestRollback:
         assert target.exists() is (shape == "live symlink")
         assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
         assert droplet.host.previous_caddyfile.is_file()
-        assert droplet.plane.caddyfile.read_text(encoding="utf-8") != OLD_CADDYFILE
+        assert droplet.plane.fragment.is_file()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE  # #316
 
         droplet.socket_file.unlink()
         rollback_first_migration(droplet.plane, droplet.host)
         _assert_pre_envelope(droplet)
 
-    @RELOADS_FROM_THE_BACKUP
     @pytest.mark.parametrize(
         ("dies_in", "socket_left"),
         [("_remove_dead_socket", True), ("_restore_pre_envelope", False)],
@@ -2455,7 +2463,8 @@ class TestRollback:
     ) -> None:
         """A refusal moves nothing, the socket Caddy left behind included."""
         _migrate(droplet)
-        assert droplet.caddy.run(_rollback_reload(droplet), {}).returncode == 0
+        by_hand = _reload_to_socket(droplet, droplet.host.previous_caddyfile)
+        assert droplet.caddy.run(by_hand, {}).returncode == 0
         droplet.host.previous_caddyfile.unlink()
 
         with pytest.raises(ControlPlaneError, match="nothing to restore"):
@@ -2525,7 +2534,6 @@ class TestRollback:
         assert droplet.host.previous_caddyfile.is_file()
         assert droplet.caddy.admin_address == DEFAULT_TCP
 
-    @RELOADS_FROM_THE_BACKUP
     def test_the_second_run_finishes_what_the_crash_left(
         self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2539,7 +2547,9 @@ class TestRollback:
         assert report.marker_removed is False and report.reloaded is False
         _assert_pre_envelope(droplet)
 
-    @RELOADS_FROM_THE_BACKUP
+    @pytest.mark.xfail(
+        strict=True, reason="#316: reconcile has no row yet for a restore stopped after the reload"
+    )
     def test_reconcile_reads_the_crashed_rollback_on_the_address_that_answers(
         self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2591,7 +2601,7 @@ def _refuse_the_reload_back(droplet: Droplet) -> None:
     with pytest.raises(ReloadFailedError):
         rollback_first_migration(droplet.plane, droplet.host)
     assert droplet.caddy.admin_address == DEFAULT_TCP
-    assert live_release(droplet.over(DEFAULT_TCP)) == droplet.a
+    assert config_pair(droplet.caddy.running_config_at(DEFAULT_TCP)).release_id == droplet.a
 
 
 def _release_on_tcp_refusal(release: str) -> str:
@@ -2628,7 +2638,7 @@ class TestAbandonReadsTcp:
         assert droplet.plane.caddyfile.read_bytes() == caddyfile
         assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, True)
         assert stat.S_ISSOCK(droplet.socket_file.lstat().st_mode)
-        assert live_release(droplet.over(DEFAULT_TCP)) == droplet.a
+        assert config_pair(droplet.caddy.running_config_at(DEFAULT_TCP)).release_id == droplet.a
 
         report = offline_rollback(droplet.plane, droplet.host)
 
@@ -2832,7 +2842,6 @@ class TestTheDropInBackup:
         assert not droplet.host.previous_drop_in.exists()
         assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
 
-    @RELOADS_FROM_THE_BACKUP
     def test_an_absent_drop_in_round_trips_as_absent(self, droplet: Droplet) -> None:
         """The failure that reported success: a box with no drop-in got one back.
 
@@ -3289,7 +3298,6 @@ class TestRetire:
         assert live_release(droplet.plane) == droplet.a
         assert droplet.caddy.admin_address == droplet.host.socket_admin
 
-    @RELOADS_FROM_THE_BACKUP
     def test_a_refused_removal_leaves_the_way_back_armed(self, droplet: Droplet) -> None:
         """The backup is unlinked only after every removal succeeded, so a refusal
         part-way leaves a host the rollback still returns to the old site."""
@@ -3883,7 +3891,6 @@ class TestReconcileRefusedCutover:
         assert droplet.host.previous_caddyfile.is_file()
         assert read_marker(droplet.releases) is None
 
-    @RELOADS_FROM_THE_BACKUP
     def test_abandon_is_one_load_of_the_previous_caddyfile_to_the_socket(
         self, droplet: Droplet
     ) -> None:
@@ -3906,7 +3913,6 @@ class TestReconcileRefusedCutover:
         assert not droplet.host.absent_drop_in.exists()
         _assert_pre_envelope(droplet)
 
-    @RELOADS_FROM_THE_BACKUP
     def test_after_the_abandon_reconcile_reads_the_host_reconciled_on_tcp(
         self, droplet: Droplet
     ) -> None:
@@ -3922,7 +3928,6 @@ class TestReconcileRefusedCutover:
             DEFAULT_TCP,
         )
 
-    @RELOADS_FROM_THE_BACKUP
     def test_after_the_abandon_the_migration_runs_again_from_the_preflight(
         self, droplet: Droplet
     ) -> None:
@@ -3961,26 +3966,209 @@ class TestReconcileRefusedCutover:
         assert droplet.plane.caddyfile.read_bytes() == before
         assert droplet.caddy.admin_address == droplet.host.socket_admin
 
-    def test_a_refused_reload_back_claims_only_that_nothing_was_restored(
+    def test_a_refused_reload_back_says_what_is_on_disk_and_names_the_offline_rollback(
         self, droplet: Droplet
     ) -> None:
         """The reload back is the same one a real cutover's rollback delivers, but here no
-        envelope is served, so its refusal says only what holds in both places. Refused in
-        #302's order, the endpoint has already moved to TCP (inferred, not observed: #305)."""
+        envelope is served, so its refusal says only what holds in both places: what is on disk,
+        and a way out that works in both. Refused in #302's order, the endpoint has already moved
+        to TCP (inferred, not observed: #305)."""
         _refuse_the_cutover(droplet)
         droplet.caddy.fail_reloads = 1
-        caddyfile = droplet.plane.caddyfile.read_bytes()
 
         with pytest.raises(ReloadFailedError) as caught:
             reconcile(droplet.plane, "abandon", droplet.host)
 
         assert str(caught.value).startswith(
             f"caddy reload --address {droplet.host.socket_admin} of "
-            f"{droplet.host.previous_caddyfile} failed: {LOAD_REFUSED_AT_START}"
+            f"{droplet.plane.caddyfile} failed: {LOAD_REFUSED_AT_START}"
         )
-        assert str(caught.value).endswith(NOTHING_RESTORED)
-        assert droplet.plane.caddyfile.read_bytes() == caddyfile
-        assert droplet.host.previous_caddyfile.is_file()
+        assert str(caught.value).endswith(_refused_reload_back(droplet))
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert droplet.host.previous_caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
         assert droplet.plane.fragment.is_file()
+        assert read_marker(droplet.releases) is None
         assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, False)
         assert droplet.caddy.admin_address == DEFAULT_TCP
+
+        offline_rollback(droplet.plane, droplet.host)
+
+        _assert_pre_envelope(droplet)
+
+
+def _dies_at_the_reload(droplet: Droplet) -> ControlPlane:
+    """The plane whose ``caddy reload`` kills the process before it reaches Caddy."""
+
+    def killed(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+        del argv, env
+        raise Killed("reloading the previous Caddyfile")
+
+    return replace(droplet.plane, runner=Sabotaged(droplet.caddy, ("caddy", "reload"), killed))
+
+
+def _assert_write_window(droplet: Droplet, with_pair: bool) -> None:
+    """Killed after the write and before the reload: the previous Caddyfile on disk, the admin
+    endpoint still on the socket, and every record as it was."""
+    assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+    assert droplet.host.previous_caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+    assert droplet.plane.fragment.is_file()
+    assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, with_pair)
+    assert droplet.caddy.admin_address == droplet.host.socket_admin
+
+
+class TestTheReloadBackIsTheCaddyfiles:
+    """#316: Caddy hides the path of the Caddyfile it loaded, so the previous Caddyfile goes back
+    to the Caddyfile's own path and is delivered from there — R then equals both what the restored
+    file adapts to and what ran before the migration."""
+
+    def test_after_a_cutover_tcp_runs_what_ran_before_and_what_the_caddyfile_adapts_to(
+        self, droplet: Droplet
+    ) -> None:
+        before = config_pair(droplet.caddy.running_config_at(DEFAULT_TCP))
+        _migrate(droplet)
+
+        rollback_first_migration(droplet.plane, droplet.host)
+
+        running = config_pair(droplet.caddy.running_config_at(DEFAULT_TCP))
+        assert running == adapt(droplet.caddy, droplet.plane.caddyfile, droplet.plane.fragment)
+        assert running == before
+        assert situation(read_triple(droplet.over(DEFAULT_TCP))) == Situation.reconciled
+
+    def test_a_stranded_host_abandoned_runs_exactly_the_pair_read_before_the_cutover(
+        self, droplet: Droplet
+    ) -> None:
+        before = config_pair(droplet.caddy.running_config_at(DEFAULT_TCP))
+        _refuse_the_cutover(droplet)
+
+        reconcile(droplet.plane, "abandon", droplet.host)
+
+        running = config_pair(droplet.caddy.running_config_at(DEFAULT_TCP))
+        assert running == before
+        assert running == adapt(droplet.caddy, droplet.plane.caddyfile, droplet.plane.fragment)
+
+    def test_the_previous_caddyfile_is_written_readable_before_the_reload_and_the_backup_kept(
+        self, droplet: Droplet, strict_umask: None
+    ) -> None:
+        _migrate(droplet)
+        seen: list[tuple[str, int, str]] = []
+
+        def reload_back(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            caddyfile = droplet.plane.caddyfile
+            mode = stat.S_IMODE(caddyfile.stat().st_mode)
+            backup = droplet.host.previous_caddyfile.read_text(encoding="utf-8")
+            seen.append((caddyfile.read_text(encoding="utf-8"), mode, backup))
+            return droplet.caddy.run(argv, env)
+
+        runner = Sabotaged(droplet.caddy, ("caddy", "reload"), reload_back)
+
+        rollback_first_migration(replace(droplet.plane, runner=runner), droplet.host)
+
+        assert seen == [(OLD_CADDYFILE, 0o644, OLD_CADDYFILE)]
+        assert _loads(droplet, 0)[-1] == _rollback_reload(droplet)
+
+    @pytest.mark.parametrize(("step", "marked"), [("reloaded", False), ("marked", True)])
+    def test_killed_after_the_write_a_second_rollback_takes_the_same_branch_and_finishes(
+        self, droplet: Droplet, step: str, marked: bool
+    ) -> None:
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at(step))
+        with pytest.raises(Killed):
+            rollback_first_migration(_dies_at_the_reload(droplet), droplet.host)
+        _assert_write_window(droplet, with_pair=marked)
+        assert (read_marker(droplet.releases) is not None) is marked
+        running = config_pair(droplet.caddy.running_config_at(droplet.host.socket_admin))
+        assert running.release_id == droplet.a
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert (report.admin_before, report.reloaded, report.marker_removed) == (
+            droplet.host.socket_admin,
+            True,
+            marked,
+        )
+        _assert_pre_envelope(droplet)
+
+    def test_killed_after_the_write_on_a_stranded_host_a_rollback_finishes(
+        self, droplet: Droplet
+    ) -> None:
+        """The abandon of a refused cutover is that rollback, so it has the same window; the
+        socket answers the previous configuration there throughout."""
+        _refuse_the_cutover(droplet)
+        with pytest.raises(Killed):
+            reconcile(_dies_at_the_reload(droplet), "abandon", droplet.host)
+        _assert_write_window(droplet, with_pair=False)
+        assert read_marker(droplet.releases) is None
+        assert stranded_on_socket(droplet.host, droplet.host.socket_admin) is True
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert (report.admin_before, report.reloaded) == (droplet.host.socket_admin, True)
+        _assert_pre_envelope(droplet)
+
+    @pytest.mark.parametrize(("step", "reaches"), [("reloaded", False), ("marked", True)])
+    def test_in_the_write_window_systemctl_reload_reaches_the_socket_only_through_the_pair(
+        self, droplet: Droplet, step: str, reaches: bool
+    ) -> None:
+        """With (e)'s pair the unit's reload delivers the Caddyfile on disk — the previous one
+        now — to the socket; before (e) the stock line derives TCP from that file and reaches
+        nothing. A rollback finishes after either."""
+        with pytest.raises(Killed):
+            _migrate(droplet, _kill_at(step))
+        with pytest.raises(Killed):
+            rollback_first_migration(_dies_at_the_reload(droplet), droplet.host)
+
+        done = droplet.caddy.run(("systemctl", "reload", "caddy"), {})
+
+        assert (done.returncode == 0) is reaches
+        assert (droplet.caddy.admin_address == DEFAULT_TCP) is reaches
+        assert rollback_first_migration(droplet.plane, droplet.host).reloaded is not reaches
+        _assert_pre_envelope(droplet)
+
+    def test_in_the_write_window_a_restart_loads_the_previous_caddyfile_onto_tcp(
+        self, droplet: Droplet
+    ) -> None:
+        _migrate(droplet)
+        with pytest.raises(Killed):
+            rollback_first_migration(_dies_at_the_reload(droplet), droplet.host)
+
+        assert droplet.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
+
+        assert config_pair(droplet.caddy.running_config_at(DEFAULT_TCP)) == droplet.old_pair()
+        report = rollback_first_migration(droplet.plane, droplet.host)
+        assert (report.admin_before, report.reloaded) == (DEFAULT_TCP, False)
+        _assert_pre_envelope(droplet)
+
+    def test_killed_after_the_reload_a_second_rollback_is_the_file_restore(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _migrate(droplet)
+        _die_once_in(monkeypatch, "_verify_back_on_tcp")
+        with pytest.raises(Killed):
+            rollback_first_migration(droplet.plane, droplet.host)
+        assert config_pair(droplet.caddy.running_config_at(DEFAULT_TCP)) == droplet.old_pair()
+        assert read_marker(droplet.releases) == Marker(active=droplet.a, previous=None)
+        assert droplet.host.previous_caddyfile.is_file()
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert (report.admin_before, report.reloaded, report.marker_removed) == (
+            DEFAULT_TCP,
+            False,
+            True,
+        )
+        assert report.socket_removed is True
+        _assert_pre_envelope(droplet)
+
+    def test_killed_after_the_reload_on_a_stranded_host_a_rollback_is_the_file_restore(
+        self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _refuse_the_cutover(droplet)
+        _die_once_in(monkeypatch, "_verify_back_on_tcp")
+        with pytest.raises(Killed):
+            reconcile(droplet.plane, "abandon", droplet.host)
+        assert droplet.caddy.admin_address == DEFAULT_TCP
+
+        report = rollback_first_migration(droplet.plane, droplet.host)
+
+        assert (report.reloaded, report.socket_removed) == (False, True)
+        _assert_pre_envelope(droplet)

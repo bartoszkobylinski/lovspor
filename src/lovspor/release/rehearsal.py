@@ -436,12 +436,28 @@ def plain_reload_refused(plan: Rehearsal) -> Step:
     return Step(name="iii.plain-reload", detail="the stock reload line reached nothing, as it must")
 
 
+def _previous_back(plan: Rehearsal, kept: bytes) -> ConfigPair:
+    """The backup's bytes back at the Caddyfile's own path, adapted from there.
+
+    Caddy hides the path of the Caddyfile it loaded (#316), so the backup
+    adapted at its own name is one path apart from anything the Caddyfile
+    loads. The bytes are asked first: R equal to what the Caddyfile adapts
+    to says nothing unless that file is the previous one.
+    """
+    _require(
+        plan.plane.caddyfile.read_bytes() == kept,
+        "iii",
+        f"{plan.plane.caddyfile} is not the previous Caddyfile after the way back",
+    )
+    return adapt(plan.plane.runner, plan.plane.caddyfile, plan.plane.fragment)
+
+
 def rolled_back(plan: Rehearsal, previous: ConfigPair) -> ConfigPair:
     """(iii) What must hold after the way back: the previous configuration, on TCP, no socket.
 
-    ``previous`` is the pre-envelope Caddyfile adapted, so the equality
-    covers what the ADR spells out — no ``vars`` handler and the symlink
-    roots — rather than only the release id.
+    ``previous`` is the pre-envelope Caddyfile adapted from the Caddyfile's
+    own path, so the equality covers what the ADR spells out — no ``vars``
+    handler and the symlink roots — rather than only the release id.
     """
     running = _running(plan, plan.host.tcp_admin)
     if running is None:
@@ -464,9 +480,9 @@ def rolled_back(plan: Rehearsal, previous: ConfigPair) -> ConfigPair:
 def rollback(plan: Rehearsal) -> tuple[Step, ...]:
     """(iii) The first-migration rollback, delivered to the socket, and its negative fixture."""
     plain = plain_reload_refused(plan)
-    previous = adapt(plan.plane.runner, plan.host.previous_caddyfile, plan.plane.fragment)
+    kept = plan.host.previous_caddyfile.read_bytes()
     report = rollback_first_migration(plan.plane, plan.host)
-    rolled_back(plan, previous)
+    rolled_back(plan, _previous_back(plan, kept))
     wanted = f"--address {plan.host.socket_admin}"
     _require(wanted not in _exec_reload(plan, "iii"), "iii", f"ExecReload still names {wanted}")
     return (
