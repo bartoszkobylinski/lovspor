@@ -22,6 +22,7 @@ comparison can be about what is served rather than about where from.
 """
 
 import json
+import re
 from pathlib import Path
 from typing import NamedTuple
 
@@ -96,6 +97,33 @@ FOREIGN_MAP = "release-foreign-map.caddy"
 SYMLINKED_ROOT = "release-symlinked-root.caddy"
 
 
+class Layout(NamedTuple):
+    """Where the deployment root and the releases root stand, relative to the world root.
+
+    The committed JSON was captured in one layout and ``rehearse-urls.sh``
+    builds its envelope in another. A boundary derived from where the release
+    happens to stand is right in the first and wrong in the second (#308), so
+    the same capture has to be askable in both.
+    """
+
+    deployment: str
+    releases: str
+
+    def www(self, root: Path) -> Path:
+        """The world's ``/var/www``: the deployment root."""
+        return root / self.deployment
+
+    def release(self, root: Path) -> Path:
+        """The envelope, under this layout's releases root."""
+        return self.www(root) / self.releases / RELEASE_ID
+
+
+CAPTURED = Layout("www", "lovspor-releases")
+"""The layout every committed capture was taken in: the release two levels under ``/var/www``."""
+WRAPPER = Layout("var/www", "lovspor-urls-rehearsal/releases")
+"""``rehearse-urls.sh``'s: the envelope under a rehearsal root of its own, three levels down."""
+
+
 class World(NamedTuple):
     """Where everything the capture and the tests need stands, under one root."""
 
@@ -141,9 +169,8 @@ def _flat_release(www: Path) -> None:
     (www / CURRENT_SYMLINK).symlink_to(flat)
 
 
-def _envelope(www: Path) -> Path:
-    """A complete envelope: ``corpus/``, ``site/``, the record and the fragment."""
-    release = www / "lovspor-releases" / RELEASE_ID
+def _envelope(www: Path, release: Path) -> None:
+    """A complete envelope at ``release``: ``corpus/``, ``site/``, the record and the fragment."""
     _corpus_tree(release / CORPUS_DIR)
     _write(release / SITE_DIR, SITE_FILES)
     (release / "release.json").write_text(
@@ -151,17 +178,15 @@ def _envelope(www: Path) -> Path:
     )
     (release / FRAGMENT_NAME).write_text(fragment_text(release, RELEASE_ID), encoding="utf-8")
     (www / LIVE_SYMLINK).symlink_to(release)
-    return release
 
 
-def _variants(root: Path, release: Path) -> None:
+def _variants(root: Path, www: Path, release: Path) -> None:
     """The three fragments the negative fixtures are adapted from, beside the Caddyfiles.
 
     Each takes away exactly one of the properties the dry-run asserts and
     leaves the others intact, so a fixture that fails names which assertion
     detected it rather than failing for four reasons at once.
     """
-    www = release.parent.parent
     live = www / LIVE_SYMLINK
     flat = (www / "lovspor-releases-flat" / FLAT_RELEASE).as_posix()
     real = fragment_text(release, RELEASE_ID)
@@ -182,13 +207,11 @@ def _variants(root: Path, release: Path) -> None:
     )
 
 
-def _caddyfiles(world_root: Path, release: Path, repo: Path) -> tuple[Path, Path]:
+def _caddyfiles(root: Path, www: Path, release: Path, repo: Path) -> tuple[Path, Path]:
     """Both Caddyfiles, pointed at this world and nothing else."""
-    previous = world_root / PREVIOUS_NAME
-    previous.write_text(
-        OLD_CADDYFILE.replace(CAPTURE_PREFIX, (world_root / "www").as_posix()), encoding="utf-8"
-    )
-    proposed = world_root / PROPOSED_NAME
+    previous = root / PREVIOUS_NAME
+    previous.write_text(OLD_CADDYFILE.replace(CAPTURE_PREFIX, www.as_posix()), encoding="utf-8")
+    proposed = root / PROPOSED_NAME
     source = (repo / "deploy" / "digitalocean" / "Caddyfile").read_text(encoding="utf-8")
     proposed.write_text(
         source.replace("/etc/caddy/lovspor-release.caddy", (release / FRAGMENT_NAME).as_posix()),
@@ -197,22 +220,33 @@ def _caddyfiles(world_root: Path, release: Path, repo: Path) -> tuple[Path, Path
     return previous, proposed
 
 
-def build_world(root: Path, repo: Path) -> World:
+def build_world(root: Path, repo: Path, layout: Layout = CAPTURED) -> World:
     """The whole world under ``root``, with both Caddyfiles naming paths inside it."""
-    www = root / "www"
+    www, release = layout.www(root), layout.release(root)
     www.mkdir(parents=True, exist_ok=True)
     _write(www / "lovspor", LANDING_FILES)
     _flat_release(www)
-    release = _envelope(www)
-    _variants(root, release)
-    previous, proposed = _caddyfiles(root, release, repo)
+    _envelope(www, release)
+    _variants(root, www, release)
+    previous, proposed = _caddyfiles(root, www, release, repo)
     return World(root, previous, proposed, release)
 
 
-def rehost(text: str, root: Path) -> str:
-    """The committed JSON with its capture prefixes pointed at a real ``root``."""
-    rehosted = text.replace(CAPTURE_PREFIX, (root / "www").as_posix())
-    return rehosted.replace(CAPTURE_ETC, root.as_posix())
+def rehost(text: str, root: Path, layout: Layout = CAPTURED) -> str:
+    """The committed JSON with its capture prefixes pointed at a real ``root``, in ``layout``.
+
+    One pass over the text: the wrapper's layout puts ``/var/www`` inside
+    the rehosted paths themselves, and a second replacement would rewrite
+    its own output.
+    """
+    www = layout.www(root).as_posix()
+    targets = {
+        f"{CAPTURE_PREFIX}/{CAPTURED.releases}/": f"{www}/{layout.releases}/",
+        CAPTURE_PREFIX: www,
+        CAPTURE_ETC: root.as_posix(),
+    }
+    pattern = "|".join(re.escape(prefix) for prefix in targets)
+    return re.sub(pattern, lambda found: targets[found.group(0)], text)
 
 
 def capture_form(text: str, root: Path) -> str:
@@ -229,6 +263,6 @@ def fixture_path(name: str) -> Path:
     return Path(__file__).parent / "fixtures" / "caddy_adapt" / name
 
 
-def load_adapted(name: str, root: Path) -> object:
-    """One committed ``caddy adapt`` fixture, rehosted onto ``root``."""
-    return json.loads(rehost(fixture_path(name).read_text(encoding="utf-8"), root))
+def load_adapted(name: str, root: Path, layout: Layout = CAPTURED) -> object:
+    """One committed ``caddy adapt`` fixture, rehosted onto ``root`` in ``layout``."""
+    return json.loads(rehost(fixture_path(name).read_text(encoding="utf-8"), root, layout))

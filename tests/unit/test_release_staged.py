@@ -23,7 +23,14 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.release.answers import Answer, _compiled, _nodes, is_servable_url, matcher_paths
+from lovspor.release.answers import (
+    Answer,
+    _compiled,
+    _nodes,
+    is_servable_url,
+    matcher_paths,
+    roots,
+)
 from lovspor.release.caddy import FRAGMENT_ENV, Completed
 from lovspor.release.envelope import CORPUS_PATHS, RECORD_NAME
 from lovspor.release.errors import RehearsalFailedError
@@ -45,11 +52,17 @@ from lovspor.release.staged import (
     unreadable_reason,
 )
 from tests.unit.staged_fixtures import (
+    CAPTURED,
     FLAT_RELEASE,
     GONE_PREFIX,
     LIVE_SYMLINK,
+    PREVIOUS_NAME,
+    PROPOSED_NAME,
     REDIRECT_TARGET,
     RELEASE_ID,
+    WRAPPER,
+    Layout,
+    World,
     build_world,
     load_adapted,
 )
@@ -65,10 +78,10 @@ class FixtureRunner:
     second reading must differ says so by pushing two.
     """
 
-    def __init__(self, previous: list[object], proposed: list[object], files: tuple[Path, Path]):
-        self.adapted = {files[0]: list(previous), files[1]: list(proposed)}
-        self.proposed = files[1]
-        self.fragment = files[0].parent / "www" / "lovspor-releases" / RELEASE_ID / "release.caddy"
+    def __init__(self, previous: list[object], proposed: list[object], paths: World):
+        self.adapted = {paths.previous: list(previous), paths.proposed: list(proposed)}
+        self.proposed = paths.proposed
+        self.fragment = paths.fragment
         self.validate_returncode = 0
         self.tamper: Path | None = None
 
@@ -92,15 +105,32 @@ def world(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def make_plan(world: Path, proposed: str = "proposed.json") -> StagedPlan:
-    return plan_for(world, [load_adapted("previous.json", world)], [load_adapted(proposed, world)])
+@pytest.fixture(params=[CAPTURED, WRAPPER], ids=["captured", "wrapper"])
+def layout(request: pytest.FixtureRequest) -> Layout:
+    return request.param  # type: ignore[no-any-return]
 
 
-def plan_for(world: Path, previous: list[object], proposed: list[object]) -> StagedPlan:
+@pytest.fixture
+def anywhere(tmp_path: Path, layout: Layout) -> Path:
+    """The same world, built in each layout in turn."""
+    build_world(tmp_path, REPO, layout)
+    return tmp_path
+
+
+def make_plan(
+    world: Path, proposed: str = "proposed.json", layout: Layout = CAPTURED
+) -> StagedPlan:
+    previous = [load_adapted("previous.json", world, layout)]
+    return plan_for(world, previous, [load_adapted(proposed, world, layout)], layout)
+
+
+def plan_for(
+    world: Path, previous: list[object], proposed: list[object], layout: Layout = CAPTURED
+) -> StagedPlan:
     """A plan whose runner answers each Caddyfile from its own queue of captures."""
-    files = (world / "Caddyfile.previous", world / "Caddyfile.proposed")
-    runner = FixtureRunner(previous, proposed, files)
-    return StagedPlan(runner, files[0], files[1], world / "www" / "lovspor-releases" / RELEASE_ID)
+    paths = World(world, world / PREVIOUS_NAME, world / PROPOSED_NAME, layout.release(world))
+    runner = FixtureRunner(previous, proposed, paths)
+    return StagedPlan(runner, paths.previous, paths.proposed, paths.release)
 
 
 def dropping(config: object, *indices: int) -> object:
@@ -176,6 +206,38 @@ class TestThePassingDryRun:
         (site_of(world) / "index.html").write_text("<h1>rebuilt</h1>\n", encoding="utf-8")
 
         assert staged_rehearsal(make_plan(world)).steps
+
+
+class TestTheWrappersLayout:
+    """``rehearse-urls.sh`` builds its envelope three levels under ``/var/www``, not two (#308).
+
+    Every other test here builds the release where its grandparent happens to be
+    the world's ``/var/www``, so nothing asked about the layout the droplet runs.
+    """
+
+    def test_the_envelope_stands_where_the_wrapper_builds_it(self, tmp_path: Path) -> None:
+        built = build_world(tmp_path, REPO, WRAPPER)
+        www = tmp_path / "var" / "www"
+
+        assert built.release == www / "lovspor-urls-rehearsal" / "releases" / RELEASE_ID
+        assert (built.release / RECORD_NAME).is_file()
+        assert (www / "lovspor-current" / "redirects.caddy").is_file()
+
+    def test_a_capture_is_rehosted_onto_that_envelope_exactly_once(self, tmp_path: Path) -> None:
+        """The wrapper's root holds ``/var/www`` itself: a second rewrite would nest it."""
+        release = WRAPPER.release(tmp_path)
+
+        found = roots(load_adapted("proposed.json", tmp_path, WRAPPER))
+
+        assert sorted(found) == [(release / "corpus").as_posix(), (release / "site").as_posix()]
+
+    def test_the_passing_dry_run_passes_in_either_layout(
+        self, anywhere: Path, layout: Layout
+    ) -> None:
+        report = staged_rehearsal(make_plan(anywhere, layout=layout))
+
+        assert [step.name for step in report.steps][-1] == "staged.rollback"
+        assert layout.release(anywhere).as_posix() in report.steps[2].detail
 
 
 class TestTheHostBothConfigurationsServe:
