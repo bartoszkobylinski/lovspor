@@ -66,6 +66,7 @@ If a feature requires an optional extra, ensure mypy strict still passes without
 - Do not change `CLAUDE.md` or `AGENTS.md`.
 - Do not modify dependencies. Adding an optional extra requires a matching `[[tool.mypy.overrides]]` block; verify `uv sync --frozen` followed by `uv run mypy src/` is green before flagging the PR ready.
 - Do not commit. Open a PR with your additions instead.
+- Do not bypass a gate (`--no-verify`, a skipped check) and do not weaken a gate, widen an ignore, or edit a baseline to make your own additions pass; a gate failure is feedback to repair (`CLAUDE.md` "Gate rules for agents", `docs/decisions.md` §9d).
 
 ## CI test-engineer role
 
