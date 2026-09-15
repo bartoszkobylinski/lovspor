@@ -369,11 +369,14 @@ def _inside_the_deployment(plan: StagedPlan) -> None:
     """The release stands below the deployment root, before anything of it is read.
 
     As spelled, because that is how the symlink assertion reads its boundary
-    off the adapted roots. A root the release is not under would leave the
-    release's own trees beyond the line both boundary assertions check inside.
+    off the adapted roots; and as resolved, because a lexical child reached
+    through a symlink is read from wherever that symlink points. A root the
+    release is not under would leave the release's own trees beyond the line
+    both boundary assertions check inside.
     """
+    spelled = plan.deployment in plan.release.parents
     _require(
-        plan.deployment in plan.release.parents,
+        spelled and plan.deployment.resolve() in plan.release.resolve().parents,
         "staged.validate",
         f"the release {plan.release} is outside the deployment root {plan.deployment}",
     )

@@ -50,6 +50,7 @@ from lovspor.release.staged import (
     symlinked_component,
     tree_urls,
     unreadable_reason,
+    validated,
 )
 from tests.unit.staged_fixtures import (
     CAPTURED,
@@ -601,6 +602,25 @@ class TestTheDeploymentRoot:
 
         assert "deployment root" in caught.value.detail
         assert RECORD_NAME not in caught.value.detail
+
+    def test_a_release_reached_through_a_symlink_outside_it_is_refused_before_reading(
+        self, world: Path
+    ) -> None:
+        """A lexical child can resolve outside the boundary; it is not a deployed release."""
+        plan = make_plan(world)
+        deployment = world / "deployment"
+        deployment.mkdir()
+        (deployment / "releases").symlink_to(plan.release.parent, target_is_directory=True)
+        release = deployment / "releases" / plan.release.name
+        (plan.release / RECORD_NAME).unlink()
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            validated(replace(plan, deployment=deployment, release=release))
+
+        assert caught.value.step == "staged.validate"
+        assert caught.value.detail == (
+            f"the release {release} is outside the deployment root {deployment}"
+        )
 
 
 class TestTheUrlSetTheOldConfigurationOffers:
