@@ -342,7 +342,7 @@ def _refused_then(staged: Staged, after: Mapping[str, object]) -> Rehearsal:
         staged.caddy.load(dict(after))
         return done
 
-    staged.caddy.refuse_at_start = 1
+    staged.caddy.fail_reloads = 1
     return staged.with_runner(("caddy", "reload"), refused)
 
 
@@ -352,7 +352,7 @@ class TestRejectedCutover:
     def test_a_refused_load_is_read_over_the_socket_and_abandoned_back_to_tcp(
         self, staged: Staged
     ) -> None:
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
         before = staged.running(REHEARSAL_TCP)
 
         steps = rejected_cutover(staged.plan)
@@ -369,7 +369,7 @@ class TestRejectedCutover:
         self, staged: Staged
     ) -> None:
         """A run against the ordinary source would prove nothing about a refused load."""
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
 
         rejected_cutover(staged.plan)
 
@@ -380,7 +380,7 @@ class TestRejectedCutover:
         self, staged: Staged
     ) -> None:
         """README step 5's own way out, not a file restore: the admin endpoint has moved."""
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
 
         rejected_cutover(staged.plan)
 
@@ -390,7 +390,7 @@ class TestRejectedCutover:
         assert len(_reloads(staged)) == 2
 
     def test_both_steps_say_what_they_read(self, staged: Staged) -> None:
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
         before = staged.running(REHEARSAL_TCP).describe()
         socket = staged.plan.host.socket_admin
 
@@ -408,7 +408,7 @@ class TestRejectedCutover:
         )
 
     def test_the_abandon_leaves_the_host_ready_for_the_real_cutover(self, staged: Staged) -> None:
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
 
         rejected_cutover(staged.plan)
 
@@ -446,7 +446,7 @@ class TestRejectedCutover:
         if answering == "tcp alone":
             plan = staged.with_runner(("caddy", "reload"), Completed(1, "", "Error: loading"))
         else:
-            staged.caddy.refuse_at_start = 1
+            staged.caddy.fail_reloads = 1
             plan = staged.answering(REHEARSAL_TCP, socket)
 
         with pytest.raises(RehearsalFailedError) as raised:
@@ -1149,7 +1149,7 @@ class TestRestarts:
 
 class TestRehearse:
     def test_walks_every_sub_step_of_validation_g_in_order(self, staged: Staged) -> None:
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
 
         report = rehearse(staged.plan)
 
@@ -1174,7 +1174,7 @@ class TestRehearse:
         ]
 
     def test_leaves_the_second_instance_cut_over_on_its_socket(self, staged: Staged) -> None:
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
 
         rehearse(staged.plan)
 
@@ -1184,7 +1184,7 @@ class TestRehearse:
         assert marker.active == staged.plan.content_id
 
     def test_every_step_reports_what_it_read(self, staged: Staged) -> None:
-        staged.caddy.refuse_at_start = 1
+        staged.caddy.fail_reloads = 1
 
         report = rehearse(staged.plan)
         described = report.describe()

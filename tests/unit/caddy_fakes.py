@@ -25,12 +25,18 @@ was gone (#303). So the file stays when the endpoint moves away, and a
 stop clears it only while the drop-in systemd last loaded sets
 ``RuntimeDirectory=``.
 
-A refused load comes in two kinds. ``fail_reloads`` refuses before
-anything moves. ``refuse_at_start`` is what the droplet's Caddy v2.11.4
-did with an explicit-address load whose site could not start (#302): the
-admin endpoint moves to the address the refused configuration names, the
-one it was listening on stops, and the running configuration stays the
-previous one.
+A refused load is ``fail_reloads``, and on the explicit-address path it
+is what the droplet's Caddy v2.11.4 did with a load whose site could not
+start (#302): the admin endpoint moves to the address the refused
+configuration names, the one it was listening on stops, its socket file
+stays, and the running configuration stays the previous one. The address
+is asked first, so a load to an address nothing listens on is *connection
+refused* and spends no refusal; a socket that cannot be bound moves
+nothing and spends none either. Nothing on that path is refused before
+the endpoint moves: no such refusal was observed, and a test that needs
+a load which never reached the instance answers it in the runner. A
+``systemctl reload`` still fails its job before anything moves, which is
+all the steady-state tests have ever asked of it.
 """
 
 import contextlib
@@ -55,15 +61,11 @@ DEFAULT_TCP = "localhost:2019"
 STOCK_EXEC_RELOAD = "/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force"
 """The stock unit's reload line (``caddyserver/dist``): no ``--address``."""
 _JOB_FAILED = "Job for caddy.service failed because the control process"
-_LOAD_REFUSED = (
-    "Error: sending configuration to instance: caddy responded with error: HTTP 400: "
-    '{"error":"loading config: loading new config: http app module: start: listen tcp :443"}'
-)
 LOAD_REFUSED_AT_START = (
     "Error: loading config: loading new config: http app module: start: listening on :443: "
     "listen tcp :443: bind: permission denied"
 )
-"""What ``refuse_at_start`` answers: the droplet's own refusal, Caddy v2.11.4 (#302)."""
+"""What a refused explicit-address load answers: the droplet's own refusal, Caddy v2.11.4 (#302)."""
 
 
 UMASK_MODE = 0o644
@@ -310,9 +312,8 @@ class FakeCaddy:
         self.admin_address = DEFAULT_TCP
         self.admin_up = True
         self.fail_reloads = 0
-        """Loads refused before anything moves: the model the rehearsal's (ii.rejected) assumed."""
-        self.refuse_at_start = 0
-        """Explicit-address loads refused at app start after the admin endpoint moved (#302)."""
+        """Loads refused. An explicit ``caddy reload --address`` that reaches the instance is
+        refused after its admin endpoint moved (#302); ``systemctl reload`` fails its job first."""
         self.knows_mode_suffix = True
         self.socket_users: set[str] = set()
         """Identities other than the caller's that can open the admin socket."""
@@ -442,13 +443,15 @@ class FakeCaddy:
         return Completed(0, "", "")
 
     def _reload(self, path: Path, env: Mapping[str, str], to: str) -> Completed:
-        """``caddy reload --address``: adapt ``path``, deliver it explicitly to ``to``."""
+        """``caddy reload --address``: adapt ``path``, deliver it explicitly to ``to``.
+
+        The address is asked first: a load to an address nothing listens on
+        is *connection refused* and never reaches the instance, so an armed
+        refusal is not spent on it.
+        """
         done = self._adapt(path, env)
         if done.returncode != 0:
             return done
-        if self.fail_reloads:
-            self.fail_reloads -= 1
-            return Completed(1, "", _LOAD_REFUSED)
         if to != self.admin_address:
             return Completed(
                 1,
@@ -456,7 +459,7 @@ class FakeCaddy:
                 f'Error: sending configuration to instance: performing request: Post "{to}'
                 '/load": dial: connect: connection refused',
             )
-        if self.refuse_at_start:
+        if self.fail_reloads:
             return self._refuse_at_start(json.loads(done.stdout))
         failure = self._apply(json.loads(done.stdout))
         if failure is not None:
@@ -472,13 +475,12 @@ class FakeCaddy:
         permission denied`` (400), ``stopped previous server localhost:…``.
         Afterwards the socket answered with the previous configuration. A
         socket that cannot be bound fails the load before anything moves, so
-        that load never reached the start and the refusal is not spent — as a
-        load to an address nothing listens on does not spend it either.
+        that load never reached the start and the refusal is not spent.
         """
         failure = self._move_admin(config)
         if failure is not None:
             return Completed(1, "", failure)
-        self.refuse_at_start -= 1
+        self.fail_reloads -= 1
         return Completed(1, "", LOAD_REFUSED_AT_START)
 
     def _move_admin(self, config: dict[str, Any]) -> str | None:

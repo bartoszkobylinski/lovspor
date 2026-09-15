@@ -403,7 +403,7 @@ class TestReconcileWindow:
         self, droplet: Droplet
     ) -> None:
         """#302: the report names --abandon, --complete is refused, --abandon ends on TCP."""
-        droplet.caddy.refuse_at_start = 1
+        droplet.caddy.fail_reloads = 1
         with pytest.raises(MigrationFailedError):
             first_migration(droplet.plane, droplet.host, droplet.a)
 
@@ -950,7 +950,7 @@ class TestRehearse:
     def test_walks_the_sequence_and_prints_what_every_step_read(
         self, droplet: Droplet, tmp_path: Path
     ) -> None:
-        droplet.caddy.refuse_at_start = 1
+        droplet.caddy.fail_reloads = 1
 
         result = runner.invoke(
             app, ["release", "rehearse", droplet.a, *self._fixtures(droplet, tmp_path)]
