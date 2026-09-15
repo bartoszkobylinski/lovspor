@@ -33,14 +33,19 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - Integration tests in `tests/integration/` use real fixtures, not mocks.
 
 ### Pre-commit checklist (mandatory, every commit)
-1. `uv run ruff check` — green
-2. `uv run ruff format --check` — green
-3. `uv run mypy src/` — green
-4. `uv run pytest tests/unit/` — green
-5. Invoke `/security-check` — clean
-6. Then `git commit`
+1. `scripts/quality/verify-fast.sh` — green (gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/`)
+2. Invoke `/security-check` — clean
+3. Then `git commit`
 
-`pre-commit install` wires steps 1–4 to run automatically. Step 5 is manual until the skill auto-triggers.
+Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, then `uv run pytest tests/unit/ -q`).
+
+`uv run pre-commit install` installs both hooks: pre-commit runs `verify-fast.sh`, pre-push runs `verify-deep.sh` (a clone whose hooks predate #323 re-runs it to add pre-push). Step 2 is manual until the skill auto-triggers. CI stays authoritative: fast-ci and the Test matrix run lint, mypy and the unit suite on every PR, whatever ran locally. Measured costs and the stage split: `docs/decisions.md` §9d.
+
+### Gate rules for agents (mandatory)
+- A gate failure is feedback to repair, not an obstacle to route around.
+- `git commit --no-verify` and `git push --no-verify` are forbidden for agent-authored work. The only exception is an operator emergency: the owner may bypass a local hook when the gate itself is broken and a fix cannot wait for its repair; CI stays authoritative, so the bypass skips local feedback, never the merge gate.
+- Run `scripts/quality/verify-fast.sh` before reporting work complete, even when no hook fired (hooks not installed, a fresh worktree).
+- Never weaken a gate, widen an ignore, or edit a baseline to make your own change pass, unless changing that gate's policy is itself the task.
 
 ### Branching
 - Every change on a feature branch: `feat/`, `fix/`, `refactor/`, `test/`, `docs/`.
@@ -157,10 +162,10 @@ These extend global rules in `~/.claude/CLAUDE.md`:
 ./scripts/bootstrap.sh
 
 # Daily
+scripts/quality/verify-fast.sh        # fast gate = pre-commit hook: gitleaks, ruff, format, mypy
+scripts/quality/verify-deep.sh        # deep gate = pre-push hook: fast gate + unit suite
 uv run pytest                         # all tests
-uv run pytest tests/unit/             # fast loop
-uv run ruff check && uv run ruff format --check
-uv run mypy src/
+uv run pytest tests/unit/             # unit suite alone
 # Mutation testing is the CI mutation job's work, not Claude's pre-push step.
 # ./scripts/mutmut-pr.sh              # PR-scoped run (CI); --list previews scope
 # uv run mutmut run                   # full-repo baseline — only if explicitly asked

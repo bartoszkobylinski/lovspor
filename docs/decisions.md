@@ -150,10 +150,10 @@ Local layout:
 | Env/deps | `uv` | Fast, lockfile, dev groups. `.venv/` in project |
 | Lint + format | `ruff` | Single tool replaces black + flake8 + isort |
 | Security lint | ruff `S` rules + `bandit` | Overlap is fine; bandit runs via `uvx` |
-| Types | `mypy` strict mode | Wired into CI + pre-commit |
+| Types | `mypy` strict mode | Wired into CI + the fast gate (pre-commit stage); see §9d |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
 | Mutation | `mutmut == 3.7.0` | Function-scoped per-PR runs; see §9 and §9c |
-| Hooks | `pre-commit` | Wired for gitleaks, ruff, format, mypy, pytest unit |
+| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + unit suite) |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
 | XML | `lxml` with `resolve_entities=False, huge_tree=False` (when added) | XXE / billion-laughs mitigation |
@@ -251,13 +251,41 @@ Decided 2026-08-05, closing issue #4. Codex review of PR #3 showed full-repo `mu
 
 **What this does NOT change:** §9a baseline expectations, survivor policy, and revisit triggers stand. Baseline numbers still come from explicitly requested full-repo runs, not from per-PR scoped runs — a scoped score is authoritative only for the PR's own surface and must not be compared against the §9a baseline.
 
+## 9d. Local gates split by cost: fast gate at commit, unit suite at push
+
+Decided 2026-09-15 by the owner, issue #323 (Phase A, decision 1). **No ADR:** development tooling and hooks are "local implementation details" / "reversible changes with no significant external consequences" under `lovspor-notebook/docs/adr/README.md` "When an ADR Is Not Required", and the agentic CI and mutation decisions already live here (§9a–9c) and in `docs/agentic-ci.md`, not in ADRs.
+
+**Why.** The single pre-commit stage ran the full unit suite on every commit:
+
+| check | owner, 2026-09-15, warm caches | re-measured 2026-09-15, fresh worktree at `684acf6` |
+|---|---|---|
+| `gitleaks git --pre-commit --redact --staged --verbose` | 0.1 s | 0.05–0.09 s |
+| `uv run ruff check` | 0.1 s | 0.05 s warm, 0.48 s first run |
+| `uv run ruff format --check` | 0.1 s | 0.05–0.09 s |
+| `uv run mypy src/` | 0.2–0.4 s | 0.21–0.25 s warm; 4.86 s first run; 6.33 s with a fresh `--cache-dir` |
+| `uv run pytest tests/unit/ -q` | 255.9 s (6789 passed) | 263.1–273.3 s (6804–6808 passed, on this change's branch) |
+
+The suite was ~99% of the commit's cost, which defeats an agent's edit → gate → repair loop. mypy stays at commit time because even cold it costs seconds. `scripts/quality/verify-fast.sh` as a whole took 0.51 s warm.
+
+**Mechanism.**
+
+- `.pre-commit-config.yaml` names no check. Its pre-commit stage runs `scripts/quality/verify-fast.sh` and its pre-push stage `scripts/quality/verify-deep.sh`. `default_install_hook_types: [pre-commit, pre-push]` makes a plain `pre-commit install` (which `scripts/bootstrap.sh` runs) install both; a clone with hooks installed before this change re-runs it to add pre-push.
+- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check` and `mypy src/`. It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
+- `verify-deep.sh` runs `verify-fast.sh`, then `uv run pytest tests/unit/ -q`, and does not start the suite when the fast gate failed. Re-running the fast gate at push costs about a second and still catches a commit made before the hooks were installed.
+- Under the hook, pre-commit stashes unstaged changes, so the commit stage checks what is being committed; run by hand, the script checks the working tree.
+- Hook and script cannot drift because the config holds no check to drift. Two test files pin that: `tests/unit/test_quality_hook_config.py` has pre-commit itself resolve which script each stage reaches, and `tests/unit/test_quality_fast_gate.py` runs both scripts against stub tools.
+
+**CI stays authoritative.** No workflow changed. fast-ci (ruff, format, mypy, unit suite) and the Test matrix (full pytest with coverage) run on every PR, so a skipped or bypassed local hook cannot turn a PR green. No workflow installs git hooks. The `[agent:*]` marker commits are made and pushed on `ubuntu-latest` from a fresh checkout, and the self-hosted agent jobs check out with `persist-credentials: false`, so the pre-push stage never runs on a CI lane. One check has no CI equivalent, before or after this change: the gitleaks scan, which runs only in this gate and in `/security-check`.
+
+**Agent rules** live in `CLAUDE.md` "Gate rules for agents". A gate failure is repaired, not bypassed. `--no-verify` is forbidden for agent-authored work outside an owner emergency. The fast gate runs before work is reported complete. A gate, ignore or baseline is never loosened to pass one's own change.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:
 
 1. **Small chunks** — 1 commit = 1 logical change. Every commit independently green and bisectable.
 2. **TDD per chunk** — failing unit test first, then minimal code to green.
-3. **Pre-commit mandatory** — ruff + format + mypy + pytest + `/security-check`.
+3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + unit suite). See §9d.
 4. **Feature branches only** — `feat/`, `fix/`, `refactor/`, `test/`, `docs/`. Never commit to `main` except the single bootstrap commit.
 5. **PR → Codex → merge** — Claude opens PR with prepared Codex prompt, STOPS, user runs Codex, Claude fixes any bugs on the same branch, **only the user merges**.
 6. **No AI attribution** in commit messages, PR descriptions, or code comments.
