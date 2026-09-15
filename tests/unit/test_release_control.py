@@ -731,6 +731,23 @@ class TestTheCrashTable:
         assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
 
+    def test_abandon_refuses_when_reload_succeeds_but_caddy_serves_something_else(
+        self, live_a: Host
+    ) -> None:
+        self._kill(live_a, "committed")
+        foreign: dict[str, Any] = copy.deepcopy(live_a.caddy.running_config())  # type: ignore[assignment]
+        site = foreign["apps"]["http"]["servers"]["srv0"]["routes"][0]
+        site["handle"][0]["routes"].append({"handle": [{"handler": "file_server"}]})
+        original_restart = live_a.caddy.restart
+        live_a.caddy.restart = lambda: live_a.caddy.load(foreign)  # type: ignore[method-assign]
+
+        with pytest.raises(ReloadFailedError, match="after the reload Caddy runs"):
+            reconcile(live_a.plane, "abandon")
+
+        live_a.caddy.restart = original_restart  # type: ignore[method-assign]
+        assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
+        assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
+
     def test_a_crash_after_the_reload_is_completed_by_the_marker_alone(self, live_a: Host) -> None:
         self._kill(live_a, "reloaded")
 
