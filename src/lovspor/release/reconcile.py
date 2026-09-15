@@ -134,12 +134,17 @@ def _complete(plane: ControlPlane, triple: Triple) -> ReconcileReport:
 
 
 def _abandon(plane: ControlPlane, triple: Triple) -> ReconcileReport:
-    """M becomes the truth: D = M's fragment, validate, reload; M unchanged."""
+    """M becomes the truth: D = M's fragment, validate, reload; M unchanged.
+
+    ``.next`` is validated before the rename; the pair R must equal is adapted
+    after it, from the path the reload reads (#317). Adapting writes nothing, so
+    a kill after the rename leaves D = M's fragment and R as it was — a re-run
+    abandons again.
+    """
     atomic_write_text(plane.next_fragment, revert_source(plane, triple.marker), mode=WORLD_READABLE)
     validate_caddy(plane.runner, plane.caddyfile, plane.next_fragment)
-    expected = adapt(plane.runner, plane.caddyfile, plane.next_fragment)
     plane.next_fragment.replace(plane.fragment)
-    failure = reload_expecting(plane, expected)
+    failure = reload_expecting(plane, adapt(plane.runner, plane.caddyfile, plane.fragment))
     if failure is not None:
         raise ReloadFailedError(f"abandon failed: {failure}")
     return _report(triple, Situation.reconciled, triple.marked, "abandoned")

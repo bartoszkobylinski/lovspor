@@ -88,14 +88,13 @@ class ControlPlane:
 
 
 class Triple(BaseModel):
-    """R, D and M as read; ``old`` is M's own fragment adapted, the reference for R."""
+    """R, D and M as read."""
 
     model_config = ConfigDict(frozen=True)
 
     running: ConfigPair
     disk: ConfigPair
     marker: Marker | None
-    old: ConfigPair | None
 
     def describe(self) -> str:
         active = self.marker.active if self.marker else "none"
@@ -133,15 +132,6 @@ def _disk_and_marker(plane: ControlPlane) -> tuple[ConfigPair, Marker | None]:
     return adapt(plane.runner, plane.caddyfile, plane.fragment), read_marker(plane.releases)
 
 
-def _old_pair(plane: ControlPlane, marker: Marker | None) -> ConfigPair | None:
-    if marker is None:
-        return None
-    fragment = release_dir(plane.releases, marker.active) / FRAGMENT_NAME
-    if not fragment.is_file():
-        return None
-    return adapt(plane.runner, plane.caddyfile, fragment)
-
-
 def read_triple(plane: ControlPlane) -> Triple:
     """D and M from disk, then R from Caddy; unreachable prints D and M for the operator."""
     disk, marker = _disk_and_marker(plane)
@@ -151,11 +141,18 @@ def read_triple(plane: ControlPlane) -> Triple:
         active = marker.active if marker else "none"
         detail = f"{error.detail}; D={disk.describe()} M=(active {active})"
         raise UnobservableError(error.reason, detail) from error
-    return Triple(running=running, disk=disk, marker=marker, old=_old_pair(plane, marker))
+    return Triple(running=running, disk=disk, marker=marker)
 
 
 def situation(triple: Triple) -> Situation:
-    """The row of the crash table this host is on."""
+    """The row of the crash table this host is on.
+
+    With R and D apart, the crash after the fragment rename is recognised by
+    release id alone: D names a release, R names M's — none while no marker
+    exists — and D's is another. No hash can say R is M's fragment: Caddy hides
+    the fragment by the path it imported it from, and D's holds that path now
+    (#317). Both resolutions reload and compare R before they report.
+    """
     running, disk = triple.running, triple.disk
     if running == disk:
         if running.release_id == triple.marked:
@@ -163,8 +160,7 @@ def situation(triple: Triple) -> Situation:
         if running.release_id is not None:
             return Situation.reloaded
         return Situation.foreign
-    r_is_old = running == triple.old or (triple.marker is None and running.release_id is None)
-    if disk.release_id is not None and r_is_old:
+    if disk.release_id not in (None, running.release_id) and running.release_id == triple.marked:
         return Situation.staged
     return Situation.foreign
 
@@ -186,15 +182,19 @@ def _stage(plane: ControlPlane, text: str, marker: Marker | None) -> None:
     atomic_write_text(plane.next_fragment, text, mode=WORLD_READABLE)
 
 
-def _candidate_pair(plane: ControlPlane, content_id: str) -> ConfigPair:
+def _check_candidate(plane: ControlPlane, content_id: str) -> None:
+    """``.next`` validates and composes the candidate, before anything public moves.
+
+    Only its content is asked here. Caddy hides the fragment by the path it
+    imported it from (#317), so no pair adapted at ``.next`` is ever R.
+    """
     validate_caddy(plane.runner, plane.caddyfile, plane.next_fragment)
-    pair = adapt(plane.runner, plane.caddyfile, plane.next_fragment)
-    if pair.release_id != content_id:
+    named = adapt(plane.runner, plane.caddyfile, plane.next_fragment).release_id
+    if named != content_id:
         raise CommitRefusedError(
-            f"the composed configuration names {pair.release_id or 'no release'}, "
+            f"the composed configuration names {named or 'no release'}, "
             f"not {content_id}; does the Caddyfile import the fragment?"
         )
-    return pair
 
 
 def revert_source(plane: ControlPlane, marker: Marker | None) -> str:
@@ -216,29 +216,39 @@ def reload_expecting(plane: ControlPlane, expected: ConfigPair) -> str | None:
     return None
 
 
-def _restore(plane: ControlPlane, marker: Marker | None, old: ConfigPair | None) -> None:
-    """D = old, then R = old; the previous fragment is immutable inside its release."""
+def _restore(plane: ControlPlane, marker: Marker | None) -> None:
+    """D = old, then R = old; the previous fragment is immutable inside its release.
+
+    R is compared with the old fragment adapted once it is back at the active
+    fragment's path, the one the reload reads (#317). With no marker the kept
+    copy is reloaded without a comparison.
+    """
     atomic_write_text(plane.next_fragment, revert_source(plane, marker), mode=WORLD_READABLE)
     plane.next_fragment.replace(plane.fragment)
-    if old is None:
+    if marker is None:
         reload_caddy(plane.runner)
         return
-    failure = reload_expecting(plane, old)
+    failure = reload_expecting(plane, adapt(plane.runner, plane.caddyfile, plane.fragment))
     if failure is not None:
         raise ReloadFailedError(f"revert did not restore the previous configuration: {failure}")
 
 
 def _commit(plane: ControlPlane, content_id: str, triple: Triple, checkpoint: Checkpoint) -> None:
-    """Steps (1) stage and (2) commit of the transaction, (3) the revert on failure."""
+    """Steps (1) stage and (2) commit of the transaction, (3) the revert on failure.
+
+    The pair R must equal is adapted after the rename, from the path the reload
+    reads (#317). Adapting writes nothing: a kill after ``committed``, that adapt
+    included, leaves D = new and R = M = old, the row ``reconcile`` resolves.
+    """
     _stage(plane, read_fragment(release_dir(plane.releases, content_id)), triple.marker)
     checkpoint("staged")
-    pair = _candidate_pair(plane, content_id)
+    _check_candidate(plane, content_id)
     checkpoint("validated")
     plane.next_fragment.replace(plane.fragment)
     checkpoint("committed")
-    failure = reload_expecting(plane, pair)
+    failure = reload_expecting(plane, adapt(plane.runner, plane.caddyfile, plane.fragment))
     if failure is not None:
-        _restore(plane, triple.marker, triple.old)
+        _restore(plane, triple.marker)
         raise ReloadFailedError(f"release {content_id[:12]} not switched: {failure}")
     checkpoint("reloaded")
     write_marker(plane.releases, Marker(active=content_id, previous=triple.marked))

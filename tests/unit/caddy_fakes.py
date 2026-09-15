@@ -18,9 +18,17 @@ whose two ``hide`` lists named that path, where the same bytes adapted at
 ``…/Caddyfile`` named ``…/Caddyfile``; with no release the pair hashes the
 whole ``servers`` subtree, so the two configurations are different pairs.
 The committed captures show the same on v2.8.4: ``previous.json``, adapted
-as ``/etc/caddy/Caddyfile.previous``, hides that path. Real Caddy also
-lists every file imported into the site block — the captures name the
-redirect map and the fragment — which the toy does not model.
+as ``/etc/caddy/Caddyfile.previous``, hides that path.
+
+Beside it every ``file_server`` hides every file imported, by the path it
+was imported from (#317), each once and sorted. ``proposed.json`` lists
+``Caddyfile.proposed``, the redirect map and then the fragment that imports
+the map — so not in the order of import. The same capture with only the
+fragment's path spelled ``.next`` hashes to another release pair, which is
+why a pair adapted with the fragment at ``.next`` is not the pair Caddy runs
+once the fragment is renamed into place. Whether Caddy lists an imported
+file that contributes no directive was not observed; the toy lists every
+file it inlines.
 
 The admin endpoint has an address. The instance listens where the
 configuration it last loaded says (``admin`` in the global options
@@ -103,8 +111,11 @@ def _resolve(text: str, env: Mapping[str, str]) -> str:
     return _PLACEHOLDER.sub(replace, text)
 
 
-def _inline_imports(text: str, env: Mapping[str, str]) -> list[str]:
-    """``import`` is a preprocessor step: the imported file's lines replace the line."""
+def _inline_imports(text: str, env: Mapping[str, str], imported: list[Path]) -> list[str]:
+    """``import`` is a preprocessor step: the imported file's lines replace the line.
+
+    Every file inlined is appended to ``imported``, by the path it was imported from.
+    """
     lines: list[str] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -115,7 +126,9 @@ def _inline_imports(text: str, env: Mapping[str, str]) -> list[str]:
         for path in _matching(pattern):
             if not path.is_file():
                 raise AdaptError(f"import {pattern}: file does not exist")
-            lines.extend(_inline_imports(_resolve(path.read_text(encoding="utf-8"), env), env))
+            imported.append(path)
+            inlined = _resolve(path.read_text(encoding="utf-8"), env)
+            lines.extend(_inline_imports(inlined, env, imported))
     return lines
 
 
@@ -201,34 +214,43 @@ def _global_options(lines: list[str]) -> tuple[dict[str, str], list[str]]:
     return options, lines[end + 1 :]
 
 
-def _hide(node: object, config_file: Path) -> None:
-    """Every ``file_server`` hides the Caddyfile the adapter was handed (#316)."""
+def _hide(node: object, hidden: Sequence[str]) -> None:
+    """Every ``file_server`` hides the Caddyfile and every file imported (#316, #317)."""
     if isinstance(node, list):
         for item in node:
-            _hide(item, config_file)
+            _hide(item, hidden)
     elif isinstance(node, dict):
         if node.get("handler") == "file_server":
-            node["hide"] = [str(config_file)]
+            node["hide"] = list(hidden)
         for value in node.values():
-            _hide(value, config_file)
+            _hide(value, hidden)
 
 
 def toy_adapt(
-    caddyfile: Path, env: Mapping[str, str], config_file: Path | None = None
+    caddyfile: Path,
+    env: Mapping[str, str],
+    config_file: Path | None = None,
+    imported_as: Mapping[Path, Path] | None = None,
 ) -> dict[str, Any]:
     """The Caddyfile as Caddy's JSON: one server, one site route, a subroute of routes.
 
     ``config_file`` is the path Caddy is handed, the one every ``file_server``
     hides; it defaults to ``caddyfile``. A test that keeps a Caddyfile's former
     text in a copy beside it adapts the copy as the file it stands in for.
+    ``imported_as`` does the same for an imported file: a release's own
+    fragment adapted as the active fragment it is installed as.
     """
-    config = _adapted(caddyfile, env)
-    _hide(config, config_file or caddyfile)
+    imported: list[Path] = []
+    config = _adapted(caddyfile, env, imported)
+    stand_ins = imported_as or {}
+    named = {config_file or caddyfile, *(stand_ins.get(path, path) for path in imported)}
+    _hide(config, sorted(str(path) for path in named))
     return config
 
 
-def _adapted(caddyfile: Path, env: Mapping[str, str]) -> dict[str, Any]:
-    lines = _inline_imports(_resolve(caddyfile.read_text(encoding="utf-8"), env), env)
+def _adapted(caddyfile: Path, env: Mapping[str, str], imported: list[Path]) -> dict[str, Any]:
+    text = _resolve(caddyfile.read_text(encoding="utf-8"), env)
+    lines = _inline_imports(text, env, imported)
     lines = [line for line in lines if line and not line.startswith("#")]
     options, lines = _global_options(lines)
     config: dict[str, Any] = {}

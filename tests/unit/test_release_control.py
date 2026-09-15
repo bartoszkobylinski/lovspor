@@ -10,12 +10,13 @@ Kills are checkpoints that stop the transaction at a named step.
 import copy
 import shutil
 import stat
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import pytest
 
-from lovspor.release.caddy import FRAGMENT_ENV, ConfigPair, adapt, config_pair
+from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
 from lovspor.release.control import (
     TRANSACTION_STEPS,
     CommitReport,
@@ -113,11 +114,12 @@ class Host(NamedTuple):
         return fragment_paths(self.fragment_of(content_id))[1].removesuffix("/corpus")
 
     def pair_of(self, content_id: str) -> ConfigPair:
-        """What the composed configuration adapts to with this release's fragment."""
+        """What the composed configuration adapts to with this release's fragment, installed at
+        the active fragment's path — the path Caddy hides it by (#317)."""
         fragment = self.releases / content_id / FRAGMENT_NAME
-        return config_pair(
-            toy_adapt(self.plane.caddyfile, {"LOVSPOR_RELEASE_FRAGMENT": str(fragment)})
-        )
+        env = {FRAGMENT_ENV: str(fragment)}
+        installed = {fragment: self.plane.fragment}
+        return config_pair(toy_adapt(self.plane.caddyfile, env, imported_as=installed))
 
     def running(self) -> ConfigPair:
         return config_pair(self.caddy.running_config())
@@ -180,7 +182,6 @@ class TestLiveRelease:
         triple = read_triple(live_a.plane)
         assert triple.running == triple.disk == live_a.pair_of(live_a.a)
         assert triple.marker == Marker(active=live_a.a, previous=None)
-        assert triple.old == triple.disk
         assert triple.describe().startswith(f"R=({live_a.a}, ")
 
     def test_a_hand_reloaded_edit_with_the_same_id_is_unreconciled(self, live_a: Host) -> None:
@@ -265,15 +266,12 @@ class TestTriple:
         disk = ConfigPair(release_id=None, config_hash="2" * 64)
         prefix = f"R=({'a' * 64}, {'1' * 12}) D=(none, {'2' * 12}) "
 
-        unmarked = Triple(running=running, disk=disk, marker=None, old=None)
-        first = Triple(
-            running=running, disk=disk, marker=Marker(active="a" * 64, previous=None), old=None
-        )
+        unmarked = Triple(running=running, disk=disk, marker=None)
+        first = Triple(running=running, disk=disk, marker=Marker(active="a" * 64, previous=None))
         second = Triple(
             running=running,
             disk=disk,
             marker=Marker(active="b" * 64, previous="a" * 64),
-            old=None,
         )
 
         assert unmarked.describe() == prefix + "M=(active none, previous none)"
@@ -327,6 +325,24 @@ class TestCommit:
 
         assert stat.S_IMODE(live_a.plane.fragment.stat().st_mode) == 0o644
         assert stat.S_IMODE((live_a.releases / MARKER_NAME).stat().st_mode) == 0o644
+
+    def test_a_pair_adapted_at_next_is_not_what_caddy_runs_once_the_fragment_is_renamed(
+        self, live_a: Host
+    ) -> None:
+        """#317: Caddy hides the fragment by the path it imported it from, so the same bytes
+        adapted at ``.next`` are one ``hide`` entry apart from R after the rename and reload;
+        adapted where Caddy reads them, they are R."""
+        live_a.plane.next_fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
+        at_next = adapt(live_a.caddy, live_a.plane.caddyfile, live_a.plane.next_fragment)
+
+        live_a.plane.next_fragment.replace(live_a.plane.fragment)
+        assert live_a.caddy.run(("systemctl", "reload", "caddy"), {}).returncode == 0
+
+        assert at_next.release_id == live_a.running().release_id == live_a.b
+        assert at_next != live_a.running()
+        assert (
+            adapt(live_a.caddy, live_a.plane.caddyfile, live_a.plane.fragment) == live_a.running()
+        )
 
     def test_the_live_release_is_not_reloaded_again(self, live_a: Host) -> None:
         before = live_a.snapshot()
@@ -508,6 +524,72 @@ class TestReloadFailure:
         assert live_release(live_a.plane) == live_a.a
 
 
+class Witness:
+    """The fake's runner, noting which release the active fragment holds whenever a command
+    reads it — ``caddy adapt`` named at that path, or a unit reload through the default."""
+
+    def __init__(self, host: Host) -> None:
+        self.host = host
+        self.seen: list[tuple[str, str]] = []
+
+    def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+        active = self.host.plane.fragment
+        if env.get(FRAGMENT_ENV, str(active)) == str(active):
+            text = active.read_text(encoding="utf-8")
+            names = {
+                self.host.fragment_of(self.host.a): "A",
+                self.host.fragment_of(self.host.b): "B",
+            }
+            self.seen.append((argv[1], names.get(text, "other")))
+        return self.host.caddy.run(argv, env)
+
+    def plane(self) -> ControlPlane:
+        return ControlPlane(
+            self.host.releases,
+            self.host.plane.caddyfile,
+            self.host.plane.fragment,
+            self,
+            self.host.caddy,
+        )
+
+
+class TestWhereRIsComparedFrom:
+    """#317: Caddy hides the fragment by the path it imported it from, so the pair R is compared
+    with is adapted at the active fragment's path once the fragment the reload reads is there;
+    ``.next`` is asked only for its content. The first entry is the triple's own D."""
+
+    def test_the_commit_adapts_the_candidate_where_the_reload_reads_it(self, live_a: Host) -> None:
+        witness = Witness(live_a)
+
+        commit_release(witness.plane(), live_a.b)
+
+        assert witness.seen == [("adapt", "A"), ("adapt", "B"), ("reload", "B")]
+
+    def test_the_revert_adapts_the_old_fragment_once_it_is_back(self, live_a: Host) -> None:
+        witness = Witness(live_a)
+        live_a.caddy.fail_reloads = 1
+
+        with pytest.raises(ReloadFailedError, match="not switched"):
+            commit_release(witness.plane(), live_a.b)
+
+        assert witness.seen == [
+            ("adapt", "A"),
+            ("adapt", "B"),
+            ("reload", "B"),
+            ("adapt", "A"),
+            ("reload", "A"),
+        ]
+
+    def test_abandon_adapts_the_markers_fragment_once_it_is_back(self, live_a: Host) -> None:
+        with pytest.raises(Killed):
+            commit_release(live_a.plane, live_a.b, _kill_at("committed"))
+        witness = Witness(live_a)
+
+        assert reconcile(witness.plane(), "abandon").action == "abandoned"
+
+        assert witness.seen == [("adapt", "B"), ("adapt", "A"), ("reload", "A")]
+
+
 class TestRollback:
     def test_the_previous_release_through_the_same_transaction(self, live_a: Host) -> None:
         commit_release(live_a.plane, live_a.b)
@@ -649,6 +731,23 @@ class TestTheCrashTable:
         assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
         assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
 
+    def test_abandon_refuses_when_reload_succeeds_but_caddy_serves_something_else(
+        self, live_a: Host
+    ) -> None:
+        self._kill(live_a, "committed")
+        foreign: dict[str, Any] = copy.deepcopy(live_a.caddy.running_config())  # type: ignore[assignment]
+        site = foreign["apps"]["http"]["servers"]["srv0"]["routes"][0]
+        site["handle"][0]["routes"].append({"handle": [{"handler": "file_server"}]})
+        original_restart = live_a.caddy.restart
+        live_a.caddy.restart = lambda: live_a.caddy.load(foreign)  # type: ignore[method-assign]
+
+        with pytest.raises(ReloadFailedError, match="after the reload Caddy runs"):
+            reconcile(live_a.plane, "abandon")
+
+        live_a.caddy.restart = original_restart  # type: ignore[method-assign]
+        assert live_a.plane.fragment.read_text(encoding="utf-8") == live_a.fragment_of(live_a.a)
+        assert read_marker(live_a.releases) == Marker(active=live_a.a, previous=None)
+
     def test_a_crash_after_the_reload_is_completed_by_the_marker_alone(self, live_a: Host) -> None:
         self._kill(live_a, "reloaded")
 
@@ -687,6 +786,119 @@ class TestTheCrashTable:
         assert situation(read_triple(live_a.plane)) == Situation.reloaded
         assert reconcile(live_a.plane).action == "marker_written"
         assert live_release(live_a.plane) == live_a.b
+
+
+class TestTheStagedRowByReleaseId:
+    """#317, owner decision of 2026-09-15: the crash after the rename is recognised by release id.
+
+    R cannot be compared by hash with M's fragment adapted where the release keeps it: Caddy
+    hides the fragment by the path it imported it from, and D's new fragment already holds the
+    active fragment's path. The row is R naming M's release — none while no marker exists —
+    beside a D naming another release.
+    """
+
+    def _crash_after_the_rename(self, host: Host) -> Triple:
+        with pytest.raises(Killed):
+            commit_release(host.plane, host.b, _kill_at("committed"))
+        return read_triple(host.plane)
+
+    def test_the_crash_after_the_rename_reads_staged_where_no_hash_could_say_so(
+        self, live_a: Host
+    ) -> None:
+        triple = self._crash_after_the_rename(live_a)
+        kept = live_a.releases / live_a.a / FRAGMENT_NAME
+
+        assert (triple.running.release_id, triple.disk.release_id) == (live_a.a, live_a.b)
+        assert triple.running == live_a.pair_of(live_a.a)
+        assert triple.running != adapt(live_a.caddy, live_a.plane.caddyfile, kept)
+        assert situation(triple) == Situation.staged
+
+    def test_every_other_command_refuses_it_by_name_and_moves_nothing(self, live_a: Host) -> None:
+        self._crash_after_the_rename(live_a)
+        before = live_a.snapshot()
+
+        for command in (live_release, rollback, prune, lambda p: commit_release(p, live_a.b)):
+            with pytest.raises(UnreconciledError, match="^host is staged_not_reloaded: "):
+                command(live_a.plane)  # type: ignore[operator]
+
+        assert live_a.snapshot() == before
+        assert live_a.caddy.reloads == 0
+
+    @pytest.mark.parametrize(("action", "resolved"), [("complete", "b"), ("abandon", "a")])
+    def test_complete_and_abandon_resolve_it_end_to_end(
+        self, live_a: Host, action: str, resolved: str
+    ) -> None:
+        triple = self._crash_after_the_rename(live_a)
+        assert situation(triple) == Situation.staged
+        live = getattr(live_a, resolved)
+
+        report = reconcile(live_a.plane, action)  # type: ignore[arg-type]
+
+        assert (report.situation, report.live, report.triple) == (
+            Situation.reconciled,
+            live,
+            triple.describe(),
+        )
+        assert live_release(live_a.plane) == live
+        assert live_a.running() == live_a.pair_of(live)
+        previous = live_a.a if action == "complete" else None
+        assert read_marker(live_a.releases) == Marker(active=live, previous=previous)
+
+    def test_r_naming_a_release_other_than_the_markers_is_foreign(self, live_a: Host) -> None:
+        fragment = live_a.releases / live_a.b / FRAGMENT_NAME
+        installed = {fragment: live_a.plane.fragment}
+        env = {FRAGMENT_ENV: str(fragment)}
+        live_a.caddy.load(toy_adapt(live_a.plane.caddyfile, env, imported_as=installed))
+
+        triple = read_triple(live_a.plane)
+
+        assert (triple.running.release_id, triple.disk.release_id) == (live_a.b, live_a.a)
+        assert triple.marked == live_a.a
+        assert situation(triple) == Situation.foreign
+
+    @pytest.mark.parametrize("disk", ["no release", "the same release"])
+    def test_r_naming_the_markers_release_beside_a_d_naming_no_other_is_foreign(
+        self, live_a: Host, disk: str
+    ) -> None:
+        text = PLACEHOLDER
+        if disk == "the same release":
+            text = live_a.fragment_of(live_a.a).replace(
+                f"{live_a.root_of(live_a.a)}/corpus/redirects",
+                f"{live_a.root_of(live_a.b)}/corpus/redirects",
+            )
+        live_a.plane.fragment.write_text(text, encoding="utf-8")
+
+        triple = read_triple(live_a.plane)
+
+        assert triple.running == live_a.pair_of(live_a.a) != triple.disk
+        assert triple.disk.release_id == (None if disk == "no release" else live_a.a)
+        assert situation(triple) == Situation.foreign
+
+    @pytest.mark.parametrize(
+        ("running", "disk", "marked", "row"),
+        [
+            ("a", "b", "a", Situation.staged),
+            (None, "b", None, Situation.staged),
+            ("a", "a", "a", Situation.foreign),
+            ("a", None, "a", Situation.foreign),
+            ("b", "a", "a", Situation.foreign),
+            ("b", "c", "a", Situation.foreign),
+            (None, "b", "a", Situation.foreign),
+            ("a", "b", None, Situation.foreign),
+        ],
+    )
+    def test_r_and_d_apart_are_staged_by_release_id_alone(
+        self, running: str | None, disk: str | None, marked: str | None, row: Situation
+    ) -> None:
+        """R and D always differ here; only the three release ids decide the row."""
+        ids = {name: name * 64 for name in "abc"}
+        triple = Triple(
+            running=ConfigPair(release_id=ids.get(running or ""), config_hash="1" * 64),
+            disk=ConfigPair(release_id=ids.get(disk or ""), config_hash="2" * 64),
+            marker=Marker(active=ids[marked], previous=None) if marked else None,
+        )
+
+        assert situation(triple) == row
 
 
 class TestForeign:
@@ -733,10 +945,12 @@ class TestForeign:
         assert str(caught.value) == "the configuration on disk names no release; cannot complete"
 
     def test_abandon_needs_the_markers_release_fragment(self, live_a: Host) -> None:
+        """R names M's release beside a D naming another: the staged row by release id (#317),
+        whether or not M's fragment is still kept; abandon refuses naming it."""
         live_a.plane.fragment.write_text(live_a.fragment_of(live_a.b), encoding="utf-8")
         (live_a.releases / live_a.a / FRAGMENT_NAME).unlink()
 
-        assert situation(read_triple(live_a.plane)) == Situation.foreign
+        assert situation(read_triple(live_a.plane)) == Situation.staged
         with pytest.raises(IncompleteEnvelopeError, match="release.caddy is unreadable"):
             reconcile(live_a.plane, "abandon")
 
