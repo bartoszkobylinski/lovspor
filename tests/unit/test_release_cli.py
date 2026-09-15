@@ -10,6 +10,7 @@ the throwaway checkout as the site CLI tests do.
 import os
 import re
 import shutil
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -1306,6 +1307,28 @@ class TestRehearseUrls:
         assert plan.release == paths["releases"] / RELEASE_ID
         assert isinstance(plan.runner, SubprocessRunner)
         assert "staged.corpus: 8 corpus URLs" in result.stdout
+
+    def test_progress_goes_to_stderr_and_stdout_is_the_report_alone(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Progress is how the operator knows the run is alive (#307); the report is the
+        verdict. They never share a stream, and the rate is measured on a clock that
+        cannot jump."""
+        captured: list[StagedPlan] = []
+
+        def capture(plan: StagedPlan) -> RehearsalReport:
+            captured.append(plan)
+            plan.progress.say("staged: checking staged.validate")
+            return RehearsalReport(steps=(Step(name="staged.corpus", detail="8 corpus URLs"),))
+
+        monkeypatch.setattr(commands, "staged_rehearsal", capture)
+
+        result = self._invoke(RELEASE_ID, self._paths(tmp_path))
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout == "staged.corpus: 8 corpus URLs\n"
+        assert result.stderr == "staged: checking staged.validate\n"
+        assert captured[0].progress.clock is time.monotonic
 
     def test_a_name_that_is_not_a_release_id_is_a_usage_error(self, tmp_path: Path) -> None:
         result = self._invoke("not-an-id", self._paths(tmp_path))

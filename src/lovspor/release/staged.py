@@ -72,8 +72,11 @@ the second-instance rehearsal — both, never either.
 
 import hashlib
 import os
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import timedelta
+from functools import partial
 from pathlib import Path
 
 from lovspor.release.answers import (
@@ -113,16 +116,63 @@ namespace nothing is there, so the old answers nothing and the URL drops
 out of the comparison on its own.
 """
 _UNIX_PREFIX = "unix/"
+PROGRESS_INTERVAL = 30.0
+"""The fewest seconds between two lines saying how far one pass has got.
+
+Time rather than a URL count: the droplet's rate is exactly what is not
+known in advance, and a count picked on a laptop is a line a second on one
+machine and a line an hour on another.
+"""
+
+
+def _silent(line: str) -> None:
+    """Progress a caller did not ask for goes nowhere."""
+
+
+@dataclass(frozen=True)
+class Progress:
+    """Where the dry-run says how far it has got, and the clock it measures that by.
+
+    Never part of the report: the report is what the run found, printed once
+    it has found it — and until then a run over the droplet's corpus printed
+    nothing, so eleven hours of work read exactly like a hang (#307).
+    """
+
+    say: Callable[[str], None] = _silent
+    clock: Callable[[], float] = time.monotonic
+
+    def counted(self, label: str, urls: Sequence[str]) -> Iterator[str]:
+        """``urls`` one at a time: the pass's start, then how far it has got each interval."""
+        self.say(f"staged: asking {label}")
+        started = said = self.clock()
+        for done, url in enumerate(urls, start=1):
+            yield url
+            now = self.clock()
+            if now - said >= PROGRESS_INTERVAL:
+                said = now
+                self.say(_how_far(label, done, len(urls), now - started))
+
+
+def _how_far(label: str, done: int, total: int, elapsed: float) -> str:
+    """Answered so far, the rate, and the rest of the pass at that rate.
+
+    Only reached an interval or more into a pass, so ``elapsed`` is never zero.
+    """
+    rate = done / elapsed
+    rest = timedelta(seconds=round((total - done) / rate))
+    return f"staged: {label} {done}/{total} URLs, {rate:.1f}/s, ETA {rest}"
 
 
 @dataclass(frozen=True)
 class StagedPlan:
-    """The two Caddyfiles, the envelope they are compared against, and how to run Caddy."""
+    """The two Caddyfiles, the envelope they are compared against, how to run Caddy,
+    and where to say how far the run has got."""
 
     runner: Runner
     previous: Path
     proposed: Path
     release: Path
+    progress: Progress = field(default_factory=Progress)
 
     @property
     def corpus(self) -> Path:
@@ -259,7 +309,7 @@ def candidate_urls(config: object) -> tuple[str, ...]:
     return tuple(dict.fromkeys(found))
 
 
-def answers_for(config: object, urls: Sequence[str]) -> dict[str, Answer]:
+def answers_for(config: object, urls: Iterable[str]) -> dict[str, Answer]:
     """What ``config`` answers for each URL; a URL no route reaches is left out."""
     found: dict[str, Answer] = {}
     for url in urls:
@@ -477,9 +527,10 @@ def _changed(taken: Sequence[tuple[str, str]], now: Sequence[tuple[str, str]]) -
     return difference[0][0] if difference else "nothing"
 
 
-def _still_answers(reading: Reading, restored: Mapping[str, Answer]) -> None:
+def _still_answers(plan: StagedPlan, reading: Reading, again: object) -> None:
     """Exactly what it answered: no answer lost, none changed, and none gained."""
-    difference = _first_difference(reading.before, restored)
+    asked = plan.progress.counted("the previous configuration again", reading.urls)
+    difference = _first_difference(reading.before, answers_for(again, asked))
     _require(
         difference is None,
         "staged.rollback",
@@ -496,7 +547,7 @@ def rollback_restores(plan: StagedPlan, reading: Reading) -> Step:
         "staged.rollback",
         f"the previous Caddyfile binds the admin endpoint to {listen}, not to TCP",
     )
-    _still_answers(reading, answers_for(again, reading.urls))
+    _still_answers(plan, reading, again)
     now = digests(reading.trees)
     _require(
         now == reading.taken,
@@ -519,20 +570,32 @@ def _read(plan: StagedPlan) -> Reading:
     previous = adapt_config(plan.runner, plan.previous, plan.fragment)
     trees = _read_trees(plan, previous)
     urls = tuple(dict.fromkeys((*candidate_urls(previous), *SITE_URLS)))
-    before, taken = answers_for(previous, urls), digests(trees)
+    plan.progress.say(f"staged: {len(urls)} URLs to ask each configuration")
+    before = answers_for(previous, plan.progress.counted("the previous configuration", urls))
+    taken = digests(trees)
     proposed = adapt_config(plan.runner, plan.proposed, plan.fragment)
-    after = answers_for(proposed, urls)
+    after = answers_for(proposed, plan.progress.counted("the proposed configuration", urls))
     return Reading(previous, proposed, before, after, trees, taken, urls)
+
+
+def _assertions(plan: StagedPlan, reading: Reading) -> tuple[tuple[str, Callable[[], Step]], ...]:
+    """The assertions over the reading, in the ADR's order, each by the name it reports under."""
+    return (
+        ("staged.host", partial(hosts_agree, reading)),
+        ("staged.corpus", partial(corpus_preserved, plan, reading)),
+        ("staged.proxied", partial(proxied_preserved, reading)),
+        ("staged.site", partial(site_answered, plan, reading)),
+        ("staged.symlinks", partial(no_symlink_served, plan, reading)),
+        ("staged.rollback", partial(rollback_restores, plan, reading)),
+    )
 
 
 def staged_rehearsal(plan: StagedPlan) -> RehearsalReport:
     """ADR-0014's staged first-migration rehearsal: the URL half, in its order."""
+    plan.progress.say("staged: checking staged.validate")
     steps = [validated(plan)]
     reading = _read(plan)
-    steps.append(hosts_agree(reading))
-    steps.append(corpus_preserved(plan, reading))
-    steps.append(proxied_preserved(reading))
-    steps.append(site_answered(plan, reading))
-    steps.append(no_symlink_served(plan, reading))
-    steps.append(rollback_restores(plan, reading))
+    for name, check in _assertions(plan, reading):
+        plan.progress.say(f"staged: checking {name}")
+        steps.append(check())
     return RehearsalReport(steps=tuple(steps))

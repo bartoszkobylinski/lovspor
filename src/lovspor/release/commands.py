@@ -61,7 +61,7 @@ from lovspor.release.migrate import (
 )
 from lovspor.release.reconcile import ReconcileAction, prune, reconcile
 from lovspor.release.rehearsal import Rehearsal, RehearsalFixtures, rehearse
-from lovspor.release.staged import StagedPlan, staged_rehearsal
+from lovspor.release.staged import Progress, StagedPlan, staged_rehearsal
 from lovspor.site.build import discover_checkout
 from lovspor.site.capabilities import CapabilityDocument, Checkout
 from lovspor.site.errors import SiteBuildError
@@ -645,7 +645,11 @@ def rehearse_urls_command(
             "the dry-run would compare it with itself"
         )
     plan = StagedPlan(
-        SubprocessRunner(), previous_caddyfile, caddyfile_source, releases / content_id
+        SubprocessRunner(),
+        previous_caddyfile,
+        caddyfile_source,
+        releases / content_id,
+        Progress(say=lambda line: typer.echo(line, err=True)),
     )
     with _refusals():
         report = staged_rehearsal(plan)
