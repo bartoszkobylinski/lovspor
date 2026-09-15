@@ -1330,6 +1330,27 @@ class TestRehearseUrls:
         assert result.stderr == "staged: checking staged.validate\n"
         assert captured[0].progress.clock is time.monotonic
 
+    def test_progress_precedes_the_refusal_on_stderr_and_never_reaches_stdout(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A failed run keeps progress off stdout and preserves its order before the error."""
+
+        def refuse(plan: StagedPlan) -> RehearsalReport:
+            plan.progress.say("staged: checking staged.corpus")
+            raise RehearsalFailedError("staged.corpus", "the proposed configuration differs")
+
+        monkeypatch.setattr(commands, "staged_rehearsal", refuse)
+
+        result = self._invoke(RELEASE_ID, self._paths(tmp_path))
+
+        assert result.exit_code == 1
+        assert result.stderr == (
+            "staged: checking staged.corpus\n"
+            "release refused: rehearsal step staged.corpus failed: "
+            "the proposed configuration differs\n"
+        )
+        assert "staged: checking" not in result.stdout
+
     def test_a_name_that_is_not_a_release_id_is_a_usage_error(self, tmp_path: Path) -> None:
         result = self._invoke("not-an-id", self._paths(tmp_path))
 
