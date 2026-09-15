@@ -415,6 +415,19 @@ class TestTree:
         assert len(failures) == 1
         assert failures[0].startswith("FAIL ratchet parse: src/broken.py:1 ")
 
+    def test_source_that_is_not_utf8_is_reported_as_an_error(self, tmp_path: Path) -> None:
+        root = _tree(tmp_path, {"mod.py": "x = 1\n"})
+        (root / "src" / "broken.py").write_bytes(b"x = '" + bytes([0xFF]) + b"'\n")
+        out = io.StringIO()
+
+        with contextlib.redirect_stdout(out):
+            code = ratchets.main(["--root", str(root), "--baseline", str(root / "baseline.toml")])
+
+        assert code == 1
+        assert out.getvalue().startswith(
+            "FAIL ratchet parse: src/broken.py:1 'utf-8' codec can't decode byte 0xff"
+        )
+
     def test_passing_tree_reports_what_it_checked(self, tmp_path: Path) -> None:
         root = _tree(tmp_path, {"a.py": _function("f", 3), "b/c.py": _function("g", 4)})
         out = io.StringIO()
