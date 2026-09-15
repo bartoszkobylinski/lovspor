@@ -457,7 +457,6 @@ class FakeCaddy:
                 '/load": dial: connect: connection refused',
             )
         if self.refuse_at_start:
-            self.refuse_at_start -= 1
             return self._refuse_at_start(json.loads(done.stdout))
         failure = self._apply(json.loads(done.stdout))
         if failure is not None:
@@ -472,10 +471,15 @@ class FakeCaddy:
         endpoint started unix//…/admin.sock|0660``, the site's ``bind:
         permission denied`` (400), ``stopped previous server localhost:…``.
         Afterwards the socket answered with the previous configuration. A
-        socket that cannot be bound fails the load before anything moves.
+        socket that cannot be bound fails the load before anything moves, so
+        that load never reached the start and the refusal is not spent — as a
+        load to an address nothing listens on does not spend it either.
         """
         failure = self._move_admin(config)
-        return Completed(1, "", failure or LOAD_REFUSED_AT_START)
+        if failure is not None:
+            return Completed(1, "", failure)
+        self.refuse_at_start -= 1
+        return Completed(1, "", LOAD_REFUSED_AT_START)
 
     def _move_admin(self, config: dict[str, Any]) -> str | None:
         """The admin endpoint moves to what ``config`` names; a failed bind moves nothing.

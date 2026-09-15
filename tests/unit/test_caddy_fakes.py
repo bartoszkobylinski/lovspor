@@ -363,6 +363,7 @@ class TestRefusedAtStart:
         )
         assert box.caddy.admin_address == DEFAULT_TCP
         assert box.caddy.running_config_at(DEFAULT_TCP) == before
+        assert box.caddy.refuse_at_start == 1
 
     def test_fail_reloads_is_still_the_refusal_that_moves_nothing(self, box: Box) -> None:
         before = box.caddy.running_config()
