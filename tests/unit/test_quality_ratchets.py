@@ -7,12 +7,14 @@ on it, ruff included: the rules are only as good as the rejection they produce.
 import contextlib
 import importlib.util
 import io
+import os
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -442,6 +444,18 @@ class TestTree:
 
         assert result.returncode == 1
         assert "FAIL ratchet function-lines: src/mod.py:1 long 21 > 20\n" in result.stdout
+
+
+class TestTheCheckedInTree:
+    def test_the_checked_in_baseline_matches_src(self) -> None:
+        if "MUTANT_UNDER_TEST" in os.environ:
+            pytest.skip("mutmut rewrites src/ into trampolines; normal runs check the real tree")
+        out = io.StringIO()
+
+        with contextlib.redirect_stdout(out):
+            code = ratchets.main([])
+
+        assert code == 0, out.getvalue()
 
 
 def _baseline_entries(root: Path) -> list[tuple[str, str, str, int, str]]:
