@@ -361,14 +361,21 @@ class TestEachPatternCompiledOnceAnswersAsBefore:
         """Pinned outright, so the spellings above are known to reach both outcomes."""
         assert matches_path((pattern,), url) is matched
 
-    @given(patterns=st.lists(_TEXT, min_size=1, max_size=4), data=st.data())
-    def test_any_patterns_and_url(self, patterns: list[str], data: st.DataObject) -> None:
-        chosen = data.draw(st.sampled_from(patterns))
-        parts = re.split(r"(\*)", chosen)
-        filled = "".join(data.draw(_TEXT) if part == "*" else part for part in parts)
-        url = data.draw(st.sampled_from([filled, filled.swapcase(), filled.upper()]) | _TEXT)
 
-        assert matches_path(patterns, url) is any(_reference(one, url) for one in patterns)
+@given(patterns=st.lists(_TEXT, min_size=1, max_size=4), data=st.data())
+def test_any_patterns_and_url(patterns: list[str], data: st.DataObject) -> None:
+    """#307's property, kept at module level on purpose.
+
+    As a method, a second pytest run in the same process — mutmut's clean-test
+    run — hands Hypothesis a new instance, and it refuses the test as
+    ``HealthCheck.differing_executors``; the mutation gate then never started.
+    """
+    chosen = data.draw(st.sampled_from(patterns))
+    parts = re.split(r"(\*)", chosen)
+    filled = "".join(data.draw(_TEXT) if part == "*" else part for part in parts)
+    url = data.draw(st.sampled_from([filled, filled.swapcase(), filled.upper()]) | _TEXT)
+
+    assert matches_path(patterns, url) is any(_reference(one, url) for one in patterns)
 
 
 class TestReadingTheRoutesThemselves:
