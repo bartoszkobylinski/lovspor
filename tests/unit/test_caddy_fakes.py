@@ -2,11 +2,15 @@
 
 What the migration tests lean on is pinned here: a global options block
 adapts to the same servers subtree and records ``admin``; a load reaches
-the instance only at the address it listens on; the socket is a file
-with the ``|mode`` suffix's mode while the endpoint is there; and
-``systemctl`` reflects the drop-in only after a ``daemon-reload``.
+the instance only at the address it listens on; the socket is a real
+socket file with the ``|mode`` suffix's mode, left behind when the
+endpoint moves away and cleared at a stop only while the loaded drop-in
+sets ``RuntimeDirectory=`` (#303); and ``systemctl`` reflects the
+drop-in only after a ``daemon-reload``.
 """
 
+import contextlib
+import socket
 import stat
 from pathlib import Path
 
@@ -20,6 +24,7 @@ from tests.unit.caddy_fakes import (
     AdaptError,
     FakeCaddy,
     admin_listen,
+    plant_socket,
     split_address,
     toy_adapt,
 )
@@ -141,13 +146,60 @@ class TestReloadAddress:
         with pytest.raises(UnobservableError):
             box.caddy.admin_client(DEFAULT_TCP).running_config()
 
-    def test_a_load_back_over_the_socket_removes_the_socket_file(self, box: Box) -> None:
+    def test_the_socket_file_is_a_real_socket(self, box: Box) -> None:
+        """The rollback removes nothing at the socket's name that is not a socket, so the
+        file the fake makes must be one — a regular file would exercise the refusal instead."""
+        box.reload(box.new, DEFAULT_TCP)
+
+        assert stat.S_ISSOCK(box.socket_file.lstat().st_mode)
+
+    @pytest.mark.parametrize("taken_by", ["socket", "file"])
+    def test_a_load_onto_a_socket_name_already_taken_fails_and_moves_nothing(
+        self, box: Box, taken_by: str
+    ) -> None:
+        """Binding over an existing file fails, as a fresh ``listen unix`` does.
+
+        Whether Caddy clears a stale file before it binds has not been
+        observed, so the fake does not: the pessimistic answer.
+        """
+        if taken_by == "socket":
+            plant_socket(box.socket_file)
+        else:
+            box.socket_file.write_text("", encoding="utf-8")
+        before = box.caddy.running_config()
+
+        done = box.caddy.run(
+            (
+                "caddy",
+                "reload",
+                "--config",
+                str(box.new),
+                "--adapter",
+                "caddyfile",
+                "--address",
+                DEFAULT_TCP,
+            ),
+            {},
+        )
+
+        assert done.returncode == 1
+        assert done.stderr.startswith(
+            f"Error: loading new config: admin: listen unix {box.socket_file}"
+        )
+        assert box.caddy.admin_address == DEFAULT_TCP
+        assert box.caddy.running_config() == before
+        assert box.caddy.reloads == 0
+
+    def test_a_load_back_over_the_socket_leaves_the_socket_file_behind(self, box: Box) -> None:
+        """#303: Caddy v2.11.4 kept the file after a load moved its endpoint back to TCP."""
         box.reload(box.new, DEFAULT_TCP)
 
         assert box.reload(box.caddyfile, box.socket) == 0
 
         assert box.caddy.admin_address == DEFAULT_TCP
-        assert not box.socket_file.exists()
+        assert stat.S_ISSOCK(box.socket_file.lstat().st_mode)
+        with pytest.raises(UnobservableError):
+            box.caddy.running_config_at(box.socket)
         assert box.caddy.running_config_at(DEFAULT_TCP) == toy_adapt(box.caddyfile, {})
 
     def test_a_reload_to_the_same_socket_keeps_the_socket_file(self, box: Box) -> None:
@@ -218,6 +270,29 @@ class TestReloadAddress:
 
         with pytest.raises(AssertionError, match="listen unix"):
             box.caddy.restart()
+
+
+class TestPlantSocket:
+    def test_leaves_a_socket_nothing_listens_on_under_a_path_too_long_to_bind(
+        self, tmp_path: Path
+    ) -> None:
+        """macOS caps a socket address near 104 bytes, and pytest's ``tmp_path`` is longer."""
+        deep = tmp_path.joinpath(*["a-directory-name-long-enough"] * 4)
+        deep.mkdir(parents=True)
+        path = deep / "admin.sock"
+        assert len(str(path)) > 104
+        cwd = Path.cwd()
+
+        plant_socket(path)
+
+        assert stat.S_ISSOCK(path.lstat().st_mode)
+        assert Path.cwd() == cwd
+        with (
+            contextlib.chdir(deep),
+            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
+            pytest.raises(ConnectionRefusedError),
+        ):
+            client.connect(path.name)
 
 
 class TestSystemctl:
@@ -293,7 +368,59 @@ class TestSystemctl:
         assert box.caddy.restarts == 1
         assert box.caddy.admin_up is True
         assert box.caddy.admin_address == DEFAULT_TCP
-        assert not box.socket_file.exists()
+        with pytest.raises(UnobservableError):
+            box.caddy.running_config_at(box.socket)
+
+    def _runtime_drop_in(self, box: Box) -> None:
+        box.drop_in.parent.mkdir(parents=True, exist_ok=True)
+        box.drop_in.write_text(
+            "[Service]\nRuntimeDirectory=caddy\nRuntimeDirectoryMode=2770\n", encoding="utf-8"
+        )
+
+    @pytest.mark.parametrize(
+        ("drop_in", "cleared"),
+        [
+            ("none", False),
+            ("written, not loaded", False),
+            ("loaded", True),
+            ("loaded, then removed and reloaded", False),
+        ],
+    )
+    def test_a_stop_clears_socket_files_only_under_a_loaded_runtime_directory(
+        self, box: Box, drop_in: str, cleared: bool
+    ) -> None:
+        """#303: once the drop-in that set ``RuntimeDirectory=`` was gone, a dead socket
+        file survived the offline rollback's restart and a second one. Whether a live
+        socket's file outlives its process was not observed; left, it is pessimistic."""
+        box.reload(box.new, DEFAULT_TCP)
+        box.reload(box.caddyfile, box.socket)
+        if drop_in != "none":
+            self._runtime_drop_in(box)
+        if drop_in.startswith("loaded"):
+            box.caddy.run(("systemctl", "daemon-reload"), {})
+        if drop_in.endswith("reloaded"):
+            box.drop_in.unlink()
+            box.caddy.run(("systemctl", "daemon-reload"), {})
+
+        assert box.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
+
+        assert box.socket_file.exists() is not cleared
+        assert box.caddy.admin_address == DEFAULT_TCP
+
+    def test_a_restart_under_runtime_directory_binds_a_fresh_socket_with_the_suffix_mode(
+        self, box: Box
+    ) -> None:
+        """So a restart never inherits a mode a hand set: the point of the creation-mode suffix."""
+        self._runtime_drop_in(box)
+        box.caddy.run(("systemctl", "daemon-reload"), {})
+        box.reload(box.new, DEFAULT_TCP)
+        box.caddyfile.write_text(box.new.read_text(encoding="utf-8"), encoding="utf-8")
+        box.socket_file.chmod(0o600)
+
+        assert box.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
+
+        assert stat.S_IMODE(box.socket_file.stat().st_mode) == 0o660
+        assert box.caddy.running_config_at(box.socket) == toy_adapt(box.new, {})
 
     def test_a_restart_of_a_caddyfile_that_does_not_adapt_fails(self, box: Box) -> None:
         box.caddyfile.write_text(UNKNOWN_OPTION, encoding="utf-8")

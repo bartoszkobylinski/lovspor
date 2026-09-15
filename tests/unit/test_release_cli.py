@@ -533,6 +533,7 @@ class TestMigrate:
         assert result.stdout.splitlines() == [
             f"rolled back from {droplet.host.socket_admin} to localhost:2019; reloaded yes",
             "marker removed yes, ExecReload pair removed yes",
+            "dead admin socket file removed",
         ]
         assert droplet.caddy.admin_address == "localhost:2019"
         assert read_marker(droplet.plane.releases) is None
@@ -563,9 +564,25 @@ class TestMigrate:
             "rolled back from offline to localhost:2019; reloaded no",
             "marker removed yes, ExecReload pair removed yes",
             "restarted caddy",
+            "dead admin socket file removed",
         ]
         assert read_marker(droplet.plane.releases) is None
         assert droplet.caddy.restarts == 1
+
+    def test_offline_rollback_without_a_socket_does_not_claim_one_was_removed(
+        self, droplet: Droplet
+    ) -> None:
+        self._staged(droplet)
+
+        result = runner.invoke(app, ["release", "migrate", "--rollback", "--offline"])
+
+        assert result.exit_code == 0, result.output
+        assert result.stdout.splitlines() == [
+            "rolled back from offline to localhost:2019; reloaded no",
+            "marker removed no, ExecReload pair removed no",
+            "restarted caddy",
+        ]
+        assert not droplet.socket_file.exists()
 
     def test_the_dialling_rollback_exits_three_when_nothing_answers(self, droplet: Droplet) -> None:
         """The state `--offline` exists for: the ordinary rollback reads the

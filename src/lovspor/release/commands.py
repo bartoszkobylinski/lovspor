@@ -404,15 +404,17 @@ def _migrated(report: MigrationReport) -> tuple[str, ...]:
 
 
 def _rolled_back(report: RollbackReport) -> tuple[str, ...]:
-    lines = (
+    lines: tuple[str, ...] = (
         f"rolled back from {report.admin_before} to {report.admin}; "
         f"reloaded {_done(report.reloaded)}",
         f"marker removed {_done(report.marker_removed)}, "
         f"ExecReload pair removed {_done(report.exec_reload_removed)}",
     )
-    if report.restarted is None:
-        return lines
-    return (*lines, f"restarted {report.restarted}")
+    if report.restarted is not None:
+        lines = (*lines, f"restarted {report.restarted}")
+    if report.socket_removed:
+        lines = (*lines, "dead admin socket file removed")
+    return lines
 
 
 def _retired(report: RetireReport) -> tuple[str, ...]:
