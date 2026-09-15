@@ -100,9 +100,10 @@ class TestFastGate:
         run = _run_gate(FAST, tmp_path)
 
         assert run.returncode == 0, run.output
-        assert set(FAST_CHECKS.values()) <= set(run.commands)
+        assert run.commands == list(FAST_CHECKS.values())
         assert run.cwds == {str(REPO_ROOT)}
         assert run.fail_lines() == []
+        assert run.output.rstrip().endswith("verify-fast: all checks passed")
 
     def test_never_runs_the_unit_suite(self, tmp_path: Path) -> None:
         """~256 s of tests on every commit is exactly what issue #323 moved out."""
@@ -163,9 +164,9 @@ class TestDeepGate:
         run = _run_gate(DEEP, tmp_path)
 
         assert run.returncode == 0, run.output
-        assert set(FAST_CHECKS.values()) <= set(run.commands[:-1])
-        assert run.commands[-1] == UNIT_SUITE
+        assert run.commands == [*FAST_CHECKS.values(), UNIT_SUITE]
         assert run.cwds == {str(REPO_ROOT)}
+        assert run.output.rstrip().endswith("verify-deep: all checks passed")
 
     def test_a_failing_unit_suite_fails_the_gate_naming_it(self, tmp_path: Path) -> None:
         run = _run_gate(DEEP, tmp_path, failing=(UNIT_SUITE,))
