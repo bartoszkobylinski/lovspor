@@ -25,7 +25,8 @@ ExecReload=/usr/bin/caddy reload --config /etc/caddy/rehearsal/Caddyfile --force
 # RuntimeDirectory= and RuntimeDirectoryMode= are NOT here, for the same reason
 # they are not in caddy.service: the migration's drop-in installs them, and the
 # rehearsal is what proves a restart then recreates the socket with the right
-# mode and group.
+# mode and group. Group=caddy above is the stock unit's for the same reason: the
+# drop-in's Group= replaces it, and that is what gives the socket its group (#324).
 TimeoutStopSec=5s
 LimitNOFILE=1048576
 PrivateTmp=true

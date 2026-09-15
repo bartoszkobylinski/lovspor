@@ -3,7 +3,8 @@
 The socket is a real file under ``tmp_path`` — the check stats it — and
 the instance behind it is ``FakeCaddy``, listening where the test says.
 The release group's gid is the file's own, so the group fact is about
-the code and not about the machine the tests run on.
+the code and not about the machine the tests run on — while the drop-in
+the instance was started under gives the socket that group (#324).
 """
 
 from pathlib import Path
@@ -20,7 +21,7 @@ from lovspor.release.admin_socket import (
 from lovspor.release.caddy import DEFAULT_ADMIN
 from lovspor.release.errors import AdminSocketError, ControlPlaneError
 from lovspor.release.migrate import DEFAULT_RELEASE_GROUP, DEFAULT_TCP_ADMIN, SOCKET_MODE
-from tests.unit.caddy_fakes import socketed_caddy
+from tests.unit.caddy_fakes import chgrp_drop_in, socketed_caddy
 
 TCP = "localhost:2019"
 
@@ -114,8 +115,8 @@ class TestTheFourFacts:
 
         assert str(raised.value) == (
             f"admin socket precondition unmet: {socketed.file} has gid {found}, not "
-            f"lovspor-release's {found + 1}; the runtime directory needs the setgid bit "
-            "and the group"
+            f"lovspor-release's {found + 1}; a start gives the socket the unit's Group= "
+            "(the caddy.service drop-in), a reload the group of its setgid runtime directory"
         )
 
     def test_the_wrong_mode_names_the_creation_mode_suffix(self, socketed: Socketed) -> None:
@@ -212,3 +213,38 @@ class TestTheUnprivilegedCall:
 
         with pytest.raises(AdminSocketError, match="cannot run"):
             check_admin_socket(socketed.access(runner=Unrunnable()))
+
+
+class TestTheGroupTheDropInGives:
+    """#324: the group fact holds only while the drop-in's ``Group=`` is the release group."""
+
+    def test_the_migrations_drop_in_runs_the_unit_in_the_release_group(
+        self, tmp_path: Path
+    ) -> None:
+        socketed = socketed_caddy(tmp_path)
+
+        assert socketed.caddy.unit_group == "lovspor-release"
+        assert socketed.ownership.gid_of("lovspor-release") == socketed.socket.stat().st_gid
+
+    def test_a_chgrp_before_the_start_is_the_droplets_refusal(self, tmp_path: Path) -> None:
+        """(v.1) on the droplet: ``has gid 988, not lovspor-release's 986``, the chgrp undone."""
+        socketed = socketed_caddy(tmp_path, drop_in=chgrp_drop_in)
+        access = AdminSocket(
+            socket_admin=socketed.address,
+            tcp_admin=TCP,
+            runner=socketed.caddy,
+            admin_client=socketed.caddy.admin_client,
+            ownership=socketed.ownership,
+        )
+        found = socketed.socket.stat().st_gid
+        wanted = socketed.ownership.gid_of("lovspor-release")
+
+        with pytest.raises(AdminSocketError) as raised:
+            check_admin_socket(access)
+
+        assert wanted != found
+        assert str(raised.value) == (
+            f"admin socket precondition unmet: {socketed.socket} has gid {found}, not "
+            f"lovspor-release's {wanted}; a start gives the socket the unit's Group= "
+            "(the caddy.service drop-in), a reload the group of its setgid runtime directory"
+        )

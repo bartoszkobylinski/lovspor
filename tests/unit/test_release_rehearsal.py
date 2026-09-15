@@ -60,7 +60,13 @@ from lovspor.release.rehearsal import (
     steady_reload,
     steady_state,
 )
-from tests.unit.caddy_fakes import LOAD_REFUSED_AT_START, FakeCaddy, plant_socket, toy_adapt
+from tests.unit.caddy_fakes import (
+    LOAD_REFUSED_AT_START,
+    FakeCaddy,
+    chgrp_drop_in,
+    plant_socket,
+    toy_adapt,
+)
 from tests.unit.migrate_fixtures import OLD_CADDYFILE, Droplet, Sabotaged, make_droplet
 from tests.unit.release_fixtures import World, build, make_world
 
@@ -1053,6 +1059,39 @@ class TestRestarts:
         assert str(staged.plan.host.socket) in steps[0].detail
         assert "0660" in steps[1].detail
         assert staged.caddy.restarts >= 2
+
+    def test_both_restarts_keep_the_release_group_under_the_migrations_drop_in(
+        self, staged: Staged
+    ) -> None:
+        cutover(staged.plan)
+
+        steps = restarts(staged.plan)
+
+        gid = staged.plan.host.socket.stat().st_gid
+        held = [f"group lovspor-release (gid {gid})" in step.detail for step in steps[:2]]
+        assert held == [True, True]
+
+    def test_a_drop_in_giving_the_group_by_chgrp_fails_the_first_restart(
+        self, staged: Staged
+    ) -> None:
+        """#324, the droplet's own (v.1): the chgrp ran, and the restarted socket was gid caddy."""
+        cutover(staged.plan)
+        host = staged.plan.host
+        host.drop_in.write_text(chgrp_drop_in(host), encoding="utf-8")
+        staged.caddy.run(("systemctl", "daemon-reload"), {})
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            restarts(staged.plan)
+
+        found = host.socket.stat().st_gid
+        wanted = staged.droplet.ownership.gid_of("lovspor-release")
+        assert raised.value.step == "v.1"
+        assert wanted != found
+        assert raised.value.detail == (
+            f"admin socket precondition unmet: {host.socket} has gid {found}, not "
+            f"lovspor-release's {wanted}; a start gives the socket the unit's Group= "
+            "(the caddy.service drop-in), a reload the group of its setgid runtime directory"
+        )
 
     def test_a_fact_that_stops_holding_ends_the_rehearsal_naming_the_restart(
         self, staged: Staged

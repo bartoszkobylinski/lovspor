@@ -103,7 +103,17 @@ class TestTheDropIn:
         assert "--address unix//run/caddy/admin.sock" in drop_in
         assert "RuntimeDirectory=caddy" in drop_in
         assert "RuntimeDirectoryMode=2770" in drop_in
-        assert "ExecStartPre=+/usr/bin/chgrp lovspor-release /run/caddy" in drop_in
+
+    def test_gives_the_socket_the_release_group_by_the_units_group(self) -> None:
+        """#324: systemd owns ``RuntimeDirectory=`` by the unit's ``Group=`` at every start,
+        and the ``ExecStartPre`` chgrp that used to give ``/run/caddy`` the group did not
+        survive it — not in the here-document, and not in a comment describing it either."""
+        drop_in = _heredoc("DROP_IN")
+
+        assert "\nGroup=lovspor-release\n" in drop_in
+        assert "\nSupplementaryGroups=caddy\n" in drop_in
+        assert "ExecStartPre" not in _script()
+        assert "chgrp" not in _script()
 
     def test_keeps_the_environment_file_the_domain_comes_from(self) -> None:
         assert "EnvironmentFile=/etc/default/caddy-lovspor" in _heredoc("DROP_IN")

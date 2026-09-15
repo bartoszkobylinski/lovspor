@@ -171,7 +171,8 @@ class TestHost:
             "EnvironmentFile=/etc/default/caddy-lovspor\n"
             "RuntimeDirectory=caddy\n"
             "RuntimeDirectoryMode=2770\n"
-            f"ExecStartPre=+/usr/bin/chgrp lovspor-release {host.runtime_dir}\n"
+            "Group=lovspor-release\n"
+            "SupplementaryGroups=caddy\n"
         )
 
         assert drop_in_text(host, with_exec_reload=False) == runtime
@@ -181,12 +182,38 @@ class TestHost:
             f"--address {host.socket_admin}\n"
         )
         assert drop_in_text(MigrationHost(), with_exec_reload=True).endswith(
-            "ExecStartPre=+/usr/bin/chgrp lovspor-release /run/caddy\n"
+            "RuntimeDirectory=caddy\n"
+            "RuntimeDirectoryMode=2770\n"
+            "Group=lovspor-release\n"
+            "SupplementaryGroups=caddy\n"
             "ExecReload=\n"
             "ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force "
             "--address unix//run/caddy/admin.sock\n"
         )
         assert PRE_ENVELOPE_DROP_IN == "[Service]\nEnvironmentFile=/etc/default/caddy-lovspor\n"
+
+    def test_the_drop_in_gives_the_release_group_by_group_not_by_a_chgrp(self) -> None:
+        """#324: systemd owns ``RuntimeDirectory=`` by the unit's ``User=``/``Group=`` at every
+        start; an ``ExecStartPre=`` chgrp of the directory came back ``caddy:caddy``."""
+        host = MigrationHost(release_group="release-group", caddy_user="caddy-user")
+
+        for with_exec_reload in (False, True):
+            text = drop_in_text(host, with_exec_reload)
+            assert "\nGroup=release-group\n" in text
+            assert "\nSupplementaryGroups=caddy-user\n" in text
+            assert "ExecStartPre" not in text
+
+    def test_the_drop_in_has_one_effective_primary_and_supplementary_group(self) -> None:
+        """#324: no later assignment may silently restore the stock primary group."""
+        host = MigrationHost(release_group="release-group", caddy_user="caddy-user")
+
+        directives = [
+            line
+            for line in drop_in_text(host, with_exec_reload=True).splitlines()
+            if line.startswith(("Group=", "SupplementaryGroups="))
+        ]
+
+        assert directives == ["Group=release-group", "SupplementaryGroups=caddy-user"]
 
 
 class TestSystemOwnership:

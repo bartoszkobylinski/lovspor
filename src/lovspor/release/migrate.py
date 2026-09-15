@@ -333,10 +333,14 @@ def _no_checkpoint(step: str) -> None:
 def drop_in_text(host: MigrationHost, with_exec_reload: bool) -> str:
     """The ``caddy.service`` drop-in: provisioning and the migration write this one text.
 
-    ``RuntimeDirectory=`` recreates the socket's directory at every start
-    and ``ExecStartPre=+chgrp`` gives it the release group, so a recreated
-    socket inherits the group through the setgid bit; the ``ExecReload=``
-    pair resets the stock line and names the socket explicitly.
+    ``RuntimeDirectory=`` recreates the socket's directory at every start,
+    and systemd owns it by the unit's ``User=`` and ``Group=``, so the
+    release group is the unit's ``Group=``; Caddy creates the socket in it
+    with that primary group. ``SupplementaryGroups=`` keeps the stock unit's
+    group, the one named like Caddy's user. An ``ExecStartPre=+chgrp`` of the
+    directory did not survive the start: on the droplet (systemd 255) it
+    came back ``caddy:caddy`` (#324). The ``ExecReload=`` pair resets the
+    stock line and names the socket explicitly.
     """
     lines = [
         "# Written by lovspor (ADR-0014 Decision 6): provisioning and the first migration.",
@@ -344,7 +348,8 @@ def drop_in_text(host: MigrationHost, with_exec_reload: bool) -> str:
         f"EnvironmentFile={ENVIRONMENT_FILE}",
         f"RuntimeDirectory={host.runtime_dir.name}",
         f"RuntimeDirectoryMode={RUNTIME_DIR_MODE:04o}",
-        f"ExecStartPre=+/usr/bin/chgrp {host.release_group} {host.runtime_dir}",
+        f"Group={host.release_group}",
+        f"SupplementaryGroups={host.caddy_user}",
     ]
     if with_exec_reload:
         lines += [
@@ -764,6 +769,10 @@ def _load_drop_in(plane: ControlPlane, host: MigrationHost, with_exec_reload: bo
 
 def _runtime_dir(host: MigrationHost) -> None:
     """By hand, once: ``RuntimeDirectory=`` only acts at the next start.
+
+    So does the drop-in's ``Group=`` (#324): the Caddy that (c) reloads was
+    started in group ``caddy``, and the setgid bit of this directory is what
+    gives the socket that reload creates the release group.
 
     The symlink question is asked here and not only in the preflight:
     ``complete_first_migration`` repeats this step with no preflight, and

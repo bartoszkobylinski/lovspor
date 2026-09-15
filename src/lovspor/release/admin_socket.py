@@ -115,7 +115,11 @@ def _gid(access: AdminSocket) -> int:
 
 
 def _mode_and_group(access: AdminSocket, found: os.stat_result) -> tuple[int, int]:
-    """Facts 1 and 2: the creation-mode suffix's mode, and the setgid directory's group."""
+    """Facts 1 and 2: the creation-mode suffix's mode, and the release group.
+
+    The refusal names both sources of the group (#324): a start, the unit's
+    ``Group=``; a reload before any start, the migration's setgid directory.
+    """
     mode = stat.S_IMODE(found.st_mode)
     if mode != SOCKET_MODE:
         raise _refuse(
@@ -126,7 +130,8 @@ def _mode_and_group(access: AdminSocket, found: os.stat_result) -> tuple[int, in
     if found.st_gid != gid:
         raise _refuse(
             f"{access.socket} has gid {found.st_gid}, not {access.release_group}'s {gid}; "
-            "the runtime directory needs the setgid bit and the group"
+            "a start gives the socket the unit's Group= (the caddy.service drop-in), "
+            "a reload the group of its setgid runtime directory"
         )
     return mode, gid
 

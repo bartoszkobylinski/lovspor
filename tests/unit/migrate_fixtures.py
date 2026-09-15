@@ -7,7 +7,8 @@ marker, no runtime directory, the drop-in provisioning wrote; beside it
 the new Caddyfile binding admin to a socket under ``tmp_path`` and
 importing the fragment. Ownership is a table, the group's gid the
 temporary directory's own, so the socket file the fake creates carries
-the group the verification asks for.
+the group the verification asks for — until a restart under a drop-in
+whose ``Group=`` is another group takes it away (#324).
 """
 
 import shutil
@@ -180,9 +181,9 @@ def make_droplet(
     new.write_text(new_caddyfile(socket_admin, fragment), encoding="utf-8")
     monkeypatch.setenv("LOVSPOR_DOMAIN", "lovspor.test")
     monkeypatch.delenv("LOVSPOR_RELEASE_FRAGMENT", raising=False)
-    caddy = FakeCaddy(caddyfile, drop_in)
-    caddy.restart()
     ownership = FakeOwnership({"caddy": CADDY_UID}, {"lovspor-release": tmp_path.stat().st_gid})
+    caddy = FakeCaddy(caddyfile, drop_in, ownership)
+    caddy.restart()
     host = MigrationHost(
         caddyfile=caddyfile,
         caddyfile_source=new,

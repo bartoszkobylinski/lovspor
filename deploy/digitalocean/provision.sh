@@ -200,9 +200,11 @@ usermod -aG lovspor-release root
 # the address the release commands address. (The first migration of a box that
 # is already serving on TCP installs this in two phases instead — the pair last,
 # after the cutover — which is `lovspor release migrate`'s business, not this
-# script's.) RuntimeDirectory= recreates /run/caddy at every start and the
-# ExecStartPre chgrp gives it the group, so a recreated socket inherits it
-# through the setgid bit.
+# script's.) RuntimeDirectory= recreates /run/caddy at every start, owned by the
+# unit's User= and Group=, so Group=lovspor-release puts the directory, and the
+# socket Caddy creates in it, in the group; SupplementaryGroups=caddy keeps the
+# stock unit's group. Anything done to the directory before the start does not
+# survive it (#324).
 mkdir -p /etc/systemd/system/caddy.service.d
 cat >/etc/systemd/system/caddy.service.d/lovspor.conf <<'DROP_IN'
 # Written by lovspor (ADR-0014 Decision 6): provisioning and the first migration.
@@ -210,7 +212,8 @@ cat >/etc/systemd/system/caddy.service.d/lovspor.conf <<'DROP_IN'
 EnvironmentFile=/etc/default/caddy-lovspor
 RuntimeDirectory=caddy
 RuntimeDirectoryMode=2770
-ExecStartPre=+/usr/bin/chgrp lovspor-release /run/caddy
+Group=lovspor-release
+SupplementaryGroups=caddy
 ExecReload=
 ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force --address unix//run/caddy/admin.sock
 DROP_IN

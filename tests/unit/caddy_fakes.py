@@ -56,6 +56,16 @@ the endpoint moves: no such refusal was observed, and a test that needs
 a load which never reached the instance answers it in the runner. A
 ``systemctl reload`` still fails its job before anything moves, which is
 all the steady-state tests have ever asked of it.
+
+A start owns the runtime directory by the unit's ``Group=`` (#324). On the
+droplet (systemd 255, 2026-09-15) a drop-in running
+``ExecStartPre=+/usr/bin/chgrp lovspor-release /run/caddy-rehearsal`` still
+left that directory ``2770 caddy:caddy`` after a restart, and the socket
+Caddy made in it gid ``caddy``; with ``Group=lovspor-release`` and
+``SupplementaryGroups=caddy`` instead, both came back
+``caddy:lovspor-release`` after a restart and after a reload. The socket
+here is a real file carrying the test machine's gid, so which group it
+carries is said through the ownership table: ``own_runtime_directory``.
 """
 
 import contextlib
@@ -64,12 +74,13 @@ import json
 import os
 import re
 import socket
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from lovspor.release.caddy import Completed
 from lovspor.release.errors import UnobservableError
+from lovspor.release.migrate import ENVIRONMENT_FILE, MigrationHost, drop_in_text
 
 _PLACEHOLDER = re.compile(r"\{\$([A-Z_]+)(?::([^}]*))?\}")
 ADMIN_DOWN = "connect: no such file or directory"
@@ -79,6 +90,8 @@ DEFAULT_TCP = "localhost:2019"
 """Caddy's default admin address: what an instance without the global option listens on."""
 STOCK_EXEC_RELOAD = "/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force"
 """The stock unit's reload line (``caddyserver/dist``): no ``--address``."""
+STOCK_GROUP = "caddy"
+"""The stock unit's ``Group=`` (``caddyserver/dist``): what a drop-in without one runs Caddy as."""
 _JOB_FAILED = "Job for caddy.service failed because the control process"
 LOAD_REFUSED_AT_START = (
     "Error: loading config: loading new config: http app module: start: listening on :443: "
@@ -342,6 +355,17 @@ def _runtime_directory_of(drop_in: Path | None) -> bool:
     )
 
 
+def _unit_group_of(drop_in: Path | None) -> str:
+    """The unit's ``Group=`` as systemd last loaded it: the drop-in's, else the stock unit's."""
+    group = STOCK_GROUP
+    if drop_in is None or not drop_in.is_file():
+        return group
+    for line in drop_in.read_text(encoding="utf-8").splitlines():
+        if line.startswith("Group="):
+            group = line[len("Group=") :] or STOCK_GROUP
+    return group
+
+
 def _address_flag(command: str) -> str | None:
     words = command.split()
     if "--address" in words:
@@ -363,9 +387,18 @@ class FakeAdmin:
 class FakeCaddy:
     """Runner + AdminClient + the process, over real files."""
 
-    def __init__(self, caddyfile: Path, drop_in: Path | None = None) -> None:
+    def __init__(
+        self,
+        caddyfile: Path,
+        drop_in: Path | None = None,
+        ownership: "FakeOwnership | None" = None,
+    ) -> None:
         self.caddyfile = caddyfile
         self.drop_in = drop_in
+        self.ownership = ownership
+        """The host's group table, when a start is to own the socket's group as systemd does."""
+        self.unit_group = _unit_group_of(drop_in)
+        """The ``Group=`` the drop-in systemd last loaded runs the unit as (#324)."""
         self.running: dict[str, Any] | None = None
         self.admin_address = DEFAULT_TCP
         self.admin_up = True
@@ -449,6 +482,7 @@ class FakeCaddy:
                 self.daemon_reloads += 1
                 self.exec_reload = _exec_reload_of(self.drop_in)
                 self.runtime_directory = _runtime_directory_of(self.drop_in)
+                self.unit_group = _unit_group_of(self.drop_in)
                 return Completed(0, "", "")
             case ["show", _, "-p", "ExecReload"]:
                 return Completed(0, self._show_exec_reload(), "")
@@ -487,9 +521,31 @@ class FakeCaddy:
         self._stop()
         if self._apply(json.loads(done.stdout)) is not None:
             return Completed(1, "", _JOB_FAILED)
+        self.own_runtime_directory()
         self.admin_up = True
         self.restarts += 1
         return Completed(0, "", "")
+
+    def own_runtime_directory(self) -> None:
+        """A start owns ``RuntimeDirectory=`` by the unit's ``Group=``, whatever ran before it.
+
+        #324: the socket is a real file with the test machine's gid, so the
+        group it carries is said through the table — every group but the
+        unit's stops naming that gid, as the droplet's release group did
+        after a restart under a drop-in that gave it by an ``ExecStartPre=``
+        chgrp. The unit's own group keeps the gid the fixture gave it: a
+        start takes a group away and never grants one, so a table a test
+        broke stays broken. Without ``RuntimeDirectory=`` nothing is
+        recreated, so nothing is re-owned.
+        """
+        path = _socket_path(self.admin_address)
+        if self.ownership is None or not self.runtime_directory or path is None:
+            return
+        gid = path.stat().st_gid
+        groups = self.ownership.groups
+        for group in [name for name, known in groups.items() if known == gid]:
+            if group != self.unit_group:
+                groups[group] = gid + 1
 
     def _stop(self) -> None:
         """The process exits and leaves its socket files; ``RuntimeDirectory=`` clears them.
@@ -616,11 +672,35 @@ class FakeCaddy:
         return copy.deepcopy(self.running)
 
 
+def chgrp_drop_in(host: MigrationHost) -> str:
+    """The drop-in #324 caught: the release group given by an ``ExecStartPre=`` chgrp.
+
+    What the droplet's rehearsal instance loaded on 2026-09-15, line for
+    line, with this host's paths: no ``Group=``. After a restart under it
+    the socket had gid ``caddy``, and (v.1) refused.
+    """
+    return (
+        "[Service]\n"
+        f"EnvironmentFile={ENVIRONMENT_FILE}\n"
+        f"RuntimeDirectory={host.runtime_dir.name}\n"
+        "RuntimeDirectoryMode=2770\n"
+        f"ExecStartPre=+/usr/bin/chgrp {host.release_group} {host.runtime_dir}\n"
+        "ExecReload=\n"
+        f"ExecReload=/usr/bin/caddy reload --config {host.caddyfile} --force "
+        f"--address {host.socket_admin}\n"
+    )
+
+
+def _migrations_drop_in(host: MigrationHost) -> str:
+    return drop_in_text(host, with_exec_reload=True)
+
+
 class SocketedCaddy(NamedTuple):
     """An instance already listening on a real socket file, for the four facts.
 
     The group's gid is the file's own, so the group fact is about the
-    code under test and not about the machine the tests run on.
+    code under test and not about the machine the tests run on — while the
+    drop-in the instance was started under gives the socket that group (#324).
     """
 
     caddy: FakeCaddy
@@ -629,17 +709,29 @@ class SocketedCaddy(NamedTuple):
     ownership: "FakeOwnership"
 
 
-def socketed_caddy(tmp_path: Path, group: str = "lovspor-release") -> SocketedCaddy:
-    """A Caddy on a ``0660`` socket under ``tmp_path``; nothing is bound, the file is stat'd."""
+def socketed_caddy(
+    tmp_path: Path,
+    group: str = "lovspor-release",
+    drop_in: Callable[[MigrationHost], str] = _migrations_drop_in,
+) -> SocketedCaddy:
+    """A Caddy on a ``0660`` socket under ``tmp_path``, started under ``drop_in``; nothing is bound.
+
+    The drop-in is the migration's own text unless a test names another, so
+    what that text gives the socket reaches every test of the four facts.
+    """
     runtime = tmp_path / "run"
     runtime.mkdir(exist_ok=True)
     socket = runtime / "admin.sock"
     socket.touch()
     socket.chmod(0o660)
-    caddy = FakeCaddy(tmp_path / "Caddyfile")
-    caddy.admin_address = f"unix/{socket}"
-    caddy.load({"apps": {}})
+    host = MigrationHost(runtime_dir=runtime, socket_admin=f"unix/{socket}", release_group=group)
+    unit = tmp_path / "lovspor.conf"
+    unit.write_text(drop_in(host), encoding="utf-8")
     ownership = FakeOwnership({}, {group: socket.stat().st_gid})
+    caddy = FakeCaddy(tmp_path / "Caddyfile", unit, ownership)
+    caddy.admin_address = host.socket_admin
+    caddy.load({"apps": {}})
+    caddy.own_runtime_directory()
     return SocketedCaddy(caddy, socket, caddy.admin_address, ownership)
 
 
