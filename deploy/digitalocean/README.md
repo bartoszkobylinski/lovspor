@@ -759,7 +759,11 @@ them, and leaves the admin endpoint on TCP. It refuses once a second envelope
 release has happened (the marker has a `previous`): that is
 `publish-release.sh --rollback`, the ordinary one. It also refuses the moment
 either `.pre-envelope` backup is gone — after step 8 there is no way back to
-the old site, only a new envelope release.
+the old site, only a new envelope release. And if its reload back is itself
+refused, Caddy may already answer on TCP while still serving the envelope, so a
+second `--migrate-rollback` refuses the file restore it would otherwise take
+there and names `release migrate --rollback --offline` (below), which restarts
+`caddy` onto the previous Caddyfile.
 
 #### Last resort: Caddy answers on neither address
 

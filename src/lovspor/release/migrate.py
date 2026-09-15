@@ -850,16 +850,20 @@ def _cutover(plane: ControlPlane, host: MigrationHost, checkpoint: Checkpoint) -
     return cutover
 
 
+def _offline_way_out(host: MigrationHost) -> str:
+    return (
+        "`lovspor release migrate --rollback --offline` puts the previous Caddyfile back and "
+        f"restarts {host.unit}"
+    )
+
+
 def _refused_hint(host: MigrationHost) -> str:
     """The way out of a refused (c), read off where the admin endpoint answers now."""
     try:
         answered = detect_admin(host)
         stranded = stranded_on_socket(host, answered)
     except UnobservableError as error:
-        return (
-            f"Caddy's admin endpoint cannot be read ({error.detail}); `lovspor release migrate "
-            f"--rollback --offline` puts the previous Caddyfile back and restarts {host.unit}"
-        )
+        return f"Caddy's admin endpoint cannot be read ({error.detail}); {_offline_way_out(host)}"
     if answered == host.tcp_admin:
         return _STAGED_HINT
     if stranded:
@@ -1223,16 +1227,51 @@ def _remove_socket_after_restart(host: MigrationHost) -> bool:
     return True
 
 
+def _require_no_release_on_tcp(host: MigrationHost) -> None:
+    """R on TCP names no release: a restore that reloads nothing is true only then (#305).
+
+    Silence there is refused as unobservable, as both callers refuse it —
+    each has just read R on TCP, so a silent TCP is a host that changed
+    under them, and a restore over an R nobody read is the claim this read
+    exists to stop.
+    """
+    try:
+        running = config_pair(host.admin_client(host.tcp_admin).running_config())
+    except UnobservableError as error:
+        detail = (
+            f"{error.detail}; the file restore reloads nothing, so it needs {host.tcp_admin} "
+            f"answering with no release; {_offline_way_out(host)}"
+        )
+        raise UnobservableError(error.reason, detail) from error
+    if running.release_id is not None:
+        raise ControlPlaneError(
+            f"Caddy runs release {running.release_id} on {host.tcp_admin}: the file restore "
+            "reloads nothing, so it would leave that release running with the previous Caddyfile "
+            "on disk and no marker; nothing was restored — the marker, the Caddyfile and the "
+            f"drop-in are as they were; {_offline_way_out(host)}"
+        )
+
+
 def abandon_first_migration(plane: ControlPlane, host: MigrationHost) -> RollbackReport:
     """Before (c) — D new, R old on TCP: the file restore, no reload, since R never moved.
 
-    A socket file left at the socket's name goes first: a rollback that
-    died after its reload back to TCP leaves one, and its second run lands
-    here because TCP answers. The backups are asked for before it goes, so
-    a refusal still moves nothing.
+    A second rollback lands here whenever TCP answers, and TCP answering
+    does not mean R is old. The droplet's Caddy v2.11.4 moved its admin
+    endpoint before refusing a load (#302); a reload back to TCP refused
+    that way would leave TCP answering while the envelope runs — inferred,
+    not observed. So R is read there first and a release is refused,
+    naming the offline rollback, whose restart loads the previous Caddyfile
+    whole. ``reconcile``'s staged row cannot bring such a host: with no
+    marker that row needs R to name no release.
+
+    A socket file left at the socket's name goes before the restore: a
+    rollback that died after its reload back to TCP leaves one. The
+    backups and R are asked for before it goes, so a refusal still moves
+    nothing.
     """
     had_pair = _had_exec_reload(host)
     _require_backup(host)
+    _require_no_release_on_tcp(host)
     socket_removed = _remove_dead_socket(host)
     return RollbackReport(
         admin_before=host.tcp_admin,
