@@ -2686,6 +2686,7 @@ class TestAbandonReadsTcp:
             "answering with no release; `lovspor release migrate --rollback --offline` puts the "
             "previous Caddyfile back and restarts caddy"
         )
+        assert caught.value.reason == "admin_unreachable"
         assert droplet.plane.caddyfile.read_bytes() == caddyfile
         assert droplet.host.previous_caddyfile.is_file() and droplet.plane.fragment.is_file()
         assert droplet.host.drop_in.read_text(encoding="utf-8") == drop_in_text(droplet.host, False)
