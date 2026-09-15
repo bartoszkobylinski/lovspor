@@ -1312,6 +1312,37 @@ class TestFirstMigration:
         assert report.action == "completed"
         assert live_release(droplet.plane) == droplet.a
 
+    def test_a_refused_cutover_whose_admin_disappears_after_probe_names_offline_rollback(
+        self, droplet: Droplet
+    ) -> None:
+        """The recovery hint remains useful if Caddy vanishes between its two admin reads."""
+        socket_reads = 0
+
+        class AnsweringAdmin:
+            def running_config(self) -> object:
+                return {"admin": {"listen": droplet.host.socket_admin}}
+
+        class VanishedAdmin:
+            def running_config(self) -> object:
+                raise UnobservableError("admin_unreachable", "socket disappeared after probe")
+
+        def disappearing_admin(address: str) -> AnsweringAdmin | VanishedAdmin:
+            nonlocal socket_reads
+            assert address == droplet.host.socket_admin
+            socket_reads += 1
+            return AnsweringAdmin() if socket_reads == 1 else VanishedAdmin()
+
+        host = replace(droplet.host, admin_client=disappearing_admin)
+
+        caught = migrate._refused_cutover(host, Completed(1, "", "load refused"))
+
+        assert socket_reads == 2
+        assert caught.detail.endswith(
+            "; Caddy's admin endpoint cannot be read (socket disappeared after probe); "
+            "`lovspor release migrate --rollback --offline` puts the previous Caddyfile back "
+            "and restarts caddy"
+        )
+
     def test_a_reload_that_exits_silently_names_the_exit_code(self, droplet: Droplet) -> None:
         plane = replace(
             droplet.plane,
