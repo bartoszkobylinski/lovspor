@@ -33,7 +33,18 @@ Staged there, *abandon* is the rollback after (c) — the previous
 Caddyfile delivered to the socket, which moves the endpoint back to TCP,
 then the file restore — and *complete* is refused, the file on disk
 being the one Caddy just refused. That pairing in any other row is
-refused, naming the offline rollback.
+refused, naming the offline rollback — but for the row below.
+
+A first-migration way back stopped before its file restore finished —
+the rollback puts the backup's bytes at the Caddyfile's own path before
+it reloads (#316) — leaves no marker, R = D naming no release, and a
+Caddyfile backup holding the Caddyfile's own bytes; so does (a) stopped
+before it installs the new Caddyfile. On TCP, or on a
+socket stranded as above, that row is resolved by *abandon* alone: the
+file restore, after the load back to TCP while the endpoint is still on
+the socket. *report* and *complete* are refused naming it, and anything
+at the backup's name that is not a regular file with those bytes is
+refused for every flag, naming what differs.
 
 ``prune`` runs only when reconciled and never deletes the release named
 by R, D or M, nor the marker's ``previous``; it removes every other
@@ -193,10 +204,10 @@ _STRANDED_WAY_OUT = (
 
 def _offline_only(host: MigrationHost) -> str:
     return (
-        "the socket answers with a configuration that binds the admin endpoint elsewhere, which "
-        "outside the staged row no step of the first migration leaves, so nothing is resolved "
-        "automatically; `lovspor release migrate --rollback --offline` puts the previous "
-        f"Caddyfile back and restarts {host.unit}"
+        "the socket answers with a configuration that binds the admin endpoint elsewhere, a "
+        "pairing reconcile resolves only in the staged row or beside an identical Caddyfile "
+        "backup, so nothing is resolved automatically; `lovspor release migrate --rollback "
+        f"--offline` puts the previous Caddyfile back and restarts {host.unit}"
     )
 
 
@@ -216,6 +227,69 @@ def _resolve_stranded(
     if action != "abandon":
         raise UnreconciledError(f"{described}; {_STRANDED_WAY_OUT}")
     rollback_first_migration(plane, host)
+    return _report(window.triple, Situation.reconciled, None, "abandoned").model_copy(
+        update={"admin": host.tcp_admin}
+    )
+
+
+def _backup_mismatch(plane: ControlPlane, host: MigrationHost) -> str | None:
+    """Why the Caddyfile backup is not what a stopped first-migration step leaves; else ``None``.
+
+    (a) writes the backup before it installs the new Caddyfile, and the way
+    back writes the backup's bytes to the Caddyfile before it reloads
+    (#316), so in both windows the two are identical. The name is asked,
+    never a symlink's target: the restore moves the name.
+    """
+    backup = host.previous_caddyfile
+    if backup.is_symlink():
+        return "is a symlink, not the backup the migration wrote"
+    if not backup.is_file():
+        return "is not a regular file"
+    if backup.read_bytes() != plane.caddyfile.read_bytes():
+        return f"differs from {plane.caddyfile}"
+    return None
+
+
+def _restore_left(host: MigrationHost, triple: Triple) -> bool:
+    """R = D naming no release, with something at the Caddyfile backup's name."""
+    backup = host.previous_caddyfile
+    return situation(triple) == Situation.reconciled and (backup.is_symlink() or backup.exists())
+
+
+def _unfinished_way_out(plane: ControlPlane, host: MigrationHost) -> str:
+    return (
+        f"{host.previous_caddyfile} holds the bytes of {plane.caddyfile}: the first migration "
+        "stopped before (a) installed the new Caddyfile, or a way back before its file restore "
+        "finished; resolve with --abandon (the backup consumed, the fragment removed and the "
+        "drop-in restored from its record, after the load back to TCP while the admin endpoint "
+        "is still on the socket); --complete is refused: the Caddyfile on disk is the "
+        "pre-envelope one, so there is no cutover to finish"
+    )
+
+
+def _resolve_unfinished(
+    plane: ControlPlane, host: MigrationHost, window: Window, action: ReconcileAction
+) -> ReconcileReport:
+    """A first-migration step stopped beside an identical Caddyfile backup: *abandon* alone.
+
+    On TCP that is the file restore alone, since R is already the previous
+    configuration. Stranded on the socket it is the rollback after (c),
+    whose load back moves the admin endpoint and leaves R's pair as it is.
+    """
+    described = f"host is {Situation.reconciled} on {window.answered}: {window.triple.describe()}"
+    mismatch = _backup_mismatch(plane, host)
+    if mismatch is not None:
+        raise UnreconciledError(
+            f"{described}; {host.previous_caddyfile} {mismatch}, so it is not what a stopped "
+            "first-migration step leaves beside the Caddyfile; nothing is resolved "
+            "automatically: which file is the previous Caddyfile is for a human to say"
+        )
+    if action != "abandon":
+        raise UnreconciledError(f"{described}; {_unfinished_way_out(plane, host)}")
+    if window.stranded:
+        rollback_first_migration(plane, host)
+    else:
+        abandon_first_migration(plane, host)
     return _report(window.triple, Situation.reconciled, None, "abandoned").model_copy(
         update={"admin": host.tcp_admin}
     )
@@ -257,6 +331,8 @@ def _reconcile_unmarked(
     if on_socket and situation(triple) != Situation.reloaded:
         # Bound to the socket and not mid-cutover: a box provisioned with the envelope.
         return _resolve(bound, triple, action).model_copy(update={"admin": answered})
+    if _restore_left(host, triple):
+        return _resolve_unfinished(plane, host, window, action)
     return _resolve_window(plane, host, window, action)
 
 
