@@ -7,8 +7,8 @@ so both are walked first on a second instance — its own unit, ports,
 runtime directory, drop-in directory and socket, every one of them a
 ``MigrationHost`` field — and this module is the sequence and the
 assertions, not a second copy of the procedure: every step runs through
-``migrate``'s own ``first_migration``, ``abandon_first_migration`` and
-``rollback_first_migration``.
+``migrate``'s own ``first_migration`` and ``rollback_first_migration``,
+and the way out of a refused load through ``reconcile`` itself.
 
 The ADR's five sub-steps, in order:
 
@@ -19,11 +19,22 @@ The ADR's five sub-steps, in order:
   immediately before (c), answering immediately after it, TCP refusing,
   R over the socket naming the envelope, and ``systemctl show`` naming
   the explicit ``--address``; and, before it, a (c) whose configuration
-  Caddy rejects at load, which must leave TCP answering, no socket and R
-  unmoved — R moves only on a successful load;
+  Caddy rejects at load. R must stay the previous configuration — R
+  moves only on a successful load — but the admin endpoint does not wait
+  for one: the droplet's Caddy v2.11.4 started the rejected
+  configuration's socket endpoint and stopped TCP before the site failed
+  to start (#302). ADR-0014 Amendment 1 requires that ordering exactly —
+  R read over the socket, TCP refusing, the running configuration still
+  naming TCP — so a Caddy that orders a refusal differently fails the
+  step and the migration stops for review. ``reconcile --abandon``, the
+  way out README step 5 names, then must leave TCP answering the previous
+  configuration, nothing answering on the socket, no file at its name
+  and nothing of the attempt behind, so the cutover starts again from the
+  state (i) asserted;
 * (iii) the first-migration rollback, which must reach the socket:
-  afterwards the previous configuration runs, TCP answers, the socket is
-  gone and ``ExecReload=`` is stock. Its negative fixture is a plain
+  afterwards the previous configuration runs, TCP answers, nothing
+  answers on the socket and no file is left at its name, and
+  ``ExecReload=`` is stock. Its negative fixture is a plain
   ``systemctl reload`` of the previous Caddyfile through the stock line
   while the socket is running, which must **fail** — ``caddy reload``
   derives the address from the file it supplies — proving the rollback's
@@ -66,22 +77,24 @@ from lovspor.release.errors import (
 from lovspor.release.migrate import (
     SOCKET_MODE,
     MigrationHost,
-    abandon_first_migration,
     drop_in_text,
     first_migration,
     rollback_first_migration,
+    stranded_on_socket,
 )
+from lovspor.release.reconcile import ReconcileReport, reconcile
 
 
 @dataclass(frozen=True)
 class RehearsalFixtures:
     """The two configurations the negative fixtures need; the harness writes them.
 
-    Both are the rehearsal's own new Caddyfile with one thing taken out,
+    Both are the rehearsal's own new Caddyfile with one thing changed,
     and neither is ever installed on the production host: ``rejected``
-    validates and fails at load — the harness makes it bind a port that
-    is already taken — and ``unsuffixed`` binds the same admin socket
-    without the ``|0660`` creation-mode suffix.
+    validates and fails at load — the harness adds a site on a port this
+    Caddy may not bind, which the droplet refused with *permission
+    denied* — and ``unsuffixed`` binds the same admin socket without the
+    ``|0660`` creation-mode suffix.
     """
 
     rejected: Path
@@ -253,41 +266,122 @@ def _refused_load(plan: Rehearsal, host: MigrationHost) -> str:
     )
 
 
+def _described(pair: ConfigPair | None) -> str:
+    return pair.describe() if pair is not None else "nothing"
+
+
+def _moved_to_socket(plan: Rehearsal) -> ConfigPair:
+    """After the refusal the socket answers and TCP does not; the pair read over the socket."""
+    tcp, socket = plan.host.tcp_admin, plan.host.socket_admin
+    on_tcp = _running(plan, tcp)
+    _require(
+        on_tcp is None,
+        "ii.rejected",
+        f"{tcp} still answers after the refusal, running {_described(on_tcp)}; Caddy v2.11.4 "
+        f"moves the admin endpoint to {socket}, and any other ordering stops the migration for "
+        "review",
+    )
+    on_socket = _running(plan, socket)
+    if on_socket is None:
+        raise RehearsalFailedError(
+            "ii.rejected", f"nothing answers on {tcp} or {socket} after the refusal"
+        )
+    return on_socket
+
+
+def refused_on_socket(plan: Rehearsal, before: ConfigPair, failure: str) -> Step:
+    """(ii) The ordering the droplet's Caddy v2.11.4 gave a refused load, exactly (#302).
+
+    ADR-0014 Amendment 1: the rejected configuration's socket answers, TCP
+    refuses, and what runs over the socket is still the previous
+    configuration — its routes, and its admin option naming TCP. The pair
+    hashes the routes and cannot see the admin option, so that half of the
+    pairing is asked the way ``reconcile`` asks it.
+    """
+    socket = plan.host.socket_admin
+    running = _moved_to_socket(plan)
+    _require(
+        running == before,
+        "ii.rejected",
+        f"over {socket} Caddy runs {running.describe()}, not the previous {before.describe()}; "
+        "R moves only on a successful load",
+    )
+    _require(
+        stranded_on_socket(plan.host, socket),
+        "ii.rejected",
+        f"the configuration over {socket} binds the admin endpoint to the socket; a refused load "
+        "leaves the previous one running, which binds it elsewhere",
+    )
+    moved = f"admin moved to {socket}, TCP refuses, R unmoved {before.describe()}"
+    return Step(name="ii.rejected", detail=f"refused ({failure}); {moved}")
+
+
 def rejected_cutover(plan: Rehearsal) -> tuple[Step, ...]:
-    """(ii) A (c) Caddy rejects at load: R moves only on a successful load, so nothing moved."""
+    """(ii) A (c) Caddy rejects at load, then the way out of it README step 5 names.
+
+    R moves only on a successful load, but the admin endpoint does not
+    wait for one, so a file restore would leave Caddy on the socket: the
+    way out is ``reconcile --abandon``, run exactly as the operator runs it.
+    """
     before = _running(plan, plan.host.tcp_admin)
     if before is None:
         raise RehearsalFailedError("ii.rejected", f"nothing answers on {plan.host.tcp_admin}")
     failure = _refused_load(plan, replace(plan.host, caddyfile_source=plan.fixtures.rejected))
-    after = _running(plan, plan.host.tcp_admin)
-    _require(
-        after == before,
-        "ii.rejected",
-        f"{plan.host.tcp_admin} runs {after.describe() if after else 'nothing'}, "
-        f"not the previous {before.describe()}",
-    )
-    _require(
-        not _present(plan.host.socket), "ii.rejected", f"{plan.host.socket} exists after a refusal"
-    )
-    abandon_first_migration(plan.plane, plan.host)
+    refused = refused_on_socket(plan, before, failure)
+    report = reconcile(plan.plane, "abandon", plan.host)
+    return (refused, abandoned(plan, before, report))
+
+
+def _attempt_names(plan: Rehearsal) -> tuple[tuple[Path, str], ...]:
+    """Every name the refused attempt wrote or left behind, and how a refusal names it."""
+    host, plane = plan.host, plan.plane
     return (
-        Step(name="ii.rejected", detail=f"R unmoved on {plan.host.tcp_admin}: {failure}"),
-        abandoned(plan),
+        (host.socket, "socket file"),
+        (plane.fragment, "fragment"),
+        (plane.next_fragment, "staged fragment"),
+        (host.previous_caddyfile, "Caddyfile backup"),
+        (host.previous_drop_in, "drop-in backup"),
+        (host.absent_drop_in, "absent drop-in record"),
     )
 
 
-def abandoned(plan: Rehearsal) -> Step:
-    """After *abandon*: the previous Caddyfile is back, and neither record survives it."""
-    for path, role in ((plan.plane.fragment, "fragment"), (plan.host.previous_caddyfile, "backup")):
-        _require(not _present(path), "ii.rejected", f"the {role} {path} survived the abandon")
-    running = _running(plan, plan.host.tcp_admin)
+def _back_on_tcp(plan: Rehearsal, before: ConfigPair, report: ReconcileReport) -> None:
+    """What the abandon reported, and what TCP then runs: the configuration read before (c)."""
+    tcp = plan.host.tcp_admin
     _require(
-        running is not None and running.release_id is None,
+        report.action == "abandoned" and report.admin == tcp,
         "ii.rejected",
-        f"{plan.host.tcp_admin} does not run the pre-envelope configuration after the abandon",
+        f"reconcile --abandon reported {report.action} on {report.admin}, not abandoned on {tcp}",
     )
+    running = _running(plan, tcp)
+    _require(
+        running == before,
+        "ii.rejected",
+        f"{tcp} runs {_described(running)} after the abandon, not the previous {before.describe()}",
+    )
+
+
+def abandoned(plan: Rehearsal, before: ConfigPair, report: ReconcileReport) -> Step:
+    """After ``reconcile --abandon``: TCP runs the previous configuration, and nothing is left.
+
+    The socket must neither answer nor leave a file at its name — the
+    cutover's preflight refuses one, and Caddy v2.11.4 leaves one when its
+    endpoint moves back to TCP (#303) — and nothing else the attempt wrote
+    may survive. That the files are the pre-envelope ones is the
+    preflight's to assert, and the cutover that follows runs it whole.
+    """
+    _back_on_tcp(plan, before, report)
+    _require(
+        _running(plan, plan.host.socket_admin) is None,
+        "ii.rejected",
+        f"{plan.host.socket_admin} still answers after the abandon",
+    )
+    for path, role in _attempt_names(plan):
+        _require(not _present(path), "ii.rejected", f"the {role} {path} survived the abandon")
+    left = "nothing answers on the socket, and no socket file, fragment or backup is left"
     return Step(
-        name="ii.abandoned", detail="the previous Caddyfile is back; no fragment, no backup"
+        name="ii.abandoned",
+        detail=f"{plan.host.tcp_admin} runs the previous {before.describe()}; {left}",
     )
 
 

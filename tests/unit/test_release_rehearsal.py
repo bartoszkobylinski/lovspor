@@ -8,9 +8,12 @@ one property every address assertion rests on — ``caddy reload`` derives
 the address from the file it supplies, and that address is not the socket.
 
 The rejected-load fixture is a real file on the droplet (a block binding a
-port already taken); here the file is the ordinary source and ``FakeCaddy``
-refuses the load, because what is under test is what the rehearsal asserts
-about a refused load, not what makes Caddy refuse one.
+port this Caddy may not bind); here the file is the ordinary source and
+``FakeCaddy`` refuses the load the way the droplet's Caddy v2.11.4 did
+(#302) — the socket endpoint started, TCP stopped, R the previous
+configuration — because what is under test is what the rehearsal asserts
+about a refused load, not what makes Caddy refuse one. The other orderings
+it must fail on are runners that answer the load differently.
 
 Every refusal is asserted by its sub-step *and* by what it says: the
 operator reads one line and acts on it, and a rehearsal that named the
@@ -25,10 +28,13 @@ from typing import NamedTuple
 
 import pytest
 
+import lovspor.release.rehearsal as rehearsal_module
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, ConfigPair, adapt, config_pair
+from lovspor.release.control import Situation
 from lovspor.release.envelope import read_marker
 from lovspor.release.errors import RehearsalFailedError, UnobservableError
-from lovspor.release.migrate import SOCKET_MODE, drop_in_text
+from lovspor.release.migrate import SOCKET_MODE, drop_in_text, preflight
+from lovspor.release.reconcile import ReconcileReport
 from lovspor.release.rehearsal import (
     Rehearsal,
     RehearsalFixtures,
@@ -48,7 +54,7 @@ from lovspor.release.rehearsal import (
     steady_reload,
     steady_state,
 )
-from tests.unit.caddy_fakes import FakeCaddy, toy_adapt
+from tests.unit.caddy_fakes import LOAD_REFUSED_AT_START, FakeCaddy, plant_socket, toy_adapt
 from tests.unit.migrate_fixtures import OLD_CADDYFILE, Droplet, Sabotaged, make_droplet
 from tests.unit.release_fixtures import World, build, make_world
 
@@ -312,8 +318,39 @@ class TestCutover:
         )
 
 
+def _reloads(staged: Staged) -> list[tuple[str, ...]]:
+    return [argv for argv in staged.droplet.argvs() if argv[:2] == ("caddy", "reload")]
+
+
+def _leftovers(staged: Staged) -> dict[str, Path]:
+    """Every name a refused attempt writes, by the role the refusal names it with."""
+    host, plane = staged.plan.host, staged.plan.plane
+    return {
+        "socket file": host.socket,
+        "fragment": plane.fragment,
+        "staged fragment": plane.next_fragment,
+        "Caddyfile backup": host.previous_caddyfile,
+        "drop-in backup": host.previous_drop_in,
+        "absent drop-in record": host.absent_drop_in,
+    }
+
+
+def _refused_then(staged: Staged, after: Mapping[str, object]) -> Rehearsal:
+    """The plan, with the refusal Caddy v2.11.4 makes followed by ``after`` loaded by hand."""
+
+    def refused(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+        done = staged.caddy.run(argv, env)
+        staged.caddy.load(dict(after))
+        return done
+
+    staged.caddy.fail_reloads = 1
+    return staged.with_runner(("caddy", "reload"), refused)
+
+
 class TestRejectedCutover:
-    def test_a_refused_load_leaves_tcp_answering_the_socket_absent_and_r_unmoved(
+    """ADR-0014 Amendment 1, decision 3: Caddy v2.11.4's ordering exactly, then its way out."""
+
+    def test_a_refused_load_is_read_over_the_socket_and_abandoned_back_to_tcp(
         self, staged: Staged
     ) -> None:
         staged.caddy.fail_reloads = 1
@@ -323,8 +360,11 @@ class TestRejectedCutover:
 
         assert names(steps) == ["ii.rejected", "ii.abandoned"]
         assert staged.caddy.admin_address == REHEARSAL_TCP
-        assert not staged.plan.host.socket.exists()
         assert staged.running(REHEARSAL_TCP) == before
+        with pytest.raises(UnobservableError):
+            staged.caddy.running_config_at(staged.plan.host.socket_admin)
+        for role, path in _leftovers(staged).items():
+            assert not (path.is_symlink() or path.exists()), role
 
     def test_it_is_the_rejected_fixture_that_is_offered_to_the_instance(
         self, staged: Staged
@@ -337,23 +377,64 @@ class TestRejectedCutover:
         adapted = [argv for argv in staged.droplet.argvs() if argv[:2] == ("caddy", "adapt")]
         assert any(str(staged.plan.fixtures.rejected) in argv for argv in adapted)
 
+    def test_the_way_out_is_reconciles_abandon_one_load_back_to_the_socket(
+        self, staged: Staged
+    ) -> None:
+        """README step 5's own way out, not a file restore: the admin endpoint has moved."""
+        staged.caddy.fail_reloads = 1
+
+        rejected_cutover(staged.plan)
+
+        host = staged.plan.host
+        back = ("caddy", "reload", "--config", str(host.previous_caddyfile), "--adapter")
+        assert _reloads(staged)[1:] == [(*back, "caddyfile", "--address", host.socket_admin)]
+        assert len(_reloads(staged)) == 2
+
+    def test_the_way_out_calls_reconcile_with_abandon_for_this_host(
+        self, staged: Staged, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ADR-0014 Amendment 1 names reconcile --abandon as the refused load's way out."""
+        calls: list[tuple[object, str, object]] = []
+        real_reconcile = rehearsal_module.reconcile
+
+        def recording_reconcile(plane: object, action: str, host: object) -> ReconcileReport:
+            calls.append((plane, action, host))
+            return real_reconcile(plane, action, host)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(rehearsal_module, "reconcile", recording_reconcile)
+        staged.caddy.fail_reloads = 1
+
+        rejected_cutover(staged.plan)
+
+        assert calls == [(staged.plan.plane, "abandon", staged.plan.host)]
+
     def test_both_steps_say_what_they_read(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
+        before = staged.running(REHEARSAL_TCP).describe()
+        socket = staged.plan.host.socket_admin
 
         said = details(rejected_cutover(staged.plan))
 
-        assert said["ii.rejected"].startswith(f"R unmoved on {REHEARSAL_TCP}: ")
-        assert said["ii.abandoned"] == "the previous Caddyfile is back; no fragment, no backup"
+        assert said["ii.rejected"].startswith(
+            f"refused (caddy reload --address {REHEARSAL_TCP} failed: {LOAD_REFUSED_AT_START}; "
+        )
+        assert said["ii.rejected"].endswith(
+            f"); admin moved to {socket}, TCP refuses, R unmoved {before}"
+        )
+        assert said["ii.abandoned"] == (
+            f"{REHEARSAL_TCP} runs the previous {before}; nothing answers on the socket, and no "
+            "socket file, fragment or backup is left"
+        )
 
     def test_the_abandon_leaves_the_host_ready_for_the_real_cutover(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
         rejected_cutover(staged.plan)
 
-        assert staged.plan.plane.caddyfile.read_text(encoding="utf-8").startswith("{\n\tadmin ")
-        assert not staged.plan.plane.fragment.exists()
-        assert not staged.plan.host.previous_caddyfile.exists()
-        assert names(cutover(staged.plan))[-1] == "ii"
+        plan = staged.plan
+        assert plan.plane.caddyfile.read_text(encoding="utf-8").startswith("{\n\tadmin ")
+        assert preflight(plan.plane, plan.host, plan.content_id).content_id == plan.content_id
+        assert names(cutover(plan))[-1] == "ii"
 
     def test_a_fixture_the_instance_accepts_ends_the_rehearsal(self, staged: Staged) -> None:
         """The negative fixture proves nothing unless the load is actually refused."""
@@ -374,22 +455,32 @@ class TestRejectedCutover:
         assert raised.value.step == "ii.rejected"
         assert raised.value.detail == f"nothing answers on {REHEARSAL_TCP}"
 
-    def test_a_refusal_that_moved_r_anyway_ends_the_rehearsal(self, staged: Staged) -> None:
-        """R moves only on a successful load; a refusal that moved it is the whole hazard."""
+    @pytest.mark.parametrize("answering", ["tcp alone", "tcp and the socket"])
+    def test_tcp_still_answering_after_the_refusal_stops_for_review(
+        self, staged: Staged, answering: str
+    ) -> None:
+        """Q3, strict: a refusal that kept TCP is not v2.11.4's, and nothing is resolved."""
+        socket = staged.plan.host.socket_admin
         before = staged.running(REHEARSAL_TCP)
-
-        def moved(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
-            del argv, env
-            staged.caddy.load({"apps": {"http": {"servers": {"srv0": {"routes": []}}}}})
-            return Completed(1, "", "Error: loading new config")
+        if answering == "tcp alone":
+            plan = staged.with_runner(("caddy", "reload"), Completed(1, "", "Error: loading"))
+        else:
+            staged.caddy.fail_reloads = 1
+            plan = staged.answering(REHEARSAL_TCP, socket)
 
         with pytest.raises(RehearsalFailedError) as raised:
-            rejected_cutover(staged.with_runner(("caddy", "reload"), moved))
+            rejected_cutover(plan)
 
         assert raised.value.step == "ii.rejected"
-        assert raised.value.detail.endswith(f"not the previous {before.describe()}")
+        assert raised.value.detail == (
+            f"{REHEARSAL_TCP} still answers after the refusal, running {before.describe()}; "
+            f"Caddy v2.11.4 moves the admin endpoint to {socket}, and any other ordering stops "
+            "the migration for review"
+        )
+        assert staged.plan.host.previous_caddyfile.is_file()
+        assert len(_reloads(staged)) == 1
 
-    def test_a_refusal_that_left_nothing_answering_says_so(self, staged: Staged) -> None:
+    def test_nothing_answering_after_the_refusal_ends_the_rehearsal(self, staged: Staged) -> None:
         def gone(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
             del argv, env
             staged.caddy.admin_up = False
@@ -398,63 +489,171 @@ class TestRejectedCutover:
         with pytest.raises(RehearsalFailedError) as raised:
             rejected_cutover(staged.with_runner(("caddy", "reload"), gone))
 
-        assert raised.value.detail.startswith(f"{REHEARSAL_TCP} runs nothing, ")
+        assert raised.value.step == "ii.rejected"
+        assert raised.value.detail == (
+            f"nothing answers on {REHEARSAL_TCP} or {staged.plan.host.socket_admin} "
+            "after the refusal"
+        )
 
-    def test_a_refusal_that_left_a_socket_behind_ends_the_rehearsal(self, staged: Staged) -> None:
-        def planted(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
-            del argv, env
-            staged.plan.host.socket.parent.mkdir(parents=True, exist_ok=True)
-            staged.plan.host.socket.touch()
-            return Completed(1, "", "Error: loading new config")
+    @pytest.mark.parametrize("moved_to", ["another configuration naming tcp", "the rejected one"])
+    def test_a_refusal_that_moved_r_anyway_ends_the_rehearsal(
+        self, staged: Staged, moved_to: str
+    ) -> None:
+        """R moves only on a successful load; a refusal that moved it is the whole hazard."""
+        before = staged.running(REHEARSAL_TCP)
+        other: dict[str, object] = {
+            "admin": {"listen": REHEARSAL_TCP},
+            "apps": {"http": {"servers": {"srv0": {"routes": []}}}},
+        }
+        if moved_to == "the rejected one":
+            other = _released(staged)
 
         with pytest.raises(RehearsalFailedError) as raised:
-            rejected_cutover(staged.with_runner(("caddy", "reload"), planted))
+            rejected_cutover(_refused_then(staged, other))
 
         assert raised.value.step == "ii.rejected"
-        assert raised.value.detail == f"{staged.plan.host.socket} exists after a refusal"
+        assert raised.value.detail == (
+            f"over {staged.plan.host.socket_admin} Caddy runs {config_pair(other).describe()}, "
+            f"not the previous {before.describe()}; R moves only on a successful load"
+        )
+
+    def test_a_configuration_over_the_socket_that_binds_it_there_ends_the_rehearsal(
+        self, staged: Staged
+    ) -> None:
+        """The routes may be the previous ones; the admin option is what a refusal kept too."""
+        socket = staged.plan.host.socket_admin
+        rebound = staged.caddy.running_config()
+        assert isinstance(rebound, dict)
+        rebound["admin"] = {"listen": f"{socket}|0660"}
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            rejected_cutover(_refused_then(staged, rebound))
+
+        assert raised.value.step == "ii.rejected"
+        assert raised.value.detail == (
+            f"the configuration over {socket} binds the admin endpoint to the socket; a refused "
+            "load leaves the previous one running, which binds it elsewhere"
+        )
+
+
+def _abandon_report(
+    action: str = "abandoned", admin: str | None = REHEARSAL_TCP
+) -> ReconcileReport:
+    """What ``reconcile --abandon`` reports for the refused cutover; the triple is not read."""
+    return ReconcileReport(
+        situation=Situation.reconciled, live=None, action=action, triple="R=…", admin=admin
+    )
 
 
 class TestAbandoned:
-    def test_a_fragment_that_survived_the_abandon_ends_the_rehearsal(self, staged: Staged) -> None:
-        staged.plan.plane.fragment.write_text("", encoding="utf-8")
+    """Read on the host as the fixture built it: exactly what the abandon must leave."""
 
-        with pytest.raises(RehearsalFailedError) as raised:
-            abandoned(staged.plan)
+    def test_the_host_back_where_step_i_found_it_passes(self, staged: Staged) -> None:
+        before = staged.running(REHEARSAL_TCP)
 
-        assert raised.value.step == "ii.rejected"
-        assert raised.value.detail == (
-            f"the fragment {staged.plan.plane.fragment} survived the abandon"
+        step = abandoned(staged.plan, before, _abandon_report())
+
+        assert step == Step(
+            name="ii.abandoned",
+            detail=(
+                f"{REHEARSAL_TCP} runs the previous {before.describe()}; nothing answers on the "
+                "socket, and no socket file, fragment or backup is left"
+            ),
         )
 
-    def test_a_backup_that_survived_the_abandon_ends_the_rehearsal(self, staged: Staged) -> None:
-        staged.plan.host.previous_caddyfile.write_text("", encoding="utf-8")
+    @pytest.mark.parametrize(
+        "role",
+        [
+            "socket file",
+            "fragment",
+            "staged fragment",
+            "Caddyfile backup",
+            "drop-in backup",
+            "absent drop-in record",
+        ],
+    )
+    def test_anything_the_refused_attempt_wrote_that_survived_ends_the_rehearsal(
+        self, staged: Staged, role: str
+    ) -> None:
+        path = _leftovers(staged)[role]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if role == "socket file":
+            plant_socket(path)
+        else:
+            path.write_text("", encoding="utf-8")
 
         with pytest.raises(RehearsalFailedError) as raised:
-            abandoned(staged.plan)
+            abandoned(staged.plan, staged.running(REHEARSAL_TCP), _abandon_report())
 
         assert raised.value.step == "ii.rejected"
-        assert raised.value.detail == (
-            f"the backup {staged.plan.host.previous_caddyfile} survived the abandon"
-        )
+        assert raised.value.detail == f"the {role} {path} survived the abandon"
 
-    def test_an_instance_that_does_not_answer_afterwards_ends_the_rehearsal(
+    def test_a_dangling_symlink_at_the_socket_name_is_not_absence(self, staged: Staged) -> None:
+        socket = staged.plan.host.socket
+        socket.parent.mkdir(parents=True, exist_ok=True)
+        socket.symlink_to(socket.parent / "nowhere")
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            abandoned(staged.plan, staged.running(REHEARSAL_TCP), _abandon_report())
+
+        assert raised.value.detail == f"the socket file {socket} survived the abandon"
+
+    def test_a_socket_that_still_answers_ends_the_rehearsal(self, staged: Staged) -> None:
+        socket = staged.plan.host.socket_admin
+        plan = staged.answering(REHEARSAL_TCP, socket)
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            abandoned(plan, staged.running(REHEARSAL_TCP), _abandon_report())
+
+        assert raised.value.step == "ii.rejected"
+        assert raised.value.detail == f"{socket} still answers after the abandon"
+
+    def test_an_instance_that_does_not_answer_on_tcp_afterwards_ends_the_rehearsal(
         self, staged: Staged
     ) -> None:
+        before = staged.running(REHEARSAL_TCP)
         staged.caddy.admin_up = False
 
         with pytest.raises(RehearsalFailedError) as raised:
-            abandoned(staged.plan)
+            abandoned(staged.plan, before, _abandon_report())
 
         assert raised.value.step == "ii.rejected"
         assert raised.value.detail == (
-            f"{REHEARSAL_TCP} does not run the pre-envelope configuration after the abandon"
+            f"{REHEARSAL_TCP} runs nothing after the abandon, not the previous {before.describe()}"
         )
 
-    def test_an_instance_left_running_a_release_ends_the_rehearsal(self, staged: Staged) -> None:
+    def test_an_instance_left_running_another_configuration_ends_the_rehearsal(
+        self, staged: Staged
+    ) -> None:
+        before = staged.running(REHEARSAL_TCP)
         staged.caddy.load(_released(staged))
 
-        with pytest.raises(RehearsalFailedError, match="pre-envelope configuration"):
-            abandoned(staged.plan)
+        with pytest.raises(RehearsalFailedError) as raised:
+            abandoned(staged.plan, before, _abandon_report())
+
+        released = staged.running(REHEARSAL_TCP).describe()
+        assert raised.value.detail == (
+            f"{REHEARSAL_TCP} runs {released} after the abandon, not the previous "
+            f"{before.describe()}"
+        )
+
+    @pytest.mark.parametrize(
+        ("action", "admin"),
+        [("completed", REHEARSAL_TCP), ("abandoned", "socket"), ("abandoned", None)],
+    )
+    def test_a_report_that_is_not_an_abandon_back_on_tcp_ends_the_rehearsal(
+        self, staged: Staged, action: str, admin: str | None
+    ) -> None:
+        """An abandon that restored the files without moving the endpoint reports the socket."""
+        reported = staged.plan.host.socket_admin if admin == "socket" else admin
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            abandoned(staged.plan, staged.running(REHEARSAL_TCP), _abandon_report(action, reported))
+
+        assert raised.value.step == "ii.rejected"
+        assert raised.value.detail == (
+            f"reconcile --abandon reported {action} on {reported}, not abandoned on {REHEARSAL_TCP}"
+        )
 
 
 class TestPlainReloadRefused:

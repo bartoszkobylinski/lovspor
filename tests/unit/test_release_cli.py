@@ -403,7 +403,7 @@ class TestReconcileWindow:
         self, droplet: Droplet
     ) -> None:
         """#302: the report names --abandon, --complete is refused, --abandon ends on TCP."""
-        droplet.caddy.refuse_at_start = 1
+        droplet.caddy.fail_reloads = 1
         with pytest.raises(MigrationFailedError):
             first_migration(droplet.plane, droplet.host, droplet.a)
 

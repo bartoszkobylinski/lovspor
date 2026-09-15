@@ -5,8 +5,11 @@ adapts to the same servers subtree and records ``admin``; a load reaches
 the instance only at the address it listens on; the socket is a real
 socket file with the ``|mode`` suffix's mode, left behind when the
 endpoint moves away and cleared at a stop only while the loaded drop-in
-sets ``RuntimeDirectory=`` (#303); and ``systemctl`` reflects the
-drop-in only after a ``daemon-reload``.
+sets ``RuntimeDirectory=`` (#303); an explicit-address load the instance
+refuses still moves the admin endpoint first, as the droplet's Caddy
+v2.11.4 did (#302), while a refused ``systemctl reload`` fails its job
+before anything moves; and ``systemctl`` reflects the drop-in only after
+a ``daemon-reload``.
 """
 
 import contextlib
@@ -289,7 +292,7 @@ class TestRefusedAtStart:
         self, box: Box
     ) -> None:
         before = box.caddy.running_config()
-        box.caddy.refuse_at_start = 1
+        box.caddy.fail_reloads = 1
 
         done = box.load(box.new, DEFAULT_TCP)
 
@@ -301,13 +304,13 @@ class TestRefusedAtStart:
         with pytest.raises(UnobservableError):
             box.caddy.running_config_at(DEFAULT_TCP)
         assert box.caddy.reloads == 0
-        assert box.caddy.refuse_at_start == 0
+        assert box.caddy.fail_reloads == 0
 
     def test_the_previous_configuration_delivered_to_the_socket_then_moves_it_back(
         self, box: Box
     ) -> None:
         before = box.caddy.running_config()
-        box.caddy.refuse_at_start = 1
+        box.caddy.fail_reloads = 1
         box.load(box.new, DEFAULT_TCP)
 
         assert box.reload(box.caddyfile, box.socket) == 0
@@ -321,7 +324,7 @@ class TestRefusedAtStart:
     ) -> None:
         box.reload(box.new, DEFAULT_TCP)
         running = box.caddy.running_config()
-        box.caddy.refuse_at_start = 1
+        box.caddy.fail_reloads = 1
 
         done = box.load(box.caddyfile, box.socket)
 
@@ -335,14 +338,14 @@ class TestRefusedAtStart:
     def test_a_load_to_an_address_nothing_listens_on_never_reaches_the_start(
         self, box: Box
     ) -> None:
-        box.caddy.refuse_at_start = 1
+        box.caddy.fail_reloads = 1
 
         done = box.load(box.new, box.socket)
 
         assert done.returncode == 1 and "connection refused" in done.stderr
         assert box.caddy.admin_address == DEFAULT_TCP
         assert not box.socket_file.exists()
-        assert box.caddy.refuse_at_start == 1
+        assert box.caddy.fail_reloads == 1
 
     @pytest.mark.parametrize("obstacle", ["socket already there", "no runtime directory"])
     def test_a_refused_load_whose_socket_cannot_be_bound_moves_nothing(
@@ -353,7 +356,7 @@ class TestRefusedAtStart:
         else:
             box.runtime.rmdir()
         before = box.caddy.running_config()
-        box.caddy.refuse_at_start = 1
+        box.caddy.fail_reloads = 1
 
         done = box.load(box.new, DEFAULT_TCP)
 
@@ -363,18 +366,23 @@ class TestRefusedAtStart:
         )
         assert box.caddy.admin_address == DEFAULT_TCP
         assert box.caddy.running_config_at(DEFAULT_TCP) == before
-        assert box.caddy.refuse_at_start == 1
+        assert box.caddy.fail_reloads == 1
 
-    def test_fail_reloads_is_still_the_refusal_that_moves_nothing(self, box: Box) -> None:
+    def test_a_refused_systemctl_reload_still_fails_its_job_before_anything_moves(
+        self, box: Box
+    ) -> None:
+        """Only the explicit-address load was observed refused (#302); the stock line's job
+        failure stays what the control-plane tests have always leaned on."""
         before = box.caddy.running_config()
         box.caddy.fail_reloads = 1
 
-        done = box.load(box.new, DEFAULT_TCP)
+        done = box.caddy.run(("systemctl", "reload", "caddy"), {})
 
-        assert done.returncode == 1 and done.stderr != REFUSED_AT_START
+        assert done.returncode == 1 and done.stderr.startswith("Job for caddy.service failed")
         assert box.caddy.admin_address == DEFAULT_TCP
         assert box.caddy.running_config_at(DEFAULT_TCP) == before
-        assert not box.socket_file.exists()
+        assert box.caddy.fail_reloads == 0
+        assert box.caddy.reloads == 0
 
 
 class TestPlantSocket:

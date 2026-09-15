@@ -455,8 +455,14 @@ sudo bash /opt/lovspor/app/deploy/digitalocean/rehearse-migration.sh
 
 About five minutes, most of it the build. It prints one line per assertion, in
 the ADR's order: (i) the instance on the previous Caddyfile with TCP answering
-and no socket; (ii) a load Caddy *rejects*, which must leave TCP answering, no
-socket and R unmoved, then the real cutover with the socket absent immediately
+and no socket; (ii) a load Caddy *rejects*: R must stay the previous
+configuration, read over the rejected configuration's socket — Caddy v2.11.4
+moves its admin endpoint there anyway and stops TCP, and the step requires
+exactly that ordering, so a Caddy that orders it differently fails the step —
+then `reconcile --abandon`, the way out step 5 names, which must leave TCP
+answering the previous configuration, nothing answering on the socket, no file
+at its name and nothing of the attempt behind; then the real cutover with the
+socket absent immediately
 before the reload and answering immediately after it, TCP refusing, R naming
 the envelope and `ExecReload=` naming the explicit socket address; (iii) the
 rollback delivered to the socket — preceded by a plain `systemctl reload` of
