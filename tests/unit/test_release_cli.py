@@ -1294,6 +1294,7 @@ class TestRehearseUrls:
             "releases": tmp_path / "releases",
             "previous": tmp_path / "etc" / "Caddyfile",
             "source": tmp_path / "app" / "Caddyfile",
+            "deployment": tmp_path,
         }
 
     def _invoke(self, content_id: str, paths: dict[str, Path]) -> object:
@@ -1309,6 +1310,8 @@ class TestRehearseUrls:
                 str(paths["previous"]),
                 "--caddyfile-source",
                 str(paths["source"]),
+                "--deployment-root",
+                str(paths["deployment"]),
             ],
         )
 
@@ -1330,6 +1333,7 @@ class TestRehearseUrls:
         (plan,) = captured
         assert plan.previous == paths["previous"] and plan.proposed == paths["source"]
         assert plan.release == paths["releases"] / RELEASE_ID
+        assert plan.deployment == paths["deployment"]
         assert isinstance(plan.runner, SubprocessRunner)
         assert "staged.corpus: 8 corpus URLs" in result.stdout
 
@@ -1474,6 +1478,7 @@ class TestRehearseUrls:
             ["release", "rehearse-urls", RELEASE_ID, "--no-such-option"],
             ["release", "rehearse-urls", RELEASE_ID, "--releases"],
             ["release", "rehearse-urls", RELEASE_ID, "--previous-caddyfile"],
+            ["release", "rehearse-urls", RELEASE_ID, "--deployment-root"],
         ],
     )
     def test_a_request_click_cannot_parse_is_a_usage_error(self, argv: list[str]) -> None:
@@ -1528,6 +1533,7 @@ class TestRehearseUrls:
             "releases",
             "previous_caddyfile",
             "caddyfile_source",
+            "deployment_root",
         }
 
     def test_both_paths_are_reachable_from_the_environment(self) -> None:
@@ -1540,6 +1546,51 @@ class TestRehearseUrls:
         assert params["previous_caddyfile"].envvar == "LOVSPOR_PREVIOUS_CADDYFILE"
         assert params["caddyfile_source"].envvar == "LOVSPOR_CADDYFILE_SOURCE"
         assert params["releases"].envvar == "LOVSPOR_RELEASES_ROOT"
+        assert params["deployment_root"].envvar == "LOVSPOR_DEPLOYMENT_ROOT"
+
+    def _captured_deployment(self, argv: list[str], monkeypatch: pytest.MonkeyPatch) -> Path:
+        """The deployment root the command hands the dry-run, for ``argv``."""
+        captured: list[StagedPlan] = []
+
+        def capture(plan: StagedPlan) -> RehearsalReport:
+            captured.append(plan)
+            return RehearsalReport(steps=())
+
+        monkeypatch.setattr(commands, "staged_rehearsal", capture)
+        result = runner.invoke(app, argv)
+        assert result.exit_code == 0, result.output
+        return captured[0].deployment
+
+    def test_the_deployment_root_is_var_www_unless_told_otherwise(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The droplet's, and never the parent of whatever root the envelope was built
+        under: rehearse-urls.sh builds it three levels down (#308)."""
+        monkeypatch.delenv("LOVSPOR_DEPLOYMENT_ROOT", raising=False)
+        paths = self._paths(tmp_path)
+        argv = ["release", "rehearse-urls", RELEASE_ID, "--releases", str(paths["releases"])]
+        argv += ["--previous-caddyfile", str(paths["previous"])]
+
+        found = self._captured_deployment(
+            [*argv, "--caddyfile-source", str(paths["source"])], monkeypatch
+        )
+
+        assert found == Path("/var/www")
+
+    def test_the_deployment_root_is_reachable_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Invoked, not introspected: the operator's route is the variable, not the param."""
+        monkeypatch.setenv("LOVSPOR_DEPLOYMENT_ROOT", str(tmp_path / "srv"))
+        paths = self._paths(tmp_path)
+        argv = ["release", "rehearse-urls", RELEASE_ID, "--releases", str(paths["releases"])]
+        argv += ["--previous-caddyfile", str(paths["previous"])]
+
+        found = self._captured_deployment(
+            [*argv, "--caddyfile-source", str(paths["source"])], monkeypatch
+        )
+
+        assert found == tmp_path / "srv"
 
     def test_one_file_named_twice_through_the_environment_is_the_same_refusal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
