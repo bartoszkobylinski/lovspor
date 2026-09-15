@@ -1,36 +1,25 @@
+# Transport only (issue #323, docs/decisions.md §9d): no check is named here.
+# The checks live in scripts/quality/, so a hook and a manual run of the same
+# script cannot drift apart. Commit stage: the fast gate. Push stage: the deep
+# gate (the fast gate, then the full unit suite). CI stays authoritative.
+# default_install_hook_types makes a plain `pre-commit install` install both.
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: local
     hooks:
-      - id: gitleaks
-        name: gitleaks secret scan
-        entry: gitleaks git --pre-commit --redact --staged --verbose
+      - id: verify-fast
+        name: fast gate (scripts/quality/verify-fast.sh)
+        entry: scripts/quality/verify-fast.sh
         language: system
         pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
 
-      - id: ruff-check
-        name: ruff lint
-        entry: uv run ruff check
+      - id: verify-deep
+        name: deep gate (scripts/quality/verify-deep.sh)
+        entry: scripts/quality/verify-deep.sh
         language: system
-        types: [python]
         pass_filenames: false
-
-      - id: ruff-format
-        name: ruff format check
-        entry: uv run ruff format --check
-        language: system
-        types: [python]
-        pass_filenames: false
-
-      - id: mypy
-        name: mypy strict
-        entry: uv run mypy src/
-        language: system
-        types: [python]
-        pass_filenames: false
-
-      - id: pytest-unit
-        name: pytest unit
-        entry: uv run pytest tests/unit/ -q
-        language: system
-        types: [python]
-        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

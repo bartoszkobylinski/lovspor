@@ -14,7 +14,10 @@ fi
 echo ">>> Installing dependencies with uv..."
 uv sync
 
-echo ">>> Installing pre-commit hooks..."
+# .pre-commit-config.yaml sets default_install_hook_types, so this installs both
+# stages: pre-commit (scripts/quality/verify-fast.sh) and pre-push
+# (scripts/quality/verify-deep.sh).
+echo ">>> Installing git hooks (pre-commit: fast gate, pre-push: deep gate)..."
 uv run pre-commit install
 
 echo ">>> Verifying toolchain..."
