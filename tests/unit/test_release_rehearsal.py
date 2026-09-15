@@ -1089,7 +1089,8 @@ class TestRestarts:
         assert wanted != found
         assert raised.value.detail == (
             f"admin socket precondition unmet: {host.socket} has gid {found}, not "
-            f"lovspor-release's {wanted}; the runtime directory needs the setgid bit and the group"
+            f"lovspor-release's {wanted}; a start gives the socket the unit's Group= "
+            "(the caddy.service drop-in), a reload the group of its setgid runtime directory"
         )
 
     def test_a_fact_that_stops_holding_ends_the_rehearsal_naming_the_restart(

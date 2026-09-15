@@ -115,8 +115,8 @@ class TestTheFourFacts:
 
         assert str(raised.value) == (
             f"admin socket precondition unmet: {socketed.file} has gid {found}, not "
-            f"lovspor-release's {found + 1}; the runtime directory needs the setgid bit "
-            "and the group"
+            f"lovspor-release's {found + 1}; a start gives the socket the unit's Group= "
+            "(the caddy.service drop-in), a reload the group of its setgid runtime directory"
         )
 
     def test_the_wrong_mode_names_the_creation_mode_suffix(self, socketed: Socketed) -> None:
@@ -245,6 +245,6 @@ class TestTheGroupTheDropInGives:
         assert wanted != found
         assert str(raised.value) == (
             f"admin socket precondition unmet: {socketed.socket} has gid {found}, not "
-            f"lovspor-release's {wanted}; the runtime directory needs the setgid bit "
-            "and the group"
+            f"lovspor-release's {wanted}; a start gives the socket the unit's Group= "
+            "(the caddy.service drop-in), a reload the group of its setgid runtime directory"
         )
