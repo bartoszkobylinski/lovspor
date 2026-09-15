@@ -17,17 +17,21 @@ import json
 import os
 import shutil
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
 
-from lovspor.release.answers import Answer, is_servable_url
+from lovspor.release.answers import Answer, _compiled, _nodes, is_servable_url, matcher_paths
 from lovspor.release.caddy import FRAGMENT_ENV, Completed
-from lovspor.release.envelope import RECORD_NAME
+from lovspor.release.envelope import CORPUS_PATHS, RECORD_NAME
 from lovspor.release.errors import RehearsalFailedError
 from lovspor.release.staged import (
     OBSERVATORY_URL,
     PROBE_SEGMENT,
+    SITE_URLS,
+    Progress,
     StagedPlan,
     _changed,
     _first_difference,
@@ -42,6 +46,7 @@ from lovspor.release.staged import (
 )
 from tests.unit.staged_fixtures import (
     FLAT_RELEASE,
+    GONE_PREFIX,
     LIVE_SYMLINK,
     REDIRECT_TARGET,
     RELEASE_ID,
@@ -765,3 +770,143 @@ class TestACaddyfileTheDryRunCannotRead:
             staged_rehearsal(plan)
 
         assert RECORD_NAME in caught.value.detail
+
+
+GONE_PAIRS, UNASKED_GONE = 500, 19_000
+"""20,000 injected 410 patterns: 500 retired prefixes as ``P P*``, and the rest unasked."""
+
+
+def gone_by_the_thousand(config: object) -> object:
+    """One capture whose ``@lovspor_gone`` matcher holds the droplet's order of patterns.
+
+    A hand edit of real `caddy adapt` output, and labelled as one: the world
+    retires one prefix, the droplet's redirect map thousands (#307), and a
+    capture of that size is not worth committing. ``GONE_PAIRS`` prefixes are
+    written as ``publish.redirects`` writes them, so each becomes two questions
+    answered 410. The rest carry their wildcard mid-path, which the dry-run never
+    turns into a question: every corpus URL still walks all of them — the
+    droplet's cost, many URLs by many patterns — without the world asking
+    twenty thousand questions that each walk twenty thousand patterns.
+    """
+    for node in _nodes(config):
+        paths = node.get("path")
+        if isinstance(paths, list) and GONE_PREFIX in paths:
+            for index in range(GONE_PAIRS):
+                prefix = f"/lov/nl-18000101-{index:04d}/"
+                paths.extend((prefix, f"{prefix}*"))
+            paths.extend(f"/lov/*/opphevet-{index}/" for index in range(UNASKED_GONE))
+    return config
+
+
+class TestARedirectMapOfTheDropletsSize:
+    def test_it_passes_compiling_each_pattern_once_however_many_urls_walk_it(
+        self, world: Path
+    ) -> None:
+        """A bound on the work, not on the clock: each distinct pattern is compiled exactly
+        once over all three passes, where the matcher it replaced recompiled one on every
+        URL that walked it once ``re``'s own cache of 512 was full."""
+        previous = gone_by_the_thousand(load_adapted("previous.json", world))
+        proposed = gone_by_the_thousand(load_adapted("proposed.json", world))
+        distinct = {*matcher_paths(previous), *matcher_paths(proposed), *CORPUS_PATHS}
+        _compiled.cache_clear()
+
+        report = staged_rehearsal(plan_for(world, [previous], [proposed]))
+
+        corpus = next(step for step in report.steps if step.name == "staged.corpus")
+        assert corpus.detail.startswith(f"{8 + 2 * GONE_PAIRS} corpus URLs")
+        assert len(distinct) > GONE_PAIRS * 2 + UNASKED_GONE
+        assert _compiled.cache_info().misses == len(distinct)
+
+
+class Ticking:
+    """A clock that moves ``step`` seconds each time it is read: time passes, nothing sleeps."""
+
+    def __init__(self, step: float) -> None:
+        self.step = step
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        self.now += self.step
+        return self.now
+
+
+PASSES = (
+    "the previous configuration",
+    "the proposed configuration",
+    "the previous configuration again",
+)
+"""The three passes over the question set, in the order the run makes them."""
+
+
+def listened_to(plan: StagedPlan, heard: list[str], step: float = 10.0) -> StagedPlan:
+    """The same plan, its progress heard into ``heard`` against a clock moved only by reading."""
+    return replace(plan, progress=Progress(say=heard.append, clock=Ticking(step)))
+
+
+def questions(world: Path) -> int:
+    """How many URLs the run asks each configuration in the fixture world."""
+    return len(dict.fromkeys((*candidate_urls(load_adapted("previous.json", world)), *SITE_URLS)))
+
+
+class TestTheDryRunSaysHowFarItHasGot:
+    """#307: eleven hours with nothing printed read as a hang.
+
+    Progress is heard through a list and never through the report, and time is a
+    clock that moves only when it is read, so nothing here sleeps or depends on
+    how fast the machine running it is.
+    """
+
+    def test_a_pass_says_it_started_then_how_far_it_has_got_each_interval(self) -> None:
+        heard: list[str] = []
+        progress = Progress(say=heard.append, clock=Ticking(10.0))
+        urls = tuple(f"/{index}" for index in range(7))
+
+        assert tuple(progress.counted("the previous configuration", urls)) == urls
+        assert heard == [
+            "staged: asking the previous configuration",
+            "staged: the previous configuration 3/7 URLs, 0.1/s, ETA 0:00:40",
+            "staged: the previous configuration 6/7 URLs, 0.1/s, ETA 0:00:10",
+        ]
+
+    def test_the_whole_run_says_what_it_is_doing_in_the_order_it_does_it(self, world: Path) -> None:
+        heard: list[str] = []
+
+        report = staged_rehearsal(listened_to(make_plan(world), heard))
+
+        checking = [f"staged: checking {step.name}" for step in report.steps]
+        assert [line for line in heard if "/s, ETA " not in line] == [
+            checking[0],
+            f"staged: {questions(world)} URLs to ask each configuration",
+            f"staged: asking {PASSES[0]}",
+            f"staged: asking {PASSES[1]}",
+            *checking[1:],
+            f"staged: asking {PASSES[2]}",
+        ]
+
+    @pytest.mark.parametrize("label", PASSES)
+    def test_every_pass_reports_its_count_rate_and_eta(self, world: Path, label: str) -> None:
+        heard: list[str] = []
+        urls = questions(world)
+
+        staged_rehearsal(listened_to(make_plan(world), heard))
+
+        start = heard.index(f"staged: asking {label}")
+        eta = timedelta(seconds=10 * (urls - 3))
+        assert heard[start + 1] == f"staged: {label} 3/{urls} URLs, 0.1/s, ETA {eta}"
+
+    def test_saying_it_changes_nothing_the_run_reports(self, world: Path) -> None:
+        heard: list[str] = []
+
+        assert staged_rehearsal(listened_to(make_plan(world), heard)) == staged_rehearsal(
+            make_plan(world)
+        )
+        assert heard
+
+    def test_a_refusal_comes_after_the_step_it_was_checking(self, world: Path) -> None:
+        heard: list[str] = []
+        plan = listened_to(make_plan(world, "proposed-drops-robots.json"), heard, step=0.0)
+
+        with pytest.raises(RehearsalFailedError):
+            staged_rehearsal(plan)
+
+        assert heard[-1] == "staged: checking staged.corpus"

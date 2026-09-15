@@ -14,14 +14,19 @@ either Caddyfile.
 """
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from lovspor.release.answers import (
     NOT_FOUND,
     Answer,
+    _as_regex,
+    _nodes,
     answer_for,
     contained,
     hidden_paths,
@@ -33,18 +38,23 @@ from lovspor.release.answers import (
     served_file,
 )
 from lovspor.release.errors import UnroutableConfigError
+from lovspor.release.staged import PROBE_SEGMENT, candidate_urls
 from tests.unit.staged_fixtures import (
     GONE_PREFIX,
     REDIRECT_SOURCE,
     REDIRECT_TARGET,
     RELEASE_ID,
     build_world,
+    fixture_path,
     load_adapted,
 )
 
 REPO = Path(__file__).resolve().parents[2]
 LAW_URL = "/lov/nl-19140101-001/"
 LAW_FILE = "lov/nl-19140101-001/index.html"
+CAPTURES = sorted(path.name for path in fixture_path("previous.json").parent.glob("*.json"))
+KELVIN, LONG_S = "\u212a", "\u017f"
+"""Two characters ``re.IGNORECASE`` folds onto ``k`` and ``s`` — and ``str.lower`` does not."""
 
 
 @pytest.fixture
@@ -269,6 +279,103 @@ class TestPathMatching:
 
     def test_no_patterns_match_nothing(self) -> None:
         assert matches_path((), LAW_URL) is False
+
+
+def _path_sets(config: object) -> list[list[str]]:
+    return [node["path"] for node in _nodes(config) if isinstance(node.get("path"), list)]
+
+
+def _asked_about(pattern: str) -> set[str]:
+    """What a matcher path itself offers as a question: as written, probed, and bare."""
+    bare = pattern.removesuffix("*")
+    return {pattern, pattern.replace("*", PROBE_SEGMENT), bare, bare.removesuffix("/")}
+
+
+def _spellings(url: str) -> set[str]:
+    """One URL and the spellings a cheaper matcher would be likeliest to answer differently."""
+    toggled = url.removesuffix("/") if url.endswith("/") else f"{url}/"
+    folded = url.replace("s", LONG_S).replace("k", KELVIN)
+    return {url, url.upper(), toggled, folded, f"{url}\n", url.replace("/", "/\n", 1)}
+
+
+def _reference(pattern: str, url: str) -> bool:
+    """The matcher as it read before #307: the regex text rebuilt and handed to ``re``."""
+    return re.fullmatch(_as_regex(pattern), url, re.IGNORECASE) is not None
+
+
+_CHARACTERS = [*"/*.-_?+()[]{}|^$\\ aAsSkK0\n", KELVIN, LONG_S, "\u00df", "\u0130", "\u0131"]
+_TEXT = st.text(alphabet=_CHARACTERS, max_size=12)
+
+
+class TestEachPatternCompiledOnceAnswersAsBefore:
+    """#307: the path matcher compiles each pattern once instead of on every URL.
+
+    Compiled from the same regex text with the same flag, so every answer is
+    unchanged by construction; these pin that construction against the plain
+    ``re.fullmatch`` it replaced, so a later, cheaper matcher — one that
+    lower-cases instead of folding, or anchors with ``$`` instead of matching
+    the whole string — cannot pass quietly.
+    """
+
+    @pytest.mark.parametrize("name", CAPTURES)
+    def test_every_pattern_of_every_capture(self, world: Path, name: str) -> None:
+        config = load_adapted(name, world)
+        patterns = {pattern for paths in _path_sets(config) for pattern in paths}
+        asked = {*candidate_urls(config), *(url for one in patterns for url in _asked_about(one))}
+        urls = {spelling for url in asked for spelling in _spellings(url)}
+        verdicts = {
+            (pattern, url): _reference(pattern, url) for pattern in patterns for url in urls
+        }
+
+        disagreements = [
+            (pattern, url)
+            for (pattern, url), held in verdicts.items()
+            if matches_path((pattern,), url) is not held
+        ]
+
+        assert {True, False} <= set(verdicts.values())
+        assert disagreements == []
+
+    @pytest.mark.parametrize("name", CAPTURES)
+    def test_every_matcher_set_of_every_capture(self, world: Path, name: str) -> None:
+        config = load_adapted(name, world)
+        urls = {spelling for url in candidate_urls(config) for spelling in _spellings(url)}
+
+        for paths in _path_sets(config):
+            for url in urls:
+                assert matches_path(paths, url) is any(_reference(one, url) for one in paths)
+
+    @pytest.mark.parametrize(
+        ("pattern", "url", "matched"),
+        [
+            ("/robots.txt", f"/robot{LONG_S}.txt", True),
+            ("/forskrift", f"/for{LONG_S}{KELVIN}rift", True),
+            ("/lov", "/lov\n", False),
+            ("/lov/*", "/lov/\n", False),
+            ("/lov/*", "/lov/a\nb", False),
+        ],
+    )
+    def test_the_case_folds_and_line_breaks_the_spellings_rely_on(
+        self, pattern: str, url: str, matched: bool
+    ) -> None:
+        """Pinned outright, so the spellings above are known to reach both outcomes."""
+        assert matches_path((pattern,), url) is matched
+
+
+@given(patterns=st.lists(_TEXT, min_size=1, max_size=4), data=st.data())
+def test_any_patterns_and_url(patterns: list[str], data: st.DataObject) -> None:
+    """#307's property, kept at module level on purpose.
+
+    As a method, a second pytest run in the same process — mutmut's clean-test
+    run — hands Hypothesis a new instance, and it refuses the test as
+    ``HealthCheck.differing_executors``; the mutation gate then never started.
+    """
+    chosen = data.draw(st.sampled_from(patterns))
+    parts = re.split(r"(\*)", chosen)
+    filled = "".join(data.draw(_TEXT) if part == "*" else part for part in parts)
+    url = data.draw(st.sampled_from([filled, filled.swapcase(), filled.upper()]) | _TEXT)
+
+    assert matches_path(patterns, url) is any(_reference(one, url) for one in patterns)
 
 
 class TestReadingTheRoutesThemselves:
