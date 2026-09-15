@@ -23,7 +23,14 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.release.answers import Answer, _compiled, _nodes, is_servable_url, matcher_paths
+from lovspor.release.answers import (
+    Answer,
+    _compiled,
+    _nodes,
+    is_servable_url,
+    matcher_paths,
+    roots,
+)
 from lovspor.release.caddy import FRAGMENT_ENV, Completed
 from lovspor.release.envelope import CORPUS_PATHS, RECORD_NAME
 from lovspor.release.errors import RehearsalFailedError
@@ -43,13 +50,20 @@ from lovspor.release.staged import (
     symlinked_component,
     tree_urls,
     unreadable_reason,
+    validated,
 )
 from tests.unit.staged_fixtures import (
+    CAPTURED,
     FLAT_RELEASE,
     GONE_PREFIX,
     LIVE_SYMLINK,
+    PREVIOUS_NAME,
+    PROPOSED_NAME,
     REDIRECT_TARGET,
     RELEASE_ID,
+    WRAPPER,
+    Layout,
+    World,
     build_world,
     load_adapted,
 )
@@ -65,10 +79,10 @@ class FixtureRunner:
     second reading must differ says so by pushing two.
     """
 
-    def __init__(self, previous: list[object], proposed: list[object], files: tuple[Path, Path]):
-        self.adapted = {files[0]: list(previous), files[1]: list(proposed)}
-        self.proposed = files[1]
-        self.fragment = files[0].parent / "www" / "lovspor-releases" / RELEASE_ID / "release.caddy"
+    def __init__(self, previous: list[object], proposed: list[object], paths: World):
+        self.adapted = {paths.previous: list(previous), paths.proposed: list(proposed)}
+        self.proposed = paths.proposed
+        self.fragment = paths.fragment
         self.validate_returncode = 0
         self.tamper: Path | None = None
 
@@ -92,15 +106,32 @@ def world(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def make_plan(world: Path, proposed: str = "proposed.json") -> StagedPlan:
-    return plan_for(world, [load_adapted("previous.json", world)], [load_adapted(proposed, world)])
+@pytest.fixture(params=[CAPTURED, WRAPPER], ids=["captured", "wrapper"])
+def layout(request: pytest.FixtureRequest) -> Layout:
+    return request.param  # type: ignore[no-any-return]
 
 
-def plan_for(world: Path, previous: list[object], proposed: list[object]) -> StagedPlan:
+@pytest.fixture
+def anywhere(tmp_path: Path, layout: Layout) -> Path:
+    """The same world, built in each layout in turn."""
+    build_world(tmp_path, REPO, layout)
+    return tmp_path
+
+
+def make_plan(
+    world: Path, proposed: str = "proposed.json", layout: Layout = CAPTURED
+) -> StagedPlan:
+    previous = [load_adapted("previous.json", world, layout)]
+    return plan_for(world, previous, [load_adapted(proposed, world, layout)], layout)
+
+
+def plan_for(
+    world: Path, previous: list[object], proposed: list[object], layout: Layout = CAPTURED
+) -> StagedPlan:
     """A plan whose runner answers each Caddyfile from its own queue of captures."""
-    files = (world / "Caddyfile.previous", world / "Caddyfile.proposed")
-    runner = FixtureRunner(previous, proposed, files)
-    return StagedPlan(runner, files[0], files[1], world / "www" / "lovspor-releases" / RELEASE_ID)
+    paths = World(world, world / PREVIOUS_NAME, world / PROPOSED_NAME, layout.release(world))
+    runner = FixtureRunner(previous, proposed, paths)
+    return StagedPlan(runner, paths.previous, paths.proposed, paths.release, layout.www(world))
 
 
 def dropping(config: object, *indices: int) -> object:
@@ -176,6 +207,68 @@ class TestThePassingDryRun:
         (site_of(world) / "index.html").write_text("<h1>rebuilt</h1>\n", encoding="utf-8")
 
         assert staged_rehearsal(make_plan(world)).steps
+
+
+class TestTheWrappersLayout:
+    """``rehearse-urls.sh`` builds its envelope three levels under ``/var/www``, not two (#308).
+
+    Every other test here builds the release where its grandparent happens to be
+    the world's ``/var/www``, so nothing asked about the layout the droplet runs.
+    """
+
+    def test_the_envelope_stands_where_the_wrapper_builds_it(self, tmp_path: Path) -> None:
+        built = build_world(tmp_path, REPO, WRAPPER)
+        www = tmp_path / "var" / "www"
+
+        assert built.release == www / "lovspor-urls-rehearsal" / "releases" / RELEASE_ID
+        assert (built.release / RECORD_NAME).is_file()
+        assert (www / "lovspor-current" / "redirects.caddy").is_file()
+
+    def test_a_capture_is_rehosted_onto_that_envelope_exactly_once(self, tmp_path: Path) -> None:
+        """The wrapper's root holds ``/var/www`` itself: a second rewrite would nest it."""
+        release = WRAPPER.release(tmp_path)
+
+        found = roots(load_adapted("proposed.json", tmp_path, WRAPPER))
+
+        assert sorted(found) == [(release / "corpus").as_posix(), (release / "site").as_posix()]
+
+    def test_the_passing_dry_run_passes_in_either_layout(
+        self, anywhere: Path, layout: Layout
+    ) -> None:
+        report = staged_rehearsal(make_plan(anywhere, layout=layout))
+
+        assert [step.name for step in report.steps][-1] == "staged.rollback"
+        assert layout.release(anywhere).as_posix() in report.steps[2].detail
+
+    def test_the_old_trees_redirect_map_is_refused_in_either_layout(
+        self, anywhere: Path, layout: Layout
+    ) -> None:
+        """The wrapper's layout is the droplet's: there a boundary at the rehearsal root
+        left ``/var/www/lovspor-current/redirects.caddy`` outside it, and unchecked."""
+        foreign = layout.www(anywhere) / "lovspor-current" / "redirects.caddy"
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(make_plan(anywhere, "proposed-foreign-map.json", layout))
+
+        assert caught.value.step == "staged.corpus"
+        assert caught.value.detail == (
+            f"the new configuration imports {foreign.as_posix()}, which is not the release's own"
+        )
+
+    def test_a_symlinked_root_is_named_as_one_in_either_layout(
+        self, anywhere: Path, layout: Layout
+    ) -> None:
+        """Not "outside the deployment": ``lovspor-live`` is inside ``/var/www`` in both."""
+        live = layout.www(anywhere) / LIVE_SYMLINK
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(make_plan(anywhere, "proposed-symlinked-root.json", layout))
+
+        assert caught.value.step == "staged.symlinks"
+        assert caught.value.detail == (
+            f"{(live / 'corpus').as_posix()} is served through the symlink {live.as_posix()}, "
+            "which a publish can move"
+        )
 
 
 class TestTheHostBothConfigurationsServe:
@@ -306,7 +399,7 @@ class TestASymlinkOnAServingPath:
         self, world: Path
     ) -> None:
         """``/var`` is a symlink on macOS and ``tmp_path`` sits under it. The assertion is
-        about the deployment's own symlinks, so it starts at the releases root's parent."""
+        about the deployment's own symlinks, so it starts at the deployment root."""
         assert symlinked_component(corpus_of(world), world / "www") is None
 
 
@@ -469,6 +562,65 @@ class TestSymlinkedComponent:
 
         assert caught.value.step == "staged.symlinks"
         assert "outside the deployment" in caught.value.detail
+
+
+class TestTheDeploymentRoot:
+    """Handed in, never derived from where the release stands (#308).
+
+    Both boundaries are drawn at it — the imports the corpus step checks and
+    the symlinks the symlink step looks for — so a release outside it would
+    put the release's own trees beyond the line the assertions check inside.
+    """
+
+    def test_a_release_outside_it_is_refused_by_name(self, world: Path) -> None:
+        elsewhere = world / "elsewhere"
+        plan = replace(make_plan(world), deployment=elsewhere)
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert caught.value.step == "staged.validate"
+        assert caught.value.detail == (
+            f"the release {plan.release} is outside the deployment root {elsewhere}"
+        )
+
+    def test_the_release_itself_is_not_inside_it(self, world: Path) -> None:
+        plan = make_plan(world)
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(replace(plan, deployment=plan.release))
+
+        assert caught.value.detail.startswith(f"the release {plan.release} is outside")
+
+    def test_it_is_named_before_an_incomplete_envelope(self, world: Path) -> None:
+        """Nothing of the release is read until it is known to stand inside the root."""
+        plan = replace(make_plan(world), deployment=world / "elsewhere")
+        (plan.release / RECORD_NAME).unlink()
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            staged_rehearsal(plan)
+
+        assert "deployment root" in caught.value.detail
+        assert RECORD_NAME not in caught.value.detail
+
+    def test_a_release_reached_through_a_symlink_outside_it_is_refused_before_reading(
+        self, world: Path
+    ) -> None:
+        """A lexical child can resolve outside the boundary; it is not a deployed release."""
+        plan = make_plan(world)
+        deployment = world / "deployment"
+        deployment.mkdir()
+        (deployment / "releases").symlink_to(plan.release.parent, target_is_directory=True)
+        release = deployment / "releases" / plan.release.name
+        (plan.release / RECORD_NAME).unlink()
+
+        with pytest.raises(RehearsalFailedError) as caught:
+            validated(replace(plan, deployment=deployment, release=release))
+
+        assert caught.value.step == "staged.validate"
+        assert caught.value.detail == (
+            f"the release {release} is outside the deployment root {deployment}"
+        )
 
 
 class TestTheUrlSetTheOldConfigurationOffers:

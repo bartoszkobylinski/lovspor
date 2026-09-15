@@ -308,6 +308,23 @@ class TestTheUrlDryRunsHarness:
         assert '--caddyfile-source "$PROPOSED_CADDYFILE"' in code
         assert '--releases "$REH_ROOT/releases"' in code
 
+    def test_tells_the_command_the_deployment_root_is_var_www(self) -> None:
+        """Never the root the envelope is built under: a boundary there left an import of
+        the old tree's redirect map outside it, and unchecked (#308)."""
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+        call = code[code.index('"$LOVSPOR" release rehearse-urls') :]
+
+        assert _directive(code, "DEPLOYMENT_ROOT") == ["/var/www"]
+        assert '--deployment-root "$DEPLOYMENT_ROOT"' in call
+
+    def test_builds_its_envelope_inside_the_deployment_root_it_names(self) -> None:
+        """The command refuses a release outside the root, so the two must agree here."""
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+        (deployment,) = _directive(code, "DEPLOYMENT_ROOT")
+        (rehearsal,) = _directive(code, "REH_ROOT")
+
+        assert Path(deployment) in Path(rehearsal).parents
+
     def test_writes_under_a_root_of_its_own_and_never_a_production_one(self) -> None:
         code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
 

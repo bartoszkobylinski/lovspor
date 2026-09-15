@@ -69,6 +69,7 @@ from lovspor.site.probe import CANONICAL_MCP_URL, DEFAULT_READINESS_URL, ProbeSe
 from lovspor.site.probe_credential import load_probe_token
 
 DEFAULT_RELEASES = Path("/var/www/lovspor-releases")
+DEFAULT_DEPLOYMENT_ROOT = Path("/var/www")
 EXIT_REFUSED = 1
 EXIT_UNOBSERVABLE = 3
 NOTHING_LIVE = "none"
@@ -622,6 +623,14 @@ def rehearse_urls_command(
         ),
     ] = DEFAULT_CADDYFILE,
     caddyfile_source: _CaddyfileSourceOption = DEFAULT_CADDYFILE_SOURCE,
+    deployment_root: Annotated[
+        Path,
+        typer.Option(
+            "--deployment-root",
+            envvar="LOVSPOR_DEPLOYMENT_ROOT",
+            help="The root the release stands under; imports and symlinks are checked inside it.",
+        ),
+    ] = DEFAULT_DEPLOYMENT_ROOT,
 ) -> None:
     """The staged first-migration rehearsal: the URL dry-run (ADR-0014 Validation).
 
@@ -649,6 +658,7 @@ def rehearse_urls_command(
         previous_caddyfile,
         caddyfile_source,
         releases / content_id,
+        deployment_root,
         Progress(say=lambda line: typer.echo(line, err=True)),
     )
     with _refusals():

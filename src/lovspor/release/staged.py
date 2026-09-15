@@ -165,13 +165,24 @@ def _how_far(label: str, done: int, total: int, elapsed: float) -> str:
 
 @dataclass(frozen=True)
 class StagedPlan:
-    """The two Caddyfiles, the envelope they are compared against, how to run Caddy,
-    and where to say how far the run has got."""
+    """The two Caddyfiles, the envelope they are compared against, the deployment root
+    it stands in, how to run Caddy, and where to say how far the run has got.
+
+    ``deployment`` is ``/var/www``: the boundary of the import assertion and of
+    the symlink assertion. Above it the symlinks belong to the machine
+    (``/var`` is one on a Mac), and the deployment neither made them nor can
+    move them; below it they are the deployment's own. It is handed in and has
+    no default, because where the release stands says nothing about it:
+    ``rehearse-urls.sh`` builds its envelope three levels down, and a root
+    derived as the release's grandparent let an import of the old tree's
+    redirect map pass unchecked (#308).
+    """
 
     runner: Runner
     previous: Path
     proposed: Path
     release: Path
+    deployment: Path
     progress: Progress = field(default_factory=Progress)
 
     @property
@@ -185,17 +196,6 @@ class StagedPlan:
     @property
     def fragment(self) -> Path:
         return self.release / FRAGMENT_NAME
-
-    @property
-    def deployment(self) -> Path:
-        """The directory the releases root sits in — ``/var/www``.
-
-        The symlink assertion's boundary. Above it the symlinks belong to
-        the machine (``/var`` is one on a Mac), and the deployment neither
-        made them nor can move them; below it they are the deployment's
-        own, which is what the ADR is about.
-        """
-        return self.release.parent.parent
 
 
 @dataclass(frozen=True)
@@ -365,8 +365,26 @@ def _readable(path: Path, role: str) -> None:
         raise RehearsalFailedError("staged.validate", f"the {role} {path} {broken}")
 
 
+def _inside_the_deployment(plan: StagedPlan) -> None:
+    """The release stands below the deployment root, before anything of it is read.
+
+    As spelled, because that is how the symlink assertion reads its boundary
+    off the adapted roots; and as resolved, because a lexical child reached
+    through a symlink is read from wherever that symlink points. A root the
+    release is not under would leave the release's own trees beyond the line
+    both boundary assertions check inside.
+    """
+    spelled = plan.deployment in plan.release.parents
+    _require(
+        spelled and plan.deployment.resolve() in plan.release.resolve().parents,
+        "staged.validate",
+        f"the release {plan.release} is outside the deployment root {plan.deployment}",
+    )
+
+
 def validated(plan: StagedPlan) -> Step:
     """The envelope is complete and Caddy accepts both files; nothing is compared before this."""
+    _inside_the_deployment(plan)
     missing = missing_parts(plan.release)
     _require(
         not missing, "staged.validate", f"{plan.release.name} is incomplete: {', '.join(missing)}"

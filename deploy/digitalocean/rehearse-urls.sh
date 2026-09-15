@@ -39,6 +39,11 @@ ENVIRONMENT=/etc/default/caddy-lovspor
 
 PREVIOUS_CADDYFILE=/etc/caddy/Caddyfile
 PROPOSED_CADDYFILE="$APP/deploy/digitalocean/Caddyfile"
+# The boundary the dry-run checks imports and symlinks inside of, named rather
+# than left to the command: the envelope below stands three levels under it,
+# and a boundary at REH_ROOT let an import of the old tree's map pass unchecked
+# (#308).
+DEPLOYMENT_ROOT=/var/www
 REH_ROOT=/var/www/lovspor-urls-rehearsal
 KEEP=0
 
@@ -103,6 +108,7 @@ log "comparing $PREVIOUS_CADDYFILE with $PROPOSED_CADDYFILE over release $RELEAS
 
 "$LOVSPOR" release rehearse-urls "$RELEASE_ID" \
 	--releases "$REH_ROOT/releases" \
+	--deployment-root "$DEPLOYMENT_ROOT" \
 	--previous-caddyfile "$PREVIOUS_CADDYFILE" \
 	--caddyfile-source "$PROPOSED_CADDYFILE"
 
