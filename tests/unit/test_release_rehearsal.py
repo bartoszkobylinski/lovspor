@@ -60,10 +60,19 @@ from lovspor.release.rehearsal import (
     steady_reload,
     steady_state,
 )
-from tests.unit.caddy_fakes import LOAD_REFUSED_AT_START, FakeCaddy, plant_socket, toy_adapt
+from tests.unit.caddy_fakes import (
+    LOAD_REFUSED_AT_START,
+    FakeCaddy,
+    chgrp_drop_in,
+    plant_socket,
+    toy_adapt,
+)
 from tests.unit.migrate_fixtures import OLD_CADDYFILE, Droplet, Sabotaged, make_droplet
 from tests.unit.release_fixtures import World, build, make_world
 
+ISSUE_324 = pytest.mark.xfail(
+    strict=True, reason="#324: a start undoes the migration drop-in's chgrp"
+)
 REHEARSAL_TCP = "localhost:2029"
 REHEARSAL_UNIT = "caddy-rehearsal"
 STOCK_SHOWN = "ExecReload={ path=/usr/bin/caddy ; argv[]=/usr/bin/caddy reload }\n"
@@ -1044,6 +1053,7 @@ class TestSteadyState:
 
 
 class TestRestarts:
+    @ISSUE_324
     def test_the_four_facts_hold_after_each_of_two_restarts(self, staged: Staged) -> None:
         cutover(staged.plan)
 
@@ -1053,6 +1063,39 @@ class TestRestarts:
         assert str(staged.plan.host.socket) in steps[0].detail
         assert "0660" in steps[1].detail
         assert staged.caddy.restarts >= 2
+
+    @ISSUE_324
+    def test_both_restarts_keep_the_release_group_under_the_migrations_drop_in(
+        self, staged: Staged
+    ) -> None:
+        cutover(staged.plan)
+
+        steps = restarts(staged.plan)
+
+        gid = staged.plan.host.socket.stat().st_gid
+        held = [f"group lovspor-release (gid {gid})" in step.detail for step in steps[:2]]
+        assert held == [True, True]
+
+    def test_a_drop_in_giving_the_group_by_chgrp_fails_the_first_restart(
+        self, staged: Staged
+    ) -> None:
+        """#324, the droplet's own (v.1): the chgrp ran, and the restarted socket was gid caddy."""
+        cutover(staged.plan)
+        host = staged.plan.host
+        host.drop_in.write_text(chgrp_drop_in(host), encoding="utf-8")
+        staged.caddy.run(("systemctl", "daemon-reload"), {})
+
+        with pytest.raises(RehearsalFailedError) as raised:
+            restarts(staged.plan)
+
+        found = host.socket.stat().st_gid
+        wanted = staged.droplet.ownership.gid_of("lovspor-release")
+        assert raised.value.step == "v.1"
+        assert wanted != found
+        assert raised.value.detail == (
+            f"admin socket precondition unmet: {host.socket} has gid {found}, not "
+            f"lovspor-release's {wanted}; the runtime directory needs the setgid bit and the group"
+        )
 
     def test_a_fact_that_stops_holding_ends_the_rehearsal_naming_the_restart(
         self, staged: Staged
@@ -1108,6 +1151,7 @@ class TestRestarts:
         gid = staged.droplet.ownership.groups["lovspor-release"]
         assert staged.droplet.ownership.chowns == [(staged.plan.host.socket, -1, gid)]
 
+    @ISSUE_324
     @pytest.mark.parametrize("nth", [3, 4, 5])
     def test_any_restart_inside_the_fixture_that_fails_names_the_fixture(
         self, staged: Staged, nth: int
@@ -1162,6 +1206,7 @@ class TestRestarts:
 
         assert _mode(staged.plan.plane.caddyfile) == 0o644
 
+    @ISSUE_324
     def test_a_fixture_that_still_carries_the_suffix_ends_the_rehearsal(
         self, staged: Staged
     ) -> None:
@@ -1180,6 +1225,7 @@ class TestRestarts:
             "a socket whose mode and group were set once by hand passed the four facts"
         )
 
+    @ISSUE_324
     def test_a_refusal_about_something_else_than_the_mode_or_the_group_ends_the_rehearsal(
         self, staged: Staged
     ) -> None:
@@ -1199,6 +1245,7 @@ class TestRestarts:
 
 
 class TestRehearse:
+    @ISSUE_324
     def test_walks_every_sub_step_of_validation_g_in_order(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
@@ -1224,6 +1271,7 @@ class TestRehearse:
             "v.by-hand",
         ]
 
+    @ISSUE_324
     def test_leaves_the_second_instance_cut_over_on_its_socket(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 
@@ -1234,6 +1282,7 @@ class TestRehearse:
         assert marker is not None
         assert marker.active == staged.plan.content_id
 
+    @ISSUE_324
     def test_every_step_reports_what_it_read(self, staged: Staged) -> None:
         staged.caddy.fail_reloads = 1
 

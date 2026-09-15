@@ -947,6 +947,7 @@ class TestRehearse:
             str(unsuffixed),
         ]
 
+    @pytest.mark.xfail(strict=True, reason="#324: a start undoes the migration drop-in's chgrp")
     def test_walks_the_sequence_and_prints_what_every_step_read(
         self, droplet: Droplet, tmp_path: Path
     ) -> None:

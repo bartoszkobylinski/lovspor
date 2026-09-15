@@ -22,12 +22,15 @@ import pytest
 
 from lovspor.release.caddy import FRAGMENT_ENV, Completed, config_pair
 from lovspor.release.errors import UnobservableError
+from lovspor.release.migrate import MigrationHost
 from tests.unit.caddy_fakes import (
     DEFAULT_TCP,
     STOCK_EXEC_RELOAD,
     AdaptError,
     FakeCaddy,
+    FakeOwnership,
     admin_listen,
+    chgrp_drop_in,
     plant_socket,
     split_address,
     toy_adapt,
@@ -721,3 +724,90 @@ class TestSystemctl:
             box.caddy.run(("systemctl", "isolate", "rescue.target"), {})
         with pytest.raises(AssertionError, match="unexpected command"):
             box.caddy.run(("journalctl", "-u", "caddy"), {})
+
+
+RUNTIME_ONLY = "[Service]\nRuntimeDirectory=caddy\nRuntimeDirectoryMode=2770\n"
+UNIT_GROUP = RUNTIME_ONLY + "Group=lovspor-release\nSupplementaryGroups=caddy\n"
+
+
+class TestTheRuntimeDirectorysGroup:
+    """#324: a start owns ``RuntimeDirectory=`` by the unit's ``Group=``, undoing an earlier chgrp.
+
+    The droplet's rehearsal instance, systemd 255: under an ``ExecStartPre=`` chgrp the
+    restarted directory was ``2770 caddy:caddy`` and its socket gid ``caddy``; under
+    ``Group=lovspor-release`` both were in the release group, after a restart and a reload.
+    """
+
+    def _host(self, box: Box) -> MigrationHost:
+        return MigrationHost(
+            caddyfile=box.caddyfile, runtime_dir=box.runtime, socket_admin=box.socket
+        )
+
+    def _on_socket_under(self, box: Box, drop_in: str) -> FakeOwnership:
+        """The box on its socket under ``drop_in``, loaded; the table names the socket's gid."""
+        box.drop_in.parent.mkdir(parents=True, exist_ok=True)
+        box.drop_in.write_text(drop_in, encoding="utf-8")
+        box.caddy.run(("systemctl", "daemon-reload"), {})
+        box.reload(box.new, DEFAULT_TCP)
+        box.caddyfile.write_text(box.new.read_text(encoding="utf-8"), encoding="utf-8")
+        ownership = FakeOwnership({}, {"lovspor-release": box.socket_file.stat().st_gid})
+        box.caddy.ownership = ownership
+        return ownership
+
+    def _carries_release_group(self, box: Box, ownership: FakeOwnership) -> bool:
+        return ownership.gid_of("lovspor-release") == box.socket_file.stat().st_gid
+
+    def test_a_restart_under_the_release_group_keeps_it_on_the_recreated_socket(
+        self, box: Box
+    ) -> None:
+        ownership = self._on_socket_under(box, UNIT_GROUP)
+
+        assert box.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
+
+        assert box.caddy.unit_group == "lovspor-release"
+        assert self._carries_release_group(box, ownership)
+
+    def test_a_chgrp_before_the_start_does_not_survive_a_restart(self, box: Box) -> None:
+        ownership = self._on_socket_under(box, chgrp_drop_in(self._host(box)))
+
+        assert box.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
+
+        assert box.caddy.unit_group == "caddy"
+        assert not self._carries_release_group(box, ownership)
+
+    def test_a_reload_re_owns_nothing(self, box: Box) -> None:
+        """The droplet's socket kept its group through ``systemctl reload``: nothing started."""
+        ownership = self._on_socket_under(box, chgrp_drop_in(self._host(box)))
+
+        assert box.caddy.run(("systemctl", "reload", "caddy"), {}).returncode == 0
+
+        assert self._carries_release_group(box, ownership)
+
+    def test_without_runtime_directory_nothing_is_re_owned(self, box: Box) -> None:
+        ownership = self._on_socket_under(box, "[Service]\nEnvironmentFile=/etc/default/x\n")
+
+        assert box.caddy.run(("systemctl", "restart", "caddy"), {}).returncode == 0
+
+        assert self._carries_release_group(box, ownership)
+
+    def test_a_restart_runs_as_the_group_the_last_daemon_reload_read(self, box: Box) -> None:
+        """As ``ExecReload=``: a drop-in written and not loaded changes nothing a start does."""
+        ownership = self._on_socket_under(box, UNIT_GROUP)
+        box.drop_in.write_text(RUNTIME_ONLY, encoding="utf-8")
+
+        box.caddy.run(("systemctl", "restart", "caddy"), {})
+        kept = self._carries_release_group(box, ownership)
+        box.caddy.run(("systemctl", "daemon-reload"), {})
+        box.caddy.run(("systemctl", "restart", "caddy"), {})
+
+        assert kept
+        assert not self._carries_release_group(box, ownership)
+
+    def test_a_start_never_grants_a_group_the_table_does_not_give(self, box: Box) -> None:
+        """A test that broke the table keeps it broken, whatever the drop-in says."""
+        ownership = self._on_socket_under(box, UNIT_GROUP)
+        ownership.groups["lovspor-release"] += 1
+
+        box.caddy.run(("systemctl", "restart", "caddy"), {})
+
+        assert not self._carries_release_group(box, ownership)
