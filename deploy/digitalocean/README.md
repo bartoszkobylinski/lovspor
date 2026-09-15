@@ -500,7 +500,8 @@ It starts nothing. `caddy validate` and `caddy adapt` over `/etc/caddy/Caddyfile
 — the configuration serving right now — and over the new one from the checkout,
 against a freshly built envelope and the flat release still behind
 `lovspor-current`, and then a route-by-route comparison of the two adapted
-configurations.
+configurations. `/var/www` below is the deployment root the script passes as
+`--deployment-root`, never the root it builds the envelope under.
 
 While it runs it reports progress on **stderr**: how many URLs it will ask each
 configuration, the start of each of its three passes over them (the previous
