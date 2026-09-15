@@ -575,10 +575,44 @@ first `deployment-capabilities.json` records `hosted_state: unknown` with
 says "not attested (unobserved: …)" rather than claiming anything. Step 7
 replaces it with a document a credentialed observation produced.
 
-If the reload at the end is refused, the new Caddyfile is on disk and Caddy is
-still running the old one on TCP: nothing public has changed, and the two ways
-out are `publish-release.sh --reconcile --complete` (finish the cutover) and
-`--reconcile --abandon` (put the previous Caddyfile back; no reload).
+If the reload at the end is refused, nothing public has changed — Caddy keeps
+serving the previous configuration — but its admin endpoint may not be where it
+was. Caddy v2.11.4 starts the admin endpoint the new configuration names (the
+socket) before it starts the site; when the site then fails to start, it keeps
+that socket and stops TCP `localhost:2019`, while still running the previous
+configuration (#302). The command reads where Caddy answers after the refusal
+and names the way out:
+
+* **Caddy answers on the socket, running the previous configuration** (what
+  v2.11.4 does): `--reconcile --abandon`. It delivers
+  `/etc/caddy/Caddyfile.pre-envelope` to the socket — which moves the admin
+  endpoint back to TCP — checks that nothing answers on the socket any more,
+  removes the socket file Caddy leaves behind, and puts the previous Caddyfile
+  and drop-in back. `--reconcile --complete` refuses here: the file on disk is
+  the one Caddy just refused.
+* **Caddy still answers on TCP**: `--reconcile --complete` (finish the cutover)
+  or `--reconcile --abandon` (put the previous Caddyfile back; no reload).
+* **Caddy answers on the socket, running the new configuration** (the load took
+  after all): `--reconcile` finishes the cutover's last steps without a choice.
+* **Caddy answers on neither address**: step 9's last resort.
+
+`--reconcile` alone names the state, and moves something only in the third
+case, which it finishes; `--abandon` takes the way back for whichever of the
+first two it finds:
+
+```bash
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --reconcile
+sudo /opt/lovspor/app/deploy/digitalocean/publish-release.sh --reconcile --abandon
+```
+
+After an abandon, confirm the box is back where step 4 found it, fix what made
+Caddy refuse the load (the error names it), and start again from the preflight:
+
+```bash
+curl -fsS localhost:2019/config/ | head -c 100; echo     # TCP answers again
+sudo ls -la /run/caddy/                                  # no admin.sock
+sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --check
+```
 
 ### 6. Verify
 
