@@ -438,6 +438,58 @@ def test_a_truncated_sitemap_is_refused_even_if_its_urls_survive(release: Path) 
         check_release(release)
 
 
+def test_a_missing_companion_index_is_refused(release: Path) -> None:
+    """The twins are advertised through their own index (#340); without it
+    nothing in the served tree announces them, which is the state this PR
+    exists to end."""
+    (release / "sitemaps" / "companions.xml").unlink()
+
+    with pytest.raises(PublishError, match="companions.xml"):
+        check_release(release)
+
+
+def test_a_companion_sitemap_omitting_a_twin_is_refused(release: Path) -> None:
+    """Emitted-but-unlisted, the same both-directions check the pages get: a
+    sitemap from a smaller build beside twins from a larger one would
+    otherwise pass, every surviving URL still resolving."""
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    start = text.index("<url>")
+    end = text.index("</url>", start) + len("</url>")
+    shard.write_text(text[:start] + text[end:], encoding="utf-8")
+
+    with pytest.raises(PublishError, match="companion"):
+        check_release(release)
+
+
+def test_a_companion_sitemap_naming_an_absent_twin_is_refused(release: Path) -> None:
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "</urlset>",
+            "<url><loc>https://lovspor.no/lov/borte/index.json</loc></url>\n</urlset>",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="not in the tree"):
+        check_release(release)
+
+
+def test_a_companion_sitemap_cannot_escape_the_release_tree(release: Path) -> None:
+    (release / "sitemaps" / "companions.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "<sitemap><loc>https://lovspor.no/sitemaps/../../outside.xml</loc></sitemap>\n"
+        "</sitemapindex>\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="not in the tree"):
+        check_release(release)
+
+
 def test_the_browse_indexes_count_as_pages_the_sitemap_must_list(release: Path) -> None:
     """`/lov/` and `/forskrift/` are pages too; dropping them from indexes.xml
     would leave the entry points unadvertised while every document passed."""
