@@ -239,4 +239,10 @@ also_copy = [
     # whole run: the gate then reports tool_failed for every PR touching
     # src/lovspor/, on a missing file rather than on code quality (issue #129).
     "mutation-equivalents.toml",
+    # The same failure, one file later: the hook-config test copies this into a
+    # scratch repo and has pre-commit resolve the stages against it. Absent from
+    # the shadow tree, that copy raises FileNotFoundError during the clean
+    # baseline and the gate again reports tool_failed for every PR touching
+    # src/lovspor/ (issue #338).
+    ".pre-commit-config.yaml",
 ]
