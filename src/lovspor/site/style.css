@@ -30,6 +30,7 @@
     --measure: 68ch;
     --gutter: 1.25rem;
     --step: 1.5rem;
+    --rail: 5.6rem;
   }
 
   /* The explicit choice wins in both directions; the bare :root palette
@@ -288,7 +289,7 @@
      entry meets the rule under the two-line entry beside it. */
   nav.toc a {
     display: grid;
-    grid-template-columns: 3.1rem 1fr;
+    grid-template-columns: var(--rail) 1fr;
     gap: 0 0.5rem;
     height: 100%;
     padding: 0.55rem 0.2rem;
@@ -297,11 +298,16 @@
     border-bottom: 1px solid var(--line);
   }
 
+  /* The rail is sized for a compound section number, not for "§ 1": a law
+     is as likely to number its sections 8-18 or 10-4-1 as 1, and the rail
+     is one width for every row or it stops being a rail. overflow-wrap is
+     the guard behind that -- a number longer than the rail wraps inside
+     its own column, where nowrap would print it over the title. */
   nav.toc .pid {
     color: var(--accent-ink);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   nav.toc a:hover {
