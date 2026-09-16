@@ -150,7 +150,8 @@ select = [
     "RET",  # flake8-return
 ]
 ignore = [
-    "PLR0913",  # too many args — we enforce manually via review
+    "PLR0913",  # too many args — enforced as function-params <= 4 by the ratchet,
+                # scripts/quality/check_ratchets.py (#323)
 ]
 
 [tool.ruff.lint.per-file-ignores]
