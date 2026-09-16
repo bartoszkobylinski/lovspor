@@ -511,6 +511,27 @@ def test_a_companion_sitemap_cannot_escape_the_release_tree(release: Path) -> No
         check_release(release)
 
 
+def test_a_twin_url_inside_a_companion_sitemap_cannot_escape_the_release_tree(
+    release: Path,
+) -> None:
+    """Confining the companion index is not enough: each URL in the shard is
+    release data too and must not be satisfiable by a JSON file beside the tree."""
+    outside = release.parent / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "</urlset>",
+            "<url><loc>https://lovspor.no/../outside.json</loc></url>\n</urlset>",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="companions-1.xml lists .*not in the tree"):
+        check_release(release)
+
+
 def test_the_browse_indexes_count_as_pages_the_sitemap_must_list(release: Path) -> None:
     """`/lov/` and `/forskrift/` are pages too; dropping them from indexes.xml
     would leave the entry points unadvertised while every document passed."""
