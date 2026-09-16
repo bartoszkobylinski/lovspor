@@ -1,7 +1,8 @@
 """The local quality gates (issue #323, docs/decisions.md §9d).
 
 `scripts/quality/verify-fast.sh` is the commit-time gate and
-`scripts/quality/verify-deep.sh` the push-time one. Both run here for real,
+`scripts/quality/verify-deep.sh` the push-time one (the fast gate, then the
+fail-closed security scan, then the unit suite). Both run here for real,
 with stub `uv` and `gitleaks` first on PATH. A stub records its command line and
 the directory it ran in, and fails when told to, so every verdict below comes
 from the scripts' own control flow rather than from reading their text.
@@ -27,6 +28,7 @@ FAST_CHECKS = {
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
 }
 UNIT_SUITE = "uv run pytest tests/unit/ -q"
+SECURITY_SCAN = "uv run python scripts/quality/check_security_scan.py"
 STUB_TOOLS = ("uv", "gitleaks")
 
 # Logs "<cwd>\t<command>"; a command listed in GATE_STUB_FAIL fails, with its
@@ -119,6 +121,12 @@ class TestFastGate:
 
         assert FAST_CHECKS["ratchets"] in run.commands
 
+    def test_never_runs_the_security_scan(self, tmp_path: Path) -> None:
+        """It belongs to the push gate; the commit loop stays about a second."""
+        run = _run_gate(FAST, tmp_path)
+
+        assert SECURITY_SCAN not in run.commands
+
     @pytest.mark.parametrize(("name", "command"), sorted(FAST_CHECKS.items()))
     def test_a_failing_check_fails_the_gate_in_one_line_naming_it(
         self, tmp_path: Path, name: str, command: str
@@ -168,13 +176,22 @@ class TestFastGate:
 
 
 class TestDeepGate:
-    def test_runs_the_fast_gate_then_the_unit_suite(self, tmp_path: Path) -> None:
+    def test_runs_the_fast_gate_then_the_security_scan_then_the_unit_suite(
+        self, tmp_path: Path
+    ) -> None:
         run = _run_gate(DEEP, tmp_path)
 
         assert run.returncode == 0, run.output
-        assert run.commands == [*FAST_CHECKS.values(), UNIT_SUITE]
+        assert run.commands == [*FAST_CHECKS.values(), SECURITY_SCAN, UNIT_SUITE]
         assert run.cwds == {str(REPO_ROOT)}
         assert run.output.rstrip().endswith("verify-deep: all checks passed")
+
+    def test_a_failing_security_scan_fails_the_gate_naming_it(self, tmp_path: Path) -> None:
+        """A scanner that skipped files reports through this gate or nowhere."""
+        run = _run_gate(DEEP, tmp_path, failing=(SECURITY_SCAN,))
+
+        assert run.returncode != 0
+        assert run.fail_lines() == [f"FAIL security-scan: stub: {SECURITY_SCAN} failed (exit 3)"]
 
     def test_a_failing_unit_suite_fails_the_gate_naming_it(self, tmp_path: Path) -> None:
         run = _run_gate(DEEP, tmp_path, failing=(UNIT_SUITE,))
@@ -188,3 +205,4 @@ class TestDeepGate:
         assert run.returncode != 0
         assert run.fail_lines() == [f"FAIL mypy: stub: {FAST_CHECKS['mypy']} failed (exit 3)"]
         assert UNIT_SUITE not in run.commands
+        assert SECURITY_SCAN not in run.commands

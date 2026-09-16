@@ -96,6 +96,7 @@ dev = [
     # lxml-stubs precedent so `mypy src/` stays strict-green.
     "jsonschema>=4.23",
     "types-jsonschema>=4.23",
+    "bandit>=1.9",
 ]
 
 [build-system]
