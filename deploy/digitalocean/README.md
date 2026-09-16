@@ -509,6 +509,17 @@ against a freshly built envelope and the flat release still behind
 configurations. `/var/www` below is the deployment root the script passes as
 `--deployment-root`, never the root it builds the envelope under.
 
+The envelope is built from the corpus commit the old configuration is *already
+serving* — read off the name of the flat release behind `lovspor-current`,
+`<YYYYMMDDTHHMMSSZ>-<sha12>` — and the run announces it in its first lines. That
+pin is what makes the comparison possible at all: `staged.corpus` compares the
+served file's bytes, so any document the corpus changed since that release
+differs on its SHA-256 alone and the assertion refuses — measuring corpus
+movement rather than the migration, after an hour and a half of work (#331).
+`--ref <sha>` names a different corpus commit; a box whose `lovspor-current` is
+absent or points at anything but a release directory is refused by name, never
+quietly built against `HEAD`.
+
 While it runs it reports progress on **stderr**: how many URLs it will ask each
 configuration, the start of each of its three passes over them (the previous
 configuration, the new one, and the previous one again for the rollback), no
