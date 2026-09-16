@@ -157,25 +157,25 @@ def _render(path: str) -> str:
 
 class TestBaseTemplate:
     def test_head_carries_lang_title_description_canonical_and_hreflang_pair(self) -> None:
-        html = _render("/docs/")
+        html = _render("/about/")
 
         assert html.startswith('<!doctype html>\n<html lang="nb">\n')
         assert "<title>" in html
         assert '<meta name="description" content="' in html
-        assert f'<link rel="canonical" href="{SITE_ORIGIN}/docs/">' in html
-        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/docs/">' in html
-        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/docs/">' in html
+        assert f'<link rel="canonical" href="{SITE_ORIGIN}/about/">' in html
+        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/about/">' in html
+        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/about/">' in html
         assert html.count("<h1>") == 1
         assert html.endswith("</html>\n")
 
     def test_the_english_twin_mirrors_the_pair_and_switches_back(self) -> None:
-        html = _render("/en/docs/")
+        html = _render("/en/about/")
 
         assert '<html lang="en">' in html
-        assert f'<link rel="canonical" href="{SITE_ORIGIN}/en/docs/">' in html
-        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/docs/">' in html
-        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/docs/">' in html
-        assert '<a href="/docs/">NO</a>' in html
+        assert f'<link rel="canonical" href="{SITE_ORIGIN}/en/about/">' in html
+        assert f'<link rel="alternate" hreflang="nb" href="{SITE_ORIGIN}/about/">' in html
+        assert f'<link rel="alternate" hreflang="en" href="{SITE_ORIGIN}/en/about/">' in html
+        assert '<a href="/about/">NO</a>' in html
 
     def test_a_page_without_a_twin_has_no_hreflang_and_no_switch(self) -> None:
         html = _render("/observatory/")
@@ -188,14 +188,14 @@ class TestBaseTemplate:
         """One inline stylesheet, migrated from the pre-envelope landing page."""
         landing = _LANDING.read_text(encoding="utf-8")
         golden = landing[landing.index("<style>") : landing.index("</style>") + len("</style>")]
-        html = _render("/docs/")
+        html = _render("/about/")
 
         assert golden in html
         assert html.count("<style>") == 1
 
     def test_placeholder_pages_carry_the_badge_title_and_lede(self) -> None:
-        nb = _render("/docs/")
-        en = _render("/en/docs/")
+        nb = _render("/about/")
+        en = _render("/en/about/")
 
         assert '<span class="tag" data-status="planned">Planlagt</span>' in nb
         assert '<span class="tag" data-status="planned">Planned</span>' in en
@@ -226,6 +226,8 @@ class TestBaseTemplate:
             "_chrome_header.html",
             "pages/connect.en.html",
             "pages/connect.nb.html",
+            "pages/docs.en.html",
+            "pages/docs.nb.html",
             "pages/landing.en.html",
             "pages/landing.nb.html",
             "pages/observatory.nb.html",

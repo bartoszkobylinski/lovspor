@@ -15,9 +15,9 @@ registry, never the reverse (ADR:565-572): ``client_routes`` is that
 projection's hook and yields nothing until a registry exists.
 
 Copy: the landing and the observatory keep the titles and descriptions
-of the hand-written pages they replace; ``/connect/`` carries a page
-written against this repository's own evidence; the remaining routes carry
-short, honest placeholders until their content lands.
+of the hand-written pages they replace; ``/connect/`` and ``/docs/`` carry
+pages written against this repository's own evidence; the remaining routes
+carry short, honest placeholders until their content lands.
 """
 
 from typing import Annotated, Self
@@ -210,13 +210,20 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
             en="The corpus state at the last release and the observation of the hosted service.",
         ),
     ),
-    _route(
-        "/docs/",
-        "planned",
-        Localised(nb="Dokumentasjon", en="Documentation"),
-        Localised(
-            nb="Verktøyreferansen og bruksdokumentasjonen for lovverk.",
-            en="The tool reference and usage documentation for lovverk.",
+    SiteRoute(
+        path="/docs/",
+        template="docs",
+        status="current",
+        title=Localised(nb="Dokumentasjon", en="Documentation"),
+        description=Localised(
+            nb=(
+                "Verktøyflaten i lovverk: hva hvert verktøy svarer på, hva det ikke svarer på, "
+                "innlogging, korpuset bak og forbeholdene."
+            ),
+            en=(
+                "The lovverk tool surface: what each tool answers, what it will not answer, "
+                "authentication, the corpus behind it and the caveats."
+            ),
         ),
     ),
     _route(

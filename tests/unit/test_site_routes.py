@@ -31,7 +31,7 @@ EXPECTED_STATUS = {
     "/research/llhb/": "research",
     "/research/pl-temporal/": "research",
     "/status/": "current",
-    "/docs/": "planned",
+    "/docs/": "current",
     "/about/": "planned",
     "/business/": "early_access",
     "/privacy/": "planned",
@@ -190,7 +190,7 @@ class TestEmittedPages:
             ("en", f"{SITE_ORIGIN}/en/docs/"),
         )
         assert context["language_switch_href"] == "/docs/"
-        assert context["status"] == "planned"
+        assert context["status"] == "current"
         assert context["title"] and context["description"]
 
     def test_a_page_without_a_twin_has_no_alternates_and_no_switch(self) -> None:

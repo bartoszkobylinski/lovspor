@@ -839,6 +839,61 @@ class TestStatusPage:
         assert _fact_values(markup, "code.tool_surface.tool_count") == ["17"]
 
 
+class TestDocsPage:
+    """The written /docs/ page: counts through the ledger, tool names pinned
+    to the checkout's own descriptor, and no hosted claim."""
+
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    def test_the_counts_are_facts_never_typed_numbers(
+        self, built: tuple[Path, SiteBuildReport], world: World, path: str
+    ) -> None:
+        out, _ = built
+        markup = _page(out, path)
+
+        assert _fact_values(markup, "code.tool_surface.tool_count") == [
+            str(world.descriptor.tool_count)
+        ]
+        assert _fact_values(markup, "corpus.documents") == ["1"]
+
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    def test_every_tool_it_names_is_a_tool_the_checkout_serves(
+        self, built: tuple[Path, SiteBuildReport], world: World, path: str
+    ) -> None:
+        """The prose names the tools; the descriptor decides which exist. The
+        count is ledgered but a name is not, so a tool added, removed or
+        renamed has to turn this red rather than leave the page quietly
+        wrong."""
+        out, _ = built
+        named = set(re.findall(r"<code>([a-z][a-z_]*)</code>", _page(out, path)))
+
+        assert named == set(world.descriptor.names)
+
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    def test_makes_no_hosted_claim_and_sends_the_reader_to_status(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """This page describes the surface; /status/ reports the observation
+        of it. Keeping hosted facts off it is exactly what makes it invariant
+        under a changed observation (TestDegradation)."""
+        out, _ = built
+        markup = _page(out, path)
+
+        assert 'data-kind="hosted"' not in markup
+        assert '<span class="tag" data-status="current">' in markup
+        assert "/status/" in markup
+
+    def test_states_what_it_will_not_answer_in_both_languages(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        """The English page is a full translation, not a summary."""
+        out, _ = built
+        nb, en = _page(out, "/docs/"), _page(out, "/en/docs/")
+
+        assert "Ikke juridisk rådgivning" in nb
+        assert "Not legal advice" in en
+        assert nb.count("<h2>") == en.count("<h2>")
+
+
 _DEGRADED = {
     "process unobserved": (unobserved_process("timeout"), "timeout", "unknown"),
     "transport unobserved": (unobserved_transport("network"), "network", "unknown"),
@@ -1127,7 +1182,7 @@ class TestSiteFacts:
         out, _ = built
         pages = {entry["page"] for entry in _facts(out)["facts"]}
 
-        assert pages == {"/", "/en/", "/status/", "/en/status/"}
+        assert pages == {"/", "/en/", "/docs/", "/en/docs/", "/status/", "/en/status/"}
 
     def test_facts_json_is_companion_bytes(self, built: tuple[Path, SiteBuildReport]) -> None:
         out, _ = built
