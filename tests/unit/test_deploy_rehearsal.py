@@ -532,6 +532,19 @@ class TestTheCorpusRefTheDryRunComparesOn:
         assert done.returncode == 1
         assert "chosen=" not in done.stdout
 
+    def test_a_symlink_to_a_validly_named_file_is_not_a_release(self, tmp_path: Path) -> None:
+        """The target has to be a directory, not merely an existing path with the right name."""
+        target = tmp_path / "lovspor-releases-flat" / _LIVE_RELEASE
+        target.parent.mkdir()
+        target.touch()
+        symlink = tmp_path / "lovspor-current"
+        symlink.symlink_to(target)
+
+        done = _choose_ref(symlink)
+
+        assert done.returncode == 1
+        assert "chosen=" not in done.stdout
+
     def test_the_chosen_ref_is_announced_with_where_it_came_from(self, tmp_path: Path) -> None:
         """In the run's first lines: the refusal it replaces arrived 1 h 40 m in."""
         derived = _choose_ref(self._live(tmp_path))
