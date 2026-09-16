@@ -1,0 +1,51 @@
+{#- /docs/ (ADR-0014 Decision 2): what the lovverk tool surface answers and
+    what it refuses to answer. The tool count is the checkout descriptor's
+    fact, never a typed number, and the tool *names* on this page are pinned
+    to that same descriptor by a test — so a tool added or removed turns
+    this page red instead of leaving it quietly wrong. No hosted fact is
+    rendered here: an observation of the running service belongs on
+    /status/, which is why this page does not move when the observation
+    does. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server med {{ fact("code.tool_surface.tool_count", kind="code") }} verktøy som bare leser. Ingen av dem endrer korpuset. Slik kobler du klienten din til: <a href="/connect/">Koble til</a>.</p>
+
+<h2>Verktøyene</h2>
+<p><strong>Finne fram.</strong> <code>search_laws</code> søker i kortnavn og tittel, <code>search_body</code> i selve lovteksten, og <code>semantic_search</code> etter mening — for når spørsmålet ditt bruker andre ord enn loven gjør. <code>list_recent_changes</code> viser hva som er endret sist, og <code>corpus_status</code> hvor ferskt korpuset du leser fra er.</p>
+<p><strong>Lese.</strong> <code>get_law</code> gir hele teksten, <code>get_section</code> én enkelt bestemmelse med kryssreferansene dens ferdig kontrollert, og <code>list_sections</code> innholdsfortegnelsen — så modellen slipper å dra hele loven gjennom kontekstvinduet for å finne én paragraf.</p>
+<p><strong>Etterprøve.</strong> <code>validate_citation</code> svarer på om en henvisning i det hele tatt finnes, og <code>verify_quote</code> på om et ordrett sitat virkelig står i bestemmelsen du tilskriver det. Disse to finnes for den vanligste feilen av alle: at modellen siterer ord som ikke står der.</p>
+<p><strong>Historikk.</strong> <code>get_law_history</code>, <code>list_law_versions</code>, <code>get_law_at</code> og <code>diff_law_versions</code> leser korpusets egen git-historikk: hva korpuset inneholdt ved slutten av en gitt dato, og hva som skilte to datoer. <code>get_temporal_events</code> gir det kilden selv sier om endringer og ikrafttredelse.</p>
+<p><strong>EU og EØS.</strong> <code>get_eu_basis</code> gir CELEX-kodene en lov gjennomfører; <code>search_eu_implementations</code> går motsatt vei, fra EU-dokument til norske lover.</p>
+
+<h2>Hva det ikke svarer på</h2>
+<ul>
+  <li><strong>Ikke juridisk rådgivning.</strong> Verktøyene viser lovteksten. Tolkningen er din.</li>
+  <li><strong>Ikke gjeldende rett på en dato.</strong> Historikkverktøyene svarer på hva <em>korpuset inneholdt</em> ved en dato — ikke hvilke bestemmelser som var rettslig i kraft da. Det er to forskjellige spørsmål, og bare det første kan besvares herfra.</li>
+  <li><strong>Ikke rettspraksis, forarbeider, rundskriv eller kommunale forskrifter.</strong> En regel kan være bindende og likevel mangle her. Et tomt svar er ikke bevis for at regelen ikke finnes.</li>
+  <li><strong>Ikke parafrase.</strong> <code>verify_quote</code> bekrefter at en ordrett streng står i bestemmelsen. Om en omskrivning er juridisk dekkende, kan den ikke svare på — der må du lese teksten selv.</li>
+</ul>
+
+<h2>Korpuset bak</h2>
+<p>{{ fact("corpus.documents", kind="corpus") }} dokumenter ved siste utgivelse: gjeldende lover og sentrale forskrifter, hentet fra Lovdatas åpne data og gjengitt som Markdown. Bla i dem her — <a href="/lov/">lover</a> og <a href="/forskrift/">forskrifter</a>.</p>
+<p>Skillet er kildens eget: <em>lover</em> er vedtatt av Stortinget, <em>sentrale forskrifter</em> er gitt med hjemmel i en lov av et departement eller direktorat. Lokale og kommunale forskrifter er ikke med.</p>
+<p class="muted">Kilde: Lovdata, lisensiert under <span data-literal>NLOD 2.0</span>, og hver fil bærer lisensen i frontmatteren sin. Korpuset ligger åpent i <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; motoren som bygger det er <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, under <span data-literal>AGPL-3.0</span>.</p>
+
+<h2>Autentisering</h2>
+<p>Den driftede tjenesten krever alltid innlogging: et kall uten legitimasjon får <span data-literal>401</span> med en Bearer-utfordring. To former finnes. <strong>Ugjennomsiktige token</strong> deles ut for hånd, og er den formen som gjelder i dag. <strong>Vertsinnlogging med OAuth</strong> er på når <span data-literal>OAuth 2.1</span>-paret er konfigurert på serveren — da svarer tjenesten på <span data-literal>RFC 9728</span>-oppdagelse; er det av, finnes ingen <code>.well-known</code> i det hele tatt.</p>
+<p>Når OAuth er på, godtas begge formene samtidig: et token som allerede virker, fortsetter å virke. Hvilken tilstand tjenesten faktisk <em>ble observert i</em> ved siste utgivelse, står på <a href="/status/">status</a> — ikke her.</p>
+
+<h2>Kvoter</h2>
+<p>Hvert kall telles i to lag: per legitimasjon og per instans. Begge begrenser samtidige kall, kall per minutt, kall per døgn og semantiske søk per døgn. Grensene settes per token og kan endres uten ny utgivelse, så de følger tokenet du får — ikke denne siden. Tellerne ligger i minnet: en omstart glemmer døgnet.</p>
+
+<h2>Ærlige forbehold</h2>
+<ul>
+  <li><strong><code>semantic_search</code> trenger en nøkkel på serveren.</strong> Spørringen din sendes ut til en embedding-tjeneste for å bli til en vektor. Korpusvektorene er regnet ut på forhånd, men <em>spørsmålet ditt</em> forlater maskinen — så ikke lim inn fortrolig tekst. Mangler nøkkelen, er det bare dette ene verktøyet som er av; resten virker uendret. Kjører du serveren selv, er nøkkelen din egen.</li>
+  <li><strong>Treffscore er likhet, ikke relevans.</strong> Et høyt tall fra <code>semantic_search</code> betyr at bestemmelsen handler om noe liknende — ikke at den svarer på spørsmålet. Les teksten med <code>get_section</code> før du siterer den.</li>
+  <li><strong><code>search_body</code> er delstrengsøk.</strong> Ingen stammeforming: søker du på <em>skattefradrag</em>, finner du ikke dokumenter som bare skriver <em>skattefradraget</em>.</li>
+  <li><strong>Uobservert betyr ikke «nede».</strong> På <a href="/status/">status</a> er en verdi merket uobservert når selve målingen ikke kom i mål — nettverket, legitimasjonen vår eller verktøyet vårt. Da sier siden nettopp det, med grunn og tidspunkt, i stedet for å vise forrige verdi eller et null. En feil hos den som måler er ikke en feil hos tjenesten, og de to skal ikke se like ut.</li>
+</ul>
+{% endblock %}

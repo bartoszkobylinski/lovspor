@@ -1,0 +1,47 @@
+{#- /docs/ (ADR-0014 Decision 2), the English twin of docs.nb.html — a full
+    translation, not a summary. The tool count is the checkout descriptor's
+    fact and the tool names are pinned to that descriptor by the same test
+    that pins the Norwegian page; no hosted fact is rendered here. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server with {{ fact("code.tool_surface.tool_count", kind="code") }} read-only tools. None of them changes the corpus. How to point your client at it: <a href="/en/connect/">Connect</a>.</p>
+
+<h2>The tools</h2>
+<p><strong>Finding.</strong> <code>search_laws</code> searches slug and title, <code>search_body</code> the legal text itself, and <code>semantic_search</code> by meaning — for when your question uses different words than the law does. <code>list_recent_changes</code> shows what changed most recently, and <code>corpus_status</code> how fresh the corpus you are reading from is.</p>
+<p><strong>Reading.</strong> <code>get_law</code> returns the whole text, <code>get_section</code> a single provision with its cross-references already checked, and <code>list_sections</code> the table of contents — so the model need not pull an entire act through its context window to reach one paragraph.</p>
+<p><strong>Verifying.</strong> <code>validate_citation</code> answers whether a citation exists at all, and <code>verify_quote</code> whether a verbatim quote really appears in the provision you attribute it to. These two exist for the most common failure of all: a model quoting words that are not there.</p>
+<p><strong>History.</strong> <code>get_law_history</code>, <code>list_law_versions</code>, <code>get_law_at</code> and <code>diff_law_versions</code> read the corpus's own git history: what the corpus held at the end of a given date, and what differed between two dates. <code>get_temporal_events</code> returns what the source itself states about amendments and commencement.</p>
+<p><strong>EU and EEA.</strong> <code>get_eu_basis</code> gives the CELEX identifiers an act implements; <code>search_eu_implementations</code> goes the other way, from an EU document to Norwegian acts.</p>
+
+<h2>What it will not answer</h2>
+<ul>
+  <li><strong>Not legal advice.</strong> The tools show you the text of the law. The interpretation is yours.</li>
+  <li><strong>Not the law in force on a date.</strong> The history tools answer what the <em>corpus held</em> at a date — not which provisions were legally in force then. Those are two different questions, and only the first can be answered from here.</li>
+  <li><strong>No case law, preparatory works, circulars or municipal regulations.</strong> A rule can be binding and still be absent here. An empty result is not evidence that no such rule exists.</li>
+  <li><strong>No paraphrase checking.</strong> <code>verify_quote</code> confirms that a verbatim string appears in the provision. Whether a rewording is legally faithful, it cannot answer — for that, read the text yourself.</li>
+</ul>
+
+<h2>The corpus behind it</h2>
+<p>{{ fact("corpus.documents", kind="corpus") }} documents at the last release: Norwegian acts and central regulations currently in force, taken from Lovdata's open data and rendered as Markdown. Browse them here — <a href="/lov/">acts</a> and <a href="/forskrift/">regulations</a>.</p>
+<p>The distinction is the source's own: <em>lover</em> are passed by the Storting, <em>sentrale forskrifter</em> are issued under the authority of an act by a ministry or directorate. Local and municipal regulations are not included.</p>
+<p class="muted">Source: Lovdata, licensed under <span data-literal>NLOD 2.0</span>, and every file carries the licence in its own front matter. The corpus is public in <a href="https://github.com/bartoszkobylinski/lovverk">lovverk</a>; the engine that builds it is <a href="https://github.com/bartoszkobylinski/lovspor">lovspor</a>, under <span data-literal>AGPL-3.0</span>.</p>
+
+<h2>Authentication</h2>
+<p>The hosted service always requires credentials: a call without them gets <span data-literal>401</span> with a Bearer challenge. There are two forms. <strong>Opaque tokens</strong> are handed out by hand, and are the form in use today. <strong>Hosted OAuth login</strong> is on when the <span data-literal>OAuth 2.1</span> pair is configured on the server — the service then answers <span data-literal>RFC 9728</span> discovery; when it is off, there is no <code>.well-known</code> at all.</p>
+<p>With OAuth on, both forms are accepted at once: a token that already works keeps working. Which state the service was actually <em>observed in</em> at the last release is on <a href="/en/status/">status</a> — not here.</p>
+
+<h2>Quotas</h2>
+<p>Every call is counted in two layers: per credential and per instance. Both bound calls in flight, calls per minute, calls per day and semantic searches per day. The limits are set per token and can be changed without a release, so they travel with the token you are given — not with this page. The counters live in memory: a restart forgives the day.</p>
+
+<h2>Honest caveats</h2>
+<ul>
+  <li><strong><code>semantic_search</code> needs a key on the server.</strong> Your query is sent out to an embedding service to be turned into a vector. The corpus vectors were computed in advance, but <em>your question</em> leaves the machine — so do not paste confidential text into it. Without the key only this one tool is off; the rest work unchanged. If you run the server yourself, the key is your own.</li>
+  <li><strong>Score is similarity, not relevance.</strong> A high number from <code>semantic_search</code> means the provision is about something similar — not that it answers the question. Read the text with <code>get_section</code> before quoting it.</li>
+  <li><strong><code>search_body</code> is substring matching.</strong> No stemming: searching for <em>skattefradrag</em> will not find documents that only write <em>skattefradraget</em>.</li>
+  <li><strong>Unobserved does not mean "down".</strong> On <a href="/en/status/">status</a>, a value is marked unobserved when the measurement itself did not complete — our network, our credential or our tooling. The page then says exactly that, with the reason and the time, instead of showing a previous value or a zero. A failure of the observer is not a failure of the service, and the two must not look alike.</li>
+</ul>
+{% endblock %}

@@ -1,0 +1,49 @@
+{#- /connect/ (ADR-0014 Decision 2), the English twin of connect.nb.html —
+    a full translation, not a summary. The same rule holds: a procedure we
+    have not run ourselves is named as untested rather than invented, and
+    every identifier carrying a digit is marked. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<p>lovverk is an <a href="https://modelcontextprotocol.io">MCP</a> server. Your client talks either to the hosted service at <code>https://lovspor.no/mcp</code>, or to a copy you run on your own machine. The first needs a token. The second needs nothing.</p>
+
+<h2>Without a token</h2>
+<p>You do not have to ask anyone. Run the server yourself — it fetches the corpus down to your machine and talks to your client over stdio:</p>
+<pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>This works today: no account, no token, no API key. Every tool except <code>semantic_search</code> reads only files and git on your own machine, and <code>semantic_search</code> needs an embedding key you supply yourself.</p>
+
+<h2>Claude Code — the hosted service</h2>
+<p>This is the procedure we run ourselves, in one line:</p>
+<pre>claude mcp add --transport http lovverk \
+  https://lovspor.no/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN"</pre>
+<p>Replace <code>YOUR_TOKEN</code> with the token you were given. <code>/mcp</code> in a fresh session shows that <code>lovverk</code> is registered.</p>
+
+<h2>Claude Desktop — a local copy</h2>
+<p>Add this to the Claude Desktop config file (<code>claude_desktop_config.json</code> — its location depends on your operating system) and restart the client:</p>
+<pre>{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": ["lovspor", "mcp"]
+    }
+  }
+}</pre>
+
+<h2>Claude Desktop and claude.ai — as a connector</h2>
+<p>The hosted service can log you in with <span data-literal>OAuth 2.1</span> instead of you pasting a token, when hosted login is switched on. That path has been run end to end from the Claude Desktop connector: the login completes, and the tools answer.</p>
+<p><span class="accent">We do not write down the click path inside the client.</span> It changes more often than this page does, and a recipe we have not checked is worse than no recipe — it looks right. Use the client's own add-a-connector flow, with the address above.</p>
+
+<h2>ChatGPT, Cursor and Codex</h2>
+<p><strong>No tested procedure.</strong> Both of the forms the service offers exist on the client side: Cursor and Codex accept a token in a field, and ChatGPT connects to connectors that log in with <span data-literal>OAuth 2.1</span>. But we have not run the setup in these clients ourselves, and we are not going to invent the steps.</p>
+<p>Use the client's own documentation, with the address <code>https://lovspor.no/mcp</code> and your token. If you get it working — or if you cannot — tell us, and it can stand here as a tested recipe with your name on it.</p>
+
+<h2>Getting a token</h2>
+<p>Private beta. One person operates the service, so access is handed out by hand.</p>
+<p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20access">Email for a beta token →</a></p>
+<p class="muted">Or run it yourself — the engine is open source under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. What the tools answer is in the <a href="/en/docs/">documentation</a>; the state at the last release is on <a href="/en/status/">status</a>.</p>
+{% endblock %}

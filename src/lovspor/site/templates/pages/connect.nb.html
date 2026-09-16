@@ -1,0 +1,54 @@
+{#- /connect/ (ADR-0014 Decision 2): how to point a client at the hosted MCP
+    endpoint, or at a copy the reader runs themselves. A procedure we have
+    not run ourselves is named as untested rather than invented — the
+    claim carries its evidence, so a client whose steps are not in this
+    repository gets that said plainly instead of a plausible recipe. The
+    per-client /connect/<client>/ pages stay a projection of the client
+    registry (ADR:565-572), which does not exist yet, so every client this
+    page knows about is on this one page. No number is typed here: the page
+    renders none, and every identifier that carries a digit is marked. -#}
+{% extends "_base.html" %}
+{% block main %}
+{{ badge(status) }}
+<h1>{{ title }}</h1>
+<p class="lede">{{ description }}</p>
+
+<p>lovverk er en <a href="https://modelcontextprotocol.io">MCP</a>-server. Klienten din snakker enten med den driftede tjenesten på <code>https://lovspor.no/mcp</code>, eller med en kopi du kjører på din egen maskin. Den første krever et token. Den andre krever ingenting.</p>
+
+<h2>Uten token</h2>
+<p>Du trenger ikke spørre noen om lov. Kjør serveren selv — den henter korpuset ned til maskinen din og snakker med klienten over stdio:</p>
+<pre>uvx lovspor fetch-corpus
+claude mcp add lovverk -- uvx lovspor mcp</pre>
+<p>Dette virker i dag: ingen konto, intet token, ingen API-nøkkel. Alle verktøyene unntatt <code>semantic_search</code> leser bare filer og git på din egen maskin, og <code>semantic_search</code> trenger en embedding-nøkkel du selv setter inn.</p>
+
+<h2>Claude Code — den driftede tjenesten</h2>
+<p>Dette er framgangsmåten vi selv kjører, på én linje:</p>
+<pre>claude mcp add --transport http lovverk \
+  https://lovspor.no/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN"</pre>
+<p>Bytt <code>YOUR_TOKEN</code> mot tokenet du har fått. <code>/mcp</code> i en ny økt viser at <code>lovverk</code> er registrert.</p>
+
+<h2>Claude Desktop — lokal kopi</h2>
+<p>Legg dette inn i oppsettsfila til Claude Desktop (<code>claude_desktop_config.json</code> — hvor den ligger avhenger av operativsystemet) og start klienten på nytt:</p>
+<pre>{
+  "mcpServers": {
+    "lovverk": {
+      "command": "uvx",
+      "args": ["lovspor", "mcp"]
+    }
+  }
+}</pre>
+
+<h2>Claude Desktop og claude.ai — som connector</h2>
+<p>Den driftede tjenesten kan logge deg inn med <span data-literal>OAuth 2.1</span> i stedet for at du limer inn et token, når vertsinnloggingen er slått på. Den veien er kjørt ende til ende fra Claude Desktop-connectoren: innloggingen fullføres, og verktøyene svarer.</p>
+<p><span class="accent">Klikkestien inne i klienten skriver vi ikke opp her.</span> Den endrer seg oftere enn denne siden gjør, og en oppskrift vi ikke har etterprøvd er verre enn ingen oppskrift — den ser riktig ut. Bruk klientens egen flyt for å legge til en connector, med adressen over.</p>
+
+<h2>ChatGPT, Cursor og Codex</h2>
+<p><strong>Ingen testet framgangsmåte.</strong> Begge formene tjenesten tilbyr finnes på klientsiden: Cursor og Codex tar imot et token i et felt, og ChatGPT kobler til connectorer som logger inn med <span data-literal>OAuth 2.1</span>. Men vi har ikke kjørt oppsettet i disse klientene selv, og da dikter vi ikke opp stegene.</p>
+<p>Bruk klientens egen dokumentasjon, med adressen <code>https://lovspor.no/mcp</code> og tokenet ditt. Får du det til — eller får du det ikke til — så si fra, så kan det stå her som en testet oppskrift med navnet ditt på.</p>
+
+<h2>Få et token</h2>
+<p>Privat beta. Jeg drifter tjenesten alene, så tilgang deles ut for hånd.</p>
+<p><a class="cta" href="mailto:bartosz.kobylinski@gmail.com?subject=lovspor%20tilgang">Be om et beta-token →</a></p>
+<p class="muted">Eller kjør det selv — motoren er åpen kildekode under <span data-literal>AGPL-3.0</span>: <a href="https://github.com/bartoszkobylinski/lovspor">github.com/bartoszkobylinski/lovspor</a>. Hva verktøyene svarer på, står i <a href="/docs/">dokumentasjonen</a>; tilstanden ved siste utgivelse står på <a href="/status/">status</a>.</p>
+{% endblock %}

@@ -639,6 +639,63 @@ class TestLanding:
         assert 'data-kind="hosted"' not in _page(out, "/")
 
 
+class TestConnectPage:
+    """The written /connect/ page: the procedures it shows, and the ones it
+    declines to invent. A client whose steps are not in this repository is
+    named as untested — the page never carries a plausible-looking recipe."""
+
+    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
+    def test_shows_the_hosted_one_liner_and_the_tokenless_local_path(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        out, _ = built
+        markup = _page(out, path)
+
+        assert "claude mcp add --transport http lovverk" in markup
+        assert "https://lovspor.no/mcp" in markup
+        assert "Authorization: Bearer YOUR_TOKEN" in markup
+        assert "uvx lovspor fetch-corpus" in markup
+        assert "claude mcp add lovverk -- uvx lovspor mcp" in markup
+
+    def test_an_unverified_client_is_named_untested_rather_than_given_steps(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        """ChatGPT, Cursor and Codex have no procedure in this repository.
+        The page says so; it does not write one down (CLAUDE.md, a claim
+        carries its evidence)."""
+        out, _ = built
+        for path, wording in (
+            ("/connect/", "Ingen testet framgangsmåte"),
+            ("/en/connect/", "No tested procedure"),
+        ):
+            markup = _page(out, path)
+
+            assert wording in markup, path
+            for client in ("ChatGPT", "Cursor", "Codex"):
+                assert client in markup, (path, client)
+
+    @pytest.mark.parametrize("path", ["/connect/", "/en/connect/"])
+    def test_makes_no_hosted_claim_and_asks_for_a_token_by_email(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """A procedure page states no observation of the running service:
+        the hosted reading lives on /status/ and nowhere else."""
+        out, _ = built
+        markup = _page(out, path)
+
+        assert 'data-kind="hosted"' not in markup
+        assert "mailto:bartosz.kobylinski@gmail.com" in markup
+        assert '<span class="tag" data-status="current">' in markup
+
+    def test_both_languages_carry_the_same_sections(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        """The English page is a full translation, not a summary."""
+        out, _ = built
+
+        assert _page(out, "/connect/").count("<h2>") == _page(out, "/en/connect/").count("<h2>")
+
+
 class TestObservatory:
     def test_main_text_is_the_hand_written_page_verbatim(
         self, built: tuple[Path, SiteBuildReport]
@@ -782,6 +839,61 @@ class TestStatusPage:
         assert _fact_values(markup, "code.tool_surface.tool_count") == ["17"]
 
 
+class TestDocsPage:
+    """The written /docs/ page: counts through the ledger, tool names pinned
+    to the checkout's own descriptor, and no hosted claim."""
+
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    def test_the_counts_are_facts_never_typed_numbers(
+        self, built: tuple[Path, SiteBuildReport], world: World, path: str
+    ) -> None:
+        out, _ = built
+        markup = _page(out, path)
+
+        assert _fact_values(markup, "code.tool_surface.tool_count") == [
+            str(world.descriptor.tool_count)
+        ]
+        assert _fact_values(markup, "corpus.documents") == ["1"]
+
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    def test_every_tool_it_names_is_a_tool_the_checkout_serves(
+        self, built: tuple[Path, SiteBuildReport], world: World, path: str
+    ) -> None:
+        """The prose names the tools; the descriptor decides which exist. The
+        count is ledgered but a name is not, so a tool added, removed or
+        renamed has to turn this red rather than leave the page quietly
+        wrong."""
+        out, _ = built
+        named = set(re.findall(r"<code>([a-z][a-z_]*)</code>", _page(out, path)))
+
+        assert named == set(world.descriptor.names)
+
+    @pytest.mark.parametrize("path", ["/docs/", "/en/docs/"])
+    def test_makes_no_hosted_claim_and_sends_the_reader_to_status(
+        self, built: tuple[Path, SiteBuildReport], path: str
+    ) -> None:
+        """This page describes the surface; /status/ reports the observation
+        of it. Keeping hosted facts off it is exactly what makes it invariant
+        under a changed observation (TestDegradation)."""
+        out, _ = built
+        markup = _page(out, path)
+
+        assert 'data-kind="hosted"' not in markup
+        assert '<span class="tag" data-status="current">' in markup
+        assert "/status/" in markup
+
+    def test_states_what_it_will_not_answer_in_both_languages(
+        self, built: tuple[Path, SiteBuildReport]
+    ) -> None:
+        """The English page is a full translation, not a summary."""
+        out, _ = built
+        nb, en = _page(out, "/docs/"), _page(out, "/en/docs/")
+
+        assert "Ikke juridisk rådgivning" in nb
+        assert "Not legal advice" in en
+        assert nb.count("<h2>") == en.count("<h2>")
+
+
 _DEGRADED = {
     "process unobserved": (unobserved_process("timeout"), "timeout", "unknown"),
     "transport unobserved": (unobserved_transport("network"), "network", "unknown"),
@@ -834,14 +946,22 @@ class TestDegradation:
             _page(out, "/status/"), "hosted.comparisons.transport_surface_match"
         ) == ["unknown"]
 
-    def test_the_corpus_and_landing_do_not_move_with_the_observation(
+    def test_pages_without_hosted_facts_do_not_move_with_the_observation(
         self, world: World, tmp_path: Path
     ) -> None:
         one, two = tmp_path / "one", tmp_path / "two"
         world.build(one)
         world.build(two, world.observation(unobserved_transport("timeout")))
 
-        for path in ("/", "/en/", "/observatory/", "/docs/"):
+        for path in (
+            "/",
+            "/en/",
+            "/observatory/",
+            "/connect/",
+            "/en/connect/",
+            "/docs/",
+            "/en/docs/",
+        ):
             assert _page(one, path) == _page(two, path), path
         assert _page(one, "/status/") != _page(two, "/status/")
 
@@ -1070,7 +1190,7 @@ class TestSiteFacts:
         out, _ = built
         pages = {entry["page"] for entry in _facts(out)["facts"]}
 
-        assert pages == {"/", "/en/", "/status/", "/en/status/"}
+        assert pages == {"/", "/en/", "/docs/", "/en/docs/", "/status/", "/en/status/"}
 
     def test_facts_json_is_companion_bytes(self, built: tuple[Path, SiteBuildReport]) -> None:
         out, _ = built
@@ -1384,7 +1504,7 @@ class TestTemplateContract:
     ) -> None:
         self._placeholder(templates, "Seksten verktøy, 16 stykker")
 
-        with pytest.raises(SiteBuildError, match=r"/connect/.*16 stykker"):
+        with pytest.raises(SiteBuildError, match=r"/infrastructure/.*16 stykker"):
             world.build(tmp_path / "site")
 
     def test_a_marked_literal_passes(self, world: World, tmp_path: Path, templates: Path) -> None:
@@ -1400,7 +1520,7 @@ class TestTemplateContract:
 
         world.build(out)
 
-        assert "/connect/" in {entry["page"] for entry in _facts(out)["facts"]}
+        assert "/infrastructure/" in {entry["page"] for entry in _facts(out)["facts"]}
 
     def test_a_kind_mismatch_fails_the_build(
         self, world: World, tmp_path: Path, templates: Path
