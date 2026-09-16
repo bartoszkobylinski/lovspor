@@ -172,6 +172,28 @@ class TestContentsAreNavigation:
 
         assert html.index("<h1>") < html.index('<nav class="toc"')
 
+    def test_the_opening_title_uses_the_document_link_resolver(self) -> None:
+        html = document_page_html(
+            _plan(),
+            ["# [Lov om abort](lov/2024-12-20-96)", "Brødtekst."],
+            PROVENANCE,
+            lambda target: "/lov/abortloven/" if target == "lov/2024-12-20-96" else None,
+        )
+
+        assert '<h1><a href="/lov/abortloven/">Lov om abort</a></h1>' in html
+
+    def test_content_immediately_after_the_title_is_rendered_once(self) -> None:
+        html = document_page_html(
+            _plan(),
+            ["# Lov om abort", "Første avsnitt."],
+            PROVENANCE,
+            lambda _target: None,
+        )
+
+        assert html.count("<h1>Lov om abort</h1>") == 1
+        assert html.count("<p>Første avsnitt.</p>") == 1
+        assert html.index('<nav class="toc"') < html.index("<p>Første avsnitt.</p>")
+
     def test_the_paragraph_number_is_its_own_element(self) -> None:
         html = _document()
 
