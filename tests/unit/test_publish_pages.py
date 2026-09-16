@@ -118,6 +118,24 @@ class TestDocumentPage:
         assert '<span class="pid">§ 2</span> Virkeområde</a>' in html
         assert "§ 1XXXX" not in html
 
+    def test_toc_escapes_the_number_and_title_inside_the_new_markup(self) -> None:
+        plan = _plan(
+            provisions=(
+                ProvisionRef(
+                    pid="1",
+                    heading_id='1"><script>alert(1)</script>',
+                    title='<img src=x onerror="alert(2)">',
+                ),
+            )
+        )
+
+        html = _document(plan)
+
+        assert '<span class="pid">§ 1&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</span>' in html
+        assert "&lt;img src=x onerror=&quot;alert(2)&quot;&gt;</a>" in html
+        assert "<script>alert(1)</script>" not in html
+        assert '<img src=x onerror="alert(2)">' not in html
+
     def test_duplicate_pid_document_suppresses_only_ambiguous_anchors(self) -> None:
         plan = _plan(duplicate_pids={"1": 2})
         html = document_page_html(plan, BODY_LINES, PROVENANCE, lambda t: None)
@@ -178,6 +196,18 @@ class TestContentsAreNavigation:
         assert '<nav class="toc"' in html
         assert html.index('<nav class="toc"') < html.index('id="paragraf-1"')
         assert "<h1>" not in html
+
+    def test_a_late_title_heading_is_not_moved_across_earlier_content(self) -> None:
+        """Only an opening H1 is the document title; a later H1 is body content."""
+        html = document_page_html(
+            _plan(),
+            ["Innledning.", "", "# Sen overskrift", "", "Tekst."],
+            PROVENANCE,
+            lambda t: None,
+        )
+
+        assert html.index('<nav class="toc"') < html.index("<p>Innledning.</p>")
+        assert html.index("<p>Innledning.</p>") < html.index("<h1>Sen overskrift</h1>")
 
     def test_a_chapter_heading_before_the_first_provision_survives(self) -> None:
         html = _document()
