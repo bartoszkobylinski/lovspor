@@ -277,11 +277,12 @@ class TestSharedChrome:
         and the chrome links to the English site."""
         html = _document()
 
-        assert '<a href="/lov/">Lover <span class="gloss">Acts</span></a>' in html
+        assert '<a href="/lov/">Lover <span class="gloss" lang="en">Acts</span></a>' in html
         assert (
-            '<a href="/forskrift/">Forskrifter <span class="gloss">Regulations</span></a>' in html
+            '<a href="/forskrift/">Forskrifter '
+            '<span class="gloss" lang="en">Regulations</span></a>' in html
         )
-        assert '<a href="/en/">EN</a>' in html
+        assert '<a href="/en/" lang="en">In English</a>' in html
 
     def test_the_corpus_chrome_carries_no_language_switch_and_no_badge(self) -> None:
         """Norwegian text, no status badge, and no *per-page* switch

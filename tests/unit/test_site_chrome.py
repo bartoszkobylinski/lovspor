@@ -174,13 +174,27 @@ class TestCorpusChrome:
     def test_both_navigation_labels_carry_their_english_gloss(self) -> None:
         header = corpus_chrome_html().header
 
-        assert '<a href="/lov/">Lover <span class="gloss">Acts</span></a>' in header
+        assert '<a href="/lov/">Lover <span class="gloss" lang="en">Acts</span></a>' in header
         assert (
-            '<a href="/forskrift/">Forskrifter <span class="gloss">Regulations</span></a>' in header
+            '<a href="/forskrift/">Forskrifter '
+            '<span class="gloss" lang="en">Regulations</span></a>' in header
         )
 
     def test_it_links_to_the_english_site(self) -> None:
-        assert '<a href="/en/">EN</a>' in corpus_chrome_html().header
+        """Named, not abbreviated: an ``EN`` with no ``NO`` beside it reads as
+        half a switch, and ``In English`` is the idiom Norwegian public sites
+        use for this affordance."""
+        assert '<a href="/en/" lang="en">In English</a>' in corpus_chrome_html().header
+
+    def test_every_english_string_is_marked_as_english(self) -> None:
+        """Otherwise a screen reader pronounces the gloss and the link with
+        Norwegian phonetics: the frame is for a reader who cannot read the
+        page it frames, so the one thing it must get right is being heard."""
+        header = corpus_chrome_html().header
+
+        assert header.count('lang="en"') == 3
+        for english in ("Acts", "Regulations", "In English"):
+            assert f'lang="en">{english}<' in header
 
     def test_it_carries_no_per_page_language_switch(self) -> None:
         """The switch markup is what promises a twin at the other language's
