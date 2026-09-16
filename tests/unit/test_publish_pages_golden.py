@@ -25,7 +25,7 @@ from lovspor.publish.pages import (
     document_page_html,
     provision_page_html,
 )
-from lovspor.site.chrome import chrome_html
+from lovspor.site.chrome import corpus_chrome_html
 from lovspor.site.style import stylesheet
 
 PLAN = DocumentPlan.model_validate(
@@ -81,7 +81,7 @@ PROVENANCE_BLOCK = (
 
 
 def _shell(lang: str, title: str, canonical: str, content: str, companion: bool = True) -> str:
-    chrome = chrome_html("nb")
+    chrome = corpus_chrome_html()
     twin = (
         f'<link rel="alternate" type="application/json" href="{canonical}{COMPANION_NAME}">\n'
         if companion

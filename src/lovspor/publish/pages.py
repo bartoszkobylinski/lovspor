@@ -17,6 +17,11 @@ on a law page from a search engine can reach ``/``, ``/lov/`` and
 corpus-state-independent, which is what keeps ADR-0013's churn invariant
 true: neither takes a plan, a manifest or a fact, so no corpus update can
 move a byte of them.
+
+The legal text is Norwegian and is never translated, but the frame around
+it is not only Norwegian (ADR-0014 Amendment 2): the navigation carries an
+English gloss and links to the English site. It carries no per-page
+language switch, because no act has an English twin to switch to.
 """
 
 import html as html_escape
@@ -28,7 +33,7 @@ from pydantic import BaseModel, ConfigDict
 from lovspor.headings import parse_section_heading
 from lovspor.publish.html import LinkResolver, render_body_html
 from lovspor.publish.inventory import DocumentPlan, ProvisionRef, normalise_pid
-from lovspor.site.chrome import Chrome, chrome_html
+from lovspor.site.chrome import Chrome, corpus_chrome_html
 from lovspor.site.style import stylesheet
 
 SITE_ORIGIN = "https://lovspor.no"
@@ -163,14 +168,19 @@ def _section_spans(body_lines: list[str]) -> Iterator[tuple[str, int, int]]:
 
 @cache
 def _corpus_chrome() -> Chrome:
-    """The Norwegian chrome every corpus page carries (ADR-0014 Decision 5).
+    """The frame every corpus page carries (ADR-0014 Decision 5, Amendment 2).
+
+    Norwegian labels glossed in English and a link to ``/en/``; no status
+    badge and no per-page language switch.
 
     Zero arguments, deliberately: there is no parameter through which a
     count, a commit or a capability could arrive, so the chrome cannot
-    churn when the corpus changes. Cached because the corpus build renders
-    it on every one of ~93k pages and it is the same bytes every time.
+    churn when the corpus changes. ``corpus_chrome_html`` takes none
+    either, so that holds the whole way down. Cached because the corpus
+    build renders it on every one of ~93k pages and it is the same bytes
+    every time.
     """
-    return chrome_html("nb")
+    return corpus_chrome_html()
 
 
 def _twin_link_html(head: PageHead) -> str:

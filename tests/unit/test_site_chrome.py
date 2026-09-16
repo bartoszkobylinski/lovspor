@@ -1,4 +1,5 @@
-"""The shared chrome and the base template (ADR-0014 Decisions 3 and 5)."""
+"""The shared chrome and the base template (ADR-0014 Decisions 3 and 5,
+Decision 5 as amended 2026-09-16 by Amendment 2)."""
 
 import inspect
 import re
@@ -78,7 +79,15 @@ class TestChromeInvariance:
         assert "data-kind" not in chrome.header + chrome.footer
 
 
-class TestCorpusVariant:
+class TestNorwegianSiteChrome:
+    """``chrome_html("nb")`` with no switch target: a site page whose twin
+    does not exist, such as ``/observatory/``.
+
+    It was the corpus chrome too until ADR-0014 Amendment 2 gave the corpus
+    its own variant; ``TestCorpusChrome`` covers that one. What is pinned
+    here is the site's, so the two cannot be read as one again.
+    """
+
     def test_is_norwegian_with_the_three_links_and_no_switch_or_badge(self) -> None:
         chrome = chrome_html("nb")
 

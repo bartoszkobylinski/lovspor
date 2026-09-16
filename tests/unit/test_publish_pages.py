@@ -17,7 +17,7 @@ from lovspor.publish.pages import (
     provision_page_html,
     section_slices,
 )
-from lovspor.site.chrome import chrome_html
+from lovspor.site.chrome import corpus_chrome_html
 from lovspor.site.style import stylesheet
 
 PROVENANCE = PageProvenance(
@@ -249,7 +249,7 @@ class TestSharedChrome:
 
     def test_the_document_page_carries_the_header_and_footer_verbatim(self) -> None:
         html = _document()
-        chrome = chrome_html("nb")
+        chrome = corpus_chrome_html()
 
         assert chrome.header in html
         assert chrome.footer in html
@@ -259,7 +259,7 @@ class TestSharedChrome:
         html = provision_page_html(
             plan, plan.provisions[0], PROVENANCE, ["### § 1. Formål"], lambda t: None
         )
-        chrome = chrome_html("nb")
+        chrome = corpus_chrome_html()
 
         assert chrome.header in html
         assert chrome.footer in html
@@ -268,16 +268,33 @@ class TestSharedChrome:
         html = _document()
 
         assert '<a class="brand" href="/">' in html
-        assert '<a href="/lov/">Lover</a>' in html
-        assert '<a href="/forskrift/">Forskrifter</a>' in html
+        assert 'href="/lov/">Lover' in html
+        assert 'href="/forskrift/">Forskrifter' in html
 
-    def test_the_corpus_chrome_carries_no_language_switch_and_no_badge(self) -> None:
-        """Norwegian, no switch, no status badge (ADR-0014 Decision 5): the
-        corpus has no English twin for a switch to point at."""
+    def test_the_frame_answers_a_reader_who_cannot_read_norwegian(self) -> None:
+        """ADR-0014 Amendment 2: the legal text stays Norwegian, the frame
+        around it does not. Each navigation label carries its English gloss,
+        and the chrome links to the English site."""
         html = _document()
 
-        assert ">EN</a>" not in html
+        assert '<a href="/lov/">Lover <span class="gloss">Acts</span></a>' in html
+        assert (
+            '<a href="/forskrift/">Forskrifter <span class="gloss">Regulations</span></a>' in html
+        )
+        assert '<a href="/en/">EN</a>' in html
+
+    def test_the_corpus_chrome_carries_no_language_switch_and_no_badge(self) -> None:
+        """Norwegian text, no status badge, and no *per-page* switch
+        (ADR-0014 Decision 5 as amended). The switch markup would promise
+        this act has an English twin at the other URL; it has none, and
+        neither has any of the other ~93k pages. The link to /en/ is the
+        honest form of the same affordance, so its absence is not what is
+        asserted here -- the NO/EN pair's is."""
+        html = _document()
+
         assert "<strong>NO</strong>" not in html
+        assert "<strong>EN</strong>" not in html
+        assert ">NO</a>" not in html
         assert 'class="tag"' not in html
 
     def test_the_content_sits_in_a_main_landmark(self) -> None:
@@ -378,7 +395,7 @@ class TestDeterminism:
         render byte-identical chrome (ADR-0014 Decision 5)."""
         one = layout(PageHead(lang="nb", title="A", path="/lov/a/"), "<p>a</p>")
         two = layout(PageHead(lang="nb", title="B", path="/lov/b/"), "<p>b</p>")
-        chrome = chrome_html("nb")
+        chrome = corpus_chrome_html()
 
         assert chrome.header in one and chrome.header in two
         assert chrome.footer in one and chrome.footer in two
