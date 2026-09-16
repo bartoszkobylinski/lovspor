@@ -6,6 +6,7 @@ each unkilled class fails, and suspicious mutants never inflate the score.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -1493,3 +1494,178 @@ class TestShadowTreeCarriesTheRegister:
                 MutmutConfig.reset()
 
         assert not (tmp_path / "mutants" / "mutation-equivalents.toml").exists()
+
+
+# Issue #338: what the shadow tree has to carry is read off the suite itself,
+# not off a list kept by hand — a list is what #129 and #338 each re-learned.
+_REPO_ROOT_EXPRESSIONS = frozenset(
+    {
+        "Path(__file__).resolve().parents[2]",
+        "Path(__file__).parents[2]",
+        "Path(__file__).parent.parent.parent",
+    }
+)
+
+
+def _is_repo_root(node: ast.expr) -> bool:
+    """Whether the expression spells out a tests/unit module's repo root."""
+    return ast.unparse(node) in _REPO_ROOT_EXPRESSIONS
+
+
+def _repo_root_aliases(tree: ast.Module) -> set[str]:
+    """Names a module binds to its repo root: ``REPO_ROOT = Path(__file__)...``."""
+    aliases: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and _is_repo_root(node.value):
+            aliases |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and node.value is not None
+            and _is_repo_root(node.value)
+            and isinstance(node.target, ast.Name)
+        ):
+            aliases.add(node.target.id)
+    return aliases
+
+
+def _root_names_read_by(module: Path) -> Iterator[tuple[str, int]]:
+    """Each root-level name the module joins onto its repo root, with the line."""
+    tree = ast.parse(module.read_text(encoding="utf-8"))
+    aliases = _repo_root_aliases(tree)
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)):
+            continue
+        rooted = _is_repo_root(node.left) or (
+            isinstance(node.left, ast.Name) and node.left.id in aliases
+        )
+        if rooted and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str):
+            yield node.right.value, node.lineno
+
+
+def _repo_state_the_unit_suite_reads(unit_dir: Path) -> dict[str, str]:
+    """Root-level entries the unit modules read, each mapped to one reading site.
+
+    Entries that exist in the checkout only: mutmut's copy step no-ops on a path
+    that is not there, so a name no file answers to cannot be carried anywhere.
+    """
+    root = unit_dir.parents[1]
+    found: dict[str, str] = {}
+    for module in sorted(unit_dir.glob("*.py")):
+        for name, line in _root_names_read_by(module):
+            if (root / name).exists():
+                found.setdefault(name, f"tests/unit/{module.name}:{line}")
+    return found
+
+
+def _shadow_tree_carries(repo_root: Path) -> set[str]:
+    """Top-level names mutmut puts in mutants/: also_copy plus the mutated sources.
+
+    ``also_copy`` as mutmut resolves it — this repo's list plus mutmut's own
+    defaults (``tests/``, ``pyproject.toml``, ``uv.lock``, the other lockfiles).
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.chdir(repo_root)
+        MutmutConfig.reset()
+        try:
+            config = MutmutConfig.get()
+            paths = [*config.also_copy, *config.source_paths]
+        finally:
+            MutmutConfig.reset()
+    return {Path(path).parts[0] for path in paths}
+
+
+class TestTheScanReadsRepoRootPaths:
+    """The derivation the rule below rests on, checked against modules written
+    here: a scan that quietly went blind would report a shadow tree missing
+    every file as carrying all of them."""
+
+    @staticmethod
+    def _scan(tmp_path: Path, source: str, present: tuple[str, ...]) -> dict[str, str]:
+        unit = tmp_path / "tests" / "unit"
+        unit.mkdir(parents=True)
+        (unit / "test_module.py").write_text(source, encoding="utf-8")
+        for name in present:
+            (tmp_path / name).write_text("", encoding="utf-8")
+        return _repo_state_the_unit_suite_reads(unit)
+
+    def test_it_sees_a_path_built_from_a_root_constant(self, tmp_path: Path) -> None:
+        source = 'ROOT = Path(__file__).resolve().parents[2]\nCFG = ROOT / ".tool.yaml"\n'
+
+        found = self._scan(tmp_path, source, (".tool.yaml",))
+
+        assert found == {".tool.yaml": "tests/unit/test_module.py:2"}
+
+    def test_it_sees_a_path_built_inline_and_reaching_deeper(self, tmp_path: Path) -> None:
+        source = 'CFG = Path(__file__).parents[2] / ".tool.yaml" / "inner"\n'
+
+        found = self._scan(tmp_path, source, (".tool.yaml",))
+
+        assert found == {".tool.yaml": "tests/unit/test_module.py:1"}
+
+    def test_it_ignores_a_path_that_is_not_rooted_at_the_repo(self, tmp_path: Path) -> None:
+        """tests/fixtures/ travels with tests/, so only repo-root joins count."""
+        source = 'FIXTURES = Path(__file__).parent.parent / "fixtures"\nX = FIXTURES / "law.xml"\n'
+
+        found = self._scan(tmp_path, source, ("fixtures", "law.xml"))
+
+        assert found == {}
+
+    def test_it_ignores_a_name_the_checkout_has_no_file_for(self, tmp_path: Path) -> None:
+        source = 'ROOT = Path(__file__).resolve().parents[2]\nGONE = ROOT / "absent.toml"\n'
+
+        found = self._scan(tmp_path, source, ())
+
+        assert found == {}
+
+
+class TestShadowTreeCarriesRepoState:
+    """Issue #338: tests/unit/test_quality_hook_config.py reads
+    .pre-commit-config.yaml, also_copy did not carry it, and mutmut's clean
+    baseline died inside mutants/ on the missing file — so every PR touching
+    src/lovspor/ reported tool_failed with no score. That is issue #129 one
+    file later, which is why the rule is pinned here and not the list."""
+
+    def test_the_scan_finds_the_root_paths_the_suite_is_known_to_read(self) -> None:
+        """The rule below is worth no more than the scan feeding it."""
+        found = _repo_state_the_unit_suite_reads(Path(__file__).parent)
+
+        assert ".pre-commit-config.yaml" in found
+        assert "mutation-equivalents.toml" in found
+        assert "pyproject.toml" in found
+
+    def test_the_repos_config_copies_the_hook_config_into_the_shadow_tree(
+        self, tmp_path: Path
+    ) -> None:
+        """Exercise the configured copy, not only the scanner's model of it."""
+        repo_root = Path(__file__).parents[2]
+        hook_config = (repo_root / ".pre-commit-config.yaml").read_bytes()
+        (tmp_path / "pyproject.toml").write_bytes((repo_root / "pyproject.toml").read_bytes())
+        (tmp_path / ".pre-commit-config.yaml").write_bytes(hook_config)
+        (tmp_path / "mutants").mkdir()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(tmp_path)
+            MutmutConfig.reset()
+            try:
+                copy_also_copy_files()
+            finally:
+                MutmutConfig.reset()
+
+        assert (tmp_path / "mutants" / ".pre-commit-config.yaml").read_bytes() == hook_config
+
+    def test_every_root_path_the_unit_suite_reads_is_carried_into_the_shadow_tree(self) -> None:
+        unit_dir = Path(__file__).parent
+        carried = _shadow_tree_carries(unit_dir.parents[1])
+
+        missing = {
+            name: site
+            for name, site in _repo_state_the_unit_suite_reads(unit_dir).items()
+            if name not in carried
+        }
+
+        assert not missing, "; ".join(
+            f"{name} (read at {site}) is missing from [tool.mutmut] also_copy in "
+            "pyproject.toml — mutmut runs the unit suite from mutants/, where a "
+            "file nothing copied does not exist (issue #338)"
+            for name, site in sorted(missing.items())
+        )
