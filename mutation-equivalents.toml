@@ -2487,3 +2487,39 @@ looks at the flag, so every later read — the `systemctl show` output the unit
 derives from that file included — is the same. No input distinguishes the two,
 so no test can. This is Python's own truthiness, not a dependency's behaviour.
 """
+
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "document_page_html"
+registered = "2026-09-16, PR #337, from run 35116838458"
+mutation = """
+-        render_body_html(heading, resolve, suppressed),
++        render_body_html(heading, resolve, ),
+"""
+justification = """
+A trailing comma in a call is syntax, not semantics: `f(a, b,)` and
+`f(a, b)` parse to the same call with the same two arguments. No input
+can distinguish them, so no test can kill this mutant.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "document_page_html"
+registered = "2026-09-16, PR #337, from run 35116838458"
+mutation = """
+-        render_body_html(heading, resolve, suppressed),
++        render_body_html(heading, resolve, None),
+"""
+justification = """
+This call renders the `heading` slice, and that slice cannot contain a
+provision heading. `_title_split` returns as `heading` only the leading
+blank lines plus the single `# ` title line: any other non-blank line
+breaks the loop and yields an empty heading. The third argument is read
+in exactly one place — `_render_heading` consults
+`suppressed_anchor_pids` only after `parse_section_heading` returns a
+section (publish/html.py) — and a `# ` title is not a section heading.
+So the set is never consulted for this call, `None` never reaches a
+membership test, and the rendered bytes are identical for every input.
+The sibling call on `rest`, which does carry provision headings, keeps
+`suppressed` and stays covered by the duplicate-pid tests.
+"""
