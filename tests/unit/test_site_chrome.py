@@ -7,6 +7,7 @@ import re
 import pytest
 from jinja2 import UndefinedError
 
+import lovspor.site.chrome as chrome_module
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.capabilities import Checkout, Observation, derive_state
 from lovspor.site.chrome import Chrome, chrome_html, corpus_chrome_html
@@ -173,6 +174,26 @@ class TestCorpusChrome:
         capability value can reach ~93k pages (ADR:1170-1176)."""
         assert list(inspect.signature(corpus_chrome_html).parameters) == []
         assert inspect.signature(corpus_chrome_html).return_annotation is Chrome
+
+    def test_it_renders_with_exactly_the_fixed_corpus_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pin the zero-input boundary before template branching can hide drift.
+
+        The language remains the canonical Norwegian code, and the absent
+        per-page twin is represented by the switch key with a null target.
+        """
+        expected = Chrome(header="header", footer="footer")
+        contexts: list[dict[str, object]] = []
+
+        def record_context(context: dict[str, object]) -> Chrome:
+            contexts.append(context)
+            return expected
+
+        monkeypatch.setattr(chrome_module, "_render", record_context)
+
+        assert corpus_chrome_html() is expected
+        assert contexts == [{"lang": "nb", "language_switch_href": None, "corpus": True}]
 
     def test_both_navigation_labels_carry_their_english_gloss(self) -> None:
         header = corpus_chrome_html().header
