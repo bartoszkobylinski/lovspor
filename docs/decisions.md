@@ -153,7 +153,7 @@ Local layout:
 | Types | `mypy` strict mode | Wired into CI + the fast gate (pre-commit stage); see §9d |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
 | Mutation | `mutmut == 3.7.0` | Function-scoped per-PR runs; see §9 and §9c |
-| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + unit suite) |
+| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + fail-closed security scan + unit suite) |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
 | XML | `lxml` with `resolve_entities=False, huge_tree=False` (when added) | XXE / billion-laughs mitigation |
@@ -174,6 +174,8 @@ Global Claude skill at `~/.claude/skills/security-check/SKILL.md`, invokable as 
 6. No `subprocess.*(..., shell=True)`
 
 Baseline on scaffold (2026-04-22): all six clean.
+
+Since 2026-09-16 check 1 also has an executable counterpart in this repository, `scripts/quality/check_security_scan.py`, which cannot report clean when the scan silently narrowed and which runs in the deep gate and in CI. See §9f.
 
 ## 9. mutmut 3.7 and PEP 695
 
@@ -289,13 +291,41 @@ Decided 2026-09-15 by the owner, issue #323 (Phase B, decision 2). The `CLAUDE.m
 
 **Where it runs.** `tests/unit/test_quality_ratchets.py` runs the checker on the real tree, so the unit suite — and with it CI — enforces the ratchet wherever it runs; a local bypass cannot produce a green PR. Since 2026-09-16 it is also a check in the fast gate (§9d), which is where a violation is cheapest to repair.
 
+## 9f. The security scan fails closed on narrowed coverage
+
+Decided 2026-09-16, issue #323 (Phase E), closing issue #253. **No ADR**, for the reason given in §9d.
+
+**Why.** bandit reports a file it could not read in a footer and still exits 0. In #253 three modules under `src/lovspor` — `retry.py`, `temporal.py` and `temporal_events.py` — were skipped with "syntax error while parsing AST from file" because the interpreter running bandit predated the PEP 695 syntax in them, and every run still reported a clean scan. The skip list grew from two files to three across sessions without the gate ever changing colour.
+
+Reproduced on this tree before the checker was written:
+
+| run | `errors[]` | exit |
+|---|---|---|
+| `python -m bandit -r src` under 3.12 | empty; 142 files scanned | 0 |
+| the same under 3.11 | `retry.py`, `temporal.py`, `temporal_events.py` — "syntax error while parsing AST from file" | 0 |
+| a tree holding one unparseable file | that file | 0 |
+| a tree holding one mode-000 file | that file — "Permission denied" | 0 |
+| a path that does not exist | that path — "No such file or directory" | 0 |
+
+Every one of those is a clean exit status over a scan that read less than it was asked to.
+
+**Mechanism.** `scripts/quality/check_security_scan.py` treats the JSON report, not the exit status, as the verdict. It fails on a MEDIUM or HIGH finding, on any entry in `errors[]`, on any `.py` file present on disk and absent from the report, and exits 2 — never a pass — when bandit itself could not run. Exit 1 alone cannot be read as "findings": a missing module exits 1 too, so the report's existence is what establishes that a scan happened at all.
+
+The file census is the part `errors[]` cannot give. A file dropped by an exclusion produces no error and no result; it is simply absent. Comparing the report against the `.py` files on disk is what turns that silence into a failure.
+
+The interpreter is pinned mechanically: the run is refused below Python 3.12 rather than trusting a caller to remember `--python 3.12`. bandit is a `dev` dependency, so `uv.lock` pins its version and `uv run` selects the project interpreter — #253's cause removed rather than its symptom suppressed.
+
+**Scope is `src/`**, the posture already declared in §8 and where #253 happened. `tests/` and `scripts/` are covered by ruff's flake8-bandit (`S`) rules, which run repo-wide in the fast gate on every commit. Their four MEDIUM bandit findings — three `B108` in `tests/unit/test_sources_lovdata.py`, one `B314` in `scripts/ci/codex_convergence.py` — already carry reviewed `# noqa` waivers, and bandit does not read `# noqa`. Scanning those trees here would re-raise four already-adjudicated findings under a second waiver vocabulary.
+
+**Where it runs.** Measured 1.8 s over 142 files, so it belongs to the push-time deep gate rather than the commit loop. CI runs it as a step inside `fast-ci`, which is criterion 12: a bypassed or uninstalled local hook must not produce a false-green PR. A step and not a new job, because the `main-branch-protection` ruleset requires `fast-ci`, `mutation` and the three `test` legs **by name** — a new job would not block a merge until the owner edited that required set, which is the very false-green the gate exists to prevent. `tests/unit/test_quality_fast_gate.py` and `tests/unit/test_agentic_ci_workflows.py` pin both placements, so a refactor cannot quietly drop the gate.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:
 
 1. **Small chunks** — 1 commit = 1 logical change. Every commit independently green and bisectable.
 2. **TDD per chunk** — failing unit test first, then minimal code to green.
-3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy + ratchets) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + unit suite). See §9d.
+3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy + ratchets) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + fail-closed security scan + unit suite). See §9d, §9e and §9f.
 4. **Feature branches only** — `feat/`, `fix/`, `refactor/`, `test/`, `docs/`. Never commit to `main` except the single bootstrap commit.
 5. **PR → Codex → merge** — Claude opens PR with prepared Codex prompt, STOPS, user runs Codex, Claude fixes any bugs on the same branch, **only the user merges**.
 6. **No AI attribution** in commit messages, PR descriptions, or code comments.

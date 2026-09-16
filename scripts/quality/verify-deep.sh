@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The deep gate (issue #323, docs/decisions.md §9d): the fast gate, then the
-# full unit suite. The pre-push hook runs exactly this script. CI still runs the
-# suite on every PR and stays authoritative.
+# The deep gate (issue #323, docs/decisions.md §9d and §9f): the fast gate, then
+# the fail-closed security scan, then the full unit suite. The pre-push hook runs
+# exactly this script. CI still runs all three on every PR and stays
+# authoritative.
 #
 # The suite does not start when the fast gate fails: that failure has to be
 # repaired and re-verified anyway, so minutes of tests first buy nothing.
@@ -18,6 +19,9 @@ if ! "$here/verify-fast.sh"; then
   echo "verify-deep: the fast gate failed; unit suite not run"
   exit 1
 fi
+# The scan costs ~1.8 s over src/, so it runs before the suite: a narrowed scan
+# is repaired and re-verified anyway, and minutes of tests first buy nothing.
+check security-scan uv run python scripts/quality/check_security_scan.py
 check unit-suite uv run pytest tests/unit/ -q
 
 finish verify-deep

@@ -37,7 +37,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 2. Invoke `/security-check` — clean
 3. Then `git commit`
 
-Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, then `uv run pytest tests/unit/ -q`).
+Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, then the fail-closed security scan, then `uv run pytest tests/unit/ -q`).
 
 `uv run pre-commit install` installs both hooks: pre-commit runs `verify-fast.sh`, pre-push runs `verify-deep.sh` (a clone whose hooks predate #323 re-runs it to add pre-push). Step 2 is manual until the skill auto-triggers. CI stays authoritative: fast-ci and the Test matrix run lint, mypy and the unit suite on every PR, whatever ran locally. Measured costs and the stage split: `docs/decisions.md` §9d.
 
@@ -164,7 +164,7 @@ These extend global rules in `~/.claude/CLAUDE.md`:
 
 # Daily
 scripts/quality/verify-fast.sh        # fast gate = pre-commit hook: gitleaks, ruff, format, mypy, ratchets
-scripts/quality/verify-deep.sh        # deep gate = pre-push hook: fast gate + unit suite
+scripts/quality/verify-deep.sh        # deep gate = pre-push hook: fast gate + security scan + unit suite
 uv run pytest                         # all tests
 uv run pytest tests/unit/             # unit suite alone
 # Mutation testing is the CI mutation job's work, not Claude's pre-push step.

@@ -84,6 +84,19 @@ def test_fast_ci_conflict_marker_gate_accepts_non_marker_boundaries(
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_fast_ci_runs_the_fail_closed_security_scan() -> None:
+    """Issue #323 criterion 12: the deep gate's security scan needs a CI
+    counterpart, or an uninstalled or bypassed local hook produces a green PR
+    over a scan nobody ran. It is a step in fast-ci because the ruleset requires
+    fast-ci by name; a separate job would not block a merge on its own."""
+    steps = _steps("pr-pipeline.yml", "fast-ci")
+    names = [step.get("name") for step in steps]
+    scan = _named_step(steps, "Security scan (fail-closed)")
+
+    assert "scripts/quality/check_security_scan.py" in scan["run"]
+    assert names.index(scan["name"]) < names.index("Unit tests")
+
+
 @pytest.mark.parametrize(
     ("workflow_name", "job_name", "step_name"),
     [

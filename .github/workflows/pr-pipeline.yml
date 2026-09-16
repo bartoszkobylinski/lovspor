@@ -48,6 +48,16 @@ jobs:
       - name: Mypy strict
         run: uv run mypy src/
 
+      - name: Security scan (fail-closed)
+        # bandit reports a file it could not read in a footer and still exits 0
+        # (issue #253: three modules skipped, every run green). The checker fails
+        # on a MEDIUM/HIGH finding, on anything unreadable, and on any file the
+        # report never mentions. Here as a step in fast-ci, not a job of its own:
+        # the main-branch-protection ruleset requires fast-ci by name, so a new
+        # job would not block a merge until that required set was edited — the
+        # false-green this step exists to prevent (issue #323, criterion 12).
+        run: uv run python scripts/quality/check_security_scan.py
+
       - name: Unit tests
         run: uv run pytest tests/unit/
 
