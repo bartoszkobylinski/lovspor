@@ -70,6 +70,17 @@ def _output(root: Path, *extra: str) -> str:
     return out.getvalue()
 
 
+def _reporting_scanner(root: Path, report_text: str) -> str:
+    module = "reporting_scanner"
+    (root / f"{module}.py").write_text(
+        "import sys\n"
+        "from pathlib import Path\n\n"
+        f"Path(sys.argv[sys.argv.index('-o') + 1]).write_text({report_text!r}, encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    return module
+
+
 class TestFindings:
     def test_a_medium_finding_fails(self, tmp_path: Path) -> None:
         root = _tree(tmp_path, {"mod.py": MEDIUM})
@@ -153,6 +164,11 @@ class TestCoverageIsNotSilentlyNarrowed:
 
         assert _check(root) == (0, [])
 
+    def test_an_empty_source_tree_is_a_complete_clean_scan(self, tmp_path: Path) -> None:
+        root = _tree(tmp_path, {})
+
+        assert _output(root) == "security: OK, 0 files scanned, no findings at MEDIUM or above\n"
+
     def test_findings_and_narrowed_coverage_are_reported_together(self, tmp_path: Path) -> None:
         root = _tree(tmp_path, {"bad.py": UNPARSEABLE, "mod.py": MEDIUM})
 
@@ -189,6 +205,28 @@ class TestCouldNotRun:
 
         assert code == 2
         assert out.getvalue().startswith("ERROR security: ")
+
+    @pytest.mark.parametrize(
+        "report_text",
+        [
+            "not JSON",
+            "[]",
+            '{"metrics": {"_totals": {}}, "results": []}',
+            '{"metrics": {"_totals": {}}, "errors": []}',
+        ],
+        ids=["invalid-json", "non-object", "missing-errors", "missing-results"],
+    )
+    def test_a_malformed_scanner_report_is_exit_2(self, tmp_path: Path, report_text: str) -> None:
+        root = _tree(tmp_path, {"mod.py": CLEAN})
+        module = _reporting_scanner(root, report_text)
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = scan.main(["--root", str(root), "--bandit-module", module])
+
+        assert code == 2
+        assert out.getvalue().startswith("ERROR security: ")
+        assert "security: OK" not in out.getvalue()
 
     def test_a_missing_scope_is_exit_2_not_a_clean_scan(self, tmp_path: Path) -> None:
         """bandit answers a nonexistent path with exit 0 and an empty result."""
