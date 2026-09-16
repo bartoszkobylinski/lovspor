@@ -2,20 +2,16 @@
 
 import inspect
 import re
-from pathlib import Path
 
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.capabilities import Checkout, Observation, derive_state
 from lovspor.site.chrome import Chrome, chrome_html
 from lovspor.site.facts import FactLedger, FactRegistry, FactSource
 from lovspor.site.routes import emitted_pages
+from lovspor.site.style import stylesheet
 from lovspor.site.templates import TEMPLATES_DIR, page_globals, site_environment
 from tests.unit.site_fixtures import available_observation, checkout_expectations, readyz_503
 
-# The pre-envelope landing page, a fixture since the first-migration PR
-# retired `deploy/digitalocean/site/`.
-_PRE_ENVELOPE = Path(__file__).resolve().parent / "fixtures" / "site" / "pre-envelope"
-_LANDING = _PRE_ENVELOPE / "index.html"
 _EXTERNAL = re.compile(r"https?://|<script|<link|<img|@import|url\(|\bon\w+=", re.IGNORECASE)
 
 
@@ -184,13 +180,18 @@ class TestBaseTemplate:
         assert 'class="lang"' in html  # the corpus links stay
         assert ">EN</a>" not in html
 
-    def test_the_stylesheet_is_the_landing_stylesheet_verbatim(self) -> None:
-        """One inline stylesheet, migrated from the pre-envelope landing page."""
-        landing = _LANDING.read_text(encoding="utf-8")
-        golden = landing[landing.index("<style>") : landing.index("</style>") + len("</style>")]
+    def test_the_stylesheet_is_the_one_shared_source_verbatim(self) -> None:
+        """The base template inlines the shared source and nothing of its own.
+
+        Pinned against ``style.css`` rather than against a copy: a second
+        copy is exactly how the site and the corpus drifted apart (#335).
+        The exemplar is a page that renders no fact: this harness builds an
+        empty registry, so a page calling ``fact()`` fails here for a reason
+        that has nothing to do with the stylesheet.
+        """
         html = _render("/about/")
 
-        assert golden in html
+        assert f"<style>\n{stylesheet()}</style>" in html
         assert html.count("<style>") == 1
 
     def test_placeholder_pages_carry_the_badge_title_and_lede(self) -> None:

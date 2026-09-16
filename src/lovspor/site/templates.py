@@ -14,6 +14,13 @@ settings are fixed here once:
 * No clock global, no ``now`` (Decision 3). ``fact`` and ``badge`` are not
   environment globals either: they are bound per page by
   ``page_globals`` so the ledger knows which page rendered a value.
+* ``stylesheet`` *is* an environment global, and legitimately: it is one
+  constant of the checkout, identical on every page, with no reading to
+  attribute to anyone. Binding it here is what stops the site's CSS and
+  the corpus generator's from drifting into two designs again (#335) —
+  ``publish.pages`` inlines the same source. ``_base.html`` emits it
+  through ``| safe``: CSS is not HTML, and escaping it would turn quoted
+  font names and ``::before`` content into entities that stop parsing.
 
 The page-status vocabulary is one definition (Decision 2, ADR:562-568):
 ``current``, ``planned``, ``research``, ``early_access``. ``badge`` renders
@@ -29,6 +36,7 @@ from markupsafe import Markup
 
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.facts import FactLedger, FactRegistry, Lang, fact_renderer
+from lovspor.site.style import stylesheet
 
 PageStatus = Literal["current", "planned", "research", "early_access"]
 
@@ -52,7 +60,7 @@ def badge(status: PageStatus, lang: Lang) -> Markup:
 
 
 def site_environment() -> Environment:
-    return Environment(
+    environment = Environment(
         loader=FileSystemLoader(TEMPLATES_DIR),
         autoescape=True,
         undefined=StrictUndefined,
@@ -61,6 +69,8 @@ def site_environment() -> Environment:
         lstrip_blocks=True,
         auto_reload=False,
     )
+    environment.globals["stylesheet"] = stylesheet()
+    return environment
 
 
 def page_globals(
