@@ -17,6 +17,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from lovspor.release.migrate import FLAT_RELEASE
+
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
 _SCRIPT = _DEPLOY / "rehearse-migration.sh"
 _URL_SCRIPT = _DEPLOY / "rehearse-urls.sh"
@@ -27,6 +29,8 @@ _README = _DEPLOY / "README.md"
 _OPERATIONS = _DEPLOY.parents[1] / "docs" / "operations.md"
 _MCP_DOC = _DEPLOY.parents[1] / "docs" / "mcp.md"
 _REH_ADMIN = "unix//run/caddy-rehearsal/admin.sock"
+_LIVE_RELEASE = "20260908T101827Z-5d0cd4a00d76"
+"""The droplet's live release on 2026-09-16 (#331): the stamp, then the corpus commit it holds."""
 
 
 def _directive(text: str, name: str) -> list[str]:
@@ -65,6 +69,31 @@ def _host_names(environment: Path) -> str:
     script = f'set -euo pipefail\n{_function(code, "host_names")}\nhost_names "{environment}"\n'
     done = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
     return done.stdout.rstrip("\n")
+
+
+def _one_liner(code: str, name: str) -> str:
+    """One of the script's single-line helpers — ``log``, ``die`` — verbatim, never restated."""
+    (found,) = [line for line in code.splitlines() if line.startswith(f"{name}() ")]
+    return found
+
+
+def _choose_ref(symlink: Path, explicit: str = "") -> subprocess.CompletedProcess[str]:
+    """Run the URL dry-run's own ref choice: its four functions, real bash, nothing stubbed."""
+    code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+    script = "\n".join(
+        (
+            "set -euo pipefail",
+            _one_liner(code, "log"),
+            _one_liner(code, "die"),
+            _function(code, "live_release_name"),
+            _function(code, "choose_ref"),
+            f'CURRENT_SYMLINK="{symlink}"',
+            f'REF="{explicit}"',
+            "choose_ref",
+            'printf "chosen=%s\\n" "$REF"',
+        )
+    )
+    return subprocess.run(["bash", "-c", script], check=False, capture_output=True, text=True)
 
 
 class TestTheSecondInstancesUnit:
@@ -423,3 +452,131 @@ class TestTheUrlDryRunsHarness:
 
     def test_is_valid_bash(self) -> None:
         subprocess.run(["bash", "-n", str(_URL_SCRIPT)], check=True)
+
+
+class TestTheCorpusRefTheDryRunComparesOn:
+    """Which corpus commit the envelope is built from (#331).
+
+    ``Answer.same_response`` compares the served file's SHA-256, so a
+    route-by-route comparison only means anything while both sides hold
+    **one** corpus commit — and the old side is not free to choose: it is
+    the flat release behind ``lovspor-current``. ``HEAD`` was the old
+    default and made the dry-run unpassable on any box whose corpus had
+    moved since its live release; on the droplet that was 525 commits and
+    1 h 40 m of work to a refusal on a document changed in between.
+
+    The functions run here are the script's own, under a real ``bash``,
+    against real directories and real symlinks.
+    """
+
+    def _live(self, root: Path, name: str = _LIVE_RELEASE) -> Path:
+        """The pre-envelope layout: a dated release directory and the symlink Caddy roots at."""
+        release = root / "lovspor-releases-flat" / name
+        release.mkdir(parents=True)
+        symlink = root / "lovspor-current"
+        symlink.symlink_to(release)
+        return symlink
+
+    def test_the_ref_is_the_corpus_commit_the_live_release_was_built_from(
+        self, tmp_path: Path
+    ) -> None:
+        done = _choose_ref(self._live(tmp_path))
+
+        assert done.returncode == 0, done.stderr
+        assert "chosen=5d0cd4a00d76" in done.stdout
+
+    def test_an_explicit_ref_is_the_override(self, tmp_path: Path) -> None:
+        done = _choose_ref(self._live(tmp_path), explicit="4f80a3490")
+
+        assert done.returncode == 0, done.stderr
+        assert "chosen=4f80a3490" in done.stdout
+        assert "5d0cd4a00d76" not in done.stdout
+
+    def test_an_explicit_ref_asks_the_box_for_nothing(self, tmp_path: Path) -> None:
+        """``--ref`` is the way past every refusal below, so it must not need the symlink."""
+        done = _choose_ref(tmp_path / "lovspor-current", explicit="4f80a3490")
+
+        assert done.returncode == 0, done.stderr
+        assert "chosen=4f80a3490" in done.stdout
+
+    def test_an_absent_symlink_is_a_named_refusal_and_never_head(self, tmp_path: Path) -> None:
+        """Falling back to HEAD is the defect; the comparison has nothing to compare against."""
+        done = _choose_ref(tmp_path / "lovspor-current")
+
+        assert done.returncode == 1
+        assert "lovspor-current" in done.stderr
+        assert "--ref" in done.stderr
+        assert "HEAD" not in done.stdout + done.stderr
+        assert "chosen=" not in done.stdout
+
+    def test_a_symlink_to_something_that_is_not_a_release_is_refused(self, tmp_path: Path) -> None:
+        target = tmp_path / "lovspor"
+        target.mkdir()
+        symlink = tmp_path / "lovspor-current"
+        symlink.symlink_to(target)
+
+        done = _choose_ref(symlink)
+
+        assert done.returncode == 1
+        assert "chosen=" not in done.stdout
+
+    def test_a_dangling_symlink_is_refused_rather_than_read_for_a_name(
+        self, tmp_path: Path
+    ) -> None:
+        """A name is not a release: what the old configuration serves has to be there."""
+        symlink = tmp_path / "lovspor-current"
+        symlink.symlink_to(tmp_path / "lovspor-releases-flat" / _LIVE_RELEASE)
+
+        done = _choose_ref(symlink)
+
+        assert done.returncode == 1
+        assert "chosen=" not in done.stdout
+
+    def test_the_chosen_ref_is_announced_with_where_it_came_from(self, tmp_path: Path) -> None:
+        """In the run's first lines: the refusal it replaces arrived 1 h 40 m in."""
+        derived = _choose_ref(self._live(tmp_path))
+        explicit = _choose_ref(self._live(tmp_path / "other"), explicit="4f80a3490")
+
+        assert "5d0cd4a00d76" in derived.stdout
+        assert _LIVE_RELEASE in derived.stdout
+        assert "lovspor-current" in derived.stdout
+        assert "--ref" in explicit.stdout
+
+    def test_it_reads_the_pre_envelope_names_own_pattern_and_no_others(
+        self, tmp_path: Path
+    ) -> None:
+        """``FLAT_RELEASE`` is what ``migrate --retire`` selects those directories by, and
+        the sha12 is the corpus commit ``publish-release.sh`` built them from. A looser
+        read here derives a ref from a directory that is not a release at all."""
+        names = (
+            _LIVE_RELEASE,
+            "20260901T120000Z-abcdef123456",
+            "20260908T101827Z-5D0CD4A00D76",
+            "20260908T101827Z-5d0cd4a",
+            "20260908T101827Z-5d0cd4a00d765",
+            "20260908T1018Z-5d0cd4a00d76",
+            "lovspor",
+        )
+
+        for index, name in enumerate(names):
+            done = _choose_ref(self._live(tmp_path / str(index), name))
+
+            assert (done.returncode == 0) is bool(FLAT_RELEASE.match(name)), name
+
+    def test_the_script_no_longer_defaults_the_ref_to_head(self) -> None:
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert "REF=HEAD" not in code
+
+    def test_the_symlink_comes_from_the_deployment_root_the_script_already_names(self) -> None:
+        """One name for ``/var/www`` in this script, not two that can drift apart."""
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert 'CURRENT_SYMLINK="$DEPLOYMENT_ROOT/lovspor-current"' in code
+        assert "/var/www/lovspor-current" not in code
+
+    def test_the_ref_is_chosen_before_the_envelope_is_built(self) -> None:
+        """The whole point: the operator sees the ref in the first lines, not in a refusal."""
+        code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+
+        assert code.index("\nchoose_ref\n") < code.index("RELEASE_ID=")

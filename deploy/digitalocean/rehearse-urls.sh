@@ -16,7 +16,7 @@
 # envelope to compare against, hands the command the two Caddyfiles, and takes
 # the envelope away again. It asserts nothing of its own.
 #
-#   sudo bash rehearse-urls.sh              dry-run against HEAD of the corpus clone
+#   sudo bash rehearse-urls.sh              dry-run against the corpus commit the live release holds
 #   sudo bash rehearse-urls.sh --ref <sha>  dry-run against one corpus commit
 #   sudo bash rehearse-urls.sh --keep       leave the envelope for inspection
 #
@@ -45,6 +45,10 @@ PROPOSED_CADDYFILE="$APP/deploy/digitalocean/Caddyfile"
 # (#308).
 DEPLOYMENT_ROOT=/var/www
 REH_ROOT=/var/www/lovspor-urls-rehearsal
+# The live release the OLD configuration serves, under the same deployment root
+# rather than at a second spelling of it: the corpus commit this dry-run has to
+# be built from is read off its name (#331, below).
+CURRENT_SYMLINK="$DEPLOYMENT_ROOT/lovspor-current"
 KEEP=0
 
 log() { printf '%s rehearse-urls: %s\n' "$(date -u +%FT%TZ)" "$*"; }
@@ -56,7 +60,7 @@ die() { log "ERROR: $*" >&2; exit 1; }
 [ -f "$PREVIOUS_CADDYFILE" ] || die "$PREVIOUS_CADDYFILE is missing; nothing to compare against"
 [ -f "$PROPOSED_CADDYFILE" ] || die "$PROPOSED_CADDYFILE is missing; is the checkout complete?"
 
-REF=HEAD
+REF=""
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 		--ref) [ -n "${2:-}" ] || die "--ref needs a commit"; REF="$2"; shift 2 ;;
@@ -64,6 +68,50 @@ while [ "$#" -gt 0 ]; do
 		*) die "usage: $0 [--ref <commit>] [--keep]" ;;
 	esac
 done
+
+# The corpus commit the comparison stands on. `Answer.same_response`
+# (src/lovspor/release/answers.py) compares the served file's SHA-256, so a
+# route-by-route comparison only means anything while BOTH sides hold ONE corpus
+# commit — and the old side is not free to choose: it is the flat release behind
+# CURRENT_SYMLINK. HEAD was the old default, which made this dry-run unpassable
+# on any box whose corpus had moved since its live release: on the droplet, 525
+# commits and 1 h 40 m of work to a refusal on a document changed in between
+# (#331). The byte comparison is the right contract; the unpinned ref was not.
+#
+# A pre-envelope release directory is named <YYYYMMDDTHHMMSSZ>-<sha12>, where
+# the second half IS the corpus commit it was built from:
+# `release_id="$(date -u +%Y%m%dT%H%M%SZ)-${sha:0:12}"` in publish-release.sh
+# before the envelope (7e650b4), over `git rev-parse --verify <ref>^{commit}` in
+# the corpus clone. That pattern is pinned today as FLAT_RELEASE in
+# src/lovspor/release/migrate.py — what `migrate --retire` selects those
+# directories by — so it is matched here exactly: 12 lowercase hex, no fewer and
+# no more. A name is not enough on its own; the tree has to still be there.
+live_release_name() {
+	local target name
+	{ [ -L "$1" ] && [ -d "$1" ]; } || return 0
+	target="$(readlink -f -- "$1")" || return 0
+	name="${target##*/}"
+	[[ "$name" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$ ]] || return 0
+	printf '%s\n' "$name"
+}
+
+# Announced before the build rather than after it: the refusal this replaces
+# reached the operator 1 h 40 m in. `${live##*-}` is how publish-release.sh read
+# the corpus commit back out of the same name. No live release is a refusal, not
+# a fall back to HEAD: the comparison would have nothing to compare against.
+choose_ref() {
+	local live
+	if [ -n "$REF" ]; then
+		log "corpus ref $REF, named by --ref"
+		return 0
+	fi
+	live="$(live_release_name "$CURRENT_SYMLINK")"
+	[ -n "$live" ] || die "$CURRENT_SYMLINK is not a symlink to a pre-envelope release directory (<YYYYMMDDTHHMMSSZ>-<sha12>), so the corpus commit the old configuration serves cannot be read; name it with --ref <corpus commit>"
+	REF="${live##*-}"
+	log "corpus ref $REF, from the live release $live behind $CURRENT_SYMLINK"
+}
+
+choose_ref
 
 teardown() {
 	if [ "$KEEP" -eq 1 ]; then
