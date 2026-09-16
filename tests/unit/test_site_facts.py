@@ -18,6 +18,7 @@ from lovspor.site.facts import (
     LedgerEntry,
     Unobserved,
     fact_renderer,
+    fact_text_renderer,
 )
 from lovspor.site.templates import badge, page_globals, site_environment
 
@@ -261,6 +262,72 @@ class TestFactRenderer:
 
         assert [entry.page for entry in ledger.entries] == ["/", "/en/"]
         assert all(entry.value == 5900 for entry in ledger.entries)
+
+
+class TestFactTextRenderer:
+    """The plain-text twin of the renderer, for an artifact that is not HTML.
+
+    ``llms.txt`` states counts but has no markup to wrap a ledgered value in
+    and no escaping boundary to cross. What must not differ is the rest: the
+    same registry, the same kind check, the same ledger entry (#340).
+    """
+
+    def test_renders_the_bare_value_with_no_markup(self, registry: FactRegistry) -> None:
+        fact = fact_text_renderer("/llms.txt", "en", registry, FactLedger())
+
+        assert fact("corpus.documents", kind="corpus") == "5,900"
+
+    def test_does_not_escape_because_there_is_no_markup_to_escape_into(
+        self, registry: FactRegistry
+    ) -> None:
+        """The HTML renderer escapes at the template boundary; a text file has
+        no such boundary, so the value arrives exactly as the artifact holds
+        it. Pinned so nobody later feeds this into markup by mistake."""
+        fact = fact_text_renderer("/llms.txt", "en", registry, FactLedger())
+
+        assert fact("code.licence", kind="code") == 'AGPL-3.0 <script>alert("x")</script>'
+
+    def test_formats_numbers_in_the_page_language(self, registry: FactRegistry) -> None:
+        ledger = FactLedger()
+        norwegian = fact_text_renderer("/llms.txt", "nb", registry, ledger)
+
+        assert norwegian("corpus.documents", kind="corpus") == "5\u00a0900"
+
+    def test_records_one_ledger_entry_per_rendered_value(self, registry: FactRegistry) -> None:
+        ledger = FactLedger()
+        fact = fact_text_renderer("/llms.txt", "en", registry, ledger)
+
+        fact("corpus.documents", kind="corpus")
+        fact("corpus.documents", kind="corpus")
+
+        assert [entry.field for entry in ledger.entries] == ["documents"]
+        assert ledger.entries[0].page == "/llms.txt"
+
+    def test_a_kind_mismatch_fails_and_leaves_no_ledger_entry(self, registry: FactRegistry) -> None:
+        ledger = FactLedger()
+        fact = fact_text_renderer("/llms.txt", "en", registry, ledger)
+
+        with pytest.raises(KindMismatchError, match="corpus.documents"):
+            fact("corpus.documents", kind="code")
+
+        assert ledger.entries == ()
+
+    def test_an_unobserved_hosted_value_degrades_rather_than_reading_as_a_number(
+        self, registry: FactRegistry
+    ) -> None:
+        fact = fact_text_renderer("/llms.txt", "en", registry, FactLedger())
+
+        assert fact("hosted.process.tool_count", kind="hosted") == (
+            "not attested at this release — unobserved (timeout), observed 2026-01-01T00:00:00Z"
+        )
+
+    def test_the_two_renderers_ledger_identically(self, registry: FactRegistry) -> None:
+        markup_ledger, text_ledger = FactLedger(), FactLedger()
+
+        fact_renderer("/x/", "en", registry, markup_ledger)("corpus.documents", kind="corpus")
+        fact_text_renderer("/x/", "en", registry, text_ledger)("corpus.documents", kind="corpus")
+
+        assert markup_ledger.entries == text_ledger.entries
 
 
 class TestBadge:

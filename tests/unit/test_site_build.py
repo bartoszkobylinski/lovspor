@@ -41,6 +41,7 @@ from lovspor.site.capabilities import (
 from lovspor.site.errors import CapabilityDocumentError, SiteBuildError
 from lovspor.site.facts import KindMismatchError
 from lovspor.site.fingerprint import release_content_id, toolchain_fingerprint
+from lovspor.site.llms import LLMS_PAGE
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import check_links, scan_page
 from lovspor.site.templates import TEMPLATES_DIR
@@ -70,7 +71,7 @@ _REPO = Path(__file__).resolve().parents[2]
 # comparisons are the ADR-0014 guarantee that the migration changed no copy.
 _PRE_ENVELOPE = Path(__file__).resolve().parent / "fixtures" / "site" / "pre-envelope"
 _GOLDEN_OBSERVATORY = _PRE_ENVELOPE / "observatory" / "index.html"
-_ROOT_FILES = {"site-facts.json", "sitemap-site.xml", "deployment-capabilities.json"}
+_ROOT_FILES = {"site-facts.json", "sitemap-site.xml", "deployment-capabilities.json", "llms.txt"}
 _LIVE_CLAIMS = re.compile(r"\b(up now|live now|available now|oppe nå|tilgjengelig nå)\b", re.I)
 _VOID_ELEMENTS = frozenset({"br", "hr", "img", "meta", "link", "input"})
 
@@ -442,7 +443,7 @@ class TestTree:
         inputs = world.inputs(tmp_path / "site")
         deep = tmp_path / "a" / "b" / "site"
         pages = {"/deep/nested/": "<p>x</p>", "/": "<p>root</p>"}
-        site_build._write_tree(inputs.model_copy(update={"out": deep}), pages, {"v": "1"})
+        site_build._write_tree(inputs.model_copy(update={"out": deep}), pages, b"llms", {"v": "1"})
 
         assert (deep / "deep" / "nested" / "index.html").read_bytes() == b"<p>x</p>"
         assert (deep / "index.html").read_bytes() == b"<p>root</p>"
@@ -450,7 +451,7 @@ class TestTree:
 
         empty = tmp_path / "empty"
         empty.mkdir()
-        site_build._write_tree(inputs.model_copy(update={"out": empty}), pages, {"v": "1"})
+        site_build._write_tree(inputs.model_copy(update={"out": empty}), pages, b"llms", {"v": "1"})
 
         assert (empty / "deep" / "nested" / "index.html").read_bytes() == b"<p>x</p>"
 
@@ -1141,7 +1142,7 @@ class TestSiteFacts:
         self, built: tuple[Path, SiteBuildReport]
     ) -> None:
         out, _ = built
-        pages = {page.path for page in emitted_pages()}
+        pages = {page.path for page in emitted_pages()} | {LLMS_PAGE}
         strings = [
             value
             for value in _strings(_facts(out))
@@ -1190,7 +1191,15 @@ class TestSiteFacts:
         out, _ = built
         pages = {entry["page"] for entry in _facts(out)["facts"]}
 
-        assert pages == {"/", "/en/", "/docs/", "/en/docs/", "/status/", "/en/status/"}
+        assert pages == {
+            "/",
+            "/en/",
+            "/docs/",
+            "/en/docs/",
+            "/status/",
+            "/en/status/",
+            LLMS_PAGE,
+        }
 
     def test_facts_json_is_companion_bytes(self, built: tuple[Path, SiteBuildReport]) -> None:
         out, _ = built

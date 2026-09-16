@@ -195,18 +195,42 @@ def _wording(source: FactSource, lang: Lang) -> str:
     return _format_value(source.value, lang)
 
 
+def _checked(page: str, registry: FactRegistry, fact_id: str, kind: FactKind) -> FactSource:
+    """The registered source, refused when the caller named another kind."""
+    source = registry.get(fact_id)
+    if source.kind != kind:
+        raise KindMismatchError(f"{page}: fact {fact_id!r} is {source.kind}, rendered as {kind}")
+    return source
+
+
 def fact_renderer(
     page: str, lang: Lang, registry: FactRegistry, ledger: FactLedger
 ) -> Callable[..., Markup]:
     """The per-page ``fact(id, *, kind)`` a template renders values through."""
 
     def fact(fact_id: str, *, kind: FactKind) -> Markup:
-        source = registry.get(fact_id)
-        if source.kind != kind:
-            raise KindMismatchError(
-                f"{page}: fact {fact_id!r} is {source.kind}, rendered as {kind}"
-            )
+        source = _checked(page, registry, fact_id, kind)
         ledger.record(page, source)
         return _SPAN.format(id=source.id, kind=source.kind, text=_wording(source, lang))
+
+    return fact
+
+
+def fact_text_renderer(
+    page: str, lang: Lang, registry: FactRegistry, ledger: FactLedger
+) -> Callable[..., str]:
+    """The same reading, for an artifact that is not HTML (``llms.txt``, #340).
+
+    Same registry, same kind check, same ledger entry — only the wrapping
+    differs. A text file has no markup to mark a ledgered value in and no
+    escaping boundary to cross, so the value is returned as the artifact
+    holds it. What must not differ is the provenance: a count stated outside
+    a template is still a count, and still belongs in the ledger.
+    """
+
+    def fact(fact_id: str, *, kind: FactKind) -> str:
+        source = _checked(page, registry, fact_id, kind)
+        ledger.record(page, source)
+        return _wording(source, lang)
 
     return fact

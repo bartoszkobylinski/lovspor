@@ -49,6 +49,7 @@ from lovspor.site.build import CAPABILITIES_NAME, FACTS_NAME, SITEMAP_NAME
 from lovspor.site.capabilities import CapabilityDocument, load_capabilities, state_sha256
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.fingerprint import ReleaseKey, release_content_id
+from lovspor.site.llms import LLMS_NAME
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import check_links, scan_page
 from lovspor.site.sitemap import sitemap_site_xml
@@ -136,7 +137,7 @@ def _manifest(root: Path) -> tuple[CorpusManifest, bytes]:
 def _require_trees(root: Path) -> None:
     if not (root / CORPUS_DIR).is_dir() or not (root / SITE_DIR).is_dir():
         raise IncompleteEnvelopeError(f"{root.name}: missing {', '.join(missing_parts(root)[:2])}")
-    for name in (FACTS_NAME, SITEMAP_NAME, CAPABILITIES_NAME):
+    for name in (FACTS_NAME, SITEMAP_NAME, CAPABILITIES_NAME, LLMS_NAME):
         if not (root / SITE_DIR / name).is_file():
             raise EnvelopeError(f"{SITE_DIR}/{name} is missing")
 

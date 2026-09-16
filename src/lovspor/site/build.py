@@ -27,9 +27,11 @@ checkout — ``state.checkout.lovspor_commit`` is ``HEAD`` and
 ``expected_tool_surface_sha256`` is the descriptor recomputed against
 the corpus (plan F.3) — renders every route in both languages through
 the fact mechanism, scans every page (``lovspor.site.scan``), and
-writes the tree: pages, ``sitemap-site.xml``, the capability document
-byte for byte, and ``site-facts.json`` with ``release_content_id``
-left ``null`` for the release script to fill (``fingerprint.py``).
+writes the tree: pages, ``sitemap-site.xml``, ``llms.txt``
+(``lovspor.site.llms``, whose counts are read through the same ledger),
+the capability document byte for byte, and ``site-facts.json`` with
+``release_content_id`` left ``null`` for the release script to fill
+(``fingerprint.py``).
 
 Subprocesses are fixed argv, never a shell.
 """
@@ -46,6 +48,7 @@ from lovspor.site.capabilities import CapabilityDocument, HostedState, load_capa
 from lovspor.site.errors import SiteBuildError
 from lovspor.site.facts import FactLedger
 from lovspor.site.fingerprint import ReleaseKey, Toolchain, release_key, toolchain_fingerprint
+from lovspor.site.llms import LLMS_NAME, llms_txt
 from lovspor.site.routes import emitted_pages
 from lovspor.site.scan import check_links, scan_page
 from lovspor.site.sitemap import sitemap_site_xml
@@ -168,8 +171,13 @@ def _document_for_this_checkout(
     )
 
 
-def _render_pages(artifacts: BuildArtifacts) -> tuple[dict[str, str], FactLedger]:
-    """Every page through the fact mechanism, scanned before anything is written."""
+def _render_pages(artifacts: BuildArtifacts) -> tuple[dict[str, str], bytes, FactLedger]:
+    """Every page, then ``llms.txt``, through the one fact mechanism.
+
+    ``llms.txt`` is rendered here rather than at write time so its readings
+    reach the ledger before ``site-facts.json`` is composed from it: a
+    number stated at the site root is attested like any other.
+    """
     environment = site_environment()
     registry = fact_registry(artifacts)
     ledger = FactLedger()
@@ -180,7 +188,7 @@ def _render_pages(artifacts: BuildArtifacts) -> tuple[dict[str, str], FactLedger
         scan_page(page.path, markup)
         pages[page.path] = markup
     check_links(pages)
-    return pages, ledger
+    return pages, llms_txt(registry, ledger), ledger
 
 
 def _capability_block(document: CapabilityDocument) -> dict[str, object]:
@@ -243,7 +251,9 @@ def _refuse_non_empty(out: Path) -> None:
         raise SiteBuildError(f"output directory is not empty: {out}")
 
 
-def _write_tree(inputs: SiteInputs, pages: dict[str, str], facts: dict[str, object]) -> None:
+def _write_tree(
+    inputs: SiteInputs, pages: dict[str, str], llms: bytes, facts: dict[str, object]
+) -> None:
     out = inputs.out
     out.mkdir(parents=True, exist_ok=True)
     for path, markup in pages.items():
@@ -251,6 +261,7 @@ def _write_tree(inputs: SiteInputs, pages: dict[str, str], facts: dict[str, obje
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(markup.encode("utf-8"))
     (out / SITEMAP_NAME).write_bytes(sitemap_site_xml(emitted_pages()))
+    (out / LLMS_NAME).write_bytes(llms)
     shutil.copyfile(inputs.capabilities, out / CAPABILITIES_NAME)
     (out / FACTS_NAME).write_bytes(companion_json_bytes(facts))
 
@@ -263,8 +274,8 @@ def build_site(inputs: SiteInputs) -> SiteBuildReport:
     artifacts = _document_for_this_checkout(document, lovspor_commit, inputs)
     toolchain = toolchain_fingerprint(inputs.checkout)
     key = release_key(artifacts.manifest.corpus_commit, lovspor_commit, document.state, toolchain)
-    pages, ledger = _render_pages(artifacts)
-    _write_tree(inputs, pages, _site_facts(artifacts, toolchain, key, ledger))
+    pages, llms, ledger = _render_pages(artifacts)
+    _write_tree(inputs, pages, llms, _site_facts(artifacts, toolchain, key, ledger))
     return SiteBuildReport(
         lovspor_commit=lovspor_commit,
         corpus_commit=artifacts.manifest.corpus_commit,
