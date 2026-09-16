@@ -477,6 +477,27 @@ def test_a_companion_sitemap_naming_an_absent_twin_is_refused(release: Path) -> 
         check_release(release)
 
 
+def test_a_companion_sitemap_naming_a_non_page_json_file_is_refused(release: Path) -> None:
+    """Existing in the tree is not enough: the advertised set must be the pages'
+    twins. `/lov/` is a browse index, written without a twin on purpose, so a
+    JSON beside it is exactly the contamination a one-directional check admits —
+    and the check's own docstring promises both directions."""
+    extra = release / "lov" / "index.json"
+    extra.write_text("{}", encoding="utf-8")
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "</urlset>",
+            "<url><loc>https://lovspor.no/lov/index.json</loc></url>\n</urlset>",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="not a page's twin"):
+        check_release(release)
+
+
 def test_a_companion_sitemap_cannot_escape_the_release_tree(release: Path) -> None:
     (release / "sitemaps" / "companions.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n'

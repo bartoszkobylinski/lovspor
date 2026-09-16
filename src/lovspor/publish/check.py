@@ -326,11 +326,22 @@ def _check_companions(root: Path, pages: list[Path]) -> None:
     if not index.is_file():
         raise PublishError(f"{index} is missing: no sitemap advertises the JSON twins")
     listed = _companion_locs(root, index)
-    unlisted = sorted({page.with_name(COMPANION_NAME).resolve() for page in pages} - listed)
+    served = {page.with_name(COMPANION_NAME).resolve() for page in pages}
+    unlisted = sorted(served - listed)
     if unlisted:
         raise PublishError(
             f"{len(unlisted)} companion(s) appear in no sitemap, first: "
             f"{unlisted[0].relative_to(root.resolve())}"
+        )
+    # The other direction, and the reason it is not covered by _companion_locs:
+    # that function only proves a loc resolves to a file inside the tree. A JSON
+    # that exists but is no page's twin — one beside a browse index, which is
+    # written without a companion on purpose — would pass it and be advertised.
+    foreign = sorted(listed - served)
+    if foreign:
+        raise PublishError(
+            f"{COMPANION_INDEX} advertises {foreign[0].relative_to(root.resolve())}, "
+            "which is not a page's twin"
         )
 
 
