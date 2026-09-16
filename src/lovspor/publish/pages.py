@@ -71,11 +71,14 @@ def document_page_html(
     provenance: PageProvenance,
     resolve: LinkResolver,
 ) -> str:
-    """The canonical document page: full text, TOC, provenance."""
+    """The canonical document page: title, TOC, full text, provenance."""
     title = plan.title or plan.slug
+    suppressed = frozenset(plan.duplicate_pids)
+    heading, rest = _title_split(body_lines)
     parts = [
+        render_body_html(heading, resolve, suppressed),
         _toc_html(plan),
-        render_body_html(body_lines, resolve, frozenset(plan.duplicate_pids)),
+        render_body_html(rest, resolve, suppressed),
         _provenance_html(plan, provenance),
     ]
     content = "\n".join(part for part in parts if part)
@@ -177,14 +180,36 @@ def layout(lang: str, title: str, path: str, content: str) -> str:
     )
 
 
+def _title_split(body_lines: list[str]) -> tuple[list[str], list[str]]:
+    """The document's own ``#`` heading, and everything after it.
+
+    The contents belong under the law's title, not above it: a reader who
+    lands on a document page meets the list of provisions second, once the
+    page has said which law this is. A body that opens with anything else
+    yields an empty heading and is left in the order it came in, because
+    the alternative is guessing where a title was meant to be.
+    """
+    for index, line in enumerate(body_lines):
+        if line.startswith("# "):
+            return body_lines[: index + 1], body_lines[index + 1 :]
+        if line.strip():
+            break
+    return [], body_lines
+
+
 def _toc_html(plan: DocumentPlan) -> str:
-    """Links to every provision page — none at all for a duplicate-pid doc."""
+    """Links to every provision page — none at all for a duplicate-pid doc.
+
+    The paragraph number is its own element: a law is cited and scanned by
+    number, so the numbers form one column the eye can run down, and the
+    titles another. ~87k provision pages hang off these lists.
+    """
     if plan.duplicate_pids or not plan.provisions:
         return ""
     items = "\n".join(
         f'<li><a href="{provision_url(plan, p.pid)}">'
-        f"§ {html_escape.escape(p.heading_id)}"
-        f"{'. ' + html_escape.escape(p.title) if p.title else ''}</a></li>"
+        f'<span class="pid">§ {html_escape.escape(p.heading_id)}</span>'
+        f"{' ' + html_escape.escape(p.title) if p.title else ''}</a></li>"
         for p in plan.provisions
     )
     return f'<nav class="toc" aria-label="Paragrafer"><ul>\n{items}\n</ul></nav>'

@@ -282,15 +282,26 @@
 
   nav.toc li { margin: 0; }
 
-  /* Full height, so the rule under a one-line entry lines up with the rule
-     under the two-line entry beside it; without it the columns stagger. */
+  /* Two columns inside the row: the paragraph number the law is cited by,
+     then its title. The numbers line up as one scannable rail instead of
+     sitting inside a sentence. Full height so the rule under a one-line
+     entry meets the rule under the two-line entry beside it. */
   nav.toc a {
-    display: block;
+    display: grid;
+    grid-template-columns: 3.1rem 1fr;
+    gap: 0 0.5rem;
     height: 100%;
     padding: 0.55rem 0.2rem;
     color: var(--ink);
     text-decoration: none;
     border-bottom: 1px solid var(--line);
+  }
+
+  nav.toc .pid {
+    color: var(--accent-ink);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   nav.toc a:hover {

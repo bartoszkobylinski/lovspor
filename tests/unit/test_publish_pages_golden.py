@@ -108,10 +108,11 @@ class TestGoldenPages:
             "nb",
             "Testloven",
             "https://lovspor.no/lov/testloven/",
-            '<nav class="toc" aria-label="Paragrafer"><ul>\n'
-            '<li><a href="/lov/testloven/paragraf/1/">§ 1. Formål</a></li>\n'
-            "</ul></nav>\n"
             "<h1>Testloven</h1>\n"
+            '<nav class="toc" aria-label="Paragrafer"><ul>\n'
+            '<li><a href="/lov/testloven/paragraf/1/">'
+            '<span class="pid">§ 1</span> Formål</a></li>\n'
+            "</ul></nav>\n"
             '<h3 id="paragraf-1">§ 1. Formål</h3>\n'
             "<p>Tekst.</p>\n"
             f"{PROVENANCE_BLOCK}",

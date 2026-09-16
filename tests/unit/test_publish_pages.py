@@ -114,7 +114,8 @@ class TestDocumentPage:
             )
         )
         html = _document(plan)
-        assert "§ 1</a></li>\n<li" in html
+        assert '<span class="pid">§ 1</span></a></li>\n<li' in html
+        assert '<span class="pid">§ 2</span> Virkeområde</a>' in html
         assert "§ 1XXXX" not in html
 
     def test_duplicate_pid_document_suppresses_only_ambiguous_anchors(self) -> None:
@@ -140,6 +141,49 @@ class TestDocumentPage:
         html = _document()
         assert "<script" not in html
         assert "onclick" not in html
+
+
+class TestContentsAreNavigation:
+    """The contents of a law are read on a phone, and ~87k provision pages
+    hang off them, so they are an index rather than a wall of links."""
+
+    def test_the_law_is_named_before_its_provisions_are_listed(self) -> None:
+        """A reader landing from a search engine met 24 links before the
+        law's own title; the title comes first now."""
+        html = _document()
+
+        assert html.index("<h1>") < html.index('<nav class="toc"')
+
+    def test_the_paragraph_number_is_its_own_element(self) -> None:
+        html = _document()
+
+        assert '<span class="pid">§ 1</span> Formål' in html
+        assert '<span class="pid">§ 2</span> Virkeområde' in html
+
+    def test_the_body_text_still_follows_the_contents_once_and_whole(self) -> None:
+        """Splitting the title off the body must not drop or duplicate it."""
+        html = _document()
+
+        assert html.count("<h1>Lov om abort (abortloven)</h1>") == 1
+        assert html.count("Loven skal sikre gravide rett til selvbestemmelse.") == 1
+        assert html.count("Loven gjelder aborter i riket.") == 1
+        assert html.index('<nav class="toc"') < html.index('id="paragraf-1"')
+
+    def test_a_body_with_no_title_heading_keeps_its_order(self) -> None:
+        """No guessing where a title was meant to be."""
+        html = document_page_html(
+            _plan(), ["### § 1. Formål", "", "Tekst."], PROVENANCE, lambda t: None
+        )
+
+        assert '<nav class="toc"' in html
+        assert html.index('<nav class="toc"') < html.index('id="paragraf-1"')
+        assert "<h1>" not in html
+
+    def test_a_chapter_heading_before_the_first_provision_survives(self) -> None:
+        html = _document()
+
+        assert "<h2>Kapittel 1. Alminnelige bestemmelser</h2>" in html
+        assert html.index('<nav class="toc"') < html.index("<h2>")
 
 
 class TestSharedChrome:
