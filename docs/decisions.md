@@ -279,6 +279,16 @@ The suite was ~99% of the commit's cost, which defeats an agent's edit → gate 
 
 **Agent rules** live in `CLAUDE.md` "Gate rules for agents". A gate failure is repaired, not bypassed. `--no-verify` is forbidden for agent-authored work outside an owner emergency. The fast gate runs before work is reported complete. A gate, ignore or baseline is never loosened to pass one's own change.
 
+## 9e. Size and complexity ratchets over production code
+
+Decided 2026-09-15 by the owner, issue #323 (Phase B, decision 2). The `CLAUDE.md` code rules were prose: `PLR0913` sat in the ruff ignore list as "enforced manually via review" while 24 functions in `src/` carried more than four parameters. `scripts/quality/check_ratchets.py` makes them executable over `src/` — function-lines ≤ 20, function-params ≤ 4, function-complexity ≤ 10 (ruff's C901, run `--isolated --ignore-noqa` so no config, per-file ignore or `# noqa` can waive it), file-lines ≤ 700. The owner chose these limits over the looser 60–80 lines and complexity 10–12 the issue proposed: `CLAUDE.md` already asks for 20 and 4, and a gate that contradicts it teaches that the rule is decorative.
+
+**A ratchet, not a cleanup.** Code already over a limit is recorded in `scripts/quality/ratchet-baseline.toml` (155 entries at `36362c2`), keyed by rule + path + qualified name — never by line number — with the measured value and a mandatory `reason`. An entry passes at its recorded value and fails when the code gets worse, and also when it gets better, so the baseline follows the code down; `--tighten` makes that edit and can only lower a value or remove a stale entry. Adding an entry or raising one is not expressible by the tool: it is a policy exception the owner approves, argued for in the PR description (`CLAUDE.md`, "Gate rules for agents"). An entry without a reason, with an unknown field or rule, at or under its limit, or duplicated is refused and waives nothing.
+
+**Definitions** (chosen with the decision; counts in `src/` at `36362c2`, 142 files, 1870 functions): a function's lines are the lines carrying code from the first statement after the docstring to its last line — decorators, signature, docstring, blank lines and comment-only lines do not count, because `CLAUDE.md` asks for WHY comments and a count that charged for them would reward deleting them (118 functions over 20; counting physical body lines instead gives 138). Nested definitions count toward the enclosing function, so a grandfathered function cannot keep growing by gaining closures. Parameters exclude the receiver unless the function is a `@staticmethod`, and count `*args`/`**kwargs` one each (24 over 4). Complexity is ruff's value, not a reimplementation (4 over 10). File lines are physical lines (9 over 700, `mcp.py` 5017).
+
+**Where it runs.** `tests/unit/test_quality_ratchets.py` runs the checker on the real tree, so the unit suite — and with it CI — enforces the ratchet wherever it runs; a local bypass cannot produce a green PR. Since 2026-09-16 it is also a check in the fast gate (§9d), which is where a violation is cheapest to repair.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:
