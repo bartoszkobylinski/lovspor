@@ -14,6 +14,11 @@ release, and checks only what can be checked from the tree alone. The two
 overlap on nothing except the representation hash, which is cheap here and
 is exactly the check that catches a corrupted copy.
 
+The machine-readable set is checked the same way as the pages (#340): the
+companion sitemaps and the emitted ``index.json`` twins must name each
+other in both directions, so a half-copied tree cannot advertise a twin it
+does not serve, nor serve one no crawler is told about.
+
 Every failure is a :class:`~lovspor.publish.inventory.PublishError` with the
 first offending path named, so the operator reads one line rather than a
 diff of ninety thousand files.
@@ -32,7 +37,8 @@ from lxml import etree
 from lovspor.parsing.xml_normalizer import safe_parser
 from lovspor.publish.companion import SCHEMA_VERSION
 from lovspor.publish.inventory import PublishError
-from lovspor.publish.pages import SITE_ORIGIN
+from lovspor.publish.pages import COMPANION_NAME, SITE_ORIGIN
+from lovspor.publish.sitemaps import COMPANION_INDEX
 
 # The corpus namespaces the generator owns (emit._clear_previous_build). Anything
 # else under the root — the landing page, /observatory — is not this release's.
@@ -79,15 +85,11 @@ def check_release(root: Path) -> ReleaseReport:
     _require(root, "robots.txt")
     _require(root, "sitemap.xml")
     pages = _pages(root)
-    documents = [page for page in pages if len(page.relative_to(root).parts) == _DOCUMENT_DEPTH]
-    if len(documents) != promised:
-        raise PublishError(
-            f"site-manifest.json promises {promised} documents, "
-            f"the tree has {len(documents)} document pages"
-        )
+    documents = _document_pages(root, pages, promised)
     for page in pages:
         _check_twin(root, page)
     sitemap_urls = _check_sitemaps(root, pages)
+    _check_companions(root, pages)
     redirects = _check_redirects(root)
     _check_caddy_map(root)
     return ReleaseReport(
@@ -97,6 +99,21 @@ def check_release(root: Path) -> ReleaseReport:
         sitemap_urls=sitemap_urls,
         redirects=redirects,
     )
+
+
+def _document_pages(root: Path, pages: list[Path], promised: int) -> list[Path]:
+    """The document pages among ``pages``, refused unless the manifest agrees.
+
+    A count that disagrees with ``site-manifest.json`` is a partial build or
+    a copy that stopped, which is the question this gate exists to answer.
+    """
+    documents = [page for page in pages if len(page.relative_to(root).parts) == _DOCUMENT_DEPTH]
+    if len(documents) != promised:
+        raise PublishError(
+            f"site-manifest.json promises {promised} documents, "
+            f"the tree has {len(documents)} document pages"
+        )
+    return documents
 
 
 def _read_text(root: Path, path: Path) -> str:
@@ -278,6 +295,54 @@ def _check_sitemaps(root: Path, pages: list[Path]) -> int:
             f"{unlisted[0].relative_to(base)}"
         )
     return len(advertised)
+
+
+def _companion_locs(root: Path, index: Path) -> set[Path]:
+    """Every twin the companion index advertises, as files inside the tree."""
+    found: set[Path] = set()
+    for sitemap_url in _locs(root, index):
+        sitemap = _served_file(root, _path_for(sitemap_url))
+        if sitemap is None:
+            raise PublishError(f"{COMPANION_INDEX} lists {sitemap_url}, which is not in the tree")
+        name = sitemap.relative_to(root.resolve())
+        for url in _locs(root, sitemap):
+            served = _served_file(root, _path_for(url))
+            if served is None:
+                raise PublishError(f"{name} lists {url}, which is not in the tree")
+            found.add(served)
+    return found
+
+
+def _check_companions(root: Path, pages: list[Path]) -> None:
+    """The twins and the tree must name each other, in both directions (#340).
+
+    ``_check_twin`` already proves every page has an ``index.json`` beside
+    it and that it hashes to those HTML bytes. This proves the other half —
+    that a crawler can find them: every twin advertised is served, and every
+    twin served is advertised. Without it the companion sitemaps would be
+    the one release artifact nothing validates.
+    """
+    index = root / COMPANION_INDEX
+    if not index.is_file():
+        raise PublishError(f"{index} is missing: no sitemap advertises the JSON twins")
+    listed = _companion_locs(root, index)
+    served = {page.with_name(COMPANION_NAME).resolve() for page in pages}
+    unlisted = sorted(served - listed)
+    if unlisted:
+        raise PublishError(
+            f"{len(unlisted)} companion(s) appear in no sitemap, first: "
+            f"{unlisted[0].relative_to(root.resolve())}"
+        )
+    # The other direction, and the reason it is not covered by _companion_locs:
+    # that function only proves a loc resolves to a file inside the tree. A JSON
+    # that exists but is no page's twin — one beside a browse index, which is
+    # written without a companion on purpose — would pass it and be advertised.
+    foreign = sorted(listed - served)
+    if foreign:
+        raise PublishError(
+            f"{COMPANION_INDEX} advertises {foreign[0].relative_to(root.resolve())}, "
+            "which is not a page's twin"
+        )
 
 
 def _redirect_map(root: Path) -> tuple[set[tuple[str, str]], set[str]]:

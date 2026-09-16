@@ -438,6 +438,144 @@ def test_a_truncated_sitemap_is_refused_even_if_its_urls_survive(release: Path) 
         check_release(release)
 
 
+def test_a_missing_companion_index_is_refused(release: Path) -> None:
+    """The twins are advertised through their own index (#340); without it
+    nothing in the served tree announces them, which is the state this PR
+    exists to end."""
+    (release / "sitemaps" / "companions.xml").unlink()
+
+    with pytest.raises(PublishError, match="companions.xml"):
+        check_release(release)
+
+
+def test_a_malformed_companion_index_is_a_named_refusal(release: Path) -> None:
+    index = release / "sitemaps" / "companions.xml"
+    index.write_text("<sitemapindex>", encoding="utf-8")
+
+    with pytest.raises(PublishError) as raised:
+        check_release(release)
+
+    assert str(raised.value).startswith("sitemaps/companions.xml is unreadable:")
+
+
+def test_a_malformed_companion_shard_is_a_named_refusal(release: Path) -> None:
+    shard = release / "sitemaps" / "companions-1.xml"
+    shard.write_text("<urlset>", encoding="utf-8")
+
+    with pytest.raises(PublishError) as raised:
+        check_release(release)
+
+    assert str(raised.value).startswith("sitemaps/companions-1.xml is unreadable:")
+
+
+def test_a_companion_sitemap_omitting_a_twin_is_refused(release: Path) -> None:
+    """Emitted-but-unlisted, the same both-directions check the pages get: a
+    sitemap from a smaller build beside twins from a larger one would
+    otherwise pass, every surviving URL still resolving."""
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    start = text.index("<url>")
+    end = text.index("</url>", start) + len("</url>")
+    shard.write_text(text[:start] + text[end:], encoding="utf-8")
+
+    with pytest.raises(PublishError, match="companion"):
+        check_release(release)
+
+
+def test_a_companion_sitemap_naming_an_absent_twin_is_refused(release: Path) -> None:
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "</urlset>",
+            "<url><loc>https://lovspor.no/lov/borte/index.json</loc></url>\n</urlset>",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="not in the tree"):
+        check_release(release)
+
+
+def test_a_companion_sitemap_naming_a_foreign_origin_is_refused(release: Path) -> None:
+    """A twin URL is canonical release data, not just a path lookup.
+
+    Keep the path equal to a real emitted twin so this fails specifically
+    because the sitemap points crawlers away from the served release.
+    """
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "https://lovspor.no/lov/testloven/index.json",
+            "https://example.invalid/lov/testloven/index.json",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="companions-1.xml lists .*not in the tree"):
+        check_release(release)
+
+
+def test_a_companion_sitemap_naming_a_non_page_json_file_is_refused(release: Path) -> None:
+    """Existing in the tree is not enough: the advertised set must be the pages'
+    twins. `/lov/` is a browse index, written without a twin on purpose, so a
+    JSON beside it is exactly the contamination a one-directional check admits —
+    and the check's own docstring promises both directions."""
+    extra = release / "lov" / "index.json"
+    extra.write_text("{}", encoding="utf-8")
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "</urlset>",
+            "<url><loc>https://lovspor.no/lov/index.json</loc></url>\n</urlset>",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError) as raised:
+        check_release(release)
+
+    assert str(raised.value) == (
+        "sitemaps/companions.xml advertises lov/index.json, which is not a page's twin"
+    )
+
+
+def test_a_companion_sitemap_cannot_escape_the_release_tree(release: Path) -> None:
+    (release / "sitemaps" / "companions.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "<sitemap><loc>https://lovspor.no/sitemaps/../../outside.xml</loc></sitemap>\n"
+        "</sitemapindex>\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="not in the tree"):
+        check_release(release)
+
+
+def test_a_twin_url_inside_a_companion_sitemap_cannot_escape_the_release_tree(
+    release: Path,
+) -> None:
+    """Confining the companion index is not enough: each URL in the shard is
+    release data too and must not be satisfiable by a JSON file beside the tree."""
+    outside = release.parent / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "</urlset>",
+            "<url><loc>https://lovspor.no/../outside.json</loc></url>\n</urlset>",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="companions-1.xml lists .*not in the tree"):
+        check_release(release)
+
+
 def test_the_browse_indexes_count_as_pages_the_sitemap_must_list(release: Path) -> None:
     """`/lov/` and `/forskrift/` are pages too; dropping them from indexes.xml
     would leave the entry points unadvertised while every document passed."""

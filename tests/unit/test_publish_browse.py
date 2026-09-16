@@ -106,8 +106,17 @@ class TestBrowseIndex:
             '<section aria-label="Å">\n<h2>Å</h2>\n<ul>\n'
             '<li><a href="/lov/åloven/">Åloven</a></li>\n'
             "</ul>\n</section>",
+            companion=False,
         )
         assert browse_index_html("lov", inventory) == expected
+
+    def test_the_browse_index_announces_no_json_twin(self) -> None:
+        """A browse index is written by ``_write``, not ``_write_page``, so no
+        ``index.json`` sits beside it: a twin link here would advertise a file
+        the release does not serve (#340)."""
+        inventory = PublishInventory(documents=(_plan("testloven", "Testloven"),))
+
+        assert "application/json" not in browse_index_html("lov", inventory)
 
     def test_forskrift_page_lists_only_forskrifter(self) -> None:
         inventory = PublishInventory(

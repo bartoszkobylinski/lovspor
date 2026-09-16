@@ -10,6 +10,7 @@ pids).
 
 from lovspor.publish.inventory import DocumentPlan, ProvisionRef
 from lovspor.publish.pages import (
+    PageHead,
     PageProvenance,
     document_page_html,
     layout,
@@ -315,6 +316,54 @@ class TestSharedStylesheet:
         assert "1px solid #999" not in html
 
 
+class TestMachineReadableTwin:
+    """A page with an ``index.json`` beside it announces it (#340).
+
+    ADR-0013 Decision 4 already writes the twin; nothing pointed at it, so an
+    agent arriving from a search engine scraped the chrome-wrapped HTML while
+    the clean representation sat one path segment away. The link is a fixed
+    function of the page's own path — no fact, no count, no corpus state — so
+    the head stays deterministic and the churn invariant untouched.
+    """
+
+    def test_the_document_page_points_at_its_own_twin(self) -> None:
+        assert (
+            '<link rel="alternate" type="application/json" '
+            'href="https://lovspor.no/lov/abortloven/index.json">'
+        ) in _document()
+
+    def test_the_provision_page_points_at_its_own_twin(self) -> None:
+        plan = _plan()
+
+        html = provision_page_html(
+            plan, plan.provisions[0], PROVENANCE, ["### § 1. Formål"], lambda t: None
+        )
+
+        assert (
+            '<link rel="alternate" type="application/json" '
+            'href="https://lovspor.no/lov/abortloven/paragraf/1/index.json">'
+        ) in html
+
+    def test_the_twin_is_announced_in_the_head_after_the_canonical(self) -> None:
+        html = _document()
+
+        assert html.index('rel="canonical"') < html.index('type="application/json"')
+        assert html.index('type="application/json"') < html.index("</head>")
+
+    def test_a_page_with_no_twin_beside_it_announces_none(self) -> None:
+        """The browse indexes are written without a companion, so a link from
+        them would advertise a file the release does not serve."""
+        html = layout(PageHead(lang="nb", title="Lover", path="/lov/", companion=False), "<p>a</p>")
+
+        assert "application/json" not in html
+
+    def test_the_twin_href_escapes_quotes(self) -> None:
+        html = layout(PageHead(lang="nb", title="Tittel", path='/lov/a" onclick="bad/'), "Tekst")
+
+        assert 'href="https://lovspor.no/lov/a&quot; onclick=&quot;bad/index.json"' in html
+        assert 'onclick="bad"' not in html
+
+
 class TestDeterminism:
     def test_two_renders_of_one_page_are_the_same_bytes(self) -> None:
         """A page is a pure function of its inputs; the chrome and the
@@ -327,8 +376,8 @@ class TestDeterminism:
     def test_the_shell_is_the_same_whatever_the_page(self) -> None:
         """The chrome takes no fact argument, so two different documents
         render byte-identical chrome (ADR-0014 Decision 5)."""
-        one = layout("nb", "A", "/lov/a/", "<p>a</p>")
-        two = layout("nb", "B", "/lov/b/", "<p>b</p>")
+        one = layout(PageHead(lang="nb", title="A", path="/lov/a/"), "<p>a</p>")
+        two = layout(PageHead(lang="nb", title="B", path="/lov/b/"), "<p>b</p>")
         chrome = chrome_html("nb")
 
         assert chrome.header in one and chrome.header in two
@@ -431,6 +480,6 @@ class TestProvisionPage:
         assert 'onload="bad"' not in html
 
     def test_canonical_attribute_escapes_quotes(self) -> None:
-        html = layout("nb", "Tittel", '/lov/a" onclick="bad/', "Tekst")
+        html = layout(PageHead(lang="nb", title="Tittel", path='/lov/a" onclick="bad/'), "Tekst")
         assert 'href="https://lovspor.no/lov/a&quot; onclick=&quot;bad/"' in html
         assert 'onclick="bad"' not in html

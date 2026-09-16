@@ -674,13 +674,6 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
 rule = "function-lines"
-path = "src/lovspor/publish/check.py"
-name = "check_release"
-value = 22
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
 path = "src/lovspor/publish/html.py"
 name = "render_body_html"
 value = 21

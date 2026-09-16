@@ -20,6 +20,7 @@ can: that they are present, and exactly where in the page they sit.
 from lovspor.publish.companion import document_companion
 from lovspor.publish.inventory import DocumentPlan, ProvisionRef
 from lovspor.publish.pages import (
+    COMPANION_NAME,
     PageProvenance,
     document_page_html,
     provision_page_html,
@@ -79,8 +80,13 @@ PROVENANCE_BLOCK = (
 )
 
 
-def _shell(lang: str, title: str, canonical: str, content: str) -> str:
+def _shell(lang: str, title: str, canonical: str, content: str, companion: bool = True) -> str:
     chrome = chrome_html("nb")
+    twin = (
+        f'<link rel="alternate" type="application/json" href="{canonical}{COMPANION_NAME}">\n'
+        if companion
+        else ""
+    )
     return (
         "<!doctype html>\n"
         f'<html lang="{lang}">\n'
@@ -89,6 +95,7 @@ def _shell(lang: str, title: str, canonical: str, content: str) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{title}</title>\n"
         f'<link rel="canonical" href="{canonical}">\n'
+        f"{twin}"
         f"<style>\n{stylesheet()}</style>\n"
         "</head>\n"
         "<body>\n"

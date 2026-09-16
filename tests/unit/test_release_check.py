@@ -142,7 +142,7 @@ class TestTwoTrees:
             check_envelope(copy)
         assert str(caught.value) == f"{'3' * 64}: missing {RECORD_NAME}, {FRAGMENT_NAME}"
 
-    @pytest.mark.parametrize("name", ["site-facts.json", "sitemap-site.xml"])
+    @pytest.mark.parametrize("name", ["site-facts.json", "sitemap-site.xml", "llms.txt"])
     def test_a_site_root_file_is_required(self, envelope: Path, name: str) -> None:
         (envelope / "site" / name).unlink()
 

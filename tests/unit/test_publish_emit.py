@@ -595,6 +595,25 @@ class TestSitemapArtifacts:
         }
         assert locs == emitted
 
+    def test_the_companion_sitemaps_list_exactly_the_emitted_twins(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        """The mirror of the page equality above, for the machine-readable
+        set (#340): every ``index.json`` the emitter wrote is listed, and
+        nothing is listed that it did not write."""
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        loc = re.compile(r"<loc>https://lovspor\.no(/[^<]+)</loc>")
+        shards = loc.findall((out / "sitemaps" / "companions.xml").read_text(encoding="utf-8"))
+        listed: set[str] = set()
+        for shard in shards:
+            listed.update(loc.findall((out / shard.lstrip("/")).read_text(encoding="utf-8")))
+        emitted = {f"/{path.relative_to(out).as_posix()}" for path in out.rglob("index.json")}
+        assert listed == emitted
+
     def test_document_lastmod_is_corpus_commit_time_not_build_time(
         self,
         corpus: tuple[Path, str],
@@ -620,6 +639,7 @@ class TestSitemapArtifacts:
         assert robots.startswith("User-agent: *\n")
         assert "Disallow: /mcp\n" in robots
         assert "Sitemap: https://lovspor.no/sitemap.xml\n" in robots
+        assert "Sitemap: https://lovspor.no/sitemaps/companions.xml\n" in robots
 
     def test_rebuild_clears_stale_sitemap_and_robots_artifacts(
         self,
