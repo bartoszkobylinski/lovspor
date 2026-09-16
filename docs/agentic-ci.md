@@ -62,7 +62,10 @@ PR opened/synchronize
 
 ## Roles
 
-- **Claude Code local / human** — production code, small PRs, fast local checks.
+- **Claude Code local / human** — production code, small PRs, local gates:
+  `scripts/quality/verify-fast.sh` at commit, `scripts/quality/verify-deep.sh` at push
+  (`docs/decisions.md` §9d; agent rules in `CLAUDE.md`). No workflow installs git hooks,
+  so neither gate runs on a CI lane; the lanes' own steps stay the gate there.
   Never invokes Codex manually for PR testing; never waits locally for mutation results.
 - **Codex CI** — independent test engineer. May touch `tests/` only, enforced
   mechanically by `scripts/ci/assert_codex_scope.sh` after every run (the prompt is not
