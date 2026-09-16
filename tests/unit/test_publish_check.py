@@ -497,6 +497,26 @@ def test_a_companion_sitemap_naming_an_absent_twin_is_refused(release: Path) -> 
         check_release(release)
 
 
+def test_a_companion_sitemap_naming_a_foreign_origin_is_refused(release: Path) -> None:
+    """A twin URL is canonical release data, not just a path lookup.
+
+    Keep the path equal to a real emitted twin so this fails specifically
+    because the sitemap points crawlers away from the served release.
+    """
+    shard = release / "sitemaps" / "companions-1.xml"
+    text = shard.read_text(encoding="utf-8")
+    shard.write_text(
+        text.replace(
+            "https://lovspor.no/lov/testloven/index.json",
+            "https://example.invalid/lov/testloven/index.json",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PublishError, match="companions-1.xml lists .*not in the tree"):
+        check_release(release)
+
+
 def test_a_companion_sitemap_naming_a_non_page_json_file_is_refused(release: Path) -> None:
     """Existing in the tree is not enough: the advertised set must be the pages'
     twins. `/lov/` is a browse index, written without a twin on purpose, so a
