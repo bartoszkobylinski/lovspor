@@ -8,16 +8,28 @@ and the byte-identical build invariant depends on nothing else leaking in.
 The NLOD transformation statement is a licence-contract requirement
 (NLOD 2.0 requires marking changed information as changed), not styling;
 its wording is fixed here and versioned with the site schema.
+
+The shell is the site's, not a second design of its own (ADR-0014
+Decision 5, issue #335): the stylesheet and the header and footer come
+from the one template source ``lovspor.site`` owns, so a reader who lands
+on a law page from a search engine can reach ``/``, ``/lov/`` and
+``/forskrift/`` instead of meeting a dead end. Both are
+corpus-state-independent, which is what keeps ADR-0013's churn invariant
+true: neither takes a plan, a manifest or a fact, so no corpus update can
+move a byte of them.
 """
 
 import html as html_escape
 from collections.abc import Iterator
+from functools import cache
 
 from pydantic import BaseModel, ConfigDict
 
 from lovspor.headings import parse_section_heading
 from lovspor.publish.html import LinkResolver, render_body_html
 from lovspor.publish.inventory import DocumentPlan, ProvisionRef, normalise_pid
+from lovspor.site.chrome import Chrome, chrome_html
+from lovspor.site.style import stylesheet
 
 SITE_ORIGIN = "https://lovspor.no"
 
@@ -28,15 +40,6 @@ _NLOD_STATEMENT = (
     "tilgjengeliggjort av Lovdata. Informasjonen er transformert og "
     "strukturert av Lovspor og gjengis ikke i sin opprinnelige form. "
     "Lovspor er ikke offisiell kunngjøringskilde."
-)
-
-_STYLE = (
-    "body{margin:0 auto;max-width:46rem;padding:1rem;"
-    "font-family:Georgia,serif;line-height:1.6}"
-    "table{border-collapse:collapse}td,th{border:1px solid #999;padding:.3rem}"
-    ".provenance{border-top:1px solid #999;margin-top:3rem;padding-top:1rem;"
-    "font-size:.85rem;color:#333}"
-    "nav.toc ul{columns:2}"
 )
 
 
@@ -68,11 +71,14 @@ def document_page_html(
     provenance: PageProvenance,
     resolve: LinkResolver,
 ) -> str:
-    """The canonical document page: full text, TOC, provenance."""
+    """The canonical document page: title, TOC, full text, provenance."""
     title = plan.title or plan.slug
+    suppressed = frozenset(plan.duplicate_pids)
+    heading, rest = _title_split(body_lines)
     parts = [
+        render_body_html(heading, resolve, suppressed),
         _toc_html(plan),
-        render_body_html(body_lines, resolve, frozenset(plan.duplicate_pids)),
+        render_body_html(rest, resolve, suppressed),
         _provenance_html(plan, provenance),
     ]
     content = "\n".join(part for part in parts if part)
@@ -129,8 +135,20 @@ def _section_spans(body_lines: list[str]) -> Iterator[tuple[str, int, int]]:
         yield normalise_pid(heading_id), start, end
 
 
-def layout(lang: str, title: str, path: str, content: str) -> str:
-    """The shared shell: escaped head values, canonical link, no scripts."""
+@cache
+def _corpus_chrome() -> Chrome:
+    """The Norwegian chrome every corpus page carries (ADR-0014 Decision 5).
+
+    Zero arguments, deliberately: there is no parameter through which a
+    count, a commit or a capability could arrive, so the chrome cannot
+    churn when the corpus changes. Cached because the corpus build renders
+    it on every one of ~93k pages and it is the same bytes every time.
+    """
+    return chrome_html("nb")
+
+
+def _head_html(lang: str, title: str, path: str) -> str:
+    """Everything above ``<body>``: escaped values, canonical, one stylesheet."""
     safe_title = html_escape.escape(title, quote=True)
     canonical = html_escape.escape(f"{SITE_ORIGIN}{path}", quote=True)
     return (
@@ -141,23 +159,57 @@ def layout(lang: str, title: str, path: str, content: str) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{safe_title}</title>\n"
         f'<link rel="canonical" href="{canonical}">\n'
-        f"<style>{_STYLE}</style>\n"
+        f"<style>\n{stylesheet()}</style>\n"
         "</head>\n"
+    )
+
+
+def layout(lang: str, title: str, path: str, content: str) -> str:
+    """The shared shell: head, the site's chrome, the page's own ``<main>``."""
+    chrome = _corpus_chrome()
+    return (
+        f"{_head_html(lang, title, path)}"
         "<body>\n"
-        f"{content}\n"
+        '<div class="wrap">\n'
+        f"{chrome.header}"
+        f"<main>\n{content}\n</main>\n"
+        f"{chrome.footer}"
+        "</div>\n"
         "</body>\n"
         "</html>\n"
     )
 
 
+def _title_split(body_lines: list[str]) -> tuple[list[str], list[str]]:
+    """The document's own ``#`` heading, and everything after it.
+
+    The contents belong under the law's title, not above it: a reader who
+    lands on a document page meets the list of provisions second, once the
+    page has said which law this is. A body that opens with anything else
+    yields an empty heading and is left in the order it came in, because
+    the alternative is guessing where a title was meant to be.
+    """
+    for index, line in enumerate(body_lines):
+        if line.startswith("# "):
+            return body_lines[: index + 1], body_lines[index + 1 :]
+        if line.strip():
+            break
+    return [], body_lines
+
+
 def _toc_html(plan: DocumentPlan) -> str:
-    """Links to every provision page — none at all for a duplicate-pid doc."""
+    """Links to every provision page — none at all for a duplicate-pid doc.
+
+    The paragraph number is its own element: a law is cited and scanned by
+    number, so the numbers form one column the eye can run down, and the
+    titles another. ~87k provision pages hang off these lists.
+    """
     if plan.duplicate_pids or not plan.provisions:
         return ""
     items = "\n".join(
         f'<li><a href="{provision_url(plan, p.pid)}">'
-        f"§ {html_escape.escape(p.heading_id)}"
-        f"{'. ' + html_escape.escape(p.title) if p.title else ''}</a></li>"
+        f'<span class="pid">§ {html_escape.escape(p.heading_id)}</span>'
+        f"{' ' + html_escape.escape(p.title) if p.title else ''}</a></li>"
         for p in plan.provisions
     )
     return f'<nav class="toc" aria-label="Paragrafer"><ul>\n{items}\n</ul></nav>'

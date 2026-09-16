@@ -16,6 +16,8 @@ from lovspor.publish.pages import (
     provision_page_html,
     section_slices,
 )
+from lovspor.site.chrome import chrome_html
+from lovspor.site.style import stylesheet
 
 PROVENANCE = PageProvenance(
     source_revision="ab388cbdeadbeef",
@@ -112,8 +114,27 @@ class TestDocumentPage:
             )
         )
         html = _document(plan)
-        assert "§ 1</a></li>\n<li" in html
+        assert '<span class="pid">§ 1</span></a></li>\n<li' in html
+        assert '<span class="pid">§ 2</span> Virkeområde</a>' in html
         assert "§ 1XXXX" not in html
+
+    def test_toc_escapes_the_number_and_title_inside_the_new_markup(self) -> None:
+        plan = _plan(
+            provisions=(
+                ProvisionRef(
+                    pid="1",
+                    heading_id='1"><script>alert(1)</script>',
+                    title='<img src=x onerror="alert(2)">',
+                ),
+            )
+        )
+
+        html = _document(plan)
+
+        assert '<span class="pid">§ 1&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</span>' in html
+        assert "&lt;img src=x onerror=&quot;alert(2)&quot;&gt;</a>" in html
+        assert "<script>alert(1)</script>" not in html
+        assert '<img src=x onerror="alert(2)">' not in html
 
     def test_duplicate_pid_document_suppresses_only_ambiguous_anchors(self) -> None:
         plan = _plan(duplicate_pids={"1": 2})
@@ -138,6 +159,180 @@ class TestDocumentPage:
         html = _document()
         assert "<script" not in html
         assert "onclick" not in html
+
+
+class TestContentsAreNavigation:
+    """The contents of a law are read on a phone, and ~87k provision pages
+    hang off them, so they are an index rather than a wall of links."""
+
+    def test_the_law_is_named_before_its_provisions_are_listed(self) -> None:
+        """A reader landing from a search engine met 24 links before the
+        law's own title; the title comes first now."""
+        html = _document()
+
+        assert html.index("<h1>") < html.index('<nav class="toc"')
+
+    def test_the_opening_title_uses_the_document_link_resolver(self) -> None:
+        html = document_page_html(
+            _plan(),
+            ["# [Lov om abort](lov/2024-12-20-96)", "Brødtekst."],
+            PROVENANCE,
+            lambda target: "/lov/abortloven/" if target == "lov/2024-12-20-96" else None,
+        )
+
+        assert '<h1><a href="/lov/abortloven/">Lov om abort</a></h1>' in html
+
+    def test_content_immediately_after_the_title_is_rendered_once(self) -> None:
+        html = document_page_html(
+            _plan(),
+            ["# Lov om abort", "Første avsnitt."],
+            PROVENANCE,
+            lambda _target: None,
+        )
+
+        assert html.count("<h1>Lov om abort</h1>") == 1
+        assert html.count("<p>Første avsnitt.</p>") == 1
+        assert html.index('<nav class="toc"') < html.index("<p>Første avsnitt.</p>")
+
+    def test_the_paragraph_number_is_its_own_element(self) -> None:
+        html = _document()
+
+        assert '<span class="pid">§ 1</span> Formål' in html
+        assert '<span class="pid">§ 2</span> Virkeområde' in html
+
+    def test_the_body_text_still_follows_the_contents_once_and_whole(self) -> None:
+        """Splitting the title off the body must not drop or duplicate it."""
+        html = _document()
+
+        assert html.count("<h1>Lov om abort (abortloven)</h1>") == 1
+        assert html.count("Loven skal sikre gravide rett til selvbestemmelse.") == 1
+        assert html.count("Loven gjelder aborter i riket.") == 1
+        assert html.index('<nav class="toc"') < html.index('id="paragraf-1"')
+
+    def test_a_body_with_no_title_heading_keeps_its_order(self) -> None:
+        """No guessing where a title was meant to be."""
+        html = document_page_html(
+            _plan(), ["### § 1. Formål", "", "Tekst."], PROVENANCE, lambda t: None
+        )
+
+        assert '<nav class="toc"' in html
+        assert html.index('<nav class="toc"') < html.index('id="paragraf-1"')
+        assert "<h1>" not in html
+
+    def test_a_late_title_heading_is_not_moved_across_earlier_content(self) -> None:
+        """Only an opening H1 is the document title; a later H1 is body content."""
+        html = document_page_html(
+            _plan(),
+            ["Innledning.", "", "# Sen overskrift", "", "Tekst."],
+            PROVENANCE,
+            lambda t: None,
+        )
+
+        assert html.index('<nav class="toc"') < html.index("<p>Innledning.</p>")
+        assert html.index("<p>Innledning.</p>") < html.index("<h1>Sen overskrift</h1>")
+
+    def test_a_chapter_heading_before_the_first_provision_survives(self) -> None:
+        html = _document()
+
+        assert "<h2>Kapittel 1. Alminnelige bestemmelser</h2>" in html
+        assert html.index('<nav class="toc"') < html.index("<h2>")
+
+
+class TestSharedChrome:
+    """ADR-0014 Decision 5, issue #335: corpus pages carry the site's chrome.
+
+    Before this, a reader landing on a law page from a search engine had no
+    link back into the site in either language — 757 laws, 5,107
+    regulations and 87,046 provision pages, every one of them a dead end.
+    """
+
+    def test_the_document_page_carries_the_header_and_footer_verbatim(self) -> None:
+        html = _document()
+        chrome = chrome_html("nb")
+
+        assert chrome.header in html
+        assert chrome.footer in html
+
+    def test_the_provision_page_carries_them_too(self) -> None:
+        plan = _plan()
+        html = provision_page_html(
+            plan, plan.provisions[0], PROVENANCE, ["### § 1. Formål"], lambda t: None
+        )
+        chrome = chrome_html("nb")
+
+        assert chrome.header in html
+        assert chrome.footer in html
+
+    def test_every_page_offers_the_way_back_to_the_site_and_both_indexes(self) -> None:
+        html = _document()
+
+        assert '<a class="brand" href="/">' in html
+        assert '<a href="/lov/">Lover</a>' in html
+        assert '<a href="/forskrift/">Forskrifter</a>' in html
+
+    def test_the_corpus_chrome_carries_no_language_switch_and_no_badge(self) -> None:
+        """Norwegian, no switch, no status badge (ADR-0014 Decision 5): the
+        corpus has no English twin for a switch to point at."""
+        html = _document()
+
+        assert ">EN</a>" not in html
+        assert "<strong>NO</strong>" not in html
+        assert 'class="tag"' not in html
+
+    def test_the_content_sits_in_a_main_landmark(self) -> None:
+        html = _document()
+
+        assert html.count("<main>") == 1
+        assert html.count("</main>") == 1
+        assert "Loven skal sikre gravide rett til selvbestemmelse." in html.split("<main>")[1]
+
+    def test_the_chrome_is_outside_the_main_landmark(self) -> None:
+        """A header repeated on 93k pages must not sit inside the document's
+        own content, or every page's main landmark starts with navigation."""
+        html = _document()
+
+        assert html.index('<a class="brand"') < html.index("<main>")
+        assert html.index("</main>") < html.index("<footer>")
+
+
+class TestSharedStylesheet:
+    def test_the_page_inlines_the_one_shared_stylesheet(self) -> None:
+        assert f"<style>\n{stylesheet()}</style>" in _document()
+
+    def test_there_is_exactly_one_style_block_and_no_linked_asset(self) -> None:
+        html = _document()
+
+        assert html.count("<style>") == 1
+        assert '<link rel="stylesheet"' not in html
+        assert "@import" not in html
+
+    def test_the_old_private_stylesheet_is_gone(self) -> None:
+        """The corpus surface had its own 1990s design — Georgia and 1px
+        table grids — which is how it drifted from the site (#335)."""
+        html = _document()
+
+        assert "Georgia" not in html
+        assert "1px solid #999" not in html
+
+
+class TestDeterminism:
+    def test_two_renders_of_one_page_are_the_same_bytes(self) -> None:
+        """A page is a pure function of its inputs; the chrome and the
+        stylesheet must not have made it a function of anything else."""
+        first = _document().encode("utf-8")
+        second = _document().encode("utf-8")
+
+        assert first == second
+
+    def test_the_shell_is_the_same_whatever_the_page(self) -> None:
+        """The chrome takes no fact argument, so two different documents
+        render byte-identical chrome (ADR-0014 Decision 5)."""
+        one = layout("nb", "A", "/lov/a/", "<p>a</p>")
+        two = layout("nb", "B", "/lov/b/", "<p>b</p>")
+        chrome = chrome_html("nb")
+
+        assert chrome.header in one and chrome.header in two
+        assert chrome.footer in one and chrome.footer in two
 
 
 class TestSectionSlices:

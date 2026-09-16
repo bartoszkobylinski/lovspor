@@ -1,11 +1,20 @@
 """Byte-exact golden pages: the template is the contract (ADR-0013).
 
 One equality against the complete rendered page pins every character
-the template emits — the doctype, the head, the style block, the NLOD
+the template emits — the doctype, the head, the chrome, the NLOD
 statement, the provenance rows, the navigation. Any mutation of a
 template string changes the bytes and fails here, which is the point:
 the emitted representation is a published contract, not an incidental
 formatting choice.
+
+Two of those characters' sources are named rather than copied: the
+stylesheet and the chrome are interpolated from ``lovspor.site``, the one
+place both published surfaces read them from (#335). Their own bytes are
+pinned there — ``test_site_style`` against ``style.css``,
+``test_site_chrome`` against the chrome templates — so copying them here
+would not add a contract, it would add the third copy whose drift this
+golden exists to catch. What this file pins about them is what only it
+can: that they are present, and exactly where in the page they sit.
 """
 
 from lovspor.publish.companion import document_companion
@@ -15,6 +24,8 @@ from lovspor.publish.pages import (
     document_page_html,
     provision_page_html,
 )
+from lovspor.site.chrome import chrome_html
+from lovspor.site.style import stylesheet
 
 PLAN = DocumentPlan.model_validate(
     {
@@ -44,15 +55,6 @@ PROVENANCE = PageProvenance(
 
 BODY_LINES = ["# Testloven", "", "### § 1. Formål", "", "Tekst."]
 
-STYLE = (
-    "body{margin:0 auto;max-width:46rem;padding:1rem;"
-    "font-family:Georgia,serif;line-height:1.6}"
-    "table{border-collapse:collapse}td,th{border:1px solid #999;padding:.3rem}"
-    ".provenance{border-top:1px solid #999;margin-top:3rem;padding-top:1rem;"
-    "font-size:.85rem;color:#333}"
-    "nav.toc ul{columns:2}"
-)
-
 NLOD = (
     "Inneholder data under Norsk lisens for offentlige data (NLOD 2.0), "
     "tilgjengeliggjort av Lovdata. Informasjonen er transformert og "
@@ -78,6 +80,7 @@ PROVENANCE_BLOCK = (
 
 
 def _shell(lang: str, title: str, canonical: str, content: str) -> str:
+    chrome = chrome_html("nb")
     return (
         "<!doctype html>\n"
         f'<html lang="{lang}">\n'
@@ -86,10 +89,14 @@ def _shell(lang: str, title: str, canonical: str, content: str) -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{title}</title>\n"
         f'<link rel="canonical" href="{canonical}">\n'
-        f"<style>{STYLE}</style>\n"
+        f"<style>\n{stylesheet()}</style>\n"
         "</head>\n"
         "<body>\n"
-        f"{content}\n"
+        '<div class="wrap">\n'
+        f"{chrome.header}"
+        f"<main>\n{content}\n</main>\n"
+        f"{chrome.footer}"
+        "</div>\n"
         "</body>\n"
         "</html>\n"
     )
@@ -101,10 +108,11 @@ class TestGoldenPages:
             "nb",
             "Testloven",
             "https://lovspor.no/lov/testloven/",
-            '<nav class="toc" aria-label="Paragrafer"><ul>\n'
-            '<li><a href="/lov/testloven/paragraf/1/">§ 1. Formål</a></li>\n'
-            "</ul></nav>\n"
             "<h1>Testloven</h1>\n"
+            '<nav class="toc" aria-label="Paragrafer"><ul>\n'
+            '<li><a href="/lov/testloven/paragraf/1/">'
+            '<span class="pid">§ 1</span> Formål</a></li>\n'
+            "</ul></nav>\n"
             '<h3 id="paragraf-1">§ 1. Formål</h3>\n'
             "<p>Tekst.</p>\n"
             f"{PROVENANCE_BLOCK}",
