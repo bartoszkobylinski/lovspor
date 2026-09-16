@@ -33,7 +33,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - Integration tests in `tests/integration/` use real fixtures, not mocks.
 
 ### Pre-commit checklist (mandatory, every commit)
-1. `scripts/quality/verify-fast.sh` — green (gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/`)
+1. `scripts/quality/verify-fast.sh` — green (gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/`, the size and complexity ratchets)
 2. Invoke `/security-check` — clean
 3. Then `git commit`
 
@@ -46,6 +46,7 @@ Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, th
 - `git commit --no-verify` and `git push --no-verify` are forbidden for agent-authored work. The only exception is an operator emergency: the owner may bypass a local hook when the gate itself is broken and a fix cannot wait for its repair; CI stays authoritative, so the bypass skips local feedback, never the merge gate.
 - Run `scripts/quality/verify-fast.sh` before reporting work complete, even when no hook fired (hooks not installed, a fresh worktree).
 - Never weaken a gate, widen an ignore, or edit a baseline to make your own change pass, unless changing that gate's policy is itself the task.
+- A new entry in `scripts/quality/ratchet-baseline.toml`, or a raised value in an existing one, is an exception the owner approves: argue for it in the PR description. Never add or raise one to get your own change past the ratchet — split the function or the file instead.
 
 ### Branching
 - Every change on a feature branch: `feat/`, `fix/`, `refactor/`, `test/`, `docs/`.
@@ -162,7 +163,7 @@ These extend global rules in `~/.claude/CLAUDE.md`:
 ./scripts/bootstrap.sh
 
 # Daily
-scripts/quality/verify-fast.sh        # fast gate = pre-commit hook: gitleaks, ruff, format, mypy
+scripts/quality/verify-fast.sh        # fast gate = pre-commit hook: gitleaks, ruff, format, mypy, ratchets
 scripts/quality/verify-deep.sh        # deep gate = pre-push hook: fast gate + unit suite
 uv run pytest                         # all tests
 uv run pytest tests/unit/             # unit suite alone

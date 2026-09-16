@@ -153,7 +153,7 @@ Local layout:
 | Types | `mypy` strict mode | Wired into CI + the fast gate (pre-commit stage); see §9d |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
 | Mutation | `mutmut == 3.7.0` | Function-scoped per-PR runs; see §9 and §9c |
-| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + unit suite) |
+| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + unit suite) |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
 | XML | `lxml` with `resolve_entities=False, huge_tree=False` (when added) | XXE / billion-laughs mitigation |
@@ -265,12 +265,12 @@ Decided 2026-09-15 by the owner, issue #323 (Phase A, decision 1). **No ADR:** d
 | `uv run mypy src/` | 0.2–0.4 s | 0.21–0.25 s warm; 4.86 s first run; 6.33 s with a fresh `--cache-dir` |
 | `uv run pytest tests/unit/ -q` | 255.9 s (6789 passed) | 263.1–273.3 s (6804–6808 passed, on this change's branch) |
 
-The suite was ~99% of the commit's cost, which defeats an agent's edit → gate → repair loop. mypy stays at commit time because even cold it costs seconds. `scripts/quality/verify-fast.sh` as a whole took 0.51 s warm.
+The suite was ~99% of the commit's cost, which defeats an agent's edit → gate → repair loop. mypy stays at commit time because even cold it costs seconds. `scripts/quality/verify-fast.sh` as a whole took 0.51 s warm. Wiring in the Phase B ratchet check on 2026-09-16 took the gate to 1.20–1.23 s warm, on a branch where the same gate without it measured 0.33–0.34 s and the ratchet alone 0.79–0.83 s (three runs each, one machine — the 0.51 s above is an earlier measurement, not the baseline for that delta).
 
 **Mechanism.**
 
 - `.pre-commit-config.yaml` names no check. Its pre-commit stage runs `scripts/quality/verify-fast.sh` and its pre-push stage `scripts/quality/verify-deep.sh`. `default_install_hook_types: [pre-commit, pre-push]` makes a plain `pre-commit install` (which `scripts/bootstrap.sh` runs) install both; a clone with hooks installed before this change re-runs it to add pre-push.
-- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check` and `mypy src/`. It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
+- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/` and the size and complexity ratchets (`scripts/quality/check_ratchets.py`). It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
 - `verify-deep.sh` runs `verify-fast.sh`, then `uv run pytest tests/unit/ -q`, and does not start the suite when the fast gate failed. Re-running the fast gate at push costs about a second and still catches a commit made before the hooks were installed.
 - Under the hook, pre-commit stashes unstaged changes, so the commit stage checks what is being committed; run by hand, the script checks the working tree.
 - Hook and script cannot drift because the config holds no check to drift. Two test files pin that: `tests/unit/test_quality_hook_config.py` has pre-commit itself resolve which script each stage reaches, and `tests/unit/test_quality_fast_gate.py` runs both scripts against stub tools.
@@ -285,7 +285,7 @@ Full contract in `CLAUDE.md`. Key points:
 
 1. **Small chunks** — 1 commit = 1 logical change. Every commit independently green and bisectable.
 2. **TDD per chunk** — failing unit test first, then minimal code to green.
-3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + unit suite). See §9d.
+3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy + ratchets) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + unit suite). See §9d.
 4. **Feature branches only** — `feat/`, `fix/`, `refactor/`, `test/`, `docs/`. Never commit to `main` except the single bootstrap commit.
 5. **PR → Codex → merge** — Claude opens PR with prepared Codex prompt, STOPS, user runs Codex, Claude fixes any bugs on the same branch, **only the user merges**.
 6. **No AI attribution** in commit messages, PR descriptions, or code comments.
