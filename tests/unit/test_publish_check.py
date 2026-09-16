@@ -448,6 +448,26 @@ def test_a_missing_companion_index_is_refused(release: Path) -> None:
         check_release(release)
 
 
+def test_a_malformed_companion_index_is_a_named_refusal(release: Path) -> None:
+    index = release / "sitemaps" / "companions.xml"
+    index.write_text("<sitemapindex>", encoding="utf-8")
+
+    with pytest.raises(PublishError) as raised:
+        check_release(release)
+
+    assert str(raised.value).startswith("sitemaps/companions.xml is unreadable:")
+
+
+def test_a_malformed_companion_shard_is_a_named_refusal(release: Path) -> None:
+    shard = release / "sitemaps" / "companions-1.xml"
+    shard.write_text("<urlset>", encoding="utf-8")
+
+    with pytest.raises(PublishError) as raised:
+        check_release(release)
+
+    assert str(raised.value).startswith("sitemaps/companions-1.xml is unreadable:")
+
+
 def test_a_companion_sitemap_omitting_a_twin_is_refused(release: Path) -> None:
     """Emitted-but-unlisted, the same both-directions check the pages get: a
     sitemap from a smaller build beside twins from a larger one would
@@ -494,8 +514,12 @@ def test_a_companion_sitemap_naming_a_non_page_json_file_is_refused(release: Pat
         encoding="utf-8",
     )
 
-    with pytest.raises(PublishError, match="not a page's twin"):
+    with pytest.raises(PublishError) as raised:
         check_release(release)
+
+    assert str(raised.value) == (
+        "sitemaps/companions.xml advertises lov/index.json, which is not a page's twin"
+    )
 
 
 def test_a_companion_sitemap_cannot_escape_the_release_tree(release: Path) -> None:

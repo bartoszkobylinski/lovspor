@@ -182,6 +182,14 @@ class TestFactRenderer:
             fact("corpus.documents", kind="code")
         assert issubclass(KindMismatchError, SiteBuildError)
 
+    def test_kind_mismatch_names_the_rendering_page(self, registry: FactRegistry) -> None:
+        fact = fact_renderer("/en/status/", "en", registry, FactLedger())
+
+        with pytest.raises(KindMismatchError) as raised:
+            fact("corpus.documents", kind="code")
+
+        assert str(raised.value).startswith("/en/status/: fact 'corpus.documents'")
+
     def test_kind_is_a_required_keyword(self, registry: FactRegistry) -> None:
         fact = fact_renderer("/", "nb", registry, FactLedger())
 
@@ -311,6 +319,14 @@ class TestFactTextRenderer:
             fact("corpus.documents", kind="code")
 
         assert ledger.entries == ()
+
+    def test_a_kind_mismatch_names_the_text_artifact(self, registry: FactRegistry) -> None:
+        fact = fact_text_renderer("/llms.txt", "en", registry, FactLedger())
+
+        with pytest.raises(KindMismatchError) as raised:
+            fact("corpus.documents", kind="code")
+
+        assert str(raised.value).startswith("/llms.txt: fact 'corpus.documents'")
 
     def test_an_unobserved_hosted_value_degrades_rather_than_reading_as_a_number(
         self, registry: FactRegistry
