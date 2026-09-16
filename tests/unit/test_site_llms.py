@@ -82,6 +82,18 @@ class TestWhatItNames:
         assert "https://lovspor.no/lov/" in text
         assert "https://lovspor.no/forskrift/" in text
 
+    def test_it_does_not_promise_a_twin_for_pages_that_have_none(self) -> None:
+        """Whether a page has a twin is declared, not inferred from its URL: the
+        browse indexes are pages and are written without one. Telling an agent to
+        append index.json to any page URL would send it to a 404 — and the release
+        check refuses a companions sitemap that advertises exactly that file, so
+        the instruction would promise what the gate forbids."""
+        text = _text()
+
+        assert "any\npage URL" not in text
+        assert "Every page has a machine-readable twin" not in text
+        assert "/lov/ and /forskrift/" in text
+
     def test_the_sitemaps_and_the_fact_files(self) -> None:
         text = _text()
 
