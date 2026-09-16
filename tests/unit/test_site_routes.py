@@ -190,6 +190,7 @@ class TestEmittedPages:
             ("en", f"{SITE_ORIGIN}/en/docs/"),
         )
         assert context["language_switch_href"] == "/docs/"
+        assert context["corpus"] is False
         assert context["status"] == "current"
         assert context["title"] and context["description"]
 
