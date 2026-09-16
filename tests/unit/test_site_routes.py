@@ -25,7 +25,7 @@ _SITE = Path(__file__).resolve().parent / "fixtures" / "site" / "pre-envelope"
 
 EXPECTED_STATUS = {
     "/": "current",
-    "/connect/": "planned",
+    "/connect/": "current",
     "/infrastructure/": "planned",
     "/research/": "research",
     "/research/llhb/": "research",

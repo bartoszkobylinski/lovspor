@@ -224,6 +224,8 @@ class TestBaseTemplate:
             "_base.html",
             "_chrome_footer.html",
             "_chrome_header.html",
+            "pages/connect.en.html",
+            "pages/connect.nb.html",
             "pages/landing.en.html",
             "pages/landing.nb.html",
             "pages/observatory.nb.html",

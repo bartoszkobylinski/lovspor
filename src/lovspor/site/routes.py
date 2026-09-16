@@ -15,8 +15,9 @@ registry, never the reverse (ADR:565-572): ``client_routes`` is that
 projection's hook and yields nothing until a registry exists.
 
 Copy: the landing and the observatory keep the titles and descriptions
-of the hand-written pages they replace; the other routes carry short,
-honest placeholders until their content lands.
+of the hand-written pages they replace; ``/connect/`` carries a page
+written against this repository's own evidence; the remaining routes carry
+short, honest placeholders until their content lands.
 """
 
 from typing import Annotated, Self
@@ -144,18 +145,19 @@ SITE_ROUTES: tuple[SiteRoute, ...] = (
             ),
         ),
     ),
-    _route(
-        "/connect/",
-        "planned",
-        Localised(nb="Koble til", en="Connect"),
-        Localised(
+    SiteRoute(
+        path="/connect/",
+        template="connect",
+        status="current",
+        title=Localised(nb="Koble til", en="Connect"),
+        description=Localised(
             nb=(
-                "Slik kobler du KI-verktøyet ditt til lovverk — én side per klient, med en "
-                "testet framgangsmåte."
+                "Slik kobler du KI-verktøyet ditt til lovverk — testede framgangsmåter der de "
+                "finnes, og et tydelig forbehold der de ikke gjør det."
             ),
             en=(
-                "How to connect your AI tool to lovverk — one page per client, with a tested "
-                "procedure."
+                "How to connect your AI tool to lovverk — tested procedures where they exist, "
+                "and a plain caveat where they do not."
             ),
         ),
     ),
