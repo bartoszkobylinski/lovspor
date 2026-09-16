@@ -946,14 +946,22 @@ class TestDegradation:
             _page(out, "/status/"), "hosted.comparisons.transport_surface_match"
         ) == ["unknown"]
 
-    def test_the_corpus_and_landing_do_not_move_with_the_observation(
+    def test_pages_without_hosted_facts_do_not_move_with_the_observation(
         self, world: World, tmp_path: Path
     ) -> None:
         one, two = tmp_path / "one", tmp_path / "two"
         world.build(one)
         world.build(two, world.observation(unobserved_transport("timeout")))
 
-        for path in ("/", "/en/", "/observatory/", "/docs/"):
+        for path in (
+            "/",
+            "/en/",
+            "/observatory/",
+            "/connect/",
+            "/en/connect/",
+            "/docs/",
+            "/en/docs/",
+        ):
             assert _page(one, path) == _page(two, path), path
         assert _page(one, "/status/") != _page(two, "/status/")
 
