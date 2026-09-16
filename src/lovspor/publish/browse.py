@@ -9,7 +9,7 @@ build invariant forbids depending on the build machine's locale tables.
 import html as html_escape
 
 from lovspor.publish.inventory import DocumentPlan, PublishInventory, Route
-from lovspor.publish.pages import document_url, layout
+from lovspor.publish.pages import PageHead, document_url, layout
 
 BROWSE_ROUTES: tuple[Route, ...] = ("lov", "forskrift")
 
@@ -54,7 +54,10 @@ def browse_index_html(route: Route, inventory: PublishInventory) -> str:
     heading = f"{_ROUTE_TITLES[route]} A–Å"  # noqa: RUF001 — deliberate EN DASH in the range
     parts = [f"<h1>{html_escape.escape(heading)}</h1>", _groups_html(plans)]
     content = "\n".join(part for part in parts if part)
-    return layout("nb", heading, browse_index_url(route), content)
+    # No twin: the emitter writes a browse index with ``_write``, not
+    # ``_write_page``, so there is no ``index.json`` beside it to announce.
+    head = PageHead(lang="nb", title=heading, path=browse_index_url(route), companion=False)
+    return layout(head, content)
 
 
 def _groups_html(plans: list[DocumentPlan]) -> str:

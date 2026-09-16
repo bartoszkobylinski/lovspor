@@ -34,6 +34,7 @@ from lovspor.publish.inventory import (
     normalise_pid,
 )
 from lovspor.publish.pages import (
+    COMPANION_NAME,
     PageProvenance,
     document_page_html,
     document_url,
@@ -118,7 +119,7 @@ def _write_page(
     html_bytes = html.encode("utf-8")
     digest = hashlib.sha256(html_bytes).hexdigest()
     _write(directory / "index.html", html_bytes)
-    _write(directory / "index.json", companion_json_bytes(companion(digest)))
+    _write(directory / COMPANION_NAME, companion_json_bytes(companion(digest)))
 
 
 def _write(path: Path, data: bytes) -> None:

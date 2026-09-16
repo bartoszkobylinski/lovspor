@@ -33,6 +33,13 @@ from lovspor.site.style import stylesheet
 
 SITE_ORIGIN = "https://lovspor.no"
 
+COMPANION_NAME = "index.json"
+"""The machine-readable twin's filename beside a page (ADR-0013 Decision 4).
+
+One spelling for the emitter that writes it, the head that announces it and
+the sitemap that lists it, so the three cannot drift apart.
+"""
+
 _NLOD_URL = "https://data.norge.no/nlod/no/2.0"
 
 _NLOD_STATEMENT = (
@@ -55,6 +62,25 @@ class PageProvenance(BaseModel):
     source_revision: str
     xml_hash: str
     renderer_version: int | None
+
+
+class PageHead(BaseModel):
+    """What the shell needs above ``<body>``: language, title, path, twin.
+
+    ``companion`` says whether an ``index.json`` sits beside this page. The
+    emitter writes one for every document and provision page and none for the
+    browse indexes, so the page carries the answer as a declared property
+    rather than letting the head infer it from the shape of a path — a guess
+    that would advertise a file the release does not serve the first time a
+    route gained a level.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    lang: str
+    title: str
+    path: str
+    companion: bool = True
 
 
 def document_url(plan: DocumentPlan) -> str:
@@ -82,7 +108,7 @@ def document_page_html(
         _provenance_html(plan, provenance),
     ]
     content = "\n".join(part for part in parts if part)
-    return layout(plan.language, title, document_url(plan), content)
+    return layout(PageHead(lang=plan.language, title=title, path=document_url(plan)), content)
 
 
 def provision_page_html(
@@ -101,12 +127,12 @@ def provision_page_html(
         _neighbours_html(plan, provision),
         _provenance_html(plan, provenance),
     ]
-    return layout(
-        plan.language,
-        f"{title} — {doc_title}",
-        provision_url(plan, provision.pid),
-        "\n".join(part for part in parts if part),
+    head = PageHead(
+        lang=plan.language,
+        title=f"{title} — {doc_title}",
+        path=provision_url(plan, provision.pid),
     )
+    return layout(head, "\n".join(part for part in parts if part))
 
 
 def section_slices(body_lines: list[str]) -> dict[str, list[str]]:
@@ -147,28 +173,45 @@ def _corpus_chrome() -> Chrome:
     return chrome_html("nb")
 
 
-def _head_html(lang: str, title: str, path: str) -> str:
-    """Everything above ``<body>``: escaped values, canonical, one stylesheet."""
-    safe_title = html_escape.escape(title, quote=True)
-    canonical = html_escape.escape(f"{SITE_ORIGIN}{path}", quote=True)
+def _twin_link_html(head: PageHead) -> str:
+    """The link to this page's machine-readable twin, or nothing when it has none.
+
+    ADR-0013 Decision 4 writes ``index.json`` beside every document and
+    provision page because static hosting cannot content-negotiate — and
+    until #340 nothing said so, leaving an agent that arrived from a search
+    engine to scrape the HTML instead. The href is a fixed function of the
+    page's own path: no fact, no count, no corpus state reaches it, so it
+    moves no byte when the corpus moves.
+    """
+    if not head.companion:
+        return ""
+    href = html_escape.escape(f"{SITE_ORIGIN}{head.path}{COMPANION_NAME}", quote=True)
+    return f'<link rel="alternate" type="application/json" href="{href}">\n'
+
+
+def _head_html(head: PageHead) -> str:
+    """Everything above ``<body>``: escaped values, canonical, twin, one stylesheet."""
+    safe_title = html_escape.escape(head.title, quote=True)
+    canonical = html_escape.escape(f"{SITE_ORIGIN}{head.path}", quote=True)
     return (
         "<!doctype html>\n"
-        f'<html lang="{html_escape.escape(lang, quote=True)}">\n'
+        f'<html lang="{html_escape.escape(head.lang, quote=True)}">\n'
         "<head>\n"
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         f"<title>{safe_title}</title>\n"
         f'<link rel="canonical" href="{canonical}">\n'
+        f"{_twin_link_html(head)}"
         f"<style>\n{stylesheet()}</style>\n"
         "</head>\n"
     )
 
 
-def layout(lang: str, title: str, path: str, content: str) -> str:
+def layout(head: PageHead, content: str) -> str:
     """The shared shell: head, the site's chrome, the page's own ``<main>``."""
     chrome = _corpus_chrome()
     return (
-        f"{_head_html(lang, title, path)}"
+        f"{_head_html(head)}"
         "<body>\n"
         '<div class="wrap">\n'
         f"{chrome.header}"

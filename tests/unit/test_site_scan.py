@@ -123,6 +123,23 @@ def test_fragment_protocol_relative_and_scheme_links_are_not_checked_against_the
     )
 
 
+def test_a_json_alternate_passes_and_is_not_read_as_a_language_alternate() -> None:
+    """The corpus pages' twin link (#340) needs no widening of the link rule.
+
+    ``alternate`` is already one of the two admitted rels, and reciprocity is
+    keyed on ``hreflang`` — which a ``type="application/json"`` alternate does
+    not carry — so the twin is neither refused nor mistaken for the English
+    page. Pinned here because both halves are load-bearing and neither is
+    obvious from the rel alone.
+    """
+    head = '<link rel="alternate" type="application/json" href="index.json">'
+
+    scan_page("/x/", _page("safe", head))
+    check_links({"/x/": _page("safe", head)})
+
+    assert _scan(_page("safe", head)).alternate_links == []
+
+
 def test_head_text_outside_the_title_is_not_scanned() -> None:
     """Page text is the body, the title and the description (module doc):
     stray head text is not rendered, and is not the numeral scan's business."""
