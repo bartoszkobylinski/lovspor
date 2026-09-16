@@ -965,11 +965,11 @@ slicing semantics. Identical output for every input.
 
 [[equivalent]]
 file = "src/lovspor/publish/pages.py"
-symbol = "_layout"
-registered = "2026-09-06, PR #249"
+symbol = "_head_html"
+registered = "2026-09-06, PR #249; re-keyed 2026-09-16, PR #341 — layout() split into _head_html, taking a PageHead"
 mutation = """
--    safe_title = html_escape.escape(title, quote=True)
-+    safe_title = html_escape.escape(title, )
+-    safe_title = html_escape.escape(head.title, quote=True)
++    safe_title = html_escape.escape(head.title, )
 """
 justification = """
 html.escape defaults quote to True; dropping the explicit argument
@@ -979,11 +979,11 @@ assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_
 
 [[equivalent]]
 file = "src/lovspor/publish/pages.py"
-symbol = "_layout"
-registered = "2026-09-06, PR #249"
+symbol = "_head_html"
+registered = "2026-09-06, PR #249; re-keyed 2026-09-16, PR #341 — layout() split into _head_html, taking a PageHead"
 mutation = """
--    canonical = html_escape.escape(f"{SITE_ORIGIN}{path}", quote=True)
-+    canonical = html_escape.escape(f"{SITE_ORIGIN}{path}", )
+-    canonical = html_escape.escape(f"{SITE_ORIGIN}{head.path}", quote=True)
++    canonical = html_escape.escape(f"{SITE_ORIGIN}{head.path}", )
 """
 justification = """
 Same stdlib-default selection on the canonical URL; pinned by the same
@@ -993,11 +993,11 @@ assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_
 
 [[equivalent]]
 file = "src/lovspor/publish/pages.py"
-symbol = "_layout"
-registered = "2026-09-06, PR #249"
+symbol = "_head_html"
+registered = "2026-09-06, PR #249; re-keyed 2026-09-16, PR #341 — layout() split into _head_html, taking a PageHead"
 mutation = """
--        f'<html lang="{html_escape.escape(lang, quote=True)}">\\n'
-+        f'<html lang="{html_escape.escape(lang, )}">\\n'
+-        f'<html lang="{html_escape.escape(head.lang, quote=True)}">\\n'
++        f'<html lang="{html_escape.escape(head.lang, )}">\\n'
 """
 justification = """
 Same stdlib-default selection on the lang attribute; pinned by the same
@@ -2523,3 +2523,35 @@ membership test, and the rendered bytes are identical for every input.
 The sibling call on `rest`, which does carry provision headings, keeps
 `suppressed` and stays covered by the duplicate-pid tests.
 """
+
+[[equivalent]]
+file = "src/lovspor/site/llms.py"
+symbol = "llms_txt"
+registered = "2026-09-16, PR #341, from run 35139116873"
+mutation = """
+-    ).encode("utf-8")
++    ).encode("UTF-8")
+"""
+justification = """
+Codec names are looked up case-insensitively and normalised before a codec is
+selected: codecs.lookup("UTF-8").name and codecs.lookup("utf-8").name are both
+"utf-8", so the two spellings reach the same encoder and produce the same
+bytes. Same argument as every other encode/decode entry in this register. The
+file is compared byte-for-byte by the release check, and identical bytes cannot
+be told apart by any test.
+"""
+
+[[equivalent]]
+file = "src/lovspor/publish/pages.py"
+symbol = "_twin_link_html"
+registered = "2026-09-16, PR #341, from run 35139116873"
+mutation = """
+-    href = html_escape.escape(f"{SITE_ORIGIN}{head.path}{COMPANION_NAME}", quote=True)
++    href = html_escape.escape(f"{SITE_ORIGIN}{head.path}{COMPANION_NAME}", )
+"""
+justification = """
+html.escape defaults quote to True, so dropping the explicit argument selects
+identical escaping — the same stdlib default the three _head_html entries above
+rest on, on the twin link's href. Pinned by the same assumption test.
+"""
+assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
