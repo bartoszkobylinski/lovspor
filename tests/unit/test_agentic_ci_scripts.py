@@ -1633,6 +1633,26 @@ class TestShadowTreeCarriesRepoState:
         assert "mutation-equivalents.toml" in found
         assert "pyproject.toml" in found
 
+    def test_the_repos_config_copies_the_hook_config_into_the_shadow_tree(
+        self, tmp_path: Path
+    ) -> None:
+        """Exercise the configured copy, not only the scanner's model of it."""
+        repo_root = Path(__file__).parents[2]
+        hook_config = (repo_root / ".pre-commit-config.yaml").read_bytes()
+        (tmp_path / "pyproject.toml").write_bytes((repo_root / "pyproject.toml").read_bytes())
+        (tmp_path / ".pre-commit-config.yaml").write_bytes(hook_config)
+        (tmp_path / "mutants").mkdir()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(tmp_path)
+            MutmutConfig.reset()
+            try:
+                copy_also_copy_files()
+            finally:
+                MutmutConfig.reset()
+
+        assert (tmp_path / "mutants" / ".pre-commit-config.yaml").read_bytes() == hook_config
+
     def test_every_root_path_the_unit_suite_reads_is_carried_into_the_shadow_tree(self) -> None:
         unit_dir = Path(__file__).parent
         carried = _shadow_tree_carries(unit_dir.parents[1])
