@@ -106,6 +106,18 @@ class TestWhatItNames:
         ):
             assert url in text, url
 
+    def test_it_names_both_sitemaps_and_calls_neither_one_every_page(self) -> None:
+        """A release serves two page sets from two trees, each with its own
+        validated sitemap: `sitemap.xml` indexes the corpus shards, while the
+        site's own pages are in `sitemap-site.xml`. Calling the first "every
+        page" both overstates it and hides the second from the inventory this
+        file exists to give an agent."""
+        text = _text()
+
+        assert "https://lovspor.no/sitemap.xml — every act, regulation and provision" in text
+        assert "https://lovspor.no/sitemap-site.xml" in text
+        assert "https://lovspor.no/sitemap.xml — every page" not in text
+
     def test_the_mcp_endpoint_and_that_it_needs_a_token(self) -> None:
         text = _text()
 
