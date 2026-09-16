@@ -24,6 +24,7 @@ FAST_CHECKS = {
     "ruff-check": "uv run ruff check",
     "ruff-format": "uv run ruff format --check",
     "mypy": "uv run mypy src/",
+    "ratchets": "uv run python scripts/quality/check_ratchets.py",
 }
 UNIT_SUITE = "uv run pytest tests/unit/ -q"
 STUB_TOOLS = ("uv", "gitleaks")
@@ -110,6 +111,13 @@ class TestFastGate:
         run = _run_gate(FAST, tmp_path)
 
         assert [command for command in run.commands if "pytest" in command] == []
+
+    def test_runs_the_ratchet_at_commit_time(self, tmp_path: Path) -> None:
+        """A function or file that crosses a CLAUDE.md limit is cheapest to
+        split in the commit that wrote it, not one push or one review later."""
+        run = _run_gate(FAST, tmp_path)
+
+        assert FAST_CHECKS["ratchets"] in run.commands
 
     @pytest.mark.parametrize(("name", "command"), sorted(FAST_CHECKS.items()))
     def test_a_failing_check_fails_the_gate_in_one_line_naming_it(

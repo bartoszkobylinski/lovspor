@@ -153,7 +153,7 @@ Local layout:
 | Types | `mypy` strict mode | Wired into CI + the fast gate (pre-commit stage); see §9d |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
 | Mutation | `mutmut == 3.7.0` | Function-scoped per-PR runs; see §9 and §9c |
-| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + unit suite) |
+| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + unit suite) |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
 | XML | `lxml` with `resolve_entities=False, huge_tree=False` (when added) | XXE / billion-laughs mitigation |
@@ -265,12 +265,12 @@ Decided 2026-09-15 by the owner, issue #323 (Phase A, decision 1). **No ADR:** d
 | `uv run mypy src/` | 0.2–0.4 s | 0.21–0.25 s warm; 4.86 s first run; 6.33 s with a fresh `--cache-dir` |
 | `uv run pytest tests/unit/ -q` | 255.9 s (6789 passed) | 263.1–273.3 s (6804–6808 passed, on this change's branch) |
 
-The suite was ~99% of the commit's cost, which defeats an agent's edit → gate → repair loop. mypy stays at commit time because even cold it costs seconds. `scripts/quality/verify-fast.sh` as a whole took 0.51 s warm.
+The suite was ~99% of the commit's cost, which defeats an agent's edit → gate → repair loop. mypy stays at commit time because even cold it costs seconds. `scripts/quality/verify-fast.sh` as a whole took 0.51 s warm. Wiring in the Phase B ratchet check on 2026-09-16 took the gate to 1.20–1.23 s warm, on a branch where the same gate without it measured 0.33–0.34 s and the ratchet alone 0.79–0.83 s (three runs each, one machine — the 0.51 s above is an earlier measurement, not the baseline for that delta).
 
 **Mechanism.**
 
 - `.pre-commit-config.yaml` names no check. Its pre-commit stage runs `scripts/quality/verify-fast.sh` and its pre-push stage `scripts/quality/verify-deep.sh`. `default_install_hook_types: [pre-commit, pre-push]` makes a plain `pre-commit install` (which `scripts/bootstrap.sh` runs) install both; a clone with hooks installed before this change re-runs it to add pre-push.
-- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check` and `mypy src/`. It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
+- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/` and the size and complexity ratchets (`scripts/quality/check_ratchets.py`). It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
 - `verify-deep.sh` runs `verify-fast.sh`, then `uv run pytest tests/unit/ -q`, and does not start the suite when the fast gate failed. Re-running the fast gate at push costs about a second and still catches a commit made before the hooks were installed.
 - Under the hook, pre-commit stashes unstaged changes, so the commit stage checks what is being committed; run by hand, the script checks the working tree.
 - Hook and script cannot drift because the config holds no check to drift. Two test files pin that: `tests/unit/test_quality_hook_config.py` has pre-commit itself resolve which script each stage reaches, and `tests/unit/test_quality_fast_gate.py` runs both scripts against stub tools.
@@ -279,13 +279,23 @@ The suite was ~99% of the commit's cost, which defeats an agent's edit → gate 
 
 **Agent rules** live in `CLAUDE.md` "Gate rules for agents". A gate failure is repaired, not bypassed. `--no-verify` is forbidden for agent-authored work outside an owner emergency. The fast gate runs before work is reported complete. A gate, ignore or baseline is never loosened to pass one's own change.
 
+## 9e. Size and complexity ratchets over production code
+
+Decided 2026-09-15 by the owner, issue #323 (Phase B, decision 2). The `CLAUDE.md` code rules were prose: `PLR0913` sat in the ruff ignore list as "enforced manually via review" while 24 functions in `src/` carried more than four parameters. `scripts/quality/check_ratchets.py` makes them executable over `src/` — function-lines ≤ 20, function-params ≤ 4, function-complexity ≤ 10 (ruff's C901, run `--isolated --ignore-noqa` so no config, per-file ignore or `# noqa` can waive it), file-lines ≤ 700. The owner chose these limits over the looser 60–80 lines and complexity 10–12 the issue proposed: `CLAUDE.md` already asks for 20 and 4, and a gate that contradicts it teaches that the rule is decorative.
+
+**A ratchet, not a cleanup.** Code already over a limit is recorded in `scripts/quality/ratchet-baseline.toml` (155 entries at `36362c2`), keyed by rule + path + qualified name — never by line number — with the measured value and a mandatory `reason`. An entry passes at its recorded value and fails when the code gets worse, and also when it gets better, so the baseline follows the code down; `--tighten` makes that edit and can only lower a value or remove a stale entry. Adding an entry or raising one is not expressible by the tool: it is a policy exception the owner approves, argued for in the PR description (`CLAUDE.md`, "Gate rules for agents"). An entry without a reason, with an unknown field or rule, at or under its limit, or duplicated is refused and waives nothing.
+
+**Definitions** (chosen with the decision; counts in `src/` at `36362c2`, 142 files, 1870 functions): a function's lines are the lines carrying code from the first statement after the docstring to its last line — decorators, signature, docstring, blank lines and comment-only lines do not count, because `CLAUDE.md` asks for WHY comments and a count that charged for them would reward deleting them (118 functions over 20; counting physical body lines instead gives 138). Nested definitions count toward the enclosing function, so a grandfathered function cannot keep growing by gaining closures. Parameters exclude the receiver unless the function is a `@staticmethod`, and count `*args`/`**kwargs` one each (24 over 4). Complexity is ruff's value, not a reimplementation (4 over 10). File lines are physical lines (9 over 700, `mcp.py` 5017).
+
+**Where it runs.** `tests/unit/test_quality_ratchets.py` runs the checker on the real tree, so the unit suite — and with it CI — enforces the ratchet wherever it runs; a local bypass cannot produce a green PR. Since 2026-09-16 it is also a check in the fast gate (§9d), which is where a violation is cheapest to repair.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:
 
 1. **Small chunks** — 1 commit = 1 logical change. Every commit independently green and bisectable.
 2. **TDD per chunk** — failing unit test first, then minimal code to green.
-3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + unit suite). See §9d.
+3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy + ratchets) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + unit suite). See §9d.
 4. **Feature branches only** — `feat/`, `fix/`, `refactor/`, `test/`, `docs/`. Never commit to `main` except the single bootstrap commit.
 5. **PR → Codex → merge** — Claude opens PR with prepared Codex prompt, STOPS, user runs Codex, Claude fixes any bugs on the same branch, **only the user merges**.
 6. **No AI attribution** in commit messages, PR descriptions, or code comments.

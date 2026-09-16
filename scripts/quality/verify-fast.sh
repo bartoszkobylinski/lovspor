@@ -22,5 +22,6 @@ check gitleaks gitleaks git --pre-commit --redact --staged --verbose
 check ruff-check uv run ruff check
 check ruff-format uv run ruff format --check
 check mypy uv run mypy src/
+check ratchets uv run python scripts/quality/check_ratchets.py
 
 finish verify-fast
