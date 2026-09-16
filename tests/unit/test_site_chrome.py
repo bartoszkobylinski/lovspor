@@ -4,6 +4,9 @@ Decision 5 as amended 2026-09-16 by Amendment 2)."""
 import inspect
 import re
 
+import pytest
+from jinja2 import UndefinedError
+
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.capabilities import Checkout, Observation, derive_state
 from lovspor.site.chrome import Chrome, chrome_html, corpus_chrome_html
@@ -256,6 +259,23 @@ def _render(path: str) -> str:
 
 
 class TestBaseTemplate:
+    def test_missing_frame_variant_fails_closed(self) -> None:
+        """Every page must explicitly choose the site or corpus frame.
+
+        The new branch must not silently default when a future rendering
+        entry point omits ``corpus``: that would make the navigation depend
+        on Jinja's treatment of an undefined value instead of the route's
+        declared page kind.
+        """
+        page = next(page for page in emitted_pages() if page.path == "/about/")
+        context = page.head_context() | page_globals(
+            page.path, page.lang, FactRegistry(sources=()), FactLedger()
+        )
+        del context["corpus"]
+
+        with pytest.raises(UndefinedError, match="corpus.*undefined"):
+            site_environment().get_template(page.template).render(context)
+
     def test_head_carries_lang_title_description_canonical_and_hreflang_pair(self) -> None:
         html = _render("/about/")
 
