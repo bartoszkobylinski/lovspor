@@ -16,6 +16,8 @@ from lovspor.publish.pages import (
     provision_page_html,
     section_slices,
 )
+from lovspor.site.chrome import chrome_html
+from lovspor.site.style import stylesheet
 
 PROVENANCE = PageProvenance(
     source_revision="ab388cbdeadbeef",
@@ -138,6 +140,103 @@ class TestDocumentPage:
         html = _document()
         assert "<script" not in html
         assert "onclick" not in html
+
+
+class TestSharedChrome:
+    """ADR-0014 Decision 5, issue #335: corpus pages carry the site's chrome.
+
+    Before this, a reader landing on a law page from a search engine had no
+    link back into the site in either language — 757 laws, 5,107
+    regulations and 87,046 provision pages, every one of them a dead end.
+    """
+
+    def test_the_document_page_carries_the_header_and_footer_verbatim(self) -> None:
+        html = _document()
+        chrome = chrome_html("nb")
+
+        assert chrome.header in html
+        assert chrome.footer in html
+
+    def test_the_provision_page_carries_them_too(self) -> None:
+        plan = _plan()
+        html = provision_page_html(
+            plan, plan.provisions[0], PROVENANCE, ["### § 1. Formål"], lambda t: None
+        )
+        chrome = chrome_html("nb")
+
+        assert chrome.header in html
+        assert chrome.footer in html
+
+    def test_every_page_offers_the_way_back_to_the_site_and_both_indexes(self) -> None:
+        html = _document()
+
+        assert '<a class="brand" href="/">' in html
+        assert '<a href="/lov/">Lover</a>' in html
+        assert '<a href="/forskrift/">Forskrifter</a>' in html
+
+    def test_the_corpus_chrome_carries_no_language_switch_and_no_badge(self) -> None:
+        """Norwegian, no switch, no status badge (ADR-0014 Decision 5): the
+        corpus has no English twin for a switch to point at."""
+        html = _document()
+
+        assert ">EN</a>" not in html
+        assert "<strong>NO</strong>" not in html
+        assert 'class="tag"' not in html
+
+    def test_the_content_sits_in_a_main_landmark(self) -> None:
+        html = _document()
+
+        assert html.count("<main>") == 1
+        assert html.count("</main>") == 1
+        assert "Loven skal sikre gravide rett til selvbestemmelse." in html.split("<main>")[1]
+
+    def test_the_chrome_is_outside_the_main_landmark(self) -> None:
+        """A header repeated on 93k pages must not sit inside the document's
+        own content, or every page's main landmark starts with navigation."""
+        html = _document()
+
+        assert html.index('<a class="brand"') < html.index("<main>")
+        assert html.index("</main>") < html.index("<footer>")
+
+
+class TestSharedStylesheet:
+    def test_the_page_inlines_the_one_shared_stylesheet(self) -> None:
+        assert f"<style>\n{stylesheet()}</style>" in _document()
+
+    def test_there_is_exactly_one_style_block_and_no_linked_asset(self) -> None:
+        html = _document()
+
+        assert html.count("<style>") == 1
+        assert '<link rel="stylesheet"' not in html
+        assert "@import" not in html
+
+    def test_the_old_private_stylesheet_is_gone(self) -> None:
+        """The corpus surface had its own 1990s design — Georgia and 1px
+        table grids — which is how it drifted from the site (#335)."""
+        html = _document()
+
+        assert "Georgia" not in html
+        assert "1px solid #999" not in html
+
+
+class TestDeterminism:
+    def test_two_renders_of_one_page_are_the_same_bytes(self) -> None:
+        """A page is a pure function of its inputs; the chrome and the
+        stylesheet must not have made it a function of anything else."""
+        first = _document().encode("utf-8")
+        second = _document().encode("utf-8")
+
+        assert first == second
+
+    def test_the_shell_is_the_same_whatever_the_page(self) -> None:
+        """The chrome takes no fact argument, so two different documents
+        render byte-identical chrome (ADR-0014 Decision 5)."""
+        one = layout("nb", "A", "/lov/a/", "<p>a</p>")
+        two = layout("nb", "B", "/lov/b/", "<p>b</p>")
+        chrome = chrome_html("nb")
+
+        assert chrome.header in one and chrome.header in two
+        assert chrome.footer in one and chrome.footer in two
 
 
 class TestSectionSlices:
