@@ -93,7 +93,14 @@ class EmittedPage(BaseModel):
         return self.route.path if self.lang == "en" else en_path(self.route.path)
 
     def head_context(self) -> dict[str, object]:
-        """What ``_base.html`` needs: head values, the hreflang pair, the switch."""
+        """What ``_base.html`` needs: head values, the hreflang pair, the switch.
+
+        ``corpus`` is false here by definition: this is the site build, and
+        the chrome's corpus variant is the one rendered for the corpus tree
+        (ADR-0014 Amendment 2). It is declared rather than defaulted in the
+        template, so a page that never says which frame it wants fails under
+        ``StrictUndefined`` instead of quietly taking one.
+        """
         alternates: tuple[tuple[str, str], ...] = ()
         if self.route.twin:
             alternates = (
@@ -107,6 +114,7 @@ class EmittedPage(BaseModel):
             "canonical": canonical_url(self.path),
             "alternates": alternates,
             "language_switch_href": self.alternate,
+            "corpus": False,
             "status": self.route.status,
         }
 

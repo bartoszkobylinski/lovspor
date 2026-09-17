@@ -124,6 +124,24 @@
     font-weight: 600;
   }
 
+  /* The corpus frame answers an English reader (ADR-0014 Amendment 2): each
+     Norwegian label carries an English gloss. The gloss is a second voice,
+     not a second link -- it inherits the nav's own muted colour, so it meets
+     AA against both palettes exactly as the label beside it does, and is set
+     smaller and italic so the eye reads it as an aside rather than as two
+     navigation items. Only the corpus nav has one: a site label needs none,
+     because its English twin is a page of its own. */
+  .lang.corpus .gloss {
+    font-size: 0.9em;
+    font-style: italic;
+  }
+
+  /* A label and its gloss are one unit, so the nav breaks at the separators
+     between items rather than between a word and its translation. The nav
+     itself stays a wrapping flow inside a header that already wraps, so a
+     narrow viewport gets more rows, never a sideways scroll. */
+  .lang.corpus a { white-space: nowrap; }
+
   main {
     padding-block: var(--step) 1rem;
   }

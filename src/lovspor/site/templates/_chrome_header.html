@@ -1,8 +1,16 @@
-{#- The shared header: brand, the corpus links, the optional language
-    switch. Fixed strings and fixed internal links only — no count, date,
-    commit or capability state may arrive here (ADR-0014 Decision 5). -#}
+{#- The shared header: brand, the corpus links, and then one of two
+    expressions of the same affordance. A site page gets the per-page
+    language switch, because its twin exists. A corpus page gets an
+    English gloss on each label and a link to the English site: no act
+    has an English twin, so a switch there would be a dead link on
+    ~93 000 pages (ADR-0014 Amendment 2). Fixed strings and fixed
+    internal links only — no count, date, commit or capability state may
+    arrive here (ADR-0014 Decision 5). -#}
 <header>
   <a class="brand" href="/">lov<span>spor</span></a>
+  {% if corpus %}
+  <nav class="lang corpus"><a href="/lov/">Lover <span class="gloss" lang="en">Acts</span></a> · <a href="/forskrift/">Forskrifter <span class="gloss" lang="en">Regulations</span></a> · <a href="/en/" lang="en">In English</a></nav>
+  {% else %}
   <nav class="lang">
     {%- if lang == "en" -%}
     <a href="/lov/">Acts</a> · <a href="/forskrift/">Regulations</a>
@@ -15,4 +23,5 @@
     {%- endif -%}
     {%- endif -%}
   </nav>
+  {% endif %}
 </header>

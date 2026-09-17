@@ -1,11 +1,16 @@
-"""The shared chrome and the base template (ADR-0014 Decisions 3 and 5)."""
+"""The shared chrome and the base template (ADR-0014 Decisions 3 and 5,
+Decision 5 as amended 2026-09-16 by Amendment 2)."""
 
 import inspect
 import re
 
+import pytest
+from jinja2 import UndefinedError
+
+import lovspor.site.chrome as chrome_module
 from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.site.capabilities import Checkout, Observation, derive_state
-from lovspor.site.chrome import Chrome, chrome_html
+from lovspor.site.chrome import Chrome, chrome_html, corpus_chrome_html
 from lovspor.site.facts import FactLedger, FactRegistry, FactSource
 from lovspor.site.routes import emitted_pages
 from lovspor.site.style import stylesheet
@@ -78,7 +83,15 @@ class TestChromeInvariance:
         assert "data-kind" not in chrome.header + chrome.footer
 
 
-class TestCorpusVariant:
+class TestNorwegianSiteChrome:
+    """``chrome_html("nb")`` with no switch target: a site page whose twin
+    does not exist, such as ``/observatory/``.
+
+    It was the corpus chrome too until ADR-0014 Amendment 2 gave the corpus
+    its own variant; ``TestCorpusChrome`` covers that one. What is pinned
+    here is the site's, so the two cannot be read as one again.
+    """
+
     def test_is_norwegian_with_the_three_links_and_no_switch_or_badge(self) -> None:
         chrome = chrome_html("nb")
 
@@ -144,6 +157,121 @@ class TestLanguageSwitch:
         assert "&lt;script&gt;" in header
 
 
+class TestCorpusChrome:
+    """The corpus frame answers an English reader (ADR-0014 Amendment 2).
+
+    Decision 5 made the corpus chrome Norwegian with no switch and no badge.
+    The amendment separates the legal text from its frame: the text stays
+    Norwegian and the badges stay out, the *navigation* gains an English
+    gloss and a link to the English site, and the per-page switch stays out
+    for the reason it was refused in the first place — there is no English
+    twin of a law page, so a switch would publish a dead link on ~93k pages.
+    """
+
+    def test_it_takes_no_argument_at_all(self) -> None:
+        """Stronger than ``chrome_html``'s guarantee, not weaker: the corpus
+        variant has no parameter of any kind, so no fact, count, manifest or
+        capability value can reach ~93k pages (ADR:1170-1176)."""
+        assert list(inspect.signature(corpus_chrome_html).parameters) == []
+        assert inspect.signature(corpus_chrome_html).return_annotation is Chrome
+
+    def test_it_renders_with_exactly_the_fixed_corpus_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pin the zero-input boundary before template branching can hide drift.
+
+        The language remains the canonical Norwegian code, and the absent
+        per-page twin is represented by the switch key with a null target.
+        """
+        expected = Chrome(header="header", footer="footer")
+        contexts: list[dict[str, object]] = []
+
+        def record_context(context: dict[str, object]) -> Chrome:
+            contexts.append(context)
+            return expected
+
+        monkeypatch.setattr(chrome_module, "_render", record_context)
+
+        assert corpus_chrome_html() is expected
+        assert contexts == [{"lang": "nb", "language_switch_href": None, "corpus": True}]
+
+    def test_both_navigation_labels_carry_their_english_gloss(self) -> None:
+        header = corpus_chrome_html().header
+
+        assert '<a href="/lov/">Lover <span class="gloss" lang="en">Acts</span></a>' in header
+        assert (
+            '<a href="/forskrift/">Forskrifter '
+            '<span class="gloss" lang="en">Regulations</span></a>' in header
+        )
+
+    def test_it_links_to_the_english_site(self) -> None:
+        """Named, not abbreviated: an ``EN`` with no ``NO`` beside it reads as
+        half a switch, and ``In English`` is the idiom Norwegian public sites
+        use for this affordance."""
+        assert '<a href="/en/" lang="en">In English</a>' in corpus_chrome_html().header
+
+    def test_every_english_string_is_marked_as_english(self) -> None:
+        """Otherwise a screen reader pronounces the gloss and the link with
+        Norwegian phonetics: the frame is for a reader who cannot read the
+        page it frames, so the one thing it must get right is being heard."""
+        header = corpus_chrome_html().header
+
+        assert header.count('lang="en"') == 3
+        for english in ("Acts", "Regulations", "In English"):
+            assert f'lang="en">{english}<' in header
+
+    def test_it_carries_no_per_page_language_switch(self) -> None:
+        """The switch markup is what promises a twin at the other language's
+        URL. A later refactor must not reintroduce it by passing ``/en/`` as
+        ``language_switch_href``, which renders exactly that promise."""
+        header = corpus_chrome_html().header
+
+        assert "<strong>NO</strong>" not in header
+        assert "<strong>EN</strong>" not in header
+        assert ">NO</a>" not in header
+        assert header != chrome_html("nb", "/en/").header
+
+    def test_the_frame_is_norwegian_and_carries_no_status_badge(self) -> None:
+        chrome = corpus_chrome_html()
+
+        assert "Lover" in chrome.header
+        assert "Forskrifter" in chrome.header
+        assert 'href="/"' in chrome.header
+        assert "Inneholder data under <span data-literal>NLOD 2.0</span> fra Lovdata." in (
+            chrome.footer
+        )
+        assert 'class="tag"' not in chrome.header + chrome.footer
+        assert "data-status" not in chrome.header + chrome.footer
+
+    def test_it_adds_no_external_link_asset_or_script(self) -> None:
+        chrome = corpus_chrome_html()
+
+        assert not _EXTERNAL.search(chrome.header + chrome.footer)
+
+    def test_the_only_numerals_are_marked_literals(self) -> None:
+        text = corpus_chrome_html().header + corpus_chrome_html().footer
+        outside = re.sub(r"<span data-literal>[^<]*</span>", "", text)
+
+        assert not re.search(r"\d", outside), outside
+
+    def test_identical_bytes_on_every_call_and_no_fact_in_scope(self) -> None:
+        first, second = corpus_chrome_html(), corpus_chrome_html()
+
+        assert first == second
+        assert first.header.encode("utf-8") == second.header.encode("utf-8")
+        assert "data-fact" not in first.header + first.footer
+        assert "data-kind" not in first.header + first.footer
+
+    def test_the_site_chrome_gains_no_gloss(self) -> None:
+        """Site pages keep today's chrome exactly: their switch is real,
+        because both twins exist, and their labels need no gloss because the
+        English twin is a page of its own."""
+        for lang, href in (("nb", None), ("en", "/status/"), ("nb", "/en/status/")):
+            chrome = chrome_html(lang, href)  # type: ignore[arg-type]
+
+            assert "gloss" not in chrome.header + chrome.footer
+
+
 def _render(path: str) -> str:
     page = next(page for page in emitted_pages() if page.path == path)
     registry = FactRegistry(sources=())
@@ -152,6 +280,23 @@ def _render(path: str) -> str:
 
 
 class TestBaseTemplate:
+    def test_missing_frame_variant_fails_closed(self) -> None:
+        """Every page must explicitly choose the site or corpus frame.
+
+        The new branch must not silently default when a future rendering
+        entry point omits ``corpus``: that would make the navigation depend
+        on Jinja's treatment of an undefined value instead of the route's
+        declared page kind.
+        """
+        page = next(page for page in emitted_pages() if page.path == "/about/")
+        context = page.head_context() | page_globals(
+            page.path, page.lang, FactRegistry(sources=()), FactLedger()
+        )
+        del context["corpus"]
+
+        with pytest.raises(UndefinedError, match="corpus.*undefined"):
+            site_environment().get_template(page.template).render(context)
+
     def test_head_carries_lang_title_description_canonical_and_hreflang_pair(self) -> None:
         html = _render("/about/")
 
