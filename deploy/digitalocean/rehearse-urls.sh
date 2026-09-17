@@ -129,8 +129,9 @@ trap teardown EXIT
 # a dry-run of a configuration this box does not have.
 #
 # READ it, do not source it. It is a systemd EnvironmentFile, not shell: the
-# droplet's value is `lovspor.no, lovspor.bartoszkobylinski.com` unquoted, and a
-# shell sourcing it runs the second name as a command and exits 127 (#260, #298).
+# value is unquoted and may list several names comma-separated, and a shell
+# sourcing it runs the second name as a command and exits 127 (#260, #298 —
+# raised while the droplet still carried the retired personal-domain alias).
 # The last assignment wins and surrounding quotes go, as systemd reads it.
 host_names() {
 	sed -n 's/^LOVSPOR_DOMAIN=//p' "$1" | tail -n 1 \

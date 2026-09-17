@@ -2,10 +2,10 @@
 
 The hosted MCP endpoint moved from the personal-domain alias
 `lovspor.bartoszkobylinski.com` to the canonical `lovspor.no`, mirroring the
-earlier deploy/landing-page rename pinned in test_deploy_landing.py. README.md,
-docs/operations.md and docs/roadmap.md must cite only the canonical host;
-docs/mcp.md is the one place that documents the old alias, and must present it
-as retirable, not as the address to use.
+earlier deploy/landing-page rename pinned in test_deploy_landing.py. The alias
+was retired on 2026-09-17 — dropped from `LOVSPOR_DOMAIN`, its certificate
+removed, and its DNS record deleted — so no document may cite it any more:
+naming it now sends a reader to a host that does not resolve.
 """
 
 from pathlib import Path
@@ -15,6 +15,8 @@ _README = _ROOT / "README.md"
 _MCP_DOC = _ROOT / "docs" / "mcp.md"
 _OPERATIONS_DOC = _ROOT / "docs" / "operations.md"
 _ROADMAP_DOC = _ROOT / "docs" / "roadmap.md"
+_PUBLISH_RELEASE = _ROOT / "deploy" / "digitalocean" / "publish-release.sh"
+_REHEARSE_URLS = _ROOT / "deploy" / "digitalocean" / "rehearse-urls.sh"
 
 _CANONICAL = "https://lovspor.no/mcp"
 _OLD_ALIAS = "lovspor.bartoszkobylinski.com"
@@ -44,14 +46,19 @@ def test_roadmap_doc_hosted_endpoint_uses_the_canonical_host_everywhere() -> Non
     assert _OLD_ALIAS not in text
 
 
-def test_mcp_doc_uses_the_canonical_host_and_flags_the_old_alias_as_retirable() -> None:
+def test_mcp_doc_hosted_endpoint_uses_the_canonical_host() -> None:
     text = _MCP_DOC.read_text(encoding="utf-8")
 
     assert _CANONICAL in text
-    # Unlike the other three docs, mcp.md is the one place that still names
-    # the old alias -- it must frame it as a retirable fallback, never as the
-    # address a reader should copy.
-    assert _OLD_ALIAS in text
-    assert "may be retired without notice" in text
-    assert "use the canonical name" in text
-    assert text.index(_CANONICAL) < text.index(_OLD_ALIAS)
+    # mcp.md used to be the one document allowed to name the alias, on the
+    # grounds that it still resolved. It no longer does, so the exemption is
+    # gone with it and this doc is held to the same rule as the other three.
+    assert _OLD_ALIAS not in text
+
+
+def test_deploy_script_guidance_does_not_name_the_retired_alias() -> None:
+    for script in (_PUBLISH_RELEASE, _REHEARSE_URLS):
+        text = script.read_text(encoding="utf-8")
+
+        assert _OLD_ALIAS not in text, script
+        assert "do not source it" in text, script
