@@ -226,7 +226,8 @@ class TestRegisterSource:
         )
 
         assert result.exit_code == 1
-        assert "already registered" in result.output
+        assert result.stdout == ""
+        assert result.stderr == f"{BAERUM_ID} is already registered; refusing to overwrite it.\n"
         record = read_registry(root / "sources.json").sources[BAERUM_ID]
         assert record.active is True
         assert record.canonical_domain == BAERUM_DOMAIN

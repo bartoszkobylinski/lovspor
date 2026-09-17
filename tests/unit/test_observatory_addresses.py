@@ -142,6 +142,11 @@ class TestSharedAddressesAreFound:
 
         assert [group.address for group in report.shared] == [GRIMSTAD]
         assert [s.authority_id for s in report.shared[0].sources] == ["4202", "4203"]
+        assert [(source.name, source.canonical_domain) for source in report.shared[0].sources] == [
+            ("Grimstad", "grimstad.kommune.no"),
+            ("Arendal", "arendal.kommune.no"),
+        ]
+        assert report.sources[0].hosts[0].host == "grimstad.kommune.no"
 
     def test_an_address_only_one_source_holds_is_not_reported(self) -> None:
         registry = register(
@@ -369,6 +374,7 @@ class TestTheSystemResolver:
         def fake_getaddrinfo(host: str, port: object, **kwargs: object) -> list[tuple]:
             captured["host"] = host
             captured["family"] = kwargs.get("family")
+            captured["proto"] = kwargs.get("proto")
             return [
                 (socket.AF_INET, socket.SOCK_STREAM, 6, "", (GRIMSTAD, 0)),
                 (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:db8::1", 0, 0, 0)),
@@ -377,10 +383,41 @@ class TestTheSystemResolver:
         monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
         assert system_resolver("grimstad.kommune.no") == frozenset({GRIMSTAD, "2001:db8::1"})
+        assert captured["host"] == "grimstad.kommune.no"
         assert captured["family"] is None
+        assert captured["proto"] == socket.IPPROTO_TCP
 
 
 class TestAddressesCommand:
+    def test_shared_address_count_and_members_are_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "observatory"
+        root.mkdir()
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(root))
+        write_registry(
+            register(
+                source("4202", "Grimstad", "grimstad.kommune.no"),
+                source("4203", "Arendal", "arendal.kommune.no"),
+            ),
+            root / "sources.json",
+        )
+        table = {
+            "grimstad.kommune.no": {GRIMSTAD},
+            "www.grimstad.kommune.no": {GRIMSTAD},
+            "arendal.kommune.no": {GRIMSTAD},
+            "www.arendal.kommune.no": {GRIMSTAD},
+        }
+        monkeypatch.setattr(observatory_commands, "system_resolver", resolver_for(table))
+
+        result = runner.invoke(app, ["observatory", "addresses"])
+
+        assert result.exit_code == 0, result.output
+        assert "addresses shared by more than one source: 1\n" in result.output
+        assert f"  {GRIMSTAD}  2 sources (2 active)\n" in result.output
+        assert "    4202  Grimstad  grimstad.kommune.no\n" in result.output
+        assert "    4203  Arendal  arendal.kommune.no\n" in result.output
+
     def test_an_empty_register_is_reported_without_resolving(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
