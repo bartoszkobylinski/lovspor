@@ -21,13 +21,17 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 import lovspor.observatory.commands as observatory_commands
+import lovspor.observatory.registry_commands as observatory_registry_commands
+import lovspor.observatory.registry_io as observatory_registry_io
 from lovspor.cli import app
 from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
+from lovspor.observatory.addresses import SharedAddress, SourceAddresses
 from lovspor.observatory.commands import (
     _capture_candidates,
     _echo_cadence,
     _echo_last_sweep,
+    _echo_shared_group,
     _echo_sources,
     _entry_points,
     _hm,
@@ -224,7 +228,8 @@ class TestRegisterSource:
         )
 
         assert result.exit_code == 1
-        assert "already registered" in result.output
+        assert result.stdout == ""
+        assert result.stderr == f"{BAERUM_ID} is already registered; refusing to overwrite it.\n"
         record = read_registry(root / "sources.json").sources[BAERUM_ID]
         assert record.active is True
         assert record.canonical_domain == BAERUM_DOMAIN
@@ -3671,6 +3676,25 @@ class TestNightly:
         assert httpx_mock.get_requests() == []
 
 
+class TestAddressReport:
+    def test_inactive_shared_source_uses_the_exact_operator_label(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        source = SourceAddresses(
+            authority_id="3201",
+            name="Bærum",
+            canonical_domain="baerum.kommune.no",
+            active=False,
+            hosts=(),
+        )
+
+        _echo_shared_group(SharedAddress(address="192.0.2.1", sources=(source,)))
+
+        assert capsys.readouterr().out == (
+            "\n  192.0.2.1  1 sources (0 active)\n    3201  Bærum  baerum.kommune.no  [inactive]\n"
+        )
+
+
 class TestStatus:
     def test_status_sections_render_the_complete_operator_report(
         self, capsys: pytest.CaptureFixture[str]
@@ -4537,7 +4561,7 @@ class TestReplaceSourceDomain:
         decision fails, the old clearance must not remain live."""
         _activate(root)
         monkeypatch.setattr(
-            observatory_commands,
+            observatory_registry_commands,
             "append_source_event",
             Mock(side_effect=OSError("archive unavailable")),
         )
@@ -4568,11 +4592,11 @@ class TestReplaceSourceDomain:
         _activate(root)
         append = Mock()
         monkeypatch.setattr(
-            observatory_commands,
+            observatory_registry_io,
             "write_registry",
             Mock(side_effect=OSError("registry unavailable")),
         )
-        monkeypatch.setattr(observatory_commands, "append_source_event", append)
+        monkeypatch.setattr(observatory_registry_commands, "append_source_event", append)
 
         result = self._replace()
 
