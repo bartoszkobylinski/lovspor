@@ -49,8 +49,9 @@ cd /
 # the release commands do not, the placeholder expands to nothing, the site
 # block parses as a global options block, and validation fails. Read the same
 # file Caddy does — but READ it, do not source it: it is a systemd
-# EnvironmentFile whose value is `lovspor.no, lovspor.bartoszkobylinski.com`
-# unquoted; a shell would run the second word as a command (seen 2026-09-08).
+# EnvironmentFile, so its value is unquoted and may list several names
+# comma-separated; a shell would run the second word as a command (seen
+# 2026-09-08, when the value still carried the retired personal-domain alias).
 if [ -z "${LOVSPOR_DOMAIN:-}" ] && [ -r /etc/default/caddy-lovspor ]; then
 	LOVSPOR_DOMAIN="$(sed -n 's/^LOVSPOR_DOMAIN=//p' /etc/default/caddy-lovspor | tail -n 1 | sed 's/^"\(.*\)"$/\1/')"
 fi
