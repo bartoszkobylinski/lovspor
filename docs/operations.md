@@ -540,6 +540,39 @@ counted as failures there, but they were not mentioned either, and the pass
 that stops calling them failures must not be the pass that stops mentioning
 them.
 
+### Which sources share a server: `observatory addresses`
+
+The politeness budget is a promise to whoever operates a machine, but the
+fetcher enforces it per *host*. Two municipalities on one server therefore hold
+two independent budgets and the sweep hits that machine at twice the rate it
+believes it is holding to — `grimstad.kommune.no` and `arendal.kommune.no` are
+one such pair (issue #277).
+
+This command does not change the keying. It answers the question that comes
+first: how much of the register actually shares an address today.
+
+```bash
+uv run lovspor observatory addresses
+```
+
+Read it before deciding what the budget should key on. Keying on the resolved
+address is an improvement for a pair on one box and a disaster for a vendor
+platform: Norwegian municipalities sit behind shared suppliers (#194 counts
+twelve on ACOS alone), and one budget per address would collapse a whole
+population into a single queue and turn a 20-hour sweep into a week of them.
+The group sizes are the finding — a group of two and a group of twelve are the
+same count and call for opposite decisions.
+
+The hosts resolved for a source are the ones the register implies: the
+canonical domain, its `www.` form, and the host of every declared listing entry
+point. Discovery can still reach another subdomain inside the cleared domain
+and this cannot see those — the register does not record them.
+
+A host that does not resolve is reported with its reason rather than raised
+past, so one retired domain does not end the pass. The command reports and
+exits 0 either way: a shared address is a fact about the register, not a defect
+in it.
+
 ### What a capture costs the machine it runs on
 
 Before it fetches anything, `capture` reads the observation log once to learn

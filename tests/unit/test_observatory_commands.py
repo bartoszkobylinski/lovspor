@@ -21,6 +21,8 @@ from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 import lovspor.observatory.commands as observatory_commands
+import lovspor.observatory.registry_commands as observatory_registry_commands
+import lovspor.observatory.registry_io as observatory_registry_io
 from lovspor.cli import app
 from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
@@ -4537,7 +4539,7 @@ class TestReplaceSourceDomain:
         decision fails, the old clearance must not remain live."""
         _activate(root)
         monkeypatch.setattr(
-            observatory_commands,
+            observatory_registry_commands,
             "append_source_event",
             Mock(side_effect=OSError("archive unavailable")),
         )
@@ -4568,11 +4570,11 @@ class TestReplaceSourceDomain:
         _activate(root)
         append = Mock()
         monkeypatch.setattr(
-            observatory_commands,
+            observatory_registry_io,
             "write_registry",
             Mock(side_effect=OSError("registry unavailable")),
         )
-        monkeypatch.setattr(observatory_commands, "append_source_event", append)
+        monkeypatch.setattr(observatory_registry_commands, "append_source_event", append)
 
         result = self._replace()
 
