@@ -7,19 +7,30 @@ zone file, and it fails for reasons no change in this repository caused.
 
 import socket
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
+import lovspor.observatory.commands as observatory_commands
+from lovspor.cli import app
 from lovspor.observatory.addresses import (
     Resolver,
     hosts_for,
     resolve_register,
     system_resolver,
 )
-from lovspor.observatory.registry import AccessPolicyCheck, SourceRecord, SourceRegistry
+from lovspor.observatory.registry import (
+    AccessPolicyCheck,
+    SourceRecord,
+    SourceRegistry,
+    write_registry,
+)
+from lovspor.observatory.storage import ENV_OBSERVATORY_ROOT
 
 GRIMSTAD = "176.221.90.98"
 OSLO = "203.0.113.7"
+runner = CliRunner()
 
 
 def cleared(domain: str) -> AccessPolicyCheck:
@@ -193,6 +204,26 @@ class TestSharedAddressesAreFound:
             (GRIMSTAD, 2),
         ]
 
+    def test_equally_busy_addresses_are_ordered_by_address(self) -> None:
+        """The report is stable when two groups have the same size."""
+        registry = register(
+            source("1", "A", "a.example.invalid"),
+            source("2", "B", "b.example.invalid"),
+            source("3", "C", "c.example.invalid"),
+            source("4", "D", "d.example.invalid"),
+        )
+        table = {
+            "a.example.invalid": {GRIMSTAD},
+            "b.example.invalid": {GRIMSTAD},
+            "c.example.invalid": {OSLO},
+            "d.example.invalid": {OSLO},
+        }
+        table.update({f"www.{host}": addresses for host, addresses in table.items()})
+
+        report = resolve_register(registry, resolver_for(table))
+
+        assert [group.address for group in report.shared] == [GRIMSTAD, OSLO]
+
 
 class TestTheHeadlineCountsOnlyActiveSources:
     def test_an_inactive_neighbour_does_not_make_a_source_share_a_budget(self) -> None:
@@ -347,3 +378,44 @@ class TestTheSystemResolver:
 
         assert system_resolver("grimstad.kommune.no") == frozenset({GRIMSTAD, "2001:db8::1"})
         assert captured["family"] is None
+
+
+class TestAddressesCommand:
+    def test_an_empty_register_is_reported_without_resolving(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "observatory"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(root))
+
+        def unexpected_resolution(host: str) -> frozenset[str]:
+            pytest.fail(f"unexpected DNS lookup for {host}")
+
+        monkeypatch.setattr(observatory_commands, "system_resolver", unexpected_resolution)
+
+        result = runner.invoke(app, ["observatory", "addresses"])
+
+        assert result.exit_code == 0, result.output
+        assert result.output == "No sources registered.\n"
+
+    def test_unresolved_hosts_are_reported_and_do_not_fail_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "observatory"
+        root.mkdir()
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(root))
+        write_registry(
+            register(source("5612", "Nowhere", "gone.example.invalid")),
+            root / "sources.json",
+        )
+        monkeypatch.setattr(observatory_commands, "system_resolver", resolver_for({}))
+
+        result = runner.invoke(app, ["observatory", "addresses"])
+
+        assert result.exit_code == 0, result.output
+        assert "registered sources: 1  (active: 1)" in result.output
+        assert (
+            "active sources sharing an address with another active source: 0 of 1" in result.output
+        )
+        assert "sources with a host that did not resolve: 1" in result.output
+        assert "5612  gone.example.invalid:" in result.output
+        assert "5612  www.gone.example.invalid:" in result.output
