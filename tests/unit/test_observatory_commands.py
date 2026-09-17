@@ -26,10 +26,12 @@ import lovspor.observatory.registry_io as observatory_registry_io
 from lovspor.cli import app
 from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
+from lovspor.observatory.addresses import SharedAddress, SourceAddresses
 from lovspor.observatory.commands import (
     _capture_candidates,
     _echo_cadence,
     _echo_last_sweep,
+    _echo_shared_group,
     _echo_sources,
     _entry_points,
     _hm,
@@ -3672,6 +3674,25 @@ class TestNightly:
         assert result.exit_code == 1
         assert isinstance(result.exception, RuntimeError)
         assert httpx_mock.get_requests() == []
+
+
+class TestAddressReport:
+    def test_inactive_shared_source_uses_the_exact_operator_label(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        source = SourceAddresses(
+            authority_id="3201",
+            name="Bærum",
+            canonical_domain="baerum.kommune.no",
+            active=False,
+            hosts=(),
+        )
+
+        _echo_shared_group(SharedAddress(address="192.0.2.1", sources=(source,)))
+
+        assert capsys.readouterr().out == (
+            "\n  192.0.2.1  1 sources (0 active)\n    3201  Bærum  baerum.kommune.no  [inactive]\n"
+        )
 
 
 class TestStatus:
