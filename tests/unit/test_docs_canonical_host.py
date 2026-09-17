@@ -15,6 +15,8 @@ _README = _ROOT / "README.md"
 _MCP_DOC = _ROOT / "docs" / "mcp.md"
 _OPERATIONS_DOC = _ROOT / "docs" / "operations.md"
 _ROADMAP_DOC = _ROOT / "docs" / "roadmap.md"
+_PUBLISH_RELEASE = _ROOT / "deploy" / "digitalocean" / "publish-release.sh"
+_REHEARSE_URLS = _ROOT / "deploy" / "digitalocean" / "rehearse-urls.sh"
 
 _CANONICAL = "https://lovspor.no/mcp"
 _OLD_ALIAS = "lovspor.bartoszkobylinski.com"
@@ -52,3 +54,11 @@ def test_mcp_doc_hosted_endpoint_uses_the_canonical_host() -> None:
     # grounds that it still resolved. It no longer does, so the exemption is
     # gone with it and this doc is held to the same rule as the other three.
     assert _OLD_ALIAS not in text
+
+
+def test_deploy_script_guidance_does_not_name_the_retired_alias() -> None:
+    for script in (_PUBLISH_RELEASE, _REHEARSE_URLS):
+        text = script.read_text(encoding="utf-8")
+
+        assert _OLD_ALIAS not in text, script
+        assert "do not source it" in text, script
