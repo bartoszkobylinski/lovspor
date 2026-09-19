@@ -206,6 +206,17 @@ class RobotsGate:
         parser = self._parser_for(url)
         return False if parser is None else parser.can_fetch(user_agent, url)
 
+    def readable(self, url: str) -> bool:
+        """Whether this host published rules that could be read at all.
+
+        ``allows`` answers False both for a policy that refuses and for one that
+        could not be read. For capture that conflation is correct — both mean
+        *do not fetch*. For a survey of hosts nothing has cleared yet it is not:
+        a refusal is the site's decision and an unreadable policy is a fact
+        about a bad afternoon, and only the first is worth a human's time.
+        """
+        return self._parser_for(url) is not None
+
     def sitemaps(self, url: str) -> tuple[str, ...]:
         """The sitemaps the host declares in its own ``robots.txt``.
 
