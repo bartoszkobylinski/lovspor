@@ -26,7 +26,7 @@ from lovspor.github_output import append_step_summary, set_output
 from lovspor.mcp import HttpConfig
 from lovspor.mcp import serve as _mcp_serve
 from lovspor.mcp import serve_http as _mcp_serve_http
-from lovspor.observatory.commands import observatory_app
+from lovspor.observatory.entrypoint import observatory_app
 from lovspor.publish.check import check_release
 from lovspor.publish.emit import emit_site
 from lovspor.publish.inventory import PublishError
