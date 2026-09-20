@@ -7,15 +7,25 @@ printed a table would repeat that.
 """
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 from pytest_httpx import HTTPXMock
 from typer.testing import CliRunner
 
 from lovspor.cli import app
-from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT
-from lovspor.observatory.survey_commands import DEFAULT_DELAY_SECONDS
+from lovspor.observatory.storage import ENV_CORPUS_ROOT, ENV_OBSERVATORY_ROOT, ObservatoryRoot
+from lovspor.observatory.survey import RobotsReadout, read_site_shape
+from lovspor.observatory.survey_commands import (
+    DEFAULT_DELAY_SECONDS,
+    _domains,
+    _run_name,
+    _survey_path,
+    _tally,
+    _write,
+)
 
 runner = CliRunner()
 
@@ -190,6 +200,19 @@ class TestWhatItReports:
 
 
 class TestWhereTheListComesFrom:
+    def test_indented_comments_are_not_domains(self, tmp_path: Path) -> None:
+        listing = tmp_path / "domains.txt"
+        listing.write_text("   # operator note\nexample.invalid\n", encoding="utf-8")
+
+        assert _domains(None, listing) == [DOMAIN]
+
+    def test_domain_lists_are_explicitly_read_as_utf8(self) -> None:
+        listing = Mock(spec=Path)
+        listing.read_text.return_value = DOMAIN
+
+        assert _domains(None, listing) == [DOMAIN]
+        listing.read_text.assert_called_once_with(encoding="utf-8")
+
     def test_a_file_of_domains_is_accepted_because_358_do_not_fit_on_a_command_line(
         self, root: Path, tmp_path: Path, httpx_mock: HTTPXMock
     ) -> None:
@@ -271,3 +294,83 @@ class TestPoliteness:
     def test_the_delay_defaults_to_the_limit_every_source_was_cleared_with(self) -> None:
         """Passing --delay 0 everywhere else in this file must stay a test-only act."""
         assert DEFAULT_DELAY_SECONDS == 7.0
+
+
+class TestSurveyHelpers:
+    def test_default_run_name_is_a_utc_timestamp(self) -> None:
+        instant = datetime(2026, 9, 20, 12, 34, 56, tzinfo=UTC)
+        clock = Mock()
+        clock.now.return_value = instant
+
+        with patch("lovspor.observatory.survey_commands.datetime", clock):
+            assert _run_name(None) == "20260920T123456Z"
+
+        clock.now.assert_called_once_with(UTC)
+
+    def test_invalid_run_name_explains_the_allowed_characters(self, root: Path) -> None:
+        result = runner.invoke(
+            app, ["observatory", "survey", "--domain", DOMAIN, "--run-id", "bad/name"]
+        )
+
+        assert result.exit_code == 2
+        assert (
+            "Letters, digits, dot, dash and underscore, starting with a letter or digit."
+            in result.stderr
+        )
+
+    def test_survey_path_creates_missing_parents_and_is_idempotent(self, tmp_path: Path) -> None:
+        root_path = tmp_path / "missing" / "archive"
+        root = ObservatoryRoot(root_path, forbidden=[])
+
+        expected = root_path / "survey" / "run.jsonl"
+        assert _survey_path(root, "run") == expected
+        assert _survey_path(root, "run") == expected
+
+    def test_jsonl_is_utf8_and_keeps_non_ascii_text(self, tmp_path: Path) -> None:
+        shape = read_site_shape(
+            domain="ø.example",
+            robots=RobotsReadout(readable=True, allows_root=False),
+            conventional_sitemap=False,
+            front_page=b"",
+        )
+        output = tmp_path / "survey.jsonl"
+
+        _write(output, [shape])
+
+        raw = output.read_bytes()
+        assert b"\\u00f8" not in raw
+        assert json.loads(raw.decode("utf-8"))["domain"] == "ø.example"
+
+    def test_jsonl_file_is_explicitly_opened_as_utf8(self) -> None:
+        path = Mock(spec=Path)
+        path.open.return_value = MagicMock()
+        handle = path.open.return_value.__enter__.return_value
+
+        _write(path, [])
+
+        path.open.assert_called_once_with("a", encoding="utf-8")
+        handle.write.assert_not_called()
+
+    def test_write_requests_json_compatible_model_values(self, tmp_path: Path) -> None:
+        shape = Mock()
+        shape.model_dump.return_value = {"domain": DOMAIN}
+
+        _write(tmp_path / "survey.jsonl", [shape])
+
+        shape.model_dump.assert_called_once_with(mode="json")
+
+    def test_tally_is_sorted_by_count_then_entry_name(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        shapes = [Mock(entry="z"), Mock(entry="a"), Mock(entry="z"), Mock(entry="b")]
+
+        _tally(shapes)
+
+        assert capsys.readouterr().out.splitlines() == ["  z: 2", "  a: 1", "  b: 1"]
+
+    def test_refusals_are_written_to_stderr(self, root: Path) -> None:
+        result = runner.invoke(app, ["observatory", "survey"])
+
+        assert result.exit_code == 2
+        assert "no domains" in result.stderr.lower()
+        assert result.stdout == ""

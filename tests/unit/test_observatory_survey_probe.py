@@ -10,6 +10,8 @@ every registered source was cleared with, which is the conservative direction:
 a recon pass must not be more aggressive than the capture it is scouting for.
 """
 
+from unittest.mock import Mock, patch
+
 import httpx
 import pytest
 from pytest_httpx import HTTPXMock
@@ -46,6 +48,13 @@ def client() -> httpx.Client:
 
 
 class TestWhatLeavesTheMachine:
+    def test_first_request_does_not_sleep(self, client: httpx.Client) -> None:
+        probe = _probe(client)
+
+        probe._wait()
+
+        assert probe.slept == []  # type: ignore[attr-defined]
+
     def test_robots_is_read_first_and_nothing_else_is_touched_when_it_refuses(
         self, client: httpx.Client, httpx_mock: HTTPXMock
     ) -> None:
@@ -228,6 +237,79 @@ class TestWhenTheHostMisbehaves:
 
         assert shape.entry == "conventional_sitemap"
         assert shape.front_page_markers == ()
+
+    def test_non_ok_and_transport_errors_return_an_empty_body(self, client: httpx.Client) -> None:
+        response = Mock(status_code=httpx.codes.NOT_FOUND)
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        stream = Mock(return_value=response)
+        probe = SiteProbe(client, ProbeSettings(delay_seconds=0))
+        probe._client = Mock(stream=stream)
+
+        assert probe._body(FRONT, 100) == b""
+
+        probe._client.stream.side_effect = httpx.ConnectError("no route")
+        assert probe._body(FRONT, 100) == b""
+
+
+class TestConfigurationPropagation:
+    def test_timeout_is_passed_to_robots_and_document_requests(self, client: httpx.Client) -> None:
+        settings = ProbeSettings(timeout_seconds=3.25, delay_seconds=0)
+        probe = SiteProbe(client, settings)
+        gate = Mock()
+        gate.readable.return_value = False
+        gate.allows.return_value = False
+        gate.sitemaps.return_value = ()
+
+        with patch("lovspor.observatory.survey_probe.RobotsGate", return_value=gate) as gate_type:
+            probe.read(DOMAIN)
+
+        assert gate_type.call_args.args[1].timeout_seconds == 3.25
+
+    def test_user_agent_is_used_for_robots_permission_checks(self, client: httpx.Client) -> None:
+        probe = SiteProbe(client, ProbeSettings(user_agent="survey-agent", delay_seconds=0))
+        gate = Mock()
+        gate.readable.return_value = True
+        gate.allows.return_value = True
+        gate.sitemaps.return_value = ()
+
+        probe._robots(gate, FRONT)
+
+        gate.allows.assert_called_once_with(FRONT, "survey-agent")
+
+    def test_discovery_permission_and_parser_receive_the_requested_url(
+        self, client: httpx.Client
+    ) -> None:
+        probe = SiteProbe(client, ProbeSettings(user_agent="survey-agent", delay_seconds=0))
+        probe._body = Mock(return_value=SITEMAP_XML)  # type: ignore[method-assign]
+        gate = Mock()
+        gate.allows.return_value = True
+        robots = Mock(declared_sitemaps=())
+
+        with patch("lovspor.observatory.survey_probe.parse_discovery_document") as parse:
+            assert probe._serves_discovery_document(gate, FRONT, robots) is True
+
+        gate.allows.assert_called_once_with(SITEMAP, "survey-agent")
+        parse.assert_called_once_with(SITEMAP_XML, SITEMAP)
+
+    def test_document_request_carries_get_user_agent_and_timeout(
+        self, client: httpx.Client
+    ) -> None:
+        response = Mock(status_code=httpx.codes.OK)
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.iter_bytes.return_value = [b"body"]
+        stream = Mock(return_value=response)
+        probe = SiteProbe(
+            Mock(stream=stream),
+            ProbeSettings(user_agent="survey-agent", timeout_seconds=3.25, delay_seconds=0),
+        )
+
+        assert probe._body(FRONT, 100) == b"body"
+        args, kwargs = stream.call_args
+        assert (args[0].upper(), args[1]) == ("GET", FRONT)
+        assert httpx.Headers(kwargs["headers"])["user-agent"] == "survey-agent"
+        assert kwargs["timeout"] == 3.25
 
     def test_a_front_page_that_times_out_with_no_sitemap_needs_a_human(
         self, client: httpx.Client, httpx_mock: HTTPXMock
