@@ -267,5 +267,22 @@ class TestPoliteness:
 
         assert probe.slept == [7.0, 7.0]  # type: ignore[attr-defined]
 
+    def test_a_new_host_does_not_inherit_the_previous_hosts_delay(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        """Spacing is per host; beginning the next host owes no delay."""
+        other = "other.invalid"
+        for domain in (DOMAIN, other):
+            httpx_mock.add_response(
+                url=f"https://{domain}/robots.txt",
+                text="User-agent: *\nDisallow: /\n",
+            )
+        probe = _probe(client)
+
+        probe.read(DOMAIN)
+        probe.read(other)
+
+        assert probe.slept == []  # type: ignore[attr-defined]
+
     def test_the_default_delay_matches_the_cleared_limit(self) -> None:
         assert ProbeSettings().delay_seconds == 7.0

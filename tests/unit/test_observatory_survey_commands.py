@@ -205,6 +205,36 @@ class TestWhereTheListComesFrom:
         assert result.exit_code == 0
         assert [row["domain"] for row in _rows(root)] == [DOMAIN, OTHER]
 
+    def test_duplicates_across_arguments_and_the_file_are_probed_once(
+        self, root: Path, tmp_path: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The persisted population and request cost both use unique hosts."""
+        listing = tmp_path / "domains.txt"
+        listing.write_text(f"{DOMAIN}\n{OTHER}\n{DOMAIN}\n", encoding="utf-8")
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+        _allow(httpx_mock, OTHER, "User-agent: *\nDisallow: /\n")
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "survey",
+                "--domain",
+                DOMAIN,
+                "--from",
+                str(listing),
+                "--delay",
+                "0",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert [row["domain"] for row in _rows(root)] == [DOMAIN, OTHER]
+        assert [str(request.url) for request in httpx_mock.get_requests()] == [
+            f"https://{DOMAIN}/robots.txt",
+            f"https://{OTHER}/robots.txt",
+        ]
+
     def test_a_blank_and_commented_file_is_a_refusal_not_an_empty_survey(
         self, root: Path, tmp_path: Path
     ) -> None:
