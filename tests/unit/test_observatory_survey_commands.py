@@ -81,6 +81,71 @@ class TestWhatTheRunLeavesBehind:
 
         assert (root / "survey" / "first.jsonl").exists()
 
+    def test_a_run_name_cannot_move_the_log_out_of_the_survey_directory(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A run id names a file. It is not a path and may not act like one.
+
+        Found by the Codex test author on PR #353: interpolating `--run-id`
+        straight into a path wrote `<root>/survey/../escaped.jsonl`, and a longer
+        climb left the archive altogether — the ADR-0010 §5 boundary reached
+        through an argument rather than through the env var the boundary type
+        guards.
+        """
+        result = runner.invoke(
+            app,
+            ["observatory", "survey", "--domain", DOMAIN, "--delay", "0", "--run-id", "../escaped"],
+        )
+
+        assert result.exit_code == 2
+        assert list(root.glob("*.jsonl")) == []
+        assert not (root / "survey").exists()
+
+    @pytest.mark.parametrize(
+        "run_id",
+        ["../escaped", "../../../../tmp/escaped", "/absolute", "sub/dir", "..", ".hidden", ""],
+    )
+    def test_a_run_id_that_could_behave_like_a_path_is_refused(
+        self, root: Path, run_id: str
+    ) -> None:
+        result = runner.invoke(
+            app, ["observatory", "survey", "--domain", DOMAIN, "--delay", "0", "--run-id", run_id]
+        )
+
+        assert result.exit_code == 2
+        assert "plain file name" in result.output
+
+    def test_the_refusal_costs_no_requests_because_it_happens_before_probing(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A bad argument must not be paid for in requests to 358 municipalities."""
+        runner.invoke(
+            app,
+            ["observatory", "survey", "--domain", DOMAIN, "--delay", "0", "--run-id", "../escaped"],
+        )
+
+        assert httpx_mock.get_requests() == []
+
+    def test_an_ordinary_dated_name_is_accepted(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "survey",
+                "--domain",
+                DOMAIN,
+                "--delay",
+                "0",
+                "--run-id",
+                "2026-09-19-all.v2_final",
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert (root / "survey" / "2026-09-19-all.v2_final.jsonl").exists()
+
     def test_the_archive_boundary_is_enforced_not_assumed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

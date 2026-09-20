@@ -17,9 +17,10 @@ invariant that every authority id in the observation log is a registered one.
 """
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import httpx
 import typer
@@ -30,6 +31,10 @@ from lovspor.observatory.survey import SiteShape
 from lovspor.observatory.survey_probe import DEFAULT_DELAY_SECONDS, ProbeSettings, SiteProbe
 
 SURVEY_DIRNAME = "survey"
+
+#: A run id is a file name. Separators, a leading dot and anything else that
+#: could make it behave like a path are refused rather than rewritten.
+_RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def _domains(named: list[str] | None, listing: Path | None) -> list[str]:
@@ -48,10 +53,34 @@ def _domains(named: list[str] | None, listing: Path | None) -> list[str]:
     return list(dict.fromkeys(collected))
 
 
-def _survey_path(root: ObservatoryRoot, run_id: str) -> Path:
+def _run_name(value: str | None) -> str:
+    """The log's file name: what was asked for, or a UTC stamp.
+
+    A run id names a file; it is not a path, and it may not act like one.
+    Interpolating it straight into one let ``--run-id ../escaped`` write outside
+    ``survey/``, and a longer climb outside the archive altogether — the
+    ADR-0010 §5 boundary, reached through an operator's argument rather than
+    through the env var the boundary type guards.
+
+    Refused by pattern rather than sanitised: quietly rewriting the name that
+    was asked for means the file the operator goes looking for later is not the
+    file that was written. Checked before any host is probed, so a bad argument
+    costs no requests.
+    """
+    if value is None:
+        return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    if not _RUN_ID_PATTERN.fullmatch(value):
+        _refuse(
+            f"Refused: --run-id must be a plain file name, got {value!r}. "
+            "Letters, digits, dot, dash and underscore, starting with a letter or digit."
+        )
+    return value
+
+
+def _survey_path(root: ObservatoryRoot, run_name: str) -> Path:
     directory = root.path / SURVEY_DIRNAME
     directory.mkdir(parents=True, exist_ok=True)
-    return directory / f"{run_id}.jsonl"
+    return directory / f"{run_name}.jsonl"
 
 
 def _write(path: Path, shapes: list[SiteShape]) -> None:
@@ -68,7 +97,7 @@ def _tally(shapes: list[SiteShape]) -> None:
         typer.echo(f"  {entry}: {count}")
 
 
-def _refuse(message: str) -> None:
+def _refuse(message: str) -> NoReturn:
     typer.echo(message, err=True)
     raise typer.Exit(2)
 
@@ -102,6 +131,7 @@ def survey(
     if not hosts:
         _refuse("Refused: no domains to survey; pass --domain or --from.")
     root = _root()
+    run_name = _run_name(run_id)
     shapes: list[SiteShape] = []
     with httpx.Client() as client:
         probe = SiteProbe(client, ProbeSettings(delay_seconds=delay))
@@ -109,7 +139,7 @@ def survey(
             shape = probe.read(host)
             typer.echo(f"{shape.entry:22} {host}")
             shapes.append(shape)
-    path = _survey_path(root, run_id or datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
+    path = _survey_path(root, run_name)
     _write(path, shapes)
     typer.echo(f"\n{len(shapes)} host(s) surveyed, written to {path}")
     _tally(shapes)
