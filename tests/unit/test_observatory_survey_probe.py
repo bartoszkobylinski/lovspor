@@ -167,6 +167,31 @@ class TestWhatCountsAsASitemapAtTheConventionalPath:
         assert shape.entry == "no_machine_index"
         assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS, FRONT]
 
+    def test_a_site_with_a_sitemap_still_has_its_markers_recorded(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        """The front page is read even once a sitemap settles the entry.
+
+        Pinning the design the Codex test author argued against on PR #353: it
+        proposed skipping this request, since the entry is already decided. The
+        entry is — but the markers are evidence about the host, not a tiebreaker.
+        Issue #332 measured 54% of captured regulation pages carrying under 300
+        characters, so a site can serve a sitemap *and* assemble its content in
+        the browser, and a row that says both is what tells a planner the index
+        may be a shell. Dropping the request would mean re-probing every host
+        later to learn what this pass could have recorded.
+        """
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP, content=SITEMAP_XML)
+        httpx_mock.add_response(
+            url=FRONT, content=b'<html><script src="/api/presentation/x"></script></html>'
+        )
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert shape.entry == "conventional_sitemap"
+        assert shape.front_page_markers == ("/api/presentation/",)
+
     def test_a_sitemap_the_site_declares_is_not_re_fetched_at_the_conventional_path(
         self, client: httpx.Client, httpx_mock: HTTPXMock
     ) -> None:

@@ -1,9 +1,23 @@
 """Ask one host what it offers a crawler, before anything registers it.
 
 Three requests at most — ``robots.txt``, the conventional ``/sitemap.xml``, the
-front page — and fewer when the answer is already decided. What the results
-*mean* is :mod:`lovspor.observatory.survey`'s question; this module only goes
-and gets them.
+front page. What the results *mean* is :mod:`lovspor.observatory.survey`'s
+question; this module only goes and gets them.
+
+**Which requests are skipped, and which are not.** A policy that cannot be read
+or that refuses the root ends the probe: the rest would be impolite as well as
+pointless. A site that *declares* a sitemap is not asked for the conventional
+one, because that answer cannot change the entry.
+
+The front page is read whenever the root is allowed, **including when a sitemap
+was already found** — the one request a stricter reading would drop. It is kept
+because the markers are evidence about the host rather than a tiebreaker for the
+entry: issue #332 measured 54% of captured regulation pages carrying under 300
+characters, so a site can serve a sitemap *and* assemble its content in the
+browser. A row saying "has a sitemap, and also looks browser-assembled" is what
+tells a planner the index may be a shell; the entry alone cannot say it. The cost
+is one GET per host against a survey that runs once, and the alternative is
+re-probing every host later to learn something this pass could have recorded.
 
 **This is not a hole in the activation gate.** ADR-0010 §4 gates *capture*, and
 :class:`~lovspor.observatory.fetch.Fetcher` enforces it. Reading a site's own
