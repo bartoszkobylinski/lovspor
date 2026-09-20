@@ -102,6 +102,25 @@ class TestWhatLeavesTheMachine:
         assert {r.headers.get("user-agent") for r in ours} == {SURVEY_USER_AGENT}
         assert "lovspor.no/observatory" in SURVEY_USER_AGENT
 
+    def test_rules_written_for_this_crawler_by_name_are_the_ones_applied(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        """The probe presents its own identity to the rule matcher, not nothing.
+
+        A site that blocks `lovspor-observatory` while allowing everyone else is
+        the case that separates the two: matching on the declared agent refuses,
+        matching on nothing takes the `*` block and proceeds.
+        """
+        httpx_mock.add_response(
+            url=ROBOTS,
+            text="User-agent: lovspor-observatory\nDisallow: /\n\nUser-agent: *\nAllow: /\n",
+        )
+
+        shape = _probe(client).read(DOMAIN)
+
+        assert shape.entry == "robots_disallowed"
+        assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS]
+
     def test_the_robots_fetch_is_still_anonymous_which_is_issue_350(
         self, client: httpx.Client, httpx_mock: HTTPXMock
     ) -> None:
@@ -365,6 +384,20 @@ class TestPoliteness:
         probe.read(other)
 
         assert probe.slept == []  # type: ignore[attr-defined]
+
+    def test_the_configured_timeout_travels_with_every_request(
+        self, client: httpx.Client, httpx_mock: HTTPXMock
+    ) -> None:
+        """A recon pass over hundreds of hosts cannot hang on one of them."""
+        httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nAllow: /\n")
+        httpx_mock.add_response(url=SITEMAP, status_code=404)
+        httpx_mock.add_response(url=FRONT, content=b"<html></html>")
+
+        SiteProbe(client, ProbeSettings(sleep=lambda _: None, timeout_seconds=4.5)).read(DOMAIN)
+
+        timeouts = [request.extensions.get("timeout") for request in httpx_mock.get_requests()]
+        expected = {"connect": 4.5, "read": 4.5, "write": 4.5, "pool": 4.5}
+        assert all(timeout == expected for timeout in timeouts), timeouts
 
     def test_the_default_delay_matches_the_cleared_limit(self) -> None:
         assert ProbeSettings().delay_seconds == 7.0

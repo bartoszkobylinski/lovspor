@@ -122,10 +122,14 @@ class SiteProbe:
         page, and reading such a page as an index is how a crawler ends up
         following a 404's navigation. The parser discovery itself uses decides.
         """
-        if robots.declared_sitemaps:
-            return False
         url = f"{base}{SITEMAP_PATH}"
-        if not gate.allows(url, self._settings.user_agent):
+        # One statement for both refusals on purpose. As two, the second was a
+        # `return False` textually identical to the first, and the equivalents
+        # register (issue #122) matches on the mutation's lines — so registering
+        # the unkillable one would have waived the killable one with it.
+        # Short-circuit order matters: a declared sitemap answers without asking
+        # robots about a path nothing is going to request.
+        if robots.declared_sitemaps or not gate.allows(url, self._settings.user_agent):
             return False
         payload = self._body(url, DEFAULT_MAX_BYTES)
         try:

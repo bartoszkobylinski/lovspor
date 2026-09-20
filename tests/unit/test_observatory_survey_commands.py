@@ -7,6 +7,8 @@ printed a table would repeat that.
 """
 
 import json
+import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
@@ -168,6 +170,101 @@ class TestWhatTheRunLeavesBehind:
         assert "observatory archive" in result.output
 
 
+class TestTheLogOnDisk:
+    """Properties of the written file, found by surviving mutants on PR #353."""
+
+    def test_norwegian_characters_are_written_as_themselves_not_escaped(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A row a person greps for `kunngjøring` has to contain it.
+
+        `ensure_ascii=True` would write `\\u00f8` — valid JSON that no reader of
+        this archive would think to search for.
+        """
+        _allow(
+            httpx_mock,
+            DOMAIN,
+            "User-agent: *\nAllow: /\nSitemap: https://example.invalid/kunngjøring.xml\n",
+        )
+        httpx_mock.add_response(url=f"https://{DOMAIN}/", content=b"<html></html>")
+
+        runner.invoke(app, ["observatory", "survey", "--domain", DOMAIN, "--delay", "0"])
+
+        written = (root / "survey").glob("*.jsonl").__next__().read_text(encoding="utf-8")
+        assert "kunngjøring.xml" in written
+        assert "\\u00f8" not in written
+
+    def test_a_second_survey_into_the_same_archive_is_not_an_error(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """The survey directory outlives the first run that created it."""
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+        _allow(httpx_mock, OTHER, "User-agent: *\nDisallow: /\n")
+
+        first = runner.invoke(
+            app, ["observatory", "survey", "--domain", DOMAIN, "--delay", "0", "--run-id", "one"]
+        )
+        second = runner.invoke(
+            app, ["observatory", "survey", "--domain", OTHER, "--delay", "0", "--run-id", "two"]
+        )
+
+        assert (first.exit_code, second.exit_code) == (0, 0)
+        assert sorted(p.name for p in (root / "survey").glob("*.jsonl")) == [
+            "one.jsonl",
+            "two.jsonl",
+        ]
+
+    def test_an_archive_root_that_does_not_exist_yet_is_created(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+    ) -> None:
+        """First survey on a fresh disk: the root is a path, not a precondition."""
+        absent = tmp_path / "fresh-archive"
+        monkeypatch.setenv(ENV_OBSERVATORY_ROOT, str(absent))
+        monkeypatch.delenv(ENV_CORPUS_ROOT, raising=False)
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+
+        result = runner.invoke(
+            app, ["observatory", "survey", "--domain", DOMAIN, "--delay", "0", "--run-id", "first"]
+        )
+
+        assert result.exit_code == 0
+        assert (absent / "survey" / "first.jsonl").exists()
+
+    def test_a_refusal_goes_to_stderr_so_a_piped_run_does_not_swallow_it(self, root: Path) -> None:
+        """`survey ... > list.txt` must still show why nothing was surveyed."""
+        result = runner.invoke(app, ["observatory", "survey"])
+
+        assert "no domains" in result.stderr.lower()
+        assert "no domains" not in result.stdout.lower()
+
+
+class TestTheDefaultRunName:
+    def test_it_is_a_sortable_utc_stamp(self, root: Path, httpx_mock: HTTPXMock) -> None:
+        """Two surveys a day apart must sort in the order they ran."""
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+
+        runner.invoke(app, ["observatory", "survey", "--domain", DOMAIN, "--delay", "0"])
+
+        written = next((root / "survey").glob("*.jsonl"))
+        assert re.fullmatch(r"\d{8}T\d{6}Z", written.stem), written.stem
+
+    def test_the_stamp_is_utc_even_where_the_machine_is_not(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+    ) -> None:
+        """The trailing Z is a claim. A local clock formatted as Z is a false one."""
+        monkeypatch.setenv("TZ", "Asia/Tokyo")
+        time.tzset()
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+
+        before = datetime.now(UTC)
+        runner.invoke(app, ["observatory", "survey", "--domain", DOMAIN, "--delay", "0"])
+        after = datetime.now(UTC)
+
+        written = next((root / "survey").glob("*.jsonl"))
+        minute = "%Y%m%dT%H%M"
+        assert written.stem[:13] in {before.strftime(minute), after.strftime(minute)}
+
+
 class TestWhatItReports:
     def test_each_host_and_a_tally_by_entry_are_printed(
         self, root: Path, httpx_mock: HTTPXMock
@@ -183,6 +280,80 @@ class TestWhatItReports:
         assert DOMAIN in result.output
         assert OTHER in result.output
         assert "robots_disallowed: 2" in result.output
+
+    def test_the_tally_leads_with_the_biggest_group(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A planner reads the tally top-down; the largest population comes first."""
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+        _allow(httpx_mock, OTHER, "User-agent: *\nDisallow: /\n")
+        third = "third.invalid"
+        _allow(httpx_mock, third)
+        httpx_mock.add_response(url=f"https://{third}/sitemap.xml", content=SITEMAP_XML)
+        httpx_mock.add_response(url=f"https://{third}/", content=b"<html></html>")
+
+        result = runner.invoke(
+            app,
+            [
+                "observatory",
+                "survey",
+                "--domain",
+                DOMAIN,
+                "--domain",
+                OTHER,
+                "--domain",
+                third,
+                "--delay",
+                "0",
+            ],
+        )
+
+        tally = [
+            line.strip() for line in result.output.splitlines() if ": " in line and "  " in line
+        ]
+        assert tally == ["robots_disallowed: 2", "conventional_sitemap: 1"]
+
+    def test_groups_of_equal_size_are_tallied_alphabetically(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A tie has to break somewhere, and a stable order is a readable diff."""
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+        _allow(httpx_mock, OTHER)
+        httpx_mock.add_response(url=f"https://{OTHER}/sitemap.xml", content=SITEMAP_XML)
+        httpx_mock.add_response(url=f"https://{OTHER}/", content=b"<html></html>")
+
+        result = runner.invoke(
+            app,
+            ["observatory", "survey", "--domain", DOMAIN, "--domain", OTHER, "--delay", "0"],
+        )
+
+        tally = [line.strip() for line in result.output.splitlines() if ": 1" in line]
+        assert tally == ["conventional_sitemap: 1", "robots_disallowed: 1"]
+
+    def test_the_written_row_is_the_same_under_either_pydantic_dump_mode(
+        self, root: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """Assumption test for the `mode="json"` equivalence in mutation-equivalents.toml.
+
+        SiteShape holds only strings, bools and tuples of strings, so pydantic's
+        python mode and json mode serialise identically once json.dumps turns a
+        tuple into an array. The equivalence registered for the `mode` argument
+        rests on that and on nothing else, so a field whose two modes disagree —
+        a datetime, a Path, an enum — must turn this test red rather than let a
+        stale justification stand (CLAUDE.md, issue #132).
+        """
+        shape = read_site_shape(
+            domain=DOMAIN,
+            robots=RobotsReadout(
+                readable=True, allows_root=True, declared_sitemaps=("https://x.invalid/s.xml",)
+            ),
+            conventional_sitemap=False,
+            front_page=b'<html><script src="/api/presentation/x"></script></html>',
+        )
+
+        assert json.dumps(shape.model_dump(mode="json")) == json.dumps(
+            shape.model_dump(mode="python")
+        )
 
     def test_the_browser_assembled_count_is_the_one_a_planner_reads_first(
         self, root: Path, httpx_mock: HTTPXMock
@@ -257,6 +428,21 @@ class TestWhereTheListComesFrom:
             f"https://{DOMAIN}/robots.txt",
             f"https://{OTHER}/robots.txt",
         ]
+
+    def test_an_indented_comment_is_still_a_comment_and_not_a_hostname(
+        self, root: Path, tmp_path: Path, httpx_mock: HTTPXMock
+    ) -> None:
+        """A hand-maintained list has indented notes under its groups."""
+        listing = tmp_path / "domains.txt"
+        listing.write_text(f"# ACOS\n    # blocked, see #194\n{DOMAIN}\n", encoding="utf-8")
+        _allow(httpx_mock, DOMAIN, "User-agent: *\nDisallow: /\n")
+
+        result = runner.invoke(
+            app, ["observatory", "survey", "--from", str(listing), "--delay", "0"]
+        )
+
+        assert result.exit_code == 0
+        assert [row["domain"] for row in _rows(root)] == [DOMAIN]
 
     def test_a_blank_and_commented_file_is_a_refusal_not_an_empty_survey(
         self, root: Path, tmp_path: Path
