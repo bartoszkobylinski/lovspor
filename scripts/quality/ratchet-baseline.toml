@@ -578,7 +578,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/observatory/commands.py"
-value = 1528
+value = 1146
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -607,13 +607,6 @@ rule = "function-lines"
 path = "src/lovspor/observatory/commands.py"
 name = "nightly"
 value = 23
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
-path = "src/lovspor/observatory/commands.py"
-name = "register_source"
-value = 21
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
