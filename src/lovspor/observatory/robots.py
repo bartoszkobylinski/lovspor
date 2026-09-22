@@ -15,8 +15,9 @@ live:
   (the User-Agent up to the first ``/``), matched case-insensitively and
   exactly and combined into one set; the ``*`` groups are the fallback and
   apply only when no group names the token;
-* within the group the rule with the **longest match** decides, and an
-  ``Allow`` wins a tie of equal length;
+* within that set the **most specific** rule decides — the one with the most
+  octets, counted on the rule itself and not on the text a ``*`` swallowed —
+  and an ``Allow`` wins a tie of equal length;
 * ``*`` in a rule matches any run of characters and a trailing ``$`` anchors
   the rule to the end of the path;
 * a rule with an empty path matches nothing (``Disallow:`` alone permits
@@ -49,20 +50,23 @@ class Rule(NamedTuple):
     anchored: bool
 
     def match_length(self, path: str) -> int:
-        """How much of ``path`` this rule matches — 0 for no match.
+        """The rule's specificity when it matches ``path`` — 0 for no match.
 
-        One more than the matched length, so an empty-pattern rule that does
-        match is told apart from no match; the caller compares lengths only.
+        RFC 9309 §2.2.2 ranks matching rules by the octets of the *rule*, not
+        of the text it consumed: what a ``*`` swallows is not part of the rule,
+        so ``Disallow: /files/*`` does not outrank ``Allow: /files/public/`` on
+        a long path (the codex-tests lane's round-3 finding). One more than
+        the length, so an empty rule that matches is told apart from no match.
         """
         if not self.path and not self.anchored:
             return 0
+        return len(self.path) + 1 if self._matches(path) else 0
+
+    def _matches(self, path: str) -> bool:
         if "*" not in self.path:
-            if self.anchored:
-                return len(self.path) + 1 if path == self.path else 0
-            return len(self.path) + 1 if path.startswith(self.path) else 0
+            return path == self.path if self.anchored else path.startswith(self.path)
         pattern = re.compile(_translate(self.path), re.DOTALL)
-        matched = pattern.fullmatch(path) if self.anchored else pattern.match(path)
-        return matched.end() + 1 if matched else 0
+        return (pattern.fullmatch(path) if self.anchored else pattern.match(path)) is not None
 
 
 class Group(NamedTuple):

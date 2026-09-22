@@ -64,12 +64,22 @@ class TestWildcards:
         assert policy(text).allows(UA, f"{HOST}/plan.pdf") is False
         assert policy(text).allows(UA, f"{HOST}/plan.pdf?view=1") is True
 
-    def test_a_wildcard_match_is_scored_by_what_it_matched(self) -> None:
-        """A wildcard rule that swallowed more of the path is the more specific one."""
+    def test_a_longer_wildcard_rule_beats_a_shorter_literal_rule(self) -> None:
         text = "User-agent: *\nAllow: /files/\nDisallow: /files/*/private\n"
 
         assert policy(text).allows(UA, f"{HOST}/files/2026/private/x") is False
         assert policy(text).allows(UA, f"{HOST}/files/2026/public/x") is True
+
+    def test_specificity_is_the_rule_s_length_not_the_text_a_wildcard_swallowed(self) -> None:
+        """RFC 9309 §2.2.2 — the codex-tests lane's round-3 finding: a short
+        wildcard rule cannot outrank a longer literal one just because the
+        request path is long."""
+        text = "User-agent: *\nDisallow: /files/*\nAllow: /files/public/\n"
+
+        assert policy(text).allows(UA, f"{HOST}/files/public/a-very-long-document-name.pdf") is True
+        assert (
+            policy(text).allows(UA, f"{HOST}/files/private/a-very-long-document-name.pdf") is False
+        )
 
 
 class TestWhichGroupApplies:
