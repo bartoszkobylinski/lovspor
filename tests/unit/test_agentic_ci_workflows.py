@@ -1225,3 +1225,25 @@ class TestEveryExpressionResolvesInItsOwnJob:
                         f"{workflow_name}:{job_name} refers to needs.{ref} without declaring it "
                         f"in `needs` — the expression resolves to empty, not to an error"
                     )
+
+
+def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_the_mutation_gate() -> None:
+    """Issue #361: a dependabot PR carries no repository secrets, so the Codex
+    lanes cannot even check out (`Input required and not supplied: token`) and
+    every dependency bump landed in `needs-human:pipeline`. The lanes are
+    skipped for that actor, and the mutation gate — which still runs fast-ci
+    and the Test matrix behind it — accepts the skip from that actor only."""
+    jobs = _workflow("pr-pipeline.yml")["jobs"]
+    same_repo_non_dependabot = (
+        "github.event.pull_request.head.repo.full_name == github.repository "
+        "&& github.actor != 'dependabot[bot]'"
+    )
+
+    assert jobs["codex-author"]["if"] == same_repo_non_dependabot
+    assert jobs["codex-tests"]["if"] == f"${{{{ !cancelled() && {same_repo_non_dependabot} }}}}"
+    mutation_condition = " ".join(jobs["mutation"]["if"].split())
+    assert mutation_condition == (
+        "always() && needs.fast-ci.result == 'success' && (needs.codex-tests.result == "
+        "'success' || (needs.codex-tests.result == 'skipped' && github.actor == "
+        "'dependabot[bot]')) && needs.codex-tests.outputs.pushed != 'true'"
+    )
