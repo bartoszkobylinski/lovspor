@@ -382,6 +382,15 @@ the very `robots.txt` the reviewer checked when the source was activated —
 that URL is in the access-policy record, so nothing guesses a host. Pass
 `--entry-point URL` (repeatable) to start somewhere else.
 
+`robots.txt` is read with the engine's own matcher
+(`src/lovspor/observatory/robots.py`), not the interpreter's: RFC 9309
+semantics — the longest matching rule decides, `Allow` wins a tie, `*` and a
+trailing `$` are wildcards, the group is chosen by the crawler's product token
+with `*` as the fallback. `urllib.robotparser` resolved a conflict by file
+order up to Python 3.13 and by longest match from 3.14, so `Allow: /` followed
+by narrower `Disallow` lines was honoured on one interpreter and ignored on
+another (issue #351). What the crawler refuses is now a property of the code.
+
 Every document discovery reads goes through the same gates as any other fetch
 — activation, live `robots.txt`, the per-source rate limit — and is recorded
 in the log. That is deliberate: what a municipality listed on a given day is
