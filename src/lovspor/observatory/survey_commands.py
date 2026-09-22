@@ -97,6 +97,18 @@ def _tally(shapes: list[SiteShape]) -> None:
         typer.echo(f"  {entry}: {count}")
 
 
+def _hosts_only(hosts: list[str]) -> None:
+    """Refuse a URL where a host was asked for, before any request is made.
+
+    The probe builds ``https://{host}/`` itself, so a scheme or path here
+    yields ``https://https://x/`` — three requests to nothing, an exit code
+    of 0, and a log row that says the host was reached and answered nothing.
+    """
+    for host in hosts:
+        if "/" in host:
+            _refuse(f"Refused: a host without scheme or path was expected, got: {host}")
+
+
 def _refuse(message: str) -> NoReturn:
     typer.echo(message, err=True)
     raise typer.Exit(2)
@@ -130,6 +142,7 @@ def survey(
     hosts = _domains(domain, from_file)
     if not hosts:
         _refuse("Refused: no domains to survey; pass --domain or --from.")
+    _hosts_only(hosts)
     root = _root()
     run_name = _run_name(run_id)
     shapes: list[SiteShape] = []

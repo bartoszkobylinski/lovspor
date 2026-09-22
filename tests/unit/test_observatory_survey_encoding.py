@@ -29,7 +29,11 @@ from pathlib import Path
 from lovspor.observatory.survey import RobotsReadout, read_site_shape
 from lovspor.observatory.survey_commands import _domains, _write
 
-target, declared, listing = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+target, listing = Path(sys.argv[1]), Path(sys.argv[3])
+# Read from a file, not argv: under LC_ALL=C Linux hands argv over as
+# ASCII + surrogateescape, so "ø" would arrive already broken and the write
+# under test would be refusing the harness, not proving its own encoding.
+declared = Path(sys.argv[2]).read_bytes().decode("utf-8")
 
 shape = read_site_shape(
     domain="example.invalid",
@@ -47,6 +51,8 @@ def _run(tmp_path: Path) -> tuple[Path, list[str]]:
     target = tmp_path / "survey.jsonl"
     listing = tmp_path / "domains.txt"
     listing.write_bytes(f"# høringer\n{HOST}\n".encode())
+    declared = tmp_path / "declared.txt"
+    declared.write_bytes(NORWEGIAN.encode())
     environment = {
         **os.environ,
         "LC_ALL": "C",
@@ -56,7 +62,7 @@ def _run(tmp_path: Path) -> tuple[Path, list[str]]:
     }
     environment.pop("PYTHONIOENCODING", None)
     completed = subprocess.run(
-        [sys.executable, "-c", _SCRIPT, str(target), NORWEGIAN, str(listing)],
+        [sys.executable, "-c", _SCRIPT, str(target), str(declared), str(listing)],
         capture_output=True,
         text=True,
         env=environment,

@@ -459,6 +459,30 @@ class TestWhereTheListComesFrom:
         assert "no domains" in result.output.lower()
         assert not (root / "survey").exists()
 
+    def test_a_domain_with_a_scheme_is_refused_before_any_request(self, root: Path) -> None:
+        """The help says "without scheme"; probing https://https://x/ would
+        exit 0 after asking nothing that exists."""
+        result = runner.invoke(
+            app, ["observatory", "survey", "--domain", f"https://{DOMAIN}", "--delay", "0"]
+        )
+
+        assert result.exit_code == 2
+        assert "scheme" in result.output.lower()
+        assert not (root / "survey").exists()
+
+    def test_a_listed_host_with_a_path_is_refused_the_same_way(
+        self, root: Path, tmp_path: Path
+    ) -> None:
+        listing = tmp_path / "domains.txt"
+        listing.write_text(f"{DOMAIN}/kunngjoringer\n", encoding="utf-8")
+
+        result = runner.invoke(
+            app, ["observatory", "survey", "--from", str(listing), "--delay", "0"]
+        )
+
+        assert result.exit_code == 2
+        assert f"{DOMAIN}/kunngjoringer" in result.output
+
     def test_naming_no_host_at_all_is_refused(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "survey"])
 
