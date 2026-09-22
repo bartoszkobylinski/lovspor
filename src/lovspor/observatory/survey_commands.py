@@ -25,7 +25,8 @@ from typing import Annotated, NoReturn
 import httpx
 import typer
 
-from lovspor.observatory.commands import _root, observatory_app
+from lovspor.observatory.commands import observatory_app
+from lovspor.observatory.registry_io import _root
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.observatory.survey import SiteShape
 from lovspor.observatory.survey_probe import DEFAULT_DELAY_SECONDS, ProbeSettings, SiteProbe
