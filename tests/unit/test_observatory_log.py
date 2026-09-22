@@ -505,6 +505,21 @@ class TestTombstonesAreFoldedOnce:
         with pytest.raises(LogIntegrityError, match="tombstone"):
             log.append_artifact(observation(b"b", url="https://example.invalid/2"), b"b")
 
+    def test_a_malformed_complete_tail_still_refuses_the_store(self, tmp_path: Path) -> None:
+        """A newline makes corruption complete, not safe to skip on a resumed fold."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a"), b"a")
+        assert log.tombstoned_hashes() == frozenset()
+        with log.log_path.open("a", encoding="utf-8") as handle:
+            handle.write('{"kind":"tombstone","sha256":false}\n')
+        before = log.log_path.read_bytes()
+
+        with pytest.raises(LogIntegrityError, match="tombstone fold cannot skip it"):
+            log.append_artifact(observation(b"b", url="https://example.invalid/2"), b"b")
+
+        assert log.log_path.read_bytes() == before
+        assert not log.blob_path(hashlib.sha256(b"b").hexdigest()).exists()
+
 
 class TestOrphanAndUnexplainedRecords:
     def test_blob_with_no_log_record_fails_the_audit(self, tmp_path: Path) -> None:
