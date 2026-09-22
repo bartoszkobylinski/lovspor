@@ -262,6 +262,37 @@ class TestRobotsGate:
 
         assert isinstance(result, ArtifactObservation)
 
+    def test_readable_separates_a_refusal_from_a_policy_that_could_not_be_read(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """``allows`` answers False for both, and for capture that is right.
+
+        A survey of hosts nothing has cleared needs them apart: a refusal is the
+        site's decision, an unreadable policy is a fact about one bad afternoon,
+        and only the first is worth a human's attention (issue #349).
+        """
+        httpx_mock.add_response(url=ROBOTS_URL, text="User-agent: *\nDisallow: /\n")
+        gate = RobotsGate(httpx.Client(), _settings())
+
+        assert gate.readable(PAGE_URL) is True
+        assert gate.allows(PAGE_URL, USER_AGENT) is False
+
+    def test_an_unreachable_robots_is_not_readable(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=503)
+        gate = RobotsGate(httpx.Client(), _settings())
+
+        assert gate.readable(PAGE_URL) is False
+
+    def test_a_404_is_readable_because_it_publishes_an_empty_rule_set(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """No robots.txt is how a site says it publishes no restrictions."""
+        httpx_mock.add_response(url=ROBOTS_URL, status_code=404)
+        gate = RobotsGate(httpx.Client(), _settings())
+
+        assert gate.readable(PAGE_URL) is True
+        assert gate.allows(PAGE_URL, USER_AGENT) is True
+
 
 class TestPoliteness:
     def test_the_second_fetch_waits_the_registered_interval(

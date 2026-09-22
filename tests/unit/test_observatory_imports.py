@@ -27,6 +27,7 @@ _MODULES = (
     "lovspor.observatory.app",
     "lovspor.observatory.commands",
     "lovspor.observatory.discovery",
+    "lovspor.observatory.entrypoint",
     "lovspor.observatory.events",
     "lovspor.observatory.fetch",
     "lovspor.observatory.freshness",
@@ -40,6 +41,9 @@ _MODULES = (
     "lovspor.observatory.registry_commands",
     "lovspor.observatory.registry_io",
     "lovspor.observatory.storage",
+    "lovspor.observatory.survey",
+    "lovspor.observatory.survey_commands",
+    "lovspor.observatory.survey_probe",
     "lovspor.observatory.sweeps",
 )
 

@@ -264,6 +264,51 @@ symlink, and a tree changed under the run. Its harness,
 [`deploy/digitalocean/rehearse-urls.sh`](../deploy/digitalocean/rehearse-urls.sh),
 carries no assertion of its own either.
 
+## Observatory: surveying a host before registering it (issue #349)
+
+Registration needs evidence, and `survey` is where it comes from. Three requests
+per host at most — `robots.txt`, the conventional `/sitemap.xml`, the front page
+— and none at all past a policy that refuses. Nothing is captured and nothing
+enters the observation log: the question is whether a source *could* be
+registered, not what it says.
+
+```bash
+export LOVSPOR_OBSERVATORY_ROOT=~/lovspor-observatory
+
+uv run lovspor observatory survey --domain baerum.kommune.no
+uv run lovspor observatory survey --from recon/kommuner.txt --run-id 2026-09-19-all
+```
+
+Every run writes `<root>/survey/<run-id>.jsonl`, one row per host. **That file is
+the point.** The 2026-08-20 sweep over all 358 municipalities produced the
+figures still quoted in `observatory/commands.py` and persisted nothing, so its
+population cannot be re-derived — which is issue #349, and the reason this is a
+command rather than another script.
+
+The survey log sits beside the observation log and is not part of it. An
+observation records what an activated source served; a survey row records whether
+a host could be activated at all. Keeping them apart preserves the invariant that
+every authority id in the observation log is a registered one.
+
+Six entries, and the distinctions carry weight:
+
+| entry | means |
+| --- | --- |
+| `declared_sitemap` | `robots.txt` names a sitemap — the cheapest entry, so it wins over anything else the page also reveals |
+| `conventional_sitemap` | nothing declared, but `/sitemap.xml` serves a document discovery can read. A 200 is not the test: the parser discovery itself uses decides, so a styled 404 does not count |
+| `browser_assembled` | no sitemap, and the front page carries the API markers issue #194 found on 12 of 12 sitemap-less municipalities. Not a dead end — the index exists and a sitemap reader cannot see it |
+| `no_machine_index` | no sitemap, no marker. The only entry that means a human must look, which is why the others must not drain into it |
+| `robots_disallowed` | the site publishes a policy and it refuses the root. Its decision, not our finding |
+| `robots_unreadable` | the policy could not be read. `fetch.py` treats that as a denial and so does this |
+
+`--delay` defaults to 7 seconds, the spacing every registered source was cleared
+with. A survey does not take the sweep's archive lock, so it can run while a
+nightly sweep is in progress — different hosts do not share a politeness budget.
+
+What this does **not** do: it does not resolve #194, it only sizes the population
+that issue is about. And it does not register anything. Activation still needs a
+named human's conclusion about the site's terms, which is the next section.
+
 ## Observatory: registering a capture source (ADR-0010)
 
 Capture is refused until a named human has checked the source's `robots.txt`

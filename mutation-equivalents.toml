@@ -2555,3 +2555,276 @@ identical escaping — the same stdlib default the three _head_html entries abov
 rest on, on the twin link's href. Pinned by the same assumption test.
 """
 assumption_test = "tests/unit/test_publish_html.py::test_assumption_html_escape_quotes_by_default"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_domains"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            for line in listing.read_text(encoding="utf-8").splitlines()
++            for line in listing.read_text(encoding="UTF-8").splitlines()
+"""
+justification = """
+Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
+name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object. No
+input can distinguish them, so no test can.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    with path.open("a", encoding="utf-8") as handle:
++    with path.open("a", encoding="UTF-8") as handle:
+"""
+justification = """
+Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
+name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object. No
+input can distinguish them, so no test can.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=False) + "\\n")
++            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=None) + "\\n")
+"""
+justification = """
+`json.dumps` tests ensure_ascii for truth and None is falsy, so None and False
+select the same encoder — the same equivalence already registered for
+`record_to_json_line` and `write_registry`. Verified here on a row carrying
+`kunngjøring`: both spellings produce byte-identical output.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=False) + "\\n")
++            handle.write(json.dumps(shape.model_dump(mode=None), ensure_ascii=False) + "\\n")
+"""
+justification = """
+pydantic treats any mode that is not "json" as python mode. For `SiteShape` the
+two modes agree once `json.dumps` runs: every field is a `str`, a `bool`, or a
+`tuple[str, ...]`, and json.dumps serialises a tuple to the same array a list
+gives. So the mutated call produces byte-identical output for this model — and
+only for this model, which is why the equivalence is pinned rather than asserted.
+"""
+assumption_test = "tests/unit/test_observatory_survey_commands.py::TestWhatItReports::test_the_written_row_is_the_same_under_either_pydantic_dump_mode"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=False) + "\\n")
++            handle.write(json.dumps(shape.model_dump(mode="XXjsonXX"), ensure_ascii=False) + "\\n")
+"""
+justification = """
+pydantic treats any mode that is not "json" as python mode. For `SiteShape` the
+two modes agree once `json.dumps` runs: every field is a `str`, a `bool`, or a
+`tuple[str, ...]`, and json.dumps serialises a tuple to the same array a list
+gives. So the mutated call produces byte-identical output for this model — and
+only for this model, which is why the equivalence is pinned rather than asserted.
+"""
+assumption_test = "tests/unit/test_observatory_survey_commands.py::TestWhatItReports::test_the_written_row_is_the_same_under_either_pydantic_dump_mode"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_commands.py"
+symbol = "_write"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            handle.write(json.dumps(shape.model_dump(mode="json"), ensure_ascii=False) + "\\n")
++            handle.write(json.dumps(shape.model_dump(mode="JSON"), ensure_ascii=False) + "\\n")
+"""
+justification = """
+pydantic treats any mode that is not "json" as python mode. For `SiteShape` the
+two modes agree once `json.dumps` runs: every field is a `str`, a `bool`, or a
+`tuple[str, ...]`, and json.dumps serialises a tuple to the same array a list
+gives. So the mutated call produces byte-identical output for this model — and
+only for this model, which is why the equivalence is pinned rather than asserted.
+"""
+assumption_test = "tests/unit/test_observatory_survey_commands.py::TestWhatItReports::test_the_written_row_is_the_same_under_either_pydantic_dump_mode"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "__init__"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    self._owes_delay = False
++    self._owes_delay = None
+"""
+justification = """
+A dead store. `read` assigns `self._owes_delay = False` as its first statement,
+before any path can read it, so the value set in `__init__` is never observed.
+The assignment stays because the attribute belongs in the constructor for
+readability and for mypy, not because any behaviour depends on it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "__init__"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    self._owes_delay = False
++    self._owes_delay = True
+"""
+justification = """
+A dead store. `read` assigns `self._owes_delay = False` as its first statement,
+before any path can read it, so the value set in `__init__` is never observed.
+The assignment stays because the attribute belongs in the constructor for
+readability and for mypy, not because any behaviour depends on it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "read"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            domain=domain, robots=robots, conventional_sitemap=False, front_page=b""
++            domain=domain, robots=robots, conventional_sitemap=None, front_page=b""
+"""
+justification = """
+This call is only reached when robots is unreadable or refuses the root, and
+`_entry_of` tests both of those before it looks at `conventional_sitemap`, so the
+flag cannot reach the verdict. `front_page` is only used to compute
+`front_page_markers`, and no API marker is a substring of b"XXXX", so the markers
+are the empty tuple either way. Both arguments are therefore unobservable on
+this path; they are passed explicitly because a positional default would hide
+which state the early return represents.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "read"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            domain=domain, robots=robots, conventional_sitemap=False, front_page=b""
++            domain=domain, robots=robots, conventional_sitemap=True, front_page=b""
+"""
+justification = """
+This call is only reached when robots is unreadable or refuses the root, and
+`_entry_of` tests both of those before it looks at `conventional_sitemap`, so the
+flag cannot reach the verdict. `front_page` is only used to compute
+`front_page_markers`, and no API marker is a substring of b"XXXX", so the markers
+are the empty tuple either way. Both arguments are therefore unobservable on
+this path; they are passed explicitly because a positional default would hide
+which state the early return represents.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "read"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-            domain=domain, robots=robots, conventional_sitemap=False, front_page=b""
++            domain=domain, robots=robots, conventional_sitemap=False, front_page=b"XXXX"
+"""
+justification = """
+This call is only reached when robots is unreadable or refuses the root, and
+`_entry_of` tests both of those before it looks at `conventional_sitemap`, so the
+flag cannot reach the verdict. `front_page` is only used to compute
+`front_page_markers`, and no API marker is a substring of b"XXXX", so the markers
+are the empty tuple either way. Both arguments are therefore unobservable on
+this path; they are passed explicitly because a positional default would hide
+which state the early return represents.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey.py"
+symbol = "front_page_markers"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    text = payload.decode("utf-8", errors="ignore")
++    text = payload.decode(errors="ignore")
+"""
+justification = """
+`bytes.decode` defaults to UTF-8, so dropping the explicit name selects the
+same codec, and codec lookup is case-insensitive, so "UTF-8" selects it too.
+Neither can differ from the original on any input.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey.py"
+symbol = "front_page_markers"
+registered = "2026-09-20, PR #353, from run 35491591237"
+mutation = """
+-    text = payload.decode("utf-8", errors="ignore")
++    text = payload.decode("UTF-8", errors="ignore")
+"""
+justification = """
+Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
+name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object. No
+input can distinguish them, so no test can.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "read"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-    self._owes_delay = False
++    self._owes_delay = None
+"""
+justification = """
+The only reader is `_wait`, which tests the attribute with `if self._owes_delay:`
+and then sets it to True. `None` and `False` are both falsy, so the first request
+to the host owes no delay under either value and every later one owes it. The
+attribute is annotated `bool` for mypy; nothing compares it by identity.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_body"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-                "GET",
++                "get",
+"""
+justification = """
+httpx upper-cases the method when it builds the request (`httpx.Request.method`
+is "GET" for either spelling), so the bytes on the wire, the recorded request a
+test can inspect, and the server's view are identical. Argued from the
+dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_upper_cases_the_request_method"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_body"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-                headers={"User-Agent": self._settings.user_agent},
++                headers={"user-agent": self._settings.user_agent},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_body"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-                headers={"User-Agent": self._settings.user_agent},
++                headers={"USER-AGENT": self._settings.user_agent},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
