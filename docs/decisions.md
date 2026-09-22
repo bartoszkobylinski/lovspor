@@ -152,7 +152,7 @@ Local layout:
 | Security lint | ruff `S` rules + `bandit` | Overlap is fine; bandit runs via `uvx` |
 | Types | `mypy` strict mode | Wired into CI + the fast gate (pre-commit stage); see §9d |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
-| Mutation | `mutmut == 3.7.0` | Function-scoped per-PR runs; see §9 and §9c |
+| Mutation | `mutmut == 3.8.0` | Function-scoped per-PR runs; see §9 and §9c |
 | Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + fail-closed security scan + unit suite) |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
@@ -186,6 +186,13 @@ justify holding the project on the legacy runner.
 
 PEP 695 generic syntax is enabled again. Ruff rule `UP047` is no longer disabled, and
 `retry_with_backoff` uses the Python 3.12 type-parameter syntax.
+
+Bumped to 3.8.0 on 2026-09-22 (dependabot #355). 3.8 moved the config singleton
+out of `mutmut.__main__.Config.get()` / `.reset()` into
+`mutmut.configuration.config()` / `reset_config()`, and loads it at import time
+(`mutmut/utils/safe_setproctitle.py`); `tests/unit/test_agentic_ci_scripts.py`
+follows. The names `scripts/ci/mutation_survivors.py` imports from
+`mutmut.__main__` are still re-exported there.
 
 ## 9a. Mutation testing baseline expectations
 

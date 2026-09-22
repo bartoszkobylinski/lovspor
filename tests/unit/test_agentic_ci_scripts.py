@@ -17,8 +17,9 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from mutmut.__main__ import Config as MutmutConfig
 from mutmut.__main__ import copy_also_copy_files
+from mutmut.configuration import config as mutmut_config
+from mutmut.configuration import reset_config as reset_mutmut_config
 
 _SCRIPTS = Path(__file__).parents[2] / "scripts" / "ci"
 
@@ -800,7 +801,7 @@ def _survivor_records(tmp_path: Path, ids: str) -> list[dict[str, object]]:
 
 def _reset_mutmut_config() -> None:
     """mutmut caches its config globally; a second tmp repo must not inherit it."""
-    MutmutConfig.reset()
+    reset_mutmut_config()
 
 
 class TestSurvivorIdentity:
@@ -1445,11 +1446,11 @@ class TestShadowTreeCarriesTheRegister:
         repo_root = Path(__file__).parents[2]
         with pytest.MonkeyPatch.context() as mp:
             mp.chdir(repo_root)
-            MutmutConfig.reset()
+            reset_mutmut_config()
             try:
-                also_copy = MutmutConfig.get().also_copy
+                also_copy = mutmut_config().also_copy
             finally:
-                MutmutConfig.reset()
+                reset_mutmut_config()
 
         assert Path("mutation-equivalents.toml") in also_copy
 
@@ -1466,11 +1467,11 @@ class TestShadowTreeCarriesTheRegister:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.chdir(tmp_path)
-            MutmutConfig.reset()
+            reset_mutmut_config()
             try:
                 copy_also_copy_files()
             finally:
-                MutmutConfig.reset()
+                reset_mutmut_config()
 
         copied = tmp_path / "mutants" / "mutation-equivalents.toml"
         assert copied.read_text() == "[[equivalent]]\n"
@@ -1487,11 +1488,11 @@ class TestShadowTreeCarriesTheRegister:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.chdir(tmp_path)
-            MutmutConfig.reset()
+            reset_mutmut_config()
             try:
                 copy_also_copy_files()
             finally:
-                MutmutConfig.reset()
+                reset_mutmut_config()
 
         assert not (tmp_path / "mutants" / "mutation-equivalents.toml").exists()
 
@@ -1565,12 +1566,12 @@ def _shadow_tree_carries(repo_root: Path) -> set[str]:
     """
     with pytest.MonkeyPatch.context() as mp:
         mp.chdir(repo_root)
-        MutmutConfig.reset()
+        reset_mutmut_config()
         try:
-            config = MutmutConfig.get()
+            config = mutmut_config()
             paths = [*config.also_copy, *config.source_paths]
         finally:
-            MutmutConfig.reset()
+            reset_mutmut_config()
     return {Path(path).parts[0] for path in paths}
 
 
@@ -1645,11 +1646,11 @@ class TestShadowTreeCarriesRepoState:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.chdir(tmp_path)
-            MutmutConfig.reset()
+            reset_mutmut_config()
             try:
                 copy_also_copy_files()
             finally:
-                MutmutConfig.reset()
+                reset_mutmut_config()
 
         assert (tmp_path / "mutants" / ".pre-commit-config.yaml").read_bytes() == hook_config
 
