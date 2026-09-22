@@ -64,6 +64,25 @@ class TestWildcards:
         assert policy(text).allows(UA, f"{HOST}/plan.pdf") is False
         assert policy(text).allows(UA, f"{HOST}/plan.pdf?view=1") is True
 
+    def test_a_literal_rule_can_be_anchored_to_the_end_of_the_path(self) -> None:
+        text = "User-agent: *\nDisallow: /pageX$\n"
+
+        assert policy(text).allows(UA, f"{HOST}/pageX") is False
+        assert policy(text).allows(UA, f"{HOST}/pageX/child") is True
+
+    def test_runs_of_wildcards_and_anchors_have_their_defined_meaning(self) -> None:
+        text = "User-agent: *\nDisallow: /docs/**/private$$*$\n"
+
+        assert policy(text).allows(UA, f"{HOST}/docs/2026/private") is False
+        assert policy(text).allows(UA, f"{HOST}/docs/2026/private/child") is True
+
+    def test_several_wildcards_preserve_every_literal_part(self) -> None:
+        text = "User-agent: *\nDisallow: /a*b*c$\n"
+
+        assert policy(text).allows(UA, f"{HOST}/a-one-b-two-c") is False
+        assert policy(text).allows(UA, f"{HOST}/a-one-c") is True
+        assert policy(text).allows(UA, f"{HOST}/a-one-b-two-d") is True
+
     def test_a_longer_wildcard_rule_beats_a_shorter_literal_rule(self) -> None:
         text = "User-agent: *\nAllow: /files/\nDisallow: /files/*/private\n"
 
@@ -154,6 +173,16 @@ class TestWhatTheFileSays:
         assert policy(text).allows(UA, f"{HOST}/private/x") is False
         assert policy(text).allows(UA, f"{HOST}/public") is True
 
+    def test_the_first_hash_starts_the_comment(self) -> None:
+        text = "User-agent: *\nDisallow: /private # first # second\n"
+
+        assert policy(text).allows(UA, f"{HOST}/private/document") is False
+
+    def test_only_a_nonempty_sitemap_directive_declares_a_sitemap(self) -> None:
+        text = "Unknown: https://a/not-a-sitemap.xml\nSitemap:\n"
+
+        assert policy(text).sitemaps() == ()
+
     def test_sitemaps_are_collected_from_anywhere(self) -> None:
         text = "Sitemap: https://a/1.xml\nUser-agent: *\nDisallow: /\nSitemap: https://a/2.xml\n"
 
@@ -195,6 +224,11 @@ class TestWhatTheFileSays:
 
         assert policy(text).allows(UA, f"{HOST}/search?q=lov") is False
         assert policy(text).allows(UA, f"{HOST}/search") is True
+
+    def test_a_url_without_an_explicit_path_is_the_root_path(self) -> None:
+        parsed = policy("User-agent: *\nDisallow: /$\n")
+
+        assert parsed.allows(UA, HOST) is False
 
 
 def test_the_decision_does_not_delegate_to_the_interpreter() -> None:
