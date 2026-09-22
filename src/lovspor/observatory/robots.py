@@ -24,16 +24,23 @@ live:
 * ``Sitemap:`` lines are collected from anywhere in the file.
 
 Paths are compared percent-encoded on both sides, so ``/høring`` in a rule
-and ``/h%C3%B8ring`` in a URL are the same path.
+and ``/h%C3%B8ring`` in a URL are the same path — while an encoded reserved
+character stays encoded, so ``/a%2Fb`` is not ``/a/b``.
 """
 
 import re
+import string
 from collections.abc import Iterable
 from typing import NamedTuple
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, urlsplit
 
 _WILDCARD_RUN = re.compile(r"[*]{2,}")
 _ANCHOR_RUN = re.compile(r"[$][$*]+")
+# RFC 3986 §2: an encoded unreserved octet means the same as the literal; an
+# encoded reserved one does not (``%2F`` is not a path separator).
+_UNRESERVED = frozenset(string.ascii_letters + string.digits + "-._~")
+_RESERVED = frozenset(":/?#[]@!$&'()*+,;=%")
+_TOKEN = re.compile(r"%[0-9A-Fa-f]{2}|.", re.DOTALL)
 
 
 class Rule(NamedTuple):
@@ -152,14 +159,33 @@ def _rule(value: str, *, allow: bool) -> Rule:
 
 
 def _normalise(pattern: str) -> str:
-    """Percent-encode the literal parts of a rule, leaving its wildcards alone."""
-    return re.sub(r"[^*$]+", lambda m: quote(unquote(m[0]), safe="/?=&%~"), pattern)
+    """Normalise the literal parts of a rule, leaving its wildcards alone."""
+    return re.sub(r"[^*$]+", lambda m: _normalise_text(m[0]), pattern)
 
 
 def _request_path(url: str) -> str:
     parts = urlsplit(url)
-    path = quote(unquote(parts.path or "/"), safe="/?=&%~")
-    return f"{path}?{quote(unquote(parts.query), safe='/?=&%~')}" if parts.query else path
+    path = _normalise_text(parts.path or "/")
+    return f"{path}?{_normalise_text(parts.query)}" if parts.query else path
+
+
+def _normalise_text(text: str) -> str:
+    """Percent-encoding as RFC 9309 §2.2.2 compares it.
+
+    An encoded unreserved octet is decoded, an encoded reserved one stays
+    encoded, and anything outside ASCII is encoded exactly once — so ``/høring``
+    and ``/h%C3%B8ring`` are one path and ``/a%2Fb`` and ``/a/b`` are two.
+    """
+    return "".join(_normalise_token(match[0]) for match in _TOKEN.finditer(text))
+
+
+def _normalise_token(token: str) -> str:
+    if token.startswith("%") and len(token) > 1:
+        octet = chr(int(token[1:], 16))
+        return octet if octet in _UNRESERVED else token.upper()
+    if token in _UNRESERVED or token in _RESERVED:
+        return token
+    return quote(token, safe="")
 
 
 def _translate(pattern: str) -> str:

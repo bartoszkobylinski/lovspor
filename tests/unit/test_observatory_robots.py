@@ -149,6 +149,27 @@ class TestWhatTheFileSays:
         assert policy(text).allows(UA, f"{HOST}/h%C3%B8ring/2026") is False
         assert policy(text).allows(UA, f"{HOST}/høring/2026") is False
 
+    def test_an_encoded_reserved_character_stays_encoded(self) -> None:
+        """RFC 9309 §2.2.2: `%2F` is not a path separator, so
+        `/documents%2Fprivate` is a different path from `/documents/private`
+        — the codex-tests lane's round-2 finding on this PR."""
+        text = "User-agent: *\nDisallow: /documents/private\n"
+
+        assert policy(text).allows(UA, f"{HOST}/documents%2Fprivate") is True
+        assert policy(text).allows(UA, f"{HOST}/documents/private/x") is False
+
+    def test_an_encoded_star_in_a_rule_is_a_literal_not_a_wildcard(self) -> None:
+        text = "User-agent: *\nDisallow: /documents/file-%2A.pdf\n"
+
+        assert policy(text).allows(UA, f"{HOST}/documents/file-%2A.pdf") is False
+        assert policy(text).allows(UA, f"{HOST}/documents/file-public.pdf") is True
+
+    def test_an_encoded_unreserved_character_is_the_same_as_the_literal(self) -> None:
+        text = "User-agent: *\nDisallow: /a%2Db\n"
+
+        assert policy(text).allows(UA, f"{HOST}/a-b/x") is False
+        assert policy(text).allows(UA, f"{HOST}/a%2Db/x") is False
+
     def test_the_query_string_is_part_of_the_matched_path(self) -> None:
         text = "User-agent: *\nDisallow: /search?q=\n"
 
