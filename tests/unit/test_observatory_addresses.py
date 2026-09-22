@@ -164,6 +164,26 @@ class TestSharedAddressesAreFound:
 
         assert resolve_register(registry, resolve).shared == ()
 
+    def test_one_source_reaching_an_address_through_several_hosts_is_not_shared(self) -> None:
+        """Sharing means multiple sources, not multiple hostnames for one source."""
+        registry = register(
+            source(
+                "4202",
+                "Grimstad",
+                "grimstad.kommune.no",
+                listings=("https://kunngjoring.grimstad.kommune.no/notices",),
+            )
+        )
+        resolve = resolver_for(
+            {
+                "grimstad.kommune.no": {GRIMSTAD},
+                "www.grimstad.kommune.no": {GRIMSTAD},
+                "kunngjoring.grimstad.kommune.no": {GRIMSTAD},
+            }
+        )
+
+        assert resolve_register(registry, resolve).shared == ()
+
     def test_overlap_on_one_of_several_addresses_still_counts(self) -> None:
         """Round-robin DNS: one shared address is one shared machine."""
         registry = register(
@@ -291,6 +311,16 @@ class TestResolutionFailureIsRecordedNotRaised:
 
         assert [s.authority_id for s in report.unresolved_sources] == ["5612"]
         assert "nodename" in report.sources[0].unresolved[0].error
+
+    def test_an_error_without_a_message_is_reported_by_class_name(self) -> None:
+        registry = register(source("5612", "Nowhere", "gone.example.invalid"))
+
+        def fail_without_message(host: str) -> frozenset[str]:
+            raise OSError
+
+        report = resolve_register(registry, fail_without_message)
+
+        assert {host.error for host in report.sources[0].unresolved} == {"OSError"}
 
     def test_a_dead_host_does_not_stop_the_pass(self) -> None:
         """A register pass that aborts on the first retired domain measures nothing."""
