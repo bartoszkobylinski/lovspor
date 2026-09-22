@@ -470,6 +470,33 @@ class TestWhereTheListComesFrom:
         assert "scheme" in result.output.lower()
         assert not (root / "survey").exists()
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    @pytest.mark.parametrize(
+        "not_a_host",
+        [f"{DOMAIN}?preview=true", f"{DOMAIN}#section", f"operator@{DOMAIN}"],
+    )
+    def test_url_components_other_than_a_host_are_refused_before_any_request(
+        self, root: Path, not_a_host: str
+    ) -> None:
+        """The option accepts a host, not URL query, fragment, or user-info.
+
+        Interpolating any of these into ``https://{host}/`` changes the URL's
+        structure instead of naming the host the operator supplied. Like a
+        scheme or path, it must be rejected before recon traffic leaves the
+        machine.
+        """
+        with patch("lovspor.observatory.survey_commands.SiteProbe.read") as read:
+            result = runner.invoke(
+                app, ["observatory", "survey", "--domain", not_a_host, "--delay", "0"]
+            )
+
+        read.assert_not_called()
+        assert result.exit_code == 2
+        assert "host without scheme or path" in result.output
+        assert not (root / "survey").exists()
+
     def test_a_listed_host_with_a_path_is_refused_the_same_way(
         self, root: Path, tmp_path: Path
     ) -> None:
