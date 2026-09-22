@@ -37,7 +37,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 2. Invoke `/security-check` — clean
 3. Then `git commit`
 
-Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, then the fail-closed security scan, then `uv run pytest tests/unit/ -q`).
+Before every push: `scripts/quality/verify-deep.sh` — green (the fast gate, then the fail-closed security scan, then `uv run pytest tests/unit/ -q -m "not network"` — network-marked tests answer for a third-party credential, not for the diff, #359).
 
 `uv run pre-commit install` installs both hooks: pre-commit runs `verify-fast.sh`, pre-push runs `verify-deep.sh` (a clone whose hooks predate #323 re-runs it to add pre-push). Step 2 is manual until the skill auto-triggers. CI stays authoritative: fast-ci and the Test matrix run lint, mypy and the unit suite on every PR, whatever ran locally. Measured costs and the stage split: `docs/decisions.md` §9d.
 

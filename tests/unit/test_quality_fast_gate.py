@@ -27,7 +27,9 @@ FAST_CHECKS = {
     "mypy": "uv run mypy src/",
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
 }
-UNIT_SUITE = "uv run pytest tests/unit/ -q"
+# `-m "not network"`: a test that needs a live third-party credential answers
+# for the operator's key, not for the change being pushed (issue #359).
+UNIT_SUITE = "uv run pytest tests/unit/ -q -m not network"
 SECURITY_SCAN = "uv run python scripts/quality/check_security_scan.py"
 STUB_TOOLS = ("uv", "gitleaks")
 
@@ -36,6 +38,9 @@ STUB_TOOLS = ("uv", "gitleaks")
 _STUB = """#!/bin/sh
 line="@TOOL@ $*"
 printf '%s\\t%s\\n' "$(pwd -P)" "$line" >> "$GATE_STUB_LOG"
+if [ "@TOOL@" = uv ] && [ "${1-}" = run ] && [ "${2-}" = pytest ]; then
+  printf 'pytest argc=%s marker=<%s>\\n' "$#" "${6-}"
+fi
 if printf '%s\\n' "$GATE_STUB_FAIL" | grep -Fqx "$line"; then
   echo "detail for $line"
   printf '\\033[31mstub: %s failed\\033[0m\\n\\n' "$line"
@@ -185,6 +190,14 @@ class TestDeepGate:
         assert run.commands == [*FAST_CHECKS.values(), SECURITY_SCAN, UNIT_SUITE]
         assert run.cwds == {str(REPO_ROOT)}
         assert run.output.rstrip().endswith("verify-deep: all checks passed")
+
+    def test_passes_the_network_marker_expression_as_one_pytest_argument(
+        self, tmp_path: Path
+    ) -> None:
+        """Without shell quoting, pytest treats `network` as a test path."""
+        run = _run_gate(DEEP, tmp_path)
+
+        assert "pytest argc=6 marker=<not network>" in run.output
 
     def test_a_failing_security_scan_fails_the_gate_naming_it(self, tmp_path: Path) -> None:
         """A scanner that skipped files reports through this gate or nowhere."""

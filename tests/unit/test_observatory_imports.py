@@ -23,6 +23,8 @@ _PACKAGE_DIR = Path(__file__).resolve().parents[2] / "src" / "lovspor" / "observ
 # entry here; the test below pins this list against the directory.
 _MODULES = (
     "lovspor.observatory",
+    "lovspor.observatory.addresses",
+    "lovspor.observatory.app",
     "lovspor.observatory.commands",
     "lovspor.observatory.discovery",
     "lovspor.observatory.entrypoint",
@@ -36,6 +38,8 @@ _MODULES = (
     "lovspor.observatory.model",
     "lovspor.observatory.outcomes",
     "lovspor.observatory.registry",
+    "lovspor.observatory.registry_commands",
+    "lovspor.observatory.registry_io",
     "lovspor.observatory.storage",
     "lovspor.observatory.survey",
     "lovspor.observatory.survey_commands",
