@@ -32,11 +32,11 @@ from pathlib import Path
 # writing from the mutant ids alone, and this step must never fail the job.
 try:
     from mutmut.__main__ import (
-        Config,
         SourceFileMutationData,
         get_diff_for_mutant,
         walk_mutatable_files,
     )
+    from mutmut.configuration import config as mutmut_config
 except ImportError as exc:
     IMPORT_ERROR: str | None = f"mutmut is not importable ({exc})"
 else:
@@ -105,7 +105,7 @@ def shadow_index() -> tuple[dict[str, Path], str | None]:
         return {}, IMPORT_ERROR
     index: dict[str, Path] = {}
     try:
-        Config.ensure_loaded()
+        mutmut_config()
         for path in walk_mutatable_files():
             data = SourceFileMutationData(path=path)
             data.load()

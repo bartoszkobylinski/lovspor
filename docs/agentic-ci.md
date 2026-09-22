@@ -99,7 +99,7 @@ colour. Issue #162 is where this gap was written down.
 
 ## Mutation policy (unchanged, now automated)
 
-`scripts/mutmut-pr.sh <base-sha>` runs mutmut 3.7.0 for functions changed by the PR.
+`scripts/mutmut-pr.sh <base-sha>` runs mutmut 3.8.0 for functions changed by the PR.
 The script rebuilds the shadow tree for each run, then uses mutmut's warm baseline and
 parallel workers. Module-level or otherwise unsafe-to-narrow changes fall back to the
 affected module instead of being exempted.

@@ -81,7 +81,7 @@ dev = [
     "pytest-httpx>=0.32.0",
     "ruff>=0.7.0",
     "mypy>=1.13.0",
-    "mutmut==3.7.0",
+    "mutmut==3.8.0",
     "pre-commit>=4.0.0",
     "lxml-stubs>=0.5.1",
     "hypothesis>=6.115.0",
