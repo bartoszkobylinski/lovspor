@@ -550,9 +550,9 @@ class TestSurveyHelpers:
         )
 
         assert result.exit_code == 2
-        assert (
-            "Letters, digits, dot, dash and underscore, starting with a letter or digit."
-            in result.stderr
+        assert result.stderr == (
+            "Refused: --run-id must be a plain file name, got 'bad/name'. "
+            "Letters, digits, dot, dash and underscore, starting with a letter or digit.\n"
         )
 
     def test_survey_path_creates_missing_parents_and_is_idempotent(self, tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from lovspor.observatory.survey_probe import (
     SURVEY_USER_AGENT,
     ProbeSettings,
     SiteProbe,
+    _capped,
 )
 
 DOMAIN = "example.invalid"
@@ -237,6 +238,18 @@ class TestWhatCountsAsASitemapAtTheConventionalPath:
 
 
 class TestWhenTheHostMisbehaves:
+    def test_body_at_the_byte_ceiling_does_not_read_another_chunk(self) -> None:
+        """Reaching the cap must stop consuming a potentially unbounded response."""
+        response = Mock(spec=httpx.Response)
+
+        def chunks() -> object:
+            yield b"exact"
+            raise AssertionError("response was consumed past the byte ceiling")
+
+        response.iter_bytes.return_value = chunks()
+
+        assert _capped(response, 5) == b"exact"
+
     def test_a_transport_error_on_robots_reads_as_unreadable_not_as_a_crash(
         self, client: httpx.Client, httpx_mock: HTTPXMock
     ) -> None:
