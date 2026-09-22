@@ -33,7 +33,7 @@ import re
 import string
 from collections.abc import Iterable
 from typing import NamedTuple
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 _WILDCARD_RUN = re.compile(r"[*]{2,}")
 _ANCHOR_RUN = re.compile(r"[$][$*]+")
@@ -41,7 +41,7 @@ _ANCHOR_RUN = re.compile(r"[$][$*]+")
 # encoded reserved one does not (``%2F`` is not a path separator).
 _UNRESERVED = frozenset(string.ascii_letters + string.digits + "-._~")
 _RESERVED = frozenset(":/?#[]@!$&'()*+,;=%")
-_TOKEN = re.compile(r"%[0-9A-Fa-f]{2}|.", re.DOTALL)
+_TOKEN = re.compile(r"(?P<escape>%[0-9A-Fa-f]{2})|.")
 
 
 class Rule(NamedTuple):
@@ -49,23 +49,17 @@ class Rule(NamedTuple):
     allow: bool
     anchored: bool
 
-    def match_length(self, path: str) -> int:
-        """The rule's specificity when it matches ``path`` — 0 for no match.
+    def matches(self, path: str) -> bool:
+        """Whether this rule applies to ``path``.
 
-        RFC 9309 §2.2.2 ranks matching rules by the octets of the *rule*, not
-        of the text it consumed: what a ``*`` swallows is not part of the rule,
-        so ``Disallow: /files/*`` does not outrank ``Allow: /files/public/`` on
-        a long path (the codex-tests lane's round-3 finding). One more than
-        the length, so an empty rule that matches is told apart from no match.
+        An empty, unanchored rule (``Disallow:`` alone) applies to nothing —
+        that is how a file says "everything is permitted".
         """
         if not self.path and not self.anchored:
-            return 0
-        return len(self.path) + 1 if self._matches(path) else 0
-
-    def _matches(self, path: str) -> bool:
+            return False
         if "*" not in self.path:
             return path == self.path if self.anchored else path.startswith(self.path)
-        pattern = re.compile(_translate(self.path), re.DOTALL)
+        pattern = re.compile(_translate(self.path))
         return (pattern.fullmatch(path) if self.anchored else pattern.match(path)) is not None
 
 
@@ -92,13 +86,21 @@ class RobotsPolicy:
         return self._sitemaps
 
     def allows(self, user_agent: str, url: str) -> bool:
+        """RFC 9309 §2.2.2: the most specific matching rule decides.
+
+        Specificity is the octets of the *rule*, not of the text it consumed:
+        what a ``*`` swallows is not part of the rule, so ``Disallow: /files/*``
+        does not outrank ``Allow: /files/public/`` on a long path (the
+        codex-tests lane's round-3 finding). Ranked as ``(length, allow)`` so
+        an ``Allow`` wins a tie; no matching rule means the path is allowed.
+        """
         path = _request_path(url)
-        best, allow = 0, True
-        for rule in self._rules_for(user_agent):
-            length = rule.match_length(path)
-            if length > best or (length == best and length and rule.allow):
-                best, allow = length, rule.allow
-        return allow
+        matching = [
+            (len(rule.path), rule.allow)
+            for rule in self._rules_for(user_agent)
+            if rule.matches(path)
+        ]
+        return max(matching)[1] if matching else True
 
     def _rules_for(self, user_agent: str) -> tuple[Rule, ...]:
         """Every rule addressed to this crawler, from every group that names it.
@@ -107,7 +109,7 @@ class RobotsPolicy:
         they are one rule set. Taking only the first would let a later
         ``Disallow`` go unenforced.
         """
-        token = user_agent.split("/", 1)[0].strip().lower()
+        token = user_agent.partition("/")[0].strip().lower()
         named = tuple(
             rule for group in self._groups if token in group.agents for rule in group.rules
         )
@@ -125,19 +127,14 @@ class _Builder:
         self.sitemaps: list[str] = []
         self._agents: list[str] = []
         self._rules: list[Rule] = []
-        self._open = False
 
     def feed(self, raw: str) -> None:
-        line = raw.split("#", 1)[0].strip()
-        if not line or ":" not in line:
-            return
-        field, _, value = line.partition(":")
+        field, _, value = raw.partition("#")[0].partition(":")
         field, value = field.strip().lower(), value.strip()
         if field == "user-agent":
             self._start_agent(value.lower())
         elif field in ("allow", "disallow") and self._agents:
             self._rules.append(_rule(value, allow=field == "allow"))
-            self._open = True
         elif field == "sitemap" and value:
             self.sitemaps.append(value)
 
@@ -147,13 +144,15 @@ class _Builder:
         return tuple(self._groups)
 
     def _start_agent(self, agent: str) -> None:
-        if self._open:
+        # A User-agent line after rules opens a new group; one after another
+        # User-agent line joins the group being opened.
+        if self._rules:
             self._close()
         self._agents.append(agent)
 
     def _close(self) -> None:
         self._groups.append(Group(tuple(self._agents), tuple(self._rules)))
-        self._agents, self._rules, self._open = [], [], False
+        self._agents, self._rules = [], []
 
 
 def _rule(value: str, *, allow: bool) -> Rule:
@@ -180,18 +179,20 @@ def _normalise_text(text: str) -> str:
     encoded, and anything outside ASCII is encoded exactly once — so ``/høring``
     and ``/h%C3%B8ring`` are one path and ``/a%2Fb`` and ``/a/b`` are two.
     """
-    return "".join(_normalise_token(match[0]) for match in _TOKEN.finditer(text))
+    return "".join(_normalise_token(match) for match in _TOKEN.finditer(text))
 
 
-def _normalise_token(token: str) -> str:
-    if token.startswith("%") and len(token) > 1:
-        octet = chr(int(token[1:], 16))
-        return octet if octet in _UNRESERVED else token.upper()
-    if token in _UNRESERVED or token in _RESERVED:
-        return token
-    return quote(token, safe="")
+def _normalise_token(match: re.Match[str]) -> str:
+    if match["escape"]:
+        octet = chr(int(match["escape"][1:], 16))
+        return octet if octet in _UNRESERVED else match["escape"].upper()
+    char = match[0]
+    if char in _UNRESERVED or char in _RESERVED:
+        return char
+    return "".join(f"%{byte:02X}" for byte in char.encode("utf-8"))
 
 
 def _translate(pattern: str) -> str:
+    """The regex for a rule that contains ``*``; a plain prefix never gets here."""
     parts = [re.escape(part) for part in pattern.split("*")]
-    return ".*?".join(parts[:-1]) + ".*" + parts[-1] if len(parts) > 1 else parts[0]
+    return ".*?".join(parts[:-1]) + ".*" + parts[-1]

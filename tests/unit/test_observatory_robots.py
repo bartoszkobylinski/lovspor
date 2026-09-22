@@ -52,11 +52,11 @@ class TestRuleOrderDoesNotMatter:
 
 
 class TestWildcards:
-    def test_match_length_is_one_more_than_the_matching_rule_length(self) -> None:
+    def test_a_wildcard_rule_matches_by_pattern_not_by_prefix(self) -> None:
         rule = Rule("/files/*", allow=False, anchored=False)
 
-        assert rule.match_length("/files/private/document") == len("/files/*") + 1
-        assert rule.match_length("/public/document") == 0
+        assert rule.matches("/files/private/document") is True
+        assert rule.matches("/public/document") is False
 
     def test_a_star_matches_any_run_of_characters(self) -> None:
         text = "User-agent: *\nDisallow: /*.pdf\n"
