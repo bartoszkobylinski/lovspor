@@ -452,6 +452,22 @@ class TestTombstonesAreFoldedOnce:
 
         assert log.tombstoned_hashes() == frozenset({record.sha256})
 
+    def test_unchanged_log_is_not_scanned_after_the_first_fold(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a"), b"a")
+        expected = log.tombstoned_hashes()
+
+        def fail_if_scanned(*args: object, **kwargs: object) -> None:
+            pytest.fail("an unchanged log must not be scanned again")
+
+        monkeypatch.setattr(log, "scan_into", fail_if_scanned)
+
+        assert log.tombstoned_hashes() == expected
+
     def test_tombstone_appended_by_another_writer_is_seen(self, tmp_path: Path) -> None:
         """One archive serves several processes; a fold held in one of them
         must still see what another appended."""
@@ -476,8 +492,10 @@ class TestTombstonesAreFoldedOnce:
         size = log.log_path.stat().st_size
 
         log.log_path.write_bytes(b"x" * size)
+        later = observation(b"later")
+        log.append(tombstone(later.sha256))
 
-        assert log.tombstoned_hashes() == frozenset({record.sha256})
+        assert log.tombstoned_hashes() == frozenset({record.sha256, later.sha256})
 
     def test_a_shorter_log_is_folded_from_the_start(self, tmp_path: Path) -> None:
         """`repair` drops a torn tail, so the log can shrink. A fold built past
@@ -510,13 +528,18 @@ class TestTombstonesAreFoldedOnce:
         log = make_log(tmp_path)
         log.append_artifact(observation(b"a"), b"a")
         assert log.tombstoned_hashes() == frozenset()
+        folded_through = log.log_path.stat().st_size
         with log.log_path.open("a", encoding="utf-8") as handle:
             handle.write('{"kind":"tombstone","sha256":false}\n')
         before = log.log_path.read_bytes()
 
-        with pytest.raises(LogIntegrityError, match="tombstone fold cannot skip it"):
+        with pytest.raises(LogIntegrityError) as exc_info:
             log.append_artifact(observation(b"b", url="https://example.invalid/2"), b"b")
 
+        assert str(exc_info.value) == (
+            f"{log.log_path}: unreadable record after byte {folded_through}; "
+            "the tombstone fold cannot skip it"
+        )
         assert log.log_path.read_bytes() == before
         assert not log.blob_path(hashlib.sha256(b"b").hexdigest()).exists()
 
