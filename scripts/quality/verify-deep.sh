@@ -22,6 +22,10 @@ fi
 # The scan costs ~1.8 s over src/, so it runs before the suite: a narrowed scan
 # is repaired and re-verified anyway, and minutes of tests first buy nothing.
 check security-scan uv run python scripts/quality/check_security_scan.py
-check unit-suite uv run pytest tests/unit/ -q
+# Not the network-marked tests: they answer for the operator's third-party
+# credential, not for the change being pushed — a revoked local key turned
+# every push red for an unrelated diff (issue #359). CI has no such key and
+# skips them by their own guard; the local gate now matches it.
+check unit-suite uv run pytest tests/unit/ -q -m "not network"
 
 finish verify-deep
