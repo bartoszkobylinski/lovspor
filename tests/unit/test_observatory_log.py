@@ -429,6 +429,83 @@ class TestTombstoneIsNotSilentlyReversed:
         assert verify_snapshot(log).ok
 
 
+def tombstone(sha256: str) -> Tombstone:
+    return Tombstone(
+        sha256=sha256,
+        removed_at=OBSERVED_AT,
+        basis="privacy request",
+        authorised_by="project owner",
+    )
+
+
+class TestTombstonesAreFoldedOnce:
+    """Every capture asks the tombstone question. The answer must not cost the
+    archive each time (issue #357: a 600 MB log re-read per stored artifact)."""
+
+    def test_tombstone_appended_after_the_first_fold_is_seen(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        record = observation(b"a")
+        log.append_artifact(record, b"a")
+        assert log.tombstoned_hashes() == frozenset()
+
+        log.append(tombstone(record.sha256))
+
+        assert log.tombstoned_hashes() == frozenset({record.sha256})
+
+    def test_tombstone_appended_by_another_writer_is_seen(self, tmp_path: Path) -> None:
+        """One archive serves several processes; a fold held in one of them
+        must still see what another appended."""
+        reader = make_log(tmp_path)
+        record = observation(b"a")
+        reader.append_artifact(record, b"a")
+        assert reader.tombstoned_hashes() == frozenset()
+
+        make_log(tmp_path).append(tombstone(record.sha256))
+
+        with pytest.raises(TombstonedArtifactError):
+            reader.append_artifact(observation(b"a"), b"a")
+
+    def test_bytes_already_folded_are_not_read_again(self, tmp_path: Path) -> None:
+        """The fold reads only what was appended since. Proven by making the
+        folded prefix unreadable in place — a second full read would raise."""
+        log = make_log(tmp_path)
+        record = observation(b"a")
+        log.append_artifact(record, b"a")
+        log.append(tombstone(record.sha256))
+        assert log.tombstoned_hashes() == frozenset({record.sha256})
+        size = log.log_path.stat().st_size
+
+        log.log_path.write_bytes(b"x" * size)
+
+        assert log.tombstoned_hashes() == frozenset({record.sha256})
+
+    def test_a_shorter_log_is_folded_from_the_start(self, tmp_path: Path) -> None:
+        """`repair` drops a torn tail, so the log can shrink. A fold built past
+        the new end is not an append and is discarded, not trusted."""
+        log = make_log(tmp_path)
+        record = observation(b"a")
+        log.append_artifact(record, b"a")
+        before = log.log_path.stat().st_size
+        log.append(tombstone(record.sha256))
+        assert log.tombstoned_hashes() == frozenset({record.sha256})
+
+        with log.log_path.open("r+b") as handle:
+            handle.truncate(before)
+
+        assert log.tombstoned_hashes() == frozenset()
+
+    def test_a_torn_tail_still_refuses_the_store(self, tmp_path: Path) -> None:
+        """Incremental reading must not turn a damaged tail into a skipped one."""
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a"), b"a")
+        assert log.tombstoned_hashes() == frozenset()
+        with log.log_path.open("a", encoding="utf-8") as handle:
+            handle.write('{"kind":"tombstone","sha256":"ab')
+
+        with pytest.raises(LogIntegrityError, match="tombstone"):
+            log.append_artifact(observation(b"b", url="https://example.invalid/2"), b"b")
+
+
 class TestOrphanAndUnexplainedRecords:
     def test_blob_with_no_log_record_fails_the_audit(self, tmp_path: Path) -> None:
         """A crash between writing bytes and appending the record leaves raw material

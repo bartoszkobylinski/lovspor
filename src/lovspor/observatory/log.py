@@ -142,6 +142,8 @@ class ObservationLog:
                 "resolve the root through observatory_root() so ADR-0010 §5 is checked",
             )
         self._root = root.path
+        self._tombstones: set[str] = set()
+        self._tombstones_through = 0
 
     @property
     def root(self) -> Path:
@@ -218,10 +220,42 @@ class ObservationLog:
         self.append(record)
 
     def tombstoned_hashes(self) -> frozenset[str]:
-        """Hashes retired by a tombstone, and therefore closed to re-capture."""
-        return frozenset(
-            record.sha256 for record in self.records() if isinstance(record, Tombstone)
-        )
+        """Hashes retired by a tombstone, and therefore closed to re-capture.
+
+        Folded once per instance and extended from the byte the last fold
+        stopped at, never re-read from the start. Every stored artifact asks
+        this question, and answering it from scratch read the whole archive
+        per store — a 600 MB log cost a full core for the length of a sweep
+        (issue #357). The log is append-only, so bytes below the fold do not
+        change under it; a file that got *shorter* (`repair` dropping a torn
+        tail) is not an append, and the fold is discarded rather than trusted.
+
+        Raises:
+            LogIntegrityError: the unread tail does not parse. Reading only
+                the tail must not turn a torn record into a skipped one.
+        """
+        if not self.log_path.exists():
+            return frozenset()
+        size = self.log_path.stat().st_size
+        if size < self._tombstones_through:
+            self._tombstones.clear()
+            self._tombstones_through = 0
+        if size > self._tombstones_through:
+            self._fold_tombstones_from(self._tombstones_through)
+        return frozenset(self._tombstones)
+
+    def _fold_tombstones_from(self, start: int) -> None:
+        def collect(record: ObservationRecord) -> None:
+            if isinstance(record, Tombstone):
+                self._tombstones.add(record.sha256)
+
+        scan = self.scan_into(collect, start=start)
+        self._tombstones_through = scan.clean_through
+        if scan.incomplete_final_record or scan.malformed_lines:
+            raise LogIntegrityError(
+                f"{self.log_path}: unreadable record after byte {scan.clean_through}; "
+                "the tombstone fold cannot skip it",
+            )
 
     def records(self) -> Iterator[ObservationRecord]:
         """Read the log in append order.
