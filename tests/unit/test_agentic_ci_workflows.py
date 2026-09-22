@@ -1234,12 +1234,16 @@ def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_the_mutation_gate()
     skipped for that actor, and the mutation gate — which still runs fast-ci
     and the Test matrix behind it — accepts the skip from that actor only."""
     jobs = _workflow("pr-pipeline.yml")["jobs"]
-    not_dependabot = "github.actor != 'dependabot[bot]'"
-
-    assert not_dependabot in jobs["codex-author"]["if"]
-    assert not_dependabot in jobs["codex-tests"]["if"]
-    assert (
-        "(needs.codex-tests.result == 'skipped' && github.actor == 'dependabot[bot]')"
-        in jobs["mutation"]["if"]
+    same_repo_non_dependabot = (
+        "github.event.pull_request.head.repo.full_name == github.repository "
+        "&& github.actor != 'dependabot[bot]'"
     )
-    assert "needs.codex-tests.result == 'success'" in jobs["mutation"]["if"]
+
+    assert jobs["codex-author"]["if"] == same_repo_non_dependabot
+    assert jobs["codex-tests"]["if"] == f"${{{{ !cancelled() && {same_repo_non_dependabot} }}}}"
+    mutation_condition = " ".join(jobs["mutation"]["if"].split())
+    assert mutation_condition == (
+        "always() && needs.fast-ci.result == 'success' && (needs.codex-tests.result == "
+        "'success' || (needs.codex-tests.result == 'skipped' && github.actor == "
+        "'dependabot[bot]')) && needs.codex-tests.outputs.pushed != 'true'"
+    )
