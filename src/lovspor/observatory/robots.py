@@ -11,9 +11,10 @@ without a line of this repository changing.
 This module pins the semantics of RFC 9309 instead, and is the only place they
 live:
 
-* the group is chosen by the crawler's **product token** (the User-Agent up to
-  the first ``/``), matched case-insensitively and exactly; ``*`` is the
-  fallback and applies only when no group names the token;
+* the rules are those of every group naming the crawler's **product token**
+  (the User-Agent up to the first ``/``), matched case-insensitively and
+  exactly and combined into one set; the ``*`` groups are the fallback and
+  apply only when no group names the token;
 * within the group the rule with the **longest match** decides, and an
   ``Allow`` wins a tie of equal length;
 * ``*`` in a rule matches any run of characters and a trailing ``$`` anchors
@@ -80,26 +81,28 @@ class RobotsPolicy:
         return self._sitemaps
 
     def allows(self, user_agent: str, url: str) -> bool:
-        group = self._group_for(user_agent)
-        if group is None:
-            return True
         path = _request_path(url)
         best, allow = 0, True
-        for rule in group.rules:
+        for rule in self._rules_for(user_agent):
             length = rule.match_length(path)
             if length > best or (length == best and length and rule.allow):
                 best, allow = length, rule.allow
         return allow
 
-    def _group_for(self, user_agent: str) -> Group | None:
+    def _rules_for(self, user_agent: str) -> tuple[Rule, ...]:
+        """Every rule addressed to this crawler, from every group that names it.
+
+        RFC 9309 §2.2.1: a site may open several groups for one token, and
+        they are one rule set. Taking only the first would let a later
+        ``Disallow`` go unenforced.
+        """
         token = user_agent.split("/", 1)[0].strip().lower()
-        for group in self._groups:
-            if token in group.agents:
-                return group
-        for group in self._groups:
-            if "*" in group.agents:
-                return group
-        return None
+        named = tuple(
+            rule for group in self._groups if token in group.agents for rule in group.rules
+        )
+        if any(token in group.agents for group in self._groups):
+            return named
+        return tuple(rule for group in self._groups if "*" in group.agents for rule in group.rules)
 
 
 class _Builder:

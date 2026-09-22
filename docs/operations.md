@@ -385,8 +385,8 @@ that URL is in the access-policy record, so nothing guesses a host. Pass
 `robots.txt` is read with the engine's own matcher
 (`src/lovspor/observatory/robots.py`), not the interpreter's: RFC 9309
 semantics — the longest matching rule decides, `Allow` wins a tie, `*` and a
-trailing `$` are wildcards, the group is chosen by the crawler's product token
-with `*` as the fallback. `urllib.robotparser` resolved a conflict by file
+trailing `$` are wildcards, every group naming the crawler's product token is
+combined into one rule set, with the `*` groups as the fallback. `urllib.robotparser` resolved a conflict by file
 order up to Python 3.13 and by longest match from 3.14, so `Allow: /` followed
 by narrower `Disallow` lines was honoured on one interpreter and ignored on
 another (issue #351). What the crawler refuses is now a property of the code.

@@ -99,6 +99,22 @@ class TestWhichGroupApplies:
 
         assert policy(text).allows(UA, f"{HOST}/x") is False
 
+    def test_every_group_naming_the_token_is_one_rule_set(self) -> None:
+        """RFC 9309 §2.2.1. Taking only the first group would let the later
+        Disallow go unenforced — the codex-tests lane's finding on this PR."""
+        text = (
+            "User-agent: lovspor-observatory\nAllow: /\n\n"
+            "User-agent: lovspor-observatory\nDisallow: /private\n"
+        )
+
+        assert policy(text).allows(UA, f"{HOST}/private/document") is False
+        assert policy(text).allows(UA, f"{HOST}/public") is True
+
+    def test_repeated_star_groups_are_combined_too(self) -> None:
+        text = "User-agent: *\nAllow: /\n\nUser-agent: *\nDisallow: /private\n"
+
+        assert policy(text).allows(UA, f"{HOST}/private/x") is False
+
     def test_a_file_with_no_group_for_us_allows_everything(self) -> None:
         text = "User-agent: other\nDisallow: /\n"
 
