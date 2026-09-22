@@ -135,6 +135,16 @@ class TestWhichGroupApplies:
 
 
 class TestWhatTheFileSays:
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    def test_robots_txt_is_implicitly_allowed_even_when_everything_else_is_disallowed(
+        self,
+    ) -> None:
+        """RFC 9309 §2.2.2 makes the policy document itself implicitly allowed."""
+        parsed = policy("User-agent: *\nDisallow: /\n")
+
+        assert parsed.allows(UA, f"{HOST}/robots.txt") is True
+        assert parsed.allows(UA, f"{HOST}/private") is False
+
     def test_an_empty_disallow_permits_everything(self) -> None:
         assert policy("User-agent: *\nDisallow:\n").allows(UA, f"{HOST}/x") is True
 
