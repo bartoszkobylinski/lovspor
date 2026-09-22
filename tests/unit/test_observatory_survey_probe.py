@@ -414,3 +414,18 @@ class TestPoliteness:
 
     def test_the_default_delay_matches_the_cleared_limit(self) -> None:
         assert ProbeSettings().delay_seconds == 7.0
+
+
+class TestWhatTheEquivalentsRegisterAssumes:
+    """`mutation-equivalents.toml` waives three `_body` mutants on the strength of
+    httpx and of HTTP, not of Python (issue #132). A dependency bump that changes
+    either fact must show up here as a red test, never as a stale waiver."""
+
+    def test_httpx_upper_cases_the_request_method(self) -> None:
+        assert httpx.Request("get", "https://example.invalid/").method == "GET"
+
+    def test_httpx_header_names_are_case_insensitive(self) -> None:
+        headers = httpx.Headers({"user-agent": "lovspor"})
+
+        assert headers["User-Agent"] == "lovspor"
+        assert headers["USER-AGENT"] == "lovspor"

@@ -2761,3 +2761,70 @@ Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
 name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object. No
 input can distinguish them, so no test can.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "read"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-    self._owes_delay = False
++    self._owes_delay = None
+"""
+justification = """
+The only reader is `_wait`, which tests the attribute with `if self._owes_delay:`
+and then sets it to True. `None` and `False` are both falsy, so the first request
+to the host owes no delay under either value and every later one owes it. The
+attribute is annotated `bool` for mypy; nothing compares it by identity.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_body"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-                "GET",
++                "get",
+"""
+justification = """
+httpx upper-cases the method when it builds the request (`httpx.Request.method`
+is "GET" for either spelling), so the bytes on the wire, the recorded request a
+test can inspect, and the server's view are identical. Argued from the
+dependency, hence pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_upper_cases_the_request_method"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_body"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-                headers={"User-Agent": self._settings.user_agent},
++                headers={"user-agent": self._settings.user_agent},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_body"
+registered = "2026-09-22, PR #353, from run 35688797552"
+mutation = """
+-                headers={"User-Agent": self._settings.user_agent},
++                headers={"USER-AGENT": self._settings.user_agent},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
