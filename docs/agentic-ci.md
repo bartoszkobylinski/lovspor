@@ -171,6 +171,10 @@ comparison quotes the `diff`. The job summary lists the first ten survivors as
   extra cycles.
 - Codex jobs run only for same-repo PRs (`head.repo.full_name == repository`); the
   fork-PR approval policy is set to "all outside collaborators".
+- Codex jobs are also skipped for `dependabot[bot]` (#361): that actor receives no
+  repository secrets, so the lanes could not check out and every bump landed in
+  `needs-human:pipeline`. The mutation gate accepts the skipped lane from that actor
+  only; fast-ci and the Test matrix still run on the bump.
 
 ## Two lanes: who runs on the small box (issue #272)
 

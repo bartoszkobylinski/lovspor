@@ -81,7 +81,9 @@ jobs:
     # waits 20 minutes before giving up, and GitHub's default kill is 6 h (#101).
     timeout-minutes: 60
     # The runner holding Codex auth never executes fork code.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Nor dependabot code: that actor gets no repository secrets, so the lanes
+    # cannot check out; fast-ci and the Test matrix still judge the bump (#361).
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
     # No push token and no write scopes on this lane: the box produces a
     # patch, the hosted verifier is the only leg that can reach the branch.
     permissions:
@@ -272,7 +274,7 @@ jobs:
     # `!cancelled()` rather than `success()`: when the agent lane dies with its
     # box this job must still run, because it is the escalation path for exactly
     # that. A fork PR skips `codex-author`, and a skipped need is not a failure.
-    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -625,7 +627,8 @@ jobs:
     if: >-
       always() &&
       needs.fast-ci.result == 'success' &&
-      needs.codex-tests.result == 'success' &&
+      (needs.codex-tests.result == 'success' ||
+       (needs.codex-tests.result == 'skipped' && github.actor == 'dependabot[bot]')) &&
       needs.codex-tests.outputs.pushed != 'true'
     runs-on: ubuntu-latest
     # Backstop over the script's own per-file budget (issue #102). Two files
