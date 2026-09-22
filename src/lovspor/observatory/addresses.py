@@ -171,10 +171,7 @@ def hosts_for(record: SourceRecord) -> tuple[str, ...]:
         host = urlsplit(url).hostname
         if host:
             ordered.append(host)
-    seen: dict[str, None] = {}
-    for host in ordered:
-        seen.setdefault(host, None)
-    return tuple(seen)
+    return tuple(dict.fromkeys(ordered))
 
 
 def resolve_register(registry: SourceRegistry, resolver: Resolver) -> AddressReport:
