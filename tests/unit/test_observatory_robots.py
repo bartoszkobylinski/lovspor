@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from lovspor.observatory.robots import RobotsPolicy
+from lovspor.observatory.robots import RobotsPolicy, Rule
 
 UA = "lovspor-observatory/0.1 (+https://lovspor.no/observatory)"
 HOST = "https://example.invalid"
@@ -52,6 +52,12 @@ class TestRuleOrderDoesNotMatter:
 
 
 class TestWildcards:
+    def test_match_length_is_one_more_than_the_matching_rule_length(self) -> None:
+        rule = Rule("/files/*", allow=False, anchored=False)
+
+        assert rule.match_length("/files/private/document") == len("/files/*") + 1
+        assert rule.match_length("/public/document") == 0
+
     def test_a_star_matches_any_run_of_characters(self) -> None:
         text = "User-agent: *\nDisallow: /*.pdf\n"
 
@@ -127,6 +133,15 @@ class TestWhichGroupApplies:
         text = "User-agent: a\nUser-agent: lovspor-observatory\nDisallow: /\n"
 
         assert policy(text).allows(UA, f"{HOST}/x") is False
+
+    def test_consecutive_agents_after_a_closed_group_share_the_next_group(self) -> None:
+        text = (
+            "User-agent: first\nDisallow: /first\n"
+            "User-agent: second\nUser-agent: lovspor-observatory\nDisallow: /private\n"
+        )
+
+        assert policy(text).allows(UA, f"{HOST}/private/document") is False
+        assert policy(text).allows(UA, f"{HOST}/public") is True
 
     def test_every_group_naming_the_token_is_one_rule_set(self) -> None:
         """RFC 9309 §2.2.1. Taking only the first group would let the later
@@ -206,6 +221,12 @@ class TestWhatTheFileSays:
 
         assert policy(text).allows(UA, f"{HOST}/documents%2Fprivate") is True
         assert policy(text).allows(UA, f"{HOST}/documents/private/x") is False
+
+    def test_a_lone_percent_is_preserved_as_a_reserved_character(self) -> None:
+        parsed = policy("User-agent: *\nDisallow: /%\n")
+
+        assert parsed.allows(UA, f"{HOST}/%") is False
+        assert parsed.allows(UA, f"{HOST}/public") is True
 
     def test_an_encoded_star_in_a_rule_is_a_literal_not_a_wildcard(self) -> None:
         text = "User-agent: *\nDisallow: /documents/file-%2A.pdf\n"
