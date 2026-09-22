@@ -27,7 +27,9 @@ FAST_CHECKS = {
     "mypy": "uv run mypy src/",
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
 }
-UNIT_SUITE = "uv run pytest tests/unit/ -q"
+# `-m "not network"`: a test that needs a live third-party credential answers
+# for the operator's key, not for the change being pushed (issue #359).
+UNIT_SUITE = "uv run pytest tests/unit/ -q -m not network"
 SECURITY_SCAN = "uv run python scripts/quality/check_security_scan.py"
 STUB_TOOLS = ("uv", "gitleaks")
 
