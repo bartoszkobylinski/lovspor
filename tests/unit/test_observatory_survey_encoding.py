@@ -31,8 +31,9 @@ from lovspor.observatory.survey_commands import _domains, _write
 
 target, listing = Path(sys.argv[1]), Path(sys.argv[3])
 # Read from a file, not argv: under LC_ALL=C Linux hands argv over as
-# ASCII + surrogateescape, so "ø" would arrive already broken and the write
-# under test would be refusing the harness, not proving its own encoding.
+# ASCII + surrogateescape, so a non-ASCII letter would arrive already broken
+# and the write under test would be refusing the harness, not proving its
+# own encoding. This script is argv too, so it must stay ASCII itself.
 declared = Path(sys.argv[2]).read_bytes().decode("utf-8")
 
 shape = read_site_shape(
