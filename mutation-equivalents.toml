@@ -2843,3 +2843,21 @@ name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object and
 `str.encode` produces the same bytes for every input. No test can distinguish
 them. Same argument as the `front_page_markers` entries for survey.py.
 """
+
+[[equivalent]]
+file = "src/lovspor/release/caddy.py"
+symbol = "SubprocessRunner.domain_from_file"
+registered = "2026-09-23, PR #374, from run 35852599315"
+mutation = """
+-        text = self._environment_file.read_text(encoding="utf-8")
++        text = self._environment_file.read_text(encoding="UTF-8")
+"""
+justification = """
+Codec names are case-insensitive: `Path.read_text` hands the name to the text
+wrapper, which resolves it through the codec registry, and the registry
+normalises the name (`codecs.lookup("UTF-8")` and `codecs.lookup("utf-8")`
+return the same CodecInfo), so both spellings decode the environment file's
+bytes to the same text. Python's codec registry, not a dependency.
+(`encoding=None` is NOT equivalent — it is the locale's codec — and is killed
+under the C locale by `test_the_file_is_read_as_utf_8_whatever_the_process_locale`.)
+"""

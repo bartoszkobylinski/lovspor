@@ -611,6 +611,28 @@ class TestTheDomainReachesCaddy:
 
         assert SubprocessRunner(tmp_path / "absent").domain_from_file() == {}
 
+    def test_an_empty_assignment_gives_nothing_rather_than_an_empty_domain(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`LOVSPOR_DOMAIN=` would hand caddy an empty site address, which is
+        the very failure the file read exists to prevent."""
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {}
+
+    def test_the_file_is_read_as_utf_8_whatever_the_process_locale(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, c_locale: None
+    ) -> None:
+        """A unit started without LANG runs under the C locale; an IDN in the
+        file is still UTF-8."""
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_bytes("LOVSPOR_DOMAIN=lovspør.test\n".encode())
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspør.test"}
+
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
@@ -619,6 +641,11 @@ class TestTheDomainReachesCaddy:
             ("LOVSPOR_DOMAIN='a.test'\n", "a.test"),
             ("OTHER=1\n", None),
             ("LOVSPOR_DOMAIN=\n", ""),
+            # A quoted empty string is empty; a lone quote is a one-character
+            # value, not an unterminated pair to strip from both ends.
+            ('LOVSPOR_DOMAIN=""\n', ""),
+            ("LOVSPOR_DOMAIN=''\n", ""),
+            ('LOVSPOR_DOMAIN="\n', '"'),
         ],
     )
     def test_environment_file_value_reads_as_systemd_does(
@@ -650,4 +677,9 @@ class TestTheDomainReachesCaddy:
         with pytest.raises(ControlPlaneError) as caught:
             adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
 
-        assert "LOVSPOR_DOMAIN" not in str(caught.value)
+        # The whole message, so that nothing at all is appended when the
+        # variable is present — not the hint, and not anything in its place.
+        assert str(caught.value) == (
+            f"caddy adapt failed for {tmp_path / 'Caddyfile'} importing"
+            f" {tmp_path / 'fragment.caddy'}: boom"
+        )
