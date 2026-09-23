@@ -190,6 +190,13 @@ class TestConfigPair:
 
         assert config_pair(_config(_site(routes))).release_id is None
 
+    def test_a_non_string_key_on_another_handler_is_not_a_release_var(self) -> None:
+        """Only a vars handler gives the key release semantics; arbitrary
+        handler metadata must not trigger the new non-string refusal."""
+        routes = [{"handle": [{"handler": "file_server", "lovspor_release": 42}]}]
+
+        assert config_pair(_config(_site(routes))).release_id is None
+
     def test_a_var_that_is_not_a_release_id_never_makes_the_pair_ambiguous(self) -> None:
         """Only names of releases can disagree about which release is served."""
         mixed = _config(_site(_routes(ID_A) + _routes("")))
@@ -626,6 +633,21 @@ class TestTheDomainReachesCaddy:
         )
 
         assert done == Completed(0, "lovspor.test, alias.test\n", "")
+
+    def test_the_commands_explicit_domain_wins_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Runner's documented overlay remains last when the file supplies a domain."""
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=file.test\n")
+
+        done = SubprocessRunner(env_file).run(
+            [sys.executable, "-c", "import os; print(os.environ['LOVSPOR_DOMAIN'])"],
+            {"LOVSPOR_DOMAIN": "command.test"},
+        )
+
+        assert done == Completed(0, "command.test\n", "")
 
     def test_the_processs_own_value_wins_over_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
