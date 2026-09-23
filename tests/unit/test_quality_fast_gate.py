@@ -41,6 +41,7 @@ _STUB = """#!/bin/sh
 line="@TOOL@ $*"
 git_context="${GIT_DIR-unset}|${GIT_WORK_TREE-unset}|${GIT_INDEX_FILE-unset}|${GIT_PREFIX-unset}"
 git_context="$git_context|${GIT_COMMON_DIR-unset}|${GIT_OBJECT_DIRECTORY-unset}"
+git_context="$git_context|${GIT_FUTURE_EXPORTED_VARIABLE-unset}"
 printf '%s\\t%s\\t%s\\n' "$(pwd -P)" "$line" "$git_context" >> "$GATE_STUB_LOG"
 if [ "@TOOL@" = uv ] && [ "${1-}" = run ] && [ "${2-}" = pytest ]; then
   printf 'pytest argc=%s marker=<%s>\\n' "$#" "${6-}"
@@ -201,11 +202,12 @@ class TestFastGate:
                 # variable, as tests.unit.site_fixtures.git_env drops them.
                 "GIT_COMMON_DIR": str(tmp_path / ".git"),
                 "GIT_OBJECT_DIRECTORY": str(tmp_path / ".git" / "objects"),
+                "GIT_FUTURE_EXPORTED_VARIABLE": "must-not-reach-checks",
             },
         )
 
         assert run.returncode == 0, run.output
-        assert run.git_contexts == {"unset|unset|unset|unset|unset|unset"}
+        assert run.git_contexts == {"unset|unset|unset|unset|unset|unset|unset"}
 
     def test_the_failure_line_carries_no_terminal_colour_codes(self, tmp_path: Path) -> None:
         """Real gitleaks colours its log even into a pipe; the summary line is
