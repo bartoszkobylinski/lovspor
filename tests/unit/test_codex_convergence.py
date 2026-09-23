@@ -277,6 +277,35 @@ def test_a_non_strict_xfail_at_the_baseline_is_not_an_inherited_proposal(
     assert verdict.blocks
 
 
+@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+def test_an_inactive_xfail_at_the_baseline_is_not_an_inherited_proposal(
+    tmp_path: Path,
+) -> None:
+    """A conditional xfail that does not apply is not the unconditional marker
+    written by the convergence job, even when its reason uses the same prefix."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "import pytest\n\n"
+        "@pytest.mark.xfail("
+        'False, strict=True, reason="codex proposal, round 4 — owner decision")\n'
+        "def test_existing():\n    assert False\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_existing")
+
+    verdict = cc.classify(
+        round_number=1,
+        cap=3,
+        failures=[test],
+        added=set(),
+        repo=repo,
+        before_sha=before,
+    )
+
+    assert verdict.foreign == [test]
+    assert not verdict.advisory
+    assert verdict.blocks
+
+
 def test_an_unparseable_test_file_is_not_a_proposal(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "def test_new_contract(: ...\n")
     assert not cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
