@@ -28,18 +28,19 @@ from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.addresses import SharedAddress, SourceAddresses
 from lovspor.observatory.commands import (
+    ENV_REQUIRE_PINNED_ENGINE,
     _capture_candidates,
     _echo_cadence,
     _echo_last_sweep,
     _echo_shared_group,
     _echo_sources,
     _entry_points,
-    _hm,
     _record_sweep,
     _sweep_one,
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
+from lovspor.observatory.engine import EngineCheckout, describe_engine
 from lovspor.observatory.events import (
     read_source_events,
     record_fingerprint,
@@ -65,6 +66,7 @@ from lovspor.observatory.registry import (
     replace_domain,
     write_registry,
 )
+from lovspor.observatory.status_report import _echo_switch, _hm
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
@@ -2669,6 +2671,10 @@ class TestCaptureAll:
         assert run is not None
         assert (run.status, run.active_sources, run.sources_refused) == ("success", 2, 0)
         assert (run.captured, run.unchanged) == (2, 0)
+        # Issue #219: the record names the engine that produced it. The suite
+        # runs from a checkout, so the commit is known here as it is at night.
+        assert run.engine_commit is not None
+        assert run.engine_commit == describe_engine().commit
 
     def test_a_zero_source_sweep_is_recorded_as_failed(self, root: Path) -> None:
         """A sweep that observed nothing must not leave green telemetry."""
@@ -2682,6 +2688,8 @@ class TestCaptureAll:
         # A failure has to say why: telemetry that is red without a cause is
         # barely better than telemetry that is missing.
         assert run.failure_reason == "no_active_sources"
+        assert run.engine_commit is not None
+        assert run.engine_commit == describe_engine().commit
 
     def test_recorded_sweep_preserves_deferred_count(self, root: Path) -> None:
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
@@ -3362,6 +3370,8 @@ class TestNightly:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.status, run.failure_reason) == ("failed", "no_active_sources")
+        assert run.engine_commit is not None
+        assert run.engine_commit == describe_engine().commit
 
     def test_registered_but_inactive_sources_count_as_no_active_sources(self, root: Path) -> None:
         """A non-empty registry is not enough to make a nightly run viable.
@@ -3445,6 +3455,98 @@ class TestNightly:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.status, run.failure_reason) == ("failed", "observation_log_damaged")
+
+    def test_a_required_unpinned_engine_refuses_before_network_and_records_commit(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The launchd opt-in turns a branch checkout into a named red run."""
+        _activate(root)
+        commit = "b" * 40
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, "1")
+        monkeypatch.setattr(
+            observatory_commands,
+            "describe_engine",
+            lambda: EngineCheckout(
+                commit=commit,
+                pinned=False,
+                reason="the engine checkout is on a branch",
+            ),
+        )
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "engine_not_pinned" in result.stderr
+        assert f"engine: the engine checkout is on a branch ({commit})" in result.stderr
+        assert httpx_mock.get_requests() == []
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason, run.engine_commit) == (
+            "failed",
+            "engine_not_pinned",
+            commit,
+        )
+
+    def test_a_wheel_install_has_no_pin_verdict_even_when_pin_is_required(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No checkout means no commit and, per the engine contract, no refusal."""
+        _activate(root)
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, "1")
+        monkeypatch.setattr(
+            observatory_commands,
+            "describe_engine",
+            lambda: EngineCheckout(commit=None, pinned=None, reason=None),
+        )
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert run.engine_commit is None
+
+    def test_a_required_pinned_engine_sweeps_and_records_its_commit(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scheduled-job guard accepts exactly the detached, clean case."""
+        _activate(root)
+        commit = "a" * 40
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, "1")
+        monkeypatch.setattr(
+            observatory_commands,
+            "describe_engine",
+            lambda: EngineCheckout(commit=commit, pinned=True, reason=None),
+        )
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason, run.engine_commit) == (
+            "success",
+            None,
+            commit,
+        )
+
+    @pytest.mark.parametrize("value", ["0", "true", "01"])
+    def test_only_the_documented_literal_one_arms_the_engine_pin_check(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        """Developer runs remain opt-in: truthy-looking values are not enough."""
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, value)
+        describe = Mock(side_effect=AssertionError("an unarmed check must not inspect git"))
+        monkeypatch.setattr(observatory_commands, "describe_engine", describe)
+
+        assert observatory_commands._engine_pin_verdict() is None
+        describe.assert_not_called()
 
     def test_a_clean_archive_sweeps(self, root: Path, httpx_mock: HTTPXMock) -> None:
         _activate(root)
@@ -3697,6 +3799,57 @@ class TestAddressReport:
 
 
 class TestStatus:
+    def test_an_armed_switch_shows_only_its_host(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        secret_url = "https://hc.example.invalid/sensitive-token"
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, secret_url)
+
+        _echo_switch()
+
+        output = capsys.readouterr().out
+        assert output == "\nDead-man switch\n  armed:      reports to hc.example.invalid\n"
+        assert "sensitive-token" not in output
+
+    def test_an_armed_switch_does_not_expose_url_userinfo(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The URL is a credential, so status must render the host alone."""
+        monkeypatch.setenv(
+            ENV_HEARTBEAT_URL,
+            "https://sensitive-user:sensitive-password@hc.example.invalid/check",
+        )
+
+        _echo_switch()
+
+        output = capsys.readouterr().out
+        assert output == "\nDead-man switch\n  armed:      reports to hc.example.invalid\n"
+        assert "sensitive-user" not in output
+        assert "sensitive-password" not in output
+
+    def test_an_armed_switch_without_a_hostname_uses_the_operator_fallback(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, "https:///sensitive-token")
+
+        _echo_switch()
+
+        output = capsys.readouterr().out
+        assert output == "\nDead-man switch\n  armed:      reports to (no host)\n"
+        assert "sensitive-token" not in output
+
+    def test_an_unarmed_switch_is_named_in_status(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+
+        _echo_switch()
+
+        assert capsys.readouterr().out == (
+            "\nDead-man switch\n"
+            "  NOT ARMED — set LOVSPOR_OBSERVATORY_HEARTBEAT_URL in the job's environment\n"
+        )
+
     def test_status_sections_render_the_complete_operator_report(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -3732,12 +3885,36 @@ class TestStatus:
             "  withdrawn:  0\n"
             "  captured:   47 | unchanged: 4218 | deferred: 0\n"
             "  status:     DEGRADED\n"
+            "  engine:     unknown\n"
             "\nCadence\n"
             f"  target:     {_hm(OBSERVATION_SLA)}\n"
             "  age:        25h00m\n"
             f"  deadline:   {_hm(SWEEP_DEADLINE)}\n"
             "  state:      OVERDUE\n"
         )
+
+    def test_last_sweep_names_the_recorded_engine_commit(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The operator can identify the exact engine that produced a run."""
+        commit = "c" * 40
+        run = SweepRun(
+            run_id="engine-report",
+            started_at=datetime(2026, 9, 23, 1, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 9, 23, 1, 1, tzinfo=UTC),
+            active_sources=1,
+            sources_completed=1,
+            sources_refused=0,
+            captured=1,
+            failed_fetches=0,
+            unchanged=0,
+            status="success",
+            engine_commit=commit,
+        )
+
+        _echo_last_sweep(run)
+
+        assert f"  engine:     {commit}\n" in capsys.readouterr().out
 
     def test_never_swept_status_uses_the_exact_operator_label(
         self, capsys: pytest.CaptureFixture[str]
@@ -3778,6 +3955,19 @@ class TestStatus:
         assert result.exit_code == 1
         assert "never" in result.output
         assert "OVERDUE" in result.output
+
+    def test_the_public_status_command_says_when_the_dead_man_switch_is_unarmed(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The warning belongs in the operator command, not only its section helper."""
+        _activate(root)
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert result.exit_code == 1
+        assert "\nDead-man switch\n" in result.output
+        assert "  NOT ARMED — set LOVSPOR_OBSERVATORY_HEARTBEAT_URL" in result.output
 
     def test_a_recent_sweep_reports_ok(self, root: Path) -> None:
         _activate(root)
