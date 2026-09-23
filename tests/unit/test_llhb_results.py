@@ -179,6 +179,18 @@ class TestRunIdConfinement:
         with pytest.raises(ResultsStoreError, match="invalid run id"):
             store.read_records(run_id)
 
+    def test_a_well_formed_id_that_resolves_outside_the_root_is_refused(
+        self, store: ResultsStore, tmp_path: Path
+    ) -> None:
+        """The id can pass the pattern and still be a symlink out of the root."""
+        runs_root = tmp_path / "runs"
+        runs_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (runs_root / RUN_ID).symlink_to(outside, target_is_directory=True)
+        with pytest.raises(ResultsStoreError, match=rf"^run id {RUN_ID!r} escapes the runs root$"):
+            store.read_records(RUN_ID)
+
 
 class TestSurvivorRegressions:
     def test_records_file_is_named_records_jsonl(self, store: ResultsStore) -> None:

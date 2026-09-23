@@ -453,3 +453,21 @@ def test_build_frontmatter_never_lets_markup_reach_language() -> None:
     fm = build_frontmatter(xml, _default_context())
     assert fm.language == "nb"
     assert not any(ch in fm.language for ch in '<>"')
+
+
+def test_the_recovery_warning_names_the_raw_value_and_the_kept_tag(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="lovspor.rendering.document"):
+        normalize_language(_LOVDATA_CORRUPT_LANG)
+    assert [record.getMessage() for record in caplog.records] == [
+        f"malformed upstream lang attribute {_LOVDATA_CORRUPT_LANG!r}: recovered leading tag 'nb'"
+    ]
+
+
+def test_the_drop_warning_names_the_raw_value(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING", logger="lovspor.rendering.document"):
+        normalize_language("NB")
+    assert [record.getMessage() for record in caplog.records] == [
+        "malformed upstream lang attribute 'NB': dropped, no unambiguous tag"
+    ]
