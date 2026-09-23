@@ -642,6 +642,21 @@ def test_an_untouched_pre_existing_test_is_still_foreign(tmp_path: Path) -> None
     assert cc.authored_tests(repo, before) == {cc.TestId("tests/unit/test_thing.py", "test_new")}
 
 
+def test_comments_and_reindentation_do_not_make_a_test_authored(tmp_path: Path) -> None:
+    """The authored-test contract compares syntax, not formatting noise."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "def test_old():\n    if True:\n        assert 1 == 1\n",
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "# explanatory comment\n\n\ndef test_old():\n    if True:\n"
+        "            assert 1 == 1  # same assertion\n",
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == set()
+
+
 def test_a_test_that_was_a_proposal_before_the_round_stays_advisory(tmp_path: Path) -> None:
     """Issue #354, the PR #367 shape: round 4 left the proposal in the tree as a
     strict xfail; round 6 re-authored it without the marker. The marker at
@@ -662,4 +677,34 @@ def test_a_test_that_was_a_proposal_before_the_round_stays_advisory(tmp_path: Pa
     )
 
     assert verdict.advisory == [test]
+    assert not verdict.blocks
+
+
+def test_an_untouched_proposal_at_the_baseline_stays_advisory(tmp_path: Path) -> None:
+    """A recorded proposal remains one even when this round authored other tests."""
+    proposal = (
+        "import pytest\n\n"
+        '@pytest.mark.xfail(strict=True, reason="codex proposal, round 2 — owner decision")\n'
+        "def test_idea():\n    assert 1 == 2\n\n\n"
+    )
+    repo, before = _committed_repo(tmp_path, proposal + "def test_existing(): ...\n")
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        proposal + "def test_existing(): ...\n\n\ndef test_new(): ...\n",
+        encoding="utf-8",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_idea")
+
+    authored = cc.authored_tests(repo, before)
+    verdict = cc.classify(
+        round_number=1,
+        cap=3,
+        failures=[test],
+        added=authored,
+        repo=repo,
+        before_sha=before,
+    )
+
+    assert test not in authored
+    assert verdict.advisory == [test]
+    assert not verdict.foreign
     assert not verdict.blocks
