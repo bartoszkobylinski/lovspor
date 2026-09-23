@@ -27,6 +27,7 @@ _MODULES = (
     "lovspor.observatory.app",
     "lovspor.observatory.commands",
     "lovspor.observatory.discovery",
+    "lovspor.observatory.engine",
     "lovspor.observatory.entrypoint",
     "lovspor.observatory.events",
     "lovspor.observatory.fetch",
@@ -45,6 +46,7 @@ _MODULES = (
     "lovspor.observatory.survey",
     "lovspor.observatory.survey_commands",
     "lovspor.observatory.survey_probe",
+    "lovspor.observatory.status_report",
     "lovspor.observatory.sweeps",
 )
 

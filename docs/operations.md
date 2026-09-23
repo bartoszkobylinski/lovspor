@@ -824,7 +824,7 @@ number of watchers closes that; it moves.
 
 ```bash
 cp deploy/launchd/no.lovspor.observatory.nightly.plist ~/Library/LaunchAgents/
-# edit __LOVSPOR_BIN__, __OBSERVATORY_ROOT__, __LOG_DIR__
+# edit __LOVSPOR_BIN__, __OBSERVATORY_ROOT__, __LOG_DIR__, __HEARTBEAT_URL__
 launchctl load ~/Library/LaunchAgents/no.lovspor.observatory.nightly.plist
 launchctl list | grep lovspor          # confirm it is registered
 launchctl start no.lovspor.observatory.nightly   # one manual run, to prove the wiring
@@ -832,6 +832,22 @@ launchctl start no.lovspor.observatory.nightly   # one manual run, to prove the 
 
 `RunAtLoad` is false on purpose: loading the job during setup must not start a sweep
 against two hundred municipal servers as a side effect.
+
+Then prove the switch is armed from outside the log — `observatory status` prints a
+`Dead-man switch` section that says `NOT ARMED` until `LOVSPOR_OBSERVATORY_HEARTBEAT_URL`
+reaches the job's environment (issue #347: an unarmed switch said so on stderr every
+night, into a 6 MB file nobody read, and an 8-day outage was found by a human).
+
+The template also sets `LOVSPOR_OBSERVATORY_REQUIRE_PINNED_ENGINE=1`: the sweep then
+refuses to run from an engine checkout that is on a branch or has local changes, the way
+the bootstrap lane worker does, and records the refusal as `engine_not_pinned` (issue
+#219 — the nightly worktree was found on a feature branch within an hour of being
+installed). Every run record names the commit that produced it (`engine_commit`), and
+`observatory status` shows it. Move the pin only to a merged `main` commit:
+
+```bash
+git -C <nightly worktree> fetch origin && git -C <nightly worktree> checkout --detach origin/main
+```
 
 `StartCalendarInterval`, not `StartInterval` or cron: if the machine is asleep at 03:00,
 launchd runs the job on wake and coalesces missed triggers. cron loses them silently.

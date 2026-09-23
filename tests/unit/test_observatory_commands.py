@@ -34,7 +34,6 @@ from lovspor.observatory.commands import (
     _echo_shared_group,
     _echo_sources,
     _entry_points,
-    _hm,
     _record_sweep,
     _sweep_one,
     _SweepTotals,
@@ -65,6 +64,7 @@ from lovspor.observatory.registry import (
     replace_domain,
     write_registry,
 )
+from lovspor.observatory.status_report import _hm
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
@@ -3731,6 +3731,7 @@ class TestStatus:
             "  withdrawn:  0\n"
             "  captured:   47 | unchanged: 4218 | deferred: 0\n"
             "  status:     DEGRADED\n"
+            "  engine:     unknown\n"
             "\nCadence\n"
             f"  target:     {_hm(OBSERVATION_SLA)}\n"
             "  age:        25h00m\n"
