@@ -295,8 +295,26 @@ def _is_proposal_decorator(node: ast.expr) -> bool:
     if not isinstance(target, ast.Attribute) or not _is_pytest_mark(target.value):
         return False
     if target.attr == "xfail":
-        return isinstance(node, ast.Call) and _reason_is_codex_proposal(node)
+        return isinstance(node, ast.Call) and _is_proposal_xfail(node)
     return target.attr == PROPOSAL_MARKER
+
+
+def _is_proposal_xfail(call: ast.Call) -> bool:
+    """The xfail :func:`mark_xfail` writes: strict, with the round's reason.
+
+    ``strict`` is half the contract. A non-strict xfail swallows the failure
+    whatever the reason says, so reading one as a prior round's proposal would
+    let a hand-written marker turn a regression advisory.
+    """
+    return _is_strict(call) and _reason_is_codex_proposal(call)
+
+
+def _is_strict(call: ast.Call) -> bool:
+    return any(
+        keyword.arg == "strict" and keyword.value.value is True
+        for keyword in call.keywords
+        if isinstance(keyword.value, ast.Constant)
+    )
 
 
 def _is_pytest_mark(mark: ast.expr) -> bool:
