@@ -202,10 +202,10 @@ class RobotsGate:
         self._parsers: dict[str, RobotsPolicy | None] = {}
 
     def allows(self, url: str, user_agent: str) -> bool:
-        parser = self._parser_for(url)
+        parser = self._parser_for(url, user_agent)
         return False if parser is None else parser.allows(user_agent, url)
 
-    def readable(self, url: str) -> bool:
+    def readable(self, url: str, user_agent: str) -> bool:
         """Whether this host published rules that could be read at all.
 
         ``allows`` answers False both for a policy that refuses and for one that
@@ -214,9 +214,9 @@ class RobotsGate:
         a refusal is the site's decision and an unreadable policy is a fact
         about a bad afternoon, and only the first is worth a human's time.
         """
-        return self._parser_for(url) is not None
+        return self._parser_for(url, user_agent) is not None
 
-    def sitemaps(self, url: str) -> tuple[str, ...]:
+    def sitemaps(self, url: str, user_agent: str) -> tuple[str, ...]:
         """The sitemaps the host declares in its own ``robots.txt``.
 
         Where discovery should start is a question the source already answers
@@ -229,19 +229,27 @@ class RobotsGate:
         decides what to do about that, since "no declared sitemap" is an
         ordinary state and not an error.
         """
-        parser = self._parser_for(url)
+        parser = self._parser_for(url, user_agent)
         return () if parser is None else parser.sitemaps()
 
-    def _parser_for(self, url: str) -> RobotsPolicy | None:
+    def _parser_for(self, url: str, user_agent: str) -> RobotsPolicy | None:
+        # One fetch per host per run: the first caller's user agent is the one
+        # the host sees, and every source clears one crawler, so they agree.
         parts = urlsplit(url)
         robots_url = urlunsplit((parts.scheme, parts.netloc, ROBOTS_PATH, "", ""))
         if robots_url not in self._parsers:
-            self._parsers[robots_url] = self._load(robots_url)
+            self._parsers[robots_url] = self._load(robots_url, user_agent)
         return self._parsers[robots_url]
 
-    def _load(self, robots_url: str) -> RobotsPolicy | None:
+    def _load(self, robots_url: str, user_agent: str) -> RobotsPolicy | None:
+        # Named like every other request: the one that reads a host's crawl
+        # policy must not be the one that hides who is asking (issue #350).
         try:
-            response = self._client.get(robots_url, timeout=self._settings.timeout_seconds)
+            response = self._client.get(
+                robots_url,
+                headers={"User-Agent": user_agent},
+                timeout=self._settings.timeout_seconds,
+            )
         except httpx.HTTPError:
             return None
         if response.status_code >= _SERVER_ERROR_STATUS:
@@ -272,15 +280,16 @@ class Fetcher:
         self._limiter = RateLimiter(self._settings)
         self._robots = RobotsGate(client, self._settings)
 
-    def declared_sitemaps(self, url: str) -> tuple[str, ...]:
+    def declared_sitemaps(self, url: str, user_agent: str) -> tuple[str, ...]:
         """The sitemaps the host serving ``url`` declares in its robots.txt.
 
         Exposed because where to start looking is a question the source
         answers in public, in the file this fetcher is obliged to read anyway.
         Nothing is fetched here beyond that file, and nothing is recorded: a
-        declaration is not an observation.
+        declaration is not an observation. ``user_agent`` is the crawler the
+        source was cleared for; the file is read in its name.
         """
-        return self._robots.sitemaps(url)
+        return self._robots.sitemaps(url, user_agent)
 
     def capture(
         self, url: str, discovery_method: str, adapter: str = CHANNEL_HTTP

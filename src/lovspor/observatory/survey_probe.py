@@ -104,9 +104,9 @@ class SiteProbe:
     def _robots(self, gate: RobotsGate, base: str) -> RobotsReadout:
         self._wait()
         return RobotsReadout(
-            readable=gate.readable(base),
+            readable=gate.readable(base, self._settings.user_agent),
             allows_root=gate.allows(base, self._settings.user_agent),
-            declared_sitemaps=gate.sitemaps(base),
+            declared_sitemaps=gate.sitemaps(base, self._settings.user_agent),
         )
 
     def _serves_discovery_document(

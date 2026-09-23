@@ -122,23 +122,17 @@ class TestWhatLeavesTheMachine:
         assert shape.entry == "robots_disallowed"
         assert [str(r.url) for r in httpx_mock.get_requests()] == [ROBOTS]
 
-    def test_the_robots_fetch_is_still_anonymous_which_is_issue_350(
+    def test_the_robots_fetch_names_the_survey_crawler(
         self, client: httpx.Client, httpx_mock: HTTPXMock
     ) -> None:
-        """Characterisation, not approval.
-
-        ``RobotsGate._load`` sends no ``User-Agent`` (fetch.py:232), so the one
-        request that reads a municipality's crawl policy does not name the
-        crawler acting on it. That is #350 and predates this module — every
-        observatory robots fetch has always gone out this way. Pinned here so a
-        fix turns this test red on purpose instead of passing unnoticed.
-        """
+        """Issue #350, fixed: the request that reads a host's crawl policy
+        carries the same User-Agent as every other request the probe makes."""
         httpx_mock.add_response(url=ROBOTS, text="User-agent: *\nDisallow: /\n")
 
         _probe(client).read(DOMAIN)
 
         robots_request = next(r for r in httpx_mock.get_requests() if str(r.url) == ROBOTS)
-        assert SURVEY_USER_AGENT not in robots_request.headers.get("user-agent", "")
+        assert robots_request.headers["User-Agent"] == SURVEY_USER_AGENT
 
 
 class TestWhatCountsAsASitemapAtTheConventionalPath:
