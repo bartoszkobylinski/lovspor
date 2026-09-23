@@ -169,7 +169,6 @@ class TestWhichGroupApplies:
 
 
 class TestWhatTheFileSays:
-    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
     def test_robots_txt_is_implicitly_allowed_even_when_everything_else_is_disallowed(
         self,
     ) -> None:

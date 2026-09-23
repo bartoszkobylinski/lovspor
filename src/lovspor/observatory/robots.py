@@ -35,6 +35,7 @@ from collections.abc import Iterable
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
+ROBOTS_PATH = "/robots.txt"
 _WILDCARD_RUN = re.compile(r"[*]{2,}")
 _ANCHOR_RUN = re.compile(r"[$][$*]+")
 # RFC 3986 §2: an encoded unreserved octet means the same as the literal; an
@@ -95,6 +96,11 @@ class RobotsPolicy:
         an ``Allow`` wins a tie; no matching rule means the path is allowed.
         """
         path = _request_path(url)
+        # The policy file itself is never off limits: a site cannot publish
+        # rules and forbid reading them (Google's REP; the codex-tests lane's
+        # round-4 proposal). The gate fetches it directly anyway.
+        if path == ROBOTS_PATH:
+            return True
         matching = [
             (len(rule.path), rule.allow)
             for rule in self._rules_for(user_agent)

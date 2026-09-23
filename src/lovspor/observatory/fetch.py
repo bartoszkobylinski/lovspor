@@ -59,7 +59,7 @@ from lovspor.observatory.registry import (
     capture_host,
     host_within_domain,
 )
-from lovspor.observatory.robots import RobotsPolicy
+from lovspor.observatory.robots import ROBOTS_PATH, RobotsPolicy
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 # Municipal PDFs are the large case; a cap keeps one oversized response from
@@ -67,7 +67,6 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 # with a hash of its own would be evidence of something never served.
 DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 CHANNEL_HTTP = "http"
-ROBOTS_PATH = "/robots.txt"
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
 _REDIRECT_STATUS = 300
 _MAX_REDIRECT_HOPS = 3
