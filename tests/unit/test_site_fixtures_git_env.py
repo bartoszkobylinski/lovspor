@@ -14,6 +14,9 @@ def test_git_env_drops_every_git_variable_and_keeps_the_stamp(
     monkeypatch.setenv("GIT_DIR", "/somewhere/.git/worktrees/x")
     monkeypatch.setenv("GIT_WORK_TREE", "/somewhere")
     monkeypatch.setenv("GIT_INDEX_FILE", "/somewhere/index")
+    monkeypatch.setenv("GIT_PREFIX", "nested/")
+    monkeypatch.setenv("GIT_OBJECT_DIRECTORY", "/somewhere/objects")
+    monkeypatch.setenv("GIT_FUTURE_EXPORTED_VARIABLE", "must-not-survive")
     monkeypatch.setenv("PATH_KEPT", "yes")
 
     env = git_env(GIT_AUTHOR_NAME="t")
@@ -21,6 +24,9 @@ def test_git_env_drops_every_git_variable_and_keeps_the_stamp(
     assert "GIT_DIR" not in env
     assert "GIT_WORK_TREE" not in env
     assert "GIT_INDEX_FILE" not in env
+    assert "GIT_PREFIX" not in env
+    assert "GIT_OBJECT_DIRECTORY" not in env
+    assert "GIT_FUTURE_EXPORTED_VARIABLE" not in env
     assert env["PATH_KEPT"] == "yes"
     assert env["GIT_AUTHOR_NAME"] == "t"
 
