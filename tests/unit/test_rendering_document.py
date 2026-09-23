@@ -429,6 +429,19 @@ def test_normalize_language_drops_unrecoverable_garbage(
     assert "malformed upstream lang attribute" in caplog.text
 
 
+@pytest.mark.parametrize("raw", ["nb\n", "nb\r\n", "nb-NO\n"])
+def test_normalize_language_does_not_pass_a_tag_with_a_trailing_newline(
+    raw: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``$`` matches before a trailing newline, so ``match`` returned the raw
+    value newline and all — into the front matter (#287). Not blank, not a
+    valid tag, no markup to recover from: the documented fallback is ``""``."""
+    with caplog.at_level("WARNING"):
+        assert normalize_language(raw) == ""
+    assert "malformed upstream lang attribute" in caplog.text
+
+
 def test_build_frontmatter_never_lets_markup_reach_language() -> None:
     """Full-pipeline guard: the escaped corrupt attribute from upstream yields
     the recovered tag, and no markup character survives into the model."""
