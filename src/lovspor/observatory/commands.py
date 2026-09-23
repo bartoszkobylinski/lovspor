@@ -7,7 +7,8 @@ The two halves share ``app`` (the Typer instance both decorate) and
 other and no cycle is possible.
 """
 
-from datetime import UTC, datetime, timedelta
+import os
+from datetime import UTC, datetime
 from typing import Annotated, NamedTuple
 
 import httpx
@@ -31,6 +32,7 @@ from lovspor.observatory.addresses import (
 )
 from lovspor.observatory.app import _AuthorityIdOption, observatory_app
 from lovspor.observatory.discovery import Candidate, Discoverer, DiscoveryResult
+from lovspor.observatory.engine import describe_engine
 from lovspor.observatory.fetch import Fetcher
 from lovspor.observatory.freshness import (
     CaptureState,
@@ -44,8 +46,6 @@ from lovspor.observatory.model import ArtifactObservation
 from lovspor.observatory.outcomes import ArchiveComposition, collect_composition
 from lovspor.observatory.registry import (
     SourceRecord,
-    SourceRegistry,
-    domains_claimed_twice,
     registry_path,
 )
 from lovspor.observatory.registry_io import (
@@ -54,11 +54,14 @@ from lovspor.observatory.registry_io import (
     _registry_file,
     _root,
 )
+from lovspor.observatory.status_report import (
+    _echo_cadence,
+    _echo_last_sweep,
+    _echo_sources,
+    _echo_switch,
+)
 from lovspor.observatory.storage import ObservatoryRoot
 from lovspor.observatory.sweeps import (
-    OBSERVATION_SLA,
-    SWEEP_DEADLINE,
-    CadenceState,
     SweepRun,
     append_sweep_run,
     cadence_state,
@@ -897,15 +900,10 @@ def _record_sweep(
         # before reaching here, but the recorder must stay total: the one
         # caller that does produce it must not produce a reasonless failure.
         failure_reason=_NO_ACTIVE_SOURCES if active == 0 else None,
+        engine_commit=describe_engine().commit,
     )
     append_sweep_run(root, run)
     return run
-
-
-def _hm(delta: timedelta) -> str:
-    """A duration as hours and minutes, e.g. ``1h16m``."""
-    minutes = int(delta.total_seconds() // 60)
-    return f"{minutes // 60}h{minutes % 60:02d}m"
 
 
 def _latest_sweep(root: ObservatoryRoot) -> SweepRun | None:
@@ -916,87 +914,18 @@ def _latest_sweep(root: ObservatoryRoot) -> SweepRun | None:
         raise typer.Exit(1) from exc
 
 
-def _echo_sources(registry: SourceRegistry) -> None:
-    active = sum(1 for record in registry.sources.values() if record.active)
-    typer.echo("Sources")
-    typer.echo(f"  registered: {len(registry.sources)}")
-    typer.echo(f"  active:     {active}")
-    _echo_contested_domains(registry)
-    _echo_verdicts(registry)
-
-
-def _echo_contested_domains(registry: SourceRegistry) -> None:
-    """Domains claimed by more than one source, named rather than counted.
-
-    Nothing else looks at the register as a whole. A sweep meets this state one
-    source at a time and only when it reaches a claimant, which in #215 meant
-    five nights of filing one municipality's pages under another's name while
-    every report said 201 registered, 201 active.
-    """
-    contested = domains_claimed_twice(registry)
-    if not contested:
-        return
-    typer.echo(f"  domains claimed twice: {len(contested)}  (capture refused on each)")
-    for domain, records in sorted(contested.items()):
-        named = ", ".join(f"{r.authority_id} {r.name}" for r in records)
-        typer.echo(f"    {domain}: {named}")
-
-
-def _echo_verdicts(registry: SourceRegistry) -> None:
-    """Held sources stay on the report, and say when they are due again.
-
-    A verdict that removed its source from view would be #151's silent zero
-    one level up: the archive reads as complete because the sources that
-    produce nothing have stopped being counted (#195).
-    """
-    held = [r.capture_verdict for r in registry.sources.values() if r.capture_verdict is not None]
-    if not held:
-        return
-    now = datetime.now(UTC)
-    typer.echo(f"  held under a verdict: {len(held)}")
-    typer.echo(f"  due for re-check: {sum(1 for verdict in held if verdict.due(now))}")
-
-
-def _echo_last_sweep(run: SweepRun | None) -> None:
-    typer.echo("\nLast sweep")
-    if run is None:
-        typer.echo("  never")
-        return
-    typer.echo(f"  started:    {run.started_at.isoformat(timespec='seconds')}")
-    typer.echo(f"  finished:   {run.finished_at.isoformat(timespec='seconds')}")
-    typer.echo(f"  duration:   {_hm(run.finished_at - run.started_at)}")
-    typer.echo(f"  completed:  {run.sources_completed} / {run.active_sources}")
-    typer.echo(f"  refused:    {run.sources_refused}")
-    typer.echo(f"  capped:     {run.sources_capped}")
-    typer.echo(f"  held:       {run.sources_held}")
-    typer.echo(f"  withdrawn:  {run.sources_withdrawn}")
-    typer.echo(
-        f"  captured:   {run.captured} | unchanged: {run.unchanged} | deferred: {run.deferred}"
-    )
-    typer.echo(f"  status:     {run.status.upper()}")
-
-
-def _echo_cadence(state: CadenceState, run: SweepRun | None) -> None:
-    """Render the cadence, distinguishing the two ways an age can be missing.
-
-    "Never swept" beside a printed last sweep would contradict itself; the
-    other case is a run stamped ahead of the clock, which is worth naming
-    because it is the one that would otherwise have read as fresh.
-    """
-    unknown = "never swept" if run is None else "unknown — last sweep is stamped ahead of the clock"
-    typer.echo("\nCadence")
-    typer.echo(f"  target:     {_hm(OBSERVATION_SLA)}")
-    typer.echo(f"  age:        {_hm(state.age) if state.age is not None else unknown}")
-    typer.echo(f"  deadline:   {_hm(SWEEP_DEADLINE)}")
-    typer.echo(f"  state:      {'OVERDUE' if state.overdue else 'OK'}")
-
-
 #: Preflight verdicts. Strings rather than an enum because they are written
 #: into the run record and read by a human at 03:00, not branched on.
 _STORAGE_UNAVAILABLE = "storage_unavailable"
 _REGISTRY_MISSING = "registry_missing"
 _LOG_DAMAGED = "observation_log_damaged"
 _NO_ACTIVE_SOURCES = "no_active_sources"
+_ENGINE_NOT_PINNED = "engine_not_pinned"
+#: Set to 1 in the scheduled job's environment: the sweep then refuses to run
+#: from an engine checkout that is on a branch or dirty (issue #219). Opt-in,
+#: because every developer checkout is on a branch and `nightly` must stay
+#: runnable there; the launchd template arms it.
+ENV_REQUIRE_PINNED_ENGINE = "LOVSPOR_OBSERVATORY_REQUIRE_PINNED_ENGINE"
 #: Not a preflight verdict: the ground was fine, the host was reserved. The
 #: sweep did not start and says so (issue #169).
 _EXCLUSIVE_WORKLOAD = "deferred_exclusive_workload"
@@ -1026,6 +955,24 @@ def _preflight(root: ObservatoryRoot) -> str | None:
         return _NO_ACTIVE_SOURCES
     if not ObservationLog(root).scan_damage().complete:
         return _LOG_DAMAGED
+    return _engine_pin_verdict()
+
+
+def _engine_pin_verdict() -> str | None:
+    """`engine_not_pinned` when the job demands a pinned engine and has none.
+
+    A branch can move under a running job and local edits are unreviewed
+    code; the lane worker refuses both and, since #219, so does the nightly.
+    The refusal is recorded like any other preflight verdict, with the
+    reason on stderr, so a stray `git checkout -b` reads as a red run and
+    not as a night that never happened.
+    """
+    if os.environ.get(ENV_REQUIRE_PINNED_ENGINE, "").strip() != "1":
+        return None
+    checkout = describe_engine()
+    if checkout.pinned is False:
+        typer.echo(f"engine: {checkout.reason} ({checkout.commit})", err=True)
+        return _ENGINE_NOT_PINNED
     return None
 
 
@@ -1048,6 +995,7 @@ def _failed_run(started_at: datetime, reason: str) -> SweepRun:
         unchanged=0,
         status="failed",
         failure_reason=reason,
+        engine_commit=describe_engine().commit,
     )
 
 
@@ -1142,5 +1090,6 @@ def status() -> None:
     _echo_sources(_load(_registry_file()))
     _echo_last_sweep(latest)
     _echo_cadence(state, latest)
+    _echo_switch()
     if state.overdue:
         raise typer.Exit(1)

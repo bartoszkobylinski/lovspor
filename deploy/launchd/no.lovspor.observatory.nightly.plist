@@ -41,6 +41,12 @@
              make audible. -->
         <key>LOVSPOR_OBSERVATORY_HEARTBEAT_URL</key>
         <string>__HEARTBEAT_URL__</string>
+
+        <!-- Refuse to sweep from an engine checkout that is on a branch or
+             dirty (issue #219). The nightly worktree is meant to sit detached
+             on a merged commit; a stray checkout must read as a red run. -->
+        <key>LOVSPOR_OBSERVATORY_REQUIRE_PINNED_ENGINE</key>
+        <string>1</string>
     </dict>
 
     <key>StartCalendarInterval</key>

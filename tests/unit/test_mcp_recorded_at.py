@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import lovspor.mcp as mcp_module
+from lovspor.errors import AmbiguousSlugError
 from lovspor.mcp import (
     CorpusNotFoundError,
     CorpusReader,
@@ -903,3 +904,40 @@ def test_integrity_error_does_not_elide_at_exactly_five(tmp_path: Path) -> None:
 
     shown = str(excinfo.value).split("tree: ")[1].split(" — ")[0]
     assert shown == ("ghost1loven, ghost2loven, ghost3loven, ghost4loven, ghost5loven")
+
+
+def test_historical_state_with_duplicate_slug_raises_ambiguous_slug_error(
+    tmp_path: Path,
+) -> None:
+    """Issue #243 at a recorded_at state: the snapshot's index shares the
+    live reader's contract, so a date where two current records claimed
+    one slug names both candidates instead of serving the first one."""
+    repo = tmp_path / "corpus"
+    (repo / "lover").mkdir(parents=True)
+    (repo / "forskrifter").mkdir()
+    _run_git(repo, "init", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "config", "commit.gpgsign", "false")
+    (repo / "lover" / "dupe.md").write_text(
+        _doc("Dupe lov", "## Kapittel 1.\n\n### § 1. Lov\n\nLovtekst.\n"),
+    )
+    (repo / "forskrifter" / "dupe.md").write_text(
+        _doc("Dupe forskrift", "## Kapittel 1.\n\n### § 1. Forskrift\n\nForskriftstekst.\n"),
+    )
+    forskrift = {
+        **_record("dupe", "hash-f1"),
+        "doc_type": "forskrift",
+        "markdown_path": "forskrifter/dupe.md",
+        "source_dataset": "gjeldende-sentrale-forskrifter",
+    }
+    (repo / "manifest.json").write_text(
+        _manifest({"doc-l": _record("dupe", "hash-l1"), "doc-f": forskrift}),
+    )
+    _commit_all(repo, "sync", "2026-05-01T12:00:00Z")
+    reader = CorpusReader(repo)
+
+    with pytest.raises(AmbiguousSlugError, match=r"doc-l \(lov\), doc-f \(forskrift\)"):
+        reader.at_state("2026-05-01").get_section("dupe", "1")
+    with pytest.raises(AmbiguousSlugError, match=r"names 2 current documents"):
+        reader.get_law_at("dupe", "2026-05-01")

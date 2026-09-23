@@ -206,7 +206,8 @@ class TestAbsence:
         sources = _by_id(_artifacts(unobserved_authenticated("probe_credential_rejected")))
 
         assert sources["hosted.transport.authenticated.served_tool_count"].unobserved == Unobserved(
-            reason="probe_credential_rejected", observed_at=OBSERVED_AT
+            reason="probe_credential_rejected",  # gitleaks:allow
+            observed_at=OBSERVED_AT,
         )
         assert sources["hosted.transport.authenticated.status"].value == "unobserved"
 

@@ -180,9 +180,9 @@ this version exists to remove.
 """
 
 [[equivalent]]
-file = "src/lovspor/observatory/commands.py"
+file = "src/lovspor/observatory/status_report.py"
 symbol = "_hm"
-registered = "2026-08-25, PR #170, from run 32785337529"
+registered = "2026-08-25, PR #170, from run 32785337529; moved with the function to status_report.py in PR #373 (run 35848943844)"
 mutation = """
 -    minutes = int(delta.total_seconds() // 60)
 +    minutes = int(delta.total_seconds() / 60)
@@ -364,38 +364,6 @@ explicit cutoff=0.6 and the default select the same threshold. Stdlib-signature
 argument, pinned by the same assumption test.
 """
 assumption_test = "tests/unit/test_mcp_recorded_at.py::test_assumption_difflib_close_matches_defaults"
-
-[[equivalent]]
-file = "src/lovspor/mcp.py"
-symbol = "_iter_search_docs"
-registered = "2026-09-01, PR #222, from run 33536461680"
-mutation = """
--        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
-+        if slug_index.get(record.slug, None)[0] != doc_id:
-"""
-justification = """
-The default is unreachable. Both callers build `slug_index` from the very
-`documents` mapping this loop iterates, keeping exactly the records with
-status "current" and a non-None slug — the same two conditions the loop has
-already checked before this line. Every record that reaches the lookup
-therefore has its slug present in the index (first-wins on duplicates, which
-is what the comparison then detects), so the default value is never produced
-and any default — tuple, None, or absent — computes the same result.
-"""
-
-[[equivalent]]
-file = "src/lovspor/mcp.py"
-symbol = "_iter_search_docs"
-registered = "2026-09-01, PR #222, from run 33536461680"
-mutation = """
--        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
-+        if slug_index.get(record.slug, )[0] != doc_id:
-"""
-justification = """
-Same unreachable default as the previous entry: the slug of every record that
-passes the current-status/slug guard is present in an index built from the
-same mapping, so `.get` never falls through to its default.
-"""
 
 [[equivalent]]
 file = "src/lovspor/mcp.py"
@@ -1094,65 +1062,6 @@ well, so the fully uppercased spelling selects the same behaviour.
 Pinned by the same real-git assumption test.
 """
 assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_keys_are_case_insensitive"
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
-symbol = "_source_revisions"
-registered = "2026-09-06, PR #249"
-mutation = """
--    current = ""
-+    current = None
-"""
-justification = """
-The initial value is dead: git log with --format=%x00%H emits the
-NUL-prefixed commit line before any file name, so `current` is
-reassigned before the first setdefault can read it. No line ever sees
-the initial value, whatever it is.
-"""
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
-symbol = "_source_revisions"
-registered = "2026-09-06, PR #249"
-mutation = """
--    current = ""
-+    current = "XXXX"
-"""
-justification = """
-Same dead initial value as the None variant: the format string
-guarantees a commit line precedes every name line.
-"""
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
-symbol = "_clear_previous_build"
-registered = "2026-09-06, PR #249"
-mutation = """
--    manifest = out / "site-manifest.json"
-+    manifest = out / "XXsite-manifest.jsonXX"
-"""
-justification = """
-The unlink is redundant with the same build's final step: emit_site
-unconditionally rewrites site-manifest.json at the same path after
-emitting the pages, so whether the stale file was removed first is
-unobservable in any completed build. The unlink exists only to avoid a
-stale manifest surviving a crash mid-build, which no deterministic test
-can exercise.
-"""
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
-symbol = "_clear_previous_build"
-registered = "2026-09-06, PR #249"
-mutation = """
--    manifest = out / "site-manifest.json"
-+    manifest = out / "SITE-MANIFEST.JSON"
-"""
-justification = """
-Same redundant-unlink argument as the XX-wrapped variant (with the
-aside that on a case-insensitive filesystem the mutated name even
-unlinks the real file — either way the final write settles the state).
-"""
 
 [[equivalent]]
 file = "src/lovspor/publish/emit.py"
@@ -2274,38 +2183,6 @@ fragment's bytes to the same text. Python's codec registry, not a dependency.
 """
 
 [[equivalent]]
-file = "src/lovspor/release/reconcile.py"
-symbol = "reconcile"
-registered = "2026-09-09, PR #268, from run 34397173401"
-mutation = """
--def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> ReconcileReport:
-+def reconcile(plane: ControlPlane, action: ReconcileAction = "XXreportXX") -> ReconcileReport:
-"""
-justification = """
-`action` is read at exactly two places, `if action == "complete"` and
-`if action == "abandon"`, and nowhere else — it is not stored, reported or
-compared with "report". Every value other than those two literals takes the
-same path to the same `UnreconciledError`, so the default's spelling cannot
-reach any output: "report", "XXreportXX" and "REPORT" are all "neither".
-Pure Python string equality; no dependency. The command layer never relies
-on the default (it passes the action it parsed), and the Literal type is a
-static promise mutmut does not run mypy against.
-"""
-
-[[equivalent]]
-file = "src/lovspor/release/reconcile.py"
-symbol = "reconcile"
-registered = "2026-09-09, PR #268, from run 34397173401"
-mutation = """
--def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> ReconcileReport:
-+def reconcile(plane: ControlPlane, action: ReconcileAction = "REPORT") -> ReconcileReport:
-"""
-justification = """
-Same argument as the entry above: the default is only ever compared with
-"complete" and "abandon", and "REPORT" is neither exactly as "report" is.
-"""
-
-[[equivalent]]
 file = "src/lovspor/release/linking.py"
 symbol = "_sha256"
 registered = "2026-09-10, PR #268, from run 34414685228"
@@ -2343,25 +2220,6 @@ reach the same encoder and write identical bytes for every input. The same
 registry argument already registered for `decode("UTF-8")` in
 observatory/manifest and for `encode("UTF-8")` in release/caddy; it is
 documented language behaviour of `codecs.lookup`, not a dependency's.
-"""
-
-[[equivalent]]
-file = "src/lovspor/release/migrate.py"
-symbol = "_had_exec_reload"
-registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
-mutation = """
--    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="utf-8")
-+    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="UTF-8")
-"""
-justification = """
-`Path.read_text` resolves the encoding name through the codec registry, which
-normalises case before lookup, so "UTF-8" and "utf-8" select the same decoder
-and return the same string for every byte sequence — including the sequences
-that make both raise the same UnicodeDecodeError. The predicate is a
-containment test on that string, so its value cannot differ. Python's own
-codec-registry semantics; the sibling `encoding=None` mutant of this same call
-is a real difference and is killed by
-`tests/unit/test_release_migrate.py::TestRollback::test_the_drop_in_is_read_as_utf8_whatever_the_locale`.
 """
 
 [[equivalent]]
@@ -2861,6 +2719,74 @@ bytes to the same text. Python's codec registry, not a dependency.
 (`encoding=None` is NOT equivalent — it is the locale's codec — and is killed
 under the C locale by `test_the_file_is_read_as_utf_8_whatever_the_process_locale`.)
 """
+
+[[equivalent]]
+
+[[equivalent]]
+file = "src/lovspor/observatory/commands.py"
+symbol = "_engine_pin_verdict"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-    if os.environ.get(ENV_REQUIRE_PINNED_ENGINE, "").strip() != "1":
++    if os.environ.get(ENV_REQUIRE_PINNED_ENGINE, "XXXX").strip() != "1":
+"""
+justification = """
+`dict.get`'s second argument is returned only when the key is absent, and the
+branch asks whether the value strips to "1". Neither "" nor "XXXX" does, so an
+absent variable takes the same early return under both defaults, and a present
+variable never sees the default at all. Python semantics only.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "describe_engine"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-    if _git(root, "symbolic-ref", "-q", "HEAD") is not None:
++    if _git(root, "symbolic-ref", "HEAD") is not None:
+"""
+justification = """
+`git symbolic-ref -q` differs from the bare form only in what it prints to
+stderr when HEAD is detached: with `-q` it exits 1 silently, without it exits
+128 with "fatal: ref HEAD is not a symbolic ref". `_git` captures stderr and
+maps every non-zero exit to None, so both spellings answer None on a detached
+HEAD and the branch name on a branch. Argued from git, hence pinned by the
+test that needs a detached HEAD to read as "not a symbolic ref".
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestPinnedCheckout::test_a_detached_clean_checkout_is_pinned_and_names_its_commit"
+
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "_git"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` truth-tests `check` before raising CalledProcessError, and
+None is as false as False. The explicit `check=False` is there for the
+reader (and for ruff's PLW1510), not for the interpreter.
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestOutsideAGitCheckout::test_an_installed_package_has_no_commit_and_no_verdict"
+
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "_git"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`, so dropping the keyword leaves
+the call as it was; the explicit spelling exists for the reader and for ruff's
+PLW1510, not for the interpreter. The test that runs git against a directory
+that is not a repository pins that a non-zero exit is an answer, not an
+exception.
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestOutsideAGitCheckout::test_an_installed_package_has_no_commit_and_no_verdict"
 
 [[equivalent]]
 file = "src/lovspor/observatory/survey_probe.py"
