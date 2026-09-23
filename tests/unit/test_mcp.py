@@ -203,6 +203,31 @@ def test_iter_search_docs_requires_current_owned_slug_and_body() -> None:
     assert looked_up == ["current"]
 
 
+def test_iter_search_docs_skips_a_foreign_claim_and_keeps_later_documents() -> None:
+    """A record whose slug the index assigns to another document is skipped,
+    not the end of the stream: every record-skipping branch in this module is
+    one keystroke from dropping the rest of the corpus."""
+    current = _record(slug="current", title="Current")
+    duplicate = _record(slug="current", title="Duplicate")
+    later = _record(slug="later", title="Later")
+    documents = {"duplicate": duplicate, "owner": current, "after": later}
+    slug_index = {"current": ("owner", current), "later": ("after", later)}
+
+    docs = list(mcp_module._iter_search_docs(documents, slug_index, lambda slug: f"{slug}-body"))
+
+    assert docs == [("owner", current, "current-body"), ("after", later, "later-body")]
+
+
+def test_a_reader_without_an_embedder_has_no_paid_query_path(tmp_path: Path) -> None:
+    """The spend hook attaches to `_query_embedder`; without an embedder there
+    must be nothing to attach to, or a keyless server would build a query
+    embedder around None and fail on the first paid request instead of at
+    `semantic_search`'s own refusal."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="one", title="One")})
+
+    assert CorpusReader(tmp_path)._query_embedder is None
+
+
 def test_parse_recorded_at_accepts_today_in_utc() -> None:
     today = datetime.now(UTC).date()
     assert mcp_module._parse_recorded_at(today.isoformat()) == today
