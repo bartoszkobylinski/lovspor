@@ -155,6 +155,26 @@ class TestActivationGate:
 
 
 class TestRobotsGate:
+    def test_capture_uses_longest_robots_match_not_file_order(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #351: the broad rule came first, so Python 3.13's
+        ``RobotFileParser`` allowed a path that the narrower rule forbids.
+
+        Exercise the capture boundary as well as ``RobotsPolicy`` itself so a
+        wiring regression cannot make crawler compliance interpreter-dependent.
+        """
+        _allow_robots(
+            httpx_mock,
+            "User-agent: *\nAllow: /\nDisallow: /forskrifter/\n",
+        )
+
+        result = _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        assert isinstance(result, FetchFailure)
+        assert result.outcome == "robots_disallowed"
+        assert [request.url for request in httpx_mock.get_requests()] == [httpx.URL(ROBOTS_URL)]
+
     def test_a_disallowed_path_is_recorded_not_fetched(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
