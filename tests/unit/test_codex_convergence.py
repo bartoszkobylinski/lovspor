@@ -469,6 +469,49 @@ def test_cli_sees_tests_in_a_brand_new_untracked_file(tmp_path: Path) -> None:
     assert verdict["blocking"] == ["tests/unit/test_brand_new.py::test_new_contract"]
 
 
+def test_cli_classifies_a_changed_pre_existing_test_as_authored(tmp_path: Path) -> None:
+    """The documented added-or-changed rule must reach the CLI verdict, not
+    merely the helper that compares function ASTs."""
+    repo = _repo_with(tmp_path, "def test_existing():\n    assert 1 == 1\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "tests/unit/test_thing.py").write_text(
+        "def test_existing():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+    junit = tmp_path / "junit.xml"
+    junit.write_text(
+        '<testsuites><testsuite><testcase classname="tests.unit.test_thing" '
+        'name="test_existing"><failure message="x">x</failure></testcase>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    sticky = tmp_path / "sticky.md"
+    sticky.write_text("", encoding="utf-8")
+
+    cc.main(
+        [
+            "--repo",
+            str(repo),
+            "--before-sha",
+            before,
+            "--junit",
+            str(junit),
+            "--sticky-body",
+            str(sticky),
+            "--verdict",
+            str(tmp_path / "v.json"),
+            "--comment",
+            str(tmp_path / "c.md"),
+        ]
+    )
+
+    verdict = json.loads((tmp_path / "v.json").read_text(encoding="utf-8"))
+    assert verdict["foreign"] == []
+    assert verdict["blocking"] == ["tests/unit/test_thing.py::test_existing"]
+
+
 # Authored by the CI test author on PR #261 — the first live round of this
 # mechanism, judging itself — and adopted verbatim.
 
