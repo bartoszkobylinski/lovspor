@@ -47,7 +47,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urljoin, urlsplit, urlunsplit
-from urllib.robotparser import RobotFileParser
 
 import httpx
 
@@ -60,6 +59,7 @@ from lovspor.observatory.registry import (
     capture_host,
     host_within_domain,
 )
+from lovspor.observatory.robots import ROBOTS_PATH, RobotsPolicy
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 # Municipal PDFs are the large case; a cap keeps one oversized response from
@@ -67,7 +67,6 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 # with a hash of its own would be evidence of something never served.
 DEFAULT_MAX_BYTES = 25 * 1024 * 1024
 CHANNEL_HTTP = "http"
-ROBOTS_PATH = "/robots.txt"
 DEFAULT_CONTENT_TYPE = "application/octet-stream"
 _REDIRECT_STATUS = 300
 _MAX_REDIRECT_HOPS = 3
@@ -200,11 +199,11 @@ class RobotsGate:
     def __init__(self, client: httpx.Client, settings: CaptureSettings) -> None:
         self._client = client
         self._settings = settings
-        self._parsers: dict[str, RobotFileParser | None] = {}
+        self._parsers: dict[str, RobotsPolicy | None] = {}
 
     def allows(self, url: str, user_agent: str) -> bool:
         parser = self._parser_for(url)
-        return False if parser is None else parser.can_fetch(user_agent, url)
+        return False if parser is None else parser.allows(user_agent, url)
 
     def readable(self, url: str) -> bool:
         """Whether this host published rules that could be read at all.
@@ -231,31 +230,29 @@ class RobotsGate:
         ordinary state and not an error.
         """
         parser = self._parser_for(url)
-        return () if parser is None else tuple(parser.site_maps() or ())
+        return () if parser is None else parser.sitemaps()
 
-    def _parser_for(self, url: str) -> RobotFileParser | None:
+    def _parser_for(self, url: str) -> RobotsPolicy | None:
         parts = urlsplit(url)
         robots_url = urlunsplit((parts.scheme, parts.netloc, ROBOTS_PATH, "", ""))
         if robots_url not in self._parsers:
             self._parsers[robots_url] = self._load(robots_url)
         return self._parsers[robots_url]
 
-    def _load(self, robots_url: str) -> RobotFileParser | None:
+    def _load(self, robots_url: str) -> RobotsPolicy | None:
         try:
             response = self._client.get(robots_url, timeout=self._settings.timeout_seconds)
         except httpx.HTTPError:
             return None
         if response.status_code >= _SERVER_ERROR_STATUS:
             return None
-        parser = RobotFileParser()
         # 4xx means no rules were published, which is an empty rule set — not
         # a document to parse. Feeding it the error page's body would let a
         # styled 404 accidentally read as directives.
         published = (
             [] if response.status_code >= _CLIENT_ERROR_STATUS else response.text.splitlines()
         )
-        parser.parse(published)
-        return parser
+        return RobotsPolicy.parse(published)
 
 
 class Fetcher:
