@@ -281,16 +281,19 @@ def _is_proposal_decorator(node: ast.expr) -> bool:
     writes for an advisory finding.
 
     Only the pytest marker is the contract: a same-named attribute on any other
-    object (``@custom.codex_proposal``) is not a proposal.
+    object (``@custom.codex_proposal``, ``@custom.xfail(reason="codex proposal")``)
+    is not a proposal — otherwise application code could make a failure advisory.
     """
     target = node.func if isinstance(node, ast.Call) else node
-    if not isinstance(target, ast.Attribute):
+    if not isinstance(target, ast.Attribute) or not _is_pytest_mark(target.value):
         return False
     if target.attr == "xfail":
         return isinstance(node, ast.Call) and _reason_is_codex_proposal(node)
-    if target.attr != PROPOSAL_MARKER:
-        return False
-    mark = target.value
+    return target.attr == PROPOSAL_MARKER
+
+
+def _is_pytest_mark(mark: ast.expr) -> bool:
+    """``pytest.mark`` or a bare ``mark`` — the two spellings the contract accepts."""
     if isinstance(mark, ast.Name):
         return mark.id == "mark"
     return (

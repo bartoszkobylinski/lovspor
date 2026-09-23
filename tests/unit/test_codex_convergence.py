@@ -213,6 +213,26 @@ def test_only_the_documented_pytest_proposal_marker_is_advisory(tmp_path: Path) 
     assert not verdict.advisory
 
 
+def test_only_pytest_mark_xfail_can_preserve_a_proposal(tmp_path: Path) -> None:
+    """A same-named decorator from application code is not the strict pytest
+    xfail written by the convergence job and must not make a failure advisory."""
+    repo = _repo_with(
+        tmp_path,
+        "class custom:\n"
+        "    @staticmethod\n"
+        "    def xfail(*, reason):\n"
+        "        return lambda function: function\n\n\n"
+        '@custom.xfail(reason="codex proposal, unrelated decorator")\n'
+        "def test_new_contract(): ...\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_new_contract")
+
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+
+    assert verdict.blocking == [test]
+    assert not verdict.advisory
+
+
 def test_an_unparseable_test_file_is_not_a_proposal(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "def test_new_contract(: ...\n")
     assert not cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))

@@ -33,13 +33,14 @@ UNIT_SUITE = "uv run pytest tests/unit/ -q -m not network"
 SECURITY_SCAN = "uv run python scripts/quality/check_security_scan.py"
 STUB_TOOLS = ("uv", "gitleaks")
 
-# Logs "<cwd>\t<command>\t<GIT_DIR or unset>"; a command listed in GATE_STUB_FAIL
+# Logs "<cwd>\t<command>\t<hook git variables or unset>"; a command listed in GATE_STUB_FAIL
 # fails, with its last line coloured the way gitleaks colours its log even into
-# a pipe. The third field is how a test sees whether a hook's GIT_DIR reached
-# the check (issues #369, #370).
+# a pipe. The third field is how a test sees whether a hook's Git environment
+# reached the check (issues #369, #370).
 _STUB = """#!/bin/sh
 line="@TOOL@ $*"
-printf '%s\\t%s\\t%s\\n' "$(pwd -P)" "$line" "${GIT_DIR-unset}" >> "$GATE_STUB_LOG"
+hook_env="${GIT_DIR-unset},${GIT_WORK_TREE-unset},${GIT_INDEX_FILE-unset},${GIT_PREFIX-unset}"
+printf '%s\\t%s\\t%s\\n' "$(pwd -P)" "$line" "$hook_env" >> "$GATE_STUB_LOG"
 if [ "@TOOL@" = uv ] && [ "${1-}" = run ] && [ "${2-}" = pytest ]; then
   printf 'pytest argc=%s marker=<%s>\\n' "$#" "${6-}"
 fi
@@ -57,7 +58,7 @@ class GateRun(NamedTuple):
     output: str
     commands: list[str]
     cwds: set[str]
-    git_dirs: set[str]
+    hook_git_envs: set[str]
 
     def fail_lines(self) -> list[str]:
         return [line for line in self.output.splitlines() if line.startswith("FAIL ")]
@@ -80,6 +81,9 @@ def _sandbox_env(
     }
     if git_dir is not None:
         env["GIT_DIR"] = git_dir
+        env["GIT_WORK_TREE"] = str(tmp_path / "worktree")
+        env["GIT_INDEX_FILE"] = str(tmp_path / "index")
+        env["GIT_PREFIX"] = "nested/"
     return env
 
 
@@ -105,7 +109,7 @@ def _run_gate(
         output=result.stdout + result.stderr,
         commands=[command for _, command, _ in rows],
         cwds={cwd for cwd, _, _ in rows},
-        git_dirs={git_dir for _, _, git_dir in rows},
+        hook_git_envs={git_env for _, _, git_env in rows},
     )
 
 
@@ -187,7 +191,7 @@ class TestFastGate:
         run = _run_gate(FAST, tmp_path, git_dir=str(tmp_path / ".git" / "worktrees" / "x"))
 
         assert run.returncode == 0, run.output
-        assert run.git_dirs == {"unset"}
+        assert run.hook_git_envs == {"unset,unset,unset,unset"}
 
     def test_the_failure_line_carries_no_terminal_colour_codes(self, tmp_path: Path) -> None:
         """Real gitleaks colours its log even into a pipe; the summary line is
