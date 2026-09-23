@@ -145,6 +145,11 @@ def test_codex_account_homes_are_explicit_repository_configuration(
 def test_codex_output_is_formatted_and_linted_before_tests(
     workflow_name: str, job_name: str, condition: str
 ) -> None:
+    """Both lanes normalize through the one script whose contract
+    tests/unit/test_normalize_agent_tests.py pins: format, safe fixes, and an
+    explicit `# noqa` for what ruff cannot fix (issues #232, #256). An inline
+    `ruff check --fix` here would bring back the hard-fail on a RUF001 that
+    ended a round with a correct test in it."""
     steps = _steps(workflow_name, job_name)
     names = [step.get("name") for step in steps]
     normalize = _named_step(steps, "Normalize and lint Codex output")
@@ -152,10 +157,7 @@ def test_codex_output_is_formatted_and_linted_before_tests(
     assert names.index("Scope guard") < names.index(normalize["name"])
     assert names.index(normalize["name"]) < names.index("Run tests on Codex additions")
     assert normalize["if"] == condition
-    assert normalize["run"].splitlines() == [
-        "uv run ruff format tests/",
-        "uv run ruff check --fix tests/",
-    ]
+    assert normalize["run"].strip() == "scripts/ci/normalize_agent_tests.sh tests/"
 
 
 def test_remediation_rejected_push_is_ignored_only_for_a_superseded_head() -> None:

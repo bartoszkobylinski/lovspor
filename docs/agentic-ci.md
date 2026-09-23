@@ -272,8 +272,20 @@ place silently resets every open PR's count to zero.
   the run log); human relays to local Claude.
 - Ambiguous/equivalent mutants → `needs-human:mutation`. BLOCKED is a valid end state,
   never to be silenced by weakening tests or thresholds.
-- Codex output is normalized (`ruff format` + `ruff check` on `tests/`) before commit in
-  both workflows, so the agent can never trip the pipeline's own lint gate (issue #66).
+- Codex output is normalized before commit in both workflows, so the agent can never
+  trip the pipeline's own lint gate (issue #66): `scripts/ci/normalize_agent_tests.sh`
+  runs `ruff format`, then ruff's **safe** fixes, then puts an explicit `# noqa: <rule>`
+  on every violation still standing (`ruff check --add-noqa`). Until 2026-09-23 the step
+  hard-failed on that residue, and a lint with no safe fix — `RUF001` on a test whose
+  subject *is* the ambiguous character (#256), `SIM105` on a `try/except/pass` (#232) —
+  ended the round before the tests ran, discarded a correct test, and reported the
+  cause as a pipeline failure. The suppression is the same edit the owner made by hand
+  to recover both rounds. Nothing is suppressed silently: each one is a `::warning`
+  annotation on its file and line, is listed in the step summary, and sits in the pushed
+  diff for review with the rest of the agent's commit. Unsafe fixes are never applied —
+  they can change what a test asserts. A draft ruff cannot read (a syntax error) still
+  fails the step, into the pipeline-failure escalation below. Pinned by
+  `tests/unit/test_normalize_agent_tests.py`, which runs the real ruff.
 - If the PR branch advances while remediation is running, its rejected push is abandoned
   as superseded — the new head's own pipeline owns mutation from there. Any other
   remediation failure escalates itself: `needs-human:mutation` + a comment linking the
@@ -304,7 +316,9 @@ ended red and silent because the failure happened outside the one step the
 escalation was watching: an unfixable lint (`RUF007`) in agent output failed the
 normalize step before the tests ran (issue #160), and a hung Codex CLI was killed
 by the job's own 60-minute ceiling, which *cancels* rather than fails and so
-skipped the reporting steps (issue #157).
+skipped the reporting steps (issue #157). The first class no longer reaches the
+escalation at all — the normalize step suppresses what it cannot fix and says so
+(above) — but the escalation stays, for the draft that does not parse.
 
 Two rules follow, and they are pinned by tests:
 

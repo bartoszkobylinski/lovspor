@@ -336,12 +336,13 @@ jobs:
         run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
 
       # Codex output is not always ruff-clean (issue #66): normalize before the
-      # pipeline's own lint gate sees it, and hard-fail on unfixable lint.
+      # pipeline's own lint gate sees it. What ruff cannot fix safely gets an
+      # explicit, annotated `# noqa` instead of ending the round: a hard-fail
+      # here discarded correct tests twice and called it a pipeline failure
+      # (issues #232, #256). Only a draft ruff cannot read still fails.
       - name: Normalize and lint Codex output
         if: needs.codex-author.outputs.skip != 'true'
-        run: |
-          uv run ruff format tests/
-          uv run ruff check --fix tests/
+        run: scripts/ci/normalize_agent_tests.sh tests/
 
       # The log lives in RUNNER_TEMP, never the workspace: the push step squashes
       # with `git add -A`, so a workspace file WILL end up committed to the
