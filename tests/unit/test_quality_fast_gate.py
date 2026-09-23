@@ -33,13 +33,14 @@ UNIT_SUITE = "uv run pytest tests/unit/ -q -m not network"
 SECURITY_SCAN = "uv run python scripts/quality/check_security_scan.py"
 STUB_TOOLS = ("uv", "gitleaks")
 
-# Logs "<cwd>\t<command>\t<GIT_DIR or unset>"; a command listed in GATE_STUB_FAIL
-# fails, with its last line coloured the way gitleaks colours its log even into
-# a pipe. The third field is how a test sees whether a hook's GIT_DIR reached
-# the check (issues #369, #370).
+# Logs "<cwd>\t<command>\t<hook git variables or unset>"; a command listed in
+# GATE_STUB_FAIL fails, with its last line coloured the way gitleaks colours its
+# log even into a pipe. The third field shows whether any repository-local git
+# variable reached the check (issues #369, #370).
 _STUB = """#!/bin/sh
 line="@TOOL@ $*"
-printf '%s\\t%s\\t%s\\n' "$(pwd -P)" "$line" "${GIT_DIR-unset}" >> "$GATE_STUB_LOG"
+git_vars="${GIT_DIR-unset},${GIT_WORK_TREE-unset},${GIT_INDEX_FILE-unset},${GIT_PREFIX-unset}"
+printf '%s\\t%s\\t%s\\n' "$(pwd -P)" "$line" "$git_vars" >> "$GATE_STUB_LOG"
 if [ "@TOOL@" = uv ] && [ "${1-}" = run ] && [ "${2-}" = pytest ]; then
   printf 'pytest argc=%s marker=<%s>\\n' "$#" "${6-}"
 fi
@@ -64,7 +65,10 @@ class GateRun(NamedTuple):
 
 
 def _sandbox_env(
-    tmp_path: Path, failing: tuple[str, ...], tools: tuple[str, ...], git_dir: str | None = None
+    tmp_path: Path,
+    failing: tuple[str, ...],
+    tools: tuple[str, ...],
+    hook_git_env: bool = False,
 ) -> dict[str, str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -78,8 +82,15 @@ def _sandbox_env(
         "GATE_STUB_LOG": str(tmp_path / "commands.log"),
         "GATE_STUB_FAIL": "\n".join(failing),
     }
-    if git_dir is not None:
-        env["GIT_DIR"] = git_dir
+    if hook_git_env:
+        env.update(
+            {
+                "GIT_DIR": str(tmp_path / ".git" / "worktrees" / "x"),
+                "GIT_WORK_TREE": str(tmp_path / "checkout"),
+                "GIT_INDEX_FILE": str(tmp_path / "index"),
+                "GIT_PREFIX": "subdirectory/",
+            }
+        )
     return env
 
 
@@ -88,10 +99,10 @@ def _run_gate(
     tmp_path: Path,
     failing: tuple[str, ...] = (),
     tools: tuple[str, ...] = STUB_TOOLS,
-    git_dir: str | None = None,
+    hook_git_env: bool = False,
 ) -> GateRun:
     """Run a gate from a directory outside the repository."""
-    env = _sandbox_env(tmp_path, failing, tools, git_dir)
+    env = _sandbox_env(tmp_path, failing, tools, hook_git_env)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     result = subprocess.run(
@@ -179,15 +190,15 @@ class TestFastGate:
         assert line.startswith("FAIL gitleaks: ")
         assert "not found" in line
 
-    def test_the_hooks_git_dir_never_reaches_a_check(self, tmp_path: Path) -> None:
+    def test_the_hooks_repository_variables_never_reach_a_check(self, tmp_path: Path) -> None:
         """Git exports GIT_DIR to a hook; from a worktree that is
         .git/worktrees/<name>, and a check that inherits it — the unit suite
         spawning git in temp directories — works on the real repository
         (issues #369, #370)."""
-        run = _run_gate(FAST, tmp_path, git_dir=str(tmp_path / ".git" / "worktrees" / "x"))
+        run = _run_gate(FAST, tmp_path, hook_git_env=True)
 
         assert run.returncode == 0, run.output
-        assert run.git_dirs == {"unset"}
+        assert run.git_dirs == {"unset,unset,unset,unset"}
 
     def test_the_failure_line_carries_no_terminal_colour_codes(self, tmp_path: Path) -> None:
         """Real gitleaks colours its log even into a pipe; the summary line is

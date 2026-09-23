@@ -1345,6 +1345,24 @@ class TestEquivalentRegister:
         assert status == 1
         assert "STALE: src/pkg/mod.py f: removed line not in file" in capsys.readouterr().err
 
+    def test_check_equivalents_reports_an_entry_whose_file_left_the_tree(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A deleted source file cannot leave its waivers silently registered."""
+        toml = (
+            '[[equivalent]]\nfile = "src/pkg/gone.py"\nsymbol = "f"\n'
+            'mutation = """\n-    return 1\n+    return None\n"""\n'
+            'justification = "the source file was deleted"\n'
+        )
+        with _register(tmp_path, toml), pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_to_json.py", "--check-equivalents"])
+            status = mutation_to_json.main()
+
+        captured = capsys.readouterr()
+        assert status == 1
+        assert "STALE: src/pkg/gone.py f: file not found" in captured.err
+        assert "1 registered, 0 refused, 1 stale" in captured.out
+
     def test_check_equivalents_accepts_an_entry_whose_line_is_still_in_the_file(
         self, tmp_path: Path
     ) -> None:
