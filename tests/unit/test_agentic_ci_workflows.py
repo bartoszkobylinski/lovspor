@@ -423,20 +423,27 @@ def test_codex_test_failure_escalates_on_the_current_pr() -> None:
     assert "codex-tests-${{ github.event.pull_request.head.sha }}" in command
 
 
-def test_the_verdict_and_the_round_counter_agree_on_the_blocked_phrase() -> None:
-    """The round count is the number of times this phrase appears in the pipeline
-    sticky comment. The verdict script owns the phrase; the workflow must not
-    write a competing one, or the count drifts (issue #248)."""
+def _blocked_phrase() -> str:
     script = Path(__file__).resolve().parents[2] / "scripts" / "ci" / "codex_convergence.py"
     spec = importlib.util.spec_from_file_location("codex_convergence_phrase", script)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    phrase: str = module.BLOCKED_PHRASE
+    return phrase
 
-    steps = _steps("pr-pipeline.yml", "codex-tests")
-    for step in steps:
-        assert module.BLOCKED_PHRASE not in str(step.get("run", "")), step["name"]
+
+def test_the_verdict_and_the_round_counter_agree_on_the_blocked_phrase() -> None:
+    """The round count is the number of times this phrase appears in the pipeline
+    sticky comment. The verdict script owns the phrase; no job of the workflow
+    may write a competing one, or the count drifts (issue #248). Every job,
+    not only `codex-tests`: `ready` writes into the same comment (#255)."""
+    phrase = _blocked_phrase()
+
+    for job_name, job in _workflow("pr-pipeline.yml")["jobs"].items():
+        for step in job.get("steps", []):
+            assert phrase not in str(step.get("run", "")), f"{job_name}: {step.get('name')}"
 
 
 def test_antiloop_matches_the_marker_only_in_the_subject_line() -> None:
@@ -689,6 +696,62 @@ class TestAGreenRunRetractsItsOwnVerdict:
         assert "grep -Fxq" in command
         assert command.index("grep -Fxq") < command.index('--remove-label "$label"')
 
+    def _report_step(self) -> dict[str, Any]:
+        return _named_step(
+            _steps("pr-pipeline.yml", "ready"),
+            "Report READY TO MERGE where the blocked rounds were reported",
+        )
+
+    def test_a_green_run_reports_ready_where_the_blocked_rounds_were_reported(self) -> None:
+        """Issue #255. The labels were retracted; the sticky comment was not.
+        #250 reached READY with every check green and its `pipeline` comment
+        still ending on a round-3 BLOCKED, so the durable text a reader opens
+        contradicted the labels. READY is appended to that comment, after the
+        labels go, with the run that proved it."""
+        steps = _steps("pr-pipeline.yml", "ready")
+        names = [step.get("name") for step in steps]
+        command = self._report_step()["run"]
+
+        assert names.index(self._ready_step()["name"]) < names.index(self._report_step()["name"])
+        assert "READY TO MERGE" in command
+        assert "scripts/ci/pr_sticky_comment.sh pipeline" in command
+        assert (
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            in command
+        )
+
+    def test_the_ready_round_is_appended_never_rewritten(self) -> None:
+        """The convergence counter reads the blocked rounds out of this
+        comment (`count_blocking_rounds`). A READY that replaced or deleted the
+        history would reset every open PR's round count to zero; the helper
+        appends, and this step goes only through the helper."""
+        command = self._report_step()["run"]
+
+        assert "--method PATCH" not in command
+        assert "--method DELETE" not in command
+        assert "gh pr comment" not in command
+        assert _blocked_phrase() not in command
+
+    def test_a_pr_that_was_never_blocked_gets_no_comment(self) -> None:
+        """A green PR with no escalation history has no sticky comment, and
+        creating one mails the author on every green PR — the noise the
+        sticky helper exists to stop. The step asks first, like the retraction."""
+        command = self._report_step()["run"]
+
+        assert 'contains("<!-- lovspor-sticky:pipeline -->")' in command
+        assert command.index('contains("<!-- lovspor-sticky:pipeline -->")') < command.index(
+            "pr_sticky_comment.sh"
+        )
+        assert command.index("exit 0") < command.index("pr_sticky_comment.sh")
+
+    def test_the_report_is_allowed_to_edit_comments(self) -> None:
+        """The helper PATCHes an issue comment; a job that silently lacked the
+        scope would leave #255 in place while reporting success."""
+        permissions = _workflow("pr-pipeline.yml")["jobs"]["ready"]["permissions"]
+
+        assert permissions["pull-requests"] == "write"
+        assert permissions["issues"] == "write"
+
 
 class TestAJobThatDiesWithItsRunnerStillReports:
     """Issue #193. Both `codex-tests` escalations are steps of that job, and a
@@ -791,6 +854,7 @@ class TestEscalationsShareOneCommentPerWorkflow:
         return [
             ("pr-pipeline.yml", "codex-tests"),
             ("pr-pipeline.yml", "codex-tests-report"),
+            ("pr-pipeline.yml", "ready"),
             ("mutation-remediation.yml", "remediate"),
         ]
 
@@ -823,6 +887,11 @@ class TestEscalationsShareOneCommentPerWorkflow:
             (
                 "pr-pipeline.yml",
                 "codex-tests-report",
+                "${{ github.event.pull_request.head.sha }}",
+            ),
+            (
+                "pr-pipeline.yml",
+                "ready",
                 "${{ github.event.pull_request.head.sha }}",
             ),
             (

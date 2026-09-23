@@ -365,6 +365,16 @@ Two rules follow, and they are pinned by tests:
   `needs.mutation.result == 'success'`, so it stays silent on the run where the test
   author pushed and mutation was skipped in favour of a fresh run. It is not in the
   required set for the same reason `codex-tests` is not.
+- The same green run **resolves the sticky comment** those rounds wrote (issue #255).
+  Retracting the labels was only half of it: #250 reached READY with every check green
+  and its `pipeline` comment still ending on a round-3 BLOCKED, so the durable text a
+  reader opens contradicted the labels. `ready` now appends a READY TO MERGE round with
+  the run link, through the same `pr_sticky_comment.sh pipeline` helper — **appended,
+  never rewritten**, because the convergence verdict counts blocked rounds out of that
+  comment's history, and the READY body carries none of the counted phrase (pinned:
+  no job of the workflow may write it). A PR that was never escalated on has no
+  sticky comment and gets none — creating one would mail the author on every green PR.
+  The job checks the helper out from the PR head, as `codex-tests-report` does.
 ## Infrastructure
 
 - Self-hosted runner: label `codex`, dedicated VM with no production data or secrets.
