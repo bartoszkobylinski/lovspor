@@ -188,6 +188,15 @@ def _equivalent(raw: object) -> Equivalent | str:
     change = normalise_mutation(str(raw["mutation"]))
     if not change:
         return f"{raw['file']}: the mutation block has no -/+ lines"
+    stray = _non_diff_lines(str(raw["mutation"]))
+    if stray:
+        # A TOML basic string turns `\n` into a newline, so a diff line quoting
+        # "\n" breaks in two and the entry can never match its survivor
+        # (issue #366). Refused, not silently narrowed.
+        return (
+            f"{raw['file']}: a mutation line is not part of a diff — {stray[0]!r}; "
+            "in a TOML basic string write \\\\n, or use a literal '''…''' string"
+        )
     return Equivalent(
         file=str(raw["file"]),
         symbol=str(raw["symbol"]),
@@ -195,6 +204,36 @@ def _equivalent(raw: object) -> Equivalent | str:
         registered=str(raw.get("registered", "")).strip(),
         change=change,
     )
+
+
+def _non_diff_lines(mutation: str) -> list[str]:
+    """Non-blank lines of a mutation block that are neither `-` nor `+` lines."""
+    return [
+        line for line in mutation.splitlines() if line.strip() and not line.startswith(("-", "+"))
+    ]
+
+
+def stale_entries(equivalents: list[Equivalent], root: Path) -> list[str]:
+    """Entries whose removed line no longer exists verbatim in the named file.
+
+    A waiver nobody can review against code is not a waiver; the file moved on
+    and left the entry matching nothing (issue #366). Reported by
+    `--check-equivalents` against the working tree, never applied by the gate,
+    which reads the register alone.
+    """
+    reports: list[str] = []
+    for entry in equivalents:
+        source = root / entry.file
+        if not source.is_file():
+            reports.append(f"{entry.file} {entry.symbol}: file not found")
+            continue
+        lines = {line.strip() for line in source.read_text(encoding="utf-8").splitlines()}
+        for removed in (c[1:] for c in entry.change if c.startswith("-")):
+            if removed not in lines:
+                reports.append(
+                    f"{entry.file} {entry.symbol}: removed line not in file — {removed!r}"
+                )
+    return reports
 
 
 def load_equivalents(path: Path) -> tuple[list[Equivalent], list[str]]:
@@ -345,8 +384,14 @@ def _report_register() -> int:
         print(f"registered: {entry.file} {entry.symbol} — {' '.join(entry.change)}")
     for reason in refused:
         print(f"REFUSED: {reason}", file=sys.stderr)
-    print(f"{len(equivalents)} registered, {len(refused)} refused ({EQUIVALENTS_FILE})")
-    return 1 if refused else 0
+    stale = stale_entries(equivalents, EQUIVALENTS_FILE.parent)
+    for reason in stale:
+        print(f"STALE: {reason}", file=sys.stderr)
+    print(
+        f"{len(equivalents)} registered, {len(refused)} refused, {len(stale)} stale "
+        f"({EQUIVALENTS_FILE})"
+    )
+    return 1 if refused or stale else 0
 
 
 def main() -> int:
