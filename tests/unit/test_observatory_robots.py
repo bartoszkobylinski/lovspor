@@ -106,6 +106,14 @@ class TestWildcards:
             policy(text).allows(UA, f"{HOST}/files/private/a-very-long-document-name.pdf") is False
         )
 
+    @pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+    def test_specificity_counts_octets_not_percent_encoded_characters(self) -> None:
+        """A UTF-8 octet is one specificity unit even though its normalised
+        representation contains three characters (``%XX``)."""
+        text = "User-agent: *\nAllow: /ø*\nDisallow: /*abcd\n"
+
+        assert policy(text).allows(UA, f"{HOST}/øzzabcd") is False
+
 
 class TestWhichGroupApplies:
     def test_a_group_naming_the_product_token_binds_this_crawler(self) -> None:
