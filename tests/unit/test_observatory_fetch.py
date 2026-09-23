@@ -313,6 +313,22 @@ class TestRobotsGate:
         assert gate.readable(PAGE_URL, USER_AGENT) is True
         assert gate.allows(PAGE_URL, USER_AGENT) is True
 
+    def test_the_cached_policy_is_fetched_once_in_the_first_callers_name(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """The first caller supplies the identity for the host-wide fetch;
+        later readers reuse that policy rather than issuing another request."""
+        first_user_agent = "lovspor-survey/0.1 (+https://lovspor.no/observatory)"
+        httpx_mock.add_response(url=ROBOTS_URL, text="User-agent: *\nAllow: /\n")
+        gate = RobotsGate(httpx.Client(), _settings())
+
+        assert gate.readable(PAGE_URL, first_user_agent) is True
+        assert gate.sitemaps(PAGE_URL, USER_AGENT) == ()
+
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 1
+        assert requests[0].headers["User-Agent"] == first_user_agent
+
 
 class TestPoliteness:
     def test_the_second_fetch_waits_the_registered_interval(
