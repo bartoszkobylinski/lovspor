@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import lovspor.snapshot as snapshot_module
-from lovspor.errors import ParseError
+from lovspor.errors import AmbiguousSlugError, ParseError
 from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
@@ -300,7 +300,11 @@ def test_snapshot_with_malformed_committed_manifest_fails_loudly(tmp_path: Path)
         _ = CorpusSnapshot(repo, sha).manifest
 
 
-def test_slug_index_first_entry_wins_and_skips_non_current(tmp_path: Path) -> None:
+def test_slug_index_records_duplicates_as_ambiguous_and_skips_non_current(
+    tmp_path: Path,
+) -> None:
+    """Issue #243: the snapshot index and the live reader's share one
+    contract — a slug two current records claim resolves to neither."""
     repo = tmp_path / "corpus"
     repo.mkdir()
     _run_git(repo, "init", "-b", "main")
@@ -310,20 +314,34 @@ def test_slug_index_first_entry_wins_and_skips_non_current(tmp_path: Path) -> No
     payload = _manifest_payload("lover/a.md")
     payload["documents"]["doc-2"] = {
         **payload["documents"]["doc-1"],  # type: ignore[dict-item]
-        "markdown_path": "lover/b.md",
+        "doc_type": "forskrift",
+        "markdown_path": "forskrifter/b.md",
+        "source_dataset": "gjeldende-sentrale-forskrifter",
     }
     payload["documents"]["doc-3"] = {
         **payload["documents"]["doc-1"],  # type: ignore[dict-item]
         "status": "removed",
         "slug": "borteloven",
     }
+    payload["documents"]["doc-4"] = {
+        **payload["documents"]["doc-1"],  # type: ignore[dict-item]
+        "markdown_path": "lover/c.md",
+        "slug": "unik",
+    }
     (repo / "manifest.json").write_text(json.dumps(payload))
     sha = _commit_all(repo, "sync", "2026-05-01T12:00:00Z")
 
     index = CorpusSnapshot(repo, sha).slug_index
 
-    assert index["testloven"][0] == "doc-1"
-    assert "borteloven" not in index
+    assert set(index) == {"unik"}
+    assert index.resolve("unik") == index["unik"]
+    assert index.resolve("borteloven") is None
+    assert [doc_id for doc_id, _record in index.ambiguous["testloven"]] == ["doc-1", "doc-2"]
+    with pytest.raises(AmbiguousSlugError) as excinfo:
+        index.resolve("testloven")
+    assert str(excinfo.value).startswith(
+        "slug 'testloven' names 2 current documents: doc-1 (lov), doc-2 (forskrift); ",
+    )
 
 
 # ---------- operational failure vs historical absence ----------

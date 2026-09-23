@@ -642,6 +642,8 @@ Decided 2026-04-26. Markdown filenames in `lovverk/lover/` and `lovverk/forskrif
 
 Slug derivation: `short_title` → strip-bracketed `title` → `doc_id` (last-resort fallback). Lowercase, hyphenated, Norwegian Unicode (`æøå`) preserved. Collisions resolved deterministically by `resolve_collisions` (sort by doc_id, append `-2`, `-3`, …).
 
+Collision resolution runs per dataset, so a lov and a forskrift can still share one slug (`bergverksordning-for-svalbard`, issue #243, 2026-09-23): the MCP slug index reports such a slug as ambiguous and names both candidates rather than picking a winner.
+
 The Lovdata stable id stays in the manifest as the dict key and in the rendered file's frontmatter as the `id` field. Cross-reference is preserved.
 
 Why slug not full title:
