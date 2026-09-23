@@ -3799,17 +3799,16 @@ class TestStatus:
         assert "sensitive-user" not in output
         assert "sensitive-password" not in output
 
-    def test_an_armed_switch_without_a_host_says_so(
+    def test_an_armed_switch_without_a_hostname_uses_the_operator_fallback(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The variable is read as text, not validated: a value with no host
-        is still armed as far as the sweep is concerned, and status must not
-        print an empty name for it."""
-        monkeypatch.setenv(ENV_HEARTBEAT_URL, "https:///ping")
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, "https:///sensitive-token")
 
         _echo_switch()
 
-        assert capsys.readouterr().out == "\nDead-man switch\n  armed:      reports to (no host)\n"
+        output = capsys.readouterr().out
+        assert output == "\nDead-man switch\n  armed:      reports to (no host)\n"
+        assert "sensitive-token" not in output
 
     def test_an_unarmed_switch_is_named_in_status(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
