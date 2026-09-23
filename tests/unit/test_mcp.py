@@ -728,6 +728,30 @@ def test_slug_index_keeps_ambiguous_candidates_out_of_the_unique_map(tmp_path: P
     assert index.ambiguous == {"dupe": [("nl-1", first), ("nl-2", second)]}
 
 
+def test_search_laws_exposes_every_ambiguous_slug_candidate(tmp_path: Path) -> None:
+    """The ambiguity error's recovery instruction is actionable: metadata
+    search returns every claimant with the fields that distinguish them."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="Dupe lov"),
+            "nl-2": _record(
+                slug="dupe",
+                title="Dupe forskrift",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+        },
+        write_files=False,
+    )
+
+    rows = CorpusReader(tmp_path).search_laws("dupe")
+
+    assert [(row["doc_id"], row["dataset"]) for row in rows] == [
+        ("nl-1", "lover"),
+        ("nl-2", "forskrifter"),
+    ]
+
+
 def test_duplicate_slug_stays_ambiguous_after_search_body(tmp_path: Path) -> None:
     """Codex PR #62 round 1 found point lookups flipping between the two
     records once ``search_body`` loaded its body index. Under #243 the slug
