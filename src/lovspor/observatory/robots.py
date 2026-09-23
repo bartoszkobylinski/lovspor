@@ -17,7 +17,10 @@ live:
   apply only when no group names the token;
 * within that set the **most specific** rule decides — the one with the most
   octets, counted on the rule itself and not on the text a ``*`` swallowed —
-  and an ``Allow`` wins a tie of equal length;
+  and an ``Allow`` wins a tie of equal length. The count is the length of the
+  normalised rule as written, ``*`` and ``%XX`` triplets included, which is
+  what Google's reference matcher does; counting decoded octets, or leaving
+  ``*`` out, were proposed on PR #367 and declined for that reason;
 * ``*`` in a rule matches any run of characters and a trailing ``$`` anchors
   the rule to the end of the path;
 * a rule with an empty path matches nothing (``Disallow:`` alone permits
