@@ -1149,6 +1149,19 @@ class TestDefaults:
 class TestDeclaredSitemaps:
     """Where to start looking is a question the source answers in public."""
 
+    def test_the_declaration_is_read_in_the_supplied_crawlers_name(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The public discovery path forwards the source's cleared identity
+        rather than silently substituting the fetcher's capture identity."""
+        discovery_user_agent = "lovspor-discovery/0.1 (+https://lovspor.no/observatory)"
+        _allow_robots(httpx_mock)
+
+        _fetcher(log).declared_sitemaps(ROBOTS_URL, discovery_user_agent)
+
+        request = httpx_mock.get_requests()[0]
+        assert request.headers["User-Agent"] == discovery_user_agent
+
     def test_the_declared_sitemaps_are_returned(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
