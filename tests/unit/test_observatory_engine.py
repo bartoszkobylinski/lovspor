@@ -77,6 +77,23 @@ class TestPinnedCheckout:
 
         assert describe_engine(repo).pinned is False
 
+    def test_the_callers_git_environment_cannot_redirect_the_query(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A hook exports GIT_DIR for the caller's checkout, but the engine
+        verdict is about the explicitly supplied checkout (issue #369)."""
+        engine_root = tmp_path / "engine"
+        engine_root.mkdir()
+        repo, sha = _repo(engine_root)
+        _git(repo, "checkout", "-q", "--detach", sha)
+        other_root = tmp_path / "other"
+        other_root.mkdir()
+        other, _ = _repo(other_root)
+        monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+        assert describe_engine(repo) == EngineCheckout(commit=sha, pinned=True, reason=None)
+
 
 class TestOutsideAGitCheckout:
     def test_an_installed_package_has_no_commit_and_no_verdict(self, tmp_path: Path) -> None:

@@ -28,6 +28,7 @@ from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.addresses import SharedAddress, SourceAddresses
 from lovspor.observatory.commands import (
+    ENV_REQUIRE_PINNED_ENGINE,
     _capture_candidates,
     _echo_cadence,
     _echo_last_sweep,
@@ -39,7 +40,7 @@ from lovspor.observatory.commands import (
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
-from lovspor.observatory.engine import describe_engine
+from lovspor.observatory.engine import EngineCheckout, describe_engine
 from lovspor.observatory.events import (
     read_source_events,
     record_fingerprint,
@@ -65,7 +66,7 @@ from lovspor.observatory.registry import (
     replace_domain,
     write_registry,
 )
-from lovspor.observatory.status_report import _hm
+from lovspor.observatory.status_report import _echo_switch, _hm
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
     ENV_OBSERVATORY_ROOT,
@@ -3454,6 +3455,59 @@ class TestNightly:
         assert run is not None
         assert (run.status, run.failure_reason) == ("failed", "observation_log_damaged")
 
+    def test_a_required_unpinned_engine_refuses_before_network_and_records_commit(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The launchd opt-in turns a branch checkout into a named red run."""
+        _activate(root)
+        commit = "b" * 40
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, "1")
+        monkeypatch.setattr(
+            observatory_commands,
+            "describe_engine",
+            lambda: EngineCheckout(
+                commit=commit,
+                pinned=False,
+                reason="the engine checkout is on a branch",
+            ),
+        )
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 1
+        assert "engine_not_pinned" in result.stderr
+        assert f"engine: the engine checkout is on a branch ({commit})" in result.stderr
+        assert httpx_mock.get_requests() == []
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason, run.engine_commit) == (
+            "failed",
+            "engine_not_pinned",
+            commit,
+        )
+
+    def test_a_wheel_install_has_no_pin_verdict_even_when_pin_is_required(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No checkout means no commit and, per the engine contract, no refusal."""
+        _activate(root)
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, "1")
+        monkeypatch.setattr(
+            observatory_commands,
+            "describe_engine",
+            lambda: EngineCheckout(commit=None, pinned=None, reason=None),
+        )
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert run.engine_commit is None
+
     def test_a_clean_archive_sweeps(self, root: Path, httpx_mock: HTTPXMock) -> None:
         _activate(root)
         _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
@@ -3705,6 +3759,30 @@ class TestAddressReport:
 
 
 class TestStatus:
+    def test_an_armed_switch_shows_only_its_host(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        secret_url = "https://hc.example.invalid/sensitive-token"
+        monkeypatch.setenv(ENV_HEARTBEAT_URL, secret_url)
+
+        _echo_switch()
+
+        output = capsys.readouterr().out
+        assert output == "\nDead-man switch\n  armed:      reports to hc.example.invalid\n"
+        assert "sensitive-token" not in output
+
+    def test_an_unarmed_switch_is_named_in_status(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+
+        _echo_switch()
+
+        assert capsys.readouterr().out == (
+            "\nDead-man switch\n"
+            "  NOT ARMED — set LOVSPOR_OBSERVATORY_HEARTBEAT_URL in the job's environment\n"
+        )
+
     def test_status_sections_render_the_complete_operator_report(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
