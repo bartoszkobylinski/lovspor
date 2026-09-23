@@ -47,7 +47,12 @@ from lovspor.embeddings import (
     write_embeddings,
 )
 from lovspor.embeddings.search import SearchHit
-from lovspor.errors import ConfigError, CorpusStateError, UnsupportedSidecarVersionError
+from lovspor.errors import (
+    AmbiguousSlugError,
+    ConfigError,
+    CorpusStateError,
+    UnsupportedSidecarVersionError,
+)
 from lovspor.mcp import (
     _CROSS_REF_SECTION,
     _MAX_MARKER_TOLERANT_QUERY,
@@ -196,6 +201,31 @@ def test_iter_search_docs_requires_current_owned_slug_and_body() -> None:
 
     assert docs == [("owner", current, "body")]
     assert looked_up == ["current"]
+
+
+def test_iter_search_docs_skips_a_foreign_claim_and_keeps_later_documents() -> None:
+    """A record whose slug the index assigns to another document is skipped,
+    not the end of the stream: every record-skipping branch in this module is
+    one keystroke from dropping the rest of the corpus."""
+    current = _record(slug="current", title="Current")
+    duplicate = _record(slug="current", title="Duplicate")
+    later = _record(slug="later", title="Later")
+    documents = {"duplicate": duplicate, "owner": current, "after": later}
+    slug_index = {"current": ("owner", current), "later": ("after", later)}
+
+    docs = list(mcp_module._iter_search_docs(documents, slug_index, lambda slug: f"{slug}-body"))
+
+    assert docs == [("owner", current, "current-body"), ("after", later, "later-body")]
+
+
+def test_a_reader_without_an_embedder_has_no_paid_query_path(tmp_path: Path) -> None:
+    """The spend hook attaches to `_query_embedder`; without an embedder there
+    must be nothing to attach to, or a keyless server would build a query
+    embedder around None and fail on the first paid request instead of at
+    `semantic_search`'s own refusal."""
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="one", title="One")})
+
+    assert CorpusReader(tmp_path)._query_embedder is None
 
 
 def test_parse_recorded_at_accepts_today_in_utc() -> None:
@@ -667,27 +697,92 @@ def test_slug_lookups_use_cached_index(tmp_path: Path) -> None:
     assert "# Skatteloven" in reader.get_law("skatteloven")
 
 
-def test_slug_index_first_record_wins_on_duplicate_slugs(tmp_path: Path) -> None:
-    """Two current records with the same slug: the first manifest entry
-    wins, matching the old linear-scan behavior."""
+def test_duplicate_slug_lookup_raises_ambiguous_slug_error(tmp_path: Path) -> None:
+    """Issue #243: two current records sharing a slug (the real corpus has
+    one — ``bergverksordning-for-svalbard`` is both a lov and a forskrift).
+    First-wins silently made one document unreachable; the owner's decision
+    is to name both candidates and pick neither."""
     _seed_corpus(
         tmp_path,
         {
             "nl-1": _record(slug="dupe", title="First", eu_basis=["32016R0679"]),
-            "nl-2": _record(slug="dupe", title="Second", eu_basis=[]),
+            "nl-2": _record(
+                slug="dupe", title="Second", source_dataset="gjeldende-sentrale-forskrifter"
+            ),
+            "nl-3": _record(slug="unique", title="Unique"),
         },
     )
     reader = CorpusReader(tmp_path)
-    assert reader.get_eu_basis("dupe")["doc_id"] == "nl-1"
+    expected = (
+        "slug 'dupe' names 2 current documents: nl-1 (lov), nl-2 (forskrift); "
+        "no tool accepts a doc_id yet, so none of them can be fetched by slug — "
+        "search_laws lists them all with their doc_id and dataset"
+    )
+    with pytest.raises(AmbiguousSlugError) as excinfo:
+        reader.get_law("dupe")
+    assert str(excinfo.value) == expected
+    assert isinstance(excinfo.value, CorpusNotFoundError)
+    with pytest.raises(AmbiguousSlugError, match="nl-1 \\(lov\\), nl-2 \\(forskrift\\)"):
+        reader.get_eu_basis("dupe")
+    with pytest.raises(AmbiguousSlugError, match="names 2 current documents"):
+        reader.get_section("dupe", "1-1")
+    assert "# Unique" in reader.get_law("unique")
+    with pytest.raises(
+        CorpusNotFoundError, match="no current law with slug 'gone'; use search_laws"
+    ):
+        reader.get_law("gone")
 
 
-def test_get_section_duplicate_slug_stable_after_search_body(tmp_path: Path) -> None:
-    """Codex PR #62 round 1: with two current records sharing a slug
-    but pointing at different files, get_section resolved the FIRST
-    record's file — until search_body() loaded the corpus-wide body
-    index, whose last-record-wins dict silently flipped subsequent
-    point lookups to the SECOND record's content. Point lookups must
-    return the same content before and after a search_body call."""
+def test_slug_index_keeps_ambiguous_candidates_out_of_the_unique_map(tmp_path: Path) -> None:
+    """The unique map keeps its ``slug -> (doc_id, record)`` shape for every
+    consumer that iterates it; the collision is recorded beside it, in
+    manifest order, and a removed record never claims a slug."""
+    first = _record(slug="dupe", title="First")
+    second = _record(slug="dupe", title="Second")
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": first,
+            "nl-2": second,
+            "nl-3": _record(slug="dupe", title="Gone", status="removed"),
+            "nl-4": _record(slug="unique", title="Unique"),
+        },
+    )
+    index = CorpusReader(tmp_path)._load_slug_index()
+    assert set(index) == {"unique"}
+    assert index.ambiguous == {"dupe": [("nl-1", first), ("nl-2", second)]}
+
+
+def test_search_laws_exposes_every_ambiguous_slug_candidate(tmp_path: Path) -> None:
+    """The ambiguity error's recovery instruction is actionable: metadata
+    search returns every claimant with the fields that distinguish them."""
+    _seed_corpus(
+        tmp_path,
+        {
+            "nl-1": _record(slug="dupe", title="Dupe lov"),
+            "nl-2": _record(
+                slug="dupe",
+                title="Dupe forskrift",
+                source_dataset="gjeldende-sentrale-forskrifter",
+            ),
+        },
+        write_files=False,
+    )
+
+    rows = CorpusReader(tmp_path).search_laws("dupe")
+
+    assert [(row["doc_id"], row["dataset"]) for row in rows] == [
+        ("nl-1", "lover"),
+        ("nl-2", "forskrifter"),
+    ]
+
+
+def test_duplicate_slug_stays_ambiguous_after_search_body(tmp_path: Path) -> None:
+    """Codex PR #62 round 1 found point lookups flipping between the two
+    records once ``search_body`` loaded its body index. Under #243 the slug
+    is ambiguous before and after that load, and the body index — built from
+    the same slug index — carries no body for it, so ``search_body`` neither
+    crashes nor reports one record's text under the shared slug."""
     first = _record(slug="dupe", title="First")
     second = _record(slug="dupe", title="Second").model_copy(
         update={"markdown_path": "lover/dupe-second.md"},
@@ -704,17 +799,15 @@ def test_get_section_duplicate_slug_stable_after_search_body(tmp_path: Path) -> 
     )
     reader = CorpusReader(tmp_path)
 
-    before = reader.get_section("dupe", "1-1")
-    assert "First body." in before["body"]
-
-    # search_body loads the corpus-wide body index; it must agree with
-    # the slug index on which record owns a duplicated slug.
-    assert [hit["slug"] for hit in reader.search_body("First body")] == ["dupe"]
+    with pytest.raises(AmbiguousSlugError):
+        reader.get_section("dupe", "1-1")
+    assert reader.search_body("First body") == []
     assert reader.search_body("Second body") == []
-
-    after = reader.get_section("dupe", "1-1")
-    assert after["body"] == before["body"]
-    assert reader.verify_quote("dupe", "1-1", "First body.")["verified"] is True
+    with pytest.raises(AmbiguousSlugError):
+        reader.get_section("dupe", "1-1")
+    verdict = reader.verify_quote("dupe", "1-1", "First body.")
+    assert verdict["verified"] is False
+    assert "names 2 current documents: nl-1 (lov), nl-2 (lov)" in verdict["reason"]
 
 
 def test_get_law_returns_file_content(tmp_path: Path) -> None:
@@ -1678,7 +1771,9 @@ def test_body_index_excludes_a_removed_but_slugged_record(tmp_path: Path) -> Non
 #   is killed below.
 
 
-def test_body_index_skips_a_duplicate_slug_and_keeps_later_documents(tmp_path: Path) -> None:
+def test_body_index_skips_an_ambiguous_slug_and_keeps_later_documents(tmp_path: Path) -> None:
+    # The body index is built from the slug index, so an ambiguous slug
+    # (#243) has no body — the document after the pair still gets one.
     _seed_corpus(
         tmp_path,
         {
@@ -1688,7 +1783,7 @@ def test_body_index_skips_a_duplicate_slug_and_keeps_later_documents(tmp_path: P
         },
         body_for={"dupe": "første", "later": "senere"},
     )
-    assert set(CorpusReader(tmp_path)._load_body_index()) == {"dupe", "later"}
+    assert set(CorpusReader(tmp_path)._load_body_index()) == {"later"}
 
 
 def test_body_index_skips_a_missing_file_and_keeps_later_documents(tmp_path: Path) -> None:
@@ -1728,11 +1823,11 @@ def test_body_index_skips_an_escaping_path_and_keeps_later_documents(tmp_path: P
     assert set(CorpusReader(tmp_path)._load_body_index()) == {"later"}
 
 
-def test_search_body_skips_a_non_owning_duplicate_and_keeps_later_documents(
+def test_search_body_skips_an_ambiguous_slug_and_keeps_later_documents(
     tmp_path: Path,
 ) -> None:
-    # Only the slug-index owner reports a hit for a duplicated slug; the second
-    # claimant is skipped. The document after it still has to be searched.
+    # A slug two current records claim is ambiguous (#243): neither claimant
+    # reports a hit under it. The document after them still has to be searched.
     _seed_corpus(
         tmp_path,
         {
@@ -1744,7 +1839,7 @@ def test_search_body_skips_a_non_owning_duplicate_and_keeps_later_documents(
     )
     rows = CorpusReader(tmp_path).search_body("boligkjøp")
 
-    assert sorted(row["slug"] for row in rows) == ["dupe", "later"]
+    assert sorted(row["slug"] for row in rows) == ["later"]
 
 
 def test_search_body_skips_a_record_without_a_body_and_keeps_later_documents(
@@ -4640,6 +4735,35 @@ def test_search_tools_reflect_corpus_pulled_after_construction(tmp_path: Path) -
     assert [hit["slug"] for hit in reader.search_laws("forvaltning")] == ["forvaltningsloven"]
     assert any(hit["slug"] == "forvaltningsloven" for hit in reader.search_body("forvaltning"))
     assert reader.get_law("forvaltningsloven")
+
+
+def test_pulled_slug_collision_invalidates_previously_unique_lookup(tmp_path: Path) -> None:
+    """Issue #243 must also hold across the reader's mtime refresh boundary.
+
+    A server may have cached a slug and its body before a pull introduces a
+    second claimant.  Neither cache may keep serving the former winner after
+    the refreshed manifest says the slug is ambiguous.
+    """
+    first = _record(slug="dupe", title="First")
+    _seed_corpus(tmp_path, {"nl-1": first}, body_for={"dupe": "first body"})
+    reader = CorpusReader(tmp_path)
+
+    assert "first body" in reader.get_law("dupe")
+    assert [row["doc_id"] for row in reader.search_body("first body")] == ["nl-1"]
+
+    second = _record(slug="dupe", title="Second").model_copy(
+        update={"markdown_path": "lover/dupe-second.md"},
+    )
+    _seed_corpus(tmp_path, {"nl-1": first, "nl-2": second}, write_files=False)
+    (tmp_path / "lover" / "dupe-second.md").write_text(
+        "---\nid: nl-2\ntitle: Second\n---\n\n# Second\n\nsecond body\n",
+        encoding="utf-8",
+    )
+    _bump_mtime(tmp_path / "manifest.json")
+
+    with pytest.raises(AmbiguousSlugError, match="nl-1 \\(lov\\), nl-2 \\(lov\\)"):
+        reader.get_law("dupe")
+    assert reader.search_body("first body") == []
 
 
 def test_reader_does_not_reload_when_manifest_unchanged(tmp_path: Path) -> None:

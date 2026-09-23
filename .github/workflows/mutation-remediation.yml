@@ -364,12 +364,12 @@ jobs:
         run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
 
       # Codex output is not always ruff-clean (issue #66): normalize before the
-      # pipeline's own lint gate sees it, and hard-fail on unfixable lint.
+      # pipeline's own lint gate sees it. What ruff cannot fix safely gets an
+      # explicit, annotated `# noqa` instead of ending the cycle (issues #232,
+      # #256); only a draft ruff cannot read still fails.
       - name: Normalize and lint Codex output
         if: needs.remediate.outputs.run == 'true'
-        run: |
-          uv run ruff format tests/
-          uv run ruff check --fix tests/
+        run: scripts/ci/normalize_agent_tests.sh tests/
 
       - name: Run tests on Codex additions
         if: needs.remediate.outputs.run == 'true'
