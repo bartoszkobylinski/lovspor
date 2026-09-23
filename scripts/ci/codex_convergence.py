@@ -46,7 +46,10 @@ from pathlib import Path
 
 BLOCKED_PHRASE = "Codex-authored tests fail against this head"
 PROPOSAL_MARKER = "codex_proposal"
-XFAIL_PROPOSAL_PREFIX = "codex proposal"
+#: Exactly what :func:`mark_xfail` is given below — a hand-written reason that
+#: merely starts with the words ("codex proposal rejected by owner") is not the
+#: pipeline's marker and must not make a failure advisory.
+XFAIL_PROPOSAL_PREFIX = "codex proposal, round "
 
 
 @dataclass(frozen=True)

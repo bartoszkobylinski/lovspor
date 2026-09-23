@@ -233,6 +233,23 @@ def test_only_pytest_mark_xfail_can_preserve_a_proposal(tmp_path: Path) -> None:
     assert not verdict.advisory
 
 
+def test_a_similar_xfail_reason_is_not_the_convergence_proposal_marker(tmp_path: Path) -> None:
+    """Only the generated ``codex proposal, …`` reason preserves proposal
+    status; an unrelated reason sharing those first words remains blocking."""
+    repo = _repo_with(
+        tmp_path,
+        "import pytest\n\n"
+        '@pytest.mark.xfail(strict=True, reason="codex proposal rejected by owner")\n'
+        "def test_new_contract(): ...\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_new_contract")
+
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+
+    assert verdict.blocking == [test]
+    assert not verdict.advisory
+
+
 def test_an_unparseable_test_file_is_not_a_proposal(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "def test_new_contract(: ...\n")
     assert not cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
