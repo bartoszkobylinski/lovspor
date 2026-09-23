@@ -24,7 +24,15 @@ check() {
   log="$(mktemp)"
   echo "==> ${name}: $*"
   set +e
-  "$@" 2>&1 | tee "$log"
+  # A git hook exports GIT_DIR (and, in a worktree, GIT_WORK_TREE / GIT_INDEX_FILE)
+  # to everything it spawns. Every check here runs from the repo root and asks
+  # git nothing about the hook's repository, while the unit suite spawns git in
+  # temp directories — with the hook's GIT_DIR inherited those commands hit the
+  # real repository: a trashed worktree index, core.bare flipped to true, 712
+  # errors (issues #369, #370). The gate strips every GIT_* variable, whoever
+  # invoked it — the same contract as the unit suite's git_env fixture, so a
+  # variable git starts exporting tomorrow needs no new line here.
+  ( unset $(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); "$@" ) 2>&1 | tee "$log"
   status="${PIPESTATUS[0]}"
   set -e
   gate_ran=$((gate_ran + 1))

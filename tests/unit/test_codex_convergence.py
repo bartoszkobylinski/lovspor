@@ -12,6 +12,8 @@ from types import ModuleType
 
 import pytest
 
+from tests.unit.site_fixtures import git_env
+
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ci" / "codex_convergence.py"
 
 
@@ -322,13 +324,12 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
-        env={
-            **os.environ,
-            "GIT_AUTHOR_NAME": "t",
-            "GIT_AUTHOR_EMAIL": "t@t",
-            "GIT_COMMITTER_NAME": "t",
-            "GIT_COMMITTER_EMAIL": "t@t",
-        },
+        env=git_env(
+            GIT_AUTHOR_NAME="t",
+            GIT_AUTHOR_EMAIL="t@t",
+            GIT_COMMITTER_NAME="t",
+            GIT_COMMITTER_EMAIL="t@t",
+        ),
     ).stdout.strip()
 
 
