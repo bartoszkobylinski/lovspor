@@ -49,6 +49,23 @@ class CorpusStateError(LovsporError):
     """
 
 
+class CorpusNotFoundError(LovsporError):
+    """Raised when the requested doc or corpus path is not present."""
+
+
+class AmbiguousSlugError(CorpusNotFoundError):
+    """A slug that more than one *current* record claims (issue #243).
+
+    A subclass so every handler that turns ``CorpusNotFoundError`` into a
+    tool error keeps doing so; distinct because the answer is different:
+    the documents exist, and the slug alone cannot pick one. The message
+    names every candidate. Picking a winner (the old first-wins index) hid
+    one document from every slug lookup with no signal that it was there —
+    the real corpus carries one such pair, ``bergverksordning-for-svalbard``,
+    a lov and a forskrift.
+    """
+
+
 class UnsupportedSidecarVersionError(LovsporError):
     """A sidecar is stored in a format version this engine does not read.
 

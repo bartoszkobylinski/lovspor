@@ -367,38 +367,6 @@ assumption_test = "tests/unit/test_mcp_recorded_at.py::test_assumption_difflib_c
 
 [[equivalent]]
 file = "src/lovspor/mcp.py"
-symbol = "_iter_search_docs"
-registered = "2026-09-01, PR #222, from run 33536461680"
-mutation = """
--        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
-+        if slug_index.get(record.slug, None)[0] != doc_id:
-"""
-justification = """
-The default is unreachable. Both callers build `slug_index` from the very
-`documents` mapping this loop iterates, keeping exactly the records with
-status "current" and a non-None slug — the same two conditions the loop has
-already checked before this line. Every record that reaches the lookup
-therefore has its slug present in the index (first-wins on duplicates, which
-is what the comparison then detects), so the default value is never produced
-and any default — tuple, None, or absent — computes the same result.
-"""
-
-[[equivalent]]
-file = "src/lovspor/mcp.py"
-symbol = "_iter_search_docs"
-registered = "2026-09-01, PR #222, from run 33536461680"
-mutation = """
--        if slug_index.get(record.slug, (doc_id, record))[0] != doc_id:
-+        if slug_index.get(record.slug, )[0] != doc_id:
-"""
-justification = """
-Same unreachable default as the previous entry: the slug of every record that
-passes the current-status/slug guard is present in an index built from the
-same mapping, so `.get` never falls through to its default.
-"""
-
-[[equivalent]]
-file = "src/lovspor/mcp.py"
 symbol = "_search_body_hits"
 registered = "2026-09-01, PR #222, from run 33536461680"
 mutation = """
