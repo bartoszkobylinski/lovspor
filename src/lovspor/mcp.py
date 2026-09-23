@@ -931,12 +931,7 @@ class CorpusReader:
         distinguish "rendered from the same XML" vs "an actual content
         update" without re-deriving it from the body.
         """
-        try:
-            target = date.fromisoformat(target_date)
-        except ValueError as exc:
-            raise ValueError(
-                f"target_date must be ISO date YYYY-MM-DD, got {target_date!r}",
-            ) from exc
+        target = _parse_iso_calendar_date("target_date", target_date)
         today = datetime.now(UTC).date()
         if target > today:
             raise ValueError(
@@ -961,12 +956,7 @@ class CorpusReader:
     def _parse_diff_date(field: str, value: str) -> date:
         """Parse an ISO diff endpoint, rejecting future dates as a typo guard
         (same posture as ``get_law_at``, but named for the diff parameter)."""
-        try:
-            parsed = date.fromisoformat(value)
-        except ValueError as exc:
-            raise ValueError(
-                f"{field} must be ISO date YYYY-MM-DD, got {value!r}",
-            ) from exc
+        parsed = _parse_iso_calendar_date(field, value)
         today = datetime.now(UTC).date()
         if parsed > today:
             raise ValueError(
@@ -3623,6 +3613,21 @@ lexical gate keeps runtime and contract identical; ``fromisoformat``
 then judges only calendar validity (2026-02-30 still fails)."""
 
 
+def _parse_iso_calendar_date(field: str, value: str) -> date:
+    """Parse a ``YYYY-MM-DD`` tool parameter, naming ``field`` on refusal.
+
+    Every date the MCP contract documents as ``YYYY-MM-DD`` goes through
+    this one gate (#225), so ``target_date``, the diff endpoints and
+    ``recorded_at`` cannot drift apart in what they accept.
+    """
+    if not _RECORDED_AT_FORM.fullmatch(value):
+        raise ValueError(f"{field} must be ISO date YYYY-MM-DD, got {value!r}")
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be ISO date YYYY-MM-DD, got {value!r}") from exc
+
+
 def _parse_recorded_at(value: str) -> date:
     """Parse and bound an ADR-0011 ``recorded_at`` value.
 
@@ -3631,16 +3636,7 @@ def _parse_recorded_at(value: str) -> date:
     End-of-day semantics downstream; future dates are refused — same
     typo-guard posture as ``get_law_at``'s ``target_date``.
     """
-    if not _RECORDED_AT_FORM.fullmatch(value):
-        raise ValueError(
-            f"recorded_at must be ISO date YYYY-MM-DD, got {value!r}",
-        )
-    try:
-        parsed = date.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError(
-            f"recorded_at must be ISO date YYYY-MM-DD, got {value!r}",
-        ) from exc
+    parsed = _parse_iso_calendar_date("recorded_at", value)
     today = datetime.now(UTC).date()
     if parsed > today:
         raise ValueError(
@@ -3659,12 +3655,7 @@ def _parse_valid_at(value: str) -> date:
     bounded ``indeterminate``/``beyond_knowledge_horizon`` answer of
     ADR-0012 point 5, not a typo to refuse. No clock is consulted.
     """
-    if not _RECORDED_AT_FORM.fullmatch(value):
-        raise ValueError(f"valid_at must be ISO date YYYY-MM-DD, got {value!r}")
-    try:
-        return date.fromisoformat(value)
-    except ValueError as exc:
-        raise ValueError(f"valid_at must be ISO date YYYY-MM-DD, got {value!r}") from exc
+    return _parse_iso_calendar_date("valid_at", value)
 
 
 def _require_section_id(slug: str, body: str, section_id: str) -> str:

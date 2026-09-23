@@ -390,7 +390,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/mcp.py"
-value = 5017
+value = 5008
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -461,13 +461,6 @@ rule = "function-lines"
 path = "src/lovspor/mcp.py"
 name = "CorpusReader.diff_law_versions"
 value = 21
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
-path = "src/lovspor/mcp.py"
-name = "CorpusReader.get_law_at"
-value = 25
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]

@@ -4257,6 +4257,29 @@ def test_get_law_at_rejects_non_iso_date_before_manifest_lookup(
         CorpusReader(tmp_path).get_law_at("skatteloven", "27-04-2026")
 
 
+_WIDER_THAN_YYYY_MM_DD = ["2026-9-1", "20260901", "2026-09-01T00:00:00", "2026-09-01\n"]
+"""Forms ``date.fromisoformat`` may accept (``20260901`` since 3.11) that the
+documented ``YYYY-MM-DD`` contract never promised (#225)."""
+
+
+@pytest.mark.parametrize("target_date", _WIDER_THAN_YYYY_MM_DD)
+def test_get_law_at_refuses_wider_iso_forms_than_the_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    target_date: str,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fail_if_called(*_args: object) -> str:
+        raise AssertionError("timetravel lookup should not run")
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fail_if_called)
+
+    with pytest.raises(ValueError) as exc_info:
+        CorpusReader(tmp_path).get_law_at("skatteloven", target_date)
+    assert str(exc_info.value) == f"target_date must be ISO date YYYY-MM-DD, got {target_date!r}"
+
+
 def test_get_law_at_allows_todays_utc_date(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -6532,6 +6555,27 @@ def test_diff_law_versions_rejects_non_iso_date_b_before_timetravel(
         match=r"^date_b must be ISO date YYYY-MM-DD, got '01-01-2024'$",
     ):
         CorpusReader(tmp_path).diff_law_versions("skatteloven", "2020-01-01", "01-01-2024")
+
+
+@pytest.mark.parametrize("value", _WIDER_THAN_YYYY_MM_DD)
+@pytest.mark.parametrize("field", ["date_a", "date_b"])
+def test_diff_law_versions_refuses_wider_iso_forms_than_the_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fail_if_called(*_args: object) -> RevisionResult:
+        raise AssertionError("timetravel lookup should not run")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fail_if_called)
+    dates = {"date_a": "2020-01-01", "date_b": "2024-01-01", field: value}
+
+    with pytest.raises(ValueError) as exc_info:
+        CorpusReader(tmp_path).diff_law_versions("skatteloven", dates["date_a"], dates["date_b"])
+    assert str(exc_info.value) == f"{field} must be ISO date YYYY-MM-DD, got {value!r}"
 
 
 def test_diff_law_versions_allows_todays_utc_date(
