@@ -3508,6 +3508,18 @@ class TestNightly:
         assert run is not None
         assert run.engine_commit is None
 
+    @pytest.mark.parametrize("value", ["0", "true", "01"])
+    def test_only_the_documented_literal_one_arms_the_engine_pin_check(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        """Developer runs remain opt-in: truthy-looking values are not enough."""
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, value)
+        describe = Mock(side_effect=AssertionError("an unarmed check must not inspect git"))
+        monkeypatch.setattr(observatory_commands, "describe_engine", describe)
+
+        assert observatory_commands._engine_pin_verdict() is None
+        describe.assert_not_called()
+
     def test_a_clean_archive_sweeps(self, root: Path, httpx_mock: HTTPXMock) -> None:
         _activate(root)
         _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
@@ -3853,6 +3865,29 @@ class TestStatus:
             f"  deadline:   {_hm(SWEEP_DEADLINE)}\n"
             "  state:      OVERDUE\n"
         )
+
+    def test_last_sweep_names_the_recorded_engine_commit(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The operator can identify the exact engine that produced a run."""
+        commit = "c" * 40
+        run = SweepRun(
+            run_id="engine-report",
+            started_at=datetime(2026, 9, 23, 1, 0, tzinfo=UTC),
+            finished_at=datetime(2026, 9, 23, 1, 1, tzinfo=UTC),
+            active_sources=1,
+            sources_completed=1,
+            sources_refused=0,
+            captured=1,
+            failed_fetches=0,
+            unchanged=0,
+            status="success",
+            engine_commit=commit,
+        )
+
+        _echo_last_sweep(run)
+
+        assert f"  engine:     {commit}\n" in capsys.readouterr().out
 
     def test_never_swept_status_uses_the_exact_operator_label(
         self, capsys: pytest.CaptureFixture[str]
