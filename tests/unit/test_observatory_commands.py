@@ -3771,6 +3771,22 @@ class TestStatus:
         assert output == "\nDead-man switch\n  armed:      reports to hc.example.invalid\n"
         assert "sensitive-token" not in output
 
+    def test_an_armed_switch_does_not_expose_url_userinfo(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The URL is a credential, so status must render the host alone."""
+        monkeypatch.setenv(
+            ENV_HEARTBEAT_URL,
+            "https://sensitive-user:sensitive-password@hc.example.invalid/check",
+        )
+
+        _echo_switch()
+
+        output = capsys.readouterr().out
+        assert output == "\nDead-man switch\n  armed:      reports to hc.example.invalid\n"
+        assert "sensitive-user" not in output
+        assert "sensitive-password" not in output
+
     def test_an_unarmed_switch_is_named_in_status(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:

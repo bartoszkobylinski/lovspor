@@ -95,7 +95,8 @@ def _echo_switch() -> None:
     if base is None:
         typer.echo("  NOT ARMED — set LOVSPOR_OBSERVATORY_HEARTBEAT_URL in the job's environment")
         return
-    typer.echo(f"  armed:      reports to {urlsplit(base).netloc}")
+    # hostname, not netloc: netloc would carry `user:password@` along with it.
+    typer.echo(f"  armed:      reports to {urlsplit(base).hostname or '(no host)'}")
 
 
 def _echo_cadence(state: CadenceState, run: SweepRun | None) -> None:
