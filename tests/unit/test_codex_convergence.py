@@ -213,6 +213,99 @@ def test_only_the_documented_pytest_proposal_marker_is_advisory(tmp_path: Path) 
     assert not verdict.advisory
 
 
+def test_only_pytest_mark_xfail_can_preserve_a_proposal(tmp_path: Path) -> None:
+    """A same-named decorator from application code is not the strict pytest
+    xfail written by the convergence job and must not make a failure advisory."""
+    repo = _repo_with(
+        tmp_path,
+        "class custom:\n"
+        "    @staticmethod\n"
+        "    def xfail(*, reason):\n"
+        "        return lambda function: function\n\n\n"
+        '@custom.xfail(reason="codex proposal, unrelated decorator")\n'
+        "def test_new_contract(): ...\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_new_contract")
+
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+
+    assert verdict.blocking == [test]
+    assert not verdict.advisory
+
+
+def test_a_similar_xfail_reason_is_not_the_convergence_proposal_marker(tmp_path: Path) -> None:
+    """Only the generated ``codex proposal, …`` reason preserves proposal
+    status; an unrelated reason sharing those first words remains blocking."""
+    repo = _repo_with(
+        tmp_path,
+        "import pytest\n\n"
+        '@pytest.mark.xfail(strict=True, reason="codex proposal rejected by owner")\n'
+        "def test_new_contract(): ...\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_new_contract")
+
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+
+    assert verdict.blocking == [test]
+    assert not verdict.advisory
+
+
+def test_a_non_strict_xfail_at_the_baseline_is_not_an_inherited_proposal(
+    tmp_path: Path,
+) -> None:
+    """Only the strict xfail written by the convergence job records a prior
+    proposal; a hand-written non-strict xfail must not make a regression advisory."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "import pytest\n\n"
+        '@pytest.mark.xfail(strict=False, reason="codex proposal, round 4 — owner decision")\n'
+        "def test_existing():\n    assert False\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_existing")
+
+    verdict = cc.classify(
+        round_number=1,
+        cap=3,
+        failures=[test],
+        added=set(),
+        repo=repo,
+        before_sha=before,
+    )
+
+    assert verdict.foreign == [test]
+    assert not verdict.advisory
+    assert verdict.blocks
+
+
+@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision, see #248")
+def test_an_inactive_xfail_at_the_baseline_is_not_an_inherited_proposal(
+    tmp_path: Path,
+) -> None:
+    """A conditional xfail that does not apply is not the unconditional marker
+    written by the convergence job, even when its reason uses the same prefix."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "import pytest\n\n"
+        "@pytest.mark.xfail("
+        'False, strict=True, reason="codex proposal, round 4 — owner decision")\n'
+        "def test_existing():\n    assert False\n",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_existing")
+
+    verdict = cc.classify(
+        round_number=1,
+        cap=3,
+        failures=[test],
+        added=set(),
+        repo=repo,
+        before_sha=before,
+    )
+
+    assert verdict.foreign == [test]
+    assert not verdict.advisory
+    assert verdict.blocks
+
+
 def test_an_unparseable_test_file_is_not_a_proposal(tmp_path: Path) -> None:
     repo = _repo_with(tmp_path, "def test_new_contract(: ...\n")
     assert not cc.is_proposal(repo, cc.TestId("tests/unit/test_thing.py", "test_new_contract"))
@@ -432,6 +525,49 @@ def test_cli_sees_tests_in_a_brand_new_untracked_file(tmp_path: Path) -> None:
     assert verdict["blocking"] == ["tests/unit/test_brand_new.py::test_new_contract"]
 
 
+def test_cli_classifies_a_changed_pre_existing_test_as_authored(tmp_path: Path) -> None:
+    """The documented added-or-changed rule must reach the CLI verdict, not
+    merely the helper that compares function ASTs."""
+    repo = _repo_with(tmp_path, "def test_existing():\n    assert 1 == 1\n")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    before = _git(repo, "rev-parse", "HEAD")
+    (repo / "tests/unit/test_thing.py").write_text(
+        "def test_existing():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+    junit = tmp_path / "junit.xml"
+    junit.write_text(
+        '<testsuites><testsuite><testcase classname="tests.unit.test_thing" '
+        'name="test_existing"><failure message="x">x</failure></testcase>'
+        "</testsuite></testsuites>",
+        encoding="utf-8",
+    )
+    sticky = tmp_path / "sticky.md"
+    sticky.write_text("", encoding="utf-8")
+
+    cc.main(
+        [
+            "--repo",
+            str(repo),
+            "--before-sha",
+            before,
+            "--junit",
+            str(junit),
+            "--sticky-body",
+            str(sticky),
+            "--verdict",
+            str(tmp_path / "v.json"),
+            "--comment",
+            str(tmp_path / "c.md"),
+        ]
+    )
+
+    verdict = json.loads((tmp_path / "v.json").read_text(encoding="utf-8"))
+    assert verdict["foreign"] == []
+    assert verdict["blocking"] == ["tests/unit/test_thing.py::test_existing"]
+
+
 # Authored by the CI test author on PR #261 — the first live round of this
 # mechanism, judging itself — and adopted verbatim.
 
@@ -565,4 +701,141 @@ def test_a_clean_pytest_run_with_no_failures_is_green(tmp_path: Path) -> None:
     verdict = cc.classify(
         round_number=1, cap=3, failures=[], added=set(), repo=repo, pytest_status=0
     )
+    assert not verdict.blocks
+
+
+# --- the author's tests are the ones it added OR changed (issues #354, #264) ---
+
+
+def _committed_repo(tmp_path: Path, source: str) -> tuple[Path, str]:
+    repo = tmp_path
+    (repo / "tests" / "unit").mkdir(parents=True)
+    (repo / "tests" / "unit" / "test_thing.py").write_text(source, encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
+def test_a_rewritten_pre_existing_test_is_the_authors_not_a_regression(tmp_path: Path) -> None:
+    """Issue #354: the author rewrote a test that was already in the tree. The
+    head did not touch it; the author did, so it is the author's test."""
+    repo, before = _committed_repo(tmp_path, "def test_old():\n    assert 1 == 1\n")
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_old():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_old")
+
+    assert cc.authored_tests(repo, before) == {test}
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+    assert verdict.blocking == [test]
+    assert not verdict.foreign
+
+
+def test_a_new_parametrize_case_in_an_existing_test_is_the_authors(tmp_path: Path) -> None:
+    """Issue #264: only the decorator changed, the body did not."""
+    repo, before = _committed_repo(
+        tmp_path,
+        'import pytest\n\n@pytest.mark.parametrize("x", ["a"])\ndef test_cases(x): ...\n',
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        'import pytest\n\n@pytest.mark.parametrize("x", ["a", "b"])\ndef test_cases(x): ...\n',
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == {cc.TestId("tests/unit/test_thing.py", "test_cases")}
+
+
+def test_an_untouched_pre_existing_test_is_still_foreign(tmp_path: Path) -> None:
+    repo, before = _committed_repo(
+        tmp_path, "def test_old():\n    assert 1 == 1\n\n\ndef test_other(): ...\n"
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_old():\n    assert 1 == 1\n\n\ndef test_other(): ...\n\n\ndef test_new(): ...\n",
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == {cc.TestId("tests/unit/test_thing.py", "test_new")}
+
+
+def test_comments_and_reindentation_do_not_make_a_test_authored(tmp_path: Path) -> None:
+    """The authored-test contract compares syntax, not formatting noise."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "def test_old():\n    if True:\n        assert 1 == 1\n",
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "# explanatory comment\n\n\ndef test_old():\n    if True:\n"
+        "            assert 1 == 1  # same assertion\n",
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == set()
+
+
+def test_reordering_tests_within_a_file_does_not_make_them_authored(tmp_path: Path) -> None:
+    """Moved *within* the file. A file moved to another path is a different
+    matter — its tests read as new, and the scope guard refuses the round before
+    this function is asked (docs/agentic-ci.md); the contract is by path."""
+    repo, before = _committed_repo(
+        tmp_path, "def test_one():\n    assert 1 == 1\n\n\ndef test_two():\n    assert 2 == 2\n"
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_two():\n    assert 2 == 2\n\n\ndef test_one():\n    assert 1 == 1\n",
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == set()
+
+
+def test_a_test_that_was_a_proposal_before_the_round_stays_advisory(tmp_path: Path) -> None:
+    """Issue #354, the PR #367 shape: round 4 left the proposal in the tree as a
+    strict xfail; round 6 re-authored it without the marker. The marker at
+    before-sha says what it is, whatever the author did to it since."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "import pytest\n\n"
+        '@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision")\n'
+        "def test_idea():\n    assert 1 == 2\n",
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_idea():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_idea")
+
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[test], added={test}, repo=repo, before_sha=before
+    )
+
+    assert verdict.advisory == [test]
+    assert not verdict.blocks
+
+
+def test_an_untouched_proposal_at_the_baseline_stays_advisory(tmp_path: Path) -> None:
+    """A recorded proposal remains one even when this round authored other tests."""
+    proposal = (
+        "import pytest\n\n"
+        '@pytest.mark.xfail(strict=True, reason="codex proposal, round 2 — owner decision")\n'
+        "def test_idea():\n    assert 1 == 2\n\n\n"
+    )
+    repo, before = _committed_repo(tmp_path, proposal + "def test_existing(): ...\n")
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        proposal + "def test_existing(): ...\n\n\ndef test_new(): ...\n",
+        encoding="utf-8",
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_idea")
+
+    authored = cc.authored_tests(repo, before)
+    verdict = cc.classify(
+        round_number=1,
+        cap=3,
+        failures=[test],
+        added=authored,
+        repo=repo,
+        before_sha=before,
+    )
+
+    assert test not in authored
+    assert verdict.advisory == [test]
+    assert not verdict.foreign
     assert not verdict.blocks
