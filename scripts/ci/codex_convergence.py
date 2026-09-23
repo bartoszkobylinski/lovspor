@@ -142,7 +142,11 @@ def authored_tests(repo: Path, before_sha: str) -> set[TestId]:
     A pre-existing test the author rewrote — or gave a new parametrize case —
     is the author's work, not a regression the head introduced: the head did
     not touch it (issues #354, #264). Changed means the function's AST differs,
-    decorators included; a moved or re-indented test is not changed.
+    decorators included; a test re-ordered or re-indented within its file is
+    not changed. Files are compared by path: a renamed test file reads as new
+    tests, and that is not a case to handle, because the scope guard fails a
+    round that renames a test file away (docs/agentic-ci.md, "What the scope
+    guard does and does not decide").
     """
     found: set[TestId] = set()
     for file, before, after in _test_files_at(repo, before_sha):

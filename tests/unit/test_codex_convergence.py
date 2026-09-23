@@ -657,6 +657,21 @@ def test_comments_and_reindentation_do_not_make_a_test_authored(tmp_path: Path) 
     assert cc.authored_tests(repo, before) == set()
 
 
+def test_reordering_tests_within_a_file_does_not_make_them_authored(tmp_path: Path) -> None:
+    """Moved *within* the file. A file moved to another path is a different
+    matter — its tests read as new, and the scope guard refuses the round before
+    this function is asked (docs/agentic-ci.md); the contract is by path."""
+    repo, before = _committed_repo(
+        tmp_path, "def test_one():\n    assert 1 == 1\n\n\ndef test_two():\n    assert 2 == 2\n"
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_two():\n    assert 2 == 2\n\n\ndef test_one():\n    assert 1 == 1\n",
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == set()
+
+
 def test_a_test_that_was_a_proposal_before_the_round_stays_advisory(tmp_path: Path) -> None:
     """Issue #354, the PR #367 shape: round 4 left the proposal in the tree as a
     strict xfail; round 6 re-authored it without the marker. The marker at
