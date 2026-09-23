@@ -336,12 +336,13 @@ jobs:
         run: scripts/ci/assert_codex_scope.sh "$BEFORE_SHA"
 
       # Codex output is not always ruff-clean (issue #66): normalize before the
-      # pipeline's own lint gate sees it, and hard-fail on unfixable lint.
+      # pipeline's own lint gate sees it. What ruff cannot fix safely gets an
+      # explicit, annotated `# noqa` instead of ending the round: a hard-fail
+      # here discarded correct tests twice and called it a pipeline failure
+      # (issues #232, #256). Only a draft ruff cannot read still fails.
       - name: Normalize and lint Codex output
         if: needs.codex-author.outputs.skip != 'true'
-        run: |
-          uv run ruff format tests/
-          uv run ruff check --fix tests/
+        run: scripts/ci/normalize_agent_tests.sh tests/
 
       # The log lives in RUNNER_TEMP, never the workspace: the push step squashes
       # with `git add -A`, so a workspace file WILL end up committed to the
@@ -715,7 +716,19 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
     steps:
+      # The PR head, for the reason `codex-tests-report` takes it: this job runs
+      # on `pull_request` with no elevated context, and off the default branch
+      # the PR that changes the helper must be able to call the version it
+      # ships, not die on a file the default branch does not have yet.
+      - name: Check out the escalation helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+
       - name: Retract the blocked labels this run disproved
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -739,3 +752,33 @@ jobs:
             fi
           done
           echo "READY TO MERGE"
+
+      # Issue #255: the labels were retracted, the sticky comment was not, so
+      # #250 reached READY with its `pipeline` comment still ending on a
+      # round-3 BLOCKED. READY goes into that comment through the same helper
+      # — appended, never rewritten: the convergence verdict counts blocked
+      # rounds out of this comment's history, and this body carries none of
+      # the phrase it counts.
+      - name: Report READY TO MERGE where the blocked rounds were reported
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          # A PR nothing ever escalated on has no sticky comment, and creating
+          # one would mail the author on every green PR — the noise the helper
+          # exists to stop. Ask first, as the retraction does.
+          existing=$(gh pr view "$PR" --json comments \
+            --jq '[.comments[] | select(.body | contains("<!-- lovspor-sticky:pipeline -->"))] | length')
+          if [ "$existing" -eq 0 ]; then
+            echo "no pipeline sticky comment to resolve"
+            exit 0
+          fi
+          {
+            echo "**READY TO MERGE** — every check on this head is green. The rounds"
+            echo "above are resolved and their labels retracted."
+            echo ""
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          } > "$RUNNER_TEMP/ready.md"
+          scripts/ci/pr_sticky_comment.sh pipeline "$PR" "$RUNNER_TEMP/ready.md"
