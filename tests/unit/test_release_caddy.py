@@ -577,6 +577,25 @@ class TestTheDomainReachesCaddy:
             "LOVSPOR_DOMAIN": "lovspor.test, alias.test"
         }
 
+    def test_the_runner_reads_the_environment_file_with_an_explicit_utf_8_encoding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        encodings: list[str | None] = []
+
+        def read_text(path: Path, encoding: str | None = None) -> str:
+            assert path == env_file
+            encodings.append(encoding)
+            return "LOVSPOR_DOMAIN=lovspor.no\n"
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspor.no"}
+        assert len(encodings) == 1
+        assert encodings[0] is not None
+        assert encodings[0].lower() == "utf-8"
+
     def test_the_runner_passes_the_file_domain_to_the_command(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -611,12 +630,23 @@ class TestTheDomainReachesCaddy:
 
         assert SubprocessRunner(tmp_path / "absent").domain_from_file() == {}
 
+    def test_an_empty_file_domain_gives_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {}
+
     @pytest.mark.parametrize(
         ("text", "expected"),
         [
             ("LOVSPOR_DOMAIN=lovspor.no, alias.no\n", "lovspor.no, alias.no"),
             ('LOVSPOR_DOMAIN="a.test, b.test"\n', "a.test, b.test"),
             ("LOVSPOR_DOMAIN='a.test'\n", "a.test"),
+            ('LOVSPOR_DOMAIN=""\n', ""),
+            ("LOVSPOR_DOMAIN='\n", "'"),
             ("OTHER=1\n", None),
             ("LOVSPOR_DOMAIN=\n", ""),
         ],
@@ -650,4 +680,7 @@ class TestTheDomainReachesCaddy:
         with pytest.raises(ControlPlaneError) as caught:
             adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
 
-        assert "LOVSPOR_DOMAIN" not in str(caught.value)
+        assert str(caught.value) == (
+            f"caddy adapt failed for {tmp_path / 'Caddyfile'} importing "
+            f"{tmp_path / 'fragment.caddy'}: boom"
+        )
