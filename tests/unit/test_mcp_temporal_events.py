@@ -218,11 +218,27 @@ def test_future_valid_at_is_legal(corpus: tuple[Path, str, str]) -> None:
     assert _pending_events(result)[0]["status_reason"] == "beyond_knowledge_horizon"
 
 
-def test_valid_at_rejects_non_iso_forms(corpus: tuple[Path, str, str]) -> None:
+@pytest.mark.parametrize(
+    "value",
+    [
+        "20260501",
+        "2026-W18-5",
+        "2026-05-01T00:00",
+        "2026-5-1",
+        "2026-05-01\n",
+        "01.05.2026",
+    ],
+)
+def test_valid_at_rejects_non_canonical_iso_forms(
+    corpus: tuple[Path, str, str], value: str
+) -> None:
+    """The tool contract names exactly YYYY-MM-DD, not every form accepted
+    by date.fromisoformat or a prefix ending before a trailing newline."""
     repo, _sha1, _sha2 = corpus
 
-    with pytest.raises(ValueError, match="valid_at must be ISO date"):
-        _tool_fn(repo)(slug="testloven", valid_at="01.05.2026")
+    with pytest.raises(ValueError) as exc_info:
+        _tool_fn(repo)(slug="testloven", valid_at=value)
+    assert str(exc_info.value) == f"valid_at must be ISO date YYYY-MM-DD, got {value!r}"
 
 
 # ---------- outcome taxonomy (ADR-0012 point 6) ----------
