@@ -31,6 +31,7 @@ from lovspor.release.caddy import (
     admin_listen,
     canonical_hash,
     config_pair,
+    environment_file_value,
     reload,
     validate,
 )
@@ -153,12 +154,23 @@ class TestConfigPair:
         assert pair.config_hash == canonical_hash(config["apps"]["http"]["servers"])
         assert pair.describe().startswith("(none, ")
 
-    @pytest.mark.parametrize("value", [None, 42, True, [ID_A], {"id": ID_A}])
-    def test_a_release_var_that_is_not_a_string_names_no_release(self, value: object) -> None:
-        """The admin API answers JSON: the var can be any node, not only a string."""
-        routes = [{"handle": [{"handler": "vars", "lovspor_release": value}]}]
+    def test_a_null_release_var_names_no_release(self) -> None:
+        """The admin API answers JSON: a null var is a var that expanded to nothing."""
+        routes = [{"handle": [{"handler": "vars", "lovspor_release": None}]}]
 
         assert config_pair(_config(_site(routes))).release_id is None
+
+    @pytest.mark.parametrize("value", [1.1111e63, 42, True, [ID_A], {"id": ID_A}])
+    def test_a_var_the_adapter_turned_into_another_type_is_a_named_refusal(
+        self, value: object
+    ) -> None:
+        """Caddy's adapter JSON-parses a vars value: an all-digit id adapts to a
+        number. Read as "no release" it would move reconcile onto the
+        pre-envelope row; it is refused by name instead (issue #293)."""
+        routes = [{"handle": [{"handler": "vars", "lovspor_release": value}]}]
+
+        with pytest.raises(ControlPlaneError, match="not a string"):
+            config_pair(_config(_site(routes)))
 
     def test_the_key_names_a_release_only_on_a_vars_handler(self) -> None:
         routes = [{"handle": [{"handler": "file_server", "lovspor_release": ID_A}]}]
@@ -546,3 +558,78 @@ class TestFallbackAdminClient:
         assert client.connect is HttpxAdminClient
         assert client.running_config() == {"apps": {}}
         assert client.answered == "localhost:2020"
+
+
+class TestTheDomainReachesCaddy:
+    """Issue #334: `migrate --check` run bare on the droplet refused with
+    "unrecognized global option: encode" and blamed the fragment. The site
+    block's placeholder was empty because the command did not carry
+    LOVSPOR_DOMAIN; Caddy's own unit reads it from an EnvironmentFile."""
+
+    def test_the_runner_reads_the_domain_from_the_environment_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=old.test\nLOVSPOR_DOMAIN='lovspor.test, alias.test'\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {
+            "LOVSPOR_DOMAIN": "lovspor.test, alias.test"
+        }
+
+    def test_the_processs_own_value_wins_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "mine.test")
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=other.test\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {}
+
+    def test_a_missing_file_gives_nothing_rather_than_a_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+
+        assert SubprocessRunner(tmp_path / "absent").domain_from_file() == {}
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("LOVSPOR_DOMAIN=lovspor.no, alias.no\n", "lovspor.no, alias.no"),
+            ('LOVSPOR_DOMAIN="a.test, b.test"\n', "a.test, b.test"),
+            ("LOVSPOR_DOMAIN='a.test'\n", "a.test"),
+            ("OTHER=1\n", None),
+            ("LOVSPOR_DOMAIN=\n", ""),
+        ],
+    )
+    def test_environment_file_value_reads_as_systemd_does(
+        self, text: str, expected: str | None
+    ) -> None:
+        assert environment_file_value(text, "LOVSPOR_DOMAIN") == expected
+
+    def test_an_adapt_failure_without_the_domain_names_the_variable_not_the_fragment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        runner = RecordingRunner(
+            Completed(1, "", "Caddyfile:10: unrecognized global option: encode")
+        )
+
+        with pytest.raises(ControlPlaneError) as caught:
+            adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
+
+        message = str(caught.value)
+        assert "LOVSPOR_DOMAIN is not in this process's environment" in message
+        assert "unrecognized global option: encode" in message
+
+    def test_an_adapt_failure_with_the_domain_set_carries_no_hint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "lovspor.test")
+        runner = RecordingRunner(Completed(1, "", "boom"))
+
+        with pytest.raises(ControlPlaneError) as caught:
+            adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
+
+        assert "LOVSPOR_DOMAIN" not in str(caught.value)

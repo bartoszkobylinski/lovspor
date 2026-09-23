@@ -572,6 +572,10 @@ step 5. Then the preflight, which moves nothing:
 sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --check
 ```
 
+Run bare, as shown: when the shell does not carry `LOVSPOR_DOMAIN`, the release commands
+read it from `/etc/default/caddy-lovspor` — the file Caddy's own unit reads — and an adapt
+that still fails names the variable rather than the fragment (issue #334).
+
 `--check` moves nothing. It prints one line — the running configuration on
 `localhost:2019` and its hash, the socket confirmed absent, the group and its
 gid, and that this Caddy accepts the `|0660` creation-mode suffix — and refuses,

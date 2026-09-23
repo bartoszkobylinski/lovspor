@@ -52,8 +52,15 @@ cd /
 # EnvironmentFile, so its value is unquoted and may list several names
 # comma-separated; a shell would run the second word as a command (seen
 # 2026-09-08, when the value still carried the retired personal-domain alias).
+# The last assignment wins and surrounding quotes — double or single, systemd
+# strips both — go (issue #301).
+host_names() {
+	sed -n 's/^LOVSPOR_DOMAIN=//p' "$1" | tail -n 1 \
+		| sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+
 if [ -z "${LOVSPOR_DOMAIN:-}" ] && [ -r /etc/default/caddy-lovspor ]; then
-	LOVSPOR_DOMAIN="$(sed -n 's/^LOVSPOR_DOMAIN=//p' /etc/default/caddy-lovspor | tail -n 1 | sed 's/^"\(.*\)"$/\1/')"
+	LOVSPOR_DOMAIN="$(host_names /etc/default/caddy-lovspor)"
 fi
 : "${LOVSPOR_DOMAIN:?LOVSPOR_DOMAIN is unset and /etc/default/caddy-lovspor did not provide it}"
 export LOVSPOR_DOMAIN

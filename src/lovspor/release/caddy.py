@@ -39,6 +39,11 @@ from lovspor.release.errors import CommitRefusedError, ControlPlaneError, Unobse
 
 FRAGMENT_ENV = "LOVSPOR_RELEASE_FRAGMENT"
 """The Caddyfile placeholder naming the fragment to import; set per command."""
+DOMAIN_VAR = "LOVSPOR_DOMAIN"
+"""The Caddyfile's site-block placeholder; Caddy's unit reads it from an EnvironmentFile."""
+DEFAULT_ENVIRONMENT_FILE = Path("/etc/default/caddy-lovspor")
+_QUOTES = "\"'"
+"""systemd strips either quote style from an EnvironmentFile value."""
 DEFAULT_CADDYFILE = Path("/etc/caddy/Caddyfile")
 DEFAULT_FRAGMENT = Path("/etc/caddy/lovspor-release.caddy")
 DEFAULT_ADMIN = "unix//run/caddy/admin.sock"
@@ -60,13 +65,23 @@ class Runner(Protocol):
 
 
 class SubprocessRunner:
-    """The real one: fixed argv, captured output, no shell."""
+    """The real one: fixed argv, captured output, no shell.
+
+    ``LOVSPOR_DOMAIN`` is read from the EnvironmentFile Caddy's own unit reads
+    when the process does not carry it (issue #334): the Caddyfile's site block
+    is ``{$LOVSPOR_DOMAIN} {``, and without the variable ``caddy adapt`` parses
+    the block as global options and blames the fragment. The file is read, never
+    sourced — it is systemd syntax, the value may be comma-separated names.
+    """
+
+    def __init__(self, environment_file: Path = DEFAULT_ENVIRONMENT_FILE) -> None:
+        self._environment_file = environment_file
 
     def run(self, argv: Sequence[str], env: Mapping[str, str]) -> Completed:
         try:
             result = subprocess.run(  # noqa: S603
                 list(argv),
-                env={**os.environ, **env},
+                env={**os.environ, **self.domain_from_file(), **env},
                 capture_output=True,
                 text=True,
                 check=False,
@@ -74,6 +89,18 @@ class SubprocessRunner:
         except OSError as error:
             raise ControlPlaneError(f"cannot run {argv[0]}: {error}") from error
         return Completed(result.returncode, result.stdout, result.stderr)
+
+    def domain_from_file(self) -> dict[str, str]:
+        """``LOVSPOR_DOMAIN`` as systemd would read it from the EnvironmentFile,
+        or nothing: the process's own value wins, an unreadable file gives up."""
+        if DOMAIN_VAR in os.environ:
+            return {}
+        try:
+            text = self._environment_file.read_text(encoding="utf-8")
+        except OSError:
+            return {}
+        value = environment_file_value(text, DOMAIN_VAR)
+        return {DOMAIN_VAR: value} if value else {}
 
 
 class AdminClient(Protocol):
@@ -179,6 +206,15 @@ def _release_vars(node: object) -> Iterator[str]:
         # edit, leaves it present and not a release id. Only an id names a release —
         # the reading the fragment's own parser takes — so nothing the marker would
         # refuse can leave here and reach it (issue #271).
+        if node.get("handler") == "vars" and found is not None and not isinstance(found, str):
+            # The Caddyfile adapter JSON-parses a vars value, so an all-digit
+            # release id adapts to a number and, read as "no release", would
+            # move reconcile onto the pre-envelope row (issue #293). Refused by
+            # name rather than silently changing the row.
+            raise ControlPlaneError(
+                f"{RELEASE_VAR} var is a {type(found).__name__}, not a string — the Caddyfile "
+                "adapter JSON-parsed it; the fragment must carry a release id as text"
+            )
         if node.get("handler") == "vars" and isinstance(found, str) and is_release_id(found):
             yield found
         for value in node.values():
@@ -234,11 +270,39 @@ def adapt_config(runner: Runner, caddyfile: Path, fragment: Path) -> object:
     argv = ("caddy", "adapt", "--config", str(caddyfile), "--adapter", "caddyfile")
     done = runner.run(argv, {FRAGMENT_ENV: str(fragment)})
     if done.returncode != 0:
-        raise ControlPlaneError(f"caddy adapt failed for {fragment}: {done.stderr.strip()}")
+        raise ControlPlaneError(
+            f"caddy adapt failed for {caddyfile} importing {fragment}: {done.stderr.strip()}"
+            + _domain_hint()
+        )
     try:
         return json.loads(done.stdout)
     except ValueError as error:
         raise ControlPlaneError("caddy adapt produced no JSON") from error
+
+
+def _domain_hint() -> str:
+    """Why an adapt most often fails on a droplet: the site block's placeholder is empty."""
+    if DOMAIN_VAR in os.environ:
+        return ""
+    return (
+        f"\n  {DOMAIN_VAR} is not in this process's environment; the Caddyfile's site block is"
+        f" `{{${DOMAIN_VAR}}} {{`. It is read from {DEFAULT_ENVIRONMENT_FILE} when that file"
+        f" is readable, else pass it: sudo env {DOMAIN_VAR}=<names> lovspor release …"
+    )
+
+
+def environment_file_value(text: str, name: str) -> str | None:
+    """``name`` as systemd reads it from an EnvironmentFile: the last assignment
+    wins and surrounding double or single quotes go (issues #260, #298, #301)."""
+    value = None
+    for line in text.splitlines():
+        if line.startswith(f"{name}="):
+            value = line[len(name) + 1 :].strip()
+    if value is None:
+        return None
+    if len(value) > 1 and value[0] == value[-1] and value[0] in _QUOTES:
+        value = value[1:-1]
+    return value
 
 
 def adapt(runner: Runner, caddyfile: Path, fragment: Path) -> ConfigPair:
