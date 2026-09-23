@@ -1384,14 +1384,15 @@ class TestEntryPoints:
         fetcher = Mock()
         fetcher.declared_sitemaps.return_value = (SITEMAP_URL, NESTED_SITEMAP_URL)
         record = SimpleNamespace(
-            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL), listing_entry_points=()
+            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL, user_agent=USER_AGENT),
+            listing_entry_points=(),
         )
 
         starts = _entry_points(fetcher, record, None)
 
         assert starts.urls == (SITEMAP_URL, NESTED_SITEMAP_URL)
         assert starts.probed is False
-        fetcher.declared_sitemaps.assert_called_once_with(ROBOTS_URL)
+        fetcher.declared_sitemaps.assert_called_once_with(ROBOTS_URL, USER_AGENT)
 
     def test_a_declared_listing_is_walked_alongside_the_sitemap(self) -> None:
         """A source can publish both. The sitemap is the machine index and the
@@ -1401,7 +1402,7 @@ class TestEntryPoints:
         fetcher.declared_sitemaps.return_value = (SITEMAP_URL,)
         listing = f"https://www.{BAERUM_DOMAIN}/kunngjoringer/"
         record = SimpleNamespace(
-            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL),
+            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL, user_agent=USER_AGENT),
             listing_entry_points=(listing,),
         )
 
@@ -1417,7 +1418,7 @@ class TestEntryPoints:
         fetcher.declared_sitemaps.return_value = ()
         listing = f"https://www.{BAERUM_DOMAIN}/kunngjoringer/"
         record = SimpleNamespace(
-            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL),
+            access_policy=SimpleNamespace(robots_txt_url=ROBOTS_URL, user_agent=USER_AGENT),
             listing_entry_points=(listing,),
         )
 

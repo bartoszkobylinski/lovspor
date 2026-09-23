@@ -291,7 +291,7 @@ def _entry_points(fetcher: Fetcher, record: SourceRecord, given: list[str] | Non
     policy = record.access_policy
     if policy is None:
         return _Starts((), probed=False)
-    declared = fetcher.declared_sitemaps(policy.robots_txt_url)
+    declared = fetcher.declared_sitemaps(policy.robots_txt_url, policy.user_agent)
     if declared:
         return _Starts(declared + record.listing_entry_points, probed=False)
     # Listings are the entry for the 116 municipalities that publish no sitemap
