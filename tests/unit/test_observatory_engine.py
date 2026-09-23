@@ -10,7 +10,11 @@ import os
 import subprocess
 from pathlib import Path
 
-from lovspor.observatory.engine import EngineCheckout, describe_engine
+import pytest
+
+import lovspor
+from lovspor.observatory import engine
+from lovspor.observatory.engine import EngineCheckout, describe_engine, engine_root
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -53,7 +57,7 @@ class TestPinnedCheckout:
 
         assert checkout.commit == sha
         assert checkout.pinned is False
-        assert checkout.reason is not None and "branch" in checkout.reason
+        assert checkout.reason == "the engine checkout is on a branch"
 
     def test_a_dirty_checkout_is_not_pinned(self, tmp_path: Path) -> None:
         repo, sha = _repo(tmp_path)
@@ -64,7 +68,7 @@ class TestPinnedCheckout:
 
         assert checkout.commit == sha
         assert checkout.pinned is False
-        assert checkout.reason is not None and "local changes" in checkout.reason
+        assert checkout.reason == "the engine checkout has local changes"
 
     def test_an_untracked_file_counts_as_local_changes(self, tmp_path: Path) -> None:
         repo, sha = _repo(tmp_path)
@@ -78,3 +82,31 @@ class TestOutsideAGitCheckout:
     def test_an_installed_package_has_no_commit_and_no_verdict(self, tmp_path: Path) -> None:
         """A wheel install is not a checkout: nothing to pin, nothing to refuse."""
         assert describe_engine(tmp_path) == EngineCheckout(commit=None, pinned=None, reason=None)
+
+
+class TestWhichCheckoutIsAsked:
+    """The question is about the engine's own checkout, never about the caller's cwd."""
+
+    def test_the_engine_root_is_where_the_package_was_imported_from(self) -> None:
+        root = engine_root()
+
+        assert (root / "src" / "lovspor" / "__init__.py") == Path(lovspor.__file__).resolve()
+
+    def test_the_default_root_is_the_engine_not_the_working_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cron job's cwd is wherever launchd put it — outside any checkout."""
+        monkeypatch.chdir(tmp_path)
+
+        assert describe_engine().commit is not None
+        assert describe_engine().commit == describe_engine(engine_root()).commit
+
+    def test_a_git_answer_is_text(self, tmp_path: Path) -> None:
+        """Pydantic's lax mode would decode bytes into `commit` unnoticed, so the
+        helper's own type is pinned here rather than through the model."""
+        repo, sha = _repo(tmp_path)
+
+        answer = engine._git(repo, "rev-parse", "HEAD")
+
+        assert answer == sha
+        assert isinstance(answer, str)

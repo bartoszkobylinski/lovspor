@@ -39,6 +39,7 @@ from lovspor.observatory.commands import (
     _SweepTotals,
 )
 from lovspor.observatory.discovery import Candidate
+from lovspor.observatory.engine import describe_engine
 from lovspor.observatory.events import (
     read_source_events,
     record_fingerprint,
@@ -2668,6 +2669,10 @@ class TestCaptureAll:
         assert run is not None
         assert (run.status, run.active_sources, run.sources_refused) == ("success", 2, 0)
         assert (run.captured, run.unchanged) == (2, 0)
+        # Issue #219: the record names the engine that produced it. The suite
+        # runs from a checkout, so the commit is known here as it is at night.
+        assert run.engine_commit is not None
+        assert run.engine_commit == describe_engine().commit
 
     def test_a_zero_source_sweep_is_recorded_as_failed(self, root: Path) -> None:
         """A sweep that observed nothing must not leave green telemetry."""
@@ -2681,6 +2686,8 @@ class TestCaptureAll:
         # A failure has to say why: telemetry that is red without a cause is
         # barely better than telemetry that is missing.
         assert run.failure_reason == "no_active_sources"
+        assert run.engine_commit is not None
+        assert run.engine_commit == describe_engine().commit
 
     def test_recorded_sweep_preserves_deferred_count(self, root: Path) -> None:
         started = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
@@ -3361,6 +3368,8 @@ class TestNightly:
         run = latest_sweep_run(root / "sweep-runs.jsonl")
         assert run is not None
         assert (run.status, run.failure_reason) == ("failed", "no_active_sources")
+        assert run.engine_commit is not None
+        assert run.engine_commit == describe_engine().commit
 
     def test_registered_but_inactive_sources_count_as_no_active_sources(self, root: Path) -> None:
         """A non-empty registry is not enough to make a nightly run viable.
