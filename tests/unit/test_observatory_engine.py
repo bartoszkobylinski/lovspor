@@ -10,6 +10,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from lovspor.observatory.engine import EngineCheckout, describe_engine
 
 
@@ -72,6 +74,23 @@ class TestPinnedCheckout:
         (repo / "stray.py").write_text("", encoding="utf-8")
 
         assert describe_engine(repo).pinned is False
+
+    def test_the_callers_git_environment_cannot_redirect_the_query(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A hook exports GIT_DIR for the caller's checkout, but the engine
+        verdict is about the explicitly supplied checkout (issue #369)."""
+        engine_root = tmp_path / "engine"
+        engine_root.mkdir()
+        repo, sha = _repo(engine_root)
+        _git(repo, "checkout", "-q", "--detach", sha)
+        other_root = tmp_path / "other"
+        other_root.mkdir()
+        other, _ = _repo(other_root)
+        monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+        assert describe_engine(repo) == EngineCheckout(commit=sha, pinned=True, reason=None)
 
 
 class TestOutsideAGitCheckout:
