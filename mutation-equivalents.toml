@@ -1065,65 +1065,6 @@ assumption_test = "tests/unit/test_publish_emit.py::test_assumption_git_config_k
 
 [[equivalent]]
 file = "src/lovspor/publish/emit.py"
-symbol = "_source_revisions"
-registered = "2026-09-06, PR #249"
-mutation = """
--    current = ""
-+    current = None
-"""
-justification = """
-The initial value is dead: git log with --format=%x00%H emits the
-NUL-prefixed commit line before any file name, so `current` is
-reassigned before the first setdefault can read it. No line ever sees
-the initial value, whatever it is.
-"""
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
-symbol = "_source_revisions"
-registered = "2026-09-06, PR #249"
-mutation = """
--    current = ""
-+    current = "XXXX"
-"""
-justification = """
-Same dead initial value as the None variant: the format string
-guarantees a commit line precedes every name line.
-"""
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
-symbol = "_clear_previous_build"
-registered = "2026-09-06, PR #249"
-mutation = """
--    manifest = out / "site-manifest.json"
-+    manifest = out / "XXsite-manifest.jsonXX"
-"""
-justification = """
-The unlink is redundant with the same build's final step: emit_site
-unconditionally rewrites site-manifest.json at the same path after
-emitting the pages, so whether the stale file was removed first is
-unobservable in any completed build. The unlink exists only to avoid a
-stale manifest surviving a crash mid-build, which no deterministic test
-can exercise.
-"""
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
-symbol = "_clear_previous_build"
-registered = "2026-09-06, PR #249"
-mutation = """
--    manifest = out / "site-manifest.json"
-+    manifest = out / "SITE-MANIFEST.JSON"
-"""
-justification = """
-Same redundant-unlink argument as the XX-wrapped variant (with the
-aside that on a case-insensitive filesystem the mutated name even
-unlinks the real file — either way the final write settles the state).
-"""
-
-[[equivalent]]
-file = "src/lovspor/publish/emit.py"
 symbol = "_committer_time"
 registered = "2026-09-06, PR #249"
 mutation = """
@@ -2242,38 +2183,6 @@ fragment's bytes to the same text. Python's codec registry, not a dependency.
 """
 
 [[equivalent]]
-file = "src/lovspor/release/reconcile.py"
-symbol = "reconcile"
-registered = "2026-09-09, PR #268, from run 34397173401"
-mutation = """
--def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> ReconcileReport:
-+def reconcile(plane: ControlPlane, action: ReconcileAction = "XXreportXX") -> ReconcileReport:
-"""
-justification = """
-`action` is read at exactly two places, `if action == "complete"` and
-`if action == "abandon"`, and nowhere else — it is not stored, reported or
-compared with "report". Every value other than those two literals takes the
-same path to the same `UnreconciledError`, so the default's spelling cannot
-reach any output: "report", "XXreportXX" and "REPORT" are all "neither".
-Pure Python string equality; no dependency. The command layer never relies
-on the default (it passes the action it parsed), and the Literal type is a
-static promise mutmut does not run mypy against.
-"""
-
-[[equivalent]]
-file = "src/lovspor/release/reconcile.py"
-symbol = "reconcile"
-registered = "2026-09-09, PR #268, from run 34397173401"
-mutation = """
--def reconcile(plane: ControlPlane, action: ReconcileAction = "report") -> ReconcileReport:
-+def reconcile(plane: ControlPlane, action: ReconcileAction = "REPORT") -> ReconcileReport:
-"""
-justification = """
-Same argument as the entry above: the default is only ever compared with
-"complete" and "abandon", and "REPORT" is neither exactly as "report" is.
-"""
-
-[[equivalent]]
 file = "src/lovspor/release/linking.py"
 symbol = "_sha256"
 registered = "2026-09-10, PR #268, from run 34414685228"
@@ -2311,25 +2220,6 @@ reach the same encoder and write identical bytes for every input. The same
 registry argument already registered for `decode("UTF-8")` in
 observatory/manifest and for `encode("UTF-8")` in release/caddy; it is
 documented language behaviour of `codecs.lookup`, not a dependency's.
-"""
-
-[[equivalent]]
-file = "src/lovspor/release/migrate.py"
-symbol = "_had_exec_reload"
-registered = "2026-09-10, PR #269, from the mutation artifact at commit 929b788"
-mutation = """
--    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="utf-8")
-+    return host.drop_in.is_file() and "ExecReload=" in host.drop_in.read_text(encoding="UTF-8")
-"""
-justification = """
-`Path.read_text` resolves the encoding name through the codec registry, which
-normalises case before lookup, so "UTF-8" and "utf-8" select the same decoder
-and return the same string for every byte sequence — including the sequences
-that make both raise the same UnicodeDecodeError. The predicate is a
-containment test on that string, so its value cannot differ. Python's own
-codec-registry semantics; the sibling `encoding=None` mutant of this same call
-is a real difference and is killed by
-`tests/unit/test_release_migrate.py::TestRollback::test_the_drop_in_is_read_as_utf8_whatever_the_locale`.
 """
 
 [[equivalent]]
