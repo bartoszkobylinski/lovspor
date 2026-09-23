@@ -157,6 +157,19 @@ def test_a_manifest_without_a_full_commit_is_refused(release: Path) -> None:
         check_release(release)
 
 
+@pytest.mark.parametrize("suffix", ["\n", "\r\n", " "])
+def test_a_full_commit_with_trailing_whitespace_is_refused(release: Path, suffix: str) -> None:
+    """``$`` matches before a trailing newline, so ``match`` would accept a
+    sha that ``git`` and the corpus would not recognise (#288)."""
+    manifest = release / "site-manifest.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["corpus_commit"] = "a" * 40 + suffix
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="names no full corpus commit"):
+        check_release(release)
+
+
 def test_a_missing_document_page_is_caught_by_the_count(release: Path) -> None:
     """The manifest's document count is the closure proof; a tree with fewer
     pages than it promises is a partial copy."""

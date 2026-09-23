@@ -44,7 +44,8 @@ from lovspor.publish.sitemaps import COMPANION_INDEX
 # else under the root — the landing page, /observatory — is not this release's.
 _ROUTES = ("lov", "forskrift")
 
-_SHA = re.compile(r"^[0-9a-f]{40}$")
+# fullmatch + \Z: `$` also matches before a trailing newline (#288).
+_SHA = re.compile(r"[0-9a-f]{40}\Z")
 # The generator writes every <loc> under the sitemaps.org namespace; the check
 # accepts <loc> in any namespace or none, because a crawler would too and the
 # question here is whether what would be crawled is served.
@@ -152,7 +153,7 @@ def _manifest(root: Path) -> tuple[str, int]:
             f"this engine serves {SCHEMA_VERSION!r}"
         )
     commit = data.get("corpus_commit")
-    if not isinstance(commit, str) or not _SHA.match(commit):
+    if not isinstance(commit, str) or not _SHA.fullmatch(commit):
         raise PublishError(f"{path} names no full corpus commit: {commit!r}")
     documents = data.get("documents")
     # bool is a subclass of int, so `True` would pass an isinstance check and
