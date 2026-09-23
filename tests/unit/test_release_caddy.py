@@ -577,6 +577,24 @@ class TestTheDomainReachesCaddy:
             "LOVSPOR_DOMAIN": "lovspor.test, alias.test"
         }
 
+    def test_the_runner_passes_the_file_domain_to_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=lovspor.test, alias.test\n")
+
+        done = SubprocessRunner(env_file).run(
+            [
+                sys.executable,
+                "-c",
+                "import os; print(os.environ['LOVSPOR_DOMAIN'])",
+            ],
+            {},
+        )
+
+        assert done == Completed(0, "lovspor.test, alias.test\n", "")
+
     def test_the_processs_own_value_wins_over_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
