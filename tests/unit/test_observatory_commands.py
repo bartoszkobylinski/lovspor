@@ -3509,6 +3509,33 @@ class TestNightly:
         assert run is not None
         assert run.engine_commit is None
 
+    def test_a_required_pinned_engine_sweeps_and_records_its_commit(
+        self, root: Path, httpx_mock: HTTPXMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scheduled-job guard accepts exactly the detached, clean case."""
+        _activate(root)
+        commit = "a" * 40
+        monkeypatch.setenv(ENV_REQUIRE_PINNED_ENGINE, "1")
+        monkeypatch.setattr(
+            observatory_commands,
+            "describe_engine",
+            lambda: EngineCheckout(commit=commit, pinned=True, reason=None),
+        )
+        _robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {SITEMAP_URL}\n")
+        httpx_mock.add_response(url=SITEMAP_URL, content=_urlset(PAGE_URL))
+        httpx_mock.add_response(url=PAGE_URL, content=b"<html>forskrift</html>")
+
+        result = runner.invoke(app, ["observatory", "nightly"])
+
+        assert result.exit_code == 0, result.output
+        run = latest_sweep_run(root / "sweep-runs.jsonl")
+        assert run is not None
+        assert (run.status, run.failure_reason, run.engine_commit) == (
+            "success",
+            None,
+            commit,
+        )
+
     @pytest.mark.parametrize("value", ["0", "true", "01"])
     def test_only_the_documented_literal_one_arms_the_engine_pin_check(
         self, monkeypatch: pytest.MonkeyPatch, value: str
