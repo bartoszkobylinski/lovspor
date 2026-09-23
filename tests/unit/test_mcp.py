@@ -4737,6 +4737,35 @@ def test_search_tools_reflect_corpus_pulled_after_construction(tmp_path: Path) -
     assert reader.get_law("forvaltningsloven")
 
 
+def test_pulled_slug_collision_invalidates_previously_unique_lookup(tmp_path: Path) -> None:
+    """Issue #243 must also hold across the reader's mtime refresh boundary.
+
+    A server may have cached a slug and its body before a pull introduces a
+    second claimant.  Neither cache may keep serving the former winner after
+    the refreshed manifest says the slug is ambiguous.
+    """
+    first = _record(slug="dupe", title="First")
+    _seed_corpus(tmp_path, {"nl-1": first}, body_for={"dupe": "first body"})
+    reader = CorpusReader(tmp_path)
+
+    assert "first body" in reader.get_law("dupe")
+    assert [row["doc_id"] for row in reader.search_body("first body")] == ["nl-1"]
+
+    second = _record(slug="dupe", title="Second").model_copy(
+        update={"markdown_path": "lover/dupe-second.md"},
+    )
+    _seed_corpus(tmp_path, {"nl-1": first, "nl-2": second}, write_files=False)
+    (tmp_path / "lover" / "dupe-second.md").write_text(
+        "---\nid: nl-2\ntitle: Second\n---\n\n# Second\n\nsecond body\n",
+        encoding="utf-8",
+    )
+    _bump_mtime(tmp_path / "manifest.json")
+
+    with pytest.raises(AmbiguousSlugError, match="nl-1 \\(lov\\), nl-2 \\(lov\\)"):
+        reader.get_law("dupe")
+    assert reader.search_body("first body") == []
+
+
 def test_reader_does_not_reload_when_manifest_unchanged(tmp_path: Path) -> None:
     """The invalidation must be surgical: with manifest.json untouched, the
     cached manifest object is reused so the O(1) index caching still pays
