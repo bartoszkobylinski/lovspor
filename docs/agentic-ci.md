@@ -241,7 +241,7 @@ sorts every failure into one of three bins:
 
 | failure | verdict | why |
 |---|---|---|
-| a test the author did **not** add | **blocks**, always | a pre-existing test broken by the PR is a regression, never a proposal |
+| a test the author neither added nor changed | **blocks**, always | a pre-existing test broken by the PR is a regression, never a proposal. "Changed" is the function's AST at `before-sha` vs the head, decorators included, so a rewrite or a new parametrize case is the author's work (#354, #264); a test that carried a `codex proposal` xfail at `before-sha` is a proposal whatever the author did to its marker |
 | an author test marked `@pytest.mark.codex_proposal` | advisory | the author itself said "stricter contract I propose", not "violation of what the PR states" — the prompt requires the distinction |
 | any author test, once the PR has been blocked `CODEX_BLOCKING_CAP` times (repo variable, default 3) | advisory | the implementation side has converged; the cap gives the test side its missing notion of diminishing returns |
 | any other author test | blocks | a contract violation within the cap |

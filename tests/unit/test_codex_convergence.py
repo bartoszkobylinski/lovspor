@@ -565,3 +565,80 @@ def test_a_clean_pytest_run_with_no_failures_is_green(tmp_path: Path) -> None:
         round_number=1, cap=3, failures=[], added=set(), repo=repo, pytest_status=0
     )
     assert not verdict.blocks
+
+
+# --- the author's tests are the ones it added OR changed (issues #354, #264) ---
+
+
+def _committed_repo(tmp_path: Path, source: str) -> tuple[Path, str]:
+    repo = tmp_path
+    (repo / "tests" / "unit").mkdir(parents=True)
+    (repo / "tests" / "unit" / "test_thing.py").write_text(source, encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
+def test_a_rewritten_pre_existing_test_is_the_authors_not_a_regression(tmp_path: Path) -> None:
+    """Issue #354: the author rewrote a test that was already in the tree. The
+    head did not touch it; the author did, so it is the author's test."""
+    repo, before = _committed_repo(tmp_path, "def test_old():\n    assert 1 == 1\n")
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_old():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_old")
+
+    assert cc.authored_tests(repo, before) == {test}
+    verdict = cc.classify(round_number=1, cap=3, failures=[test], added={test}, repo=repo)
+    assert verdict.blocking == [test]
+    assert not verdict.foreign
+
+
+def test_a_new_parametrize_case_in_an_existing_test_is_the_authors(tmp_path: Path) -> None:
+    """Issue #264: only the decorator changed, the body did not."""
+    repo, before = _committed_repo(
+        tmp_path,
+        'import pytest\n\n@pytest.mark.parametrize("x", ["a"])\ndef test_cases(x): ...\n',
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        'import pytest\n\n@pytest.mark.parametrize("x", ["a", "b"])\ndef test_cases(x): ...\n',
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == {cc.TestId("tests/unit/test_thing.py", "test_cases")}
+
+
+def test_an_untouched_pre_existing_test_is_still_foreign(tmp_path: Path) -> None:
+    repo, before = _committed_repo(
+        tmp_path, "def test_old():\n    assert 1 == 1\n\n\ndef test_other(): ...\n"
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_old():\n    assert 1 == 1\n\n\ndef test_other(): ...\n\n\ndef test_new(): ...\n",
+        encoding="utf-8",
+    )
+
+    assert cc.authored_tests(repo, before) == {cc.TestId("tests/unit/test_thing.py", "test_new")}
+
+
+def test_a_test_that_was_a_proposal_before_the_round_stays_advisory(tmp_path: Path) -> None:
+    """Issue #354, the PR #367 shape: round 4 left the proposal in the tree as a
+    strict xfail; round 6 re-authored it without the marker. The marker at
+    before-sha says what it is, whatever the author did to it since."""
+    repo, before = _committed_repo(
+        tmp_path,
+        "import pytest\n\n"
+        '@pytest.mark.xfail(strict=True, reason="codex proposal, round 4 — owner decision")\n'
+        "def test_idea():\n    assert 1 == 2\n",
+    )
+    (repo / "tests" / "unit" / "test_thing.py").write_text(
+        "def test_idea():\n    assert 1 == 2\n", encoding="utf-8"
+    )
+    test = cc.TestId("tests/unit/test_thing.py", "test_idea")
+
+    verdict = cc.classify(
+        round_number=1, cap=3, failures=[test], added={test}, repo=repo, before_sha=before
+    )
+
+    assert verdict.advisory == [test]
+    assert not verdict.blocks

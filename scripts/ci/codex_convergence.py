@@ -46,6 +46,7 @@ from pathlib import Path
 
 BLOCKED_PHRASE = "Codex-authored tests fail against this head"
 PROPOSAL_MARKER = "codex_proposal"
+XFAIL_PROPOSAL_PREFIX = "codex proposal"
 
 
 @dataclass(frozen=True)
@@ -135,13 +136,64 @@ def added_tests(repo: Path, before_sha: str) -> set[TestId]:
     return found
 
 
+def authored_tests(repo: Path, before_sha: str) -> set[TestId]:
+    """Test functions the author added **or changed** since ``before_sha``.
+
+    A pre-existing test the author rewrote — or gave a new parametrize case —
+    is the author's work, not a regression the head introduced: the head did
+    not touch it (issues #354, #264). Changed means the function's AST differs,
+    decorators included; a moved or re-indented test is not changed.
+    """
+    found: set[TestId] = set()
+    for file, before, after in _test_files_at(repo, before_sha):
+        found.update(TestId(file, name) for name, node in after.items() if before.get(name) != node)
+    return found
+
+
+def _test_files_at(repo: Path, before_sha: str) -> list[tuple[str, dict[str, str], dict[str, str]]]:
+    """Each changed test file with its test nodes at ``before_sha`` and now."""
+    changed = subprocess.run(  # noqa: S603
+        ["git", "diff", "--name-only", before_sha, "--", "tests/"],  # noqa: S607
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    files = []
+    for file in changed:
+        if not file.endswith(".py"):
+            continue
+        now = repo / file
+        after = _test_nodes(now.read_text(encoding="utf-8")) if now.is_file() else {}
+        shown = _show(repo, before_sha, file)
+        files.append((file, _test_nodes(shown) if shown is not None else {}, after))
+    return files
+
+
+def _show(repo: Path, sha: str, file: str) -> str | None:
+    """The file's text at ``sha``, or None when it did not exist there."""
+    shown = subprocess.run(  # noqa: S603
+        ["git", "show", f"{sha}:{file}"],  # noqa: S607
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return shown.stdout if shown.returncode == 0 else None
+
+
 def _test_names(source: str) -> set[str]:
     """Dotted names of every test function in ``source``; empty if unparseable."""
+    return set(_test_nodes(source))
+
+
+def _test_nodes(source: str) -> dict[str, str]:
+    """Dotted name -> AST dump of every test function in ``source``; empty if unparseable."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return set()
-    names: set[str] = set()
+        return {}
+    nodes: dict[str, str] = {}
 
     def walk(scope: ast.Module | ast.ClassDef, prefix: str) -> None:
         for node in scope.body:
@@ -150,10 +202,10 @@ def _test_names(source: str) -> set[str]:
             elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith(
                 "test"
             ):
-                names.add(f"{prefix}{node.name}")
+                nodes[f"{prefix}{node.name}"] = ast.dump(node)
 
     walk(tree, "")
-    return names
+    return nodes
 
 
 def failed_tests(junit_path: Path) -> list[TestId]:
@@ -182,16 +234,27 @@ def failed_tests(junit_path: Path) -> list[TestId]:
     return failures
 
 
-def is_proposal(repo: Path, test: TestId) -> bool:
-    """Whether the test carries ``@pytest.mark.codex_proposal``."""
+def is_proposal(repo: Path, test: TestId, before_sha: str | None = None) -> bool:
+    """Whether the test is a proposal: ``@pytest.mark.codex_proposal``, or the
+    strict xfail a previous round wrote (``reason="codex proposal, …"``).
+
+    Checked in the working tree and, when ``before_sha`` is given, at that
+    revision too: a round that re-authors last round's proposal without its
+    marker has not turned it into a regression (issue #354).
+    """
     path = repo / test.file
-    if not path.is_file():
-        return False
+    sources = [path.read_text(encoding="utf-8")] if path.is_file() else []
+    if before_sha is not None and (earlier := _show(repo, before_sha, test.file)) is not None:
+        sources.append(earlier)
+    return any(_declares_proposal(source, test.name) for source in sources)
+
+
+def _declares_proposal(source: str, name: str) -> bool:
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = ast.parse(source)
     except SyntaxError:
         return False
-    node = _find_function(tree, test.name)
+    node = _find_function(tree, name)
     return node is not None and any(_is_proposal_decorator(d) for d in node.decorator_list)
 
 
@@ -213,13 +276,19 @@ def _find_function(tree: ast.Module, dotted: str) -> ast.FunctionDef | ast.Async
 
 
 def _is_proposal_decorator(node: ast.expr) -> bool:
-    """Match ``pytest.mark.codex_proposal`` / ``mark.codex_proposal``, bare or called.
+    """Match ``pytest.mark.codex_proposal`` / ``mark.codex_proposal``, bare or called,
+    or the ``pytest.mark.xfail(reason="codex proposal, …")`` that :func:`mark_xfail`
+    writes for an advisory finding.
 
     Only the pytest marker is the contract: a same-named attribute on any other
     object (``@custom.codex_proposal``) is not a proposal.
     """
     target = node.func if isinstance(node, ast.Call) else node
-    if not (isinstance(target, ast.Attribute) and target.attr == PROPOSAL_MARKER):
+    if not isinstance(target, ast.Attribute):
+        return False
+    if target.attr == "xfail":
+        return isinstance(node, ast.Call) and _reason_is_codex_proposal(node)
+    if target.attr != PROPOSAL_MARKER:
         return False
     mark = target.value
     if isinstance(mark, ast.Name):
@@ -232,6 +301,13 @@ def _is_proposal_decorator(node: ast.expr) -> bool:
     )
 
 
+def _reason_is_codex_proposal(call: ast.Call) -> bool:
+    for keyword in call.keywords:
+        if keyword.arg == "reason" and isinstance(keyword.value, ast.Constant):
+            return str(keyword.value.value).startswith(XFAIL_PROPOSAL_PREFIX)
+    return False
+
+
 def classify(
     *,
     round_number: int,
@@ -240,12 +316,13 @@ def classify(
     added: set[TestId],
     repo: Path,
     pytest_status: int = 0,
+    before_sha: str | None = None,
 ) -> Verdict:
     verdict = Verdict(round=round_number, cap=cap)
     for test in failures:
-        if test not in added:
+        if test not in added and not is_proposal(repo, test, before_sha):
             verdict.foreign.append(test)
-        elif round_number > cap or is_proposal(repo, test):
+        elif round_number > cap or is_proposal(repo, test, before_sha):
             verdict.advisory.append(test)
         else:
             verdict.blocking.append(test)
@@ -374,9 +451,10 @@ def main(argv: list[str] | None = None) -> int:
         round_number=count_blocking_rounds(sticky) + 1,
         cap=args.cap,
         failures=failed_tests(args.junit) if args.junit.is_file() else [],
-        added=added_tests(args.repo, args.before_sha),
+        added=authored_tests(args.repo, args.before_sha),
         repo=args.repo,
         pytest_status=args.pytest_status,
+        before_sha=args.before_sha,
     )
     if args.apply and not verdict.blocks:
         for test in verdict.advisory:
