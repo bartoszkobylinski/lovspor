@@ -172,6 +172,19 @@ class TestConfigPair:
         with pytest.raises(ControlPlaneError, match="not a string"):
             config_pair(_config(_site(routes)))
 
+    def test_the_named_refusal_says_which_type_and_what_to_do(self) -> None:
+        """The operator reads this on a droplet with no context: the type Caddy
+        produced, and where the fix goes, both belong in the one line."""
+        routes = [{"handle": [{"handler": "vars", "lovspor_release": 42}]}]
+
+        with pytest.raises(ControlPlaneError) as caught:
+            config_pair(_config(_site(routes)))
+
+        assert str(caught.value) == (
+            "lovspor_release var is a int, not a string — the Caddyfile adapter"
+            " JSON-parsed it; the fragment must carry a release id as text"
+        )
+
     def test_the_key_names_a_release_only_on_a_vars_handler(self) -> None:
         routes = [{"handle": [{"handler": "file_server", "lovspor_release": ID_A}]}]
 
