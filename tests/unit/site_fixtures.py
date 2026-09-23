@@ -166,6 +166,20 @@ _GIT_STAMP = {
     "GIT_COMMITTER_EMAIL": "t@t",
 }
 
+
+def git_env(**stamp: str) -> dict[str, str]:
+    """The caller's environment with every ``GIT_*`` variable dropped, then ``stamp``.
+
+    A git hook exports ``GIT_DIR`` (in a worktree, ``.git/worktrees/<name>``)
+    to everything it spawns, so a fixture that inherited the environment would
+    run its ``git init`` / ``git commit`` against the *caller's* repository —
+    712 errors on a push from a worktree (issue #369). A fixture asks about
+    its own temp repository, never the caller's.
+    """
+    kept = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    return {**kept, **stamp}
+
+
 CORPUS_DOC = """---
 title: "Testloven"
 language: "nb"
@@ -189,7 +203,7 @@ def run_git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
-        env={**os.environ, **_GIT_STAMP},
+        env=git_env(**_GIT_STAMP),
     )
     return result.stdout.strip()
 
