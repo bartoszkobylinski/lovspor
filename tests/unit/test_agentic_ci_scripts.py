@@ -1327,6 +1327,21 @@ class TestEquivalentRegister:
         assert len(refused) == 1
         assert "not part of a diff" in refused[0]
 
+    def test_an_entry_with_a_literal_backslash_n_remains_valid(self, tmp_path: Path) -> None:
+        """The refusal message documents ``\\n`` as the safe basic-string spelling."""
+        toml = (
+            '[[equivalent]]\nfile = "src/pkg/mod.py"\nsymbol = "f"\n'
+            'mutation = """\n-    return "\\\\n"\n+    return "\\\\r"\n"""\n'
+            'justification = "same"\n'
+        )
+        with _register(tmp_path, toml):
+            equivalents, refused = mutation_to_json.load_equivalents(
+                mutation_to_json.EQUIVALENTS_FILE
+            )
+
+        assert refused == []
+        assert equivalents[0].change == ('-return "\\n"', '+return "\\r"')
+
     def test_check_equivalents_reports_an_entry_whose_line_left_the_file(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -1344,6 +1359,27 @@ class TestEquivalentRegister:
 
         assert status == 1
         assert "STALE: src/pkg/mod.py f: removed line not in file" in capsys.readouterr().err
+
+    def test_check_equivalents_checks_every_removed_line_for_staleness(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """One surviving removed line must not hide another line that left the file."""
+        (tmp_path / "src" / "pkg").mkdir(parents=True)
+        (tmp_path / "src" / "pkg" / "mod.py").write_text("def f():\n    first = 1\n")
+        toml = (
+            '[[equivalent]]\nfile = "src/pkg/mod.py"\nsymbol = "f"\n'
+            'mutation = """\n-    first = 1\n-    second = 2\n'
+            '+    first = None\n+    second = None\n"""\n'
+            'justification = "multi-line mutation"\n'
+        )
+        with _register(tmp_path, toml), pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_to_json.py", "--check-equivalents"])
+            status = mutation_to_json.main()
+
+        captured = capsys.readouterr()
+        assert status == 1
+        assert "removed line not in file — 'second = 2'" in captured.err
+        assert "removed line not in file — 'first = 1'" not in captured.err
 
     def test_check_equivalents_reports_an_entry_whose_file_left_the_tree(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
