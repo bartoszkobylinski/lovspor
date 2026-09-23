@@ -294,14 +294,14 @@ class TestRobotsGate:
         httpx_mock.add_response(url=ROBOTS_URL, text="User-agent: *\nDisallow: /\n")
         gate = RobotsGate(httpx.Client(), _settings())
 
-        assert gate.readable(PAGE_URL) is True
+        assert gate.readable(PAGE_URL, USER_AGENT) is True
         assert gate.allows(PAGE_URL, USER_AGENT) is False
 
     def test_an_unreachable_robots_is_not_readable(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(url=ROBOTS_URL, status_code=503)
         gate = RobotsGate(httpx.Client(), _settings())
 
-        assert gate.readable(PAGE_URL) is False
+        assert gate.readable(PAGE_URL, USER_AGENT) is False
 
     def test_a_404_is_readable_because_it_publishes_an_empty_rule_set(
         self, httpx_mock: HTTPXMock
@@ -310,8 +310,24 @@ class TestRobotsGate:
         httpx_mock.add_response(url=ROBOTS_URL, status_code=404)
         gate = RobotsGate(httpx.Client(), _settings())
 
-        assert gate.readable(PAGE_URL) is True
+        assert gate.readable(PAGE_URL, USER_AGENT) is True
         assert gate.allows(PAGE_URL, USER_AGENT) is True
+
+    def test_the_cached_policy_is_fetched_once_in_the_first_callers_name(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """The first caller supplies the identity for the host-wide fetch;
+        later readers reuse that policy rather than issuing another request."""
+        first_user_agent = "lovspor-survey/0.1 (+https://lovspor.no/observatory)"
+        httpx_mock.add_response(url=ROBOTS_URL, text="User-agent: *\nAllow: /\n")
+        gate = RobotsGate(httpx.Client(), _settings())
+
+        assert gate.readable(PAGE_URL, first_user_agent) is True
+        assert gate.sitemaps(PAGE_URL, USER_AGENT) == ()
+
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 1
+        assert requests[0].headers["User-Agent"] == first_user_agent
 
 
 class TestPoliteness:
@@ -415,6 +431,20 @@ class TestRecordedObservation:
 
         page_request = next(r for r in httpx_mock.get_requests() if str(r.url) == PAGE_URL)
         assert page_request.headers["User-Agent"] == USER_AGENT
+
+    def test_the_robots_fetch_names_the_crawler_the_source_was_cleared_for(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """Issue #350: the one request that reads a host's crawl policy went
+        out as python-httpx, so the host could never tell it was the crawler
+        it had cleared. The registered user agent goes on that request too."""
+        _allow_robots(httpx_mock)
+        httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
+
+        _fetcher(log).capture(PAGE_URL, "sitemap")
+
+        robots_request = next(r for r in httpx_mock.get_requests() if str(r.url) == ROBOTS_URL)
+        assert robots_request.headers["User-Agent"] == USER_AGENT
 
     def test_the_user_agent_header_name_keeps_its_canonical_casing(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -1119,13 +1149,26 @@ class TestDefaults:
 class TestDeclaredSitemaps:
     """Where to start looking is a question the source answers in public."""
 
+    def test_the_declaration_is_read_in_the_supplied_crawlers_name(
+        self, log: ObservationLog, httpx_mock: HTTPXMock
+    ) -> None:
+        """The public discovery path forwards the source's cleared identity
+        rather than silently substituting the fetcher's capture identity."""
+        discovery_user_agent = "lovspor-discovery/0.1 (+https://lovspor.no/observatory)"
+        _allow_robots(httpx_mock)
+
+        _fetcher(log).declared_sitemaps(ROBOTS_URL, discovery_user_agent)
+
+        request = httpx_mock.get_requests()[0]
+        assert request.headers["User-Agent"] == discovery_user_agent
+
     def test_the_declared_sitemaps_are_returned(
         self, log: ObservationLog, httpx_mock: HTTPXMock
     ) -> None:
         sitemap = f"https://{BAERUM_DOMAIN}/sitemap.xml"
         _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {sitemap}\n")
 
-        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == (sitemap,)
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL, USER_AGENT) == (sitemap,)
 
     def test_no_declaration_is_an_ordinary_answer(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -1133,7 +1176,7 @@ class TestDeclaredSitemaps:
         """Not every site publishes one, and that is not an error to raise."""
         _allow_robots(httpx_mock)
 
-        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == ()
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL, USER_AGENT) == ()
 
     def test_an_unreadable_robots_file_declares_nothing(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -1142,7 +1185,7 @@ class TestDeclaredSitemaps:
         a site whose rules could not be read is not one to start crawling."""
         httpx_mock.add_exception(httpx.ConnectError("unreachable"), url=ROBOTS_URL)
 
-        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == ()
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL, USER_AGENT) == ()
 
     def test_reading_the_declaration_records_nothing(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -1153,7 +1196,7 @@ class TestDeclaredSitemaps:
             httpx_mock, f"User-agent: *\nAllow: /\nSitemap: https://{BAERUM_DOMAIN}/s.xml\n"
         )
 
-        _fetcher(log).declared_sitemaps(ROBOTS_URL)
+        _fetcher(log).declared_sitemaps(ROBOTS_URL, USER_AGENT)
 
         assert list(log.records()) == []
 
@@ -1166,7 +1209,7 @@ class TestDeclaredSitemaps:
         second = f"https://{BAERUM_DOMAIN}/sitemap-vedtak.xml"
         _allow_robots(httpx_mock, f"User-agent: *\nAllow: /\nSitemap: {first}\nSitemap: {second}\n")
 
-        assert _fetcher(log).declared_sitemaps(ROBOTS_URL) == (first, second)
+        assert _fetcher(log).declared_sitemaps(ROBOTS_URL, USER_AGENT) == (first, second)
 
     def test_the_robots_fetch_is_shared_with_the_allow_check(
         self, log: ObservationLog, httpx_mock: HTTPXMock
@@ -1180,7 +1223,7 @@ class TestDeclaredSitemaps:
         httpx_mock.add_response(url=PAGE_URL, content=PAYLOAD)
         fetcher = _fetcher(log)
 
-        fetcher.declared_sitemaps(ROBOTS_URL)
+        fetcher.declared_sitemaps(ROBOTS_URL, USER_AGENT)
         fetcher.capture(PAGE_URL, "sitemap")
 
         assert [r.url for r in httpx_mock.get_requests()].count(ROBOTS_URL) == 1

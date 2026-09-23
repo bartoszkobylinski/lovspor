@@ -2843,3 +2843,56 @@ name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object and
 `str.encode` produces the same bytes for every input. No test can distinguish
 them. Same argument as the `front_page_markers` entries for survey.py.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/survey_probe.py"
+symbol = "_robots"
+registered = "2026-09-23, PR #368, from run 35843560071"
+mutation = """
+-            declared_sitemaps=gate.sitemaps(base, self._settings.user_agent),
++            declared_sitemaps=gate.sitemaps(base, None),
+"""
+justification = """
+`RobotsGate` fetches robots.txt once per host and caches the parsed policy by
+URL; the user agent is used only by that first fetch. In `_robots` the call
+before this one, `gate.readable(base, user_agent)`, has already performed the
+fetch, so the argument to `sitemaps()` never reaches a request: the cached
+policy is returned whatever is passed. The value is passed for the contract
+(every reader names the crawler), not because this call can observe it.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/fetch.py"
+symbol = "_load"
+registered = "2026-09-23, PR #368, from run 35843560071"
+mutation = """
+-            headers={"User-Agent": user_agent},
++            headers={"user-agent": user_agent},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned; the same entry exists for survey_probe._body.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/observatory/fetch.py"
+symbol = "_load"
+registered = "2026-09-23, PR #368, from run 35843560071"
+mutation = """
+-            headers={"User-Agent": user_agent},
++            headers={"USER-AGENT": user_agent},
+"""
+justification = """
+HTTP field names are case-insensitive (RFC 9110 §5.1), and httpx's `Headers`
+resolves any spelling to the same value, so the server, the transport and every
+assertion a test can make on the recorded request see one User-Agent whatever
+the case of its name. Only the raw bytes differ, and no conforming peer may
+read a meaning into them. Argued from the protocol and the dependency, hence
+pinned; the same entry exists for survey_probe._body.
+"""
+assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
