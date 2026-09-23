@@ -20,7 +20,8 @@ from typing import Any
 from lovspor.errors import LovsporError
 from lovspor.llhb.schema import canonical_case_line, load_schema, validate_case
 
-_RUN_ID_RE = re.compile(r"^llhb-v1-run-[0-9]{8}-[a-z0-9]{4,12}$")
+# fullmatch + \Z: `$` also matches before a trailing newline (#286).
+_RUN_ID_RE = re.compile(r"llhb-v1-run-[0-9]{8}-[a-z0-9]{4,12}\Z")
 _FINALIZABLE = frozenset(
     {"finished_at", "cases_total", "cases_completed", "errors_total", "notes", "evaluator_version"}
 )
@@ -38,7 +39,7 @@ class ResultsStoreError(LovsporError):
 def new_run_id(date_utc: str, suffix: str) -> str:
     """Build a schema-valid run id from a YYYYMMDD date and a short suffix."""
     run_id = f"llhb-v1-run-{date_utc}-{suffix}"
-    if not _RUN_ID_RE.match(run_id):
+    if not _RUN_ID_RE.fullmatch(run_id):
         raise ResultsStoreError(
             f"invalid run id {run_id!r}: need a YYYYMMDD date and a [a-z0-9]{{4,12}} suffix"
         )
@@ -92,7 +93,7 @@ class ResultsStore:
         _write_metadata(self._run_dir(run_id) / _METADATA_FILE, merged)
 
     def _run_dir(self, run_id: str) -> Path:
-        if not _RUN_ID_RE.match(run_id):
+        if not _RUN_ID_RE.fullmatch(run_id):
             raise ResultsStoreError(f"invalid run id {run_id!r}")
         path = self._runs_root / run_id
         if path.resolve().parent != self._runs_root.resolve():
