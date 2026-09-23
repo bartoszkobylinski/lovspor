@@ -180,9 +180,9 @@ this version exists to remove.
 """
 
 [[equivalent]]
-file = "src/lovspor/observatory/commands.py"
+file = "src/lovspor/observatory/status_report.py"
 symbol = "_hm"
-registered = "2026-08-25, PR #170, from run 32785337529"
+registered = "2026-08-25, PR #170, from run 32785337529; moved with the function to status_report.py in PR #373 (run 35848943844)"
 mutation = """
 -    minutes = int(delta.total_seconds() // 60)
 +    minutes = int(delta.total_seconds() / 60)
@@ -2701,6 +2701,72 @@ name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object and
 `str.encode` produces the same bytes for every input. No test can distinguish
 them. Same argument as the `front_page_markers` entries for survey.py.
 """
+
+[[equivalent]]
+file = "src/lovspor/observatory/commands.py"
+symbol = "_engine_pin_verdict"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-    if os.environ.get(ENV_REQUIRE_PINNED_ENGINE, "").strip() != "1":
++    if os.environ.get(ENV_REQUIRE_PINNED_ENGINE, "XXXX").strip() != "1":
+"""
+justification = """
+`dict.get`'s second argument is returned only when the key is absent, and the
+branch asks whether the value strips to "1". Neither "" nor "XXXX" does, so an
+absent variable takes the same early return under both defaults, and a present
+variable never sees the default at all. Python semantics only.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "describe_engine"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-    if _git(root, "symbolic-ref", "-q", "HEAD") is not None:
++    if _git(root, "symbolic-ref", "HEAD") is not None:
+"""
+justification = """
+`git symbolic-ref -q` differs from the bare form only in what it prints to
+stderr when HEAD is detached: with `-q` it exits 1 silently, without it exits
+128 with "fatal: ref HEAD is not a symbolic ref". `_git` captures stderr and
+maps every non-zero exit to None, so both spellings answer None on a detached
+HEAD and the branch name on a branch. Argued from git, hence pinned by the
+test that needs a detached HEAD to read as "not a symbolic ref".
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestPinnedCheckout::test_a_detached_clean_checkout_is_pinned_and_names_its_commit"
+
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "_git"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-            check=False,
++            check=None,
+"""
+justification = """
+`subprocess.run` truth-tests `check` before raising CalledProcessError, and
+None is as false as False. The explicit `check=False` is there for the
+reader (and for ruff's PLW1510), not for the interpreter.
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestOutsideAGitCheckout::test_an_installed_package_has_no_commit_and_no_verdict"
+
+[[equivalent]]
+file = "src/lovspor/observatory/engine.py"
+symbol = "_git"
+registered = "2026-09-23, PR #373, from run 35848943844"
+mutation = """
+-            check=False,
+-        )
++            )
+"""
+justification = """
+`check` defaults to False in `subprocess.run`, so dropping the keyword leaves
+the call as it was; the explicit spelling exists for the reader and for ruff's
+PLW1510, not for the interpreter. The test that runs git against a directory
+that is not a repository pins that a non-zero exit is an answer, not an
+exception.
+"""
+assumption_test = "tests/unit/test_observatory_engine.py::TestOutsideAGitCheckout::test_an_installed_package_has_no_commit_and_no_verdict"
 
 [[equivalent]]
 file = "src/lovspor/observatory/survey_probe.py"

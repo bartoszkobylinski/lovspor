@@ -99,6 +99,10 @@ class SweepRun(BaseModel):
     #: and "the archive is unreadable" needs a different response from "the
     #: archive is not mounted".
     failure_reason: str | None = Field(default=None, min_length=1)
+    #: HEAD of the engine checkout that produced this run (issue #219). None
+    #: for runs recorded before the field existed and for a wheel install,
+    #: which has no checkout to name.
+    engine_commit: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _finished_after_started(self) -> "SweepRun":

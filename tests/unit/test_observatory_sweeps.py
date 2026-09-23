@@ -137,11 +137,22 @@ class TestAppendOnly:
         assert read_sweep_runs(sweeps_path(root)) == [_run()]
 
     def test_a_written_run_round_trips_without_losing_fields(self, root: ObservatoryRoot) -> None:
-        run = _run(refused=1, completed=1)
+        run = _run(refused=1, completed=1).model_copy(update={"engine_commit": "a" * 40})
 
         append_sweep_run(root, run)
 
         assert read_sweep_runs(sweeps_path(root)) == [run]
+
+    def test_a_run_written_before_engine_telemetry_defaults_to_unknown(
+        self, root: ObservatoryRoot
+    ) -> None:
+        """The append-only archive predates engine commits and remains readable."""
+        line = _run().model_dump(mode="json")
+        del line["engine_commit"]
+        sweeps_path(root).parent.mkdir(parents=True, exist_ok=True)
+        sweeps_path(root).write_text(f"{json.dumps(line)}\n", encoding="utf-8")
+
+        assert read_sweep_runs(sweeps_path(root))[0].engine_commit is None
 
     def test_a_run_written_before_capped_telemetry_defaults_to_uncapped(
         self, root: ObservatoryRoot
