@@ -100,6 +100,18 @@ class TestOutsideAGitCheckout:
         """A wheel install is not a checkout: nothing to pin, nothing to refuse."""
         assert describe_engine(tmp_path) == EngineCheckout(commit=None, pinned=None, reason=None)
 
+    def test_an_install_without_git_has_no_commit_and_no_verdict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wheel can run on a host where the git executable is not installed."""
+
+        def missing_git(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            raise FileNotFoundError("git")
+
+        monkeypatch.setattr(engine.subprocess, "run", missing_git)
+
+        assert describe_engine(tmp_path) == EngineCheckout(commit=None, pinned=None, reason=None)
+
 
 class TestWhichCheckoutIsAsked:
     """The question is about the engine's own checkout, never about the caller's cwd."""

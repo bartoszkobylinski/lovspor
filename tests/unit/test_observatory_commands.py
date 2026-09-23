@@ -3928,6 +3928,19 @@ class TestStatus:
         assert "never" in result.output
         assert "OVERDUE" in result.output
 
+    def test_the_public_status_command_says_when_the_dead_man_switch_is_unarmed(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The warning belongs in the operator command, not only its section helper."""
+        _activate(root)
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+
+        result = runner.invoke(app, ["observatory", "status"])
+
+        assert result.exit_code == 1
+        assert "\nDead-man switch\n" in result.output
+        assert "  NOT ARMED — set LOVSPOR_OBSERVATORY_HEARTBEAT_URL" in result.output
+
     def test_a_recent_sweep_reports_ok(self, root: Path) -> None:
         _activate(root)
         _write_sweep(root, started=datetime.now(UTC) - timedelta(hours=18))
