@@ -2828,3 +2828,18 @@ read a meaning into them. Argued from the protocol and the dependency, hence
 pinned.
 """
 assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/observatory/robots.py"
+symbol = "_normalise_token"
+registered = "2026-09-23, PR #367, from run 35793196052"
+mutation = """
+-    return "".join(f"%{byte:02X}" for byte in char.encode("utf-8"))
++    return "".join(f"%{byte:02X}" for byte in char.encode("UTF-8"))
+"""
+justification = """
+Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
+name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object and
+`str.encode` produces the same bytes for every input. No test can distinguish
+them. Same argument as the `front_page_markers` entries for survey.py.
+"""
