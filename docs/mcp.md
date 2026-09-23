@@ -255,6 +255,8 @@ Return the full Markdown of a Norwegian law or regulation.
 
 - **`slug`** — the human-readable kortform identifier, e.g. `skatteloven`, `opplæringslova`, `trafikkforskriften`. Use `search_laws` or `list_recent_changes` to discover valid slugs.
 
+**Ambiguous slugs (issue #243).** Slug collisions are resolved per dataset at render time, so a lov and a forskrift can carry the same slug — the corpus has one such pair, `bergverksordning-for-svalbard`. Every slug-taking tool (`get_law`, `get_section`, `list_sections`, `get_eu_basis`, `get_law_at`, the `recorded_at` state views, …) then raises `AmbiguousSlugError` (a `CorpusNotFoundError`) instead of silently serving one of them: `slug 'bergverksordning-for-svalbard' names 2 current documents: <doc_id> (lov), <doc_id> (forskrift); no tool accepts a doc_id yet, so none of them can be fetched by slug — search_laws lists them all with their doc_id and dataset`. `search_laws` still returns both records; `search_body` and `semantic_search` report no hits under an ambiguous slug, because a hit there could not be followed up by slug. A type-qualified address is the deliberate follow-up, not a hidden precedence rule.
+
 **Temporal notice (ADR-0009 T0).** When the source marks amendments in the act as announced
 but not yet in force, pending a delegated commencement, or never brought into force, a
 **Temporal notice** block is appended after the legal text and evaluated against today's

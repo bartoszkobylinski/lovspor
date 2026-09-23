@@ -177,6 +177,8 @@ Baseline on scaffold (2026-04-22): all six clean.
 
 Since 2026-09-16 check 1 also has an executable counterpart in this repository, `scripts/quality/check_security_scan.py`, which cannot report clean when the scan silently narrowed and which runs in the deep gate and in CI. See §9f.
 
+Check 3 runs in two shapes, on purpose (issue #329). The fast gate (§9d) scans the **staged index** (`gitleaks git --pre-commit --staged`): it is what a commit can introduce, and it is cheap enough to run on every commit. The skill's whole-tree scan (`gitleaks detect --no-git --source .`) stays where it is — in the manual `/security-check` before a commit — and is not a hook: it covers what earlier commits already carry, which no staged scan can see, and it is the one that was red for months on a test literal (`probe_credential_rejected`, a probe refusal reason the `generic-api-key` rule reads as a credential). That finding is allowed inline on its one line (`# gitleaks:allow`), never by file or by rule, and `tests/unit/test_quality_gitleaks.py` runs the real scanner on that file so the allow cannot drift off the line it was written for.
+
 ## 9. mutmut 3.7 and PEP 695
 
 Migrated from mutmut 2.5.1 to 3.7.0 on 2026-08-17 (issue #91). The migration was
@@ -641,6 +643,8 @@ A refresh landing between those two lines yields a pre-refresh record stamped wi
 Decided 2026-04-26. Markdown filenames in `lovverk/lover/` and `lovverk/forskrifter/` use a human-readable slug derived from the law's `short_title` (Lovdata's official kortform), not the opaque `nl-YYYYMMDD-NNN` doc_id from the source XML.
 
 Slug derivation: `short_title` → strip-bracketed `title` → `doc_id` (last-resort fallback). Lowercase, hyphenated, Norwegian Unicode (`æøå`) preserved. Collisions resolved deterministically by `resolve_collisions` (sort by doc_id, append `-2`, `-3`, …).
+
+Collision resolution runs per dataset, so a lov and a forskrift can still share one slug (`bergverksordning-for-svalbard`, issue #243, 2026-09-23): the MCP slug index reports such a slug as ambiguous and names both candidates rather than picking a winner.
 
 The Lovdata stable id stays in the manifest as the dict key and in the rendered file's frontmatter as the `id` field. Cross-reference is preserved.
 

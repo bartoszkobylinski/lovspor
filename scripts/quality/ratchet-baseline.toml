@@ -390,7 +390,7 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 [[entry]]
 rule = "file-lines"
 path = "src/lovspor/mcp.py"
-value = 5008
+value = 5001
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
@@ -419,13 +419,6 @@ rule = "function-lines"
 path = "src/lovspor/mcp.py"
 name = "CorpusReader._grounded_hit"
 value = 33
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
-path = "src/lovspor/mcp.py"
-name = "CorpusReader._load_body_index"
-value = 22
 reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]

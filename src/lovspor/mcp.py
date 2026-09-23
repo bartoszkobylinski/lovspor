@@ -87,7 +87,13 @@ from lovspor.embeddings import (
     space_id_of,
 )
 from lovspor.embeddings.query import QueryEmbedder
+
+# Explicit re-exports: ``CorpusNotFoundError`` moved to ``lovspor.errors`` so
+# ``lovspor.snapshot`` and ``lovspor.slug_index`` can raise its subclass
+# (#243) without importing this module; its importers keep this name.
+from lovspor.errors import AmbiguousSlugError as AmbiguousSlugError  # noqa: PLC0414
 from lovspor.errors import ConfigError, CorpusStateError, LovsporError
+from lovspor.errors import CorpusNotFoundError as CorpusNotFoundError  # noqa: PLC0414
 from lovspor.headings import (
     ANY_HEADING,
     BLOCK_ID_PREFIX,
@@ -100,6 +106,7 @@ from lovspor.headings import (
 )
 from lovspor.quota import LimitsSource, QuotaEnforcer, QuotaExceededError
 from lovspor.settings import load_env
+from lovspor.slug_index import SlugIndex, build_slug_index
 from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
@@ -319,10 +326,6 @@ _DATASET_KEY_TO_SUBDIR = {
 }
 
 
-class CorpusNotFoundError(LovsporError):
-    """Raised when the requested doc or corpus path is not present."""
-
-
 class CorpusAmbiguousSectionError(LovsporError):
     """Raised when a ``section_id`` matches more than one ``§`` in one act.
 
@@ -489,7 +492,7 @@ class CorpusReader:
         # (get_law, get_section, get_eu_basis, ...). Built once from
         # the cached manifest — every per-call linear scan over ~4500
         # records was pure waste for the most common tool calls.
-        self._slug_index: dict[str, tuple[str, ManifestRecord]] | None = None  # pragma: no mutate
+        self._slug_index: SlugIndex | None = None  # pragma: no mutate
         # mtime of manifest.json as of the last cache load. Guards every
         # cache against a ``git pull`` landing underneath the long-lived
         # server (see _refresh_if_stale). None until the first read.
@@ -892,7 +895,7 @@ class CorpusReader:
         carries the slug or its lineage does not reach the date — the
         state view turns that into a historical negative, never a guess.
         """
-        entry = self._load_slug_index().get(slug)
+        entry = self._load_slug_index().resolve(slug)
         if entry is None:
             return None
         rel = self._safe_relative(entry[1].markdown_path)
@@ -1212,7 +1215,7 @@ class CorpusReader:
         + ``git pull`` to remediate rather than treating the field
         as 'unset'.
         """
-        entry = self._load_slug_index().get(slug)
+        entry = self._load_slug_index().resolve(slug)
         if entry is None:
             raise CorpusNotFoundError(
                 f"no current law with slug {slug!r}; "
@@ -1742,7 +1745,7 @@ class CorpusReader:
         """``_resolve_current`` for callers that tolerate an unknown slug:
         returns ``(None, epoch)`` instead of raising. Same atomicity contract."""
         with self._lock:
-            entry = self._load_slug_index().get(slug)
+            entry = self._load_slug_index().resolve(slug)
             return (entry[1] if entry is not None else None), self._epoch
 
     def _remember_body(self, slug: str, body: str, epoch: int) -> None:
@@ -1855,25 +1858,20 @@ class CorpusReader:
         check or are missing on disk are silently skipped — the same
         defensive posture as ``get_law``.
 
-        First manifest entry wins on a duplicate slug — the same
-        contract as ``_load_slug_index``. Without this, point lookups
-        (which fall back to this index once it is loaded) would
-        silently flip from the first record's content to the last
-        record's after the first ``search_body`` call (Codex PR #62
-        round 1 reproducer).
+        Built from ``_load_slug_index``, so it carries exactly the slugs a
+        point lookup can serve: an ambiguous slug (issue #243) has no body
+        here and ``search_body`` skips it. Any other rule would let point
+        lookups flip from one record's content to another's after the
+        first ``search_body`` call (Codex PR #62 round 1 reproducer).
         """
-        self._refresh_if_stale()
+        slug_index = self._load_slug_index()
         if self._body_index is not None:
             return self._body_index
         with self._lock:
             if self._body_index is not None:
                 return self._body_index
             index: dict[str, str] = {}
-            for record in self.manifest.documents.values():
-                if record.status != "current" or record.slug is None:
-                    continue
-                if record.slug in index:
-                    continue
+            for slug, (_doc_id, record) in slug_index.items():
                 try:
                     path = self._safe_join(record.markdown_path)
                 except CorpusNotFoundError:
@@ -1881,7 +1879,7 @@ class CorpusReader:
                 if not path.exists():
                     continue
                 raw = path.read_text(encoding="utf-8")
-                index[record.slug] = _strip_frontmatter_and_h1(raw)
+                index[slug] = _strip_frontmatter_and_h1(raw)
             self._body_index = index
             return self._body_index
 
@@ -2001,11 +1999,11 @@ class CorpusReader:
             "subject": lines[2],
         }
 
-    def _load_slug_index(self) -> dict[str, tuple[str, ManifestRecord]]:
+    def _load_slug_index(self) -> SlugIndex:
         """Build ``slug -> (doc_id, record)`` once for current records.
 
-        First manifest entry wins on a duplicate slug, matching the
-        linear-scan behavior this index replaced. Pinned until the
+        A slug several current records claim is ambiguous, never
+        first-wins (issue #243, ``lovspor.slug_index``). Pinned until the
         corpus changes on disk — the same contract as the cached manifest.
         """
         self._refresh_if_stale()
@@ -2014,16 +2012,11 @@ class CorpusReader:
         with self._lock:
             if self._slug_index is not None:
                 return self._slug_index
-            index: dict[str, tuple[str, ManifestRecord]] = {}
-            for doc_id, record in self.manifest.documents.items():
-                if record.status != "current" or record.slug is None:
-                    continue
-                index.setdefault(record.slug, (doc_id, record))
-            self._slug_index = index
+            self._slug_index = build_slug_index(self.manifest.documents)
             return self._slug_index
 
     def _find_current_by_slug(self, slug: str) -> ManifestRecord:
-        entry = self._load_slug_index().get(slug)
+        entry = self._load_slug_index().resolve(slug)
         if entry is None:
             suggestions = self._slug_suggestions(slug)
             hint = f"did you mean {', '.join(suggestions)}? " if suggestions else ""
@@ -3083,9 +3076,9 @@ def _iter_search_docs(
 ) -> Iterator[tuple[str, ManifestRecord, str]]:
     """Yield ``(doc_id, record, body)`` for one state's searchable docs.
 
-    Applies the shared eligibility rules — current status, a slug, the
-    slug-index owner on duplicates (otherwise one body reports once per
-    claiming record), a body the state can actually produce.
+    Applies the shared eligibility rules — current status, a slug, a body
+    the state can actually produce. An ambiguous slug (#243) is outside
+    the slug index and has no body in either state, so no claimant reports.
     """
     for doc_id, record in documents.items():
         if record.status != "current" or record.slug is None:
@@ -3807,7 +3800,7 @@ class _SnapshotState:
         """The global state commit — the identity every answer reports."""
         return self._data.ref.sha
 
-    def _slug_index(self) -> dict[str, tuple[str, ManifestRecord]]:
+    def _slug_index(self) -> SlugIndex:
         return self._data.snapshot.slug_index
 
     def _unknown_slug_error(self, slug: str) -> CorpusNotFoundError:
@@ -3839,7 +3832,7 @@ class _SnapshotState:
         historical negative — never a silent fallback to today's
         namespace.
         """
-        entry = self._slug_index().get(slug)
+        entry = self._slug_index().resolve(slug)
         if entry is not None:
             return entry[1], None
         record = self._record_via_lineage(slug)

@@ -25,7 +25,8 @@ from datetime import UTC, date, datetime, time
 from pathlib import Path
 
 from lovspor.errors import LovsporError, ParseError
-from lovspor.storage.manifest import Manifest, ManifestRecord
+from lovspor.slug_index import SlugIndex, build_slug_index
+from lovspor.storage.manifest import Manifest
 from lovspor.timetravel import ShallowHistoryError, _is_shallow_repository
 
 _STATE_LOG_SEP = "__COMMIT__"
@@ -153,11 +154,7 @@ class CorpusSnapshot:
     repo_path: Path
     sha: str
     _manifest: Manifest | None = field(default=None, init=False, repr=False)
-    _slug_index: dict[str, tuple[str, ManifestRecord]] | None = field(
-        default=None,
-        init=False,
-        repr=False,
-    )
+    _slug_index: SlugIndex | None = field(default=None, init=False, repr=False)
 
     def read_text(self, rel_path: str) -> str | None:
         """Blob content of ``rel_path`` at this state, or ``None`` when the
@@ -208,19 +205,14 @@ class CorpusSnapshot:
         return self._manifest
 
     @property
-    def slug_index(self) -> dict[str, tuple[str, ManifestRecord]]:
+    def slug_index(self) -> SlugIndex:
         """``slug -> (doc_id, record)`` for this state's current records.
 
-        First manifest entry wins on a duplicate slug — the same contract
-        as the live reader's ``_load_slug_index``, so a historical answer
-        and a current answer never disagree about which record a slug names
-        for reasons other than the state itself.
+        Built by ``lovspor.slug_index`` — the same builder as the live
+        reader's ``_load_slug_index``, so a historical answer and a current
+        answer never disagree about which record a slug names (or that a
+        slug is ambiguous, issue #243) for reasons other than the state.
         """
         if self._slug_index is None:
-            index: dict[str, tuple[str, ManifestRecord]] = {}
-            for doc_id, record in self.manifest.documents.items():
-                if record.status != "current" or record.slug is None:
-                    continue
-                index.setdefault(record.slug, (doc_id, record))
-            self._slug_index = index
+            self._slug_index = build_slug_index(self.manifest.documents)
         return self._slug_index
