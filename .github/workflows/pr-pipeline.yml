@@ -77,9 +77,11 @@ jobs:
     # no label, because every reporting step is downstream of one that never ran
     # (issue #139).
     runs-on: [self-hosted, linux, codex]
-    # A stuck agent job must not hold the lane indefinitely: the box lock alone
-    # waits 20 minutes before giving up, and GitHub's default kill is 6 h (#101).
-    timeout-minutes: 60
+    # A stuck agent job must not hold the lane indefinitely, and GitHub's
+    # default kill is 6 h (#101). The ceiling is the step's queue-plus-round
+    # budget (105 min, below) plus checkout and setup: the wait for the shared
+    # box is legitimate queueing, so the job must outlive it (#382).
+    timeout-minutes: 120
     # The runner holding Codex auth never executes fork code.
     # Nor dependabot code: that actor gets no repository secrets, so the lanes
     # cannot check out; fast-ci and the Test matrix still judge the bump (#361).
@@ -166,7 +168,12 @@ jobs:
         # steps that would say why it died. On the step, the same hang fails
         # the step and the reporting below still runs (issue #157, seen on
         # the remediation side when the Codex CLI hung for ~50 minutes).
-        timeout-minutes: 45
+        #
+        # 105 = up to 60 min queueing for the shared box lock + the 45 min an
+        # agent round is allowed. The two budgets are in one step because the
+        # lock lives on fd 9, which no later step inherits; a 45 min ceiling
+        # therefore spent the whole round's budget waiting (#382).
+        timeout-minutes: 105
         env:
           CLAUDE_TESTS_OAUTH_TOKEN: ${{ secrets.CLAUDE_TESTS_OAUTH_TOKEN }}
           CLAUDE_TESTS_MODEL: ${{ vars.CLAUDE_TESTS_MODEL }}
@@ -177,8 +184,19 @@ jobs:
           # repositories' CI down until the container was rebooted. The fd stays
           # open for the life of this step, so the lock releases even if the job
           # is cancelled.
+          #
+          # FIVE repositories share this one lock file (lovspor, job-search,
+          # llmbus, milamber, notebook — read off the box in #382), so the
+          # holder is usually NOT lovspor: `gh api .../actions/runners` reports
+          # this repo's runner idle while a lane dies waiting. Queueing behind a
+          # neighbour is the design (#272: 1 core, 2 GB, no swap), so the wait
+          # must cover a neighbour's whole round (~25-40 min), not 20 minutes.
           exec 9>/home/runner/.mikrus-agent.lock
-          flock -w 1200 9 || { echo "another agent job held the box lock for 20 minutes" >&2; exit 1; }
+          lock_wait_start=$SECONDS
+          flock -w 3600 9 || {
+            echo "the shared box lock was held for $(( (SECONDS - lock_wait_start) / 60 )) minutes by another repository's agent job (/home/runner/.mikrus-agent.lock is box-wide, #272/#382) — this is runner contention, not a fault in this PR" >&2
+            exit 1
+          }
           : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
           : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
           set +e
