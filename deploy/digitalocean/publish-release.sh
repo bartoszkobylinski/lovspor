@@ -53,9 +53,11 @@ cd /
 # comma-separated; a shell would run the second word as a command (seen
 # 2026-09-08, when the value still carried the retired personal-domain alias).
 # The last assignment wins and surrounding quotes — double or single, systemd
-# strips both — go (issue #301).
+# strips both — go (issue #301). An indented assignment counts: systemd's parser
+# skips whitespace before the key (`src/basic/env-file.c`, state PRE_KEY), so a
+# line this refused to read is one Caddy's own unit honours.
 host_names() {
-	sed -n 's/^LOVSPOR_DOMAIN=//p' "$1" | tail -n 1 \
+	sed -n 's/^[[:space:]]*LOVSPOR_DOMAIN[[:space:]]*=//p' "$1" | tail -n 1 \
 		| sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
 }
 

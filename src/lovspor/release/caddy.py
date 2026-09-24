@@ -301,11 +301,19 @@ def _domain_hint() -> str:
 
 def environment_file_value(text: str, name: str) -> str | None:
     """``name`` as systemd reads it from an EnvironmentFile: the last assignment
-    wins and surrounding double or single quotes go (issues #260, #298, #301)."""
+    wins, an indented assignment still counts, and surrounding double or single
+    quotes go (issues #260, #298, #301).
+
+    Whitespace around the key goes the way systemd's own parser drops it
+    (`src/basic/env-file.c`): PRE_KEY consumes whitespace until a non-WHITESPACE,
+    non-COMMENT character, and the key is truncated at `last_key_whitespace`
+    before it is pushed. A line refused here is one Caddy's unit still honours,
+    which is the whole failure mode this reader exists to prevent."""
     value = None
-    for line in text.splitlines():
-        if line.startswith(f"{name}="):
-            value = line[len(name) + 1 :].strip()
+    for raw in text.splitlines():
+        key, assigned, rest = raw.partition("=")
+        if assigned and key.strip() == name:
+            value = rest.strip()
     if value is None:
         return None
     if len(value) > 1 and value[0] == value[-1] and value[0] in _QUOTES:

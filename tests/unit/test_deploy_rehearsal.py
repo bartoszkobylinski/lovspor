@@ -442,6 +442,15 @@ class TestTheUrlDryRunsHarness:
 
         assert _host_names(environment) == "lovspor.test, alias.test"
 
+    def test_whitespace_around_the_key_is_dropped_as_systemd_drops_it(self, tmp_path: Path) -> None:
+        """systemd skips whitespace before the key and truncates the key at it
+        (`src/basic/env-file.c`), so a line this reader refuses is one the
+        running unit honours — and the dry-run would rehearse the wrong host."""
+        environment = tmp_path / "caddy-lovspor"
+        environment.write_text("  LOVSPOR_DOMAIN =lovspor.test, alias.test\n", encoding="utf-8")
+
+        assert _host_names(environment) == "lovspor.test, alias.test"
+
     def test_builds_the_envelope_as_the_build_user(self) -> None:
         code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
 
@@ -625,6 +634,21 @@ class TestPublishReleaseReadsTheEnvironmentFile:
         env.write_text("LOVSPOR_DOMAIN=lovspor.no, lovspor.bartoszkobylinski.com\n")
 
         assert _publish_host_names(env) == "lovspor.no, lovspor.bartoszkobylinski.com"
+
+    def test_leading_whitespace_before_an_assignment_is_ignored(self, tmp_path: Path) -> None:
+        """The helper promises the same EnvironmentFile reading as systemd."""
+        env = tmp_path / "caddy-lovspor"
+        env.write_text("  LOVSPOR_DOMAIN=lovspor.no, alias.no\n")
+
+        assert _publish_host_names(env) == "lovspor.no, alias.no"
+
+    def test_whitespace_between_the_key_and_the_equals_is_ignored_too(self, tmp_path: Path) -> None:
+        """systemd truncates the key at its trailing whitespace before pushing
+        it (`src/basic/env-file.c`), so `NAME =value` assigns NAME here too."""
+        env = tmp_path / "caddy-lovspor"
+        env.write_text("LOVSPOR_DOMAIN =lovspor.no, alias.no\n")
+
+        assert _publish_host_names(env) == "lovspor.no, alias.no"
 
     def test_the_script_reads_the_file_through_that_function(self) -> None:
         code = _code(_PUBLISH_SCRIPT.read_text(encoding="utf-8"))

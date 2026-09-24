@@ -721,6 +721,28 @@ class TestTheDomainReachesCaddy:
     ) -> None:
         assert environment_file_value(text, "LOVSPOR_DOMAIN") == expected
 
+    def test_environment_file_value_ignores_leading_whitespace_as_systemd_does(self) -> None:
+        """EnvironmentFile assignments may be indented; systemd discards leading whitespace."""
+        assert environment_file_value("  LOVSPOR_DOMAIN=lovspor.no\n", "LOVSPOR_DOMAIN") == (
+            "lovspor.no"
+        )
+
+    def test_whitespace_between_the_key_and_the_equals_is_dropped_as_systemd_does(self) -> None:
+        """`src/basic/env-file.c` truncates the key at `last_key_whitespace`
+        before pushing it, so `NAME =value` assigns NAME. The same line read as
+        no assignment is the divergence that leaves caddy without a domain."""
+        assert environment_file_value("LOVSPOR_DOMAIN =lovspor.no\n", "LOVSPOR_DOMAIN") == (
+            "lovspor.no"
+        )
+
+    def test_a_key_that_merely_starts_with_the_name_is_not_that_assignment(self) -> None:
+        """Whitespace tolerance must not widen into prefix matching."""
+        assert environment_file_value("LOVSPOR_DOMAIN_ALIAS=other.test\n", "LOVSPOR_DOMAIN") is None
+
+    def test_a_commented_assignment_is_not_read(self) -> None:
+        """systemd sends a leading `#` to COMMENT; the key is never pushed."""
+        assert environment_file_value("# LOVSPOR_DOMAIN=commented.test\n", "LOVSPOR_DOMAIN") is None
+
     def test_an_adapt_failure_without_the_domain_names_the_variable_not_the_fragment(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
