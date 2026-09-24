@@ -92,8 +92,11 @@ class SubprocessRunner:
 
     def domain_from_file(self) -> dict[str, str]:
         """``LOVSPOR_DOMAIN`` as systemd would read it from the EnvironmentFile,
-        or nothing: the process's own value wins, an unreadable file gives up."""
-        if DOMAIN_VAR in os.environ:
+        or nothing: a non-empty process value wins, an unreadable file gives up.
+        An exported empty value is not a domain — it hands caddy the same empty
+        site address an absent one does — so the file still answers."""
+        own = os.environ.get(DOMAIN_VAR)
+        if own and own.strip():
             return {}
         try:
             text = self._environment_file.read_text(encoding="utf-8")
@@ -281,11 +284,16 @@ def adapt_config(runner: Runner, caddyfile: Path, fragment: Path) -> object:
 
 
 def _domain_hint() -> str:
-    """Why an adapt most often fails on a droplet: the site block's placeholder is empty."""
-    if DOMAIN_VAR in os.environ:
+    """Why an adapt most often fails on a droplet: the site block's placeholder is empty.
+
+    An exported empty value fails identically to an absent one — the placeholder
+    expands to nothing either way — so presence alone does not clear the hint."""
+    value = os.environ.get(DOMAIN_VAR)
+    if value and value.strip():
         return ""
+    state = "is empty" if value is not None else "is not in this process's environment"
     return (
-        f"\n  {DOMAIN_VAR} is not in this process's environment; the Caddyfile's site block is"
+        f"\n  {DOMAIN_VAR} {state}; the Caddyfile's site block is"
         f" `{{${DOMAIN_VAR}}} {{`. It is read from {DEFAULT_ENVIRONMENT_FILE} when that file"
         f" is readable, else pass it: sudo env {DOMAIN_VAR}=<names> lovspor release …"
     )

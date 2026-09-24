@@ -658,6 +658,18 @@ class TestTheDomainReachesCaddy:
 
         assert SubprocessRunner(env_file).domain_from_file() == {}
 
+    def test_an_exported_empty_value_does_not_win_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`LOVSPOR_DOMAIN=` in the process expands to the same empty site
+        address as an absent one, so presence alone must not silence the file
+        the deploy actually configures."""
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "")
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=lovspor.test\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspor.test"}
+
     def test_a_missing_file_gives_nothing_rather_than_a_traceback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -722,6 +734,23 @@ class TestTheDomainReachesCaddy:
 
         message = str(caught.value)
         assert "LOVSPOR_DOMAIN is not in this process's environment" in message
+        assert "unrecognized global option: encode" in message
+
+    def test_an_adapt_failure_with_an_empty_domain_still_names_the_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An exported empty value still leaves the Caddyfile placeholder empty,
+        so the diagnostic must not treat mere presence as a usable domain."""
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "")
+        runner = RecordingRunner(
+            Completed(1, "", "Caddyfile:10: unrecognized global option: encode")
+        )
+
+        with pytest.raises(ControlPlaneError) as caught:
+            adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
+
+        message = str(caught.value)
+        assert "LOVSPOR_DOMAIN" in message
         assert "unrecognized global option: encode" in message
 
     def test_an_adapt_failure_with_the_domain_set_carries_no_hint(
