@@ -125,6 +125,28 @@ def test_write_embeddings_never_writes_through_a_symlink_at_the_staging_name(
     np.testing.assert_array_equal(result.sections[0][1], _vector([1]))
 
 
+def test_write_embeddings_preserves_existing_file_and_cleans_staging_on_rename_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The atomic writer contract applies at this call site too: a failed
+    final rename leaves the last readable sidecar intact and no owned temp."""
+    path = tmp_path / "blob.bin"
+    original = b"previous complete sidecar"
+    path.write_bytes(original)
+
+    def fail_replace(_self: Path, _target: Path) -> Path:
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="simulated rename failure"):
+        write_embeddings(path, [("1", _vector([1]))], scale=1.0, dim=1)
+
+    assert path.read_bytes() == original
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["blob.bin"]
+
+
 def test_write_embeddings_header_reserved_byte_is_zero(tmp_path: Path) -> None:
     path = tmp_path / "header.bin"
 
