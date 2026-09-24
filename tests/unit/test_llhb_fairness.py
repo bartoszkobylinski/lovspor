@@ -579,6 +579,19 @@ class TestUnidentifiedRecords:
             "control run holds record(s) whose case id is not a dataset id: ['not-an-llhb-case']"
         ]
 
+    def test_flags_a_case_id_with_a_trailing_newline(self) -> None:
+        """PR #376 promises fully anchored LLHB case-id validation at every
+        call site; fairness must not re-admit an id the orchestrator refuses."""
+        case_id = "llhb-v1-C1-001\n"
+        run = RunArtifacts(
+            metadata=metadata(cases_total=1),
+            records=[record(case_id)],
+        )
+
+        assert coverage_violations(run, "control") == [
+            f"control run holds record(s) whose case id is not a dataset id: [{case_id!r}]"
+        ]
+
     def test_the_pattern_matches_the_committed_schema(self) -> None:
         """The constant mirrors result_record.schema.json; a test rather
         than an import keeps this module light without letting them drift."""

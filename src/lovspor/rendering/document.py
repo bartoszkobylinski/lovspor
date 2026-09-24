@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 _DATE_ONLY = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 
-LANGUAGE_TAG = re.compile(r"^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?$")
+# fullmatch + \Z: `$` also matches before a trailing newline (#287).
+LANGUAGE_TAG = re.compile(r"[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|\d{3}))?\Z")
 """BCP-47-shaped tag: ``language[-Script][-REGION]``. Shared with the corpus
 audit's ``malformed_language`` check so both sides accept the same shape."""
 
@@ -53,7 +54,7 @@ def normalize_language(raw: str | None) -> str:
     """
     if raw is None or raw.strip() == "":
         return ""
-    if LANGUAGE_TAG.match(raw):
+    if LANGUAGE_TAG.fullmatch(raw):
         return raw
     recovered = _LANGUAGE_THEN_MARKUP.match(raw)
     if recovered:

@@ -38,7 +38,9 @@ _MAY_DIFFER = frozenset(
 
 # Mirrors result_record.schema.json's case_id pattern. Kept as a constant
 # rather than read from the schema so this module stays import-light; a test
-# asserts the two never drift apart.
+# asserts the two never drift apart — which is why `$` stays here rather than
+# becoming `\Z`. Python's `$` also matches before a trailing newline, so every
+# use of this pattern goes through `fullmatch` (#286).
 _CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
 # A namespaced MCP tool is mcp__<server>__<tool>; the middle field names the
 # server whose connection the case depended on.
@@ -180,7 +182,7 @@ def coverage_violations(run: RunArtifacts, label: str) -> list[str]:
             # is an unkillable mutation site.
             str(record.get("case_id"))
             for record in run.records
-            if not _CASE_ID_RE.match(str(record.get("case_id")))
+            if not _CASE_ID_RE.fullmatch(str(record.get("case_id")))
         }
     )
     if malformed:

@@ -157,6 +157,19 @@ def test_a_manifest_without_a_full_commit_is_refused(release: Path) -> None:
         check_release(release)
 
 
+@pytest.mark.parametrize("suffix", ["\n", "\r\n", " "])
+def test_a_full_commit_with_trailing_whitespace_is_refused(release: Path, suffix: str) -> None:
+    """``$`` matches before a trailing newline, so ``match`` would accept a
+    sha that ``git`` and the corpus would not recognise (#288)."""
+    manifest = release / "site-manifest.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["corpus_commit"] = "a" * 40 + suffix
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(PublishError, match="names no full corpus commit"):
+        check_release(release)
+
+
 def test_a_missing_document_page_is_caught_by_the_count(release: Path) -> None:
     """The manifest's document count is the closure proof; a tree with fewer
     pages than it promises is a partial copy."""
@@ -620,3 +633,26 @@ def test_comments_and_blank_lines_in_the_caddy_map_are_not_directives(release: P
     )
 
     check_release(release)
+
+
+def _set_document_count(release: Path, value: object) -> None:
+    manifest = release / "site-manifest.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["documents"] = value
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_a_string_manifest_document_count_is_a_named_refusal(release: Path) -> None:
+    """A count that is not an integer is refused by the count gate itself; it
+    is never compared with zero, which for a string would be a TypeError."""
+    _set_document_count(release, "2")
+    with pytest.raises(PublishError, match="has no document count: '2'"):
+        check_release(release)
+
+
+def test_a_zero_manifest_document_count_passes_the_count_gate(release: Path) -> None:
+    """Zero is a size. It is the closure check, not the count gate, that
+    refuses it against a tree that has document pages."""
+    _set_document_count(release, 0)
+    with pytest.raises(PublishError, match="promises 0 documents, the tree has 2"):
+        check_release(release)

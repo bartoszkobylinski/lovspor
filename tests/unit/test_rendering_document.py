@@ -429,6 +429,19 @@ def test_normalize_language_drops_unrecoverable_garbage(
     assert "malformed upstream lang attribute" in caplog.text
 
 
+@pytest.mark.parametrize("raw", ["nb\n", "nb\r\n", "nb-NO\n"])
+def test_normalize_language_does_not_pass_a_tag_with_a_trailing_newline(
+    raw: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``$`` matches before a trailing newline, so ``match`` returned the raw
+    value newline and all — into the front matter (#287). Not blank, not a
+    valid tag, no markup to recover from: the documented fallback is ``""``."""
+    with caplog.at_level("WARNING"):
+        assert normalize_language(raw) == ""
+    assert "malformed upstream lang attribute" in caplog.text
+
+
 def test_build_frontmatter_never_lets_markup_reach_language() -> None:
     """Full-pipeline guard: the escaped corrupt attribute from upstream yields
     the recovered tag, and no markup character survives into the model."""
@@ -440,3 +453,21 @@ def test_build_frontmatter_never_lets_markup_reach_language() -> None:
     fm = build_frontmatter(xml, _default_context())
     assert fm.language == "nb"
     assert not any(ch in fm.language for ch in '<>"')
+
+
+def test_the_recovery_warning_names_the_raw_value_and_the_kept_tag(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="lovspor.rendering.document"):
+        normalize_language(_LOVDATA_CORRUPT_LANG)
+    assert [record.getMessage() for record in caplog.records] == [
+        f"malformed upstream lang attribute {_LOVDATA_CORRUPT_LANG!r}: recovered leading tag 'nb'"
+    ]
+
+
+def test_the_drop_warning_names_the_raw_value(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING", logger="lovspor.rendering.document"):
+        normalize_language("NB")
+    assert [record.getMessage() for record in caplog.records] == [
+        "malformed upstream lang attribute 'NB': dropped, no unambiguous tag"
+    ]

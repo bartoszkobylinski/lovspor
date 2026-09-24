@@ -63,7 +63,8 @@ _RETRY_BACKOFF_S: tuple[float, ...] = (30.0, 60.0)
 _CANNOT_EXECUTE = 127
 _RAW_DIR = "raw"
 _TOOLS_DIR = "tools"
-_CASE_ID_RE = re.compile(r"^llhb-v1-C[1-8]-[0-9]{3}$")
+# fullmatch + \Z: `$` also matches before a trailing newline (#286).
+_CASE_ID_RE = re.compile(r"llhb-v1-C[1-8]-[0-9]{3}\Z")
 # Keys that would defeat the sandbox or flip billing if a caller smuggled
 # them in through extra_env — each one fails closed instead of merging.
 _BANNED_ENV = frozenset({"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "HOME", "CLAUDE_CONFIG_DIR"})
@@ -203,7 +204,7 @@ def run_arm(
 def _checked_case_ids(cases: list[dict[str, Any]]) -> list[str]:
     """Every case id, validated before anything touches disk."""
     ids = [str(case.get("case_id", "")) for case in cases]
-    invalid = sorted(case_id for case_id in ids if not _CASE_ID_RE.match(case_id))
+    invalid = sorted(case_id for case_id in ids if not _CASE_ID_RE.fullmatch(case_id))
     if invalid:
         raise OrchestratorError(f"invalid case ids: {invalid}")
     return ids
@@ -389,7 +390,7 @@ def _raw_payload(invocation: CliInvocation) -> str:
 
 def _checked_dir(run_dir: Path, case_id: str, name: str) -> Path:
     """A per-run subdirectory, refused unless the case id can name a file."""
-    if not _CASE_ID_RE.match(case_id):
+    if not _CASE_ID_RE.fullmatch(case_id):
         raise OrchestratorError(f"invalid case id {case_id!r} for artifact retention")
     directory = run_dir / name
     directory.mkdir(exist_ok=True)

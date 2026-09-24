@@ -298,7 +298,7 @@ def _language_findings(
         if record.status != "current" or record.markdown_path not in on_disk:
             continue
         declared = _frontmatter_language(corpus_root / record.markdown_path)
-        if declared is None or declared == "" or LANGUAGE_TAG.match(declared):
+        if declared is None or declared == "" or LANGUAGE_TAG.fullmatch(declared):
             continue
         shown = (
             declared

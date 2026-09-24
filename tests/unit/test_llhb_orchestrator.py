@@ -617,6 +617,19 @@ class TestRunArm:
         assert not (tmp_path / "runs").exists()
         assert not (tmp_path / "outside.json").exists()
 
+    def test_rejects_a_case_id_with_a_trailing_newline_before_any_write(
+        self, tmp_path: Path
+    ) -> None:
+        """`$` also matches just before one trailing newline, and the id names
+        per-case artifact files under the run dir (#286)."""
+        bin_dir = fake_claude(tmp_path, SUCCESS_STREAM)
+        store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
+        cases = [make_case("llhb-v1-C1-001\n")]
+
+        with pytest.raises(OrchestratorError, match=r"^invalid case ids: \['llhb-v1-C1-001\\n'\]$"):
+            run_arm(make_config(tmp_path, bin_dir), cases, make_metadata(), store)
+        assert not (tmp_path / "runs").exists()
+
     def test_reports_a_missing_case_id_as_empty_before_any_write(self, tmp_path: Path) -> None:
         store = ResultsStore(runs_root=tmp_path / "runs", schema_dir=SCHEMA_DIR)
 
@@ -982,6 +995,20 @@ def test_artifact_retention_rejects_an_invalid_case_id(tmp_path: Path) -> None:
         match=r"^invalid case id '\.\./outside' for artifact retention$",
     ):
         orchestrator._checked_dir(tmp_path, "../outside", "raw")
+
+
+@pytest.mark.parametrize(
+    "case_id",
+    ["llhb-v1-C1-001\n", "llhb-v1-C1-001\r\n", "\nllhb-v1-C1-001", "llhb-v1-C1-001 "],
+)
+def test_artifact_retention_rejects_a_case_id_with_a_trailing_newline(
+    tmp_path: Path, case_id: str
+) -> None:
+    """`$` also matches just before one trailing newline; the id names a
+    file under the run dir, so it must be refused like a traversal (#286)."""
+    with pytest.raises(OrchestratorError, match="invalid case id .* for artifact retention"):
+        orchestrator._checked_dir(tmp_path, case_id, "raw")
+    assert not (tmp_path / "raw").exists()
 
 
 def test_text_converts_absent_process_output_to_empty_text() -> None:
