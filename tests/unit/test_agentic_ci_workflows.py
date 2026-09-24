@@ -483,11 +483,41 @@ def test_agent_jobs_are_never_serialized_by_a_shared_concurrency_group() -> None
 )
 def test_agent_jobs_have_a_wallclock_backstop(workflow_name: str, job_name: str) -> None:
     """Issue #101: a job that hangs holds the lane against every later PR until
-    GitHub's 6 h default kill. The box lock alone waits 20 minutes before it
-    gives up, so the job needs its own ceiling above that."""
+    GitHub's 6 h default kill. The ceiling sits above the agent step's own
+    (issue #382: that step budgets an hour of queueing for the box-wide lock
+    plus the agent round), so the step reports before the job is cancelled."""
     job = _workflow(workflow_name)["jobs"][job_name]
 
-    assert job["timeout-minutes"] == 60
+    assert job["timeout-minutes"] == 120
+
+
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("pr-pipeline.yml", "codex-author", "Codex — independent PR test author"),
+        ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
+    ],
+)
+def test_the_box_lock_wait_fits_inside_the_agent_step(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    """Issue #382: five repositories share /home/runner/.mikrus-agent.lock, so
+    a lane routinely queues behind a FOREIGN agent round (~25-40 min) while
+    this repo's runner reads idle. The lock is fd 9, which no later step
+    inherits, so the queue and the round have to share one step: a wait the
+    step ceiling cannot outlive is dead code, and a wait that eats the ceiling
+    leaves the round nothing. -w 1200 failed #374 three times over."""
+    step = _named_step(_steps(workflow_name, job_name), step_name)
+    wait = re.search(r"flock -w (\d+) 9", step["run"])
+
+    assert wait, f"{workflow_name}: the agent step must take the box lock with a bounded wait"
+    assert int(wait.group(1)) == 3600
+    assert step["timeout-minutes"] * 60 - int(wait.group(1)) >= 45 * 60, (
+        "a full lock wait must still leave the agent round its 45 minutes"
+    )
+    assert "another repository's agent job" in step["run"], (
+        "the timeout message names the box-wide holder, not lovspor (#382)"
+    )
 
 
 def test_remediation_concurrency_group_is_scoped_to_head_branch() -> None:
@@ -533,8 +563,8 @@ class TestEscalationCoversEveryFailure:
             step = _named_step(_steps(workflow_name, job_name), step_name)
             job = _workflow(workflow_name)["jobs"][job_name]
 
-            assert step["timeout-minutes"] == 45
-            assert job["timeout-minutes"] == 60
+            assert step["timeout-minutes"] == 105
+            assert job["timeout-minutes"] == 120
             assert step["timeout-minutes"] < job["timeout-minutes"], (
                 f"{workflow_name}: the step ceiling must bite before the job's"
             )
