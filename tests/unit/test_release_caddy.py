@@ -670,6 +670,17 @@ class TestTheDomainReachesCaddy:
 
         assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspor.test"}
 
+    def test_an_exported_whitespace_value_does_not_win_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whitespace also expands to no Caddy site address, so only a
+        non-blank process value may override the unit's EnvironmentFile."""
+        monkeypatch.setenv("LOVSPOR_DOMAIN", " \t ")
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=lovspor.test\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspor.test"}
+
     def test_a_missing_file_gives_nothing_rather_than_a_traceback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -726,6 +737,12 @@ class TestTheDomainReachesCaddy:
         assert environment_file_value("  LOVSPOR_DOMAIN=lovspor.no\n", "LOVSPOR_DOMAIN") == (
             "lovspor.no"
         )
+
+    def test_a_final_empty_assignment_overrides_an_earlier_domain(self) -> None:
+        """The last assignment wins even when its value clears a stale domain."""
+        text = "LOVSPOR_DOMAIN=stale.test\nLOVSPOR_DOMAIN=\n"
+
+        assert environment_file_value(text, "LOVSPOR_DOMAIN") == ""
 
     def test_whitespace_between_the_key_and_the_equals_is_dropped_as_systemd_does(self) -> None:
         """`src/basic/env-file.c` truncates the key at `last_key_whitespace`
