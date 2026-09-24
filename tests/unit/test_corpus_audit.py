@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from lovspor.corpus_audit import (
+    _LANGUAGE_DETAIL_MAX,
     ADVISORY_KINDS,
     INTEGRITY_KINDS,
     AuditFinding,
@@ -689,3 +690,47 @@ def test_malformed_language_detail_truncates_long_values(tmp_path: Path) -> None
     (finding,) = report.findings
     assert finding.kind == "malformed_language"
     assert len(finding.detail) < 140
+
+
+def test_a_tombstone_without_a_file_does_not_end_the_language_scan(tmp_path: Path) -> None:
+    """The first skip branch steps over one record, never out of the loop:
+    a document after the skipped one is still audited."""
+    _seed_with_language(tmp_path, "broken", 'language: "NB"')
+    report = audit_corpus(
+        tmp_path,
+        _manifest(gone=_record("gone", status="removed"), broken=_record("broken")),
+    )
+    assert _kinds(report.findings) == [("malformed_language", "lover/broken.md")]
+
+
+def test_a_valid_language_does_not_end_the_language_scan(tmp_path: Path) -> None:
+    """The second skip branch is per-record too: a valid tag before a
+    malformed one must not hide the malformed one."""
+    _seed_with_language(tmp_path, "valid", 'language: "nb"')
+    _seed_with_language(tmp_path, "broken", 'language: "NB"')
+    report = audit_corpus(
+        tmp_path,
+        _manifest(valid=_record("valid"), broken=_record("broken")),
+    )
+    assert _kinds(report.findings) == [("malformed_language", "lover/broken.md")]
+
+
+def test_malformed_language_detail_keeps_a_value_at_the_cap_whole(tmp_path: Path) -> None:
+    tag = "a" * _LANGUAGE_DETAIL_MAX
+    _seed_with_language(tmp_path, "capped", f'language: "{tag}"')
+    report = audit_corpus(tmp_path, _manifest(capped=_record("capped")))
+    (finding,) = report.findings
+    assert finding.doc_id == "capped"
+    assert finding.detail == f"frontmatter language is not a valid language tag: {tag!r}"
+
+
+def test_malformed_language_detail_truncates_one_past_the_cap(tmp_path: Path) -> None:
+    """One character over the cap: the detail is exactly the cap long, the
+    last three characters of it being the ellipsis."""
+    tag = "a" * (_LANGUAGE_DETAIL_MAX + 1)
+    _seed_with_language(tmp_path, "over", f'language: "{tag}"')
+    report = audit_corpus(tmp_path, _manifest(over=_record("over")))
+    (finding,) = report.findings
+    shown = "a" * (_LANGUAGE_DETAIL_MAX - 3) + "..."
+    assert finding.doc_id == "over"
+    assert finding.detail == f"frontmatter language is not a valid language tag: {shown!r}"

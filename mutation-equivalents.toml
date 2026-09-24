@@ -2703,6 +2703,21 @@ them. Same argument as the `front_page_markers` entries for survey.py.
 """
 
 [[equivalent]]
+file = "src/lovspor/embeddings/store.py"
+symbol = "write_embeddings"
+registered = "2026-09-23, PR #376, from run 35854180642"
+mutation = """
+-        encoded = section_id.encode("utf-8")
++        encoded = section_id.encode("UTF-8")
+"""
+justification = """
+Codec names are case-insensitive: `encodings.normalize_encoding` lowercases the
+name before lookup, so "UTF-8" and "utf-8" resolve to the same codec object and
+`str.encode` produces the same bytes for every input. No test can distinguish
+them. Same argument as the `_normalise_token` entry for robots.py.
+"""
+
+[[equivalent]]
 file = "src/lovspor/release/caddy.py"
 symbol = "SubprocessRunner.domain_from_file"
 registered = "2026-09-23, PR #374, from run 35852599315"

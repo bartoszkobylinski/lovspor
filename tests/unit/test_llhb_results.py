@@ -68,6 +68,13 @@ class TestNewRunId:
         with pytest.raises(ResultsStoreError):
             new_run_id("20260808", "PILOT")
 
+    @pytest.mark.parametrize("suffix", ["pilot1\n", "pilot1\r\n", "pilot1 "])
+    def test_rejects_a_suffix_with_trailing_whitespace(self, suffix: str) -> None:
+        """`$` also matches just before one trailing newline, and the id
+        becomes a directory name under the runs root (#286)."""
+        with pytest.raises(ResultsStoreError, match="invalid run id"):
+            new_run_id("20260808", suffix)
+
 
 class TestOpenRun:
     def test_writes_metadata_file(self, store: ResultsStore, tmp_path: Path) -> None:
@@ -159,6 +166,30 @@ class TestRunIdConfinement:
     def test_read_records_rejects_invalid_run_id(self, store: ResultsStore) -> None:
         with pytest.raises(ResultsStoreError, match="invalid run id"):
             store.read_records("llhb-v1-run-20260808-..")
+
+    @pytest.mark.parametrize(
+        "run_id", [RUN_ID + "\n", RUN_ID + "\r\n", "\n" + RUN_ID, RUN_ID + " "]
+    )
+    def test_read_records_rejects_a_run_id_with_a_trailing_newline(
+        self, store: ResultsStore, run_id: str
+    ) -> None:
+        """`$` also matches just before one trailing newline, and ids are read
+        out of files: keeping it would name `runs/<id>\\n/`, a directory beside
+        the real one that no other reader can name (#286)."""
+        with pytest.raises(ResultsStoreError, match="invalid run id"):
+            store.read_records(run_id)
+
+    def test_a_well_formed_id_that_resolves_outside_the_root_is_refused(
+        self, store: ResultsStore, tmp_path: Path
+    ) -> None:
+        """The id can pass the pattern and still be a symlink out of the root."""
+        runs_root = tmp_path / "runs"
+        runs_root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (runs_root / RUN_ID).symlink_to(outside, target_is_directory=True)
+        with pytest.raises(ResultsStoreError, match=rf"^run id {RUN_ID!r} escapes the runs root$"):
+            store.read_records(RUN_ID)
 
 
 class TestSurvivorRegressions:

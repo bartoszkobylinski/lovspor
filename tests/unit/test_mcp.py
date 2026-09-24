@@ -15,7 +15,7 @@ import shlex
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from io import StringIO
@@ -4352,6 +4352,29 @@ def test_get_law_at_rejects_non_iso_date_before_manifest_lookup(
         CorpusReader(tmp_path).get_law_at("skatteloven", "27-04-2026")
 
 
+_WIDER_THAN_YYYY_MM_DD = ["2026-9-1", "20260901", "2026-09-01T00:00:00", "2026-09-01\n"]
+"""Forms ``date.fromisoformat`` may accept (``20260901`` since 3.11) that the
+documented ``YYYY-MM-DD`` contract never promised (#225)."""
+
+
+@pytest.mark.parametrize("target_date", _WIDER_THAN_YYYY_MM_DD)
+def test_get_law_at_refuses_wider_iso_forms_than_the_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    target_date: str,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fail_if_called(*_args: object) -> str:
+        raise AssertionError("timetravel lookup should not run")
+
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", fail_if_called)
+
+    with pytest.raises(ValueError) as exc_info:
+        CorpusReader(tmp_path).get_law_at("skatteloven", target_date)
+    assert str(exc_info.value) == f"target_date must be ISO date YYYY-MM-DD, got {target_date!r}"
+
+
 def test_get_law_at_allows_todays_utc_date(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -6658,6 +6681,27 @@ def test_diff_law_versions_rejects_non_iso_date_b_before_timetravel(
         CorpusReader(tmp_path).diff_law_versions("skatteloven", "2020-01-01", "01-01-2024")
 
 
+@pytest.mark.parametrize("value", _WIDER_THAN_YYYY_MM_DD)
+@pytest.mark.parametrize("field", ["date_a", "date_b"])
+def test_diff_law_versions_refuses_wider_iso_forms_than_the_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+
+    def fail_if_called(*_args: object) -> RevisionResult:
+        raise AssertionError("timetravel lookup should not run")
+
+    monkeypatch.setattr("lovspor.mcp.resolve_law_at_revision", fail_if_called)
+    dates = {"date_a": "2020-01-01", "date_b": "2024-01-01", field: value}
+
+    with pytest.raises(ValueError) as exc_info:
+        CorpusReader(tmp_path).diff_law_versions("skatteloven", dates["date_a"], dates["date_b"])
+    assert str(exc_info.value) == f"{field} must be ISO date YYYY-MM-DD, got {value!r}"
+
+
 def test_diff_law_versions_allows_todays_utc_date(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -8526,3 +8570,70 @@ def test_the_spend_charger_bills_the_caller_and_refuses_an_unidentified_one(
     finally:
         auth_context_var.reset(reset)
     assert enforcer.paid_daily_used("beta-001") == 1
+
+
+def _pin_zone_off_utc() -> None:
+    """Point TZ at a zone whose calendar date differs from UTC's right now.
+
+    UTC+14 and UTC-12 are 26 hours apart, so at every instant at least one
+    of them is on a different calendar day from UTC."""
+    for zone in ("Etc/GMT-14", "Etc/GMT+12"):
+        os.environ["TZ"] = zone
+        time.tzset()
+        if datetime.now().date() != datetime.now(UTC).date():
+            return
+    pytest.fail("no zone whose local date differs from UTC")
+
+
+@pytest.fixture
+def local_date_off_utc() -> Iterator[date]:
+    saved = os.environ.get("TZ")
+    _pin_zone_off_utc()
+    yield datetime.now().date()
+    if saved is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = saved
+    time.tzset()
+
+
+def _future_probe(local_today: date) -> tuple[date, bool]:
+    """``(date to pass, whether the UTC calendar calls it future)``, chosen so
+    a clock read in local time would give the opposite verdict."""
+    utc_today = datetime.now(UTC).date()
+    if local_today > utc_today:
+        return local_today, True
+    return utc_today, False
+
+
+def test_get_law_at_judges_the_future_by_the_utc_calendar(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    local_date_off_utc: date,
+) -> None:
+    _seed_corpus(tmp_path, {"nl-1": _record(slug="skatteloven", title="Skatteloven")})
+    monkeypatch.setattr("lovspor.mcp.get_law_at_revision", lambda *_: "markdown")
+    target, is_future = _future_probe(local_date_off_utc)
+    reader = CorpusReader(tmp_path)
+    if is_future:
+        with pytest.raises(ValueError, match="is in the future"):
+            reader.get_law_at("skatteloven", target.isoformat())
+    else:
+        assert reader.get_law_at("skatteloven", target.isoformat()) == "markdown"
+
+
+def test_diff_dates_are_judged_by_the_utc_calendar(local_date_off_utc: date) -> None:
+    target, is_future = _future_probe(local_date_off_utc)
+    if is_future:
+        with pytest.raises(ValueError, match="is in the future"):
+            CorpusReader._parse_diff_date("date_b", target.isoformat())
+    else:
+        assert CorpusReader._parse_diff_date("date_b", target.isoformat()) == target
+
+
+def test_parse_recorded_at_names_its_field_on_a_malformed_value() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^recorded_at must be ISO date YYYY-MM-DD, got '05/01/2026'$",
+    ):
+        mcp_module._parse_recorded_at("05/01/2026")

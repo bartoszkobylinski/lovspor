@@ -104,6 +104,49 @@ def test_write_embeddings_leaves_no_temp_file(tmp_path: Path) -> None:
     assert [p.name for p in tmp_path.iterdir()] == ["atomic.bin"]
 
 
+def test_write_embeddings_never_writes_through_a_symlink_at_the_staging_name(
+    tmp_path: Path,
+) -> None:
+    """The staging name is predictable; a symlink planted there must not be
+    followed, and the link must not be renamed onto the target (#284, #280)."""
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"SECRET")
+    planted = tmp_path / "blob.bin.tmp"
+    planted.symlink_to(victim)
+    path = tmp_path / "blob.bin"
+
+    write_embeddings(path, [("1", _vector([1]))], scale=1.0, dim=1)
+
+    assert victim.read_bytes() == b"SECRET"
+    assert planted.is_symlink()
+    assert not path.is_symlink()
+    result = read_embeddings(path)
+    assert [section_id for section_id, _vector_int8 in result.sections] == ["1"]
+    np.testing.assert_array_equal(result.sections[0][1], _vector([1]))
+
+
+def test_write_embeddings_preserves_existing_file_and_cleans_staging_on_rename_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The atomic writer contract applies at this call site too: a failed
+    final rename leaves the last readable sidecar intact and no owned temp."""
+    path = tmp_path / "blob.bin"
+    original = b"previous complete sidecar"
+    path.write_bytes(original)
+
+    def fail_replace(_self: Path, _target: Path) -> Path:
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="simulated rename failure"):
+        write_embeddings(path, [("1", _vector([1]))], scale=1.0, dim=1)
+
+    assert path.read_bytes() == original
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["blob.bin"]
+
+
 def test_write_embeddings_header_reserved_byte_is_zero(tmp_path: Path) -> None:
     path = tmp_path / "header.bin"
 

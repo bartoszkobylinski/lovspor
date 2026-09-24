@@ -58,6 +58,7 @@ from pathlib import Path
 
 import numpy as np
 
+from lovspor.atomic_io import atomic_write_bytes
 from lovspor.errors import UnsupportedSidecarVersionError
 
 _MAGIC = b"LSPE"
@@ -184,12 +185,11 @@ def write_embeddings(
         parts.append(struct.pack("<B", len(encoded)))
         parts.append(encoded)
         parts.append(vector.tobytes())
-    # Write to a sibling temp file then atomically rename, so a crash
-    # mid-write can never leave a truncated .bin that later reads as
-    # corrupt (or, worse, that a staleness check treats as present).
-    tmp = path.with_name(f"{path.name}.tmp")
-    tmp.write_bytes(b"".join(parts))
-    tmp.replace(path)
+    # Staged then atomically renamed, so a crash mid-write can never leave a
+    # truncated .bin that later reads as corrupt (or, worse, that a staleness
+    # check treats as present). atomic_io also refuses to write through a
+    # symlink planted at the predictable staging name (#284, #280).
+    atomic_write_bytes(path, b"".join(parts))
 
 
 def read_embeddings(path: Path) -> EmbeddingFile:
