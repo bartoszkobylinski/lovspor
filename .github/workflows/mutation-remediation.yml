@@ -27,7 +27,10 @@ jobs:
   # runs the lint, the full unit suite and the push, hosted and free.
   remediate:
     runs-on: [self-hosted, linux, codex]
-    timeout-minutes: 60
+    # Above the agent step's queue-plus-round budget (105 min, below): waiting
+    # for a neighbouring repository's agent to release the box is legitimate
+    # queueing, and the job has to outlive it (#382).
+    timeout-minutes: 120
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
@@ -198,7 +201,11 @@ jobs:
         # Below the job ceiling on purpose: a job-level timeout cancels the
         # job and skips the escalation, which is exactly how run 32423861392
         # ended with a red check, no label and no comment (issue #157).
-        timeout-minutes: 45
+        #
+        # 105 = up to 60 min queueing for the shared box lock + the 45 min an
+        # agent round is allowed. Both budgets live in this one step because
+        # the lock is fd 9, which no later step inherits (#382).
+        timeout-minutes: 105
         id: author
         if: steps.cycle.outputs.run == 'true'
         env:
@@ -211,8 +218,18 @@ jobs:
           # repositories' CI down until the container was rebooted. The fd stays
           # open for the life of this step, so the lock releases even if the job
           # is cancelled.
+          #
+          # FIVE repositories share this one lock file (lovspor, job-search,
+          # llmbus, milamber, notebook — read off the box in #382), so the
+          # holder is usually NOT lovspor, and this repo's runner reads idle
+          # while a lane waits. Queueing behind a neighbour is the design
+          # (#272), so the wait covers a neighbour's whole round, not 20 min.
           exec 9>/home/runner/.mikrus-agent.lock
-          flock -w 1200 9 || { echo "another agent job held the box lock for 20 minutes" >&2; exit 1; }
+          lock_wait_start=$SECONDS
+          flock -w 3600 9 || {
+            echo "the shared box lock was held for $(( (SECONDS - lock_wait_start) / 60 )) minutes by another repository's agent job (/home/runner/.mikrus-agent.lock is box-wide, #272/#382) — this is runner contention, not a fault in this PR" >&2
+            exit 1
+          }
           : "${CODEX_PRIMARY_HOME:?Set repository variable CODEX_PRIMARY_HOME}"
           : "${CODEX_SECONDARY_HOME:?Set repository variable CODEX_SECONDARY_HOME}"
           set +e
