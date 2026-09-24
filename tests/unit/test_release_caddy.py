@@ -744,6 +744,13 @@ class TestTheDomainReachesCaddy:
 
         assert environment_file_value(text, "LOVSPOR_DOMAIN") == ""
 
+    def test_an_equals_sign_in_the_value_is_not_treated_as_the_assignment_separator(self) -> None:
+        """Only the first equals separates the key; later ones belong to the value."""
+        assert (
+            environment_file_value("LOVSPOR_DOMAIN=first.test=second.test\n", "LOVSPOR_DOMAIN")
+            == "first.test=second.test"
+        )
+
     def test_whitespace_between_the_key_and_the_equals_is_dropped_as_systemd_does(self) -> None:
         """`src/basic/env-file.c` truncates the key at `last_key_whitespace`
         before pushing it, so `NAME =value` assigns NAME. The same line read as
@@ -789,7 +796,7 @@ class TestTheDomainReachesCaddy:
             adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
 
         message = str(caught.value)
-        assert "LOVSPOR_DOMAIN" in message
+        assert "LOVSPOR_DOMAIN is empty" in message
         assert "unrecognized global option: encode" in message
 
     def test_an_adapt_failure_with_the_domain_set_carries_no_hint(
