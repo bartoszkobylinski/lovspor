@@ -520,6 +520,30 @@ def test_the_box_lock_wait_fits_inside_the_agent_step(
     )
 
 
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name", "step_name"),
+    [
+        ("pr-pipeline.yml", "codex-author", "Codex — independent PR test author"),
+        ("mutation-remediation.yml", "remediate", "Codex — mutation remediation (tests only)"),
+    ],
+)
+def test_every_agent_provider_runs_under_the_same_box_wide_lock(
+    workflow_name: str, job_name: str, step_name: str
+) -> None:
+    """Issue #382: serialization is box-wide only when both lanes open the
+    shared path, acquire its fd, and do so before the Codex/Claude failover can
+    launch either provider."""
+    command = _named_step(_steps(workflow_name, job_name), step_name)["run"]
+
+    lock_open = "exec 9>/home/runner/.mikrus-agent.lock"
+    lock_acquire = "flock -w 3600 9"
+    provider_launch = "python3 scripts/ci/codex_account_failover.py"
+
+    assert command.count(lock_open) == 1
+    assert command.count(lock_acquire) == 1
+    assert command.index(lock_open) < command.index(lock_acquire) < command.index(provider_launch)
+
+
 def test_remediation_concurrency_group_is_scoped_to_head_branch() -> None:
     """Issue #139 fix: the group must interpolate head_branch verbatim so a PR's
     own newer remediation run supersedes only its own prior run, never a
