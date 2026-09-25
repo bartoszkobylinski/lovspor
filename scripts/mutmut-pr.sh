@@ -149,6 +149,9 @@ fi
 
 budget_exceeded=0
 if [ "$run_status" -eq 124 ] || [ "$run_status" -eq 137 ]; then
+  # Mutmut's spinner ends on a bare \r; without the newline this verdict
+  # lands on the spinner's line and reads as lost (issue #365).
+  echo
   echo "mutation budget exceeded: after ${total_budget}s — unmeasured mutants are untested"
   budget_exceeded=1
 elif [ "$run_status" -ne 0 ]; then
@@ -158,6 +161,13 @@ elif [ "$run_status" -ne 0 ]; then
 fi
 
 tally="$(tr '\r' '\n' < mutation-run.log | grep -oE '[0-9]+/[0-9]+  🎉 [0-9]+ 🫥 [0-9]+  ⏰ [0-9]+  🤔 [0-9]+  🙁 [0-9]+  🔇 [0-9]+  🧙 [0-9]+' | tail -1 || true)"
+# Stats and the clean-test pass run before the first tally line, so a budget
+# spent there leaves none. That is still the budget's verdict, not a broken
+# tool: exit 3 would read as tool_failed and hide it (issue #365).
+if [ -z "$tally" ] && [ "$budget_exceeded" -eq 1 ]; then
+  echo "no mutant was measured before the budget ran out"
+  exit "$(exit_code_for 0 0 0 1)"
+fi
 if [ -z "$tally" ]; then
   echo "error: mutmut produced no progress line — the run did not measure any mutant" >&2
   echo "no score for this PR — do not report one" >&2
