@@ -559,6 +559,64 @@ class TestEmitSite:
         assert manifest["corpus_commit"] == pinned_sha
 
 
+def _named_revisions(node: object) -> list[str]:
+    """Every ``source_revision`` value at any depth of a companion document."""
+    if isinstance(node, dict):
+        found = [v for k, v in node.items() if k == "source_revision" and isinstance(v, str)]
+        return found + [r for v in node.values() for r in _named_revisions(v)]
+    if isinstance(node, list):
+        return [r for item in node for r in _named_revisions(item)]
+    return []
+
+
+def _is_ancestor(repo: Path, revision: str, commit: str) -> bool:
+    probe = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", revision, commit],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+    )
+    return probe.returncode == 0
+
+
+class TestClosure:
+    """ADR-0013 Validation, closure test: across the whole output tree, not one page."""
+
+    def test_every_named_source_revision_is_an_ancestor_of_the_pinned_commit(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, pinned_sha = corpus
+        for path in ("lover/testloven.md", "forskrifter/testforskriften.md"):
+            (repo / path).write_text((repo / path).read_text() + "\nSENERE.\n", encoding="utf-8")
+        _run_git(repo, "commit", "-q", "-am", "later corpus state")
+        out = tmp_path / "site"
+
+        emit_site(repo, pinned_sha, out)
+
+        manifest = json.loads((out / "site-manifest.json").read_text(encoding="utf-8"))
+        named = {
+            revision
+            for path in out.rglob("*.json")
+            for revision in _named_revisions(json.loads(path.read_text(encoding="utf-8")))
+        }
+        assert manifest["corpus_commit"] == pinned_sha
+        # Both fixture commits are named, so the ancestry check below is not vacuous.
+        assert len(named) == 2
+        assert all(_is_ancestor(repo, revision, pinned_sha) for revision in named)
+
+    def test_the_ancestry_probe_refuses_a_later_commit(self, corpus: tuple[Path, str]) -> None:
+        repo, pinned_sha = corpus
+        _run_git(repo, "commit", "-q", "--allow-empty", "-m", "later")
+        later = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+        assert _is_ancestor(repo, pinned_sha, later)
+        assert not _is_ancestor(repo, later, pinned_sha)
+
+
 class TestBrowseIndexes:
     def test_emit_writes_one_browse_index_per_route(
         self,
