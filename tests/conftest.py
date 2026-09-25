@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from lovspor.exclusive_workload import ENV_LOCK_PATH
+from tests.scope_order import pytest_collection_modifyitems
+
+__all__ = ["pytest_collection_modifyitems"]
 
 # Repo-targeting variables git exports to hook subprocesses. Anything spawned
 # with these inherited operates on the EXPORTING repo, not on the cwd repo.
