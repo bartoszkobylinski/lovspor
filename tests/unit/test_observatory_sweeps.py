@@ -556,6 +556,12 @@ class TestAFailedRunSaysWhy:
         with pytest.raises(LogIntegrityError, match="unreadable sweep run"):
             read_sweep_runs(sweeps_path(root))
 
+    @pytest.mark.parametrize("blank", [" ", "\t", " \t "])
+    def test_a_blank_reason_is_no_reason(self, blank: str) -> None:
+        """A failed run explained by whitespace carries no next step (#207)."""
+        with pytest.raises(ValidationError):
+            SweepRun.model_validate(self._failed(reason=blank))
+
     def test_a_successful_run_needs_no_reason(self) -> None:
         assert _run().failure_reason is None
 

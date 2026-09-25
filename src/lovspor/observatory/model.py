@@ -34,6 +34,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from lovspor.observatory.fields import NonBlankStr
+
 AuthorityType = Literal["kommune", "fylkeskommune"]
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -164,8 +166,8 @@ class Tombstone(BaseModel):
     kind: Literal["tombstone"] = "tombstone"
     sha256: str = Field(pattern=_SHA256_PATTERN)
     removed_at: datetime
-    basis: str = Field(min_length=1)
-    authorised_by: str = Field(min_length=1)
+    basis: NonBlankStr
+    authorised_by: NonBlankStr
 
     @field_validator("removed_at")
     @classmethod
