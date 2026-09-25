@@ -20,8 +20,11 @@ class _Trimmed(BaseModel):
 class TestNonBlankStr:
     @pytest.mark.parametrize("blank", BLANKS)
     def test_a_value_with_no_content_is_refused(self, blank: str) -> None:
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as exc_info:
             _Kept(value=blank)
+
+        if blank:
+            assert exc_info.value.errors()[0]["msg"] == "Value error, must not be blank"
 
     @pytest.mark.parametrize("blank", BLANKS)
     def test_an_optional_field_refuses_blank_but_accepts_none(self, blank: str) -> None:
@@ -40,8 +43,11 @@ class TestNonBlankStr:
 class TestTrimmedNonBlankStr:
     @pytest.mark.parametrize("blank", BLANKS)
     def test_a_value_with_no_content_is_refused(self, blank: str) -> None:
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as exc_info:
             _Trimmed(value=blank)
+
+        if blank:
+            assert exc_info.value.errors()[0]["msg"] == "Value error, must not be blank"
 
     def test_surrounding_whitespace_is_taken_off(self) -> None:
         assert _Trimmed(value="  Bartosz Kobyliński\n").value == "Bartosz Kobyliński"
