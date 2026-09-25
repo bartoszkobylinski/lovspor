@@ -69,6 +69,7 @@ def test_clean_corpus_reports_no_findings(tmp_path: Path) -> None:
 
     assert report.findings == ()
     assert report.clean is True
+    assert report.corpus_root == str(tmp_path)
     assert report.documents_checked == 1
 
 
@@ -81,6 +82,9 @@ def test_detects_an_orphan_document_on_disk(tmp_path: Path) -> None:
     assert _kinds(report.findings) == [
         ("orphan_document", "lover/endr-i-kjøretøyforskriften.md"),
     ]
+    assert report.findings[0].detail == (
+        "file is in the corpus but no manifest record refers to it"
+    )
     assert report.clean is False
 
 
@@ -179,6 +183,7 @@ def test_detects_an_orphan_embedding_sidecar(tmp_path: Path) -> None:
     report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven")))
 
     assert _kinds(report.findings) == [("orphan_embedding", "lover/embeddings/spøkelse.bin")]
+    assert report.findings[0].detail == "embedding sidecar with no current manifest record"
 
 
 def test_a_removed_record_does_not_own_a_leftover_embedding_sidecar(tmp_path: Path) -> None:
@@ -219,6 +224,9 @@ def test_detects_a_current_document_whose_embedding_sidecar_is_missing(tmp_path:
 
     assert _kinds(report.findings) == [("missing_embedding", "lover/embeddings/ny-lov.bin")]
     assert report.findings[0].doc_id == "nl2"
+    assert report.findings[0].detail == (
+        "current act has no embedding sidecar; semantic_search cannot reach it"
+    )
     assert report.integrity_findings == report.findings
 
 
