@@ -12,6 +12,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from lovspor.cli import app
+from tests.unit.cli_output import said
 from tests.unit.test_publish_emit import corpus  # noqa: F401 — fixture reuse
 
 runner = CliRunner()
@@ -71,7 +72,7 @@ class TestPublishSiteCommand:
         )
 
         assert result.exit_code != 0
-        assert "not a readable corpus commit" in result.output
+        assert said("not a readable corpus commit", result.output)
 
     def test_refuses_a_directory_that_is_not_a_git_repo(
         self,

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import stat
 from pathlib import Path
 
@@ -17,23 +16,12 @@ from lovspor.mcp import HttpConfig
 from lovspor.rendering.markdown_renderer import RENDERER_VERSION
 from lovspor.storage.manifest import MANIFEST_VERSION
 from lovspor.sync.orchestrator import SyncReport
+from tests.unit.cli_output import said
 
 runner = CliRunner()
 
 _AUTHKIT_DOMAIN = "https://vigilant-beacon-78-staging.authkit.app"
 _PUBLIC_URL = "https://lovspor.example.com/mcp"
-
-# Typer >= 0.12 renders --help through Rich panels, which interleave the
-# usage text with ANSI escape sequences and box-drawing characters. The
-# literal "Usage: lovspor [OPTIONS] COMMAND [ARGS]..." chunk only appears
-# contiguously after the ANSI is stripped — Rich does not honour NO_COLOR
-# for panel rendering. Local terminals with TERM=dumb don't trigger Rich,
-# which is why the gap reached CI rather than failing pre-push.
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-
-def _strip_ansi(s: str) -> str:
-    return _ANSI_RE.sub("", s)
 
 
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,16 +33,15 @@ def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_help_succeeds() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    plain = _strip_ansi(result.stdout)
-    assert "Usage: lovspor [OPTIONS] COMMAND [ARGS]..." in plain
-    assert "Norwegian law change tracker" in plain
-    assert "XXNorwegian law change tracker" not in plain
+    assert said("Usage: lovspor [OPTIONS] COMMAND [ARGS]...", result.stdout)
+    assert said("Norwegian law change tracker", result.stdout)
+    assert not said("XXNorwegian law change tracker", result.stdout)
 
 
 def test_no_args_shows_help() -> None:
     result = runner.invoke(app, [])
     assert result.exit_code == 2
-    assert "Usage: lovspor [OPTIONS] COMMAND [ARGS]..." in _strip_ansi(result.stdout)
+    assert said("Usage: lovspor [OPTIONS] COMMAND [ARGS]...", result.stdout)
 
 
 def test_completion_options_are_not_registered() -> None:
@@ -94,29 +81,29 @@ def test_unknown_command_fails_cleanly() -> None:
 def test_seed_help_mentions_empty_corpus() -> None:
     result = runner.invoke(app, ["seed", "--help"])
     assert result.exit_code == 0
-    assert "Initial population" in result.stdout
+    assert said("Initial population", result.stdout)
 
 
 def test_sync_help_mentions_incremental() -> None:
     result = runner.invoke(app, ["sync", "--help"])
     assert result.exit_code == 0
-    assert "Incremental sync" in result.stdout
+    assert said("Incremental sync", result.stdout)
 
 
 def test_mcp_help_mentions_sixteen_tools_and_optional_semantic_search_key() -> None:
     result = runner.invoke(app, ["mcp", "--help"])
     assert result.exit_code == 0
-    assert "Sixteen read-only tools" in result.stdout
-    assert "OPENAI_API_KEY" in result.stdout
-    assert "semantic_search" in result.stdout
-    assert "other fifteen" in result.stdout
-    assert "tools work normally" in result.stdout
+    assert said("Sixteen read-only tools", result.stdout)
+    assert said("OPENAI_API_KEY", result.stdout)
+    assert said("semantic_search", result.stdout)
+    assert said("other fifteen", result.stdout)
+    assert said("tools work normally", result.stdout)
 
 
 def test_repair_embeddings_command_is_registered() -> None:
     result = runner.invoke(app, ["repair-embeddings", "--help"])
     assert result.exit_code == 0
-    assert "repair-embeddings" in _strip_ansi(result.stdout)
+    assert said("repair-embeddings", result.stdout)
 
 
 def test_repair_embeddings_invokes_mark_and_reports_count(
@@ -623,7 +610,7 @@ def test_sync_surfaces_config_error_on_missing_env(
 def test_fetch_corpus_command_is_registered() -> None:
     result = runner.invoke(app, ["fetch-corpus", "--help"])
     assert result.exit_code == 0
-    assert "fetch-corpus" in _strip_ansi(result.stdout)
+    assert said("fetch-corpus", result.stdout)
 
 
 def test_fetch_corpus_reports_action_and_path(
