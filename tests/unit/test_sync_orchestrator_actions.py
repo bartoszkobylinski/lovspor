@@ -235,6 +235,26 @@ class TestChangedDocumentPhaseTwo:
         assert stored["lov-1"].markdown_path == "lover/gamma.md"
         assert stored["lov-2"].markdown_path == "lover/alfa.md"
 
+    def test_a_keyed_new_doc_taking_the_vacated_slot_keeps_its_sidecar(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        embedder = _LocalEmbedder()
+        settings = _corpus(tmp_path, [_ALFA], embedder)
+        repo = settings.lovverk_repo_path
+        _serve(
+            monkeypatch,
+            [_doc("lov-1", "gamma", "Changed text."), _doc("lov-2", "alfa", "Newcomer text.")],
+            embedder,
+        )
+
+        run_sync(settings)
+
+        tracked = _tracked(repo)
+        assert {"lover/embeddings/alfa.bin", "lover/embeddings/gamma.bin"} <= tracked
+        assert (repo / "lover" / "embeddings" / "alfa.bin").exists()
+
     def test_a_keyed_move_into_a_slot_another_doc_vacated_keeps_the_new_sidecar(
         self,
         tmp_path: Path,
