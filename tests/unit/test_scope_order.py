@@ -39,6 +39,36 @@ INTERLEAVED = [
     "test_b.py::test_two",
 ]
 
+CLASS_SOURCE = """\
+import pytest
+
+@pytest.fixture(scope="class")
+def built(request):
+    with open("setups.txt", "a") as handle:
+        handle.write(f"{request.cls.__name__}\\n")
+
+class TestA:
+    def test_one(self, built):
+        pass
+
+    def test_two(self, built):
+        pass
+
+class TestB:
+    def test_one(self, built):
+        pass
+
+    def test_two(self, built):
+        pass
+"""
+
+INTERLEAVED_CLASSES = [
+    "test_classes.py::TestA::test_one",
+    "test_classes.py::TestB::test_one",
+    "test_classes.py::TestA::test_two",
+    "test_classes.py::TestB::test_two",
+]
+
 
 def _by_chain(chains: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
     return grouped_by_scope(chains, lambda chain: chain[:-1])
@@ -94,6 +124,31 @@ def _setups(tmp_path: Path, *plugin: str) -> list[str]:
     return (tmp_path / "setups.txt").read_text().split()
 
 
+def _class_setups(tmp_path: Path, *plugin: str) -> list[str]:
+    (tmp_path / "test_classes.py").write_text(CLASS_SOURCE)
+    (tmp_path / "pytest.ini").write_text("[pytest]\n")
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            *plugin,
+            *INTERLEAVED_CLASSES,
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return (tmp_path / "setups.txt").read_text().split()
+
+
 class TestNamedNodeIdsInAnInterleavedOrder:
     def test_without_the_hook_each_module_fixture_is_rebuilt_at_every_switch(
         self, tmp_path: Path
@@ -102,3 +157,6 @@ class TestNamedNodeIdsInAnInterleavedOrder:
 
     def test_with_the_hook_each_module_fixture_is_built_once(self, tmp_path: Path) -> None:
         assert _setups(tmp_path, "-p", "tests.scope_order") == ["a", "b"]
+
+    def test_with_the_hook_each_class_fixture_is_built_once(self, tmp_path: Path) -> None:
+        assert _class_setups(tmp_path, "-p", "tests.scope_order") == ["TestA", "TestB"]
