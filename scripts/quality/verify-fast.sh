@@ -23,5 +23,6 @@ check ruff-check uv run ruff check
 check ruff-format uv run ruff format --check
 check mypy uv run mypy src/
 check ratchets uv run python scripts/quality/check_ratchets.py
+check boundaries uv run python scripts/quality/check_boundaries.py
 
 finish verify-fast
