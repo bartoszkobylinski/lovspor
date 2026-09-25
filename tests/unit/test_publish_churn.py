@@ -25,7 +25,15 @@ REDIRECT_ARTIFACTS = frozenset({Path("redirect-map.json"), Path("redirects.caddy
 def _commit_later(repo: Path, message: str) -> str:
     """Commit on a later day than the fixture, so lastmod-bearing artifacts can move."""
     later = "2026-03-01T00:00:00Z"
-    env = {**os.environ, "GIT_AUTHOR_DATE": later, "GIT_COMMITTER_DATE": later}
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_DATE": later,
+        "GIT_COMMITTER_DATE": later,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True, env=env)
     subprocess.run(
         ["git", "commit", "-q", "-m", message], cwd=repo, check=True, capture_output=True, env=env
@@ -163,4 +171,30 @@ class TestIdentityChurn:
         touched_evidence = (changed & evidence) - browse
         assert touched_evidence == set()
         assert Path("lov/nyloven/index.html") in after
+        assert Path("lov/index.html") in changed
+
+    def test_removing_a_document_leaves_every_surviving_evidence_page_byte_identical(
+        self,
+        corpus: tuple[Path, str],  # noqa: F811
+        tmp_path: Path,
+    ) -> None:
+        repo, pinned = corpus
+        (repo / "lover/testloven.md").unlink()
+        manifest_path = repo / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["documents"]["doc-1"]["status"] = "removed"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        updated = _commit_later(repo, "membership update: removed document")
+
+        before, after = _build_pair(repo, (pinned, updated), tmp_path)
+        changed = _changed(before, after)
+
+        surviving_evidence = {
+            path
+            for path in before.keys() & after.keys()
+            if path.name in {"index.html", "index.json"} and len(path.parts) > 2
+        }
+        assert changed.isdisjoint(surviving_evidence)
+        assert not any(_under(path, "lov/testloven") for path in after)
+        assert Path("lov/testloven/index.html") in changed
         assert Path("lov/index.html") in changed
