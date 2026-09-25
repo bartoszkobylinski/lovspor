@@ -1,7 +1,12 @@
 """Contract tests for the PR-scoped Mutmut 3 runner."""
 
+import importlib.util
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -151,6 +156,102 @@ class TestBudget:
         assert '[ "$run_status" -eq 124 ] || [ "$run_status" -eq 137 ]' in body
         assert "mutation budget exceeded:" in body
         assert "budget_exceeded=1" in body
+
+
+SILENT_MUTMUT = "#!/bin/sh\nexec sleep 30\n"
+SPINNER_MUTMUT = "#!/bin/sh\nprintf 'collecting stats\\r'\nexec sleep 30\n"
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _repo_with_one_changed_function(tmp_path: Path, mutmut: str) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "scripts" / "ci").mkdir(parents=True)
+    (repo / "src" / "lovspor").mkdir(parents=True)
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    (repo / "scripts" / "mutmut-pr.sh").write_bytes(SCRIPT.read_bytes())
+    scope = REPO_ROOT / "scripts" / "ci" / "mutation_scope.py"
+    (repo / "scripts" / "ci" / "mutation_scope.py").write_bytes(scope.read_bytes())
+    (repo / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    fake = repo / ".venv" / "bin" / "mutmut"
+    fake.write_text(mutmut, encoding="utf-8")
+    fake.chmod(0o755)
+    module = repo / "src" / "lovspor" / "mod.py"
+    module.write_text("def answer() -> int:\n    return 1\n", encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "scripts", "src")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base")
+    _git(repo, "tag", "base")
+    module.write_text("def answer() -> int:\n    return 2\n", encoding="utf-8")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "change")
+    return repo
+
+
+@pytest.mark.skipif(shutil.which("timeout") is None, reason="needs timeout(1)")
+class TestBudgetKillBeforeFirstTally:
+    """Issue #365: the budget can expire during stats or the clean-test pass."""
+
+    def _run(self, tmp_path: Path) -> subprocess.CompletedProcess[str]:
+        repo = _repo_with_one_changed_function(tmp_path, SILENT_MUTMUT)
+        return subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"},
+            timeout=60,
+            check=False,
+        )
+
+    def test_is_reported_as_the_budget_not_as_a_missing_progress_line(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path)
+
+        assert "mutation budget exceeded: after 1s" in result.stdout
+        assert "no progress line" not in result.stderr
+        assert result.returncode == 16
+
+    def test_names_every_mutant_unmeasured(self, tmp_path: Path) -> None:
+        result = self._run(tmp_path)
+
+        assert "no mutant was measured before the budget ran out" in result.stdout
+
+    def test_budget_verdict_starts_after_spinner_line(self, tmp_path: Path) -> None:
+        repo = _repo_with_one_changed_function(tmp_path, SPINNER_MUTMUT)
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            env={**os.environ, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"},
+            timeout=60,
+            check=False,
+        )
+
+        assert b"collecting stats\r\nmutation budget exceeded: after 1s" in result.stdout
+
+    def test_the_gate_reads_it_as_the_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = self._run(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        verdict = _mutation_to_json().build_result(
+            "0" * 40, result.stdout + result.stderr, result.returncode
+        )
+
+        assert verdict["gate"] == {"passed": False, "reason": "budget_exceeded"}
+
+
+def _mutation_to_json() -> ModuleType:
+    path = REPO_ROOT / "scripts" / "ci" / "mutation_to_json.py"
+    spec = importlib.util.spec_from_file_location("mutation_to_json", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class TestScoreReport:
