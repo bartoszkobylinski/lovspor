@@ -153,7 +153,7 @@ Local layout:
 | Types | `mypy` strict mode | Wired into CI + the fast gate (pre-commit stage); see §9d |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
 | Mutation | `mutmut == 3.8.0` | Function-scoped per-PR runs; see §9 and §9c |
-| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + fail-closed security scan + unit suite) |
+| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets, release contracts); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + fail-closed security scan + unit suite) |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
 | XML | `lxml` with `resolve_entities=False, huge_tree=False` (when added) | XXE / billion-laughs mitigation |
@@ -281,7 +281,7 @@ The suite was ~99% of the commit's cost, which defeats an agent's edit → gate 
 **Mechanism.**
 
 - `.pre-commit-config.yaml` names no check. Its pre-commit stage runs `scripts/quality/verify-fast.sh` and its pre-push stage `scripts/quality/verify-deep.sh`. `default_install_hook_types: [pre-commit, pre-push]` makes a plain `pre-commit install` (which `scripts/bootstrap.sh` runs) install both; a clone with hooks installed before this change re-runs it to add pre-push.
-- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/` and the size and complexity ratchets (`scripts/quality/check_ratchets.py`). It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
+- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/`, the size and complexity ratchets (`scripts/quality/check_ratchets.py`) and the release contracts (§9h). It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
 - `verify-deep.sh` runs `verify-fast.sh`, then `uv run pytest tests/unit/ -q -m "not network"` (a test gated on a live third-party credential reports the operator's key, not the change — #359), and does not start the suite when the fast gate failed. Re-running the fast gate at push costs about a second and still catches a commit made before the hooks were installed.
 - Under the hook, pre-commit stashes unstaged changes, so the commit stage checks what is being committed; run by hand, the script checks the working tree.
 - Hook and script cannot drift because the config holds no check to drift. Two test files pin that: `tests/unit/test_quality_hook_config.py` has pre-commit itself resolve which script each stage reaches, and `tests/unit/test_quality_fast_gate.py` runs both scripts against stub tools.
@@ -327,6 +327,21 @@ The interpreter is pinned mechanically: the run is refused below Python 3.12 rat
 **Scope is `src/`**, the posture already declared in §8 and where #253 happened. `tests/` and `scripts/` are covered by ruff's flake8-bandit (`S`) rules, which run repo-wide in the fast gate on every commit. Their four MEDIUM bandit findings — three `B108` in `tests/unit/test_sources_lovdata.py`, one `B314` in `scripts/ci/codex_convergence.py` — already carry reviewed `# noqa` waivers, and bandit does not read `# noqa`. Scanning those trees here would re-raise four already-adjudicated findings under a second waiver vocabulary.
 
 **Where it runs.** Measured 1.8 s over 142 files, so it belongs to the push-time deep gate rather than the commit loop. CI runs it as a step inside `fast-ci`, which is criterion 12: a bypassed or uninstalled local hook must not produce a false-green PR. A step and not a new job, because the `main-branch-protection` ruleset requires `fast-ci`, `mutation` and the three `test` legs **by name** — a new job would not block a merge until the owner edited that required set, which is the very false-green the gate exists to prevent. `tests/unit/test_quality_fast_gate.py` and `tests/unit/test_agentic_ci_workflows.py` pin both placements, so a refactor cannot quietly drop the gate.
+
+## 9h. Release contracts in the fast gate
+
+Decided 2026-09-25, issue #323 (Phase D1/D2, step 4 of the owner's 2026-09-15 split). **No ADR**, for the reason given in §9d. The contracts encode no new rule: D1 is the fix already shipped for #316/#317, D2 is the crash table of ADR-0014 Decision 6 as `release/control.py` implements it. (§9g is left to the Phase C/D3 boundary check, PR #398.)
+
+**What runs.** One named module, `tests/unit/test_release_contracts.py`, as the fast gate's `release-contracts` check. Decision 1 moved the *unit suite* out of the commit loop; the issue's fast layer names "selected tiny contract tests", and this is the one selection. The pin in `tests/unit/test_quality_fast_gate.py` says so: the only pytest run the fast gate may make is that module, never `tests/unit/`.
+
+- **D1, path identity.** The fake Caddy hides every imported file by the path it was imported from, and the first test proves it does (a pair adapted at `.next` differs from the one at the active path), so the rest cannot pass vacuously. Commit, the revert after a failed reload, and reconcile's complete and abandon must each end with R equal to the release's pair *at the active fragment's path*.
+- **D2, fail closed.** `situation()` is swept over its whole 108-triple domain (three release ids × two hashes for R and D, three markers): every row other than foreign must show its own evidence, and the partition is pinned (reconciled 6, reloaded 8, staged 16, foreign 78). `live_release`, `commit_release`, `rollback`, `prune` and `reconcile` each refuse a hand-reloaded, a marked-but-not-running and an unobservable host, and leave its files and reload count untouched; `--complete` refuses a disk naming no release.
+
+**Proved against regressions**, each by breaking `src/` and restoring it: the commit, the revert and the abandon comparing R with a pair adapted at `.next` or in the release (1 failure each); an R = D naming nothing beside a marker read as reconciled (10); staged without R naming M's release (33); commit skipping its reconciled check (2); complete accepting a disk naming no release (1).
+
+**Cost.** 131 tests, 1.7–1.9 s inside pytest, 2.2–2.3 s wall. About 1.1 s of it is building the two real envelopes D1 needs, once per module; D2 needs no build. `verify-fast.sh` measured 1.11–1.15 s warm without the check and 3.40–3.63 s with it, on one machine.
+
+**CI stays authoritative.** The module lives in `tests/unit/`, so fast-ci and the Test matrix run it on every PR like any other unit test; the deeper suites (`test_release_control.py`, `test_release_migrate.py`, the real-Caddy rehearsal) are unchanged.
 
 ## 10. Workflow — how Claude works here
 
