@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import re
 import subprocess
 import sys
@@ -231,6 +233,57 @@ def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
     )
     assert working_checkout["if"] == "steps.gate.outputs.run == 'true'"
     assert names.index(blocked["name"]) < names.index(working_checkout.get("name"))
+
+
+_UNMEASURED_BLOCK = "BLOCKED — mutants got no verdict, tests cannot fix an unmeasured surface"
+
+
+def _decide_outputs(tmp_path: Path, reason: str, passed: bool) -> dict[str, str]:
+    """Run the real decision step against a result carrying `reason`."""
+    run = _named_step(
+        _steps("mutation-remediation.yml", "remediate"),
+        "Validate result as data; decide whether remediation applies",
+    )["run"]
+    run = run.replace("${{ runner.temp }}", str(tmp_path))
+    run = run.replace("${{ steps.artifact.outcome }}", "success")
+    (tmp_path / "mutation").mkdir()
+    result = {
+        "schema_version": 1,
+        "commit": "a" * 40,
+        "gate": {"passed": passed, "reason": reason},
+        "survivors": [],
+    }
+    (tmp_path / "mutation" / "mutation-result.json").write_text(json.dumps(result))
+    outputs = tmp_path / "outputs"
+    env = {"PATH": os.environ["PATH"], "HEAD_SHA": "a" * 40, "GITHUB_OUTPUT": str(outputs)}
+    subprocess.run(["bash", "-eu", "-o", "pipefail", "-c", run], env=env, check=True)
+    lines = outputs.read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines)
+
+
+def test_remediation_routes_unmeasured_mutants_to_a_human_not_codex(tmp_path: Path) -> None:
+    """Issue #283: a signal-killed mutant got no verdict — tests cannot kill
+    what was never measured, so Codex must not get the round."""
+    outputs = _decide_outputs(tmp_path, "unmeasured_mutants", passed=False)
+
+    assert outputs == {"run": "false", "signal_killed": "true"}
+
+
+def test_surviving_mutants_still_reach_codex(tmp_path: Path) -> None:
+    outputs = _decide_outputs(tmp_path, "surviving_mutants", passed=False)
+
+    assert outputs == {"run": "true"}
+
+
+def test_the_unmeasured_block_labels_the_pr_before_any_codex_step() -> None:
+    steps = _steps("mutation-remediation.yml", "remediate")
+    blocked = _named_step(steps, _UNMEASURED_BLOCK)
+    names = [step.get("name") for step in steps]
+
+    assert blocked["if"] == "steps.gate.outputs.signal_killed == 'true'"
+    assert '--add-label "needs-human:mutation"' in blocked["run"]
+    assert ".mutants.unmeasured" in blocked["run"]
+    assert names.index(blocked["name"]) < names.index("Resolve PR number and remediation cycle")
 
 
 @pytest.mark.parametrize(

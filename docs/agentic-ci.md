@@ -126,6 +126,12 @@ No numeric score threshold exists or was added. The gate in `mutation-result.jso
   The score counts only 🎉 killed, so other outcomes never inflate it. Gate FAIL → Codex remediation (≤ 2 `[agent:codex-mutation]`
   cycles) → then `needs-human:mutation` + BLOCKED. This automates the previous manual
   practice of Codex investigating survivors and proposing killer tests.
+- mutants that got no verdict → **FAIL**, reason `unmeasured_mutants` (issue #283). mutmut
+  files a child killed by a signal — including the `-9` its own CPU-limit escalation sends — as
+  "segfault", a bucket its progress line never prints but still counts in the `done` total.
+  `mutants.unmeasured` is that shortfall. It outranks the per-bucket reasons and, like
+  `budget_exceeded`, routes straight to `needs-human:mutation`: tests cannot kill a mutant that
+  was never measured.
 
 `mutation-result.json` (schema_version 1) is bound to the exact PR head SHA; a stale
 result is ignored by the remediation workflow. Artifact `mutation-result-<SHA>` (JSON +

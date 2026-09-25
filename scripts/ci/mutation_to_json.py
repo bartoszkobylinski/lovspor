@@ -6,7 +6,8 @@ policy. `mutation_gate.py` just reads the result. Policy mirrors the existing
 lovspor practice (no numeric threshold was ever set, decisions.md §9c):
 
 - "mutation not applicable" (release/packaging/docs PRs) is a valid PASS outcome;
-- surviving, timed-out, suspicious, and uncovered mutants each fail the gate;
+- surviving, timed-out, suspicious, and uncovered mutants each fail the gate,
+  as do mutants the run never gave a verdict (signal-killed, issue #283);
 - the wrapper preserves the pipeline's 2/4/8 compatibility bitfield for aggregate
   survived / timeout / suspicious state; survivors route the PR to Codex remediation and,
   after two cycles, to a human — the automated form of "investigate survived
@@ -89,17 +90,20 @@ BUDGET_EXCEEDED = "mutation budget exceeded:"
 FAILURE_LINE = re.compile(r"^(?:FAILED |ERROR |error: ).*", re.MULTILINE)
 
 
+COUNT_KEYS = ("total", "killed", "survived", "timeout", "invalid", "skipped", "no_tests")
+# Every bucket the progress line prints. Its `done` also counts the ones it
+# does not: mutmut files a signal-killed child (-9 after its own CPU limit,
+# -11) as "segfault" and never prints that bucket (issue #283).
+PRINTED_BUCKETS = ("killed", "no_tests", "timeout", "suspicious", "survived", "skipped")
+
+
 def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
     """Return (mutant counts, run_finished) from the last mutmut progress line."""
     last: dict[str, int] | None = None
     for m in MUTMUT_LINE.finditer(raw):
         last = {k: int(v) for k, v in m.groupdict().items()}
     if last is None:
-        empty = dict.fromkeys(
-            ("total", "killed", "survived", "timeout", "invalid", "skipped", "no_tests"),
-            0,
-        )
-        return empty, False
+        return dict.fromkeys((*COUNT_KEYS, "unmeasured"), 0), False
     counts = {
         "total": last["done"],
         "killed": last["killed"],
@@ -109,6 +113,8 @@ def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
         "skipped": last["skipped"],
         "no_tests": last["no_tests"],
     }
+    printed = sum(last[bucket] for bucket in PRINTED_BUCKETS) + last["type_checked"]
+    counts["unmeasured"] = max(last["done"] - printed, 0)
     return counts, last["done"] > 0
 
 
@@ -320,6 +326,9 @@ def compute_gate(counts: dict[str, int], health: RunHealth) -> dict[str, object]
     failures = (
         (not health.baseline_ok, "baseline_tests_failed"),
         (not health.completed, "run_incomplete"),
+        # Ahead of the per-bucket reasons for the budget's reason: a mutant
+        # with no verdict is beyond any test, so the PR must reach a human.
+        (counts.get("unmeasured", 0) > 0, "unmeasured_mutants"),
         (survivors_stand, "surviving_mutants"),
         (counts["timeout"] > 0 or bool(bits & 4), "timeout_mutants"),
         (counts["invalid"] > 0 or bool(bits & 8), "suspicious_mutants"),
