@@ -1798,6 +1798,23 @@ class TestNothingMeasured:
         assert result["completed"] is False
         assert result["score"] is None
 
+    @pytest.mark.parametrize(
+        ("raw", "reason"),
+        [
+            ("Failed to run clean test\n", "baseline_tests_failed"),
+            ("mutmut exited cleanly without progress\n", "run_incomplete"),
+        ],
+    )
+    def test_every_unfinished_zero_mutant_run_has_no_score(
+        self, tmp_path: Path, raw: str, reason: str
+    ) -> None:
+        result = _run(tmp_path, raw)
+
+        assert result["mutants"]["total"] == 0  # type: ignore[index]
+        assert result["completed"] is False
+        assert result["score"] is None
+        assert result["gate"] == {"passed": False, "reason": reason}
+
     def test_not_applicable_keeps_its_score(self, tmp_path: Path) -> None:
         result = _run(tmp_path, "mutation not applicable: no src/lovspor logic changed\n")
 
@@ -1820,6 +1837,20 @@ class TestNothingMeasured:
         captured = capsys.readouterr().out
         assert "Score: none — no mutant was measured" in captured
         assert "Gate: FAIL (tool_failed)" in captured
+
+    def test_a_measured_zero_score_is_not_reported_as_unmeasured(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _run(tmp_path, _progress_line(survived=1), survivors="7\n")
+        out_file = tmp_path / "result.json"
+
+        assert result["score"] == 0.0
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out_file)])
+            assert mutation_gate.main() == 0
+        captured = capsys.readouterr().out
+        assert "Total: 1 · Killed: 0 · Survived: 1 · Timeout: 0 · Score: 0.0" in captured
+        assert "no mutant was measured" not in captured
 
     def _unmeasured(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> str:
         with pytest.MonkeyPatch.context() as mp:
