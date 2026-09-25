@@ -4167,10 +4167,18 @@ class TestTheReloadBackIsTheCaddyfiles:
         assert running == adapt(droplet.caddy, droplet.plane.caddyfile, droplet.plane.fragment)
 
     def test_the_previous_caddyfile_is_written_readable_before_the_reload_and_the_backup_kept(
-        self, droplet: Droplet, strict_umask: None
+        self, droplet: Droplet, strict_umask: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _migrate(droplet)
         seen: list[tuple[str, int, str]] = []
+        writes: list[tuple[Path, int | None]] = []
+        real_atomic_write_bytes = migrate.atomic_write_bytes
+
+        def recording_write(path: Path, payload: bytes, *, mode: int | None = None) -> None:
+            writes.append((path, mode))
+            real_atomic_write_bytes(path, payload, mode=mode)
+
+        monkeypatch.setattr(migrate, "atomic_write_bytes", recording_write)
 
         def reload_back(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
             caddyfile = droplet.plane.caddyfile
@@ -4184,6 +4192,7 @@ class TestTheReloadBackIsTheCaddyfiles:
         rollback_first_migration(replace(droplet.plane, runner=runner), droplet.host)
 
         assert seen == [(OLD_CADDYFILE, 0o644, OLD_CADDYFILE)]
+        assert writes[0] == (droplet.plane.caddyfile, WORLD_READABLE)
         assert _loads(droplet, 0)[-1] == _rollback_reload(droplet)
 
     @pytest.mark.parametrize(("step", "marked"), [("reloaded", False), ("marked", True)])
