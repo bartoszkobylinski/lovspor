@@ -104,6 +104,24 @@ def _refuse_a_claimed_domain(
     raise typer.Exit(1)
 
 
-def _save(sources: dict[str, SourceRecord], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_registry(SourceRegistry(sources=sources), path)
+def _save(
+    sources: dict[str, SourceRecord], path: Path, consequence: str = "The register was not changed."
+) -> None:
+    """Write the register, or refuse the way an unreadable one is refused (#208).
+
+    The archive sits on external storage by design (ADR-0010 §5), so an
+    unmounted or read-only disk is its ordinary failure, and a traceback would
+    call that a bug. The write is atomic, so a refusal here always means the
+    file on disk is the one the command read — ``consequence`` says so, and a
+    command whose failure has a further meaning states that too.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_registry(SourceRegistry(sources=sources), path)
+    except OSError as exc:
+        typer.echo(
+            f"Refused: cannot write the source register at {path}: {exc}. "
+            f"Is the archive mounted and writable? {consequence}",
+            err=True,
+        )
+        raise typer.Exit(1) from exc
