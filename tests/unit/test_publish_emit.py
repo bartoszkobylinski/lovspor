@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,9 @@ import pytest
 import lovspor.publish.emit as publish_emit
 from lovspor.publish.emit import _committer_time, _deep_url, _resolver, _source_revisions, emit_site
 from lovspor.publish.inventory import PublishError, PublishInventory, build_inventory
+from lovspor.publish.pages import SITE_ORIGIN
 from lovspor.publish.sitemaps import SourceRevision
+from lovspor.site.routes import emitted_pages
 from lovspor.snapshot import CorpusSnapshot
 
 DOC = """---
@@ -686,6 +689,157 @@ class TestRedirectArtifacts:
         emit_site(repo, sha, out)
         assert "gammel" not in (out / "redirect-map.json").read_text(encoding="utf-8")
         assert "gammel" not in (out / "redirects.caddy").read_text(encoding="utf-8")
+
+
+class _Hrefs(HTMLParser):
+    """Every href/src of one page, and every id it carries (fragment targets)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[str] = []
+        self.ids: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del tag
+        for name, value in attrs:
+            if value is not None and name in ("href", "src"):
+                self.links.append(value)
+            if value is not None and name == "id":
+                self.ids.add(value)
+
+
+def _parsed(page: Path) -> _Hrefs:
+    parser = _Hrefs()
+    parser.feed(page.read_text(encoding="utf-8"))
+    return parser
+
+
+def _companion_urls(value: object) -> list[str]:
+    """Every string in a companion that names a page on this site."""
+    if isinstance(value, dict):
+        return [url for item in value.values() for url in _companion_urls(item)]
+    if isinstance(value, list):
+        return [url for item in value for url in _companion_urls(item)]
+    return [value] if isinstance(value, str) and value.startswith(SITE_ORIGIN + "/") else []
+
+
+def _site_path(link: str, page: str) -> str | None:
+    """The site path a link points at, or None for an external https link.
+
+    The closed href policy (ADR-0013 §2) admits site-relative canonical paths,
+    absolute URLs under the site origin, and approved https source links; a
+    bare fragment means the page itself. Anything else — a relative path, a
+    foreign scheme — cannot be shown to land on an emitted URL, so it is
+    returned as-is and fails the lookup.
+    """
+    if link.startswith("#"):
+        return page + link
+    if link.startswith(SITE_ORIGIN + "/"):
+        return link[len(SITE_ORIGIN) :]
+    if link.startswith("https://") and not link.startswith(SITE_ORIGIN):
+        return None
+    return link
+
+
+def _dead_links(out: Path) -> list[str]:
+    """``<page>: <link>`` for every internal link that lands on nothing emitted."""
+    site_pages = {page.path for page in emitted_pages()}
+    ids = {"/" + str(p.parent.relative_to(out)) + "/": _parsed(p).ids for p in out.rglob("*.html")}
+    sources = [(p, _parsed(p).links) for p in out.rglob("*.html")]
+    sources += [(p, _companion_urls(json.loads(p.read_bytes()))) for p in out.rglob("index.json")]
+    dead = []
+    for source, links in sources:
+        page = "/" + str(source.parent.relative_to(out)) + "/"
+        for link in links:
+            target = _site_path(link, page)
+            if target is not None and not _lands(out, target, (site_pages, ids)):
+                dead.append(f"{source.relative_to(out)}: {link}")
+    return dead
+
+
+def _lands(out: Path, target: str, emitted: tuple[set[str], dict[str, set[str]]]) -> bool:
+    """A corpus target must be an emitted file; any other path a site page."""
+    site_pages, ids = emitted
+    path, _, fragment = target.partition("#")
+    if not path.startswith("/"):
+        return False
+    if path.split("/")[1] not in ("lov", "forskrift"):
+        return path in site_pages and not fragment
+    served = out / path.lstrip("/") / "index.html" if path.endswith("/") else out / path[1:]
+    return served.is_file() and (not fragment or fragment in ids.get(path, set()))
+
+
+class TestInternalLinks:
+    """ADR-0013 Decision 8: no internal link in the built site points at a
+    non-emitted URL — walked over every emitted page and companion, not just
+    the one cross-reference the resolver test follows."""
+
+    def test_every_internal_link_lands_on_an_emitted_url(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        assert _dead_links(out) == []
+
+    def test_the_walk_sees_links_from_every_source_kind(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        """Guards the check itself: an empty walk would pass vacuously."""
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        page_links = _parsed(out / "lov/testloven/paragraf/1/index.html").links
+        assert "/forskrift/testforskriften/paragraf/2/" in page_links
+        assert "/observatory/" in page_links
+        parent = _companion_urls(
+            json.loads((out / "lov/testloven/paragraf/1/index.json").read_bytes())
+        )
+        assert f"{SITE_ORIGIN}/lov/testloven/" in parent
+
+    def test_a_link_to_a_retired_page_is_reported(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        target = out / "forskrift/testforskriften/paragraf/2"
+        for artifact in target.iterdir():
+            artifact.unlink()
+        target.rmdir()
+        dead = _dead_links(out)
+        assert "lov/testloven/paragraf/1/index.html: /forskrift/testforskriften/paragraf/2/" in dead
+
+    @pytest.mark.parametrize(
+        "link",
+        [
+            "/lov/ukjent/",
+            "/ukjent-side/",
+            "lov/testloven/",
+            "javascript:alert(1)",
+            f"{SITE_ORIGIN}/lov/testloven/#ingen-slik-id",
+            "/observatory/#fragment",
+        ],
+    )
+    def test_links_that_land_on_nothing_emitted_are_refused(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+        link: str,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        page = out / "lov/testloven/index.html"
+        html = page.read_text(encoding="utf-8")
+        page.write_text(html.replace("</body>", f'<a href="{link}">x</a></body>'), encoding="utf-8")
+        assert _dead_links(out) == [f"lov/testloven/index.html: {link}"]
 
 
 class TestRevisionLogParser:
