@@ -3254,6 +3254,29 @@ class TestOfflineRollbackKilledBeforeItsRestart:
         assert (report.restarted, report.socket_removed) == ("caddy", True)
         _assert_pre_envelope(droplet)
 
+    def test_an_absent_drop_in_record_survives_the_failed_restart(self, droplet: Droplet) -> None:
+        """The alternate backup name is also kept until the restored files are loaded."""
+        droplet.host.drop_in.unlink()
+        _migrate(droplet)
+
+        with pytest.raises(Killed):
+            offline_rollback(_dies_at(droplet, ("systemctl", "restart")), droplet.host)
+
+        assert not droplet.host.drop_in.exists()
+        assert droplet.host.absent_drop_in.is_file()
+        assert droplet.host.previous_caddyfile.is_file()
+
+        report = offline_rollback(droplet.plane, droplet.host)
+
+        assert report.restarted == "caddy"
+        assert not droplet.host.drop_in.exists()
+        assert not droplet.host.absent_drop_in.exists()
+        assert not droplet.host.previous_caddyfile.exists()
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert read_marker(droplet.releases) is None
+        assert droplet.caddy.exec_reload == STOCK_EXEC_RELOAD
+        assert preflight(droplet.plane, droplet.host, droplet.a).content_id == droplet.a
+
     def test_the_backups_are_consumed_once_the_restart_worked(self, droplet: Droplet) -> None:
         _migrate(droplet)
         kept: list[bool] = []
