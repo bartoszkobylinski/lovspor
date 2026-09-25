@@ -558,7 +558,7 @@ Pseudo-warunek:
 ```yaml
 needs: [fast-ci, codex-tests]
 if: >-
-  always() &&
+  !cancelled() &&
   needs.fast-ci.result == 'success' &&
   needs.codex-tests.result == 'success' &&
   needs.codex-tests.outputs.pushed != 'true'
