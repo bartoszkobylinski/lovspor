@@ -61,6 +61,13 @@ class TestTreeDigest:
 
         assert digest_script.tree_digest(tree) == before
 
+    def test_permissions_do_not_matter(self, tmp_path: Path) -> None:
+        tree = _write(tmp_path / "one", FILES)
+        before = digest_script.tree_digest(tree)
+        (tree / "index.json").chmod(0o444)
+
+        assert digest_script.tree_digest(tree) == before
+
     def test_listing_uses_forward_slashes_in_utf8_byte_order(self, tmp_path: Path) -> None:
         tree = _write(tmp_path / "one", {"ø/x": b"1", "z/x": b"2", "a/x": b"3"})
 
@@ -89,6 +96,13 @@ class TestTreeDigest:
         (renamed / "index.json").rename(renamed / "Index.json")
 
         assert digest_script.tree_digest(base) != digest_script.tree_digest(renamed)
+
+    def test_removing_a_file_moves_the_digest(self, tmp_path: Path) -> None:
+        base = _write(tmp_path / "one", FILES)
+        missing = _write(tmp_path / "two", FILES)
+        (missing / "index.json").unlink()
+
+        assert digest_script.tree_digest(base) != digest_script.tree_digest(missing)
 
     def test_empty_directories_are_not_part_of_the_tree(self, tmp_path: Path) -> None:
         base = _write(tmp_path / "one", FILES)
