@@ -1564,12 +1564,15 @@ class TestTheInstallWindow:
     """(a) writes three files; a crash between two of them must leave a bootable box."""
 
     def _dying_caddyfile_write(self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The process dies as the new Caddyfile is being installed."""
+        """The process dies as the new Caddyfile is being installed — once, so the recovery's
+        own write of the Caddyfile is the real one."""
         real = migrate.atomic_write_bytes
+        died: list[str] = []
 
         def dying(path: Path, payload: bytes, *, mode: int | None = None) -> None:
-            if path == droplet.plane.caddyfile:
-                raise Killed("installing the Caddyfile")
+            if path == droplet.plane.caddyfile and not died:
+                died.append("installing the Caddyfile")
+                raise Killed(died[0])
             real(path, payload, mode=mode)
 
         monkeypatch.setattr(migrate, "atomic_write_bytes", dying)
@@ -2537,7 +2540,7 @@ class TestRollback:
         Only the first call dies, so the second run is the real recovery
         rather than a test that undid the fixture's environment with it.
         """
-        real = migrate._restore_files
+        real = migrate._put_files_back
         died: list[str] = []
 
         def dying(plane: ControlPlane, host: MigrationHost) -> None:
@@ -2546,12 +2549,12 @@ class TestRollback:
                 raise Killed(died[0])
             real(plane, host)
 
-        monkeypatch.setattr(migrate, "_restore_files", dying)
+        monkeypatch.setattr(migrate, "_put_files_back", dying)
 
     def test_a_rollback_that_dies_before_the_restore_leaves_the_backup(
         self, droplet: Droplet, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """`_restore_files` consumes `Caddyfile.pre-envelope`. Removing the marker
+        """`_restore_pre_envelope` consumes `Caddyfile.pre-envelope`. Removing the marker
         after it meant a crash between the two left the marker with the backup
         already gone: every later rollback hit the `nothing to restore` refusal,
         and `reconcile` — which ignores the host once a marker exists — dialled
@@ -3206,6 +3209,68 @@ class TestOfflineRollback:
             offline_rollback(plane, droplet.host)
 
         assert stat.S_ISSOCK(droplet.socket_file.lstat().st_mode)
+
+
+def _dies_at(droplet: Droplet, prefix: tuple[str, ...]) -> ControlPlane:
+    def die(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+        raise Killed(" ".join(argv))
+
+    return replace(droplet.plane, runner=Sabotaged(droplet.caddy, prefix, die))
+
+
+class TestOfflineRollbackKilledBeforeItsRestart:
+    """#318: the backups are the only sources, so they outlive the restart that loads them.
+
+    Consumed before the restart, a kill between the two left the previous
+    Caddyfile on disk and nothing running it, with no backup — and every
+    supported way back refuses a host with no backup.
+    """
+
+    @pytest.mark.parametrize("step", [("systemctl", "daemon-reload"), ("systemctl", "restart")])
+    def test_running_it_again_finishes_the_restore(
+        self, droplet: Droplet, step: tuple[str, ...]
+    ) -> None:
+        _migrate(droplet)
+        droplet.caddy.admin_up = False
+        with pytest.raises(Killed):
+            offline_rollback(_dies_at(droplet, step), droplet.host)
+        assert droplet.host.previous_caddyfile.is_file()
+
+        report = offline_rollback(droplet.plane, droplet.host)
+
+        assert report.restarted == "caddy"
+        _assert_pre_envelope(droplet)
+
+    def test_a_stranded_host_is_recovered_by_running_it_again(self, droplet: Droplet) -> None:
+        """The state the issue names: the cutover refused on the socket, the offline
+        rollback's restart never ran, the socket still running the previous configuration."""
+        _refuse_the_cutover(droplet)
+        with pytest.raises(Killed):
+            offline_rollback(_dies_at(droplet, ("systemctl", "restart")), droplet.host)
+        assert droplet.caddy.admin_address == droplet.host.socket_admin
+
+        report = offline_rollback(droplet.plane, droplet.host)
+
+        assert (report.restarted, report.socket_removed) == ("caddy", True)
+        _assert_pre_envelope(droplet)
+
+    def test_the_backups_are_consumed_once_the_restart_worked(self, droplet: Droplet) -> None:
+        _migrate(droplet)
+        kept: list[bool] = []
+
+        def restart(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            kept.append(droplet.host.previous_caddyfile.is_file())
+            kept.append(droplet.host.previous_drop_in.is_file())
+            return droplet.caddy.run(argv, env)
+
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("systemctl", "restart"), restart)
+        )
+
+        offline_rollback(plane, droplet.host)
+
+        assert kept == [True, True]
+        _assert_pre_envelope(droplet)
 
 
 class TestRetire:
@@ -4207,7 +4272,7 @@ class TestTheReloadBackIsTheCaddyfiles:
 def _stop_the_restore(droplet: Droplet, monkeypatch: pytest.MonkeyPatch) -> None:
     """A rollback after a real cutover, killed as its file restore begins: R = D, no marker."""
     _migrate(droplet)
-    _die_once_in(monkeypatch, "_restore_files")
+    _die_once_in(monkeypatch, "_put_files_back")
     with pytest.raises(Killed):
         rollback_first_migration(droplet.plane, droplet.host)
     assert droplet.caddy.admin_address == DEFAULT_TCP

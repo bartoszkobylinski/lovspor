@@ -819,7 +819,7 @@ def _install_files(plane: ControlPlane, host: MigrationHost) -> None:
     the fragment arriving early changes nothing about what is served.
 
     The drop-in's backup is taken first, before the Caddyfile's: the two
-    together are the way back and ``_restore_files`` needs both, so the
+    together are the way back and ``_restore_pre_envelope`` needs both, so the
     window in which one exists without the other is one statement wide.
     """
     _require_install_targets(plane, host)
@@ -1098,9 +1098,9 @@ def _require_backup(host: MigrationHost) -> None:
     """The rollback's only sources. ``--retire`` removes them last; after that there is no way
     back.
 
-    A symlink at any of the names is not a source: ``_restore_files``
-    renames the Caddyfile backup over the live Caddyfile, which moves the
-    link and not its target, and reads the drop-in backup through it.
+    A symlink at any of the names is not a source: ``_restore_pre_envelope``
+    reads both backups' bytes, which would follow a link to whatever it
+    points at, and restores that instead of what the migration wrote.
     """
     for backup in (host.previous_caddyfile, host.previous_drop_in, host.absent_drop_in):
         if backup.is_symlink():
@@ -1113,8 +1113,8 @@ def _require_backup(host: MigrationHost) -> None:
     _require_drop_in_backup(host)
 
 
-def _restore_drop_in(host: MigrationHost) -> None:
-    """The drop-in as the backup found it, absence included; the backup is consumed.
+def _put_drop_in_back(host: MigrationHost) -> None:
+    """The drop-in as the backup found it, absence included; the record is kept.
 
     Which of the three states comes back is read off the *name* that
     holds the record, never off its length. Restoring an assumed
@@ -1124,49 +1124,47 @@ def _restore_drop_in(host: MigrationHost) -> None:
     answer: bytes at ``.pre-envelope`` are put back as they are, empty
     included, and ``.pre-envelope.absent`` removes the drop-in.
 
-    The drop-in moves first and the record is consumed second, so a crash
-    between them leaves the record and a re-runnable rollback rather than
-    a restored file with nothing left saying what it was.
-
-    Every move acts on the name and not on a link's target: ``os.replace``
-    under ``atomic_write_bytes`` replaces a symlink rather than writing
-    through it, and ``unlink`` takes the link. The sources are guarded by
-    ``_require_backup``, which will not read a symlink as a backup.
+    Every write and unlink acts on the name, never a link's target; the
+    sources are guarded by ``_require_backup``, which refuses a symlink.
     """
     if host.absent_drop_in.is_file():
         host.drop_in.unlink(missing_ok=True)
-        host.absent_drop_in.unlink()
         return
     atomic_write_bytes(host.drop_in, host.previous_drop_in.read_bytes(), mode=WORLD_READABLE)
-    host.previous_drop_in.unlink()
 
 
-def _restore_files(plane: ControlPlane, host: MigrationHost) -> None:
-    """The reverse of (a): the previous Caddyfile back, the fragment gone, the drop-in as it
-    was, loaded. Both records are consumed, so a later migration starts clean."""
-    _require_backup(host)
-    host.previous_caddyfile.replace(plane.caddyfile)
+def _put_files_back(plane: ControlPlane, host: MigrationHost) -> None:
+    """The reverse of (a), loaded, with both backups kept: repeating it rewrites the same bytes."""
+    atomic_write_bytes(plane.caddyfile, host.previous_caddyfile.read_bytes(), mode=WORLD_READABLE)
     plane.fragment.unlink(missing_ok=True)
     plane.next_fragment.unlink(missing_ok=True)
-    _restore_drop_in(host)
+    _put_drop_in_back(host)
     _daemon_reload(plane.runner)
 
 
-def _restore_pre_envelope(plane: ControlPlane, host: MigrationHost) -> bool:
-    """M goes before the files, and neither moves without a backup to restore.
+def _consume_backups(host: MigrationHost) -> None:
+    """Last, so a crash before it leaves every source and a re-runnable rollback (#318)."""
+    host.previous_caddyfile.unlink()
+    host.absent_drop_in.unlink(missing_ok=True)
+    host.previous_drop_in.unlink(missing_ok=True)
 
-    ``_restore_files`` consumes both ``.pre-envelope`` backups, the
-    rollback's only sources. Removing the marker after it left a crash window whose
-    state has no way out: the marker says a release is live while the
-    backup is gone, so every later rollback hits *nothing to restore* and
-    ``reconcile`` — which ignores the host once a marker exists — dials
-    the socket the reload just closed. The other order's window keeps the
-    backup, and a marker-less host is exactly what ``reconcile`` reads on
-    whichever address answers.
+
+def _restore_pre_envelope(
+    plane: ControlPlane, host: MigrationHost, load: Callable[[], None] | None = None
+) -> bool:
+    """M goes before the files, the backups go last, and nothing moves without them.
+
+    Removing the marker after the backups left a marker naming a live
+    release with no backup: every later rollback hits *nothing to restore*
+    and ``reconcile`` ignores a host with a marker. ``load`` runs before
+    the backups go, so a crash inside it leaves both for a second run (#318).
     """
     _require_backup(host)
     removed = _remove_marker(plane)
-    _restore_files(plane, host)
+    _put_files_back(plane, host)
+    if load is not None:
+        load()
+    _consume_backups(host)
     return removed
 
 
@@ -1343,7 +1341,7 @@ def _reload_previous(plane: ControlPlane, host: MigrationHost) -> None:
     the configuration hid ``….pre-envelope`` and equalled neither what the
     restored Caddyfile adapts to nor what ran before the migration; from its
     own path it is both. The write is atomic and keeps the backup, so
-    ``_restore_files`` still moves it, over identical bytes.
+    ``_restore_pre_envelope`` still copies it, over identical bytes.
 
     Killed after the write and before the reload, the host has the previous
     Caddyfile on disk while R is still the envelope — or, stranded by a
@@ -1418,6 +1416,9 @@ def offline_rollback(plane: ControlPlane, host: MigrationHost) -> RollbackReport
     an observation: the previous Caddyfile is restored and the unit is
     restarted, which loads it whole. Verify afterwards, by hand.
 
+    The restart runs before the backups are consumed (#318): a kill before
+    it would otherwise leave no backup, which every way back refuses.
+
     The socket's name is asked about before anything moves — a symlink or
     any other file there is refused, never followed — and a socket file
     standing there goes only after the restart worked. With the drop-in
@@ -1426,8 +1427,7 @@ def offline_rollback(plane: ControlPlane, host: MigrationHost) -> RollbackReport
     """
     had_pair = _had_exec_reload(host)
     _refuse_foreign_socket(host)
-    marker_removed = _restore_pre_envelope(plane, host)
-    _systemctl_restart(plane, host)
+    marker_removed = _restore_pre_envelope(plane, host, lambda: _systemctl_restart(plane, host))
     return RollbackReport(
         admin_before=OFFLINE_ADMIN,
         reloaded=False,

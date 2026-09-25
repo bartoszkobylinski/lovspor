@@ -809,7 +809,9 @@ sudo /opt/lovspor/app/.venv/bin/lovspor release migrate --rollback --offline
 It dials nothing. It removes the marker, restores `/etc/caddy/Caddyfile` from
 `/etc/caddy/Caddyfile.pre-envelope`, puts the drop-in back from its own backup
 (absent if it was absent) and runs `systemctl restart caddy`, which loads the
-file on disk whole. After a successful restart it removes a socket file left at
+file on disk whole. Both backups are copied, not moved, and removed only after
+the restart worked, so if the command dies before that — a lost SSH session, a
+kill — running it again finishes the job. After a successful restart it removes a socket file left at
 `/run/caddy/admin.sock`: with the drop-in restored, `RuntimeDirectory=` no
 longer clears `/run/caddy` when Caddy stops, so nothing else would, and
 `migrate --check` refuses a socket that is already there. Then verify by
