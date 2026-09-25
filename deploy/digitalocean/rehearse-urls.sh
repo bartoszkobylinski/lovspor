@@ -132,9 +132,12 @@ trap teardown EXIT
 # value is unquoted and may list several names comma-separated, and a shell
 # sourcing it runs the second name as a command and exits 127 (#260, #298 —
 # raised while the droplet still carried the retired personal-domain alias).
-# The last assignment wins and surrounding quotes go, as systemd reads it.
+# The last assignment wins and surrounding quotes go, as systemd reads it, and
+# whitespace around the key goes with them: systemd's parser skips it before the
+# key and truncates the key at it (`src/basic/env-file.c`), so an indented line
+# this refused to read is one the running unit honours.
 host_names() {
-	sed -n 's/^LOVSPOR_DOMAIN=//p' "$1" | tail -n 1 \
+	sed -n 's/^[[:space:]]*LOVSPOR_DOMAIN[[:space:]]*=//p' "$1" | tail -n 1 \
 		| sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
 }
 

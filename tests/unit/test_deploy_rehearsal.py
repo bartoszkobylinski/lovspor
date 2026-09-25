@@ -22,6 +22,7 @@ from lovspor.release.migrate import FLAT_RELEASE
 _DEPLOY = Path(__file__).resolve().parents[2] / "deploy" / "digitalocean"
 _SCRIPT = _DEPLOY / "rehearse-migration.sh"
 _URL_SCRIPT = _DEPLOY / "rehearse-urls.sh"
+_PUBLISH_SCRIPT = _DEPLOY / "publish-release.sh"
 _UNIT = _DEPLOY / "caddy-rehearsal.service"
 _CADDY_UNIT_NAME = "caddy-rehearsal"
 _NEW_CADDYFILE = _DEPLOY / "Caddyfile"
@@ -66,6 +67,14 @@ def _rehearsal_form(source: Path) -> str:
 def _host_names(environment: Path) -> str:
     """Run the URL dry-run's own reading of the EnvironmentFile, strict mode, nothing else."""
     code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
+    script = f'set -euo pipefail\n{_function(code, "host_names")}\nhost_names "{environment}"\n'
+    done = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
+    return done.stdout.rstrip("\n")
+
+
+def _publish_host_names(environment: Path) -> str:
+    """publish-release.sh's own reading of the EnvironmentFile, strict mode, nothing else."""
+    code = _code(_PUBLISH_SCRIPT.read_text(encoding="utf-8"))
     script = f'set -euo pipefail\n{_function(code, "host_names")}\nhost_names "{environment}"\n'
     done = subprocess.run(["bash", "-c", script], check=True, capture_output=True, text=True)
     return done.stdout.rstrip("\n")
@@ -433,6 +442,15 @@ class TestTheUrlDryRunsHarness:
 
         assert _host_names(environment) == "lovspor.test, alias.test"
 
+    def test_whitespace_around_the_key_is_dropped_as_systemd_drops_it(self, tmp_path: Path) -> None:
+        """systemd skips whitespace before the key and truncates the key at it
+        (`src/basic/env-file.c`), so a line this reader refuses is one the
+        running unit honours — and the dry-run would rehearse the wrong host."""
+        environment = tmp_path / "caddy-lovspor"
+        environment.write_text("  LOVSPOR_DOMAIN =lovspor.test, alias.test\n", encoding="utf-8")
+
+        assert _host_names(environment) == "lovspor.test, alias.test"
+
     def test_builds_the_envelope_as_the_build_user(self) -> None:
         code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
 
@@ -593,3 +611,46 @@ class TestTheCorpusRefTheDryRunComparesOn:
         code = _code(_URL_SCRIPT.read_text(encoding="utf-8"))
 
         assert code.index("\nchoose_ref\n") < code.index("RELEASE_ID=")
+
+
+class TestPublishReleaseReadsTheEnvironmentFile:
+    """Issue #301: publish-release.sh copied the URL dry-run's parse but stripped
+    only double quotes; systemd strips single quotes from an EnvironmentFile too."""
+
+    def test_drops_double_quotes_around_the_last_assignment(self, tmp_path: Path) -> None:
+        env = tmp_path / "caddy-lovspor"
+        env.write_text('LOVSPOR_DOMAIN=old.test\nLOVSPOR_DOMAIN="lovspor.test, alias.test"\n')
+
+        assert _publish_host_names(env) == "lovspor.test, alias.test"
+
+    def test_drops_single_quotes_around_the_last_assignment(self, tmp_path: Path) -> None:
+        env = tmp_path / "caddy-lovspor"
+        env.write_text("LOVSPOR_DOMAIN='lovspor.test, alias.test'\n")
+
+        assert _publish_host_names(env) == "lovspor.test, alias.test"
+
+    def test_an_unquoted_value_is_read_verbatim(self, tmp_path: Path) -> None:
+        env = tmp_path / "caddy-lovspor"
+        env.write_text("LOVSPOR_DOMAIN=lovspor.no, lovspor.bartoszkobylinski.com\n")
+
+        assert _publish_host_names(env) == "lovspor.no, lovspor.bartoszkobylinski.com"
+
+    def test_leading_whitespace_before_an_assignment_is_ignored(self, tmp_path: Path) -> None:
+        """The helper promises the same EnvironmentFile reading as systemd."""
+        env = tmp_path / "caddy-lovspor"
+        env.write_text("  LOVSPOR_DOMAIN=lovspor.no, alias.no\n")
+
+        assert _publish_host_names(env) == "lovspor.no, alias.no"
+
+    def test_whitespace_between_the_key_and_the_equals_is_ignored_too(self, tmp_path: Path) -> None:
+        """systemd truncates the key at its trailing whitespace before pushing
+        it (`src/basic/env-file.c`), so `NAME =value` assigns NAME here too."""
+        env = tmp_path / "caddy-lovspor"
+        env.write_text("LOVSPOR_DOMAIN =lovspor.no, alias.no\n")
+
+        assert _publish_host_names(env) == "lovspor.no, alias.no"
+
+    def test_the_script_reads_the_file_through_that_function(self) -> None:
+        code = _code(_PUBLISH_SCRIPT.read_text(encoding="utf-8"))
+
+        assert 'LOVSPOR_DOMAIN="$(host_names /etc/default/caddy-lovspor)"' in code

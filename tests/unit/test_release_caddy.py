@@ -31,6 +31,7 @@ from lovspor.release.caddy import (
     admin_listen,
     canonical_hash,
     config_pair,
+    environment_file_value,
     reload,
     validate,
 )
@@ -153,15 +154,46 @@ class TestConfigPair:
         assert pair.config_hash == canonical_hash(config["apps"]["http"]["servers"])
         assert pair.describe().startswith("(none, ")
 
-    @pytest.mark.parametrize("value", [None, 42, True, [ID_A], {"id": ID_A}])
-    def test_a_release_var_that_is_not_a_string_names_no_release(self, value: object) -> None:
-        """The admin API answers JSON: the var can be any node, not only a string."""
-        routes = [{"handle": [{"handler": "vars", "lovspor_release": value}]}]
+    def test_a_null_release_var_names_no_release(self) -> None:
+        """The admin API answers JSON: a null var is a var that expanded to nothing."""
+        routes = [{"handle": [{"handler": "vars", "lovspor_release": None}]}]
 
         assert config_pair(_config(_site(routes))).release_id is None
 
+    @pytest.mark.parametrize("value", [1.1111e63, 42, True, [ID_A], {"id": ID_A}])
+    def test_a_var_the_adapter_turned_into_another_type_is_a_named_refusal(
+        self, value: object
+    ) -> None:
+        """Caddy's adapter JSON-parses a vars value: an all-digit id adapts to a
+        number. Read as "no release" it would move reconcile onto the
+        pre-envelope row; it is refused by name instead (issue #293)."""
+        routes = [{"handle": [{"handler": "vars", "lovspor_release": value}]}]
+
+        with pytest.raises(ControlPlaneError, match="not a string"):
+            config_pair(_config(_site(routes)))
+
+    def test_the_named_refusal_says_which_type_and_what_to_do(self) -> None:
+        """The operator reads this on a droplet with no context: the type Caddy
+        produced, and where the fix goes, both belong in the one line."""
+        routes = [{"handle": [{"handler": "vars", "lovspor_release": 42}]}]
+
+        with pytest.raises(ControlPlaneError) as caught:
+            config_pair(_config(_site(routes)))
+
+        assert str(caught.value) == (
+            "lovspor_release var is a int, not a string — the Caddyfile adapter"
+            " JSON-parsed it; the fragment must carry a release id as text"
+        )
+
     def test_the_key_names_a_release_only_on_a_vars_handler(self) -> None:
         routes = [{"handle": [{"handler": "file_server", "lovspor_release": ID_A}]}]
+
+        assert config_pair(_config(_site(routes))).release_id is None
+
+    def test_a_non_string_key_on_another_handler_is_not_a_release_var(self) -> None:
+        """Only a vars handler gives the key release semantics; arbitrary
+        handler metadata must not trigger the new non-string refusal."""
+        routes = [{"handle": [{"handler": "file_server", "lovspor_release": 42}]}]
 
         assert config_pair(_config(_site(routes))).release_id is None
 
@@ -546,3 +578,239 @@ class TestFallbackAdminClient:
         assert client.connect is HttpxAdminClient
         assert client.running_config() == {"apps": {}}
         assert client.answered == "localhost:2020"
+
+
+class TestTheDomainReachesCaddy:
+    """Issue #334: `migrate --check` run bare on the droplet refused with
+    "unrecognized global option: encode" and blamed the fragment. The site
+    block's placeholder was empty because the command did not carry
+    LOVSPOR_DOMAIN; Caddy's own unit reads it from an EnvironmentFile."""
+
+    def test_the_runner_reads_the_domain_from_the_environment_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=old.test\nLOVSPOR_DOMAIN='lovspor.test, alias.test'\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {
+            "LOVSPOR_DOMAIN": "lovspor.test, alias.test"
+        }
+
+    def test_the_runner_reads_the_environment_file_with_an_explicit_utf_8_encoding(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        encodings: list[str | None] = []
+
+        def read_text(path: Path, encoding: str | None = None) -> str:
+            assert path == env_file
+            encodings.append(encoding)
+            return "LOVSPOR_DOMAIN=lovspor.no\n"
+
+        monkeypatch.setattr(Path, "read_text", read_text)
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspor.no"}
+        assert len(encodings) == 1
+        assert encodings[0] is not None
+        assert encodings[0].lower() == "utf-8"
+
+    def test_the_runner_passes_the_file_domain_to_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=lovspor.test, alias.test\n")
+
+        done = SubprocessRunner(env_file).run(
+            [
+                sys.executable,
+                "-c",
+                "import os; print(os.environ['LOVSPOR_DOMAIN'])",
+            ],
+            {},
+        )
+
+        assert done == Completed(0, "lovspor.test, alias.test\n", "")
+
+    def test_the_commands_explicit_domain_wins_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Runner's documented overlay remains last when the file supplies a domain."""
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=file.test\n")
+
+        done = SubprocessRunner(env_file).run(
+            [sys.executable, "-c", "import os; print(os.environ['LOVSPOR_DOMAIN'])"],
+            {"LOVSPOR_DOMAIN": "command.test"},
+        )
+
+        assert done == Completed(0, "command.test\n", "")
+
+    def test_the_processs_own_value_wins_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "mine.test")
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=other.test\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {}
+
+    def test_an_exported_empty_value_does_not_win_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`LOVSPOR_DOMAIN=` in the process expands to the same empty site
+        address as an absent one, so presence alone must not silence the file
+        the deploy actually configures."""
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "")
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=lovspor.test\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspor.test"}
+
+    def test_an_exported_whitespace_value_does_not_win_over_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whitespace also expands to no Caddy site address, so only a
+        non-blank process value may override the unit's EnvironmentFile."""
+        monkeypatch.setenv("LOVSPOR_DOMAIN", " \t ")
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=lovspor.test\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspor.test"}
+
+    def test_a_missing_file_gives_nothing_rather_than_a_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+
+        assert SubprocessRunner(tmp_path / "absent").domain_from_file() == {}
+
+    def test_an_empty_assignment_gives_nothing_rather_than_an_empty_domain(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`LOVSPOR_DOMAIN=` would hand caddy an empty site address, which is
+        the very failure the file read exists to prevent."""
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_text("LOVSPOR_DOMAIN=\n")
+
+        assert SubprocessRunner(env_file).domain_from_file() == {}
+
+    def test_the_file_is_read_as_utf_8_whatever_the_process_locale(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, c_locale: None
+    ) -> None:
+        """A unit started without LANG runs under the C locale; an IDN in the
+        file is still UTF-8."""
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        env_file = tmp_path / "caddy-lovspor"
+        env_file.write_bytes("LOVSPOR_DOMAIN=lovspør.test\n".encode())
+
+        assert SubprocessRunner(env_file).domain_from_file() == {"LOVSPOR_DOMAIN": "lovspør.test"}
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("LOVSPOR_DOMAIN=lovspor.no, alias.no\n", "lovspor.no, alias.no"),
+            ('LOVSPOR_DOMAIN="a.test, b.test"\n', "a.test, b.test"),
+            ("LOVSPOR_DOMAIN='a.test'\n", "a.test"),
+            ('LOVSPOR_DOMAIN=""\n', ""),
+            ("LOVSPOR_DOMAIN='\n", "'"),
+            ("OTHER=1\n", None),
+            ("LOVSPOR_DOMAIN=\n", ""),
+            # A quoted empty string is empty; a lone quote is a one-character
+            # value, not an unterminated pair to strip from both ends.
+            ('LOVSPOR_DOMAIN=""\n', ""),
+            ("LOVSPOR_DOMAIN=''\n", ""),
+            ('LOVSPOR_DOMAIN="\n', '"'),
+        ],
+    )
+    def test_environment_file_value_reads_as_systemd_does(
+        self, text: str, expected: str | None
+    ) -> None:
+        assert environment_file_value(text, "LOVSPOR_DOMAIN") == expected
+
+    def test_environment_file_value_ignores_leading_whitespace_as_systemd_does(self) -> None:
+        """EnvironmentFile assignments may be indented; systemd discards leading whitespace."""
+        assert environment_file_value("  LOVSPOR_DOMAIN=lovspor.no\n", "LOVSPOR_DOMAIN") == (
+            "lovspor.no"
+        )
+
+    def test_a_final_empty_assignment_overrides_an_earlier_domain(self) -> None:
+        """The last assignment wins even when its value clears a stale domain."""
+        text = "LOVSPOR_DOMAIN=stale.test\nLOVSPOR_DOMAIN=\n"
+
+        assert environment_file_value(text, "LOVSPOR_DOMAIN") == ""
+
+    def test_an_equals_sign_in_the_value_is_not_treated_as_the_assignment_separator(self) -> None:
+        """Only the first equals separates the key; later ones belong to the value."""
+        assert (
+            environment_file_value("LOVSPOR_DOMAIN=first.test=second.test\n", "LOVSPOR_DOMAIN")
+            == "first.test=second.test"
+        )
+
+    def test_whitespace_between_the_key_and_the_equals_is_dropped_as_systemd_does(self) -> None:
+        """`src/basic/env-file.c` truncates the key at `last_key_whitespace`
+        before pushing it, so `NAME =value` assigns NAME. The same line read as
+        no assignment is the divergence that leaves caddy without a domain."""
+        assert environment_file_value("LOVSPOR_DOMAIN =lovspor.no\n", "LOVSPOR_DOMAIN") == (
+            "lovspor.no"
+        )
+
+    def test_a_key_that_merely_starts_with_the_name_is_not_that_assignment(self) -> None:
+        """Whitespace tolerance must not widen into prefix matching."""
+        assert environment_file_value("LOVSPOR_DOMAIN_ALIAS=other.test\n", "LOVSPOR_DOMAIN") is None
+
+    def test_a_commented_assignment_is_not_read(self) -> None:
+        """systemd sends a leading `#` to COMMENT; the key is never pushed."""
+        assert environment_file_value("# LOVSPOR_DOMAIN=commented.test\n", "LOVSPOR_DOMAIN") is None
+
+    def test_an_adapt_failure_without_the_domain_names_the_variable_not_the_fragment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LOVSPOR_DOMAIN", raising=False)
+        runner = RecordingRunner(
+            Completed(1, "", "Caddyfile:10: unrecognized global option: encode")
+        )
+
+        with pytest.raises(ControlPlaneError) as caught:
+            adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
+
+        message = str(caught.value)
+        assert "LOVSPOR_DOMAIN is not in this process's environment" in message
+        assert "unrecognized global option: encode" in message
+
+    def test_an_adapt_failure_with_an_empty_domain_still_names_the_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An exported empty value still leaves the Caddyfile placeholder empty,
+        so the diagnostic must not treat mere presence as a usable domain."""
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "")
+        runner = RecordingRunner(
+            Completed(1, "", "Caddyfile:10: unrecognized global option: encode")
+        )
+
+        with pytest.raises(ControlPlaneError) as caught:
+            adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
+
+        message = str(caught.value)
+        assert "LOVSPOR_DOMAIN is empty" in message
+        assert "unrecognized global option: encode" in message
+
+    def test_an_adapt_failure_with_the_domain_set_carries_no_hint(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOVSPOR_DOMAIN", "lovspor.test")
+        runner = RecordingRunner(Completed(1, "", "boom"))
+
+        with pytest.raises(ControlPlaneError) as caught:
+            adapt_config(runner, tmp_path / "Caddyfile", tmp_path / "fragment.caddy")
+
+        # The whole message, so that nothing at all is appended when the
+        # variable is present — not the hint, and not anything in its place.
+        assert str(caught.value) == (
+            f"caddy adapt failed for {tmp_path / 'Caddyfile'} importing"
+            f" {tmp_path / 'fragment.caddy'}: boom"
+        )
