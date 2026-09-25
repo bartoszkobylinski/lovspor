@@ -5003,6 +5003,28 @@ class TestUnwritableArchive:
         assert "The register was not changed, and no decision was recorded." in result.stderr
         assert list(read_source_events(source_events_path(ObservatoryRoot(root, ())))) == []
 
+    def test_an_archive_directory_that_cannot_be_created_is_refused(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mkdir = Mock(side_effect=OSError(30, "Read-only file system"))
+        write = Mock()
+        monkeypatch.setattr(Path, "mkdir", mkdir)
+        monkeypatch.setattr(observatory_registry_io, "write_registry", write)
+
+        result = runner.invoke(app, ["observatory", *_register_command(root)])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert f"Refused: cannot write the source register at {root / 'sources.json'}" in (
+            result.stderr
+        )
+        assert "Read-only file system" in result.stderr
+        assert "Is the archive mounted and writable? The register was not changed." in (
+            result.stderr
+        )
+        mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        write.assert_not_called()
+
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
     def test_a_read_only_archive_directory_is_refused_on_the_real_filesystem(
         self, root: Path
