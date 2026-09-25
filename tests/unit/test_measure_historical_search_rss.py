@@ -8,8 +8,11 @@ between the Mac it was measured on and the droplet it is compared against.
 
 import importlib.util
 import sys
+from argparse import Namespace
+from datetime import date
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import Mock
 
 import pytest
 
@@ -77,3 +80,108 @@ class TestRenderTable:
         assert "| 1500 |" in rows[1]
         assert "| -100 |" in rows[1]  # over MemoryHigh 1400M
         assert "| 200 |" in rows[1]  # under MemoryMax 1700M
+
+
+class TestScenarioPlans:
+    DATES = [date(2026, month, 15) for month in range(6, 10)]  # noqa: RUF012
+
+    @pytest.mark.parametrize(
+        ("scenario", "expected_steps"),
+        [
+            ("cold_one_state", ["recorded_at=2026-06-15"]),
+            (
+                "four_states",
+                [
+                    "recorded_at=2026-06-15",
+                    "recorded_at=2026-07-15",
+                    "recorded_at=2026-08-15",
+                    "recorded_at=2026-09-15",
+                ],
+            ),
+            (
+                "live_warm_four_states",
+                [
+                    "live search_body",
+                    "recorded_at=2026-06-15",
+                    "recorded_at=2026-07-15",
+                    "recorded_at=2026-08-15",
+                    "recorded_at=2026-09-15",
+                ],
+            ),
+            (
+                "embeddings_warm_four_states",
+                [
+                    "embedding index",
+                    "live search_body",
+                    "recorded_at=2026-06-15",
+                    "recorded_at=2026-07-15",
+                    "recorded_at=2026-08-15",
+                    "recorded_at=2026-09-15",
+                ],
+            ),
+        ],
+    )
+    def test_plan_has_the_documented_warmup_and_historical_steps(
+        self, scenario: str, expected_steps: list[str]
+    ) -> None:
+        plan = rss._plan(scenario, Mock(), self.DATES, "arbeidsgiver")
+
+        assert [name for name, _action in plan] == expected_steps
+
+
+def test_parent_runs_each_scenario_in_a_fresh_interpreter_and_combines_steps(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    scenarios = ("cold_one_state", "four_states")
+    outputs = [
+        _step("cold", 100.0).model_dump_json() + "\n",
+        _step("four", 200.0).model_dump_json() + "\n",
+    ]
+    run = Mock(side_effect=[Namespace(stdout=output) for output in outputs])
+    monkeypatch.setattr(rss.subprocess, "run", run)
+    args = Namespace(
+        scenarios=",".join(scenarios),
+        corpus=tmp_path,
+        dates="2026-06-15,2026-07-15,2026-08-15,2026-09-15",
+        query="arbeidsgiver",
+    )
+
+    rss.run_parent(args)
+
+    assert run.call_count == 2
+    for call, scenario in zip(run.call_args_list, scenarios, strict=True):
+        command = call.args[0]
+        assert command[:4] == [sys.executable, str(_SCRIPT), "--child", scenario]
+        assert call.kwargs == {"stdout": rss.subprocess.PIPE, "check": True, "text": True}
+    table = capsys.readouterr().out
+    assert "| four_states | cold |" in table
+    assert "| four_states | four |" in table
+
+
+@pytest.mark.parametrize(
+    "dates",
+    [
+        "2026-06-15,2026-07-15,2026-08-15",
+        "2026-06-15,2026-07-15,2026-08-15,2026-08-15",
+    ],
+    ids=["only-three", "duplicate"],
+)
+def test_four_state_child_refuses_dates_that_are_not_four_distinct_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dates: str
+) -> None:
+    run_child = Mock()
+    monkeypatch.setattr(rss, "run_child", run_child)
+
+    with pytest.raises((SystemExit, ValueError)):
+        rss.main(
+            [
+                "--corpus",
+                str(tmp_path),
+                "--dates",
+                dates,
+                "--child",
+                "four_states",
+            ]
+        )
+
+    run_child.assert_not_called()
