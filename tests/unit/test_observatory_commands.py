@@ -9,6 +9,8 @@ real one lands.
 
 import hashlib
 import json
+import os
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -4904,3 +4906,141 @@ class TestReplaceSourceDomain:
         result = self._replace()
 
         assert f"  replaced record {record_fingerprint(before)[:12]} " in result.output
+
+
+def _unwritable_register(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        observatory_registry_io,
+        "write_registry",
+        Mock(side_effect=PermissionError(13, "Permission denied")),
+    )
+
+
+def _register_command(root: Path) -> list[str]:
+    return ["register-source", "--id", BAERUM_ID, "--name", "Bærum", "--domain", BAERUM_DOMAIN]
+
+
+def _activate_command(root: Path) -> list[str]:
+    _register()
+    check = _write_check(root / "check.json", _check_document())
+    return ["activate-source", "--id", BAERUM_ID, "--check", str(check)]
+
+
+def _update_command(root: Path) -> list[str]:
+    _activate(root)
+    return ["update-source", "--id", BAERUM_ID, "--add-listing", LISTING_URL]
+
+
+def _verdict_command(root: Path) -> list[str]:
+    _activate(root)
+    return ["record-verdict", "--id", BAERUM_ID, "--verdict", str(_write_verdict(root / "v.json"))]
+
+
+def _replace_command(root: Path) -> list[str]:
+    _activate(root)
+    return [
+        "replace-source-domain",
+        *("--id", BAERUM_ID, "--domain", NEW_BAERUM_DOMAIN),
+        *("--reason", "baerum.kommune.no redirects to baerum.no", "--by", "Bartosz Kobyliński"),
+    ]
+
+
+_WRITING_COMMANDS = pytest.mark.parametrize(
+    "command",
+    [_register_command, _activate_command, _update_command, _verdict_command, _replace_command],
+    ids=["register-source", "activate-source", "update-source", "record-verdict", "replace"],
+)
+
+
+class TestUnwritableArchive:
+    """A register that cannot be written is refused like one that cannot be read (#208).
+
+    The archive lives on external storage by design (ADR-0010 §5), so an
+    unplugged or read-only disk is the ordinary failure, not an exotic one.
+    """
+
+    @_WRITING_COMMANDS
+    def test_the_refusal_names_the_register_and_the_likely_cause(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch, command: Callable[[Path], list[str]]
+    ) -> None:
+        args = command(root)
+        _unwritable_register(monkeypatch)
+
+        result = runner.invoke(app, ["observatory", *args])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert f"Refused: cannot write the source register at {root / 'sources.json'}" in (
+            result.stderr
+        )
+        assert "Permission denied" in result.stderr
+        assert "Is the archive mounted and writable?" in result.stderr
+
+    @_WRITING_COMMANDS
+    def test_the_register_on_disk_is_left_as_it_was(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch, command: Callable[[Path], list[str]]
+    ) -> None:
+        args = command(root)
+        path = root / "sources.json"
+        before = path.read_bytes() if path.exists() else None
+        _unwritable_register(monkeypatch)
+
+        result = runner.invoke(app, ["observatory", *args])
+
+        assert result.exit_code == 1
+        assert (path.read_bytes() if path.exists() else None) == before
+        assert "The register was not changed" in result.stderr
+
+    def test_a_domain_move_that_could_not_land_says_no_decision_was_recorded(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        args = _replace_command(root)
+        _unwritable_register(monkeypatch)
+
+        result = runner.invoke(app, ["observatory", *args])
+
+        assert result.exit_code == 1
+        assert "The register was not changed, and no decision was recorded." in result.stderr
+        assert list(read_source_events(source_events_path(ObservatoryRoot(root, ())))) == []
+
+    def test_an_archive_directory_that_cannot_be_created_is_refused(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mkdir = Mock(side_effect=OSError(30, "Read-only file system"))
+        write = Mock()
+        monkeypatch.setattr(Path, "mkdir", mkdir)
+        monkeypatch.setattr(observatory_registry_io, "write_registry", write)
+
+        result = runner.invoke(app, ["observatory", *_register_command(root)])
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert f"Refused: cannot write the source register at {root / 'sources.json'}" in (
+            result.stderr
+        )
+        assert "Read-only file system" in result.stderr
+        assert "Is the archive mounted and writable? The register was not changed." in (
+            result.stderr
+        )
+        mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        write.assert_not_called()
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+    def test_a_read_only_archive_directory_is_refused_on_the_real_filesystem(
+        self, root: Path
+    ) -> None:
+        """No stand-in for the write: the directory itself refuses the staging file."""
+        _register()
+        root.chmod(0o555)
+        try:
+            result = runner.invoke(app, ["observatory", *_second_registration()])
+        finally:
+            root.chmod(0o755)
+
+        assert result.exit_code == 1
+        assert isinstance(result.exception, SystemExit)
+        assert "Refused: cannot write the source register" in result.stderr
+
+
+def _second_registration() -> list[str]:
+    return ["register-source", "--id", "0301", "--name", "Oslo", "--domain", "oslo.kommune.no"]
