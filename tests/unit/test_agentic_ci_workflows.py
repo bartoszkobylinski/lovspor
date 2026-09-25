@@ -568,6 +568,32 @@ def test_pr_pipeline_workflow_scoped_concurrency_still_cancels_stale_runs() -> N
     assert concurrency["cancel-in-progress"] is True
 
 
+def _cancel_in_progress_workflows() -> list[str]:
+    return sorted(
+        path.name
+        for path in _WORKFLOWS.glob("*.yml")
+        if (_workflow(path.name).get("concurrency") or {}).get("cancel-in-progress") is True
+    )
+
+
+def test_some_workflow_cancels_stale_runs() -> None:
+    assert "pr-pipeline.yml" in _cancel_in_progress_workflows()
+
+
+@pytest.mark.parametrize("workflow_name", _cancel_in_progress_workflows())
+def test_no_job_in_a_cancellable_workflow_outlives_its_cancellation(workflow_name: str) -> None:
+    """Issue #101. On cancellation GitHub re-evaluates the `if` of every job
+    still running and keeps the ones that evaluate true — `always()` does. The
+    mutation job carried it, so a push landing while mutation ran left the
+    superseded run holding the `pr-<PR#>` group and the new run pending with no
+    jobs. `!cancelled()` survives a skipped or failed need the same way and
+    still yields to the cancellation."""
+    jobs = _workflow(workflow_name)["jobs"]
+    outliving = [name for name, job in jobs.items() if "always()" in str(job.get("if", ""))]
+
+    assert outliving == []
+
+
 class TestEscalationCoversEveryFailure:
     """Issues #157 and #160. The pipeline's contract is that a blocked PR ends
     labelled and commented (docs/agentic-ci.md). Twice in one day it ended red
@@ -1368,7 +1394,7 @@ def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_the_mutation_gate()
     assert jobs["codex-tests"]["if"] == f"${{{{ !cancelled() && {same_repo_non_dependabot} }}}}"
     mutation_condition = " ".join(jobs["mutation"]["if"].split())
     assert mutation_condition == (
-        "always() && needs.fast-ci.result == 'success' && (needs.codex-tests.result == "
+        "!cancelled() && needs.fast-ci.result == 'success' && (needs.codex-tests.result == "
         "'success' || (needs.codex-tests.result == 'skipped' && github.actor == "
         "'dependabot[bot]')) && needs.codex-tests.outputs.pushed != 'true'"
     )

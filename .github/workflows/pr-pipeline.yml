@@ -643,8 +643,11 @@ jobs:
     # Runs only when fast CI is green, Codex finished, and Codex did NOT just push —
     # a push fires a fresh synchronize run that redoes mutation on the new SHA.
     needs: [fast-ci, codex-tests]
+    # `!cancelled()`, never `always()` (issue #101): on cancellation GitHub
+    # keeps every running job whose `if` still evaluates true, so an `always()`
+    # mutation job held the pr-<PR#> group against the next push's run.
     if: >-
-      always() &&
+      !cancelled() &&
       needs.fast-ci.result == 'success' &&
       (needs.codex-tests.result == 'success' ||
        (needs.codex-tests.result == 'skipped' && github.actor == 'dependabot[bot]')) &&
