@@ -48,6 +48,7 @@ INTEGRITY_KINDS = frozenset(
         "duplicate_path_ownership",
         "identity_mismatch",
         "missing_document",
+        "missing_embedding",
         "orphan_document",
         "orphan_embedding",
         "stale_render",
@@ -423,21 +424,54 @@ def _orphan_findings(
         )
         for path in sorted(on_disk - claimed)
     ]
-    owned = {
-        expected
-        for record in manifest.documents.values()
-        if record.status == "current"
-        and (expected := _expected_embedding(corpus_root, record)) is not None
-    }
     orphan_bins = [
         AuditFinding(
             kind="orphan_embedding",
             path=path,
             detail="embedding sidecar with no current manifest record",
         )
-        for path in sorted(_embeddings_on_disk(corpus_root) - owned)
+        for path in sorted(
+            _embeddings_on_disk(corpus_root) - set(_owned_sidecars(corpus_root, manifest))
+        )
     ]
     return orphan_docs + orphan_bins
+
+
+def _owned_sidecars(corpus_root: Path, manifest: Manifest) -> dict[str, str]:
+    """Sidecar path -> doc id, for every current record that can own one."""
+    return {
+        expected: doc_id
+        for doc_id, record in manifest.documents.items()
+        if record.status == "current"
+        and (expected := _expected_embedding(corpus_root, record)) is not None
+    }
+
+
+def _missing_embedding_findings(
+    corpus_root: Path, manifest: Manifest, on_disk: set[str]
+) -> list[AuditFinding]:
+    """Current acts with no sidecar, in a corpus that otherwise carries them.
+
+    A sync with a missing or empty ``OPENAI_API_KEY`` writes the Markdown and
+    silently skips every ``.bin`` (#344) — production ran that way from Sprint 9
+    to 2026-06-10. The corpus counts as embedded once any current act owns its
+    sidecar: a corpus built keyless on purpose has none, and must stay clean.
+    An act whose Markdown is absent is already a ``missing_document``.
+    """
+    owned = _owned_sidecars(corpus_root, manifest)
+    present = _embeddings_on_disk(corpus_root)
+    if not owned.keys() & present:
+        return []
+    return [
+        AuditFinding(
+            kind="missing_embedding",
+            path=path,
+            doc_id=doc_id,
+            detail="current act has no embedding sidecar; semantic_search cannot reach it",
+        )
+        for path, doc_id in sorted(owned.items())
+        if path not in present and manifest.documents[doc_id].markdown_path in on_disk
+    ]
 
 
 def _unparsed_heading_findings(corpus_root: Path) -> list[AuditFinding]:
@@ -509,6 +543,7 @@ def audit_corpus(
     findings += _identity_findings(corpus_root, manifest, on_disk)
     findings += _language_findings(corpus_root, manifest, on_disk)
     findings += _orphan_findings(corpus_root, manifest, on_disk)
+    findings += _missing_embedding_findings(corpus_root, manifest, on_disk)
     findings += _unparsed_heading_findings(corpus_root)
     findings.sort(key=lambda f: (f.kind, f.path))
     return AuditReport(
