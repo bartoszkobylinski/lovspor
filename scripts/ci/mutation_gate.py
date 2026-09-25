@@ -8,6 +8,7 @@ threshold decision.
 Usage:
     mutation_gate.py result.json              # exit 0 if gate.passed else 1
     mutation_gate.py --summary result.json    # markdown job summary, exit 0
+    mutation_gate.py --unmeasured result.json # PR comment for a run that measured nothing
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 
 def _load_result(path: Path) -> dict[str, object] | str:
@@ -39,7 +41,7 @@ def _is_count(v: object) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
 
-def _extract(r: dict[str, object]) -> tuple[str, float, bool, str, tuple[int, ...]] | str:
+def _extract(r: dict[str, object]) -> tuple[str, float | None, bool, str, tuple[int, ...]] | str:
     """Return (commit, score, passed, reason, counts) or an error message.
 
     JSON truthiness is not enough: a string "false" in gate.passed must be
@@ -56,8 +58,12 @@ def _extract(r: dict[str, object]) -> tuple[str, float, bool, str, tuple[int, ..
         return "malformed mutation result: gate.passed must be a boolean, gate.reason a string"
     if not isinstance(commit, str) or not all(_is_count(c) for c in counts):
         return "malformed mutation result: commit must be a string, mutant counts integers"
+    # null is the one non-number allowed: a run that measured no mutant has no
+    # score, and saying so beats printing a 100 nobody earned (#311).
+    if score is None:
+        return commit, None, passed, reason, counts
     if not isinstance(score, (int, float)) or isinstance(score, bool):
-        return "malformed mutation result: score must be a number"
+        return "malformed mutation result: score must be a number or null"
     return commit, float(score), passed, reason, counts
 
 
@@ -125,50 +131,87 @@ def _register_lines(equivalents: object) -> list[str]:
     return lines
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--summary", action="store_true")
-    ap.add_argument("result", type=Path)
-    args = ap.parse_args()
-
-    r = _load_result(args.result)
-    if isinstance(r, str):
-        print(r, file=sys.stderr)
-        return 1
-
-    extracted = _extract(r)
-    if isinstance(extracted, str):
-        print(extracted, file=sys.stderr)
-        return 1
-    commit, score, passed, reason, (total, killed, survived, timeout) = extracted
+def _hint(r: dict[str, object]) -> str | None:
     # Diagnostics, not policy: absent in pre-hint artifacts, shown when present.
     hint = r.get("failure_hint")
-    hint = hint if isinstance(hint, str) and hint else None
+    return hint if isinstance(hint, str) and hint else None
 
-    if args.summary:
-        print("## Mutation testing")
-        print(f"- SHA: `{commit}`")
-        print(
-            f"- Total: {total} · Killed: {killed} · Survived: {survived}"
-            f" · Timeout: {timeout} · Score: {score}"
-        )
-        print(f"- Gate: {'PASS' if passed else 'FAIL'} ({reason})")
-        if hint:
-            print(f"- Hint: `{hint}`")
-        for line in _survivor_lines(r.get("survivors")):
-            print(line)
-        for line in _register_lines(r.get("equivalents")):
-            print(line)
-        print(f"- Artifact: `mutation-result-{commit}`")
-        return 0
 
+def _print_summary(r: dict[str, object], extracted: tuple[Any, ...]) -> None:
+    commit, score, passed, reason, (total, killed, survived, timeout) = extracted
+    shown = "none — no mutant was measured" if score is None else score
+    print("## Mutation testing")
+    print(f"- SHA: `{commit}`")
+    print(
+        f"- Total: {total} · Killed: {killed} · Survived: {survived}"
+        f" · Timeout: {timeout} · Score: {shown}"
+    )
+    print(f"- Gate: {'PASS' if passed else 'FAIL'} ({reason})")
+    if hint := _hint(r):
+        print(f"- Hint: `{hint}`")
+    for line in [*_survivor_lines(r.get("survivors")), *_register_lines(r.get("equivalents"))]:
+        print(line)
+    print(f"- Artifact: `mutation-result-{commit}`")
+
+
+def _unmeasured_lines(r: dict[str, object]) -> list[str]:
+    """The PR comment for a gate that failed before any mutant was measured.
+
+    Remediation classifies survivors; with none measured, naming that step
+    would point the reader at a problem that does not exist (#311).
+    """
+    if r.get("baseline_tests_passed") is False:
+        cause = "the clean baseline test run failed"
+    else:
+        cause = f"the mutation tool failed (exit {r.get('tool_exit_code')})"
+    lines = [f"Mutation did not run: {cause}, so no mutant was measured."]
+    if hint := _hint(r):
+        lines += ["", "```", hint, "```"]
+    lines += [
+        "",
+        "Codex remediation skipped: there are no survivors to classify. "
+        "Fix the failure above and push. Human review required.",
+    ]
+    return lines
+
+
+def _verdict(r: dict[str, object], extracted: tuple[Any, ...]) -> int:
+    _, _, passed, reason, (_, _, survived, _) = extracted
     if passed:
         print(f"mutation gate PASS ({reason})")
         return 0
     print(f"mutation gate FAIL ({reason}); survivors: {survived}")
-    if hint:
+    if hint := _hint(r):
         print(f"hint: {hint}")
     return 1
+
+
+def _parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser()
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--summary", action="store_true")
+    mode.add_argument("--unmeasured", action="store_true")
+    ap.add_argument("result", type=Path)
+    return ap.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    r = _load_result(args.result)
+    if isinstance(r, str):
+        print(r, file=sys.stderr)
+        return 1
+    extracted = _extract(r)
+    if isinstance(extracted, str):
+        print(extracted, file=sys.stderr)
+        return 1
+    if args.summary:
+        _print_summary(r, extracted)
+        return 0
+    if args.unmeasured:
+        print("\n".join(_unmeasured_lines(r)))
+        return 0
+    return _verdict(r, extracted)
 
 
 if __name__ == "__main__":

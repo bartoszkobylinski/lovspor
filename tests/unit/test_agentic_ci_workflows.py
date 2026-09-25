@@ -1372,3 +1372,130 @@ def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_the_mutation_gate()
         "'success' || (needs.codex-tests.result == 'skipped' && github.actor == "
         "'dependabot[bot]')) && needs.codex-tests.outputs.pushed != 'true'"
     )
+
+
+_REPO = Path(__file__).resolve().parents[2]
+_DECIDE = "Validate result as data; decide whether remediation applies"
+_UNMEASURED = "BLOCKED — mutation did not run, nothing was measured"
+_RUN_URL = "https://github.com/o/r/actions/runs/1"
+_SHA = "a" * 40
+_SYSTEM_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+
+
+def _render(script: str, values: dict[str, str]) -> str:
+    """Substitute the step's ${{ }} expressions; an unknown one fails the test."""
+    return re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda m: values[m.group(1)], script)
+
+
+def _mutation_artifact(tmp_path: Path, raw: str, tool_exit_code: int) -> Path:
+    folder = tmp_path / "mutation"
+    folder.mkdir()
+    (tmp_path / "raw.log").write_text(raw, encoding="utf-8")
+    args = ["--commit", _SHA, "--raw", str(tmp_path / "raw.log")]
+    args += ["--tool-exit-code", str(tool_exit_code)]
+    args += ["--out", str(folder / "mutation-result.json")]
+    script = _REPO / "scripts" / "ci" / "mutation_to_json.py"
+    subprocess.run([sys.executable, str(script), *args], check=True, capture_output=True)
+    return folder / "mutation-result.json"
+
+
+def _run_step(script: str, cwd: Path, env: dict[str, str]) -> None:
+    subprocess.run(
+        ["bash", "-eu", "-o", "pipefail", "-c", script],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _decide(tmp_path: Path, raw: str, tool_exit_code: int) -> dict[str, str]:
+    _mutation_artifact(tmp_path, raw, tool_exit_code)
+    step = _named_step(_steps("mutation-remediation.yml", "remediate"), _DECIDE)
+    values = {"runner.temp": str(tmp_path), "steps.artifact.outcome": "success"}
+    output = tmp_path / "github-output"
+    env = {"PATH": _SYSTEM_PATH, "HEAD_SHA": _SHA, "GITHUB_OUTPUT": str(output)}
+    _run_step(_render(step["run"], values), tmp_path, env)
+    return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+
+def _escalation_sandbox(tmp_path: Path) -> dict[str, str]:
+    """scripts/ci as the helper checkout holds it, with GitHub stubbed at the CLI."""
+    ci = tmp_path / "scripts" / "ci"
+    ci.mkdir(parents=True)
+    (ci / "mutation_gate.py").write_text(
+        (_REPO / "scripts" / "ci" / "mutation_gate.py").read_text(encoding="utf-8")
+    )
+    sticky = ci / "pr_sticky_comment.sh"
+    sticky.write_text(
+        f'#!/bin/sh\necho "$@" > "{tmp_path}/sticky-args"\ncp "$3" "{tmp_path}/body"\n'
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        f'#!/bin/sh\necho "$@" >> "{tmp_path}/gh-calls"\n[ "$2" = list ] && echo 309\nexit 0\n'
+    )
+    for executable in (sticky, gh):
+        executable.chmod(0o755)
+    return {
+        "PATH": f"{bin_dir}:{_SYSTEM_PATH}",
+        "HEAD_SHA": _SHA,
+        "HEAD_BRANCH": "fix/x",
+        "RUNNER_TEMP": str(tmp_path),
+    }
+
+
+class TestUnmeasuredRunSkipsRemediation:
+    """Issue #311: a gate that failed before any mutant was measured has no
+    survivors for Codex to classify, and must reach a human saying why."""
+
+    @pytest.mark.parametrize(
+        ("raw", "exit_code"),
+        [
+            ("Failed to run clean test\nerror: mutmut run failed (exit 1)\n", 3),
+            (
+                "Tests failed when run without mutations\n"
+                "1/1  🎉 1 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0\n",
+                0,
+            ),
+        ],
+    )
+    def test_a_failed_tool_or_baseline_goes_to_a_human(
+        self, tmp_path: Path, raw: str, exit_code: int
+    ) -> None:
+        assert _decide(tmp_path, raw, exit_code) == {"run": "false", "unmeasured": "true"}
+
+    def test_surviving_mutants_still_go_to_codex(self, tmp_path: Path) -> None:
+        raw = "2/2  🎉 1 🫥 0  ⏰ 0  🤔 0  🙁 1  🔇 0  🧙 0\n"
+
+        assert _decide(tmp_path, raw, 2) == {"run": "true"}
+
+    def test_the_escalation_runs_before_any_checkout_or_codex_cycle(self) -> None:
+        steps = _steps("mutation-remediation.yml", "remediate")
+        names = [step.get("name") for step in steps]
+        blocked = _named_step(steps, _UNMEASURED)
+
+        assert blocked["if"] == "steps.gate.outputs.unmeasured == 'true'"
+        assert names.index(_UNMEASURED) < names.index("Resolve PR number and remediation cycle")
+        assert names.index(_UNMEASURED) < names.index("Codex — mutation remediation (tests only)")
+
+    def test_the_comment_names_the_failure_not_survivor_classification(
+        self, tmp_path: Path
+    ) -> None:
+        raw = "FAILED tests/unit/test_x.py::test_y - FailedHealthCheck\nFailed to run clean test\n"
+        _mutation_artifact(tmp_path, raw, 3)
+        env = _escalation_sandbox(tmp_path)
+        step = _named_step(_steps("mutation-remediation.yml", "remediate"), _UNMEASURED)
+        values = {"runner.temp": str(tmp_path), "github.event.workflow_run.html_url": _RUN_URL}
+
+        _run_step(_render(step["run"], values), tmp_path, env)
+
+        body = (tmp_path / "body").read_text()
+        assert "the clean baseline test run failed" in body
+        assert "FAILED tests/unit/test_x.py::test_y - FailedHealthCheck" in body
+        assert f"mutation-result-{_SHA}" in body
+        assert _RUN_URL in body
+        assert "non-killable" not in body
+        assert "--add-label needs-human:mutation" in (tmp_path / "gh-calls").read_text()
+        assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "309"]
