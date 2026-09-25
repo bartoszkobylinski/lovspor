@@ -3,6 +3,12 @@ Description=Refresh the local lovverk corpus clone
 Documentation=https://github.com/bartoszkobylinski/lovspor/blob/main/deploy/digitalocean/README.md
 After=network-online.target
 Wants=network-online.target
+# A transient GitHub failure (issue #234) should cost minutes, not the day until
+# the next timer run: retry up to 4 starts within 2 h, then stay failed so a
+# permanent fault does not loop forever. The window is shorter than a day, so
+# the next 05:30 run is never blocked by the limit.
+StartLimitIntervalSec=2h
+StartLimitBurst=4
 
 [Service]
 Type=oneshot
@@ -18,5 +24,8 @@ ExecStart=/opt/lovspor/app/.venv/bin/lovspor fetch-corpus --full-history
 # oneshot disables the start timeout by default; bound it so a stalled git fetch
 # cannot wedge the unit and block every subsequent timer run.
 TimeoutStartSec=600
+# Restart= on a oneshot needs systemd >= 244; the droplet runs Ubuntu 24.04.
+Restart=on-failure
+RestartSec=10min
 # No mcp restart needed: the running reader drops every cache when manifest.json
 # changes (_refresh_if_stale) and rebuilds indices on the next query.
