@@ -816,6 +816,38 @@ class TestInternalLinks:
         dead = _dead_links(out)
         assert "lov/testloven/paragraf/1/index.html: /forskrift/testforskriften/paragraf/2/" in dead
 
+    def test_a_dangling_companion_url_is_reported(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        companion = out / "lov/testloven/paragraf/1/index.json"
+        data = json.loads(companion.read_bytes())
+        data["links"]["parent"] = f"{SITE_ORIGIN}/lov/ukjent/"
+        companion.write_text(json.dumps(data), encoding="utf-8")
+        assert _dead_links(out) == [
+            f"lov/testloven/paragraf/1/index.json: {SITE_ORIGIN}/lov/ukjent/"
+        ]
+
+    def test_a_dangling_src_is_reported(
+        self,
+        corpus: tuple[Path, str],
+        tmp_path: Path,
+    ) -> None:
+        repo, sha = corpus
+        out = tmp_path / "site"
+        emit_site(repo, sha, out)
+        page = out / "lov/testloven/index.html"
+        html = page.read_text(encoding="utf-8")
+        page.write_text(
+            html.replace("</body>", '<img src="/ukjent-side/"></body>'),
+            encoding="utf-8",
+        )
+        assert _dead_links(out) == ["lov/testloven/index.html: /ukjent-side/"]
+
     @pytest.mark.parametrize(
         "link",
         [
