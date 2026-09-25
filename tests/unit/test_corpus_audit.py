@@ -222,6 +222,31 @@ def test_detects_a_current_document_whose_embedding_sidecar_is_missing(tmp_path:
     assert report.integrity_findings == report.findings
 
 
+def test_reports_every_missing_embedding_in_deterministic_path_order(tmp_path: Path) -> None:
+    """One present current sidecar activates the check for every current act.
+
+    The audit is a corpus gate, so finding one hole must not stop the scan and
+    leave later holes for subsequent runs. Its stable ordering also keeps the
+    report byte-comparable across identical runs.
+    """
+    _seed(tmp_path, "embedded", "zulu", "alpha")
+    _embed(tmp_path, "embedded")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(
+            present=_record("embedded"),
+            last=_record("zulu"),
+            first=_record("alpha"),
+        ),
+    )
+
+    assert [(finding.kind, finding.path, finding.doc_id) for finding in report.findings] == [
+        ("missing_embedding", "lover/embeddings/alpha.bin", "first"),
+        ("missing_embedding", "lover/embeddings/zulu.bin", "last"),
+    ]
+
+
 def test_every_current_sidecar_present_is_not_a_missing_embedding(tmp_path: Path) -> None:
     _seed(tmp_path, "skatteloven", "ny-lov")
     _embed(tmp_path, "skatteloven", "ny-lov")
