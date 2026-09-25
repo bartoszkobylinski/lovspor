@@ -197,6 +197,126 @@ def test_a_removed_record_does_not_own_a_leftover_embedding_sidecar(tmp_path: Pa
     assert _kinds(report.findings) == [("orphan_embedding", "lover/embeddings/opphevet-lov.bin")]
 
 
+def _embed(root: Path, *slugs: str, subdir: str = "lover") -> None:
+    embeddings = root / subdir / "embeddings"
+    embeddings.mkdir(parents=True, exist_ok=True)
+    for slug in slugs:
+        (embeddings / f"{slug}.bin").write_bytes(b"\x00")
+
+
+def test_detects_a_current_document_whose_embedding_sidecar_is_missing(tmp_path: Path) -> None:
+    """#344: a keyless sync writes the Markdown and silently skips the .bin.
+
+    The corpus is embedded — another current act owns its sidecar — so an act
+    without one is a hole semantic_search cannot see, not a deliberate choice."""
+    _seed(tmp_path, "skatteloven", "ny-lov")
+    _embed(tmp_path, "skatteloven")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("ny-lov")),
+    )
+
+    assert _kinds(report.findings) == [("missing_embedding", "lover/embeddings/ny-lov.bin")]
+    assert report.findings[0].doc_id == "nl2"
+    assert report.integrity_findings == report.findings
+
+
+def test_every_current_sidecar_present_is_not_a_missing_embedding(tmp_path: Path) -> None:
+    _seed(tmp_path, "skatteloven", "ny-lov")
+    _embed(tmp_path, "skatteloven", "ny-lov")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("ny-lov")),
+    )
+
+    assert report.findings == ()
+
+
+def test_a_corpus_built_without_embeddings_reports_no_missing_embedding(tmp_path: Path) -> None:
+    """No current act owns a sidecar: the corpus was built keyless on purpose
+    (a local build, a fixture). Demanding vectors there would make the audit
+    red on every embedding-less corpus."""
+    _seed(tmp_path, "skatteloven", "ny-lov")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("ny-lov")),
+    )
+
+    assert report.findings == ()
+
+
+def test_a_leftover_sidecar_of_a_removed_act_does_not_make_the_corpus_embedded(
+    tmp_path: Path,
+) -> None:
+    """Only a *current* owner proves the corpus carries embeddings; a
+    tombstone's leftover .bin is orphan drift, reported once as that."""
+    _seed(tmp_path, "skatteloven")
+    _embed(tmp_path, "opphevet-lov")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("opphevet-lov", status="removed")),
+    )
+
+    assert _kinds(report.findings) == [("orphan_embedding", "lover/embeddings/opphevet-lov.bin")]
+
+
+def test_a_removed_act_without_a_sidecar_is_not_a_missing_embedding(tmp_path: Path) -> None:
+    _seed(tmp_path, "skatteloven")
+    _embed(tmp_path, "skatteloven")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("opphevet-lov", status="removed")),
+    )
+
+    assert report.findings == ()
+
+
+def test_a_missing_document_is_not_also_reported_as_a_missing_embedding(tmp_path: Path) -> None:
+    """One cause, one finding: with the Markdown gone, the absent sidecar is a
+    consequence the missing_document finding already names."""
+    _seed(tmp_path, "skatteloven")
+    _embed(tmp_path, "skatteloven")
+
+    report = audit_corpus(
+        tmp_path,
+        _manifest(nl1=_record("skatteloven"), nl2=_record("forsvunnet-lov")),
+    )
+
+    assert _kinds(report.findings) == [("missing_document", "lover/forsvunnet-lov.md")]
+
+
+def test_a_missing_embedding_is_found_in_every_dataset(tmp_path: Path) -> None:
+    """The ownership signal in one dataset makes the whole corpus embedded:
+    a keyless run skips sidecars in lover and forskrifter alike."""
+    _seed(tmp_path, "skatteloven")
+    _embed(tmp_path, "skatteloven")
+    (tmp_path / "forskrifter").mkdir()
+    (tmp_path / "forskrifter" / "ny-forskrift.md").write_text("# f\n", encoding="utf-8")
+    forskrift = _record("ny-forskrift", dataset="gjeldende-sentrale-forskrifter")
+    forskrift = forskrift.model_copy(update={"markdown_path": "forskrifter/ny-forskrift.md"})
+
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven"), sf1=forskrift))
+
+    assert _kinds(report.findings) == [
+        ("missing_embedding", "forskrifter/embeddings/ny-forskrift.bin"),
+    ]
+
+
+def test_a_record_without_a_slug_cannot_miss_an_embedding(tmp_path: Path) -> None:
+    _seed(tmp_path, "skatteloven", "uten-slug")
+    _embed(tmp_path, "skatteloven")
+    slugless = _record("uten-slug").model_copy(update={"slug": None})
+
+    report = audit_corpus(tmp_path, _manifest(nl1=_record("skatteloven"), nl2=slugless))
+
+    assert report.findings == ()
+
+
 def test_detects_a_stale_render(tmp_path: Path) -> None:
     """Renderer-version self-healing re-renders these, but a doc stuck below the
     current version across many syncs means the backfill is not converging."""
@@ -630,6 +750,7 @@ def test_the_severity_registers_are_disjoint_and_cover_every_emitted_kind() -> N
         "identity_mismatch",
         "malformed_language",
         "missing_document",
+        "missing_embedding",
         "orphan_document",
         "orphan_embedding",
         "stale_render",

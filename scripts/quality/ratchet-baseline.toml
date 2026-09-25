@@ -61,13 +61,6 @@ reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
 
 [[entry]]
 rule = "function-lines"
-path = "src/lovspor/corpus_audit.py"
-name = "_orphan_findings"
-value = 24
-reason = "legacy: over the limit when the ratchet landed (#323, 2026-09-15)"
-
-[[entry]]
-rule = "function-lines"
 path = "src/lovspor/corpus_fetch.py"
 name = "fetch_corpus"
 value = 22
