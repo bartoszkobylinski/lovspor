@@ -344,6 +344,15 @@ def _health(raw: str, tool_exit_code: int, counts_done: bool) -> RunHealth:
     )
 
 
+def _score(counts: dict[str, int], completed: bool) -> float | None:
+    if counts["total"]:
+        return round(100.0 * counts["killed"] / counts["total"], 2)
+    # Zero mutants on a finished run (not applicable) is a clean 100; zero on a
+    # run that died before measuring any is no score at all — mutmut-pr.sh
+    # prints "do not report one", and the artifact must not report one (#311).
+    return 100.0 if completed else None
+
+
 def build_result(
     commit: str, raw: str, tool_exit_code: int, survivors_file: Path | None = None
 ) -> dict[str, object]:
@@ -356,7 +365,7 @@ def build_result(
     # the gate anyway (mutmut exit bits 4 and 8), so they never inflate the score.
     # Registered equivalents do not adjust it either: the register moves the
     # verdict, never the measurement (decisions.md §9c).
-    score = round(100.0 * counts["killed"] / counts["total"], 2) if counts["total"] else 100.0
+    score = _score(counts, health.completed)
     checked = health._replace(
         unexplained_survivors=unexplained if survivors else None,
         registered_equivalents=registered,

@@ -1784,3 +1784,80 @@ class TestShadowTreeCarriesRepoState:
             "file nothing copied does not exist (issue #338)"
             for name, site in sorted(missing.items())
         )
+
+
+class TestNothingMeasured:
+    """Issue #311: a run that measured no mutant has no score, and the
+    escalation names the tool failure instead of a survivor problem."""
+
+    def test_a_run_that_died_before_any_mutant_has_no_score(self, tmp_path: Path) -> None:
+        raw = "Failed to run clean test\nerror: mutmut run failed (exit 1)\n"
+        result = _run(tmp_path, raw, tool_exit_code=3)
+
+        assert result["mutants"]["total"] == 0  # type: ignore[index]
+        assert result["completed"] is False
+        assert result["score"] is None
+
+    def test_not_applicable_keeps_its_score(self, tmp_path: Path) -> None:
+        result = _run(tmp_path, "mutation not applicable: no src/lovspor logic changed\n")
+
+        assert result["score"] == 100.0
+
+    def test_a_measured_run_keeps_its_score(self, tmp_path: Path) -> None:
+        result = _run(tmp_path, _progress_line(killed=1, survived=1), survivors="7\n")
+
+        assert result["score"] == 50.0
+
+    def test_gate_accepts_a_null_score(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, "Failed to run clean test\n", tool_exit_code=3)
+        out_file = tmp_path / "result.json"
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out_file)])
+            assert mutation_gate.main() == 0
+        captured = capsys.readouterr().out
+        assert "Score: none — no mutant was measured" in captured
+        assert "Gate: FAIL (tool_failed)" in captured
+
+    def _unmeasured(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> str:
+        with pytest.MonkeyPatch.context() as mp:
+            argv = ["mutation_gate.py", "--unmeasured", str(tmp_path / "result.json")]
+            mp.setattr("sys.argv", argv)
+            assert mutation_gate.main() == 0
+        return capsys.readouterr().out
+
+    def test_escalation_names_a_failed_baseline_and_its_failure(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        raw = (
+            "FAILED tests/unit/test_release_answers.py::test_any - FailedHealthCheck\n"
+            "Failed to run clean test\n"
+        )
+        _run(tmp_path, raw, tool_exit_code=3)
+
+        comment = self._unmeasured(tmp_path, capsys)
+
+        assert "the clean baseline test run failed" in comment
+        assert "FAILED tests/unit/test_release_answers.py::test_any - FailedHealthCheck" in comment
+        assert "no mutant was measured" in comment
+        assert "non-killable" not in comment
+
+    def test_escalation_names_a_tool_failure_with_its_exit_code(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, "error: mutmut run failed (exit 1)\n", tool_exit_code=1)
+
+        comment = self._unmeasured(tmp_path, capsys)
+
+        assert "the mutation tool failed (exit 1)" in comment
+        assert "clean baseline" not in comment
+        assert "survivors" in comment  # says there are none to classify
+
+    def test_escalation_without_a_hint_prints_no_empty_failure_block(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, "mutmut crashed without a failure line\n", tool_exit_code=1)
+
+        assert "```" not in self._unmeasured(tmp_path, capsys)

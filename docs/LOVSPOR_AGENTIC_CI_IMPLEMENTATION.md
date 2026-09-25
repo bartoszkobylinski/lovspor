@@ -639,6 +639,12 @@ albo `id_only: <powód>`, gdy drzewa cieni już nie ma. Implementer nie może
 zamienić tego z powrotem na gołe `null` — artefakt jest jedynym przekazaniem
 między bramką a tym, kto naprawia PR.
 
+`score` jest `null`, gdy run nie zmierzył ani jednego mutanta i się nie
+zakończył (`mutants.total == 0`, `completed: false`) — np. padł baseline albo
+samo narzędzie. `mutmut-pr.sh` mówi wtedy „do not report one” i artefakt też
+żadnego nie podaje (issue #311). `not_applicable` zostaje przy 100.0: run się
+zakończył, a zakres był pusty.
+
 ### Ważne
 
 Implementer **nie może wymyślić nowego progu mutation score**.

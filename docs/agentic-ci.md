@@ -56,8 +56,11 @@ PR opened/synchronize
   ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
   │     └─ pushes `[agent:codex-tests]` → fresh synchronize run, old run cancelled
   └─ mutation       (ubuntu, no LLM: scripts/mutmut-pr.sh → mutation-result.json)
-        └─ gate FAIL → Mutation Remediation workflow (Codex, tests only, max 2 cycles)
-              └─ still failing / non-killable → BLOCKED + needs-human:mutation
+        └─ gate FAIL → Mutation Remediation workflow
+              ├─ budget_exceeded / tool_failed / baseline_tests_failed
+              │     → BLOCKED + needs-human:mutation, no Codex (nothing measured to kill)
+              └─ survivors → Codex, tests only, max 2 cycles
+                    └─ still failing / non-killable → BLOCKED + needs-human:mutation
 ```
 
 ## Roles
