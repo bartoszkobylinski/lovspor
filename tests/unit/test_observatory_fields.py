@@ -5,7 +5,7 @@ from pydantic import BaseModel, ValidationError
 
 from lovspor.observatory.fields import NonBlankStr, TrimmedNonBlankStr
 
-BLANKS = ["", " ", "\t", "\n", " \t "]
+BLANKS = ["", " ", "\t", "\n", " \t ", "\u00a0", "\u2003"]
 
 
 class _Kept(BaseModel):
