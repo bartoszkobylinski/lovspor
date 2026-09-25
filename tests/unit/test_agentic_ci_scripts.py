@@ -582,6 +582,7 @@ class TestUnmeasuredMutants:
 
         assert result["mutants"]["unmeasured"] == 2  # type: ignore[index]
         assert result["mutants"]["total"] == 57  # type: ignore[index]
+        assert result["score"] == 87.72
 
     def test_unmeasured_mutants_fail_a_run_that_is_otherwise_clean(self, tmp_path: Path) -> None:
         raw = "40/900  🎉 38 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0\n"

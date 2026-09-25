@@ -163,3 +163,17 @@ class TestScoreReport:
         assert "suspicious: 1" in lines
         assert "untested:   3" in lines[-1]
         assert "not over the whole surface" in lines[-1]
+
+
+class TestUnmeasuredMutants:
+    def test_shortfall_excludes_every_printed_bucket_and_type_checked_mutants(self) -> None:
+        body = SCRIPT.read_text(encoding="utf-8")
+
+        assert (
+            "unmeasured=$((done_count - killed - no_tests - timed_out - suspicious "
+            "- survived - skipped - type_checked))"
+        ) in body
+        assert 'if [ "$unmeasured" -gt 0 ]; then' in body
+        assert (
+            'echo "unmeasured: $unmeasured  — signal-killed (mutmut: segfault), no verdict"' in body
+        )
