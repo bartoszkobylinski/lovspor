@@ -54,6 +54,8 @@ SCENARIOS = (
 # The hosted unit's cgroup limits (deploy/digitalocean/lovspor-mcp.service).
 MEMORY_HIGH_MIB = 1400
 MEMORY_MAX_MIB = 1700
+# _MAX_SNAPSHOT_STATES in lovspor.mcp: the most states the reader keeps at once.
+STATE_COUNT = 4
 _KIB = 1024
 _MIB = 1024 * 1024
 # Satisfies adapter construction only; the index build never embeds a query.
@@ -199,6 +201,15 @@ def _shared_args(args: argparse.Namespace) -> list[str]:
     return ["--corpus", str(args.corpus), "--dates", args.dates, "--query", args.query]
 
 
+def parse_dates(value: str) -> list[date]:
+    """Exactly four distinct dates: a repeat would re-hit a cached state and
+    report three resident states as four."""
+    dates = [date.fromisoformat(d) for d in value.split(",")]
+    if len(dates) != STATE_COUNT or len(set(dates)) != STATE_COUNT:
+        raise ValueError(f"--dates needs {STATE_COUNT} distinct dates, got {value!r}")
+    return dates
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--corpus", type=Path, required=True)
@@ -211,8 +222,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> None:
     args = _parse_args(argv)
+    dates = parse_dates(args.dates)
     if args.child:
-        dates = [date.fromisoformat(d) for d in args.dates.split(",")]
         run_child(args.child, args.corpus.resolve(), dates, args.query)
     else:
         run_parent(args)
