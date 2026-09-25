@@ -159,6 +159,7 @@ class TestBudget:
 
 
 SILENT_MUTMUT = "#!/bin/sh\nexec sleep 30\n"
+SPINNER_MUTMUT = "#!/bin/sh\nprintf 'collecting stats\\r'\nexec sleep 30\n"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -215,6 +216,20 @@ class TestBudgetKillBeforeFirstTally:
         result = self._run(tmp_path)
 
         assert "no mutant was measured before the budget ran out" in result.stdout
+
+    def test_budget_verdict_starts_after_spinner_line(self, tmp_path: Path) -> None:
+        repo = _repo_with_one_changed_function(tmp_path, SPINNER_MUTMUT)
+
+        result = subprocess.run(
+            ["bash", "scripts/mutmut-pr.sh", "base"],
+            cwd=repo,
+            capture_output=True,
+            env={**os.environ, "MUTMUT_PR_FILE_BUDGET_SECONDS": "1"},
+            timeout=60,
+            check=False,
+        )
+
+        assert b"collecting stats\r\nmutation budget exceeded: after 1s" in result.stdout
 
     def test_the_gate_reads_it_as_the_budget(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
