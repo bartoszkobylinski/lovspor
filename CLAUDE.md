@@ -33,7 +33,7 @@ This repo contains **only the engine**. Legal text never lives here. The corpus 
 - Integration tests in `tests/integration/` use real fixtures, not mocks.
 
 ### Pre-commit checklist (mandatory, every commit)
-1. `scripts/quality/verify-fast.sh` — green (gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/`, the size and complexity ratchets)
+1. `scripts/quality/verify-fast.sh` — green (gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/`, the size and complexity ratchets, the architecture boundaries)
 2. Invoke `/security-check` — clean
 3. Then `git commit`
 
@@ -163,7 +163,7 @@ These extend global rules in `~/.claude/CLAUDE.md`:
 ./scripts/bootstrap.sh
 
 # Daily
-scripts/quality/verify-fast.sh        # fast gate = pre-commit hook: gitleaks, ruff, format, mypy, ratchets
+scripts/quality/verify-fast.sh        # fast gate = pre-commit hook: gitleaks, ruff, format, mypy, ratchets, boundaries
 scripts/quality/verify-deep.sh        # deep gate = pre-push hook: fast gate + security scan + unit suite
 uv run pytest                         # all tests
 uv run pytest tests/unit/             # unit suite alone
