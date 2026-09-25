@@ -95,6 +95,14 @@ jobs:
           if [ "$(jq -r .commit "$f")" != "$HEAD_SHA" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          # Mutants mutmut killed with a signal got no verdict at all (#283):
+          # the same unmeasured surface as a budget cut, beyond any new test.
+          if [ "$(jq -r .gate.reason "$f")" = "unmeasured_mutants" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "signal_killed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # A budget-exceeded gate is not remediable by tests: the surface
           # was never fully measured, so there is nothing for new tests to
           # kill. Route it straight to a human instead of burning cycles.
@@ -108,6 +116,18 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: BLOCKED — mutants got no verdict, tests cannot fix an unmeasured surface
+        if: steps.gate.outputs.signal_killed == 'true'
+        run: |
+          pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
+          [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
+          gh pr edit "$pr" --add-label "needs-human:mutation"
+          n="$(jq -r .mutants.unmeasured "${{ runner.temp }}/mutation/mutation-result.json")"
+          {
+            echo "Mutation gate: $n mutant(s) got no verdict — mutmut killed them with a signal and filed them as \"segfault\", a bucket its progress line never prints (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Re-run the mutation job, or read the mutants' status with \`mutmut results\`. Human decision required."
+          } > "$RUNNER_TEMP/unmeasured-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "$pr" "$RUNNER_TEMP/unmeasured-escalation.md"
 
       - name: BLOCKED — budget exceeded, tests cannot fix an unmeasured surface
         if: steps.gate.outputs.budget == 'true'

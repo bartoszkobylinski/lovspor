@@ -182,6 +182,13 @@ echo "timed out:  $timed_out"
 echo "suspicious: $suspicious"
 if [ "$no_tests" -gt 0 ]; then echo "no tests:   $no_tests"; fi
 if [ "$skipped" -gt 0 ]; then echo "skipped:    $skipped"; fi
+# The tally has no segfault bucket, yet counts those mutants in its done
+# total: the shortfall is every signal-killed mutant, which got no verdict (#283).
+type_checked="$(printf '%s' "$tally" | sed -E 's/.*🧙 ([0-9]+).*/\1/')"
+unmeasured=$((done_count - killed - no_tests - timed_out - suspicious - survived - skipped - type_checked))
+if [ "$unmeasured" -gt 0 ]; then
+  echo "unmeasured: $unmeasured  — signal-killed (mutmut: segfault), no verdict"
+fi
 echo
 echo "Tests were selected per function from Mutmut's stats pass."
 

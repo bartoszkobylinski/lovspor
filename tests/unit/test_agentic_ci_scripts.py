@@ -567,6 +567,58 @@ class TestBudgetExceeded:
         assert result["gate"] == {"passed": False, "reason": "tool_failed"}
 
 
+class TestUnmeasuredMutants:
+    """Issue #283: mutmut files a child killed by a signal (-9 from its own
+    CPU-limit escalation, -11) as "segfault", a bucket its progress line never
+    prints. Those mutants still count in the line's `done`, so the printed
+    buckets fall short of it — and the difference is exactly the mutants that
+    got no verdict. A run that learned nothing about them cannot pass."""
+
+    # The #280 run: 57 mutants in scope, 2 of them signal-killed.
+    SIGNAL_KILLED = "57/1203  🎉 50 🫥 0  ⏰ 0  🤔 0  🙁 5  🔇 0  🧙 0\n"
+
+    def test_the_shortfall_is_counted_as_unmeasured(self, tmp_path: Path) -> None:
+        result = _run(tmp_path, self.SIGNAL_KILLED, tool_exit_code=2)
+
+        assert result["mutants"]["unmeasured"] == 2  # type: ignore[index]
+        assert result["mutants"]["total"] == 57  # type: ignore[index]
+
+    def test_unmeasured_mutants_fail_a_run_that_is_otherwise_clean(self, tmp_path: Path) -> None:
+        raw = "40/900  🎉 38 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0\n"
+
+        result = _run(tmp_path, raw)
+
+        assert result["gate"] == {"passed": False, "reason": "unmeasured_mutants"}
+
+    def test_unmeasured_outranks_the_per_bucket_reasons(self, tmp_path: Path) -> None:
+        """Survivors beside unmeasured mutants still need a human: new tests
+        could kill the survivors, never the mutants that got no verdict."""
+        result = _run(tmp_path, self.SIGNAL_KILLED, tool_exit_code=2)
+
+        assert result["gate"] == {"passed": False, "reason": "unmeasured_mutants"}
+
+    def test_type_checked_mutants_are_measured(self, tmp_path: Path) -> None:
+        raw = "10/900  🎉 7 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 1  🧙 2\n"
+
+        result = _run(tmp_path, raw)
+
+        assert result["mutants"]["unmeasured"] == 0  # type: ignore[index]
+        assert result["gate"] == {"passed": True, "reason": "ok"}
+
+    def test_a_budget_cut_keeps_its_own_reason(self, tmp_path: Path) -> None:
+        raw = self.SIGNAL_KILLED + TestBudgetExceeded.BUDGET_LINE
+
+        result = _run(tmp_path, raw, tool_exit_code=18)
+
+        assert result["gate"] == {"passed": False, "reason": "budget_exceeded"}
+
+    def test_no_progress_line_reports_zero_unmeasured(self, tmp_path: Path) -> None:
+        result = _run(tmp_path, "mutation not applicable: no src/lovspor logic changed\n")
+
+        assert result["mutants"]["unmeasured"] == 0  # type: ignore[index]
+        assert result["gate"] == {"passed": True, "reason": "not_applicable"}
+
+
 class TestFailureHint:
     """A failing gate must carry the decisive raw-log line: three blocked
     runs in a row required digging job logs for one FAILED test line the
