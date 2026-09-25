@@ -64,6 +64,14 @@ class TestAttestationRegistryBoundary:
         assert run.returncode == 0, run.stdout
         assert "0 violation(s)" in run.stdout
 
+    def test_a_similarly_named_module_is_not_exempt(self, tmp_path: Path) -> None:
+        lookalike = "src/lovspor/temporal_attestation_backup.py"
+
+        run = _run(_tree(tmp_path, {lookalike: LIFTED_READ}))
+
+        assert run.returncode == 1
+        assert f"FAIL attestation-registry: {lookalike}:4 runs `git notes`" in run.stdout
+
     def test_a_registry_read_lifted_into_another_module_fails(self, tmp_path: Path) -> None:
         run = _run(_tree(tmp_path, {REGISTRY: "", ELSEWHERE: LIFTED_READ}))
         assert run.returncode == 1
@@ -97,6 +105,30 @@ class TestAttestationRegistryBoundary:
     )
     def test_notes_that_is_not_a_git_notes_call_passes(self, source: str) -> None:
         assert boundaries.violations_in(ELSEWHERE, source) == []
+
+    def test_an_argv_built_at_runtime_is_outside_the_rule(self) -> None:
+        source = 'command = [git_program, notes_subcommand, "show", sha]\n'
+
+        assert boundaries.violations_in(ELSEWHERE, source) == []
+
+    def test_every_violation_is_reported_in_path_order(self, tmp_path: Path) -> None:
+        first = "src/lovspor/a.py"
+        second = "src/lovspor/z.py"
+        run = _run(
+            _tree(
+                tmp_path,
+                {
+                    second: 'args = ["notes", "show", sha]\n',
+                    first: 'args = ["git", "notes", "list"]\n',
+                },
+            )
+        )
+
+        assert run.returncode == 1
+        failures = [line for line in run.stdout.splitlines() if line.startswith("FAIL")]
+        assert failures[0].startswith(f"FAIL attestation-registry: {first}:1 ")
+        assert failures[1].startswith(f"FAIL attestation-registry: {second}:1 ")
+        assert run.stdout.splitlines()[-1] == "boundaries: 2 violation(s), 1 rule"
 
     def test_an_unparseable_file_is_an_error_not_a_pass(self, tmp_path: Path) -> None:
         run = _run(_tree(tmp_path, {ELSEWHERE: "def broken(:\n"}))
