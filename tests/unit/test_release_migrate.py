@@ -3138,6 +3138,8 @@ class TestOfflineRollback:
         assert str(caught.value) == "systemctl restart caddy failed: Job for caddy failed"
         assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
         assert read_marker(droplet.releases) is None
+        assert droplet.host.previous_caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert droplet.host.previous_drop_in.read_text(encoding="utf-8") == PRE_ENVELOPE_DROP_IN
 
     def test_a_silent_restart_failure_names_the_exit_code(self, droplet: Droplet) -> None:
         _migrate(droplet)
