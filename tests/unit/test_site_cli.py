@@ -42,6 +42,7 @@ from lovspor.site.fixture import (
     synthetic_document,
 )
 from lovspor.tool_surface import describe_tool_surface
+from tests.unit.cli_output import said
 from tests.unit.probe_fixtures import (
     MCP_URL,
     READINESS_URL,
@@ -269,11 +270,11 @@ class TestSiteFixtureCommand:
 
 class TestHelp:
     def test_both_commands_are_registered_beside_publish_site(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        root = get_command(app)
 
-        assert result.exit_code == 0
-        for command in ("publish-site", "build-site", "site-fixture"):
-            assert command in result.output
+        assert isinstance(root, click.Group)
+        assert {"publish-site", "build-site", "site-fixture"} <= set(root.commands)
+        assert runner.invoke(app, ["--help"]).exit_code == 0
 
 
 def _probe_args(corpus: Path, out: Path, *extra: str) -> list[str]:
@@ -784,8 +785,8 @@ class TestSiteDriftCheckCommand:
         )
 
         assert result.exit_code == 2
-        assert (
-            "Invalid value: public_mcp_url: not an http(s) URL: 'lovspor.no/mcp'" in result.stderr
+        assert said(
+            "Invalid value: public_mcp_url: not an http(s) URL: 'lovspor.no/mcp'", result.stderr
         )
         assert not httpx_mock.get_requests()
 
@@ -807,7 +808,7 @@ class TestSiteDriftCheckCommand:
         )
 
         assert result.exit_code == 2
-        assert "Invalid value: served_url: not an http(s) URL" in result.stderr
+        assert said("Invalid value: served_url: not an http(s) URL", result.stderr)
         assert called is False
 
     def test_the_observer_is_the_drift_timer_by_default(
@@ -834,7 +835,7 @@ class TestSiteDriftCheckCommand:
         for code in ("0", "1", "2", "3", "4"):
             assert re.search(rf"\b{code}\b", result.output)
         assert "drift" in result.output
-        assert "served document" in result.output
+        assert said("served document", result.output)
 
     def test_the_admin_socket_is_the_first_action_and_its_own_exit(
         self, tmp_path: Path, httpx_mock: HTTPXMock, credential: Path
@@ -853,7 +854,7 @@ class TestSiteDriftCheckCommand:
         result = runner.invoke(app, _drift_args("--admin", "localhost:2019"))
 
         assert result.exit_code == 2
-        assert "Unix-socket" in result.stderr
+        assert said("Unix-socket", result.stderr)
         assert not httpx_mock.get_requests()
 
     def test_the_call_as_the_other_identity_is_made_as_the_option_names_it(
@@ -914,11 +915,11 @@ class TestFirstValidationMessage:
 
 class TestProbeHelp:
     def test_both_commands_are_registered(self) -> None:
-        result = runner.invoke(app, ["--help"])
+        root = get_command(app)
 
-        assert result.exit_code == 0
-        assert "release-probe" in result.output
-        assert "site-drift-check" in result.output
+        assert isinstance(root, click.Group)
+        assert {"release-probe", "site-drift-check"} <= set(root.commands)
+        assert runner.invoke(app, ["--help"]).exit_code == 0
 
     def test_the_probe_has_no_checkout_option_and_the_drift_check_no_corpus(self) -> None:
         command = get_command(app)

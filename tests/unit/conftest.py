@@ -7,6 +7,23 @@ from collections.abc import Iterator
 
 import pytest
 
+NARROW_CONSOLE_COLUMNS = "20"
+
+
+@pytest.fixture(autouse=True)
+def narrow_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test sees a 20-column console, whatever terminal runs the suite.
+
+    Rich sizes help and usage-error panels from ``COLUMNS`` and folds a token
+    that does not fit mid-word, so an assertion on rendered output can pass at
+    the width a developer or runner happens to have and fail at another (#295).
+    Pinning the width narrow makes every such assertion fail here, on every
+    run, instead of whenever a runner's width or a message's length changes —
+    the comparison has to go through ``tests.unit.cli_output`` or below the
+    renderer to pass at all.
+    """
+    monkeypatch.setenv("COLUMNS", NARROW_CONSOLE_COLUMNS)
+
 
 @pytest.fixture
 def c_locale() -> Iterator[None]:
