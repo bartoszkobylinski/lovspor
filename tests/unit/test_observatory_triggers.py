@@ -81,6 +81,18 @@ class TestScheduledTriggers:
 
         assert triggers == [_utc(24, 1, month=10), _utc(25, 2, month=10)]
 
+    def test_triggers_follow_oslo_across_the_spring_clock_change(self) -> None:
+        """03:00 is CET (02:00Z) before 29 March 2026 and CEST (01:00Z) from it."""
+        triggers = scheduled_triggers(
+            datetime(2026, 3, 28, 0, tzinfo=UTC),
+            datetime(2026, 3, 29, 12, tzinfo=UTC),
+        )
+
+        assert triggers == [
+            datetime(2026, 3, 28, 2, tzinfo=UTC),
+            datetime(2026, 3, 29, 1, tzinfo=UTC),
+        ]
+
     def test_triggers_are_stated_in_oslo_time(self) -> None:
         (trigger,) = scheduled_triggers(_utc(22, 0), _utc(22, 12))
 
@@ -127,6 +139,17 @@ class TestDroppedTriggers:
 
         assert dropped[0].scheduled_at == _utc(13, 1)
         assert len(dropped) == 13
+
+    def test_a_trigger_exactly_at_the_lookback_cutoff_is_not_listed(self) -> None:
+        """The report covers (now - 14 days, now], not fifteen calendar dates."""
+        now = _utc(26, 1)
+        run = _run(_utc(11, 12), now + timedelta(hours=1))
+
+        dropped = dropped_triggers([run], None, now=now)
+
+        assert [trigger.scheduled_at for trigger in dropped] == [
+            _utc(day, 1) for day in range(13, 27)
+        ]
 
     def test_the_sweep_running_now_holds_the_triggers_since_it_began(self) -> None:
         since = _utc(24, 5, 15)
@@ -228,6 +251,23 @@ class TestRunningSweep:
     def test_a_released_lock_means_nothing_is_running(self, tmp_path: Path) -> None:
         lock = tmp_path / "lock"
         lock.write_text("")
+
+        assert running_sweep("observatory-sweep", lock) is None
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            b"not json\n",
+            b'{"owner":"observatory-sweep","pid":',
+            b'{"owner":"observatory-sweep","pid":"not-a-pid","since":"2026-09-26T05:15:40+00:00"}',
+            b"\xff\n",
+        ],
+    )
+    def test_an_unreadable_advisory_record_is_not_a_running_sweep(
+        self, tmp_path: Path, record: bytes
+    ) -> None:
+        lock = tmp_path / "lock"
+        lock.write_bytes(record)
 
         assert running_sweep("observatory-sweep", lock) is None
 
