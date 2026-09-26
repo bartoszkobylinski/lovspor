@@ -102,15 +102,16 @@ def is_mutatable(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     }
 
 
-def is_entered(node: ast.ClassDef, class_name: str) -> bool:
-    """Whether mutmut 3.8.0 can reach this class's methods.
+def is_entered(class_name: str) -> bool:
+    """Whether mutmut 3.8.0 can reach the methods of a class nested in `class_name`.
 
     Mutmut skips a class's decorator but recurses into the class
     (`mutmut/mutation/file_mutation.py:337-342`), and it gives trampolines to
-    the methods of a top-level class only (`combine_mutations_to_source`,
-    lines 409-434), so a decorated class nested in another stays out (#419).
+    the direct methods of a top-level class only (`combine_mutations_to_source`,
+    lines 409-434): a class nested in another, decorated (#419) or not (#424),
+    is copied unmutated.
     """
-    return not node.decorator_list or not class_name
+    return not class_name
 
 
 def keyed_units(source: str) -> list[Unit]:
@@ -133,7 +134,7 @@ def keyed_units(source: str) -> list[Unit]:
                 start = min([node.lineno, *(item.lineno for item in node.decorator_list)])
                 units.append(Unit(f"{prefix}{node.name}", start, node.end_lineno or node.lineno))
             elif isinstance(node, ast.ClassDef):
-                if not is_entered(node, class_name):
+                if not is_entered(class_name):
                     continue
                 nested_name = node.name if not class_name else f"{class_name}.{node.name}"
                 visit(node.body, nested_name)
@@ -183,7 +184,8 @@ def _region_of(node: ast.stmt, class_name: str) -> Unit | None:
             return None
         return Unit(f"decorated function {_qualified(class_name, node.name)}", start, end)
     if isinstance(node, ast.ClassDef):
-        return Unit(f"decorated class {_qualified(class_name, node.name)}", start, end)
+        kind = "decorated class" if node.decorator_list else "nested class"
+        return Unit(f"{kind} {_qualified(class_name, node.name)}", start, end)
     return Unit(f"class body {class_name}" if class_name else "module level", start, end)
 
 
@@ -202,8 +204,8 @@ def unmeasured_regions(tree: ast.Module) -> list[Unit]:
     Mutmut copies module-level and class-body statements unmutated and skips
     every decorated function but a lone `@staticmethod`/`@classmethod`
     (`mutmut/mutation/file_mutation.py`, `_skip_node_and_children`), the
-    decorators and header of a decorated class, and a decorated class nested
-    in another class (#419).
+    decorators and header of a decorated class, and any class nested in
+    another class (#419, #424).
     A change there cannot be brought into scope, so it is reported instead
     (#289, #292).
     """
@@ -211,7 +213,7 @@ def unmeasured_regions(tree: ast.Module) -> list[Unit]:
 
     def visit(body: list[ast.stmt], class_name: str = "") -> None:
         for node in body:
-            if isinstance(node, ast.ClassDef) and is_entered(node, class_name):
+            if isinstance(node, ast.ClassDef) and is_entered(class_name):
                 regions.extend(_declaration_region(node))
                 visit(node.body, _qualified(class_name, node.name))
             elif region := _region_of(node, class_name):
