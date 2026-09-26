@@ -69,6 +69,7 @@ LOVSPOR_SELF_SERVICE_RATE_PER_MINUTE   LOVSPOR_SERVICE_DAILY_QUOTA
 LOVSPOR_SELF_SERVICE_RATE_BURST        LOVSPOR_SERVICE_PAID_DAILY_QUOTA
 LOVSPOR_SELF_SERVICE_DAILY_QUOTA       LOVSPOR_SEMANTIC_QUERY_MAX_TOKENS
 LOVSPOR_SELF_SERVICE_PAID_DAILY_QUOTA  LOVSPOR_SEMANTIC_QUERY_CACHE_ENTRIES
+LOVSPOR_HISTORICAL_CACHE_MIB
 ```
 
 An unset or empty variable keeps the default; anything that is not a positive integer is a startup refusal, so a typo in a deployment env file cannot silently serve the built-in value instead of the one the operator meant. Counters are per process and in memory: a restart forgives the day, and the numbers are placeholders until real self-service traffic replaces the guesswork.
@@ -721,6 +722,18 @@ force). The response is then an envelope `{"recorded_at": ..., "corpus_commit": 
 "results": [...]}` instead of a bare list, so even zero matches carry the resolved state.
 Without the parameter the bare-list shape is unchanged. The first historical search per
 state bulk-loads that state's bodies — comparable cost to the live index's own cold start.
+
+**Historical memory (issue #223).** A state's bodies are streamed out of one `git archive`
+narrowed to the Markdown files, never captured whole, and kept afterwards only inside a
+byte budget: `LOVSPOR_HISTORICAL_CACHE_MIB`, default **256**. Every cached state is
+charged 16 MiB (its parsed manifest, ~14 MiB measured) plus its search bodies (~198 MiB
+by `sum(getsizeof)` on lovverk `ddb130e71`), and whole states are evicted least recently
+used first. The default holds one production state, not two: the hosted unit runs at
+~847 MB steady under `MemoryMax=1700M`, and a cold historical search adds the state being
+built plus `git archive`'s own peak in the same cgroup. A state whose bodies exceed the
+budget is still answered — they live for that one call and are then released — so a
+small budget costs a reload per call, never a refusal. Results are identical whether a
+state was cached or not; only the time differs.
 
 **Performance:** the body index is loaded lazily on the first call and stays resident. Measured 2026-07-29 on the renderer-5 corpus (5,913 docs, 113,457,896 characters): **~270 MB peak RSS** — four runs across two machines landed at 247, 271, 278 and 280 MB, so size a droplet from the top of that range, not the bottom. The body strings alone are ~209 MB (`sum(getsizeof)`) plus ~0.8 MB of dict and keys; the rest is the transient load-time peak, which is the part that actually decides whether a small droplet survives the warm-up. Cold load 1.3–1.9 s off a warm page cache. Every call after that is a full scan of that text — ~0.4 s, or ~0.5–0.6 s once the marker-tolerant pass runs over the 18.3% of documents that carry a footnote marker. Server startup stays fast for clients that only query metadata.
 

@@ -50,13 +50,11 @@ import re
 import shlex
 import subprocess
 import sys
-import tarfile
 import threading
 import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
-from io import BytesIO
 from pathlib import Path
 from typing import Any, NamedTuple, Self, TypedDict, final
 
@@ -113,6 +111,7 @@ from lovspor.snapshot import (
     StateIntegrityError,
     resolve_corpus_state,
 )
+from lovspor.state_cache import STATE_OVERHEAD_BYTES, ByteBudgetCache, state_bytes
 from lovspor.storage.manifest import Manifest, ManifestRecord, read_manifest
 from lovspor.temporal import (
     TEMPORAL_PARSER_VERSION,
@@ -518,8 +517,8 @@ class CorpusReader:
         # commit SHA. Deliberately NOT dropped by ``_refresh_if_stale``:
         # a ``git pull`` adds commits but cannot change what an existing
         # commit contains, so these caches can never go stale — only
-        # unused. Bounded FIFO (``_MAX_SNAPSHOT_STATES``).
-        self._snapshot_states: dict[str, _SnapshotData] = {}
+        # unused. Bounded in bytes, LRU (``lovspor.state_cache``, #223).
+        self._snapshot_states = ByteBudgetCache["_SnapshotData"].from_env()
 
     def _refresh_if_stale(self) -> None:
         """Drop all in-memory caches when ``manifest.json`` changed on disk.
@@ -879,10 +878,9 @@ class CorpusReader:
         with self._lock:
             data = self._snapshot_states.get(ref.sha)
             if data is None:
-                if len(self._snapshot_states) >= _MAX_SNAPSHOT_STATES:
-                    self._snapshot_states.pop(next(iter(self._snapshot_states)))
-                data = _SnapshotData(CorpusSnapshot(self.corpus_path, ref.sha), ref)
-                self._snapshot_states[ref.sha] = data
+                snapshot = CorpusSnapshot(self.corpus_path, ref.sha)
+                data = _SnapshotData(snapshot, ref, self._snapshot_states)
+                self._snapshot_states.put(ref.sha, data, STATE_OVERHEAD_BYTES)
         return data
 
     def _lineage_path_at(self, slug: str, target: date) -> str | None:
@@ -3588,14 +3586,6 @@ def _stamp_not_evaluated(result: dict[str, Any]) -> dict[str, Any]:
 _INTEGRITY_SAMPLE_SLUGS = 5
 """How many offending slugs an integrity error names before eliding."""
 
-_MAX_SNAPSHOT_STATES = 4
-"""Bound on cached historical states. Each holds a parsed manifest and,
-after a historical ``search_body``, the state's whole body set (~200 MB on
-the production corpus) — a handful covers a session revisiting the same
-dates; an unbounded map would let a date-scanning client hold every state
-ever asked for."""
-
-
 _RECORDED_AT_FORM = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 """The one wire form ``recorded_at`` accepts: ``YYYY-MM-DD``, exactly.
 
@@ -3759,6 +3749,7 @@ class _SnapshotData:
 
     snapshot: CorpusSnapshot
     ref: CorpusStateRef
+    cache: "ByteBudgetCache[_SnapshotData]"
     bodies: dict[str, str | None] = field(default_factory=dict)
     section_indexes: dict[str, SectionIndex] = field(default_factory=dict)
     search_bodies: dict[str, str] | None = None
@@ -4060,10 +4051,11 @@ class _SnapshotState:
         """``search_body`` against this state, in the ADR-0011 point 8
         envelope — so even an empty result set carries the evidence
         stamp a bare list cannot."""
+        load = functools.cache(self._search_bodies)
         docs = _iter_search_docs(
             self._data.snapshot.manifest.documents,
             self._slug_index(),
-            self._search_body_lookup,
+            lambda slug: load().get(slug),
         )
         hits = _search_body_hits(query, docs, dataset, limit)
         recorded_at = self._recorded_at
@@ -4074,39 +4066,33 @@ class _SnapshotState:
             "results": hits,
         }
 
-    def _search_body_lookup(self, slug: str) -> str | None:
-        if self._data.search_bodies is None:
-            self._data.search_bodies = self._load_search_bodies()
-        return self._data.search_bodies.get(slug)
+    def _search_bodies(self) -> dict[str, str]:
+        """This state's bodies, kept for later calls only while the state is
+        cached and they fit its byte budget (#223). Otherwise they live for
+        this one call — one state's transient memory, never a resident one."""
+        if self._data.search_bodies is not None:
+            return self._data.search_bodies
+        bodies = self._load_search_bodies()
+        if self._data.cache.resize(self._data.ref.sha, state_bytes(bodies)):
+            self._data.search_bodies = bodies
+        return bodies
 
     def _load_search_bodies(self) -> dict[str, str]:
         """Bulk-read every current doc's body at this state, in one pass.
 
         Per-file ``git show`` would cost two subprocesses per document —
         ~12,000 for one historical search on the production corpus.
-        ``git archive`` streams the whole tree once; members are read in
-        memory only, nothing touches the filesystem, so the tar
-        path-traversal class (CVE-2007-4559) has no surface here.
+        ``iter_texts`` streams one ``git archive`` instead (issue #223);
+        each body is stripped as it arrives, so the raw text of the whole
+        state is never held at once.
         """
         wanted = {
             record.markdown_path: slug for slug, (_doc_id, record) in self._slug_index().items()
         }
-        raw = subprocess.run(  # noqa: S603
-            ["git", "archive", "--format=tar", self._data.ref.sha],  # noqa: S607
-            cwd=self._data.snapshot.repo_path,
-            capture_output=True,
-            check=True,
-        )
-        bodies: dict[str, str] = {}
-        with tarfile.open(fileobj=BytesIO(raw.stdout)) as tar:
-            for member in tar:
-                slug = wanted.get(member.name)
-                if slug is None or not member.isfile():
-                    continue
-                blob = tar.extractfile(member)
-                if blob is None:
-                    continue
-                bodies[slug] = _strip_frontmatter_and_h1(blob.read().decode("utf-8"))
+        bodies = {
+            wanted[path]: _strip_frontmatter_and_h1(text)
+            for path, text in self._data.snapshot.iter_texts(wanted)
+        }
         missing = sorted(set(wanted.values()) - set(bodies))
         if missing:
             shown = ", ".join(missing[:_INTEGRITY_SAMPLE_SLUGS])

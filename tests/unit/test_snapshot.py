@@ -3,8 +3,10 @@
 import json
 import os
 import subprocess
+import tarfile
 from dataclasses import FrozenInstanceError
 from datetime import UTC, date, datetime, time, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from lovspor.snapshot import (
     CorpusSnapshot,
     CorpusStateRef,
     HistoryBoundaryError,
+    StateIntegrityError,
     resolve_corpus_state,
 )
 from lovspor.timetravel import ShallowHistoryError
@@ -224,6 +227,16 @@ def _manifest_payload(body_rel: str, *, slug: str = "testloven") -> dict[str, ob
     }
 
 
+def _init_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "corpus"
+    repo.mkdir()
+    _run_git(repo, "init", "-b", "main")
+    _run_git(repo, "config", "user.email", "test@example.com")
+    _run_git(repo, "config", "user.name", "Test")
+    _run_git(repo, "config", "commit.gpgsign", "false")
+    return repo
+
+
 @pytest.fixture
 def corpus_repo(tmp_path: Path) -> tuple[Path, str, str]:
     """A two-commit corpus: v1 body on 2026-05-01, v2 body on 2026-05-10."""
@@ -404,3 +417,176 @@ def test_shallow_no_history_message_is_verbatim(
         resolve_corpus_state(tmp_path, date(2026, 5, 1))
 
     assert "checkout; no locally available history. Deepen" in str(excinfo.value)
+
+
+# ---------- streamed archive reads (issue #223) ----------
+
+
+def test_iter_texts_reads_each_wanted_file_at_its_commit(
+    corpus_repo: tuple[Path, str, str],
+) -> None:
+    repo, sha1, sha2 = corpus_repo
+
+    old = dict(CorpusSnapshot(repo, sha1).iter_texts({"lover/testloven.md"}))
+    new = dict(CorpusSnapshot(repo, sha2).iter_texts({"lover/testloven.md"}))
+
+    assert old == {"lover/testloven.md": "---\nx: 1\n---\n# T\n\nv1 body\n"}
+    assert new == {"lover/testloven.md": "---\nx: 1\n---\n# T\n\nv2 body\n"}
+
+
+def test_iter_texts_yields_only_wanted_files_present_in_the_tree(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    (repo / "lover").mkdir()
+    (repo / "lover" / "a.md").write_text("A\n")
+    (repo / "lover" / "b.md").write_text("B\n")
+    (repo / "manifest.json").write_text("{}")
+    sha = _commit_all(repo, "two docs", "2026-05-01T12:00:00Z")
+
+    wanted = {"lover/b.md", "lover/absent.md", "lover/absent.txt"}
+    texts = dict(CorpusSnapshot(repo, sha).iter_texts(wanted))
+
+    assert texts == {"lover/b.md": "B\n"}
+
+
+def test_iter_texts_reads_paths_of_every_suffix_and_none(tmp_path: Path) -> None:
+    # The archive is narrowed by suffix; a wanted path of another suffix,
+    # or of none at all, must still be read rather than silently dropped.
+    repo = _init_repo(tmp_path)
+    (repo / "lover").mkdir()
+    (repo / "lover" / "a.md").write_text("A\n")
+    (repo / "lover" / "b.txt").write_text("B\n")
+    (repo / "lover" / "README").write_text("C\n")
+    (repo / "manifest.json").write_text("{}")
+    sha = _commit_all(repo, "mixed", "2026-05-01T12:00:00Z")
+    snapshot = CorpusSnapshot(repo, sha)
+
+    by_suffix = dict(snapshot.iter_texts({"lover/a.md", "lover/b.txt"}))
+    with_bare = dict(snapshot.iter_texts({"lover/a.md", "lover/README"}))
+
+    assert by_suffix == {"lover/a.md": "A\n", "lover/b.txt": "B\n"}
+    assert with_bare == {"lover/a.md": "A\n", "lover/README": "C\n"}
+
+
+def test_iter_texts_with_no_match_for_the_narrowed_archive_reads_nothing(
+    corpus_repo: tuple[Path, str, str],
+) -> None:
+    # No .txt file exists: git refuses an unmatched pathspec, so the archive
+    # must not name one — absence stays absence, not an operational error.
+    repo, sha1, _ = corpus_repo
+
+    assert list(CorpusSnapshot(repo, sha1).iter_texts({"lover/absent.txt"})) == []
+
+
+def test_iter_texts_with_nothing_wanted_runs_no_git(tmp_path: Path) -> None:
+    assert list(CorpusSnapshot(tmp_path / "not-a-repo", "0" * 40).iter_texts(set())) == []
+
+
+def test_iter_texts_invalid_commit_fails_loudly(corpus_repo: tuple[Path, str, str]) -> None:
+    repo, _, _ = corpus_repo
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        list(CorpusSnapshot(repo, "0" * 40).iter_texts({"lover/testloven.md"}))
+
+    assert excinfo.value.returncode != 0
+    assert excinfo.value.stderr
+
+
+def test_stream_archive_preserves_git_returncode_and_complete_stderr() -> None:
+    archive_bytes = BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        info = tarfile.TarInfo("lover/wanted.md")
+        info.size = 1
+        archive.addfile(info, BytesIO(b"x"))
+    archive_bytes.seek(0)
+
+    class FailedGitProcess:
+        stdout = archive_bytes
+        args = ["git", "archive", "broken"]  # noqa: RUF012
+
+        @staticmethod
+        def wait() -> int:
+            return 23
+
+    stderr = BytesIO(b"fatal: complete diagnostic")
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        list(
+            snapshot_module._stream_archive(
+                FailedGitProcess(),  # type: ignore[arg-type]
+                frozenset({"lover/wanted.md"}),
+                stderr,
+            ),
+        )
+
+    assert excinfo.value.returncode == 23
+    assert excinfo.value.stderr == b"fatal: complete diagnostic"
+
+
+def test_iter_texts_stopped_early_reaps_git(corpus_repo: tuple[Path, str, str]) -> None:
+    repo, sha1, _ = corpus_repo
+    stream = CorpusSnapshot(repo, sha1).iter_texts({"lover/testloven.md"})
+
+    assert next(stream)[0] == "lover/testloven.md"
+    stream.close()
+
+
+def test_archive_pathspecs_narrow_to_wanted_suffixes() -> None:
+    wanted = frozenset({"lover/a.md", "forskrifter/b.md", "lover/c.txt"})
+
+    assert snapshot_module._archive_pathspecs(wanted) == [
+        ":(glob)**/*.md",
+        ":(glob)**/*.txt",
+    ]
+
+
+@pytest.mark.parametrize("odd", ["lover/README", "lover/x.m*d", "lover/.md"])
+def test_archive_pathspecs_fall_back_to_the_whole_tree(odd: str) -> None:
+    # No suffix, or one a glob would misread: read everything, never guess.
+    assert snapshot_module._archive_pathspecs(frozenset({"lover/a.md", odd})) == []
+
+
+def _tar_stream(*members: tuple[str, bytes]) -> tarfile.TarFile:
+    buffer = BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as tar:
+        for name, payload in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            tar.addfile(info, BytesIO(payload))
+    buffer.seek(0)
+    return tarfile.open(fileobj=buffer, mode="r|")
+
+
+def test_read_wanted_refuses_a_member_escaping_the_archive_root() -> None:
+    # git cannot commit such a name; the data filter is the guarantee that
+    # a damaged or forged stream still cannot name a path outside the tree.
+    tar = _tar_stream(("../evil.md", b"x"))
+
+    with pytest.raises(StateIntegrityError, match="evil.md"):
+        list(snapshot_module._read_wanted(tar, frozenset({"../evil.md"})))
+
+
+def test_read_wanted_skips_unwanted_before_reading_later_wanted() -> None:
+    tar = _tar_stream(("lover/skip.md", b"s"), ("lover/keep.md", b"k"))
+
+    assert list(snapshot_module._read_wanted(tar, frozenset({"lover/keep.md"}))) == [
+        ("lover/keep.md", "k"),
+    ]
+
+
+def test_read_wanted_never_follows_a_wanted_symlink() -> None:
+    buffer = BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        link = tarfile.TarInfo("lover/wanted.md")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../outside.md"
+        archive.addfile(link)
+    buffer.seek(0)
+    with tarfile.open(fileobj=buffer, mode="r|") as archive:
+        assert list(snapshot_module._read_wanted(archive, frozenset({link.name}))) == []
+
+
+def test_read_wanted_fails_loudly_on_malformed_utf8() -> None:
+    tar = _tar_stream(("lover/wanted.md", b"valid prefix\n\xff"))
+
+    with pytest.raises(UnicodeDecodeError):
+        list(snapshot_module._read_wanted(tar, frozenset({"lover/wanted.md"})))
