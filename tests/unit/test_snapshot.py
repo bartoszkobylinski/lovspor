@@ -540,3 +540,22 @@ def test_read_wanted_skips_unwanted_before_reading_later_wanted() -> None:
     assert list(snapshot_module._read_wanted(tar, frozenset({"lover/keep.md"}))) == [
         ("lover/keep.md", "k"),
     ]
+
+
+def test_read_wanted_never_follows_a_wanted_symlink() -> None:
+    buffer = BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        link = tarfile.TarInfo("lover/wanted.md")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../outside.md"
+        archive.addfile(link)
+    buffer.seek(0)
+    with tarfile.open(fileobj=buffer, mode="r|") as archive:
+        assert list(snapshot_module._read_wanted(archive, frozenset({link.name}))) == []
+
+
+def test_read_wanted_fails_loudly_on_malformed_utf8() -> None:
+    tar = _tar_stream(("lover/wanted.md", b"valid prefix\n\xff"))
+
+    with pytest.raises(UnicodeDecodeError):
+        list(snapshot_module._read_wanted(tar, frozenset({"lover/wanted.md"})))
