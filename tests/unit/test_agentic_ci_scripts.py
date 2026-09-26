@@ -1945,3 +1945,83 @@ class TestNothingMeasured:
         _run(tmp_path, "mutmut crashed without a failure line\n", tool_exit_code=1)
 
         assert "```" not in self._unmeasured(tmp_path, capsys)
+
+
+UNMEASURED_ENVELOPE = "unmeasured changed lines: src/lovspor/release/envelope.py:56 (module level)"
+UNMEASURED_COMMAND = (
+    "unmeasured changed lines: src/lovspor/release/commands.py:590-633 "
+    "(decorated function rehearse_urls_command)"
+)
+
+
+class TestUnmeasuredChangedLines:
+    """#289 / #292: the artifact names changed lines no mutant measured."""
+
+    def test_the_scope_notices_reach_the_artifact_in_order(self, tmp_path: Path) -> None:
+        raw = (
+            "mutation scope: 2 changed file(s) relative to base\n"
+            f"  src/lovspor/release/envelope.py (no mutatable changed function)\n"
+            f"{UNMEASURED_ENVELOPE}\n"
+            f"{UNMEASURED_COMMAND}\n"
+            f"{UNMEASURED_ENVELOPE}\n" + _progress_line(killed=3)
+        )
+
+        result = _run(tmp_path, raw)
+
+        assert result["unmeasured_changed_lines"] == [
+            "src/lovspor/release/envelope.py:56 (module level)",
+            "src/lovspor/release/commands.py:590-633 (decorated function rehearse_urls_command)",
+        ]
+
+    def test_a_notice_leaves_the_verdict_alone(self, tmp_path: Path) -> None:
+        # Owner-call-free default: reported, never failing — failing would
+        # block every PR that touches a typer command.
+        passing = _run(tmp_path, f"{UNMEASURED_ENVELOPE}\n" + _progress_line(killed=3))
+        not_applicable = _run(
+            tmp_path,
+            f"{UNMEASURED_ENVELOPE}\nmutation not applicable: 1 changed file(s), "
+            "but no mutatable function changed relative to base\n",
+        )
+
+        assert passing["gate"] == {"passed": True, "reason": "ok"}
+        assert not_applicable["gate"] == {"passed": True, "reason": "not_applicable"}
+
+    def test_no_notice_is_an_empty_list(self, tmp_path: Path) -> None:
+        assert _run(tmp_path, _progress_line(killed=1))["unmeasured_changed_lines"] == []
+
+    def test_a_notice_quoted_mid_line_is_not_a_notice(self, tmp_path: Path) -> None:
+        raw = f"FAILED test_x - AssertionError: {UNMEASURED_ENVELOPE}\n" + _progress_line(killed=1)
+
+        assert _run(tmp_path, raw)["unmeasured_changed_lines"] == []
+
+    def test_the_summary_lists_the_unmeasured_lines(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _run(tmp_path, f"{UNMEASURED_COMMAND}\n" + _progress_line(killed=1))
+        out = tmp_path / "gate-input.json"
+        out.write_text(json.dumps(result))
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+            assert mutation_gate.main() == 0
+
+        captured = capsys.readouterr().out
+        assert "- Unmeasured changed lines (no mutant can reach them):" in captured
+        assert (
+            "  - `src/lovspor/release/commands.py:590-633` — "
+            "decorated function rehearse_urls_command" in captured
+        )
+
+    def test_the_summary_is_unchanged_without_notices_or_with_a_pre_notice_artifact(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        result = _run(tmp_path, _progress_line(killed=1))
+        legacy = {k: v for k, v in result.items() if k != "unmeasured_changed_lines"}
+        for name, payload in (("empty", result), ("legacy", legacy)):
+            out = tmp_path / f"{name}.json"
+            out.write_text(json.dumps(payload))
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr("sys.argv", ["mutation_gate.py", "--summary", str(out)])
+                assert mutation_gate.main() == 0
+
+        assert "Unmeasured changed lines" not in capsys.readouterr().out
