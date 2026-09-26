@@ -1,10 +1,10 @@
 """Derived freshness index beside the observation log (issue #201).
 
 The capture-state fold — ``url -> latest observed_at`` plus the failure
-holds — is recomputed from the whole log on every round, so a round's cost
-grows with the archive forever. This sidecar persists the fold together
-with the byte offset of the log it was built from, so the next round folds
-only the tail.
+holds and the runs of unchanged content — is recomputed from the whole log
+on every round, so a round's cost grows with the archive forever. This
+sidecar persists the fold together with the byte offset of the log it was
+built from, so the next round folds only the tail.
 
 ADR-0010 §7 discipline: the index is ``derived = f(observation_snapshot,
 derivation_version)`` — an accelerant for ``worth_capturing``'s decision,
@@ -43,19 +43,24 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from lovspor.atomic_io import atomic_write_text
-from lovspor.observatory.freshness import CaptureState, FailureHold, collect_capture_state
+from lovspor.observatory.freshness import (
+    CaptureState,
+    ContentRun,
+    FailureHold,
+    collect_capture_state,
+)
 from lovspor.observatory.log import LogScan, ObservationLog
 from lovspor.observatory.model import require_utc
 
 FRESHNESS_INDEX_FILENAME = "freshness-index.json"
 
-INDEX_DERIVATION_VERSION = 1
+INDEX_DERIVATION_VERSION = 2
 """Behaviour version of the capture-state fold this index caches.
 
 Bump on ANY change to what ``collect_capture_state`` folds — sighting
 rules, hold transitions, record selection — the ``TEMPORAL_PARSER_VERSION``
 precedent: an index written by other fold semantics must rebuild, never be
-silently reused.
+silently reused. Version 2 added the runs of unchanged content (#415).
 """
 
 _DIGEST_CHUNK = 1 << 20
@@ -77,6 +82,15 @@ class StoredHold(BaseModel):
         return require_utc(value)
 
 
+class StoredRun(BaseModel):
+    """One :class:`~lovspor.observatory.freshness.ContentRun`, serialised."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    unchanged: int = Field(ge=0)
+
+
 class FreshnessIndex(BaseModel):
     """The persisted fold plus the anchor that proves what it was built from."""
 
@@ -94,6 +108,7 @@ class FreshnessIndex(BaseModel):
     state_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     observed: dict[str, datetime]
     holds: dict[str, StoredHold]
+    content: dict[str, StoredRun]
 
     @field_validator("observed")
     @classmethod
@@ -170,6 +185,9 @@ def _state_binding(index: FreshnessIndex) -> str:
             "holds": {
                 url: hold.model_dump(mode="json") for url, hold in sorted(index.holds.items())
             },
+            "content": {
+                url: run.model_dump(mode="json") for url, run in sorted(index.content.items())
+            },
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -198,6 +216,7 @@ def _state_from_index(index: FreshnessIndex) -> CaptureState:
             url: FailureHold(hold.outcome, hold.consecutive, hold.last_failed_at)
             for url, hold in index.holds.items()
         },
+        content={url: ContentRun(run.sha256, run.unchanged) for url, run in index.content.items()},
     )
 
 
@@ -217,6 +236,10 @@ def _index_from_state(log: ObservationLog, state: CaptureState, offset: int) -> 
                 last_failed_at=hold.last_failed_at,
             )
             for url, hold in sorted(state.holds.items())
+        },
+        content={
+            url: StoredRun(sha256=run.sha256, unchanged=run.unchanged)
+            for url, run in sorted(state.content.items())
         },
     )
     return unbound.model_copy(update={"state_sha256": _state_binding(unbound)})

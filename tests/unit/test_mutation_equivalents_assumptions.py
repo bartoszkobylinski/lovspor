@@ -27,6 +27,7 @@ import pytest
 from mcp.types import JSONRPCMessage
 from pydantic import ValidationError
 
+from lovspor.observatory.freshness_index import StoredRun
 from lovspor.release.envelope import CorpusSummary, Marker, ReleaseRecord
 from lovspor.site.capabilities import CapabilityDocument, Checkout, Observation, derive_state
 from lovspor.site.fingerprint import ReleaseKey
@@ -176,7 +177,8 @@ def _release_record() -> ReleaseRecord:
 def test_assumption_a_python_mode_dump_serialises_like_json_mode() -> None:
     """Pins the argument that waives the ``mode="json"`` -> ``None`` / other
     string mutants in ``site/capabilities.py::state_sha256``,
-    ``site/fixture.py::document_bytes`` and ``release/envelope.py::record_bytes``:
+    ``site/fixture.py::document_bytes``, ``release/envelope.py::record_bytes``
+    and the content runs in ``observatory/freshness_index.py::_state_binding``:
     pydantic takes the JSON serialiser only for the exact string "json" and the
     Python one otherwise, and these models hold nothing the Python path renders
     differently under ``json.dumps`` — the one non-JSON-native type is
@@ -191,6 +193,8 @@ def test_assumption_a_python_mode_dump_serialises_like_json_mode() -> None:
         _release_record(),
         Marker(active="b" * 64, previous="a" * 64),
         Marker(active="a" * 64, previous=None),
+        StoredRun(sha256="c" * 64, unchanged=0),
+        StoredRun(sha256="d" * 64, unchanged=2**70),
     ]
 
     for model in models:
