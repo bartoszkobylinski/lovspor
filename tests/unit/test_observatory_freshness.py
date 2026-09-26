@@ -12,6 +12,7 @@ from lovspor.observatory.freshness import (
     FAILED_RECHECK,
     FAILED_RECHECK_CEILING,
     UNDATED_RECHECK,
+    UNDATED_RECHECK_CEILING,
     CaptureState,
     ContentRun,
     FailureHold,
@@ -21,6 +22,7 @@ from lovspor.observatory.freshness import (
     failure_backoff,
     latest_observations,
     parse_site_lastmod,
+    undated_recheck,
     worth_capturing,
 )
 from lovspor.observatory.model import (
@@ -615,6 +617,106 @@ class TestContentRunFold:
         collect(_observation(DAY_2))
 
         assert state.content == {URL: ContentRun(SAME, 1)}
+
+
+class TestUndatedRecheck:
+    """Issue #415: an undated page that keeps coming back identical waits longer."""
+
+    def test_a_run_of_none_waits_one_window(self) -> None:
+        assert undated_recheck(0) == UNDATED_RECHECK == timedelta(hours=24)
+
+    def test_each_unchanged_recapture_doubles_the_wait(self) -> None:
+        assert undated_recheck(1) == timedelta(hours=48)
+        assert undated_recheck(2) == timedelta(hours=96)
+
+    def test_the_ceiling_is_a_week(self) -> None:
+        """Owner decision on #415: however stable a page has been, it is
+        asked again within seven days."""
+        assert timedelta(days=7) == UNDATED_RECHECK_CEILING
+        assert undated_recheck(3) == UNDATED_RECHECK_CEILING
+        assert undated_recheck(1000) == UNDATED_RECHECK_CEILING
+
+    def test_a_negative_run_still_waits_a_window(self) -> None:
+        assert undated_recheck(-3) == UNDATED_RECHECK
+
+    def test_an_implausible_run_does_not_overflow_the_arithmetic(self) -> None:
+        assert undated_recheck(1_000_000) == UNDATED_RECHECK_CEILING
+
+
+def _stable(seen: datetime, unchanged: int) -> CaptureState:
+    return CaptureState({URL: seen}, {}, {URL: ContentRun(SAME, unchanged)})
+
+
+class TestWorthCapturingAStablePage:
+    """Issue #415: the undated window stretches with unchanged content."""
+
+    def test_one_unchanged_recapture_is_not_asked_again_after_a_day(self) -> None:
+        assert worth_capturing(_candidate(None), _stable(NOW - UNDATED_RECHECK, 1), NOW) is False
+
+    def test_the_doubled_window_boundary_fetches(self) -> None:
+        state = _stable(NOW - timedelta(hours=48), 1)
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_just_inside_the_doubled_window_is_left_alone(self) -> None:
+        state = _stable(NOW - timedelta(hours=48) + timedelta(seconds=1), 1)
+
+        assert worth_capturing(_candidate(None), state, NOW) is False
+
+    def test_a_long_stable_page_is_still_asked_at_the_ceiling(self) -> None:
+        state = _stable(NOW - UNDATED_RECHECK_CEILING, 50)
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_a_long_stable_page_waits_out_the_ceiling(self) -> None:
+        state = _stable(NOW - UNDATED_RECHECK_CEILING + timedelta(seconds=1), 50)
+
+        assert worth_capturing(_candidate(None), state, NOW) is False
+
+    def test_changed_content_brings_the_window_back_to_a_day(self) -> None:
+        """Three identical captures then new bytes: the run is over and the
+        page is due one window after its last capture, not a week."""
+        last = NOW - UNDATED_RECHECK
+        state = capture_state(
+            [
+                _observation(last - timedelta(days=6)),
+                _observation(last - timedelta(days=4)),
+                _observation(last - timedelta(days=2)),
+                _observation(last, sha256=OTHER),
+            ]
+        )
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_an_unreadable_lastmod_backs_off_like_an_absent_one(self) -> None:
+        state = _stable(NOW - UNDATED_RECHECK, 1)
+
+        assert worth_capturing(_candidate("whenever"), state, NOW) is False
+
+    def test_a_sighting_with_no_run_waits_one_window(self) -> None:
+        """A run missing from the map is read as a run of none — the short
+        window, the direction that costs a request rather than a window."""
+        state = CaptureState({URL: NOW - UNDATED_RECHECK}, {}, {})
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_a_stable_page_stamped_ahead_of_the_clock_still_fetches(self) -> None:
+        state = _stable(NOW + timedelta(hours=1), 50)
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_a_dated_page_changed_since_we_looked_fetches_however_stable(self) -> None:
+        """The site's claim decides dated URLs; the run is never consulted."""
+        state = _stable(NOW - timedelta(minutes=5), 50)
+
+        assert worth_capturing(_candidate("2099-01-01"), state, NOW) is True
+
+    def test_a_dated_page_unchanged_since_we_looked_gets_no_window(self) -> None:
+        """Seen three days ago with a claim from before that: skipped, as it
+        always was, with no run at all — the window is for undated pages."""
+        state = CaptureState({URL: datetime(2026, 8, 17, tzinfo=UTC)}, {}, {})
+
+        assert worth_capturing(_candidate("2026-08-16"), state, NOW) is False
 
 
 class TestWorthCapturingAfterFailure:
