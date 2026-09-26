@@ -187,12 +187,13 @@ def _region_of(node: ast.stmt, class_name: str) -> Unit | None:
     return Unit(f"class body {class_name}" if class_name else "module level", start, end)
 
 
-def _decorator_region(node: ast.ClassDef) -> list[Unit]:
-    """The decorator lines of a class whose methods are measured."""
+def _declaration_region(node: ast.ClassDef) -> list[Unit]:
+    """The decorators and `class` header of a decorated class whose methods
+    are measured: mutmut mutates neither, only the methods' bodies."""
     if not node.decorator_list:
         return []
-    first, last = node.decorator_list[0], node.decorator_list[-1]
-    return [Unit(f"class decorator {node.name}", first.lineno, last.end_lineno or last.lineno)]
+    header_end = max(node.lineno, node.body[0].lineno - 1)
+    return [Unit(f"class declaration {node.name}", node.decorator_list[0].lineno, header_end)]
 
 
 def unmeasured_regions(tree: ast.Module) -> list[Unit]:
@@ -200,8 +201,9 @@ def unmeasured_regions(tree: ast.Module) -> list[Unit]:
 
     Mutmut copies module-level and class-body statements unmutated and skips
     every decorated function but a lone `@staticmethod`/`@classmethod`
-    (`mutmut/mutation/file_mutation.py`, `_skip_node_and_children`), every
-    class decorator, and a decorated class nested in another class (#419).
+    (`mutmut/mutation/file_mutation.py`, `_skip_node_and_children`), the
+    decorators and header of a decorated class, and a decorated class nested
+    in another class (#419).
     A change there cannot be brought into scope, so it is reported instead
     (#289, #292).
     """
@@ -210,7 +212,7 @@ def unmeasured_regions(tree: ast.Module) -> list[Unit]:
     def visit(body: list[ast.stmt], class_name: str = "") -> None:
         for node in body:
             if isinstance(node, ast.ClassDef) and is_entered(node, class_name):
-                regions.extend(_decorator_region(node))
+                regions.extend(_declaration_region(node))
                 visit(node.body, _qualified(class_name, node.name))
             elif region := _region_of(node, class_name):
                 regions.append(region)

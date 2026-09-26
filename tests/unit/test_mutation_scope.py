@@ -51,6 +51,19 @@ class Outer:
 """
 
 
+METHODLESS_DECLARATION_SOURCE = """\
+@register
+@dataclass(
+    frozen=1 + 1,
+)
+class Record(
+    make_base(2 + 2),
+):
+    \"\"\"Docstring.\"\"\"
+    count: int = 3 + 3
+"""
+
+
 class TestMutationFunctionScope:
     def test_keyed_units_excludes_decorated_code(self, mutation_scope: ModuleType) -> None:
         source = """\
@@ -341,7 +354,7 @@ class TestUnmeasuredNotices:
 
         assert notices == [
             "unmeasured changed lines: src/lovspor/example.py:25 (class body Service)",
-            "unmeasured changed lines: src/lovspor/example.py:31 (class decorator Record)",
+            "unmeasured changed lines: src/lovspor/example.py:31 (class declaration Record)",
         ]
 
     def test_a_decorated_class_notices_its_decorator_and_body_not_its_methods(
@@ -354,11 +367,55 @@ class TestUnmeasuredNotices:
         )
 
         assert notices == [
-            "unmeasured changed lines: src/lovspor/example.py:3 (class decorator Record)",
+            "unmeasured changed lines: src/lovspor/example.py:3 (class declaration Record)",
             "unmeasured changed lines: src/lovspor/example.py:5 (class body Record)",
             "unmeasured changed lines: src/lovspor/example.py:10,12"
             " (decorated function Record.doubled)",
         ]
+
+    def test_a_decorated_class_notices_its_unmeasured_declaration(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {4}, DECORATED_CLASS_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:4 (class declaration Record)"
+        ]
+
+    @pytest.mark.parametrize(
+        ("changed_lines", "expected"),
+        [
+            pytest.param({1}, ["1 (class declaration Record)"], id="first-of-two-decorators"),
+            pytest.param({3}, ["3 (class declaration Record)"], id="decorator-argument-line"),
+            pytest.param({6}, ["6 (class declaration Record)"], id="multi-line-header-base"),
+            pytest.param({9}, ["9 (class body Record)"], id="field-of-a-class-without-methods"),
+            pytest.param(
+                {2, 7, 9},
+                ["2,7 (class declaration Record)", "9 (class body Record)"],
+                id="declaration-lines-share-one-notice",
+            ),
+        ],
+    )
+    def test_a_decorated_class_declaration_spans_every_decorator_and_its_header(
+        self, mutation_scope: ModuleType, changed_lines: set[int], expected: list[str]
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", changed_lines, METHODLESS_DECLARATION_SOURCE
+        )
+
+        assert notices == [
+            f"unmeasured changed lines: src/lovspor/example.py:{e}" for e in expected
+        ]
+
+    def test_mutmut_mutates_nothing_in_a_decorated_class_without_methods(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        # the declaration and field lines really are unmeasured: the installed
+        # mutmut creates no mutant for decorator arguments, bases or defaults
+        assert mutate_file_contents("x.py", METHODLESS_DECLARATION_SOURCE).mutant_names == []
+        assert mutation_scope.keyed_units(METHODLESS_DECLARATION_SOURCE) == []
 
     def test_a_nested_decorated_class_stays_unmeasured_as_a_whole(
         self, mutation_scope: ModuleType
@@ -511,7 +568,7 @@ def decorated():
                 "@dataclass\nclass Record:\n    'class docstring'\n\n"
                 "    def total(self):\n        'method docstring'\n        return 6\n",
                 {1, 3, 6},
-                "1 (class decorator Record)",
+                "1 (class declaration Record)",
                 id="decorated-class-docstrings-inert",
             ),
             pytest.param(
