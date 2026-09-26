@@ -9,6 +9,7 @@ Usage:
     mutation_gate.py result.json              # exit 0 if gate.passed else 1
     mutation_gate.py --summary result.json    # markdown job summary, exit 0
     mutation_gate.py --unmeasured result.json # PR comment for a run that measured nothing
+    mutation_gate.py --no-change result.json  # PR comment when remediation changed nothing
 """
 
 from __future__ import annotations
@@ -148,6 +149,56 @@ def _unmeasured_changed_lines(notices: object) -> list[str]:
     return ["- Unmeasured changed lines (no mutant can reach them):", *bullets]
 
 
+# Every bucket outside 🎉, keyed as the artifact stores it. A timed-out mutant
+# is not a survivor and not a kill: it got no verdict inside mutmut's
+# per-mutant time limit, so a report that folds it into either lies (#423).
+NOT_KILLED = (
+    ("survived", "survived"),
+    ("timeout", "timed out"),
+    ("invalid", "suspicious"),
+    ("no_tests", "without tests"),
+    ("unmeasured", "without a verdict"),
+)
+BLOCKERS = {
+    "survived": "{n} survivor(s) classified non-killable",
+    "timeout": (
+        "{n} timed-out mutant(s) got no verdict — mutmut stopped them at its per-mutant"
+        " time limit, so whether a test kills them was never measured; the artifact"
+        " does not list them, triage them by hand (`mutmut results`)"
+    ),
+    "invalid": "{n} suspicious mutant(s) — mutmut could not tell killed from survived",
+    "no_tests": "{n} mutant(s) no test reaches",
+    "unmeasured": "{n} mutant(s) got no verdict — killed by a signal",
+}
+
+
+def _not_killed(r: dict[str, object]) -> dict[str, int]:
+    """Bucket counts; one an older artifact does not carry reads as 0."""
+    mutants = r.get("mutants")
+    known = mutants if isinstance(mutants, dict) else {}
+    return {k: v if _is_count(v := known.get(k, 0)) else 0 for k, _ in NOT_KILLED}
+
+
+def _tally(counts: dict[str, int]) -> str:
+    return " · ".join(f"{counts[key]} {label}" for key, label in NOT_KILLED)
+
+
+def _no_change_line(r: dict[str, object], reason: str) -> str:
+    """The escalation when remediation changed nothing: it names what blocked.
+
+    "Survivors classified non-killable" is said only when there were survivors;
+    on PR #395 it was said over two timeouts and none (#423).
+    """
+    counts = _not_killed(r)
+    blockers = "; ".join(BLOCKERS[k].format(n=n) for k, n in counts.items() if n)
+    if not blockers:
+        blockers = "no mutant outside the killed count is on record, only the gate reason"
+    return (
+        f"Mutation remediation made no safe test-only change. Gate: FAIL ({reason})."
+        f" Not killed: {_tally(counts)}. Blocked by: {blockers}."
+    )
+
+
 def _hint(r: dict[str, object]) -> str | None:
     # Diagnostics, not policy: absent in pre-hint artifacts, shown when present.
     hint = r.get("failure_hint")
@@ -163,6 +214,7 @@ def _print_summary(r: dict[str, object], extracted: tuple[Any, ...]) -> None:
         f"- Total: {total} · Killed: {killed} · Survived: {survived}"
         f" · Timeout: {timeout} · Score: {shown}"
     )
+    print(f"- Not killed: {_tally(_not_killed(r))}")
     print(f"- Gate: {'PASS' if passed else 'FAIL'} ({reason})")
     if hint := _hint(r):
         print(f"- Hint: `{hint}`")
@@ -197,11 +249,11 @@ def _unmeasured_lines(r: dict[str, object]) -> list[str]:
 
 
 def _verdict(r: dict[str, object], extracted: tuple[Any, ...]) -> int:
-    _, _, passed, reason, (_, _, survived, _) = extracted
+    passed, reason = extracted[2], extracted[3]
     if passed:
         print(f"mutation gate PASS ({reason})")
         return 0
-    print(f"mutation gate FAIL ({reason}); survivors: {survived}")
+    print(f"mutation gate FAIL ({reason}); not killed: {_tally(_not_killed(r))}")
     if hint := _hint(r):
         print(f"hint: {hint}")
     return 1
@@ -212,6 +264,7 @@ def _parse_args() -> argparse.Namespace:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--summary", action="store_true")
     mode.add_argument("--unmeasured", action="store_true")
+    mode.add_argument("--no-change", action="store_true")
     ap.add_argument("result", type=Path)
     return ap.parse_args()
 
@@ -231,6 +284,9 @@ def main() -> int:
         return 0
     if args.unmeasured:
         print("\n".join(_unmeasured_lines(r)))
+        return 0
+    if args.no_change:
+        print(_no_change_line(r, extracted[3]))
         return 0
     return _verdict(r, extracted)
 

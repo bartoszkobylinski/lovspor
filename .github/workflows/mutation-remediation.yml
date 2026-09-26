@@ -47,6 +47,7 @@ jobs:
       author: ${{ steps.author.outputs.author }}
       before_sha: ${{ steps.base.outputs.before_sha }}
       patch: ${{ steps.patch.outputs.patch }}
+      blocked: ${{ steps.blocked.outputs.message }}
     env:
       CODEX_PRIMARY_HOME: ${{ vars.CODEX_PRIMARY_HOME }}
       CODEX_SECONDARY_HOME: ${{ vars.CODEX_SECONDARY_HOME }}
@@ -125,6 +126,20 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Read here, while the workspace still holds the default-branch helper and
+      # the artifact: the verifier that reports "no change" has neither. The
+      # words name the buckets that blocked the gate — on PR #395 the fixed
+      # text blamed "survivors classified non-killable" for two timed-out
+      # mutants and zero survivors (#423).
+      - name: Say what blocked the gate, should remediation change nothing
+        id: blocked
+        if: steps.gate.outputs.run == 'true'
+        # Never fatal: an artifact the helper refuses leaves the message empty,
+        # and the verifier falls back to wording that claims no bucket at all.
+        run: |
+          message="$(python3 scripts/ci/mutation_gate.py --no-change "${{ runner.temp }}/mutation/mutation-result.json" || true)"
+          echo "message=$message" >> "$GITHUB_OUTPUT"
 
       - name: BLOCKED — mutants got no verdict, tests cannot fix an unmeasured surface
         if: steps.gate.outputs.signal_killed == 'true'
@@ -456,11 +471,14 @@ jobs:
 
       - name: Commit and push, or report BLOCKED
         if: needs.remediate.outputs.run == 'true'
+        env:
+          # Data, never interpolated into the script: it quotes the artifact.
+          BLOCKED_BY: ${{ needs.remediate.outputs.blocked }}
         run: |
           if [ -z "$(git status --porcelain)" ] && git diff --quiet "$BEFORE_SHA"..HEAD; then
             gh pr edit "${{ needs.remediate.outputs.pr }}" --add-label "needs-human:mutation"
             {
-              echo "Mutation remediation made no safe test-only change (survivors classified non-killable). Human review required. Artifact: mutation-result-$HEAD_SHA."
+              echo "${BLOCKED_BY:-Mutation remediation made no safe test-only change.} Human review required. Artifact: mutation-result-$HEAD_SHA."
             } > "$RUNNER_TEMP/nochange-escalation.md"
             scripts/ci/pr_sticky_comment.sh mutation "${{ needs.remediate.outputs.pr }}" "$RUNNER_TEMP/nochange-escalation.md"
             exit 0
