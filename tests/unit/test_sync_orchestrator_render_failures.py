@@ -151,3 +151,35 @@ def test_a_failed_doc_whose_file_another_doc_took_is_dropped_and_the_next_is_kep
     assert stored["lov-3"].xml_hash == _GAMMA.xml_hash
     assert "Beta text." in _body(settings, "alfa")
     assert _DROPPED.format(doc_id="lov-1", path="lover/alfa.md") in caplog.messages
+
+
+def test_a_failed_rename_whose_file_another_doc_took_is_dropped_from_the_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A rename is found among unchanged docs, so its prior record is already
+    # carried before the loops run; announcing the drop is not enough (#421).
+    # lov-3's failed change is reconciled first and kept, before lov-1's drop.
+    settings = _corpus(tmp_path, [_ALFA, _BETA, _GAMMA])
+    _serve(
+        monkeypatch,
+        [
+            _unrenderable(_ALFA, slug="delta"),
+            replace(_BETA, slug="alfa"),
+            _unrenderable(_GAMMA, slug="gamma", xml_hash=_changed_hash(_GAMMA)),
+        ],
+    )
+
+    with (
+        caplog.at_level(logging.WARNING, logger="lovspor.sync.orchestrator"),
+        pytest.raises(AttestationError, match="carried-forward document"),
+    ):
+        run_sync(settings)
+
+    stored = _stored(settings)
+    assert "lov-1" not in stored
+    assert stored["lov-3"].xml_hash == _GAMMA.xml_hash
+    assert stored["lov-2"].markdown_path == "lover/alfa.md"
+    assert "Beta text." in _body(settings, "alfa")
+    assert _DROPPED.format(doc_id="lov-1", path="lover/alfa.md") in caplog.messages
