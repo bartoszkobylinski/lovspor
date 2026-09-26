@@ -51,10 +51,38 @@ class TestParseExpiry:
     def test_reads_a_numeric_offset_and_normalises_the_instant(self) -> None:
         parsed = token_expiry.parse_expiry("2026-10-10 10:28:30 +0200")
         assert parsed == datetime(2026, 10, 10, 8, 28, 30, tzinfo=UTC)
+        assert parsed.tzinfo is UTC
 
     def test_refuses_a_shape_it_does_not_know(self) -> None:
         with pytest.raises(ValueError, match="unrecognised"):
             token_expiry.parse_expiry("next Tuesday")
+
+    def test_reads_a_negative_offset_as_a_later_utc_instant(self) -> None:
+        parsed = token_expiry.parse_expiry("2026-10-09 23:28:30 -0900")
+        assert parsed == datetime(2026, 10, 10, 8, 28, 30, tzinfo=UTC)
+        assert parsed.tzinfo is UTC
+
+    def test_a_zero_offset_is_already_utc(self) -> None:
+        parsed = token_expiry.parse_expiry("2026-10-10 08:28:30 +0000")
+        assert parsed == datetime(2026, 10, 10, 8, 28, 30, tzinfo=UTC)
+        assert parsed.tzinfo is UTC
+
+    def test_the_utc_suffixed_form_carries_the_utc_singleton(self) -> None:
+        assert token_expiry.parse_expiry("2026-10-10 08:28:30 UTC").tzinfo is UTC
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "2026-10-10 08:28:30",
+            "2026-10-10 08:28:30 +02",
+            "2026-10-10 08:28:30 CEST",
+            "2026-10-10T08:28:30Z",
+            "",
+        ],
+    )
+    def test_refuses_a_missing_or_malformed_zone(self, value: str) -> None:
+        with pytest.raises(ValueError, match="unrecognised"):
+            token_expiry.parse_expiry(value)
 
 
 class TestJudge:
@@ -63,6 +91,24 @@ class TestJudge:
         assert verdict.ok
         assert "2026-11-09 19:32 UTC" in verdict.message
         assert "45.3 days" in verdict.message
+
+    def test_numeric_offset_is_reported_as_the_equivalent_utc_time(self) -> None:
+        verdict = _judge(200, "2026-11-09 21:32:00 +0200")
+        assert verdict.ok
+        assert "2026-11-09 19:32 UTC" in verdict.message
+        assert "45.3 days" in verdict.message
+
+    def test_an_offset_moving_the_instant_into_the_window_fails(self) -> None:
+        # 2026-10-09 13:00 +0200 is 11:00 UTC: 13.96 days, inside the 14-day window.
+        verdict = _judge(200, "2026-10-09 13:00:00 +0200")
+        assert not verdict.ok
+        assert "2026-10-09 11:00 UTC" in verdict.message
+
+    def test_a_negative_offset_moving_the_instant_out_of_the_window_passes(self) -> None:
+        # 2026-10-09 08:00 -0500 is 13:00 UTC: 14.04 days, outside the window.
+        verdict = _judge(200, "2026-10-09 08:00:00 -0500")
+        assert verdict.ok
+        assert "2026-10-09 13:00 UTC" in verdict.message
 
     def test_expiry_inside_the_warning_window_fails(self) -> None:
         verdict = _judge(200, "2026-10-01 12:00:00 UTC")

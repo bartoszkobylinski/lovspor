@@ -61,7 +61,7 @@ def parse_expiry(value: str) -> datetime:
             parsed = datetime.strptime(value.strip(), fmt)
         except ValueError:
             continue
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     raise ValueError(f"unrecognised {EXPIRY_HEADER} value: {value!r}")
 
 
