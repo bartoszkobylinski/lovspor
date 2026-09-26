@@ -288,6 +288,7 @@ REPOINTING_MUTMUT = (
     f'printf %s "$PWD/mutants/src" > "{EDITABLE_PTH}"\n'
     f"printf '%s\\n' '{TALLY}'\n"
 )
+REPOINTING_FAILED_MUTMUT = REPOINTING_MUTMUT + "exit 23\n"
 REPAIRING_UV = (
     f'#!/bin/sh\nprintf "%s\\n" "$*" >> uv-calls.log\nprintf %s "$PWD/src" > "{EDITABLE_PTH}"\n'
 )
@@ -337,6 +338,17 @@ class TestEditableInstallAfterRun:
 
         assert f"error: .venv still imports lovspor from {repo}/mutants/src" in result.stderr
         assert "killed:" not in result.stdout
+        assert result.returncode == 3
+
+    def test_a_failed_mutmut_run_still_repairs_the_install(self, tmp_path: Path) -> None:
+        repo, result = _run_with_uv(tmp_path, REPOINTING_FAILED_MUTMUT, REPAIRING_UV)
+
+        assert (repo / EDITABLE_PTH).read_text(encoding="utf-8") == str(repo / "src")
+        assert (repo / "uv-calls.log").read_text(encoding="utf-8") == (
+            "sync --frozen --reinstall-package lovspor\n"
+        )
+        assert "error: mutmut run failed (exit 23)" in result.stderr
+        assert "no score for this PR — do not report one" in result.stderr
         assert result.returncode == 3
 
     def test_an_intact_install_is_left_alone(self, tmp_path: Path) -> None:
