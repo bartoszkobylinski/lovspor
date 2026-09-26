@@ -95,6 +95,14 @@ jobs:
           if [ "$(jq -r .commit "$f")" != "$HEAD_SHA" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
+          # Mutants mutmut killed with a signal got no verdict at all (#283):
+          # the same unmeasured surface as a budget cut, beyond any new test.
+          if [ "$(jq -r .gate.reason "$f")" = "unmeasured_mutants" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "signal_killed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # A budget-exceeded gate is not remediable by tests: the surface
           # was never fully measured, so there is nothing for new tests to
           # kill. Route it straight to a human instead of burning cycles.
@@ -103,11 +111,32 @@ jobs:
             echo "budget=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Same for a run that died before measuring anything: the tool or
+          # the clean baseline failed, so there are no survivors to classify
+          # and Codex would only report "non-killable" about nothing (#311).
+          case "$(jq -r .gate.reason "$f")" in
+            tool_failed|baseline_tests_failed)
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "unmeasured=true" >> "$GITHUB_OUTPUT"
+              exit 0 ;;
+          esac
           if [ "$(jq -r .gate.passed "$f")" = "false" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: BLOCKED — mutants got no verdict, tests cannot fix an unmeasured surface
+        if: steps.gate.outputs.signal_killed == 'true'
+        run: |
+          pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
+          [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
+          gh pr edit "$pr" --add-label "needs-human:mutation"
+          n="$(jq -r .mutants.unmeasured "${{ runner.temp }}/mutation/mutation-result.json")"
+          {
+            echo "Mutation gate: $n mutant(s) got no verdict — mutmut killed them with a signal and filed them as \"segfault\", a bucket its progress line never prints (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Re-run the mutation job, or read the mutants' status with \`mutmut results\`. Human decision required."
+          } > "$RUNNER_TEMP/unmeasured-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "$pr" "$RUNNER_TEMP/unmeasured-escalation.md"
 
       - name: BLOCKED — budget exceeded, tests cannot fix an unmeasured surface
         if: steps.gate.outputs.budget == 'true'
@@ -119,6 +148,19 @@ jobs:
             echo "Mutation gate: per-file wall-clock budget exceeded — the changed surface was not fully measured (artifact: mutation-result-$HEAD_SHA, run: ${{ github.event.workflow_run.html_url }}). Codex remediation skipped: tests cannot kill unmeasured mutants. Human decision required."
           } > "$RUNNER_TEMP/budget-escalation.md"
           scripts/ci/pr_sticky_comment.sh mutation "$pr" "$RUNNER_TEMP/budget-escalation.md"
+
+      - name: BLOCKED — mutation did not run, nothing was measured
+        if: steps.gate.outputs.unmeasured == 'true'
+        run: |
+          pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
+          [ -n "$pr" ] || { echo "no open PR for $HEAD_BRANCH" >&2; exit 1; }
+          gh pr edit "$pr" --add-label "needs-human:mutation"
+          {
+            python3 scripts/ci/mutation_gate.py --unmeasured "${{ runner.temp }}/mutation/mutation-result.json"
+            echo
+            echo "Artifact: mutation-result-$HEAD_SHA (run: ${{ github.event.workflow_run.html_url }})."
+          } > "$RUNNER_TEMP/unmeasured-escalation.md"
+          scripts/ci/pr_sticky_comment.sh mutation "$pr" "$RUNNER_TEMP/unmeasured-escalation.md"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.gate.outputs.run == 'true'
@@ -317,7 +359,15 @@ jobs:
   # agent still reports when that machine dies.
   remediate-verify:
     needs: [remediate]
-    if: ${{ !cancelled() && needs.remediate.outputs.run == 'true' }}
+    # Also when the agent lane died (#254): a box that goes away mid-job takes
+    # the job's outputs with it, so `run` arrives empty and a lane waiting on it
+    # alone stayed skipped — the PR red, with no label and no comment. A
+    # job-level timeout is `cancelled` on the job, and is reported too; a run a
+    # human cancelled is not a blocked PR, which `!cancelled()` keeps out.
+    if: >-
+      !cancelled() &&
+      (needs.remediate.outputs.run == 'true' ||
+      needs.remediate.result == 'failure' || needs.remediate.result == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -343,6 +393,18 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch }}
           fetch-depth: 0
           token: ${{ secrets.LOVSPOR_CI_PUSH_TOKEN }}
+
+      # No round ran, so the PR head was not checked out: take the helper from
+      # the default branch, for the reason `remediate` does — this job holds a
+      # write token, and the script that reports on a PR is never one that PR
+      # can rewrite.
+      - name: Check out the escalation helper
+        if: needs.remediate.outputs.run != 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: scripts/ci
+          persist-credentials: false
 
       - name: The remediation lane did not finish
         # After the checkout, because the escalation below needs the helper
@@ -426,6 +488,71 @@ jobs:
           # it, so it belongs in the run summary rather than in a PR comment that
           # mails the author on every remediation cycle.
           echo "Mutation gate failed; remediation cycle $(( ${{ needs.remediate.outputs.count }} + 1 ))/2 pushed test-only changes; pipeline rerunning." >> "$GITHUB_STEP_SUMMARY"
+
+      # Issue #254: the lane died before it could say which PR it was on. Only
+      # when nothing else could have reported — an empty `pr` means neither the
+      # in-job escalation nor the step above ever had a PR to label — and only
+      # for a pipeline that failed: a green one had nothing to remediate.
+      - name: Classify the lane failure
+        id: classify
+        if: failure() && needs.remediate.outputs.pr == ''
+        # Never fatal: a jobs-API hiccup downgrades the wording below, it must
+        # not silence the report (#193, one level up).
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/actions/runs/$GITHUB_RUN_ID/jobs" --paginate \
+            > "$RUNNER_TEMP/jobs.json"
+          python3 scripts/ci/classify_lane_failure.py \
+            --jobs "$RUNNER_TEMP/jobs.json" --lane remediate >> "$GITHUB_OUTPUT"
+
+      - name: Escalate a remediation lane that died without reporting
+        if: >-
+          failure() && needs.remediate.outputs.pr == '' &&
+          github.event.workflow_run.conclusion == 'failure'
+        env:
+          RESULT: ${{ needs.remediate.result }}
+          KIND: ${{ steps.classify.outputs.kind }}
+          STEP: ${{ steps.classify.outputs.step }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          pr="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number')"
+          if [ -z "$pr" ]; then
+            echo "::warning::no open PR for $HEAD_BRANCH — nothing to label"
+            exit 0
+          fi
+          view="$(gh pr view "$pr" --json headRefOid,labels --jq '.headRefOid, .labels[].name')"
+          # A superseded head is owned by the new head's own pipeline.
+          if [ "${view%%$'\n'*}" != "$HEAD_SHA" ]; then
+            echo "PR #$pr moved past $HEAD_SHA — its new head reports for itself"
+            exit 0
+          fi
+          if grep -Fxq "needs-human:mutation" <<< "$view"; then
+            echo "already reported: needs-human:mutation"
+            exit 0
+          fi
+          gh pr edit "$pr" --add-label "needs-human:mutation"
+          if [ "$KIND" = "infrastructure" ]; then
+            {
+              echo "Mutation remediation BLOCKED by an INFRASTRUCTURE failure — the machine, not the diff."
+              echo ""
+              echo "Job \`remediate\` was recorded as failed while its step \`$STEP\` was still"
+              echo "running: a runner going away mid-job (#254). Whether remediation applies is unknown."
+              echo "Check the machine, then re-run:"
+              echo "\`gh api repos/$GH_REPO/actions/runners\`"
+              echo "\`gh run rerun ${RUN_URL##*/} --failed\`"
+              echo ""
+              echo "Run: $RUN_URL"
+            } > "$RUNNER_TEMP/dead-lane-escalation.md"
+          else
+            {
+              echo "Mutation remediation ended '$RESULT' without reporting its own state — the job"
+              echo "never reached its escalation steps. Whether remediation applies is unknown."
+              echo "Human review required. Run: $RUN_URL"
+            } > "$RUNNER_TEMP/dead-lane-escalation.md"
+          fi
+          scripts/ci/pr_sticky_comment.sh mutation "$pr" "$RUNNER_TEMP/dead-lane-escalation.md"
 
       # Issue #67: a remediation job that dies mid-run must never fail silently —
       # the escalation contract (label + comment) applies to the failure itself.

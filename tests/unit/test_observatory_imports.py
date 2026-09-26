@@ -31,6 +31,7 @@ _MODULES = (
     "lovspor.observatory.entrypoint",
     "lovspor.observatory.events",
     "lovspor.observatory.fetch",
+    "lovspor.observatory.fields",
     "lovspor.observatory.freshness",
     "lovspor.observatory.freshness_index",
     "lovspor.observatory.heartbeat",

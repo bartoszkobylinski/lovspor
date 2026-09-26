@@ -29,9 +29,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 from lovspor.errors import LogIntegrityError, ParseError
+from lovspor.observatory.fields import TrimmedNonBlankStr
 from lovspor.observatory.registry import SourceRecord
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -54,35 +55,15 @@ class SourceDomainReplaced(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     event: Literal["source_domain_replaced"] = "source_domain_replaced"
-    authority_id: str = Field(min_length=1)
-    from_domain: str = Field(min_length=1)
-    to_domain: str = Field(min_length=1)
-    reason: str = Field(min_length=1)
+    authority_id: TrimmedNonBlankStr
+    from_domain: TrimmedNonBlankStr
+    to_domain: TrimmedNonBlankStr
+    reason: TrimmedNonBlankStr
     changed_at: AwareDatetime
-    changed_by: str = Field(min_length=1)
+    changed_by: TrimmedNonBlankStr
     #: The record as it stood before this event, by content. A timestamp says
     #: when; this says *which*, and survives the registry being rewritten.
     previous_record_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-    @field_validator("authority_id", "from_domain", "to_domain", "reason", "changed_by")
-    @classmethod
-    def _not_blank(cls, value: str) -> str:
-        """Reject a field that is empty once the whitespace is taken off it.
-
-        ``min_length=1`` counts characters, and a space is a character: it
-        admits ``" "`` as a reason and ``"\t"`` as the person who decided,
-        which is an unattributed change wearing the shape of an attributed
-        one. That is the failure this record exists to prevent, so the check
-        has to be on content rather than on length.
-
-        The stripped value is what gets stored. A name typed with a trailing
-        space is the same name, and an event log that holds two spellings of
-        one person cannot be grouped by who decided what.
-        """
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("must not be blank")
-        return stripped
 
 
 #: Every event shape this log holds. A union of one today, written as a name

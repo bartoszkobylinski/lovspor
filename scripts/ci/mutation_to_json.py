@@ -6,7 +6,8 @@ policy. `mutation_gate.py` just reads the result. Policy mirrors the existing
 lovspor practice (no numeric threshold was ever set, decisions.md §9c):
 
 - "mutation not applicable" (release/packaging/docs PRs) is a valid PASS outcome;
-- surviving, timed-out, suspicious, and uncovered mutants each fail the gate;
+- surviving, timed-out, suspicious, and uncovered mutants each fail the gate,
+  as do mutants the run never gave a verdict (signal-killed, issue #283);
 - the wrapper preserves the pipeline's 2/4/8 compatibility bitfield for aggregate
   survived / timeout / suspicious state; survivors route the PR to Codex remediation and,
   after two cycles, to a human — the automated form of "investigate survived
@@ -87,6 +88,18 @@ BUDGET_EXCEEDED = "mutation budget exceeded:"
 # mutmut-pr.sh's own `error:`. Three blocked runs in a row required digging
 # the job logs for exactly this line — the artifact already contains it.
 FAILURE_LINE = re.compile(r"^(?:FAILED |ERROR |error: ).*", re.MULTILINE)
+# `mutation_scope.py --explain` names each changed region no mutant can reach:
+# module-level and class-body statements, decorated functions (every typer
+# command), methods of a decorated class (#289, #292). Anchored at line start
+# so a notice quoted inside a test failure is not read as one.
+UNMEASURED_LINE = re.compile(r"^unmeasured changed lines: (.+)$", re.MULTILINE)
+
+
+COUNT_KEYS = ("total", "killed", "survived", "timeout", "invalid", "skipped", "no_tests")
+# Every bucket the progress line prints. Its `done` also counts the ones it
+# does not: mutmut files a signal-killed child (-9 after its own CPU limit,
+# -11) as "segfault" and never prints that bucket (issue #283).
+PRINTED_BUCKETS = ("killed", "no_tests", "timeout", "suspicious", "survived", "skipped")
 
 
 def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
@@ -95,11 +108,7 @@ def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
     for m in MUTMUT_LINE.finditer(raw):
         last = {k: int(v) for k, v in m.groupdict().items()}
     if last is None:
-        empty = dict.fromkeys(
-            ("total", "killed", "survived", "timeout", "invalid", "skipped", "no_tests"),
-            0,
-        )
-        return empty, False
+        return dict.fromkeys((*COUNT_KEYS, "unmeasured"), 0), False
     counts = {
         "total": last["done"],
         "killed": last["killed"],
@@ -109,6 +118,8 @@ def parse_counts(raw: str) -> tuple[dict[str, int], bool]:
         "skipped": last["skipped"],
         "no_tests": last["no_tests"],
     }
+    printed = sum(last[bucket] for bucket in PRINTED_BUCKETS) + last["type_checked"]
+    counts["unmeasured"] = max(last["done"] - printed, 0)
     return counts, last["done"] > 0
 
 
@@ -116,6 +127,17 @@ def parse_failure_hint(raw: str) -> str | None:
     """First FAILED/ERROR/error: line of the raw log, single line, capped."""
     m = FAILURE_LINE.search(raw)
     return m.group(0)[:300].rstrip() if m else None
+
+
+def parse_unmeasured_lines(raw: str) -> list[str]:
+    """`<path>:<ranges> (<region>)` per scope notice, first occurrence order.
+
+    Reported, never scored: the gate verdict does not read this. Failing on it
+    would block every PR that touches a typer command, since mutmut 3.8.0
+    cannot mutate one — the notice exists so a green score stops implying it
+    measured them.
+    """
+    return list(dict.fromkeys(m.strip() for m in UNMEASURED_LINE.findall(raw)))
 
 
 def _id_only(mutant_id: str, detail_source: str) -> dict[str, object]:
@@ -320,6 +342,9 @@ def compute_gate(counts: dict[str, int], health: RunHealth) -> dict[str, object]
     failures = (
         (not health.baseline_ok, "baseline_tests_failed"),
         (not health.completed, "run_incomplete"),
+        # Ahead of the per-bucket reasons for the budget's reason: a mutant
+        # with no verdict is beyond any test, so the PR must reach a human.
+        (counts.get("unmeasured", 0) > 0, "unmeasured_mutants"),
         (survivors_stand, "surviving_mutants"),
         (counts["timeout"] > 0 or bool(bits & 4), "timeout_mutants"),
         (counts["invalid"] > 0 or bool(bits & 8), "suspicious_mutants"),
@@ -344,6 +369,15 @@ def _health(raw: str, tool_exit_code: int, counts_done: bool) -> RunHealth:
     )
 
 
+def _score(counts: dict[str, int], completed: bool) -> float | None:
+    if counts["total"]:
+        return round(100.0 * counts["killed"] / counts["total"], 2)
+    # Zero mutants on a finished run (not applicable) is a clean 100; zero on a
+    # run that died before measuring any is no score at all — mutmut-pr.sh
+    # prints "do not report one", and the artifact must not report one (#311).
+    return 100.0 if completed else None
+
+
 def build_result(
     commit: str, raw: str, tool_exit_code: int, survivors_file: Path | None = None
 ) -> dict[str, object]:
@@ -356,7 +390,7 @@ def build_result(
     # the gate anyway (mutmut exit bits 4 and 8), so they never inflate the score.
     # Registered equivalents do not adjust it either: the register moves the
     # verdict, never the measurement (decisions.md §9c).
-    score = round(100.0 * counts["killed"] / counts["total"], 2) if counts["total"] else 100.0
+    score = _score(counts, health.completed)
     checked = health._replace(
         unexplained_survivors=unexplained if survivors else None,
         registered_equivalents=registered,
@@ -373,6 +407,7 @@ def build_result(
         "gate": compute_gate(counts, checked),
         "equivalents": {"registered": registered, "refused": refused},
         "failure_hint": parse_failure_hint(raw),
+        "unmeasured_changed_lines": parse_unmeasured_lines(raw),
         "survivors": survivors,
     }
 

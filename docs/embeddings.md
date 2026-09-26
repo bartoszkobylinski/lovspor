@@ -204,6 +204,14 @@ sidecars, and sixteen of the seventeen MCP tools work untouched — only
 `semantic_search` is unavailable. Credentials are always operator-supplied;
 nothing is bundled.
 
+A keyless sync is silent by design, so `lovspor audit` is what notices one
+against a corpus that already carries embeddings: once any current act owns its
+sidecar, a current act without one is a `missing_embedding` INTEGRITY finding
+and fails the post-sync audit step (#344). A corpus with no sidecars at all is
+treated as built keyless on purpose and stays clean. The finding covers acts a
+keyless run *added*; an act it *changed* keeps its old sidecar, which is
+content-stale rather than missing and is not an audit finding.
+
 The application asks one factory for an adapter —
 `EmbeddingConfig.from_env() -> create_embedder() -> EmbeddingModel` — and no
 provider name appears in the sync engine or the MCP server. Configuration:

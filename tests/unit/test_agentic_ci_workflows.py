@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import re
 import subprocess
 import sys
@@ -231,6 +233,57 @@ def test_remediation_routes_a_budget_cut_to_a_human_not_codex() -> None:
     )
     assert working_checkout["if"] == "steps.gate.outputs.run == 'true'"
     assert names.index(blocked["name"]) < names.index(working_checkout.get("name"))
+
+
+_UNMEASURED_BLOCK = "BLOCKED — mutants got no verdict, tests cannot fix an unmeasured surface"
+
+
+def _decide_outputs(tmp_path: Path, reason: str, passed: bool) -> dict[str, str]:
+    """Run the real decision step against a result carrying `reason`."""
+    run = _named_step(
+        _steps("mutation-remediation.yml", "remediate"),
+        "Validate result as data; decide whether remediation applies",
+    )["run"]
+    run = run.replace("${{ runner.temp }}", str(tmp_path))
+    run = run.replace("${{ steps.artifact.outcome }}", "success")
+    (tmp_path / "mutation").mkdir()
+    result = {
+        "schema_version": 1,
+        "commit": "a" * 40,
+        "gate": {"passed": passed, "reason": reason},
+        "survivors": [],
+    }
+    (tmp_path / "mutation" / "mutation-result.json").write_text(json.dumps(result))
+    outputs = tmp_path / "outputs"
+    env = {"PATH": os.environ["PATH"], "HEAD_SHA": "a" * 40, "GITHUB_OUTPUT": str(outputs)}
+    subprocess.run(["bash", "-eu", "-o", "pipefail", "-c", run], env=env, check=True)
+    lines = outputs.read_text(encoding="utf-8").splitlines()
+    return dict(line.split("=", 1) for line in lines)
+
+
+def test_remediation_routes_unmeasured_mutants_to_a_human_not_codex(tmp_path: Path) -> None:
+    """Issue #283: a signal-killed mutant got no verdict — tests cannot kill
+    what was never measured, so Codex must not get the round."""
+    outputs = _decide_outputs(tmp_path, "unmeasured_mutants", passed=False)
+
+    assert outputs == {"run": "false", "signal_killed": "true"}
+
+
+def test_surviving_mutants_still_reach_codex(tmp_path: Path) -> None:
+    outputs = _decide_outputs(tmp_path, "surviving_mutants", passed=False)
+
+    assert outputs == {"run": "true"}
+
+
+def test_the_unmeasured_block_labels_the_pr_before_any_codex_step() -> None:
+    steps = _steps("mutation-remediation.yml", "remediate")
+    blocked = _named_step(steps, _UNMEASURED_BLOCK)
+    names = [step.get("name") for step in steps]
+
+    assert blocked["if"] == "steps.gate.outputs.signal_killed == 'true'"
+    assert '--add-label "needs-human:mutation"' in blocked["run"]
+    assert ".mutants.unmeasured" in blocked["run"]
+    assert names.index(blocked["name"]) < names.index("Resolve PR number and remediation cycle")
 
 
 @pytest.mark.parametrize(
@@ -566,6 +619,32 @@ def test_pr_pipeline_workflow_scoped_concurrency_still_cancels_stale_runs() -> N
 
     assert concurrency["group"] == "pr-${{ github.event.pull_request.number }}"
     assert concurrency["cancel-in-progress"] is True
+
+
+def _cancel_in_progress_workflows() -> list[str]:
+    return sorted(
+        path.name
+        for path in _WORKFLOWS.glob("*.yml")
+        if (_workflow(path.name).get("concurrency") or {}).get("cancel-in-progress") is True
+    )
+
+
+def test_some_workflow_cancels_stale_runs() -> None:
+    assert "pr-pipeline.yml" in _cancel_in_progress_workflows()
+
+
+@pytest.mark.parametrize("workflow_name", _cancel_in_progress_workflows())
+def test_no_job_in_a_cancellable_workflow_outlives_its_cancellation(workflow_name: str) -> None:
+    """Issue #101. On cancellation GitHub re-evaluates the `if` of every job
+    still running and keeps the ones that evaluate true — `always()` does. The
+    mutation job carried it, so a push landing while mutation ran left the
+    superseded run holding the `pr-<PR#>` group and the new run pending with no
+    jobs. `!cancelled()` survives a skipped or failed need the same way and
+    still yields to the cancellation."""
+    jobs = _workflow(workflow_name)["jobs"]
+    outliving = [name for name, job in jobs.items() if "always()" in str(job.get("if", ""))]
+
+    assert outliving == []
 
 
 class TestEscalationCoversEveryFailure:
@@ -1227,10 +1306,20 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
 
     def test_the_verifier_only_runs_for_a_cycle_the_gate_allowed(self) -> None:
         """The gate, the cycle count and both BLOCKED paths stay on the agent
-        lane, so the verifier must not start a round the gate refused."""
-        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        lane, so the verifier must not start a round the gate refused. The job
+        also runs when the agent lane died (#254) — only to report it, so every
+        step of the round itself still waits on the gate's `run`."""
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
+        round_steps = [
+            "Sync dependencies",
+            "Scope guard",
+            "Normalize and lint Codex output",
+            "Run tests on Codex additions",
+            "Commit and push, or report BLOCKED",
+        ]
 
-        assert job["if"] == "${{ !cancelled() && needs.remediate.outputs.run == 'true' }}"
+        for name in round_steps:
+            assert _named_step(steps, name)["if"] == "needs.remediate.outputs.run == 'true'"
         assert self._agent()["outputs"]["run"] == "${{ steps.cycle.outputs.run }}"
 
 
@@ -1368,7 +1457,258 @@ def test_dependabot_prs_skip_the_codex_lanes_and_still_reach_the_mutation_gate()
     assert jobs["codex-tests"]["if"] == f"${{{{ !cancelled() && {same_repo_non_dependabot} }}}}"
     mutation_condition = " ".join(jobs["mutation"]["if"].split())
     assert mutation_condition == (
-        "always() && needs.fast-ci.result == 'success' && (needs.codex-tests.result == "
+        "!cancelled() && needs.fast-ci.result == 'success' && (needs.codex-tests.result == "
         "'success' || (needs.codex-tests.result == 'skipped' && github.actor == "
         "'dependabot[bot]')) && needs.codex-tests.outputs.pushed != 'true'"
     )
+
+
+_REPO = Path(__file__).resolve().parents[2]
+_DECIDE = "Validate result as data; decide whether remediation applies"
+_UNMEASURED = "BLOCKED — mutation did not run, nothing was measured"
+_RUN_URL = "https://github.com/o/r/actions/runs/1"
+_SHA = "a" * 40
+_SYSTEM_PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
+
+
+def _render(script: str, values: dict[str, str]) -> str:
+    """Substitute the step's ${{ }} expressions; an unknown one fails the test."""
+    return re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda m: values[m.group(1)], script)
+
+
+def _mutation_artifact(tmp_path: Path, raw: str, tool_exit_code: int) -> Path:
+    folder = tmp_path / "mutation"
+    folder.mkdir()
+    (tmp_path / "raw.log").write_text(raw, encoding="utf-8")
+    args = ["--commit", _SHA, "--raw", str(tmp_path / "raw.log")]
+    args += ["--tool-exit-code", str(tool_exit_code)]
+    args += ["--out", str(folder / "mutation-result.json")]
+    script = _REPO / "scripts" / "ci" / "mutation_to_json.py"
+    subprocess.run([sys.executable, str(script), *args], check=True, capture_output=True)
+    return folder / "mutation-result.json"
+
+
+def _run_step(script: str, cwd: Path, env: dict[str, str]) -> None:
+    subprocess.run(
+        ["bash", "-eu", "-o", "pipefail", "-c", script],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _decide(tmp_path: Path, raw: str, tool_exit_code: int) -> dict[str, str]:
+    _mutation_artifact(tmp_path, raw, tool_exit_code)
+    step = _named_step(_steps("mutation-remediation.yml", "remediate"), _DECIDE)
+    values = {"runner.temp": str(tmp_path), "steps.artifact.outcome": "success"}
+    output = tmp_path / "github-output"
+    env = {"PATH": _SYSTEM_PATH, "HEAD_SHA": _SHA, "GITHUB_OUTPUT": str(output)}
+    _run_step(_render(step["run"], values), tmp_path, env)
+    return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+
+def _escalation_sandbox(tmp_path: Path) -> dict[str, str]:
+    """scripts/ci as the helper checkout holds it, with GitHub stubbed at the CLI."""
+    ci = tmp_path / "scripts" / "ci"
+    ci.mkdir(parents=True)
+    (ci / "mutation_gate.py").write_text(
+        (_REPO / "scripts" / "ci" / "mutation_gate.py").read_text(encoding="utf-8")
+    )
+    sticky = ci / "pr_sticky_comment.sh"
+    sticky.write_text(
+        f'#!/bin/sh\necho "$@" > "{tmp_path}/sticky-args"\ncp "$3" "{tmp_path}/body"\n'
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(
+        f'#!/bin/sh\necho "$@" >> "{tmp_path}/gh-calls"\n[ "$2" = list ] && echo 309\nexit 0\n'
+    )
+    for executable in (sticky, gh):
+        executable.chmod(0o755)
+    return {
+        "PATH": f"{bin_dir}:{_SYSTEM_PATH}",
+        "HEAD_SHA": _SHA,
+        "HEAD_BRANCH": "fix/x",
+        "RUNNER_TEMP": str(tmp_path),
+    }
+
+
+class TestUnmeasuredRunSkipsRemediation:
+    """Issue #311: a gate that failed before any mutant was measured has no
+    survivors for Codex to classify, and must reach a human saying why."""
+
+    @pytest.mark.parametrize(
+        ("raw", "exit_code"),
+        [
+            ("Failed to run clean test\nerror: mutmut run failed (exit 1)\n", 3),
+            (
+                "Tests failed when run without mutations\n"
+                "1/1  🎉 1 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0\n",
+                0,
+            ),
+        ],
+    )
+    def test_a_failed_tool_or_baseline_goes_to_a_human(
+        self, tmp_path: Path, raw: str, exit_code: int
+    ) -> None:
+        assert _decide(tmp_path, raw, exit_code) == {"run": "false", "unmeasured": "true"}
+
+    def test_surviving_mutants_still_go_to_codex(self, tmp_path: Path) -> None:
+        raw = "2/2  🎉 1 🫥 0  ⏰ 0  🤔 0  🙁 1  🔇 0  🧙 0\n"
+
+        assert _decide(tmp_path, raw, 2) == {"run": "true"}
+
+    def test_the_escalation_runs_before_any_checkout_or_codex_cycle(self) -> None:
+        steps = _steps("mutation-remediation.yml", "remediate")
+        names = [step.get("name") for step in steps]
+        blocked = _named_step(steps, _UNMEASURED)
+
+        assert blocked["if"] == "steps.gate.outputs.unmeasured == 'true'"
+        assert names.index(_UNMEASURED) < names.index("Resolve PR number and remediation cycle")
+        assert names.index(_UNMEASURED) < names.index("Codex — mutation remediation (tests only)")
+
+    def test_the_comment_names_the_failure_not_survivor_classification(
+        self, tmp_path: Path
+    ) -> None:
+        raw = "FAILED tests/unit/test_x.py::test_y - FailedHealthCheck\nFailed to run clean test\n"
+        _mutation_artifact(tmp_path, raw, 3)
+        env = _escalation_sandbox(tmp_path)
+        step = _named_step(_steps("mutation-remediation.yml", "remediate"), _UNMEASURED)
+        values = {"runner.temp": str(tmp_path), "github.event.workflow_run.html_url": _RUN_URL}
+
+        _run_step(_render(step["run"], values), tmp_path, env)
+
+        body = (tmp_path / "body").read_text()
+        assert "the clean baseline test run failed" in body
+        assert "FAILED tests/unit/test_x.py::test_y - FailedHealthCheck" in body
+        assert f"mutation-result-{_SHA}" in body
+        assert _RUN_URL in body
+        assert "non-killable" not in body
+        assert "--add-label needs-human:mutation" in (tmp_path / "gh-calls").read_text()
+        assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "309"]
+
+
+_DEAD_LANE = "Escalate a remediation lane that died without reporting"
+
+
+def _dead_lane_sandbox(tmp_path: Path, pr: str, view: str) -> dict[str, str]:
+    """scripts/ci as the helper checkout holds it; `gh` answers `pr list` with
+    `pr` and `pr view` with `view` (head SHA, then one label per line)."""
+    env = _escalation_sandbox(tmp_path)
+    (tmp_path / "pr-list").write_text(pr, encoding="utf-8")
+    (tmp_path / "pr-view").write_text(view, encoding="utf-8")
+    (tmp_path / "bin" / "gh").write_text(
+        f'#!/bin/sh\necho "$@" >> "{tmp_path}/gh-calls"\n'
+        f'[ "$2" = list ] && cat "{tmp_path}/pr-list"\n'
+        f'[ "$2" = view ] && cat "{tmp_path}/pr-view"\nexit 0\n'
+    )
+    env |= {"GH_REPO": "o/r", "RUN_URL": _RUN_URL}
+    return env | {"RESULT": "failure", "KIND": "", "STEP": ""}
+
+
+class TestADeadRemediationLaneStillEscalates:
+    """Issue #254. When the self-hosted box dies mid-`remediate`, its in-job
+    escalation dies with it, and the job's outputs are never evaluated — so
+    `run` and `pr` reach the hosted lane empty (inferred from runs 34043549922
+    and #193's evidence, not reproduced). The hosted lane used to wait on
+    `run == 'true'` and so stayed skipped: a red PR with no label, no comment."""
+
+    def _job(self) -> dict[str, Any]:
+        return _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+
+    def _run(self, tmp_path: Path, env: dict[str, str]) -> str:
+        step = _named_step(self._job()["steps"], _DEAD_LANE)
+        _run_step(step["run"], tmp_path, env)
+        calls = tmp_path / "gh-calls"
+        return calls.read_text() if calls.exists() else ""
+
+    def test_the_hosted_lane_runs_when_the_agent_lane_failed_or_hit_its_ceiling(self) -> None:
+        # `!cancelled()`, never `always()`: a run a human cancelled is not a
+        # blocked PR. A job-level timeout is `cancelled` on the job, not the run.
+        assert self._job()["if"] == (
+            "!cancelled() && (needs.remediate.outputs.run == 'true' || "
+            "needs.remediate.result == 'failure' || needs.remediate.result == 'cancelled')"
+        )
+
+    def test_the_helper_is_checked_out_from_the_default_branch_when_no_round_ran(self) -> None:
+        steps = self._job()["steps"]
+        names = [step.get("name") for step in steps]
+        helper = _named_step(steps, "Check out the escalation helper")
+
+        assert helper["if"] == "needs.remediate.outputs.run != 'true'"
+        assert helper["with"] == {
+            "ref": "${{ github.event.repository.default_branch }}",
+            "sparse-checkout": "scripts/ci",
+            "persist-credentials": False,
+        }
+        assert names.index(helper["name"]) < names.index("The remediation lane did not finish")
+        assert names.index(helper["name"]) < names.index(_DEAD_LANE)
+
+    def test_the_escalation_fires_only_where_nothing_else_could_report(self) -> None:
+        step = _named_step(self._job()["steps"], _DEAD_LANE)
+
+        assert step["if"] == (
+            "failure() && needs.remediate.outputs.pr == '' && "
+            "github.event.workflow_run.conclusion == 'failure'"
+        )
+        assert step["env"] == {
+            "RESULT": "${{ needs.remediate.result }}",
+            "KIND": "${{ steps.classify.outputs.kind }}",
+            "STEP": "${{ steps.classify.outputs.step }}",
+            "RUN_URL": "${{ github.server_url }}/${{ github.repository }}"
+            "/actions/runs/${{ github.run_id }}",
+        }
+
+    def test_the_classifier_is_best_effort_and_reads_the_agent_lane(self) -> None:
+        steps = self._job()["steps"]
+        names = [step.get("name") for step in steps]
+        classify = _named_step(steps, "Classify the lane failure")
+
+        assert classify["continue-on-error"] is True
+        assert "--lane remediate" in classify["run"]
+        assert names.index(classify["name"]) < names.index(_DEAD_LANE)
+
+    @pytest.mark.parametrize("result", ["failure", "cancelled"])
+    def test_empty_outputs_still_label_the_open_pr(self, tmp_path: Path, result: str) -> None:
+        env = _dead_lane_sandbox(tmp_path, "250\n", f"{_SHA}\n")
+        env["RESULT"] = result
+
+        calls = self._run(tmp_path, env)
+
+        assert "pr list --head fix/x --state open --json number --jq .[0].number" in calls
+        assert "pr edit 250 --add-label needs-human:mutation" in calls
+        assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "250"]
+        body = (tmp_path / "body").read_text()
+        assert f"ended '{result}'" in body
+        assert "unknown" in body
+        assert _RUN_URL in body
+
+    def test_a_runner_death_is_named_as_infrastructure(self, tmp_path: Path) -> None:
+        env = _dead_lane_sandbox(tmp_path, "250\n", f"{_SHA}\n")
+        env |= {"KIND": "infrastructure", "STEP": "Codex — mutation remediation (tests only)"}
+
+        self._run(tmp_path, env)
+
+        body = (tmp_path / "body").read_text()
+        assert "INFRASTRUCTURE" in body
+        assert "`Codex — mutation remediation (tests only)`" in body
+        assert "gh run rerun 1 --failed" in body
+
+    @pytest.mark.parametrize(
+        ("pr", "view"),
+        [
+            ("", ""),
+            ("250\n", "b" * 40 + "\n"),
+            ("250\n", f"{_SHA}\nneeds-human:mutation\n"),
+        ],
+        ids=["no-open-pr", "head-moved-on", "already-labelled"],
+    )
+    def test_no_label_where_there_is_nothing_to_report(
+        self, tmp_path: Path, pr: str, view: str
+    ) -> None:
+        calls = self._run(tmp_path, _dead_lane_sandbox(tmp_path, pr, view))
+
+        assert "--add-label" not in calls
+        assert not (tmp_path / "sticky-args").exists()

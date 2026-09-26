@@ -322,6 +322,11 @@ def _record_replacement(root: ObservatoryRoot, event: SourceDomainReplaced) -> N
         raise typer.Exit(1) from exc
 
 
+# The event is appended only after the register moves, so a failed write
+# leaves no decision behind either; the operator should not have to infer it.
+_NOTHING_DECIDED = "The register was not changed, and no decision was recorded."
+
+
 @observatory_app.command("replace-source-domain")
 def replace_source_domain(
     authority_id: _AuthorityIdOption,
@@ -357,7 +362,7 @@ def replace_source_domain(
         raise typer.Exit(1)
     _refuse_a_claimed_domain(registry, domain, excluding=authority_id)
     replaced, event = _plan_replacement(record, domain, reason, changed_by)
-    _save({**registry.sources, authority_id: replaced}, path)
+    _save({**registry.sources, authority_id: replaced}, path, _NOTHING_DECIDED)
     _record_replacement(root, event)
     _echo_replacement(replaced, event)
 

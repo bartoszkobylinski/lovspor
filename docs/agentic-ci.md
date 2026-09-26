@@ -56,8 +56,11 @@ PR opened/synchronize
   ├─ codex-tests    (ubuntu: applies that patch, lints, runs the suite, verdict, push)
   │     └─ pushes `[agent:codex-tests]` → fresh synchronize run, old run cancelled
   └─ mutation       (ubuntu, no LLM: scripts/mutmut-pr.sh → mutation-result.json)
-        └─ gate FAIL → Mutation Remediation workflow (Codex, tests only, max 2 cycles)
-              └─ still failing / non-killable → BLOCKED + needs-human:mutation
+        └─ gate FAIL → Mutation Remediation workflow
+              ├─ budget_exceeded / tool_failed / baseline_tests_failed
+              │     → BLOCKED + needs-human:mutation, no Codex (nothing measured to kill)
+              └─ survivors → Codex, tests only, max 2 cycles
+                    └─ still failing / non-killable → BLOCKED + needs-human:mutation
 ```
 
 ## Roles
@@ -123,6 +126,12 @@ No numeric score threshold exists or was added. The gate in `mutation-result.jso
   The score counts only 🎉 killed, so other outcomes never inflate it. Gate FAIL → Codex remediation (≤ 2 `[agent:codex-mutation]`
   cycles) → then `needs-human:mutation` + BLOCKED. This automates the previous manual
   practice of Codex investigating survivors and proposing killer tests.
+- mutants that got no verdict → **FAIL**, reason `unmeasured_mutants` (issue #283). mutmut
+  files a child killed by a signal — including the `-9` its own CPU-limit escalation sends — as
+  "segfault", a bucket its progress line never prints but still counts in the `done` total.
+  `mutants.unmeasured` is that shortfall. It outranks the per-bucket reasons and, like
+  `budget_exceeded`, routes straight to `needs-human:mutation`: tests cannot kill a mutant that
+  was never measured.
 
 `mutation-result.json` (schema_version 1) is bound to the exact PR head SHA; a stale
 result is ignored by the remediation workflow. Artifact `mutation-result-<SHA>` (JSON +
@@ -217,6 +226,12 @@ Invariants, enforced in `tests/unit/test_agentic_ci_workflows.py`:
 
 Both agent lanes keep their own `Escalate…` step: the verifier cannot report a box that
 died before it ever started, and `codex-tests-report` covers the PR lane from outside.
+`remediate-verify` covers the remediation lane the same way (#254): it also runs when
+`remediate` ended `failure` or `cancelled`, because a box that dies mid-job never
+evaluates the job's outputs and `run`/`pr` arrive empty. With no PR to name, it resolves
+the open PR from the branch itself, classifies the death with
+`scripts/ci/classify_lane_failure.py`, and labels `needs-human:mutation` unless the
+pipeline was green, the head moved on, or the label is already there.
 
 Measured on PR #269, the first real PR through the split: the agent job on the box went
 from **877 s** (the old single job) to **225 s**, with the suite moving to a hosted lane

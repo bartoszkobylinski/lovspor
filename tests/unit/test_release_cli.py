@@ -39,6 +39,7 @@ from lovspor.release.migrate import first_migration
 from lovspor.release.rehearsal import Rehearsal, RehearsalReport, Step
 from lovspor.release.staged import StagedPlan
 from tests.unit.caddy_fakes import FakeCaddy
+from tests.unit.cli_output import said
 from tests.unit.migrate_fixtures import Droplet, make_droplet
 from tests.unit.probe_fixtures import (
     MCP_URL,
@@ -117,16 +118,6 @@ def envelopes(world: World, tmp_path_factory: pytest.TempPathFactory) -> tuple[P
     rename_document(world)
     b = build(world, releases, observe=observer(LATER)).release_content_id
     return releases, a, b
-
-
-_ANSI = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _plain(rendered: str) -> str:
-    """rich output collapsed to its words: no escapes, no box drawing, one space."""
-    text = _ANSI.sub("", rendered)
-    text = re.sub(r"[\u2500-\u257f]", " ", text)
-    return " ".join(text.split())
 
 
 class Host(NamedTuple):
@@ -730,9 +721,7 @@ class TestMigrate:
         result = runner.invoke(app, ["release", "migrate", *given])
 
         assert result.exit_code == 2
-        # rich renders the usage error as a panel wrapped at the runner's
-        # width; compare the words, not the rendering.
-        assert phrase in _plain(result.output)
+        assert said(phrase, result.output)
         assert read_marker(droplet.plane.releases) is None
         assert not droplet.plane.fragment.exists()
 
@@ -1054,7 +1043,7 @@ class TestRehearse:
         result = runner.invoke(app, ["release", "rehearse", droplet.a, *args])
 
         assert result.exit_code == 2
-        assert "never the production unit caddy" in _plain(result.output)
+        assert said("never the production unit caddy", result.output)
 
     def test_refuses_the_production_caddyfile(self, droplet: Droplet, tmp_path: Path) -> None:
         args = self._fixtures(droplet, tmp_path)
@@ -1063,7 +1052,7 @@ class TestRehearse:
         result = runner.invoke(app, ["release", "rehearse", droplet.a, *args])
 
         assert result.exit_code == 2
-        assert "never /etc/caddy/Caddyfile" in _plain(result.output)
+        assert said("never /etc/caddy/Caddyfile", result.output)
 
     def test_refuses_anything_that_is_not_a_release_id(
         self, droplet: Droplet, tmp_path: Path
@@ -1073,7 +1062,7 @@ class TestRehearse:
         )
 
         assert result.exit_code == 2
-        assert "not a release_content_id" in _plain(result.output)
+        assert said("not a release_content_id", result.output)
 
     def test_the_instance_and_both_fixtures_are_required(self) -> None:
         """Nothing here has a sensible default: every one of them names the second instance."""
@@ -1184,9 +1173,7 @@ class TestBuild:
         result = runner.invoke(app, _build_args(world, tmp_path, "latest", None))
 
         assert result.exit_code == 2
-        # rich renders the usage error as an ANSI-styled panel wrapped at the
-        # terminal width; compare the words, not the rendering.
-        assert "--live must be a release_content_id or 'none'" in _plain(result.output)
+        assert said("--live must be a release_content_id or 'none'", result.output)
 
 
 class TestPublishCheck:

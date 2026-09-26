@@ -68,6 +68,33 @@ exit_code_for() {
   printf '%s' "$code"
 }
 
+# A `uv run` spawned from the shadow tree syncs mutants/ into the symlinked
+# .venv and re-points the editable install at mutants/src; every later pytest
+# in this checkout then imports the shadow tree, silently (issue #400).
+editable_target() {
+  local pth
+  for pth in "$repo_root"/.venv/lib/python*/site-packages/_editable_impl_lovspor.pth; do
+    if [ -f "$pth" ]; then cat "$pth"; fi
+    return 0
+  done
+}
+
+restore_editable_install() {
+  local target
+  target="$(editable_target)"
+  if [ -z "$target" ] || [ "$target" = "$repo_root/src" ]; then return 0; fi
+  echo "warning: the run re-pointed .venv's editable lovspor install at $target" >&2
+  echo "repairing: uv sync --frozen --reinstall-package lovspor" >&2
+  uv sync --frozen --reinstall-package lovspor >&2 || true
+  target="$(editable_target)"
+  if [ "$target" != "$repo_root/src" ]; then
+    echo "error: .venv still imports lovspor from $target, not $repo_root/src" >&2
+    echo "run 'uv sync --frozen --reinstall-package lovspor' before trusting any test" >&2
+    exit 3
+  fi
+  echo "repaired: .venv imports lovspor from $repo_root/src again" >&2
+}
+
 guard_dir="$(mktemp -d)"
 trap 'rm -rf "$guard_dir"' EXIT INT TERM
 printf '#!/bin/sh\necho "mutation guard: the real provider CLI is blocked" >&2\nexit 127\n' \
@@ -146,9 +173,13 @@ else
   PATH="$guard_dir:$PATH" "$mutmut_bin" run "${patterns[@]}" --max-children "$max_children" \
     2>&1 | tee mutation-run.log || run_status=${PIPESTATUS[0]}
 fi
+restore_editable_install
 
 budget_exceeded=0
 if [ "$run_status" -eq 124 ] || [ "$run_status" -eq 137 ]; then
+  # Mutmut's spinner ends on a bare \r; without the newline this verdict
+  # lands on the spinner's line and reads as lost (issue #365).
+  echo
   echo "mutation budget exceeded: after ${total_budget}s — unmeasured mutants are untested"
   budget_exceeded=1
 elif [ "$run_status" -ne 0 ]; then
@@ -158,6 +189,13 @@ elif [ "$run_status" -ne 0 ]; then
 fi
 
 tally="$(tr '\r' '\n' < mutation-run.log | grep -oE '[0-9]+/[0-9]+  🎉 [0-9]+ 🫥 [0-9]+  ⏰ [0-9]+  🤔 [0-9]+  🙁 [0-9]+  🔇 [0-9]+  🧙 [0-9]+' | tail -1 || true)"
+# Stats and the clean-test pass run before the first tally line, so a budget
+# spent there leaves none. That is still the budget's verdict, not a broken
+# tool: exit 3 would read as tool_failed and hide it (issue #365).
+if [ -z "$tally" ] && [ "$budget_exceeded" -eq 1 ]; then
+  echo "no mutant was measured before the budget ran out"
+  exit "$(exit_code_for 0 0 0 1)"
+fi
 if [ -z "$tally" ]; then
   echo "error: mutmut produced no progress line — the run did not measure any mutant" >&2
   echo "no score for this PR — do not report one" >&2
@@ -182,6 +220,13 @@ echo "timed out:  $timed_out"
 echo "suspicious: $suspicious"
 if [ "$no_tests" -gt 0 ]; then echo "no tests:   $no_tests"; fi
 if [ "$skipped" -gt 0 ]; then echo "skipped:    $skipped"; fi
+# The tally has no segfault bucket, yet counts those mutants in its done
+# total: the shortfall is every signal-killed mutant, which got no verdict (#283).
+type_checked="$(printf '%s' "$tally" | sed -E 's/.*🧙 ([0-9]+).*/\1/')"
+unmeasured=$((done_count - killed - no_tests - timed_out - suspicious - survived - skipped - type_checked))
+if [ "$unmeasured" -gt 0 ]; then
+  echo "unmeasured: $unmeasured  — signal-killed (mutmut: segfault), no verdict"
+fi
 echo
 echo "Tests were selected per function from Mutmut's stats pass."
 

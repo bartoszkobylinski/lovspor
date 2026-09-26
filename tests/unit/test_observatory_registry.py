@@ -1454,3 +1454,39 @@ class TestTheRegisterIsReReadUnderALongRun:
 
     def test_an_unregistered_id_is_not_an_activated_source(self, tmp_path: Path) -> None:
         assert self._bound(tmp_path).activated("0000") is None
+
+
+WHITESPACE_ONLY = [" ", "\t", "\n", " \t "]
+
+
+class TestMandatoryFieldsRefuseWhitespace:
+    """`min_length=1` counts characters, and a space is one (#207).
+
+    A blank ``reviewed_by`` is worse than a missing one: it reads as though
+    somebody signed the clearance or the verdict.
+    """
+
+    @pytest.mark.parametrize("blank", WHITESPACE_ONLY)
+    @pytest.mark.parametrize("field", ["robots_txt_url", "user_agent", "reviewed_by"])
+    def test_an_access_policy_check_refuses_a_blank_field(self, field: str, blank: str) -> None:
+        with pytest.raises(ValidationError):
+            AccessPolicyCheck.model_validate(check_document(**{field: blank}))
+
+    @pytest.mark.parametrize("blank", WHITESPACE_ONLY)
+    @pytest.mark.parametrize("field", ["evidence", "reviewed_by"])
+    def test_a_capture_verdict_refuses_a_blank_field(self, field: str, blank: str) -> None:
+        with pytest.raises(ValidationError):
+            verdict(**{field: blank})
+
+    @pytest.mark.parametrize("blank", WHITESPACE_ONLY)
+    @pytest.mark.parametrize("field", ["authority_id", "name", "canonical_domain"])
+    def test_a_source_record_refuses_a_blank_field(self, field: str, blank: str) -> None:
+        fields = eligible_source().model_dump() | {field: blank}
+
+        with pytest.raises(ValidationError):
+            SourceRecord.model_validate(fields)
+
+    def test_a_filled_value_is_read_back_unaltered(self) -> None:
+        """The register is fingerprinted and rewritten from what was read, so
+        validation refuses blanks without editing anything it accepts."""
+        assert check(reviewed_by=" project owner ").reviewed_by == " project owner "

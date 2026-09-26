@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from lovspor.errors import LogIntegrityError, ParseError
 from lovspor.observatory import events
@@ -75,6 +76,40 @@ def _event(**overrides: object) -> SourceDomainReplaced:
     }
     fields.update(overrides)
     return SourceDomainReplaced.model_validate(fields)
+
+
+class TestMandatoryEventText:
+    @pytest.mark.parametrize(
+        "field",
+        ["authority_id", "from_domain", "to_domain", "reason", "changed_by"],
+    )
+    @pytest.mark.parametrize("blank", [" ", "\t", "\n", "\u00a0", "\u2003"])
+    def test_whitespace_only_text_is_refused(self, field: str, blank: str) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            _event(**{field: blank})
+
+    def test_all_mandatory_text_is_trimmed(self) -> None:
+        event = _event(
+            authority_id=" 1106\n",
+            from_domain=" haugesund.no\t",
+            to_domain="\thaugesund.kommune.no ",
+            reason=f"  {REASON}\n",
+            changed_by=" Bartosz Kobyliński ",
+        )
+
+        assert (
+            event.authority_id,
+            event.from_domain,
+            event.to_domain,
+            event.reason,
+            event.changed_by,
+        ) == (
+            "1106",
+            "haugesund.no",
+            "haugesund.kommune.no",
+            REASON,
+            "Bartosz Kobyliński",
+        )
 
 
 class TestTheFingerprintIdentifiesARecord:

@@ -15,6 +15,7 @@ _TIMER = _DEPLOY / "lovspor-site-drift.timer"
 _SERVICE = _DEPLOY / "lovspor-site-drift.service"
 _FETCH_TIMER = _DEPLOY / "lovspor-fetch-corpus.timer"
 _PUBLISH = _DEPLOY / "lovspor-publish.service"
+_FETCH_SERVICE = _DEPLOY / "lovspor-fetch-corpus.service"
 
 
 def _directive(text: str, name: str) -> list[str]:
@@ -96,3 +97,46 @@ class TestDriftServiceAdminSocket:
         assert "drops to" in text
         assert "`lovspor` cannot" in text
         assert _directive(text, "User") == ["root"]
+
+
+def _seconds(value: str) -> int:
+    units = {"s": 1, "min": 60, "h": 3600}
+    match = re.fullmatch(r"(\d+)(s|min|h)?", value)
+    assert match, value
+    return int(match[1]) * units[match[2] or "s"]
+
+
+class TestFetchCorpusRetry:
+    """A transient fetch failure is retried, boundedly (issue #234)."""
+
+    def test_a_failed_run_is_retried(self) -> None:
+        text = _FETCH_SERVICE.read_text(encoding="utf-8")
+
+        assert _directive(text, "Type") == ["oneshot"]
+        assert _directive(text, "Restart") == ["on-failure"]
+        (delay,) = _directive(text, "RestartSec")
+        assert _seconds(delay) == 10 * 60
+
+    def test_retries_stop_before_they_can_loop(self) -> None:
+        (burst,) = _directive(_FETCH_SERVICE.read_text(encoding="utf-8"), "StartLimitBurst")
+
+        assert int(burst) == 4
+
+    def test_the_retry_window_never_blocks_the_next_daily_run(self) -> None:
+        text = _FETCH_SERVICE.read_text(encoding="utf-8")
+        (window,) = _directive(text, "StartLimitIntervalSec")
+        (burst,) = _directive(text, "StartLimitBurst")
+        (delay,) = _directive(text, "RestartSec")
+        (timeout,) = _directive(text, "TimeoutStartSec")
+
+        assert _seconds(window) == 2 * 3600
+        assert int(burst) * (_seconds(delay) + _seconds(timeout)) <= _seconds(window)
+
+    def test_retry_directives_are_in_the_systemd_sections_that_honor_them(self) -> None:
+        text = _FETCH_SERVICE.read_text(encoding="utf-8")
+        unit, service = text.split("[Service]", maxsplit=1)
+
+        assert "StartLimitIntervalSec=2h" in unit
+        assert "StartLimitBurst=4" in unit
+        assert "Restart=on-failure" in service
+        assert "RestartSec=10min" in service

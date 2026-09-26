@@ -818,10 +818,10 @@ def audit(
     on disk that no record claims (`orphan_document`), tombstoned records whose
     file was never deleted (`tombstoned_but_present`), current records with no
     file (`missing_document`), embedding sidecars no current record owns
-    (`orphan_embedding`), documents left behind by a renderer bump
-    (`stale_render`), one markdown path claimed by more than one record or one
-    current record claiming two paths (`duplicate_path_ownership`), and files
-    whose frontmatter id contradicts their owning record (`identity_mismatch`).
+    (`orphan_embedding`) or missing in an embedded corpus (`missing_embedding`),
+    renderer-bump leftovers (`stale_render`), a path with two owners or an owner
+    with two paths (`duplicate_path_ownership`), and frontmatter ids that
+    contradict their owning record (`identity_mismatch`).
 
     ADVISORY findings are registered follow-up work, not corruption — today
     that is `unparsed_section_heading` (18 pre-existing findings). They are

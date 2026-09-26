@@ -153,6 +153,21 @@ class TestMandatoryFields:
         with pytest.raises(ValidationError):
             Tombstone.model_validate(fields)
 
+    @pytest.mark.parametrize("blank", [" ", "\t", "\n", " \t "])
+    @pytest.mark.parametrize("field", ["basis", "authorised_by"])
+    def test_tombstone_refuses_a_blank_basis_or_authoriser(self, field: str, blank: str) -> None:
+        """A removal authorised by a space reads as authorised by somebody (#207)."""
+        fields: dict[str, object] = {
+            "sha256": SHA,
+            "removed_at": OBSERVED_AT,
+            "basis": "privacy request",
+            "authorised_by": "project owner",
+        }
+        fields[field] = blank
+
+        with pytest.raises(ValidationError):
+            Tombstone.model_validate(fields)
+
     @pytest.mark.parametrize("bad", ["", "xyz", "A" * 64, "a" * 63])
     def test_malformed_sha256_is_refused(self, bad: str) -> None:
         with pytest.raises(ValidationError):

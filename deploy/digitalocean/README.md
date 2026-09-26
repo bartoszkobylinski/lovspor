@@ -235,6 +235,11 @@ until the first releases have shown what a rebuild costs on this box.
 **Corpus refresh** is automatic — `lovspor-fetch-corpus.timer` runs daily at
 05:30 UTC and the running server picks up changes on the next query (no restart).
 Force one now: `sudo systemctl start lovspor-fetch-corpus`.
+A failed run is retried every 10 minutes, at most 4 starts within 2 hours
+(`Restart=on-failure`, `StartLimitBurst=4`, #234); after that the unit stays
+`failed` until the next daily run. Nothing alerts on that final failure yet —
+check with `systemctl status lovspor-fetch-corpus` or
+`journalctl -u lovspor-fetch-corpus`.
 
 **Full git history is required** on this box: the hosted MCP exposes the
 time-machine tools, so the fetch units run `fetch-corpus --full-history`

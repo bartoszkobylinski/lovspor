@@ -33,6 +33,7 @@ from lovspor.errors import (
     SourceNotActivatedError,
     StaleSourceError,
 )
+from lovspor.observatory.fields import NonBlankStr
 from lovspor.observatory.model import AuthorityType, require_utc
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -97,14 +98,14 @@ class AccessPolicyCheck(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     checked_at: datetime
-    robots_txt_url: str = Field(min_length=1)
+    robots_txt_url: NonBlankStr
     robots_allows: bool
     terms_reviewed: bool
     terms_permit_capture: bool
     terms_url: str | None = None
     rate_limit_seconds: float = Field(gt=0)
-    user_agent: str = Field(min_length=1)
-    reviewed_by: str = Field(min_length=1)
+    user_agent: NonBlankStr
+    reviewed_by: NonBlankStr
     note: str = ""
 
     @field_validator("checked_at")
@@ -157,9 +158,9 @@ class CaptureVerdict(BaseModel):
 
     outcome: CaptureOutcome
     routes_checked: tuple[str, ...] = Field(min_length=1)
-    evidence: str = Field(min_length=1)
+    evidence: NonBlankStr
     reached_at: datetime
-    reviewed_by: str = Field(min_length=1)
+    reviewed_by: NonBlankStr
     recheck_after: datetime
 
     @field_validator("reached_at", "recheck_after")
@@ -189,9 +190,9 @@ class SourceRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     authority_type: AuthorityType
-    authority_id: str = Field(min_length=1)
-    name: str = Field(min_length=1)
-    canonical_domain: str = Field(min_length=1)
+    authority_id: NonBlankStr
+    name: NonBlankStr
+    canonical_domain: NonBlankStr
     #: Overview pages to read as a second entry into discovery (issue #151).
     #: Declared by a human at activation, one per listing, because "this URL is
     #: an index of documents" is a judgement about a page and not something to
