@@ -464,6 +464,13 @@ class TestUnmeasuredNotices:
 
         assert patterns == ["lovspor.example.xǁOuterǁouter_method__mutmut_*"]
 
+    def test_only_nested_class_changes_select_no_pattern(self, mutation_scope: ModuleType) -> None:
+        patterns = mutation_scope.patterns_for_file(
+            "src/lovspor/example.py", {2, 4, 8}, NESTED_CLASS_SOURCE
+        )
+
+        assert patterns == []
+
     def test_a_nested_class_stays_unmeasured_as_a_whole(self, mutation_scope: ModuleType) -> None:
         notices = mutation_scope.unmeasured_notices(
             "src/lovspor/example.py", {2, 4, 8, 11}, NESTED_CLASS_SOURCE
