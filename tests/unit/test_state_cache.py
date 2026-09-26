@@ -177,6 +177,12 @@ def test_budget_from_env_is_read_in_mebibytes() -> None:
     assert budget_bytes_from_env({"LOVSPOR_HISTORICAL_CACHE_MIB": "512"}) == 512 * _MIB
 
 
+def test_cache_from_env_uses_explicit_environment_mapping() -> None:
+    cache = ByteBudgetCache[str].from_env({"LOVSPOR_HISTORICAL_CACHE_MIB": "3"})
+
+    assert cache.budget_bytes == 3 * _MIB
+
+
 @pytest.mark.parametrize("raw", ["0", "-1", "lots", "1.5"])
 def test_budget_from_env_refuses_unusable_values(raw: str) -> None:
     with pytest.raises(ConfigError, match="LOVSPOR_HISTORICAL_CACHE_MIB"):
