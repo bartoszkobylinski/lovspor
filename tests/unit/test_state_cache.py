@@ -145,6 +145,30 @@ def test_put_replaces_an_existing_key_without_double_charging() -> None:
     assert cache.total_bytes == 50
 
 
+def test_put_replacement_with_a_larger_cost_evicts_older_entries() -> None:
+    cache: ByteBudgetCache[str] = ByteBudgetCache(100)
+    cache.put("a", "A", 40)
+    cache.put("b", "B", 40)
+
+    assert cache.put("a", "A2", 70) is True
+
+    assert cache.get("b") is None
+    assert cache.get("a") == "A2"
+    assert cache.total_bytes == 70
+
+
+def test_oversized_put_replacement_preserves_the_existing_entry() -> None:
+    cache: ByteBudgetCache[str] = ByteBudgetCache(100)
+    cache.put("a", "A", 40)
+    cache.put("b", "B", 40)
+
+    assert cache.put("a", "A2", 101) is False
+
+    assert cache.get("a") == "A"
+    assert cache.get("b") == "B"
+    assert cache.total_bytes == 80
+
+
 def test_clear_empties_the_cache() -> None:
     cache: ByteBudgetCache[str] = ByteBudgetCache(100)
     cache.put("a", "A", 50)
