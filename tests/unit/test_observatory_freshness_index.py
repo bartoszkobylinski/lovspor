@@ -12,11 +12,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from lovspor.observatory.commands import _capture_state
-from lovspor.observatory.freshness import CaptureState, collect_capture_state
+from lovspor.observatory.freshness import CaptureState, ContentRun, collect_capture_state
 from lovspor.observatory.freshness_index import (
     INDEX_DERIVATION_VERSION,
     FreshnessIndex,
     StoredHold,
+    StoredRun,
     _prefix_digest,
     _state_binding,
     freshness_index_path,
@@ -47,13 +48,13 @@ def _provenance() -> RetrievalProvenance:
     )
 
 
-def _observation(url: str, when: datetime = NOW) -> ArtifactObservation:
+def _observation(url: str, when: datetime = NOW, sha256: str = "0" * 64) -> ArtifactObservation:
     return ArtifactObservation(
         authority_id="3201",
         url=url,
         observed_at=when,
         provenance=_provenance(),
-        sha256="0" * 64,
+        sha256=sha256,
         content_type="text/html",
         http_status=200,
     )
@@ -139,6 +140,37 @@ class TestIndexedFoldEqualsTheFullFold:
         assert scan.records_read == 1
         assert url in state.observed
         assert url not in state.holds
+        assert state == _full_fold(log)
+
+    def test_a_content_run_continues_correctly_across_the_index_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        """Issue #415: two identical captures before the anchor and one after
+        are a run of two unchanged, exactly as one full read counts them."""
+        url = "https://example.invalid/x"
+        log = make_log(tmp_path)
+        log.append(_observation(url, NOW))
+        log.append(_observation(url, NOW + timedelta(hours=1)))
+        indexed_capture_state(log)
+        log.append(_observation(url, NOW + timedelta(hours=2)))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert state.content[url] == ContentRun("0" * 64, 2)
+        assert state == _full_fold(log)
+
+    def test_changed_content_in_the_tail_resets_a_cached_run(self, tmp_path: Path) -> None:
+        url = "https://example.invalid/x"
+        log = make_log(tmp_path)
+        log.append(_observation(url, NOW))
+        log.append(_observation(url, NOW + timedelta(hours=1)))
+        indexed_capture_state(log)
+        log.append(_observation(url, NOW + timedelta(hours=2), "1" * 64))
+
+        state, _scan = indexed_capture_state(log)
+
+        assert state.content[url] == ContentRun("1" * 64, 0)
         assert state == _full_fold(log)
 
     def test_the_written_index_is_byte_identical_for_one_log_state(self, tmp_path: Path) -> None:
@@ -277,6 +309,44 @@ class TestAnyDoubtRebuilds:
         assert real_url in state.observed
         assert invented_url not in state.observed
 
+    def test_an_altered_cached_run_is_not_treated_as_evidence(self, tmp_path: Path) -> None:
+        """A run is what stretches an undated page's recheck to a week, so a
+        hand-inflated one would suppress fetches exactly as an invented
+        sighting would. The binding covers it too (issue #415)."""
+        url = "https://example.invalid/real"
+        log = make_log(tmp_path)
+        log.append(_observation(url))
+        indexed_capture_state(log)
+        path = freshness_index_path(log)
+        doc = json.loads(path.read_text())
+        doc["content"][url]["unchanged"] = 50
+        path.write_text(json.dumps(doc))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert state.content[url] == ContentRun("0" * 64, 0)
+
+    def test_an_index_without_content_runs_is_discarded_and_rebuilt(self, tmp_path: Path) -> None:
+        """An index written before #415 folded no runs. Reading it as "no
+        runs" would be harmless, but it must not be reusable at all: it was
+        derived by other fold semantics."""
+        log = make_log(tmp_path)
+        log.append(_observation("https://example.invalid/a"))
+        indexed_capture_state(log)
+        path = freshness_index_path(log)
+        doc = json.loads(path.read_text())
+        del doc["content"]
+        path.write_text(json.dumps(doc))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert state == _full_fold(log)
+
+    def test_the_fold_that_learned_content_runs_has_its_own_version(self) -> None:
+        assert INDEX_DERIVATION_VERSION == 2
+
 
 class TestDamageNeverAdvancesTheIndex:
     def test_damage_in_a_rewritten_prefix_refuses_and_does_not_advance_the_index(
@@ -392,10 +462,14 @@ class TestTheBindingIsPinnedByItsBytes:
                     last_failed_at=datetime(2026, 9, 3, 7, 0, tzinfo=UTC),
                 )
             },
+            content={
+                "https://example.invalid/b": StoredRun(sha256="c" * 64, unchanged=0),
+                "https://example.invalid/a": StoredRun(sha256="d" * 64, unchanged=3),
+            },
         )
 
         assert _state_binding(index) == (
-            "70c5a9341e4d168950b8cea8fc25a7f2577628f04ee3046da2871754a094042f"
+            "4e305e84b2f6935cc5ffde337ce56ce3243d21f4160368df1474177298846c2a"
         )
 
     def test_an_empty_log_records_the_empty_prefix_digest(self, tmp_path: Path) -> None:

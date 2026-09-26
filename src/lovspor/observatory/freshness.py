@@ -153,13 +153,39 @@ class FailureHold(NamedTuple):
         )
 
 
+class ContentRun(NamedTuple):
+    """A URL's latest bytes and how many re-captures in a row returned them.
+
+    The digest is what the next capture is compared against; the count is
+    what :func:`undated_recheck` reads. Zero means the latest capture was the
+    first, or brought bytes that differ from the one before (issue #415).
+    """
+
+    sha256: str
+    unchanged: int
+
+    def then(self, record: ArtifactObservation, in_order: bool) -> "ContentRun":
+        """This run extended by one more capture, or started over.
+
+        A record older than the URL's latest sighting cannot extend a run it
+        does not follow, so it ends it — keeping the bytes the run already
+        holds, which are the later ones. Ending errs toward fetching.
+        """
+        if not in_order:
+            return ContentRun(self.sha256, 0)
+        if record.sha256 != self.sha256:
+            return ContentRun(record.sha256, 0)
+        return ContentRun(self.sha256, self.unchanged + 1)
+
+
 class CaptureState(NamedTuple):
     """What the log already knows about the URLs a pass is about to consider.
 
-    Two maps rather than two arguments because they are folded in one reading
-    of the log and consulted by one decision. Splitting them across the call
-    chain is how a caller ends up passing the sightings and forgetting the
-    failures, which reads exactly like the bug this pairing fixes.
+    Three maps rather than three arguments because they are folded in one
+    reading of the log and consulted by one decision. Splitting them across
+    the call chain is how a caller ends up passing the sightings and
+    forgetting the failures, which reads exactly like the bug this pairing
+    fixes.
     """
 
     #: When each URL was last seen *with content*.
@@ -167,10 +193,13 @@ class CaptureState(NamedTuple):
     #: Where each URL that has never yielded content stands in its run of
     #: URL-property failures. A URL in both maps is governed by ``observed``.
     holds: dict[str, FailureHold]
+    #: Each observed URL's latest bytes and its run of identical re-captures.
+    #: A URL in ``observed`` but missing here is read as a run of none.
+    content: dict[str, ContentRun]
 
     @classmethod
     def empty(cls) -> "CaptureState":
-        return cls({}, {})
+        return cls({}, {}, {})
 
 
 def collect_capture_state(
@@ -186,6 +215,8 @@ def collect_capture_state(
     observe = collect_latest_observations(state.observed, authority_id)
 
     def collect(record: ObservationRecord) -> None:
+        if isinstance(record, ArtifactObservation):
+            _extend_run(state, record, authority_id)
         observe(record)
         if isinstance(record, ArtifactObservation):
             _clear_hold(state.holds, record, authority_id)
@@ -217,6 +248,24 @@ def _clear_hold(
     """
     if authority_id is None or record.authority_id == authority_id:
         holds.pop(record.url, None)
+
+
+def _extend_run(state: CaptureState, record: ArtifactObservation, authority_id: str | None) -> None:
+    """Fold one capture into the URL's run of identical bytes.
+
+    Must run before the sighting is folded: whether this record follows the
+    URL's latest sighting is only answerable while that sighting is still the
+    previous one.
+    """
+    if authority_id is not None and record.authority_id != authority_id:
+        return
+    run = state.content.get(record.url)
+    if run is None:
+        state.content[record.url] = ContentRun(record.sha256, 0)
+        return
+    latest = state.observed.get(record.url)
+    in_order = latest is None or record.observed_at >= latest
+    state.content[record.url] = run.then(record, in_order)
 
 
 def _extend_hold(
