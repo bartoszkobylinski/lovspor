@@ -12,7 +12,9 @@ from lovspor.observatory.freshness import (
     FAILED_RECHECK,
     FAILED_RECHECK_CEILING,
     UNDATED_RECHECK,
+    UNDATED_RECHECK_CEILING,
     CaptureState,
+    ContentRun,
     FailureHold,
     capture_state,
     collect_capture_state,
@@ -20,6 +22,7 @@ from lovspor.observatory.freshness import (
     failure_backoff,
     latest_observations,
     parse_site_lastmod,
+    undated_recheck,
     worth_capturing,
 )
 from lovspor.observatory.model import (
@@ -44,13 +47,13 @@ def _provenance() -> RetrievalProvenance:
     )
 
 
-def _observation(when: datetime, url: str = URL) -> ArtifactObservation:
+def _observation(when: datetime, url: str = URL, sha256: str = "a" * 64) -> ArtifactObservation:
     return ArtifactObservation(
         authority_id="3201",
         url=url,
         observed_at=when,
         provenance=_provenance(),
-        sha256="a" * 64,
+        sha256=sha256,
         content_type="text/html",
         http_status=200,
     )
@@ -171,7 +174,7 @@ class TestWorthCapturing:
         Past the window the page is asked about again, exactly as before."""
         observed = {URL: NOW - UNDATED_RECHECK}
 
-        assert worth_capturing(_candidate(None), CaptureState(observed, {}), NOW) is True
+        assert worth_capturing(_candidate(None), CaptureState(observed, {}, {}), NOW) is True
 
     def test_an_undated_candidate_seen_just_now_is_left_alone(self) -> None:
         """Issue #209. This is the one judgement in the module made from our
@@ -179,7 +182,7 @@ class TestWorthCapturing:
         alternative was re-fetching the page on every pass forever."""
         observed = {URL: NOW - timedelta(minutes=20)}
 
-        assert worth_capturing(_candidate(None), CaptureState(observed, {}), NOW) is False
+        assert worth_capturing(_candidate(None), CaptureState(observed, {}, {}), NOW) is False
 
     def test_an_unreadable_lastmod_is_treated_as_no_claim_at_all(self) -> None:
         """A stamp we cannot read tells us exactly what an absent one does, so
@@ -187,15 +190,15 @@ class TestWorthCapturing:
         recent = {URL: NOW - timedelta(minutes=20)}
         stale = {URL: NOW - UNDATED_RECHECK}
 
-        assert worth_capturing(_candidate("whenever"), CaptureState(recent, {}), NOW) is False
-        assert worth_capturing(_candidate("whenever"), CaptureState(stale, {}), NOW) is True
+        assert worth_capturing(_candidate("whenever"), CaptureState(recent, {}, {}), NOW) is False
+        assert worth_capturing(_candidate("whenever"), CaptureState(stale, {}, {}), NOW) is True
 
     def test_an_observation_stamped_ahead_of_the_clock_still_fetches(self) -> None:
         """An age cannot be computed from it, and a clock that disagrees with
         the archive must not be able to hold a page back."""
         observed = {URL: NOW + timedelta(hours=1)}
 
-        assert worth_capturing(_candidate(None), CaptureState(observed, {}), NOW) is True
+        assert worth_capturing(_candidate(None), CaptureState(observed, {}, {}), NOW) is True
 
     def test_a_future_observation_cannot_make_a_dated_candidate_look_unchanged(self) -> None:
         """The clock-safety rule applies even when the site supplies a claim.
@@ -203,7 +206,9 @@ class TestWorthCapturing:
         was observed, so it must resolve toward fetching."""
         observed = {URL: NOW + timedelta(hours=1)}
 
-        assert worth_capturing(_candidate("2026-08-19"), CaptureState(observed, {}), NOW) is True
+        assert (
+            worth_capturing(_candidate("2026-08-19"), CaptureState(observed, {}, {}), NOW) is True
+        )
 
     def test_an_observation_at_this_very_instant_is_left_alone(self) -> None:
         """The near boundary. Age zero is inside the window, not on the far
@@ -213,33 +218,39 @@ class TestWorthCapturing:
         elapsed there."""
         observed = {URL: NOW}
 
-        assert worth_capturing(_candidate(None), CaptureState(observed, {}), NOW) is False
+        assert worth_capturing(_candidate(None), CaptureState(observed, {}, {}), NOW) is False
 
     def test_the_window_boundary_fetches(self) -> None:
         """Exactly at the window the page is asked about, for the reason every
         tie in this module resolves toward fetching."""
         observed = {URL: NOW - UNDATED_RECHECK}
 
-        assert worth_capturing(_candidate(None), CaptureState(observed, {}), NOW) is True
+        assert worth_capturing(_candidate(None), CaptureState(observed, {}, {}), NOW) is True
 
     def test_a_dated_candidate_ignores_the_window_entirely(self) -> None:
         """The site made a claim, so the claim decides. A page stamped as
         changed after our sighting is fetched however recently we saw it."""
         observed = {URL: NOW - timedelta(minutes=1)}
 
-        assert worth_capturing(_candidate("2099-01-01"), CaptureState(observed, {}), NOW) is True
+        assert (
+            worth_capturing(_candidate("2099-01-01"), CaptureState(observed, {}, {}), NOW) is True
+        )
 
     def test_a_page_changed_since_we_looked_is_worth_capturing(self) -> None:
         observed = {URL: datetime(2026, 8, 1, tzinfo=UTC)}
 
-        assert worth_capturing(_candidate("2026-08-18"), CaptureState(observed, {}), NOW) is True
+        assert (
+            worth_capturing(_candidate("2026-08-18"), CaptureState(observed, {}, {}), NOW) is True
+        )
 
     def test_a_page_unchanged_since_we_looked_is_not(self) -> None:
         """The only case safe to skip: the site's own claim predates an
         observation we already hold."""
         observed = {URL: datetime(2026, 8, 19, tzinfo=UTC)}
 
-        assert worth_capturing(_candidate("2026-08-18"), CaptureState(observed, {}), NOW) is False
+        assert (
+            worth_capturing(_candidate("2026-08-18"), CaptureState(observed, {}, {}), NOW) is False
+        )
 
     def test_an_observation_exactly_at_the_lastmod_still_fetches(self) -> None:
         """Seeing a page at the very moment it is said to have changed does not
@@ -248,14 +259,16 @@ class TestWorthCapturing:
         stamp = "2026-08-18T10:00:00Z"
         observed = {URL: datetime(2026, 8, 18, 10, 0, tzinfo=UTC)}
 
-        assert worth_capturing(_candidate(stamp), CaptureState(observed, {}), NOW) is True
+        assert worth_capturing(_candidate(stamp), CaptureState(observed, {}, {}), NOW) is True
 
     def test_an_observation_within_the_lastmod_day_still_fetches(self) -> None:
         """The bare date resolves to end-of-day, so a morning observation of a
         page stamped that same day does not count as having seen the change."""
         observed = {URL: datetime(2026, 8, 18, 6, 0, tzinfo=UTC)}
 
-        assert worth_capturing(_candidate("2026-08-18"), CaptureState(observed, {}), NOW) is True
+        assert (
+            worth_capturing(_candidate("2026-08-18"), CaptureState(observed, {}, {}), NOW) is True
+        )
 
 
 class TestCollectingWithoutHoldingTheRecords:
@@ -505,6 +518,223 @@ class TestCaptureStateFold:
         assert state.holds == {other: FailureHold("http_404", 1, seen)}
 
 
+DAY_1 = datetime(2026, 8, 17, tzinfo=UTC)
+DAY_2 = datetime(2026, 8, 18, tzinfo=UTC)
+DAY_3 = datetime(2026, 8, 19, tzinfo=UTC)
+SAME = "a" * 64
+OTHER = "b" * 64
+
+
+class TestContentRunFold:
+    """Issue #415: how many re-captures in a row came back byte-identical."""
+
+    def test_a_first_capture_starts_a_run_of_none_unchanged(self) -> None:
+        state = capture_state([_observation(DAY_1)])
+
+        assert state.content == {URL: ContentRun(SAME, 0)}
+
+    def test_identical_bytes_again_extend_the_run(self) -> None:
+        state = capture_state([_observation(DAY_1), _observation(DAY_2), _observation(DAY_3)])
+
+        assert state.content == {URL: ContentRun(SAME, 2)}
+
+    def test_different_bytes_start_the_run_over(self) -> None:
+        state = capture_state(
+            [_observation(DAY_1), _observation(DAY_2), _observation(DAY_3, sha256=OTHER)]
+        )
+
+        assert state.content == {URL: ContentRun(OTHER, 0)}
+
+    def test_the_run_counts_from_the_last_change(self) -> None:
+        state = capture_state(
+            [
+                _observation(DAY_1),
+                _observation(DAY_2, sha256=OTHER),
+                _observation(DAY_3, sha256=OTHER),
+            ]
+        )
+
+        assert state.content == {URL: ContentRun(OTHER, 1)}
+
+    def test_a_capture_at_the_same_instant_still_counts(self) -> None:
+        """Only a record *older* than the latest sighting is out of order."""
+        state = capture_state([_observation(DAY_1), _observation(DAY_1)])
+
+        assert state.content == {URL: ContentRun(SAME, 1)}
+
+    def test_an_older_record_arriving_late_ends_the_run(self) -> None:
+        """It cannot extend a run it does not follow. Resetting errs toward
+        fetching, which is the direction every doubt here resolves."""
+        state = capture_state([_observation(DAY_2), _observation(DAY_3), _observation(DAY_1)])
+
+        assert state.content == {URL: ContentRun(SAME, 0)}
+
+    def test_an_older_record_arriving_late_does_not_replace_the_latest_bytes(self) -> None:
+        state = capture_state([_observation(DAY_2), _observation(DAY_1, sha256=OTHER)])
+
+        assert state.content == {URL: ContentRun(SAME, 0)}
+
+    def test_a_newer_capture_can_extend_the_run_after_a_late_record_reset(self) -> None:
+        """The doubtful late record ends the old run, but must not leave the
+        URL unable to establish a new run from its retained latest bytes."""
+        day_4 = datetime(2026, 8, 20, tzinfo=UTC)
+
+        state = capture_state(
+            [
+                _observation(DAY_2),
+                _observation(DAY_3),
+                _observation(DAY_1),
+                _observation(day_4),
+            ]
+        )
+
+        assert state.content == {URL: ContentRun(SAME, 1)}
+
+    def test_a_failure_neither_extends_nor_ends_a_run(self) -> None:
+        """A failure carries no bytes, so it says nothing about whether the
+        content changed — neither a timeout nor a 404."""
+        state = capture_state(
+            [
+                _observation(DAY_1),
+                _failure(DAY_2, outcome="http_404"),
+                _failure(DAY_2, outcome="timeout"),
+                _observation(DAY_3),
+            ]
+        )
+
+        assert state.content == {URL: ContentRun(SAME, 1)}
+
+    def test_each_url_keeps_its_own_run(self) -> None:
+        other = "https://www.baerum.kommune.no/annet"
+
+        state = capture_state(
+            [_observation(DAY_1), _observation(DAY_1, other), _observation(DAY_2, other)]
+        )
+
+        assert state.content == {URL: ContentRun(SAME, 0), other: ContentRun(SAME, 1)}
+
+    def test_narrowing_ignores_another_sources_capture(self) -> None:
+        state = CaptureState.empty()
+        collect = collect_capture_state(state, "3201")
+
+        collect(_observation(DAY_1))
+        collect(_observation(DAY_2).model_copy(update={"authority_id": "9999"}))
+
+        assert state.content == {URL: ContentRun(SAME, 0)}
+
+    def test_another_sources_capture_does_not_order_ours(self) -> None:
+        """Its later sighting is not in our map either, so our own older
+        record is still in order against what this fold has seen."""
+        state = CaptureState.empty()
+        collect = collect_capture_state(state, "3201")
+
+        collect(_observation(DAY_3).model_copy(update={"authority_id": "9999"}))
+        collect(_observation(DAY_1))
+        collect(_observation(DAY_2))
+
+        assert state.content == {URL: ContentRun(SAME, 1)}
+
+
+class TestUndatedRecheck:
+    """Issue #415: an undated page that keeps coming back identical waits longer."""
+
+    def test_a_run_of_none_waits_one_window(self) -> None:
+        assert undated_recheck(0) == UNDATED_RECHECK == timedelta(hours=24)
+
+    def test_each_unchanged_recapture_doubles_the_wait(self) -> None:
+        assert undated_recheck(1) == timedelta(hours=48)
+        assert undated_recheck(2) == timedelta(hours=96)
+
+    def test_the_ceiling_is_a_week(self) -> None:
+        """Owner decision on #415: however stable a page has been, it is
+        asked again within seven days."""
+        assert timedelta(days=7) == UNDATED_RECHECK_CEILING
+        assert undated_recheck(3) == UNDATED_RECHECK_CEILING
+        assert undated_recheck(1000) == UNDATED_RECHECK_CEILING
+
+    def test_a_negative_run_still_waits_a_window(self) -> None:
+        assert undated_recheck(-3) == UNDATED_RECHECK
+
+    def test_an_implausible_run_does_not_overflow_the_arithmetic(self) -> None:
+        assert undated_recheck(1_000_000) == UNDATED_RECHECK_CEILING
+
+
+def _stable(seen: datetime, unchanged: int) -> CaptureState:
+    return CaptureState({URL: seen}, {}, {URL: ContentRun(SAME, unchanged)})
+
+
+class TestWorthCapturingAStablePage:
+    """Issue #415: the undated window stretches with unchanged content."""
+
+    def test_one_unchanged_recapture_is_not_asked_again_after_a_day(self) -> None:
+        assert worth_capturing(_candidate(None), _stable(NOW - UNDATED_RECHECK, 1), NOW) is False
+
+    def test_the_doubled_window_boundary_fetches(self) -> None:
+        state = _stable(NOW - timedelta(hours=48), 1)
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_just_inside_the_doubled_window_is_left_alone(self) -> None:
+        state = _stable(NOW - timedelta(hours=48) + timedelta(seconds=1), 1)
+
+        assert worth_capturing(_candidate(None), state, NOW) is False
+
+    def test_a_long_stable_page_is_still_asked_at_the_ceiling(self) -> None:
+        state = _stable(NOW - UNDATED_RECHECK_CEILING, 50)
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_a_long_stable_page_waits_out_the_ceiling(self) -> None:
+        state = _stable(NOW - UNDATED_RECHECK_CEILING + timedelta(seconds=1), 50)
+
+        assert worth_capturing(_candidate(None), state, NOW) is False
+
+    def test_changed_content_brings_the_window_back_to_a_day(self) -> None:
+        """Three identical captures then new bytes: the run is over and the
+        page is due one window after its last capture, not a week."""
+        last = NOW - UNDATED_RECHECK
+        state = capture_state(
+            [
+                _observation(last - timedelta(days=6)),
+                _observation(last - timedelta(days=4)),
+                _observation(last - timedelta(days=2)),
+                _observation(last, sha256=OTHER),
+            ]
+        )
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_an_unreadable_lastmod_backs_off_like_an_absent_one(self) -> None:
+        state = _stable(NOW - UNDATED_RECHECK, 1)
+
+        assert worth_capturing(_candidate("whenever"), state, NOW) is False
+
+    def test_a_sighting_with_no_run_waits_one_window(self) -> None:
+        """A run missing from the map is read as a run of none — the short
+        window, the direction that costs a request rather than a window."""
+        state = CaptureState({URL: NOW - UNDATED_RECHECK}, {}, {})
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_a_stable_page_stamped_ahead_of_the_clock_still_fetches(self) -> None:
+        state = _stable(NOW + timedelta(hours=1), 50)
+
+        assert worth_capturing(_candidate(None), state, NOW) is True
+
+    def test_a_dated_page_changed_since_we_looked_fetches_however_stable(self) -> None:
+        """The site's claim decides dated URLs; the run is never consulted."""
+        state = _stable(NOW - timedelta(minutes=5), 50)
+
+        assert worth_capturing(_candidate("2099-01-01"), state, NOW) is True
+
+    def test_a_dated_page_unchanged_since_we_looked_gets_no_window(self) -> None:
+        """Seen three days ago with a claim from before that: skipped, as it
+        always was, with no run at all — the window is for undated pages."""
+        state = CaptureState({URL: datetime(2026, 8, 17, tzinfo=UTC)}, {}, {})
+
+        assert worth_capturing(_candidate("2026-08-16"), state, NOW) is False
+
+
 class TestWorthCapturingAfterFailure:
     """Issue #204: a URL that has never yielded content, judged on its refusals."""
 
@@ -516,26 +746,26 @@ class TestWorthCapturingAfterFailure:
         again on the next round, minutes later, forever."""
         holds = {URL: FailureHold("redirect_not_followed", 1, NOW - timedelta(minutes=20))}
 
-        assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is False
+        assert worth_capturing(_candidate(None), CaptureState({}, holds, {}), NOW) is False
 
     def test_the_window_boundary_asks_again(self) -> None:
         """Exactly at the window the URL is asked about, for the reason every
         tie in this module resolves toward fetching."""
         holds = {URL: FailureHold("http_404", 1, NOW - FAILED_RECHECK)}
 
-        assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is True
+        assert worth_capturing(_candidate(None), CaptureState({}, holds, {}), NOW) is True
 
     def test_a_longer_run_waits_longer(self) -> None:
         """One window has passed, which would have been enough after a single
         failure. After two it is not."""
         holds = {URL: FailureHold("http_404", 2, NOW - FAILED_RECHECK)}
 
-        assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is False
+        assert worth_capturing(_candidate(None), CaptureState({}, holds, {}), NOW) is False
 
     def test_a_longer_run_is_still_asked_at_the_ceiling(self) -> None:
         holds = {URL: FailureHold("http_404", 99, NOW - FAILED_RECHECK_CEILING)}
 
-        assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is True
+        assert worth_capturing(_candidate(None), CaptureState({}, holds, {}), NOW) is True
 
     def test_the_site_saying_the_url_changed_overrides_the_wait(self) -> None:
         """The strongest reason there is to ask again. Without this override a
@@ -543,14 +773,14 @@ class TestWorthCapturingAfterFailure:
         the sitemap said, in public, that it was there."""
         holds = {URL: FailureHold("http_404", 5, datetime(2026, 8, 19, tzinfo=UTC))}
 
-        assert worth_capturing(_candidate("2026-08-20"), CaptureState({}, holds), NOW) is True
+        assert worth_capturing(_candidate("2026-08-20"), CaptureState({}, holds, {}), NOW) is True
 
     def test_a_claim_older_than_the_failure_does_not_override(self) -> None:
         """The stamp was already there when we asked and got nothing. It says
         the URL has not changed since, which is the case the wait is for."""
         holds = {URL: FailureHold("http_404", 1, NOW - timedelta(minutes=20))}
 
-        assert worth_capturing(_candidate("2026-08-01"), CaptureState({}, holds), NOW) is False
+        assert worth_capturing(_candidate("2026-08-01"), CaptureState({}, holds, {}), NOW) is False
 
     def test_a_claim_exactly_at_the_failure_asks_again(self) -> None:
         """Failing at the very moment the site says the page changed does not
@@ -564,7 +794,7 @@ class TestWorthCapturingAfterFailure:
         holds = {URL: FailureHold("http_404", 1, NOW - timedelta(minutes=20))}
 
         assert (
-            worth_capturing(_candidate("2026-08-20T11:40:00Z"), CaptureState({}, holds), NOW)
+            worth_capturing(_candidate("2026-08-20T11:40:00Z"), CaptureState({}, holds, {}), NOW)
             is True
         )
 
@@ -573,19 +803,19 @@ class TestWorthCapturingAfterFailure:
         the archive must not be able to hold a URL back."""
         holds = {URL: FailureHold("http_404", 1, NOW + timedelta(hours=1))}
 
-        assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is True
+        assert worth_capturing(_candidate(None), CaptureState({}, holds, {}), NOW) is True
 
     def test_a_failure_stamped_exactly_now_still_obeys_the_backoff(self) -> None:
         """Equal clocks are usable evidence; only a future failure is suspect."""
         holds = {URL: FailureHold("http_404", 1, NOW)}
 
-        assert worth_capturing(_candidate(None), CaptureState({}, holds), NOW) is False
+        assert worth_capturing(_candidate(None), CaptureState({}, holds, {}), NOW) is False
 
     def test_an_unreadable_claim_leaves_the_wait_in_force(self) -> None:
         """A stamp we cannot read is not a statement that the URL changed."""
         holds = {URL: FailureHold("http_404", 1, NOW - timedelta(minutes=20))}
 
-        assert worth_capturing(_candidate("whenever"), CaptureState({}, holds), NOW) is False
+        assert worth_capturing(_candidate("whenever"), CaptureState({}, holds, {}), NOW) is False
 
     def test_a_sighting_outranks_a_hold_that_would_fetch(self) -> None:
         """A URL that has served content is judged on that. The hold is about
@@ -593,6 +823,7 @@ class TestWorthCapturingAfterFailure:
         state = CaptureState(
             {URL: NOW - timedelta(minutes=20)},
             {URL: FailureHold("http_404", 1, NOW - timedelta(days=10))},
+            {},
         )
 
         assert worth_capturing(_candidate(None), state, NOW) is False
@@ -614,6 +845,7 @@ class TestWorthCapturingAfterFailure:
         state = CaptureState(
             {URL: NOW - UNDATED_RECHECK},
             {URL: FailureHold("http_404", 1, NOW - timedelta(minutes=20))},
+            {},
         )
 
         assert worth_capturing(_candidate(None), state, NOW) is True

@@ -28,6 +28,18 @@ alone. That is a genuine weakening — an undated page changing twice a day is
 caught a day late — accepted because the alternative is not "catch it sooner"
 but "re-download the whole site forever and never reach the pages behind it".
 
+**The window then stretched, on the same record, and that is a second
+weakening argued on its own (issue #415).** A single undated sitemap — Bergen,
+7,877 ``<loc>`` and not one ``<lastmod>`` — re-queued every page on every daily
+pass: 55% of a 27.6-hour sweep, and 79% of those re-captures came back with the
+same ``sha256`` as the capture before. So the window now reads the URL's run of
+byte-identical re-captures: each one doubles it, 24 h → 48 h → 96 h, up to
+:data:`UNDATED_RECHECK_CEILING`; any change of bytes puts it back to 24 h. The
+price, accepted by the owner on 2026-09-26: an undated page that sat unchanged
+for weeks and then changes is caught up to a week late instead of up to a day.
+Dated URLs are untouched — the site's claim still decides them — and so is the
+rule that a sighting stamped ahead of the clock fetches.
+
 **A URL that has never yielded content has a record of its own, and issue #204
 is what happens when nothing reads it.** Both rules above key on a *sighting*,
 so a URL that only ever failed was proposed, fetched, failed and proposed
@@ -153,13 +165,39 @@ class FailureHold(NamedTuple):
         )
 
 
+class ContentRun(NamedTuple):
+    """A URL's latest bytes and how many re-captures in a row returned them.
+
+    The digest is what the next capture is compared against; the count is
+    what :func:`undated_recheck` reads. Zero means the latest capture was the
+    first, or brought bytes that differ from the one before (issue #415).
+    """
+
+    sha256: str
+    unchanged: int
+
+    def then(self, record: ArtifactObservation, in_order: bool) -> "ContentRun":
+        """This run extended by one more capture, or started over.
+
+        A record older than the URL's latest sighting cannot extend a run it
+        does not follow, so it ends it — keeping the bytes the run already
+        holds, which are the later ones. Ending errs toward fetching.
+        """
+        if not in_order:
+            return ContentRun(self.sha256, 0)
+        if record.sha256 != self.sha256:
+            return ContentRun(record.sha256, 0)
+        return ContentRun(self.sha256, self.unchanged + 1)
+
+
 class CaptureState(NamedTuple):
     """What the log already knows about the URLs a pass is about to consider.
 
-    Two maps rather than two arguments because they are folded in one reading
-    of the log and consulted by one decision. Splitting them across the call
-    chain is how a caller ends up passing the sightings and forgetting the
-    failures, which reads exactly like the bug this pairing fixes.
+    Three maps rather than three arguments because they are folded in one
+    reading of the log and consulted by one decision. Splitting them across
+    the call chain is how a caller ends up passing the sightings and
+    forgetting the failures, which reads exactly like the bug this pairing
+    fixes.
     """
 
     #: When each URL was last seen *with content*.
@@ -167,10 +205,13 @@ class CaptureState(NamedTuple):
     #: Where each URL that has never yielded content stands in its run of
     #: URL-property failures. A URL in both maps is governed by ``observed``.
     holds: dict[str, FailureHold]
+    #: Each observed URL's latest bytes and its run of identical re-captures.
+    #: A URL in ``observed`` but missing here is read as a run of none.
+    content: dict[str, ContentRun]
 
     @classmethod
     def empty(cls) -> "CaptureState":
-        return cls({}, {})
+        return cls({}, {}, {})
 
 
 def collect_capture_state(
@@ -186,6 +227,8 @@ def collect_capture_state(
     observe = collect_latest_observations(state.observed, authority_id)
 
     def collect(record: ObservationRecord) -> None:
+        if isinstance(record, ArtifactObservation):
+            _extend_run(state, record, authority_id)
         observe(record)
         if isinstance(record, ArtifactObservation):
             _clear_hold(state.holds, record, authority_id)
@@ -219,6 +262,24 @@ def _clear_hold(
         holds.pop(record.url, None)
 
 
+def _extend_run(state: CaptureState, record: ArtifactObservation, authority_id: str | None) -> None:
+    """Fold one capture into the URL's run of identical bytes.
+
+    Must run before the sighting is folded: whether this record follows the
+    URL's latest sighting is only answerable while that sighting is still the
+    previous one.
+    """
+    if authority_id is not None and record.authority_id != authority_id:
+        return
+    run = state.content.get(record.url)
+    if run is None:
+        state.content[record.url] = ContentRun(record.sha256, 0)
+        return
+    latest = state.observed.get(record.url)
+    in_order = latest is None or record.observed_at >= latest
+    state.content[record.url] = run.then(record, in_order)
+
+
 def _extend_hold(
     holds: dict[str, FailureHold], record: FetchFailure, authority_id: str | None
 ) -> None:
@@ -237,8 +298,18 @@ def _extend_hold(
 #: it has been observed. The same figure as the observation SLA, deliberately
 #: rather than by import: that one says how often a *source* is looked at, this
 #: says how long one undated *page* is left alone, and they are two claims that
-#: happen to agree today. Argue them down separately (issue #209).
+#: happen to agree today. Argue them down separately (issue #209) — and one
+#: was: this is now only the *starting* window, the one a page gets after its
+#: bytes last changed. :func:`undated_recheck` doubles it for every re-capture
+#: that came back identical (issue #415).
 UNDATED_RECHECK = timedelta(hours=24)
+
+#: The longest an undated page is ever taken on trust, however long it has
+#: come back unchanged. A week, by owner decision on issue #415 (2026-09-26):
+#: long enough that a stable undated sitemap stops re-queueing itself every
+#: night, short enough that a page changed after weeks of stillness is still
+#: caught within one weekly cycle. Widening it is a separate argument.
+UNDATED_RECHECK_CEILING = timedelta(days=7)
 
 #: How long a URL is left alone after the first failure that describes it.
 FAILED_RECHECK = timedelta(hours=24)
@@ -269,6 +340,19 @@ def failure_backoff(consecutive: int) -> timedelta:
     return min(FAILED_RECHECK * (1 << doublings), FAILED_RECHECK_CEILING)
 
 
+def undated_recheck(unchanged: int) -> timedelta:
+    """How long to leave an undated page alone after ``unchanged`` identical
+    re-captures in a row.
+
+    :func:`failure_backoff`'s shape on the other question: a page that has come
+    back byte-identical three times running is a better bet for staying so than
+    one just seen to change — but bounded, because neither is a certainty and
+    the ceiling is what keeps a late change findable.
+    """
+    doublings = min(max(unchanged, 0), _MAX_DOUBLINGS)
+    return min(UNDATED_RECHECK * (1 << doublings), UNDATED_RECHECK_CEILING)
+
+
 def worth_capturing(candidate: Candidate, state: CaptureState, now: datetime) -> bool:
     """Whether this candidate should be fetched now.
 
@@ -279,19 +363,24 @@ def worth_capturing(candidate: Candidate, state: CaptureState, now: datetime) ->
     """
     last_seen = state.observed.get(candidate.url)
     if last_seen is not None:
-        return _worth_after_sighting(candidate, last_seen, now)
+        run = state.content.get(candidate.url)
+        wait = undated_recheck(0 if run is None else run.unchanged)
+        return _worth_after_sighting(candidate, last_seen, wait, now)
     return _worth_after_failure(candidate, state.holds.get(candidate.url), now)
 
 
-def _worth_after_sighting(candidate: Candidate, last_seen: datetime, now: datetime) -> bool:
+def _worth_after_sighting(
+    candidate: Candidate, last_seen: datetime, wait: timedelta, now: datetime
+) -> bool:
     """Declined in two cases, and both need the URL to have been observed.
 
     The site says it last changed at a moment we already hold a later sighting
     from — the certain case, unchanged since this module was written. Or the
-    site says nothing readable and we saw it less than :data:`UNDATED_RECHECK`
-    ago, which is a judgement about our own record rather than about the site's
-    claim, and is there because a candidate with no ``lastmod`` was otherwise
-    re-fetched on every pass forever (issue #209).
+    site says nothing readable and we saw it less than ``wait`` ago — the
+    undated window, :data:`UNDATED_RECHECK` stretched by the URL's run of
+    unchanged content (issue #415) — which is a judgement about our own record
+    rather than about the site's claim, and is there because a candidate with
+    no ``lastmod`` was otherwise re-fetched on every pass forever (issue #209).
 
     A sighting stamped ahead of ``now`` fetches, whichever comparison it would
     have fed. Either the clock is wrong or the record is, and neither makes it
@@ -304,7 +393,7 @@ def _worth_after_sighting(candidate: Candidate, last_seen: datetime, now: dateti
     changed_at = _site_claim(candidate)
     if changed_at is not None:
         return last_seen <= changed_at
-    return now - last_seen >= UNDATED_RECHECK
+    return now - last_seen >= wait
 
 
 def _worth_after_failure(candidate: Candidate, held: FailureHold | None, now: datetime) -> bool:

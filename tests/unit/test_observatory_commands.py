@@ -2842,7 +2842,7 @@ class TestCaptureAll:
         observed = {candidate.url: now - timedelta(hours=23) for candidate in candidates}
         fetcher = Mock()
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState(observed, {}), limit=0)
+        counts = _capture_candidates(fetcher, candidates, CaptureState(observed, {}, {}), limit=0)
 
         clock.now.assert_called_once_with(UTC)
         assert (counts.captured, counts.failed, counts.unchanged) == (0, 0, 2)
@@ -2873,7 +2873,7 @@ class TestCaptureAll:
         counts = _capture_candidates(
             fetcher,
             (recent, unseen),
-            CaptureState({PAGE_URL: now - timedelta(hours=1)}, {}),
+            CaptureState({PAGE_URL: now - timedelta(hours=1)}, {}, {}),
             limit=1,
         )
 
@@ -2894,7 +2894,7 @@ class TestCaptureAll:
         holds = {candidate.url: FailureHold("http_404", 1, now) for candidate in candidates}
         fetcher = Mock()
 
-        counts = _capture_candidates(fetcher, candidates, CaptureState({}, holds), limit=0)
+        counts = _capture_candidates(fetcher, candidates, CaptureState({}, holds, {}), limit=0)
 
         assert counts.deferred == 2
         fetcher.capture.assert_not_called()
@@ -2911,7 +2911,7 @@ class TestCaptureAll:
         capped = Candidate(url=THIRD_PAGE_URL, discovery_method="sitemap", found_in=SITEMAP_URL)
         fetcher = Mock()
         fetcher.capture.return_value = _observation(b"page", OTHER_PAGE_URL)
-        state = CaptureState({}, {PAGE_URL: FailureHold("http_404", 1, now)})
+        state = CaptureState({}, {PAGE_URL: FailureHold("http_404", 1, now)}, {})
 
         counts = _capture_candidates(fetcher, (held, first, capped), state, limit=1)
 
@@ -2957,6 +2957,7 @@ class TestCaptureAll:
         state = CaptureState(
             {THIRD_PAGE_URL: datetime(2026, 8, 24, tzinfo=UTC)},
             {"https://held.invalid": FailureHold("http_404", 1, datetime(2026, 8, 24, tzinfo=UTC))},
+            {},
         )
 
         counts = _capture_candidates(fetcher, candidates, state, limit=0)
@@ -3041,7 +3042,7 @@ class TestCaptureAll:
         counts = _capture_candidates(
             fetcher,
             (fresh, unchanged),
-            CaptureState({OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)}, {}),
+            CaptureState({OTHER_PAGE_URL: datetime(2026, 8, 18, tzinfo=UTC)}, {}, {}),
             limit=1,
         )
 
