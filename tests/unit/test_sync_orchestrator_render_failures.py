@@ -183,3 +183,25 @@ def test_a_failed_rename_whose_file_another_doc_took_is_dropped_from_the_manifes
     assert stored["lov-2"].markdown_path == "lover/alfa.md"
     assert "Beta text." in _body(settings, "alfa")
     assert _DROPPED.format(doc_id="lov-1", path="lover/alfa.md") in caplog.messages
+
+
+def test_a_failed_rename_whose_file_a_new_doc_took_is_dropped_from_the_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # New-document writes happen before the failed rename is reconciled.  The
+    # rename's record was already carried as unchanged, so it must be removed
+    # when the new document claims its old path just as it is for a takeover by
+    # another rename.
+    settings = _corpus(tmp_path, [_ALFA])
+    newcomer = _doc("lov-2", "alfa", "Newcomer text.")
+    _serve(monkeypatch, [_unrenderable(_ALFA, slug="delta"), newcomer])
+
+    run_sync(settings)
+
+    stored = _stored(settings)
+    assert "lov-1" not in stored
+    assert stored["lov-2"].markdown_path == "lover/alfa.md"
+    assert "Newcomer text." in _body(settings, "alfa")
+    assert _DROPPED.format(doc_id="lov-1", path="lover/alfa.md") in caplog.messages
