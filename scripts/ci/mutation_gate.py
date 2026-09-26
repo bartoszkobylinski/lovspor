@@ -131,6 +131,23 @@ def _register_lines(equivalents: object) -> list[str]:
     return lines
 
 
+def _unmeasured_changed_lines(notices: object) -> list[str]:
+    """Changed lines the score says nothing about (#289, #292).
+
+    Absent in pre-notice artifacts and empty on most runs; either way, silent.
+    """
+    if not isinstance(notices, list):
+        return []
+    bullets = []
+    for notice in notices:
+        if isinstance(notice, str):
+            where, _, region = notice.partition(" (")
+            bullets.append(f"  - `{where}` — {region.removesuffix(')')}")
+    if not bullets:
+        return []
+    return ["- Unmeasured changed lines (no mutant can reach them):", *bullets]
+
+
 def _hint(r: dict[str, object]) -> str | None:
     # Diagnostics, not policy: absent in pre-hint artifacts, shown when present.
     hint = r.get("failure_hint")
@@ -149,7 +166,11 @@ def _print_summary(r: dict[str, object], extracted: tuple[Any, ...]) -> None:
     print(f"- Gate: {'PASS' if passed else 'FAIL'} ({reason})")
     if hint := _hint(r):
         print(f"- Hint: `{hint}`")
-    for line in [*_survivor_lines(r.get("survivors")), *_register_lines(r.get("equivalents"))]:
+    for line in [
+        *_survivor_lines(r.get("survivors")),
+        *_register_lines(r.get("equivalents")),
+        *_unmeasured_changed_lines(r.get("unmeasured_changed_lines")),
+    ]:
         print(line)
     print(f"- Artifact: `mutation-result-{commit}`")
 

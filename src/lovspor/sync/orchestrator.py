@@ -482,19 +482,19 @@ def run_sync(  # noqa: PLR0912, PLR0915
     # (e.g. a rename moved into the failed doc's slug), carrying it would leave
     # two current records at one file — and that file now holds the OTHER doc's
     # content. Drop it instead: it re-appears as ``new`` and is re-added once it
-    # renders on a future sync. Same path-ownership invariant the phase-2 delete
-    # guards enforce (Codex #104).
+    # renders on a future sync. A rename was already carried as unchanged, so it
+    # is un-carried (#421). Same invariant the phase-2 delete guards enforce (Codex #104).
     for doc_id, prior_record in deferred_carries:
-        carried_path = settings.lovverk_repo_path / prior_record.markdown_path
-        if carried_path in written_paths:
-            logger.warning(
-                "dropping %s this sync: its file %s was taken over by another "
-                "document; it will be re-added once it renders on a future sync",
-                doc_id,
-                prior_record.markdown_path,
-            )
+        if settings.lovverk_repo_path / prior_record.markdown_path not in written_paths:
+            new_records[doc_id] = prior_record
             continue
-        new_records[doc_id] = prior_record
+        logger.warning(
+            "dropping %s this sync: its file %s was taken over by another "
+            "document; it will be re-added once it renders on a future sync",
+            doc_id,
+            prior_record.markdown_path,
+        )
+        new_records.pop(doc_id, None)
 
     # Phase 2a: changed-action deletes + action build. ``written_paths``
     # now reflects every write from new + changed + rename loops, so

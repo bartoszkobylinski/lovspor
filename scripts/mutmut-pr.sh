@@ -68,6 +68,33 @@ exit_code_for() {
   printf '%s' "$code"
 }
 
+# A `uv run` spawned from the shadow tree syncs mutants/ into the symlinked
+# .venv and re-points the editable install at mutants/src; every later pytest
+# in this checkout then imports the shadow tree, silently (issue #400).
+editable_target() {
+  local pth
+  for pth in "$repo_root"/.venv/lib/python*/site-packages/_editable_impl_lovspor.pth; do
+    if [ -f "$pth" ]; then cat "$pth"; fi
+    return 0
+  done
+}
+
+restore_editable_install() {
+  local target
+  target="$(editable_target)"
+  if [ -z "$target" ] || [ "$target" = "$repo_root/src" ]; then return 0; fi
+  echo "warning: the run re-pointed .venv's editable lovspor install at $target" >&2
+  echo "repairing: uv sync --frozen --reinstall-package lovspor" >&2
+  uv sync --frozen --reinstall-package lovspor >&2 || true
+  target="$(editable_target)"
+  if [ "$target" != "$repo_root/src" ]; then
+    echo "error: .venv still imports lovspor from $target, not $repo_root/src" >&2
+    echo "run 'uv sync --frozen --reinstall-package lovspor' before trusting any test" >&2
+    exit 3
+  fi
+  echo "repaired: .venv imports lovspor from $repo_root/src again" >&2
+}
+
 guard_dir="$(mktemp -d)"
 trap 'rm -rf "$guard_dir"' EXIT INT TERM
 printf '#!/bin/sh\necho "mutation guard: the real provider CLI is blocked" >&2\nexit 127\n' \
@@ -146,6 +173,7 @@ else
   PATH="$guard_dir:$PATH" "$mutmut_bin" run "${patterns[@]}" --max-children "$max_children" \
     2>&1 | tee mutation-run.log || run_status=${PIPESTATUS[0]}
 fi
+restore_editable_install
 
 budget_exceeded=0
 if [ "$run_status" -eq 124 ] || [ "$run_status" -eq 137 ]; then

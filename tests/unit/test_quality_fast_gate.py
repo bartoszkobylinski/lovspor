@@ -26,7 +26,12 @@ FAST_CHECKS = {
     "ruff-format": "uv run ruff format --check",
     "mypy": "uv run mypy src/",
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
+    "boundaries": "uv run python scripts/quality/check_boundaries.py",
+    "release-contracts": (
+        "uv run pytest tests/unit/test_release_contracts.py -q -p no:cacheprovider"
+    ),
 }
+RELEASE_CONTRACTS = REPO_ROOT / "tests" / "unit" / "test_release_contracts.py"
 # `-m "not network"`: a test that needs a live third-party credential answers
 # for the operator's key, not for the change being pushed (issue #359).
 UNIT_SUITE = "uv run pytest tests/unit/ -q -m not network"
@@ -128,10 +133,19 @@ class TestFastGate:
         assert run.output.rstrip().endswith("verify-fast: all checks passed")
 
     def test_never_runs_the_unit_suite(self, tmp_path: Path) -> None:
-        """~256 s of tests on every commit is exactly what issue #323 moved out."""
+        """~256 s of tests on every commit is exactly what issue #323 moved out; the one
+        pytest run left is a single named module, the release contracts (D1/D2)."""
         run = _run_gate(FAST, tmp_path)
 
-        assert [command for command in run.commands if "pytest" in command] == []
+        pytest_runs = [command for command in run.commands if "pytest" in command]
+        assert pytest_runs == [FAST_CHECKS["release-contracts"]]
+        assert UNIT_SUITE not in run.commands
+
+    def test_the_release_contracts_it_names_exist(self) -> None:
+        """A renamed module would make pytest collect nothing and the check fail on every commit;
+        the pin names the file so that rename fails here, naming the path."""
+        assert RELEASE_CONTRACTS.is_file()
+        assert str(RELEASE_CONTRACTS.relative_to(REPO_ROOT)) in FAST_CHECKS["release-contracts"]
 
     def test_runs_the_ratchet_at_commit_time(self, tmp_path: Path) -> None:
         """A function or file that crosses a CLAUDE.md limit is cheapest to
@@ -139,6 +153,13 @@ class TestFastGate:
         run = _run_gate(FAST, tmp_path)
 
         assert FAST_CHECKS["ratchets"] in run.commands
+
+    def test_runs_the_architecture_boundaries_at_commit_time(self, tmp_path: Path) -> None:
+        """A call reaching across a seam is one line to move back while it is
+        still the only one; by review it has callers of its own."""
+        run = _run_gate(FAST, tmp_path)
+
+        assert FAST_CHECKS["boundaries"] in run.commands
 
     def test_never_runs_the_security_scan(self, tmp_path: Path) -> None:
         """It belongs to the push gate; the commit loop stays about a second."""
