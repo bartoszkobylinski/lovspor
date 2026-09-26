@@ -7,10 +7,12 @@ each unkilled class fails, and suspicious mutants never inflate the score.
 from __future__ import annotations
 
 import ast
+import importlib.metadata
 import importlib.util
 import json
 import os
 import subprocess
+import tomllib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -274,6 +276,21 @@ def test_scope_guard_stays_silent_when_existing_test_only_gains_lines(tmp_path: 
 
     assert result.returncode == 0
     assert "REWRITTEN TESTS" not in result.stdout
+
+
+def _pinned_mutmut() -> str:
+    pyproject = tomllib.loads((_SCRIPTS.parents[1] / "pyproject.toml").read_text())
+    pins = [dep for dep in pyproject["dependency-groups"]["dev"] if dep.startswith("mutmut==")]
+    assert len(pins) == 1
+    return pins[0].removeprefix("mutmut==")
+
+
+def test_the_artifact_names_the_pinned_and_installed_mutmut() -> None:
+    # #419: the tool string said 3.7.0 for every run after the 3.8.0 bump.
+    pinned = _pinned_mutmut()
+
+    assert importlib.metadata.version("mutmut") == pinned
+    assert mutation_to_json.TOOL.startswith(f"mutmut {pinned} ")
 
 
 def test_all_killed_passes(tmp_path: Path) -> None:

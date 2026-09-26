@@ -35,7 +35,7 @@ from typing import NamedTuple
 
 SCHEMA_VERSION = 1
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
-TOOL = "mutmut 3.7.0 (function-scoped via scripts/mutmut-pr.sh)"
+TOOL = "mutmut 3.8.0 (function-scoped via scripts/mutmut-pr.sh)"
 # Every survivor carries the same keys whether or not the detail step recovered
 # anything, so a consumer never has to distinguish "absent" from "unknown".
 # `detail_source` says which of the two a null means (issue #119).
