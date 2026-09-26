@@ -26,6 +26,7 @@ FAST_CHECKS = {
     "ruff-format": "uv run ruff format --check",
     "mypy": "uv run mypy src/",
     "ratchets": "uv run python scripts/quality/check_ratchets.py",
+    "boundaries": "uv run python scripts/quality/check_boundaries.py",
     "release-contracts": (
         "uv run pytest tests/unit/test_release_contracts.py -q -p no:cacheprovider"
     ),
@@ -152,6 +153,13 @@ class TestFastGate:
         run = _run_gate(FAST, tmp_path)
 
         assert FAST_CHECKS["ratchets"] in run.commands
+
+    def test_runs_the_architecture_boundaries_at_commit_time(self, tmp_path: Path) -> None:
+        """A call reaching across a seam is one line to move back while it is
+        still the only one; by review it has callers of its own."""
+        run = _run_gate(FAST, tmp_path)
+
+        assert FAST_CHECKS["boundaries"] in run.commands
 
     def test_never_runs_the_security_scan(self, tmp_path: Path) -> None:
         """It belongs to the push gate; the commit loop stays about a second."""

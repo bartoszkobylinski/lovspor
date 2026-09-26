@@ -25,6 +25,7 @@ from lovspor.sync.orchestrator import (
     _commit_with_history,
     _DocAction,
     _embedding_is_stale,
+    _embeddings_path,
     _ensure_corpus_git_repo,
     _expected_section_id_counts,
     _find_undersized_embeddings,
@@ -2313,3 +2314,218 @@ def test_an_unknown_lspe_version_is_rejected_before_any_work(tmp_path: Path) -> 
             _AnonymousEmbedder(),  # type: ignore[arg-type]
             lspe_version=7,
         )
+
+
+# --- run_sync's removal phase, observed on disk (#229) ----------------------
+# The run_sync tests above replace delete_document and never create an embedding
+# sidecar, so the removal phase's delete guards and sidecar branches ran on no
+# real file. These seed a committed corpus, let the real delete run, and read
+# the disk back.
+
+
+def _seed_doc(repo: Path, record: ManifestRecord, *, sidecar: bool) -> None:
+    md = repo / record.markdown_path
+    md.parent.mkdir(parents=True, exist_ok=True)
+    md.write_text(f"# {record.title}\n", encoding="utf-8")
+    if sidecar and record.slug is not None:
+        bin_path = _embeddings_path(repo, record.source_dataset, record.slug)
+        bin_path.parent.mkdir(parents=True, exist_ok=True)
+        bin_path.write_bytes(record.title.encode())
+
+
+def _write_to_disk(
+    settings: Settings,
+    upstream_doc: _UpstreamDoc,
+    _now: datetime,
+    _embedder: object,
+) -> tuple[ManifestRecord, list[Path]]:
+    record = _record(upstream_doc.doc_id, xml_hash=upstream_doc.xml_hash, slug=upstream_doc.slug)
+    repo = settings.lovverk_repo_path
+    md = repo / record.markdown_path
+    md.parent.mkdir(parents=True, exist_ok=True)
+    md.write_text(f"# {upstream_doc.doc_id}\n", encoding="utf-8")
+    sidecar = _embeddings_path(repo, record.source_dataset, upstream_doc.slug)
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_bytes(upstream_doc.doc_id.encode())
+    return record, [md, sidecar]
+
+
+def _sync_against_disk(
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    prior: Manifest,
+    upstream: dict[str, _UpstreamDoc],
+) -> dict[str, object]:
+    repo = settings.lovverk_repo_path
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "seed")
+    captured: dict[str, object] = {}
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+    monkeypatch.setattr(orchestrator_module, "_write_one", _write_to_disk)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_commit_with_history",
+        lambda *_args, **kwargs: captured.update(kwargs),
+    )
+    monkeypatch.setattr(orchestrator_module, "_ensure_head_attested", lambda *_args: None)
+    captured["report"] = run_sync(settings)
+    return captured
+
+
+def _forskrift(doc_id: str, *, slug: str) -> ManifestRecord:
+    return _record(doc_id, xml_hash="9" * 64, slug=slug).model_copy(
+        update={
+            "doc_type": "forskrift",
+            "source_dataset": "gjeldende-sentrale-forskrifter",
+            "markdown_path": f"forskrifter/{slug}.md",
+        },
+    )
+
+
+def _actions(captured: dict[str, object]) -> list[_DocAction]:
+    actions = captured["actions"]
+    assert isinstance(actions, list)
+    return actions
+
+
+def _records(captured: dict[str, object]) -> dict[str, ManifestRecord]:
+    records = captured["new_records"]
+    assert isinstance(records, dict)
+    return records
+
+
+class TestRemovalPhaseOnDisk:
+    def test_a_removed_doc_leaves_disk_with_its_sidecar_and_stages_both(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        settings = _settings(tmp_path)
+        repo = settings.lovverk_repo_path
+        gone = _forskrift("sf-gone", slug="gone")
+        keep = _record("lov-keep", xml_hash="a" * 64, slug="keep")
+        _seed_doc(repo, gone, sidecar=True)
+        _seed_doc(repo, keep, sidecar=True)
+        prior = Manifest(
+            generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+            documents={"sf-gone": gone, "lov-keep": keep},
+        )
+        upstream = {"lov-keep": _upstream("lov-keep", xml_hash="a" * 64, slug="keep")}
+
+        captured = _sync_against_disk(settings, monkeypatch, prior, upstream)
+
+        md = repo / "forskrifter" / "gone.md"
+        sidecar = repo / "forskrifter" / "embeddings" / "gone.bin"
+        assert not md.exists()
+        assert not sidecar.exists()
+        assert (repo / "lover" / "keep.md").exists()
+        assert (repo / "lover" / "embeddings" / "keep.bin").exists()
+        assert _actions(captured) == [
+            _DocAction(
+                action="remove",
+                doc_type="forskrift",
+                doc_id="sf-gone",
+                slug="gone",
+                paths=(md,),
+                sidecar_paths=(sidecar,),
+            ),
+        ]
+        records = _records(captured)
+        tombstone = records["sf-gone"]
+        assert (tombstone.status, tombstone.removed_reason) == ("removed", None)
+        named = ("doc_type", "xml_hash", "markdown_path", "source_dataset", "last_seen", "slug")
+        assert [getattr(tombstone, f) for f in named] == [getattr(gone, f) for f in named]
+        assert tombstone.title == gone.title
+        assert records["lov-keep"] == keep
+        assert captured["report"] == SyncReport(
+            new_count=0,
+            changed_count=0,
+            removed_count=1,
+            unchanged_count=1,
+        )
+
+    def test_a_removed_doc_without_a_sidecar_stages_no_sidecar(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        settings = _settings(tmp_path)
+        repo = settings.lovverk_repo_path
+        gone = _record("lov-gone", xml_hash="d" * 64, slug="gone")
+        _seed_doc(repo, gone, sidecar=False)
+        prior = Manifest(
+            generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+            documents={"lov-gone": gone},
+        )
+
+        captured = _sync_against_disk(settings, monkeypatch, prior, {})
+
+        md = repo / "lover" / "gone.md"
+        assert not md.exists()
+        [action] = _actions(captured)
+        assert action.paths == (md,)
+        assert action.sidecar_paths == ()
+
+    def test_a_slugless_removed_record_is_named_by_its_id_and_touches_no_sidecar(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        settings = _settings(tmp_path)
+        repo = settings.lovverk_repo_path
+        legacy = _record("lov-legacy", xml_hash="d" * 64, slug="legacy").model_copy(
+            update={"slug": None},
+        )
+        _seed_doc(repo, legacy, sidecar=False)
+        prior = Manifest(
+            generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+            documents={"lov-legacy": legacy},
+        )
+
+        captured = _sync_against_disk(settings, monkeypatch, prior, {})
+
+        [action] = _actions(captured)
+        assert action.slug == "lov-legacy"
+        assert action.paths == (repo / "lover" / "legacy.md",)
+        assert action.sidecar_paths == ()
+        assert not (repo / "lover" / "legacy.md").exists()
+
+    def test_a_removed_doc_whose_slot_a_rename_took_keeps_the_new_owner_on_disk(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Production crash 2026-05-05 shape: a rename moves into the slot of a
+        doc removed in the same sync. The removal must become manifest-only —
+        deleting the path would wipe the new owner's Markdown and sidecar."""
+        settings = _settings(tmp_path)
+        repo = settings.lovverk_repo_path
+        gone = _record("lov-gone", xml_hash="d" * 64, slug="shared")
+        mover = _record("lov-mover", xml_hash="c" * 64, slug="old-home")
+        _seed_doc(repo, gone, sidecar=True)
+        _seed_doc(repo, mover, sidecar=True)
+        prior = Manifest(
+            generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+            documents={"lov-gone": gone, "lov-mover": mover},
+        )
+        upstream = {"lov-mover": _upstream("lov-mover", xml_hash="c" * 64, slug="shared")}
+
+        captured = _sync_against_disk(settings, monkeypatch, prior, upstream)
+
+        assert (repo / "lover" / "shared.md").read_text(encoding="utf-8") == "# lov-mover\n"
+        assert (repo / "lover" / "embeddings" / "shared.bin").read_bytes() == b"lov-mover"
+        assert not (repo / "lover" / "old-home.md").exists()
+        assert not (repo / "lover" / "embeddings" / "old-home.bin").exists()
+        rename, remove = _actions(captured)
+        assert (rename.action, rename.doc_id) == ("rename", "lov-mover")
+        assert remove == _DocAction(
+            action="remove",
+            doc_type="lov",
+            doc_id="lov-gone",
+            slug="shared",
+            paths=(),
+            sidecar_paths=(),
+        )
+        assert _records(captured)["lov-gone"].status == "removed"
