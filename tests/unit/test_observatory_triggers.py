@@ -65,6 +65,26 @@ class TestSchedule:
 
 
 class TestScheduledTriggers:
+    def test_the_window_start_uses_oslo_date_not_the_host_timezone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_tz = os.environ.get("TZ")
+        monkeypatch.setenv("TZ", "UTC-23")
+        time.tzset()
+        try:
+            triggers = scheduled_triggers(
+                datetime(2026, 1, 22, 1, 30, tzinfo=UTC),
+                datetime(2026, 1, 22, 3, 0, tzinfo=UTC),
+            )
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
+
+        assert triggers == [datetime(2026, 1, 22, 2, tzinfo=UTC)]
+
     def test_the_window_end_uses_oslo_date_not_the_host_timezone(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
