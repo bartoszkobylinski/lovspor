@@ -2,6 +2,7 @@
 
 import json
 import os
+import signal
 import subprocess
 import tarfile
 from dataclasses import FrozenInstanceError
@@ -520,6 +521,86 @@ def test_stream_archive_preserves_git_returncode_and_complete_stderr() -> None:
 
     assert excinfo.value.returncode == 23
     assert excinfo.value.stderr == b"fatal: complete diagnostic"
+
+
+def _commit_raw_tree(repo: Path, entries: dict[bytes, bytes]) -> str:
+    """Commit a tree built with plumbing, so names need not be valid UTF-8
+    (or valid on this filesystem at all)."""
+
+    def git(*args: str, data: bytes = b"") -> str:
+        return (
+            subprocess.run(["git", *args], cwd=repo, input=data, check=True, capture_output=True)
+            .stdout.decode()
+            .strip()
+        )
+
+    lines = b"".join(
+        b"100644 blob "
+        + git("hash-object", "-w", "--stdin", data=body).encode()
+        + b"\t"
+        + name
+        + b"\0"
+        for name, body in entries.items()
+    )
+    tree = git("mktree", "-z", data=lines)
+    return git("commit-tree", tree, "-m", "raw tree")
+
+
+def test_iter_texts_survives_an_undecodable_name_elsewhere_in_the_tree(
+    tmp_path: Path,
+) -> None:
+    repo = _init_repo(tmp_path)
+    sha = _commit_raw_tree(repo, {b"a.md": b"A\n", b"b\xff.md": b"B\n"})
+
+    assert dict(CorpusSnapshot(repo, sha).iter_texts({"a.md"})) == {"a.md": "A\n"}
+
+
+def test_iter_texts_closed_mid_stream_kills_git_rather_than_waiting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Two bodies larger than a pipe buffer: after the first, git is still
+    # blocked writing the second, so only an explicit kill ends it as -9.
+    repo = _init_repo(tmp_path)
+    big = b"x" * (1 << 20)
+    sha = _commit_raw_tree(repo, {b"a.md": big, b"b.md": big})
+    started: list[subprocess.Popen[bytes]] = []
+
+    class RecordingPopen(subprocess.Popen[bytes]):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+            started.append(self)
+
+    monkeypatch.setattr(snapshot_module.subprocess, "Popen", RecordingPopen)
+    stream = CorpusSnapshot(repo, sha).iter_texts({"a.md", "b.md"})
+
+    assert next(stream)[0] == "a.md"
+    stream.close()
+
+    archives = [proc for proc in started if list(proc.args)[:2] == ["git", "archive"]]  # type: ignore[arg-type]
+    assert [proc.returncode for proc in archives] == [-signal.SIGKILL]
+
+
+def test_iter_texts_archive_failure_carries_gits_diagnostic(
+    corpus_repo: tuple[Path, str, str],
+) -> None:
+    # The tree lists the body, the object store has lost it: ls-tree
+    # succeeds and git archive dies, and its own words must reach the error.
+    repo, sha1, _ = corpus_repo
+    blob = subprocess.run(
+        ["git", "rev-parse", f"{sha1}:lover/testloven.md"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        list(CorpusSnapshot(repo, sha1).iter_texts({"lover/testloven.md"}))
+
+    assert excinfo.value.cmd[:2] == ["git", "archive"]
+    assert blob.encode() in excinfo.value.stderr
 
 
 def test_iter_texts_stopped_early_reaps_git(corpus_repo: tuple[Path, str, str]) -> None:

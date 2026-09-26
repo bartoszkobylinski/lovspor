@@ -19,6 +19,7 @@ machinery is needed here.
 """
 
 import json
+import os
 import re
 import subprocess
 import tarfile
@@ -263,6 +264,11 @@ class CorpusSnapshot:
         ``git archive`` refuses a pathspec that matches no file, so the
         narrowed archive may only name suffixes proven present; an invalid
         commit fails here, loudly, as it did for ``git archive`` itself.
+
+        Names decode as the filesystem does (``os.fsdecode``, surrogate
+        escapes), so one undecodable name elsewhere in the tree cannot fail
+        every read of it. The empty string after the final NUL needs no
+        removal: it is only ever intersected with the wanted paths.
         """
         listing = subprocess.run(  # noqa: S603
             ["git", "ls-tree", "-r", "-z", "--name-only", self.sha],  # noqa: S607
@@ -270,7 +276,7 @@ class CorpusSnapshot:
             capture_output=True,
             check=True,
         )
-        return frozenset(listing.stdout.decode("utf-8", "surrogateescape").split("\0")) - {""}
+        return frozenset(os.fsdecode(listing.stdout).split("\0"))
 
 
 def _archive_pathspecs(present: frozenset[str]) -> list[str]:
