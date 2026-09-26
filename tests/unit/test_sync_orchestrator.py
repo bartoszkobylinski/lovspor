@@ -1723,16 +1723,23 @@ def test_run_sync_rerender_noop_preserves_record_and_continues_to_later_docs(
         "lov-write": _upstream("lov-write", xml_hash="b" * 64, slug="write"),
     }
     captured: dict[str, object] = {}
+    noop_times: list[datetime] = []
     write_times: list[datetime] = []
 
     _disable_migrations(monkeypatch)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
     monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
-    monkeypatch.setattr(
-        orchestrator_module,
-        "_rerender_is_noop",
-        lambda _settings, doc, _now, _prior: doc.doc_id == "lov-noop",
-    )
+
+    def fake_rerender_is_noop(
+        _settings: Settings,
+        doc: _UpstreamDoc,
+        now: datetime,
+        _prior: ManifestRecord,
+    ) -> bool:
+        noop_times.append(now)
+        return doc.doc_id == "lov-noop"
+
+    monkeypatch.setattr(orchestrator_module, "_rerender_is_noop", fake_rerender_is_noop)
 
     def fake_write_one(
         settings: Settings,
@@ -1760,8 +1767,10 @@ def test_run_sync_rerender_noop_preserves_record_and_continues_to_later_docs(
     assert records["lov-noop"] is prior.documents["lov-noop"]
     assert records["lov-noop"].last_seen == prior.documents["lov-noop"].last_seen
     assert records["lov-write"].slug == "write"
+    assert len(noop_times) == 2
+    assert all(timestamp.tzinfo is UTC for timestamp in noop_times)
     assert len(write_times) == 1
-    assert write_times[0].tzinfo is UTC
+    assert noop_times == [write_times[0], write_times[0]]
     assert report.unchanged_count == 1
 
 
