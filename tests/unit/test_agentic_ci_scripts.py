@@ -2022,6 +2022,19 @@ class TestTimeoutsAreNotSurvivors:
         assert "3 mutant(s) no test reaches" in comment
         assert "non-killable" not in comment
 
+    def test_signal_killed_mutants_are_named_as_without_a_verdict(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        raw = "40/900  🎉 38 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0\n"
+        _run(tmp_path, raw)
+
+        comment = self._no_change(tmp_path, capsys)
+
+        assert "Gate: FAIL (unmeasured_mutants)" in comment
+        assert "2 without a verdict" in comment
+        assert "2 mutant(s) got no verdict — killed by a signal" in comment
+        assert "non-killable" not in comment
+
     def test_a_gate_failed_on_exit_bits_alone_says_no_bucket_is_on_record(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
