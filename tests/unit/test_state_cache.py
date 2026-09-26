@@ -81,6 +81,29 @@ def test_resize_grows_an_entry_and_evicts_others_first() -> None:
     assert cache.total_bytes == 95
 
 
+def test_resize_accepts_an_entry_exactly_at_the_budget() -> None:
+    cache: ByteBudgetCache[str] = ByteBudgetCache(100)
+    cache.put("a", "A", 40)
+
+    assert cache.resize("a", 100) is True
+
+    assert cache.get("a") == "A"
+    assert cache.total_bytes == 100
+
+
+def test_eviction_removes_as_many_old_entries_as_needed() -> None:
+    cache: ByteBudgetCache[str] = ByteBudgetCache(100)
+    cache.put("a", "A", 40)
+    cache.put("b", "B", 40)
+
+    assert cache.put("c", "C", 90) is True
+
+    assert cache.get("a") is None
+    assert cache.get("b") is None
+    assert cache.get("c") == "C"
+    assert cache.total_bytes == 90
+
+
 def test_resize_is_absolute_so_repeating_it_does_not_double_charge() -> None:
     cache: ByteBudgetCache[str] = ByteBudgetCache(100)
     cache.put("a", "A", 10)

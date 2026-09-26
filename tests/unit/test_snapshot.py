@@ -491,6 +491,37 @@ def test_iter_texts_invalid_commit_fails_loudly(corpus_repo: tuple[Path, str, st
     assert excinfo.value.stderr
 
 
+def test_stream_archive_preserves_git_returncode_and_complete_stderr() -> None:
+    archive_bytes = BytesIO()
+    with tarfile.open(fileobj=archive_bytes, mode="w") as archive:
+        info = tarfile.TarInfo("lover/wanted.md")
+        info.size = 1
+        archive.addfile(info, BytesIO(b"x"))
+    archive_bytes.seek(0)
+
+    class FailedGitProcess:
+        stdout = archive_bytes
+        args = ["git", "archive", "broken"]  # noqa: RUF012
+
+        @staticmethod
+        def wait() -> int:
+            return 23
+
+    stderr = BytesIO(b"fatal: complete diagnostic")
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        list(
+            snapshot_module._stream_archive(
+                FailedGitProcess(),  # type: ignore[arg-type]
+                frozenset({"lover/wanted.md"}),
+                stderr,
+            ),
+        )
+
+    assert excinfo.value.returncode == 23
+    assert excinfo.value.stderr == b"fatal: complete diagnostic"
+
+
 def test_iter_texts_stopped_early_reaps_git(corpus_repo: tuple[Path, str, str]) -> None:
     repo, sha1, _ = corpus_repo
     stream = CorpusSnapshot(repo, sha1).iter_texts({"lover/testloven.md"})
