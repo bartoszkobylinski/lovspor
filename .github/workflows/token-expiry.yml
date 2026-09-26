@@ -1,0 +1,47 @@
+name: Token Expiry
+
+# LOVSPOR_CI_PUSH_TOKEN is a personal access token with an expiry date. When it
+# lapsed on 2026-09-10, every PR blocked at `actions/checkout` and the pipeline
+# reported "codex-tests BLOCKED before the tests ran" — a verdict about the pull
+# request for a cause that was a calendar date (issue #270). The secret list
+# shows when a secret was set, never when its token expires, so nothing watched.
+#
+# Once a week this asks the GitHub API with the token and reads the
+# `GitHub-Authentication-Token-Expiration` response header. The run fails when
+# the token has 14 days or fewer left, is rejected, or cannot be checked — and a
+# failed scheduled run is what reaches the owner as a notification. A token that
+# is accepted with no expiry header passes, and the step summary says so.
+#
+# Renewal: create the new token, then
+#   gh secret set LOVSPOR_CI_PUSH_TOKEN --repo bartoszkobylinski/lovspor
+# and re-run this workflow (workflow_dispatch) to confirm the new date.
+on:
+  schedule:
+    - cron: "41 6 * * 1" # Mondays 06:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: token-expiry
+  cancel-in-progress: false
+
+jobs:
+  push-token:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check LOVSPOR_CI_PUSH_TOKEN expiry
+        env:
+          LOVSPOR_CI_PUSH_TOKEN: ${{ secrets.LOVSPOR_CI_PUSH_TOKEN }}
+        run: |
+          python3 scripts/ci/token_expiry.py \
+            --secret-env LOVSPOR_CI_PUSH_TOKEN \
+            --repo "${{ github.repository }}" \
+            --warn-days 14
