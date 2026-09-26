@@ -200,3 +200,133 @@ def untouched():
         changed = mutation_scope.changed_lines(base)
 
         assert changed == {"src/lovspor/example.py": {2}}
+
+
+UNMEASURED_SOURCE = '''\
+"""Module docstring."""
+
+import re
+
+_RELEASE_ID = re.compile(
+    r"\\A[0-9a-f]{64}\\Z"
+)
+
+
+def plain():
+    return 1
+
+
+@app.command("status")
+def status(verbose: bool = False):
+    # operator-facing branch
+    if verbose:
+        return 2
+    return 3
+
+
+class Service:
+    """Class docstring."""
+
+    LIMIT = 5
+
+    def method(self):
+        return 4
+
+
+@dataclass
+class Record:
+    def total(self):
+        return 6
+'''
+
+
+class TestUnmeasuredNotices:
+    """#289 / #292: a changed line no mutant can measure is named, not implied covered."""
+
+    def test_a_changed_module_level_constant_is_named(self, mutation_scope: ModuleType) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {5, 6, 7}, UNMEASURED_SOURCE
+        )
+
+        assert notices == ["unmeasured changed lines: src/lovspor/example.py:5-7 (module level)"]
+
+    def test_a_changed_decorated_function_body_names_the_function(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/cli.py", {15, 17, 18}, UNMEASURED_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/cli.py:15,17-18 (decorated function status)"
+        ]
+
+    def test_a_changed_decorator_line_counts_as_the_decorated_function(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices("src/lovspor/cli.py", {14}, UNMEASURED_SOURCE)
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/cli.py:14 (decorated function status)"
+        ]
+
+    def test_class_attributes_and_decorated_classes_are_named(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {25, 34}, UNMEASURED_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:25 (class body Service)",
+            "unmeasured changed lines: src/lovspor/example.py:34 (decorated class Record)",
+        ]
+
+    def test_measured_inert_and_comment_lines_raise_no_notice(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        # docstrings, an import, blank lines, a comment inside a decorated
+        # body, a mutatable function and a mutatable method
+        lines = {1, 2, 3, 4, 10, 11, 16, 23, 27, 28}
+
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", lines, UNMEASURED_SOURCE) == []
+
+    def test_unparseable_source_raises_no_notice(self, mutation_scope: ModuleType) -> None:
+        # the whole module is in scope then (`lovspor.x.*`), so nothing is unmeasured
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", {1}, "def broken(:\n") == []
+
+    def test_explain_prints_the_notice_on_its_own_line(
+        self,
+        mutation_scope: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            mutation_scope, "changed_lines", lambda base: {"src/lovspor/example.py": {5, 11}}
+        )
+        monkeypatch.setattr(mutation_scope, "head_source", lambda path: UNMEASURED_SOURCE)
+        monkeypatch.setattr("sys.argv", ["mutation_scope.py", "--base", "main", "--explain"])
+
+        assert mutation_scope.main() == 0
+
+        captured = capsys.readouterr()
+        assert captured.out.strip() == "lovspor.example.x_plain__mutmut_*"
+        assert (
+            "\nunmeasured changed lines: src/lovspor/example.py:5 (module level)\n" in captured.err
+        )
+
+    def test_without_explain_nothing_but_patterns_is_printed(
+        self,
+        mutation_scope: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            mutation_scope, "changed_lines", lambda base: {"src/lovspor/example.py": {5}}
+        )
+        monkeypatch.setattr(mutation_scope, "head_source", lambda path: UNMEASURED_SOURCE)
+        monkeypatch.setattr("sys.argv", ["mutation_scope.py", "--base", "main"])
+
+        assert mutation_scope.main() == 0
+
+        assert capsys.readouterr() == ("\n", "")
