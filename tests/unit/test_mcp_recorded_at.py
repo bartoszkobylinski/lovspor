@@ -761,24 +761,27 @@ def test_state_slug_citation_never_gains_a_lineage_mapping(
 
 def test_historical_archive_failure_is_loud(
     reader: CorpusReader,
-    monkeypatch: pytest.MonkeyPatch,
+    corpus: tuple[Path, str, str],
 ) -> None:
-    # A failing `git archive` must surface as the subprocess error the
-    # check= contract promises — never limp on into tar parsing.
-    real_run = mcp_module.subprocess.run
-
-    def fake_run(cmd: list[str], **kwargs: object):
-        if cmd[:2] == ["git", "archive"]:
-            if kwargs.get("check"):
-                raise subprocess.CalledProcessError(128, cmd)
-            return subprocess.CompletedProcess(cmd, 128, stdout=b"", stderr=b"")
-        return real_run(cmd, **kwargs)  # type: ignore[arg-type]
-
+    # A `git archive` that dies mid-stream (here: a body blob lost from the
+    # object store) must surface as the subprocess error — never as a
+    # truncated tar read as "these bodies were absent at that date".
+    repo, sha1, _ = corpus
     state = reader.at_state("2026-05-05")
-    monkeypatch.setattr(mcp_module.subprocess, "run", fake_run)
+    state._slug_index()
+    blob = subprocess.run(
+        ["git", "rev-parse", f"{sha1}:lover/testloven.md"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
         state.search_body("tekst")
+
+    assert excinfo.value.cmd[:2] == ["git", "archive"]
 
 
 def _init_repo(repo: Path) -> None:

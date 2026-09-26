@@ -50,13 +50,11 @@ import re
 import shlex
 import subprocess
 import sys
-import tarfile
 import threading
 import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
-from io import BytesIO
 from pathlib import Path
 from typing import Any, NamedTuple, Self, TypedDict, final
 
@@ -4084,29 +4082,17 @@ class _SnapshotState:
 
         Per-file ``git show`` would cost two subprocesses per document —
         ~12,000 for one historical search on the production corpus.
-        ``git archive`` streams the whole tree once; members are read in
-        memory only, nothing touches the filesystem, so the tar
-        path-traversal class (CVE-2007-4559) has no surface here.
+        ``iter_texts`` streams one ``git archive`` instead (issue #223);
+        each body is stripped as it arrives, so the raw text of the whole
+        state is never held at once.
         """
         wanted = {
             record.markdown_path: slug for slug, (_doc_id, record) in self._slug_index().items()
         }
-        raw = subprocess.run(  # noqa: S603
-            ["git", "archive", "--format=tar", self._data.ref.sha],  # noqa: S607
-            cwd=self._data.snapshot.repo_path,
-            capture_output=True,
-            check=True,
-        )
-        bodies: dict[str, str] = {}
-        with tarfile.open(fileobj=BytesIO(raw.stdout)) as tar:
-            for member in tar:
-                slug = wanted.get(member.name)
-                if slug is None or not member.isfile():
-                    continue
-                blob = tar.extractfile(member)
-                if blob is None:
-                    continue
-                bodies[slug] = _strip_frontmatter_and_h1(blob.read().decode("utf-8"))
+        bodies = {
+            wanted[path]: _strip_frontmatter_and_h1(text)
+            for path, text in self._data.snapshot.iter_texts(wanted)
+        }
         missing = sorted(set(wanted.values()) - set(bodies))
         if missing:
             shown = ", ".join(missing[:_INTEGRITY_SAMPLE_SLUGS])

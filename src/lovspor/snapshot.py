@@ -19,10 +19,15 @@ machinery is needed here.
 """
 
 import json
+import re
 import subprocess
+import tarfile
+import tempfile
+from collections.abc import Collection, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from typing import IO
 
 from lovspor.errors import LovsporError, ParseError
 from lovspor.slug_index import SlugIndex, build_slug_index
@@ -31,6 +36,13 @@ from lovspor.timetravel import ShallowHistoryError, _is_shallow_repository
 
 _STATE_LOG_SEP = "__COMMIT__"
 """Block separator for the state log, same strategy as ``timetravel``."""
+
+_ARCHIVE_SUFFIX = re.compile(r"\.[A-Za-z0-9]+\Z")
+"""A suffix safe to splice into a glob pathspec: no glob metacharacters."""
+
+_ARCHIVE_ROOT = "/lovspor-in-memory-archive"
+"""The frame ``tarfile.data_filter`` judges member names against. Nothing
+is written there, or anywhere: members are only read in memory."""
 
 
 class HistoryBoundaryError(LovsporError):
@@ -216,3 +228,111 @@ class CorpusSnapshot:
         if self._slug_index is None:
             self._slug_index = build_slug_index(self.manifest.documents)
         return self._slug_index
+
+    def iter_texts(self, paths: Collection[str]) -> Iterator[tuple[str, str]]:
+        """``(path, text)`` for every one of ``paths`` present at this state,
+        streamed from one ``git archive`` in archive order.
+
+        One subprocess for any number of files, where ``read_text`` costs
+        two per file. The tar is read as a stream (``r|``), never captured
+        whole: on the production corpus the captured archive was ~500 MB
+        of transient memory per historical search (issue #223). A wanted
+        path absent from the tree is simply not yielded; judging that
+        absence is the caller's business.
+        """
+        wanted = frozenset(paths)
+        present = wanted & self._tree_paths() if wanted else wanted
+        if not present:
+            return
+        command = ["git", "archive", "--format=tar", self.sha, "--", *_archive_pathspecs(present)]
+        with (
+            tempfile.TemporaryFile() as stderr,
+            subprocess.Popen(  # noqa: S603
+                command, cwd=self.repo_path, stdout=subprocess.PIPE, stderr=stderr
+            ) as proc,
+        ):
+            try:
+                yield from _stream_archive(proc, wanted, stderr)
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+
+    def _tree_paths(self) -> frozenset[str]:
+        """Every file path in this state's tree.
+
+        ``git archive`` refuses a pathspec that matches no file, so the
+        narrowed archive may only name suffixes proven present; an invalid
+        commit fails here, loudly, as it did for ``git archive`` itself.
+        """
+        listing = subprocess.run(  # noqa: S603
+            ["git", "ls-tree", "-r", "-z", "--name-only", self.sha],  # noqa: S607
+            cwd=self.repo_path,
+            capture_output=True,
+            check=True,
+        )
+        return frozenset(listing.stdout.decode("utf-8", "surrogateescape").split("\0")) - {""}
+
+
+def _archive_pathspecs(present: frozenset[str]) -> list[str]:
+    """Narrow the archive to the suffixes of the wanted paths present.
+
+    The production tree carries embedding sidecars and JSON next to the
+    Markdown; archiving only ``*.md`` cut the stream from ~496 MB to
+    ~136 MB and git's own peak from ~529 MB to ~169 MB (lovverk
+    ``2d3178c93``, 2026-09-26). A path without a plain suffix gets the
+    whole tree (``[]``): reading more is safe, guessing a pattern is not.
+    """
+    suffixes = {PurePosixPath(path).suffix for path in present}
+    if not all(_ARCHIVE_SUFFIX.fullmatch(suffix) for suffix in suffixes):
+        return []
+    return [f":(glob)**/*{suffix}" for suffix in sorted(suffixes)]
+
+
+def _stream_archive(
+    proc: "subprocess.Popen[bytes]",
+    wanted: frozenset[str],
+    stderr: IO[bytes],
+) -> Iterator[tuple[str, str]]:
+    """Read the wanted members off git's stdout, then prove git succeeded.
+
+    A git failure truncates or empties the stream, which ``tarfile`` sees
+    first — so a tar error is re-judged against git's exit status: a
+    failed git is the operational error it always was, not a tar puzzle.
+    """
+    assert proc.stdout is not None  # noqa: S101 — stdout=PIPE above
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
+            yield from _read_wanted(tar, wanted)
+    except tarfile.ReadError:
+        _raise_if_git_failed(proc, stderr)
+        raise
+    proc.stdout.read()
+    _raise_if_git_failed(proc, stderr)
+
+
+def _raise_if_git_failed(proc: "subprocess.Popen[bytes]", stderr: IO[bytes]) -> None:
+    returncode = proc.wait()
+    if returncode != 0:
+        stderr.seek(0)
+        raise subprocess.CalledProcessError(returncode, proc.args, stderr=stderr.read())
+
+
+def _read_wanted(tar: tarfile.TarFile, wanted: frozenset[str]) -> Iterator[tuple[str, str]]:
+    """Wanted regular files only, each passed through ``tarfile.data_filter``.
+
+    A symlink or other non-regular member is skipped, never followed. The
+    filter refuses a name escaping the tree (absolute, ``..``) — git cannot
+    commit one, so a refusal means a damaged or forged stream.
+    """
+    for member in tar:
+        if member.name not in wanted or not member.isfile():
+            continue
+        try:
+            tarfile.data_filter(member, _ARCHIVE_ROOT)
+        except tarfile.FilterError as exc:
+            raise StateIntegrityError(
+                f"archive member {member.name!r} refused by the tar data filter: {exc}",
+            ) from exc
+        blob = tar.extractfile(member)
+        if blob is not None:
+            yield member.name, blob.read().decode("utf-8")
