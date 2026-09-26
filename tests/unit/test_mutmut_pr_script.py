@@ -9,6 +9,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from mutmut.configuration import config, reset_config
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "mutmut-pr.sh"
@@ -358,3 +359,37 @@ class TestEditableInstallAfterRun:
         assert not (repo / "uv-calls.log").exists()
         assert "killed:     1 / 1" in result.stdout
         assert result.returncode == 0
+
+
+class TestPerMutantTimeLimit:
+    """Issue #423 (owner decision (c)): mutmut's per-mutant wall limit is
+    `(estimated_time + timeout_constant) * timeout_multiplier`
+    (mutmut 3.8.0 `workers/isolation.py:875`), and `estimated_time` sums only the
+    pytest `call` phase. On PR #395 two real survivors ran out of the default
+    limit: 0.71 s call phase, 4.75 s setup+teardown, 6.3 s wall locally,
+    limit (0.71 + 1) * 15 ≈ 25.7 s. The constant carries the setup time."""
+
+    PR_395_CALL_SECONDS = 0.71
+    DEFAULT_LIMIT_SECONDS = (0.71 + 1.0) * 15.0
+
+    @staticmethod
+    def _config() -> tuple[float, float]:
+        """Read through mutmut's own loader, so a misspelt key cannot pass."""
+        with pytest.MonkeyPatch.context() as mp:
+            mp.chdir(REPO_ROOT)
+            reset_config()
+            try:
+                cfg = config()
+                return cfg.timeout_constant, cfg.timeout_multiplier
+            finally:
+                reset_config()
+
+    def test_the_repo_pins_the_timeout_values(self) -> None:
+        assert self._config() == (7.0, 15.0)
+
+    def test_the_pr_395_survivors_get_four_times_the_limit_they_ran_out_of(self) -> None:
+        constant, multiplier = self._config()
+
+        limit = (self.PR_395_CALL_SECONDS + constant) * multiplier
+
+        assert limit >= 4 * self.DEFAULT_LIMIT_SECONDS
