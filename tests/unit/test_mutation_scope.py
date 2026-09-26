@@ -336,6 +336,123 @@ def decorated():
         # enclosing them in a decorated region must not turn them into code.
         assert mutation_scope.unmeasured_notices("src/lovspor/x.py", changed_lines, source) == []
 
+    @pytest.mark.parametrize(
+        ("source", "changed_line", "region"),
+        [
+            (
+                "'module docstring'\n\n'executable string expression'\n",
+                3,
+                "module level",
+            ),
+            (
+                "class Service:\n    'class docstring'\n    'executable string expression'\n",
+                3,
+                "class body Service",
+            ),
+            (
+                "@command()\ndef decorated():\n    'function docstring'\n    'executable string expression'\n",  # noqa: E501
+                4,
+                "decorated function decorated",
+            ),
+        ],
+    )
+    def test_only_actual_docstrings_are_inert(
+        self,
+        mutation_scope: ModuleType,
+        source: str,
+        changed_line: int,
+        region: str,
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices("src/lovspor/x.py", {changed_line}, source)
+
+        assert notices == [f"unmeasured changed lines: src/lovspor/x.py:{changed_line} ({region})"]
+
+    @pytest.mark.parametrize(
+        ("source", "changed_lines", "expected"),
+        [
+            pytest.param(
+                '@command()\ndef decorated():\n    f"not a {docstring}"\n    return 1\n',
+                {3},
+                "3 (decorated function decorated)",
+                id="f-string-in-docstring-position-is-code",
+            ),
+            pytest.param(
+                "from __future__ import annotations\n\n'not a docstring'\n",
+                {1, 3},
+                "3 (module level)",
+                id="future-import-inert-string-after-it-is-not",
+            ),
+            pytest.param(
+                "@command()\ndef outer():\n    def inner():\n"
+                "        'inner docstring'\n        return 1\n    return inner()\n",
+                {3, 4, 5},
+                "3,5 (decorated function outer)",
+                id="nested-def-docstring-inert-its-code-not",
+            ),
+            pytest.param(
+                "class Service:\n    'class docstring'\n\n    @property\n"
+                "    def value(self):\n        'method docstring'\n"
+                "        x = 1\n        'after first statement'\n        return x\n",
+                {2, 6, 7, 8},
+                "7-8 (decorated function Service.value)",
+                id="class-and-method-docstrings-inert-later-string-not",
+            ),
+            pytest.param(
+                "@dataclass\nclass Record:\n    'class docstring'\n\n"
+                "    def total(self):\n        'method docstring'\n        return 6\n",
+                {3, 6, 7},
+                "7 (decorated class Record)",
+                id="decorated-class-docstrings-inert",
+            ),
+            pytest.param(
+                '"""multi\nline\ndocstring"""\nimport os\nLIMIT = (\n    "a"\n)\n',
+                {1, 2, 3, 4, 5, 6, 7},
+                "5-7 (module level)",
+                id="multiline-docstring-and-string-inside-statement",
+            ),
+            pytest.param(
+                "LIMIT = 1\n'attribute docstring'\n",
+                {1, 2},
+                "1 (module level)",
+                id="module-attribute-docstring-inert",
+            ),
+            pytest.param(
+                "class Service:\n    LIMIT: int = 1\n    'attribute docstring'\n",
+                {2, 3},
+                "2 (class body Service)",
+                id="class-attribute-docstring-inert",
+            ),
+            pytest.param(
+                "@command()\ndef decorated():\n    x = 1\n    'no attribute here'\n    return x\n",
+                {3, 4},
+                "3-4 (decorated function decorated)",
+                id="string-after-assignment-in-a-function-is-code",
+            ),
+            pytest.param(
+                "def f():\n    return 1\n'after a def'\n",
+                {3},
+                "3 (module level)",
+                id="string-after-a-def-is-code",
+            ),
+            pytest.param(
+                "A = 1\nB = 2\n\nC = 3\n",
+                {1, 2, 4},
+                "1-2,4 (module level)",
+                id="one-notice-per-region-across-statements",
+            ),
+        ],
+    )
+    def test_docstring_position_decides_what_is_inert(
+        self,
+        mutation_scope: ModuleType,
+        source: str,
+        changed_lines: set[int],
+        expected: str,
+    ) -> None:
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", changed_lines, source) == [
+            f"unmeasured changed lines: src/lovspor/x.py:{expected}"
+        ]
+
     def test_unparseable_source_raises_no_notice(self, mutation_scope: ModuleType) -> None:
         # the whole module is in scope then (`lovspor.x.*`), so nothing is unmeasured
         assert mutation_scope.unmeasured_notices("src/lovspor/x.py", {1}, "def broken(:\n") == []

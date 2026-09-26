@@ -135,15 +135,32 @@ def _qualified(class_name: str, name: str) -> str:
     return f"{class_name}.{name}" if class_name else name
 
 
-def _is_inert(node: ast.stmt) -> bool:
-    """Imports and docstrings: mutmut has no operator for either, anywhere."""
-    if isinstance(node, (ast.Import, ast.ImportFrom)):
-        return True
+_BODY_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+_ATTRIBUTE_OWNERS = (ast.Module, ast.ClassDef)
+
+
+def _is_string(stmt: ast.stmt) -> bool:
+    """A plain string statement; an f-string or bytes literal is not one."""
     return (
-        isinstance(node, ast.Expr)
-        and isinstance(node.value, ast.Constant)
-        and isinstance(node.value.value, str)
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and isinstance(stmt.value.value, str)
     )
+
+
+def _docstrings(owner: ast.AST) -> list[ast.stmt]:
+    """The owner's docstrings: a string as its FIRST statement, and in a
+    module or class body a string right after an assignment (the attribute
+    docstring Sphinx and PEP 257 recognise). Any other string statement is
+    an expression like any other and stays code.
+    """
+    if not isinstance(owner, _BODY_OWNERS) or not owner.body:
+        return []
+    found = [owner.body[0]] if _is_string(owner.body[0]) else []
+    if isinstance(owner, _ATTRIBUTE_OWNERS):
+        pairs = zip(owner.body, owner.body[1:], strict=False)
+        found += [s for prev, s in pairs if isinstance(prev, (ast.Assign, ast.AnnAssign))]
+    return [s for s in found if _is_string(s)]
 
 
 def _region_of(node: ast.stmt, class_name: str) -> Unit | None:
@@ -192,12 +209,13 @@ def code_lines(source: str) -> set[int]:
 
 
 def inert_lines(tree: ast.Module) -> set[int]:
-    """Lines of every import and docstring, at any depth, even inside a
+    """Lines of every import and every docstring, at any depth, even inside a
     decorated region: no mutant could measure them there either."""
     lines: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.stmt) and _is_inert(node):
-            lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+        imports = [node] if isinstance(node, (ast.Import, ast.ImportFrom)) else []
+        for inert in [*imports, *_docstrings(node)]:
+            lines.update(range(inert.lineno, (inert.end_lineno or inert.lineno) + 1))
     return lines
 
 
@@ -212,18 +230,19 @@ def _ranges(lines: list[int]) -> str:
 
 
 def unmeasured_notices(path: str, lines: set[int], source: str) -> list[str]:
-    """One notice per region whose changed code lines no mutant measures."""
+    """One notice per region label whose changed code lines no mutant
+    measures: every module-level statement shares `module level`."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return []
     changed = (lines & code_lines(source)) - inert_lines(tree)
-    notices = []
+    hits: dict[str, list[int]] = {}
     for region in unmeasured_regions(tree):
         hit = [line for line in changed if region.contains(line)]
         if hit:
-            notices.append(f"{UNMEASURED_PREFIX}{path}:{_ranges(hit)} ({region.key})")
-    return notices
+            hits.setdefault(region.key, []).extend(hit)
+    return [f"{UNMEASURED_PREFIX}{path}:{_ranges(hit)} ({key})" for key, hit in hits.items()]
 
 
 def module_of(path: str) -> str:
