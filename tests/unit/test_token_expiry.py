@@ -233,6 +233,17 @@ def test_an_empty_secret_fails_without_calling_the_api(
     assert "is empty or not set" in capsys.readouterr().out
 
 
+def test_an_unset_secret_fails_without_calling_the_api(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(NAME, raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(token_expiry, "ask", lambda *_: pytest.fail("API was called"))
+    argv = ["--secret-env", NAME, "--repo", "o/r"]
+    assert token_expiry.main(argv) == 1
+    assert "is empty or not set" in capsys.readouterr().out
+
+
 def test_a_closed_port_reads_as_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     server = HTTPServer(("127.0.0.1", 0), _Api)
     port = server.server_address[1]
@@ -248,7 +259,7 @@ class TestWorkflow:
     def test_runs_weekly_and_on_demand(self) -> None:
         triggers = self._workflow()[True]
         assert set(triggers) == {"schedule", "workflow_dispatch"}
-        assert len(triggers["schedule"]) == 1
+        assert triggers["schedule"] == [{"cron": "41 6 * * 1"}]
 
     def test_holds_read_only_permissions(self) -> None:
         assert self._workflow()["permissions"] == {"contents": "read"}
@@ -258,6 +269,8 @@ class TestWorkflow:
         step = next(s for s in job["steps"] if "token_expiry.py" in s.get("run", ""))
         assert step["env"] == {NAME: "${{ secrets.LOVSPOR_CI_PUSH_TOKEN }}"}
         assert f"--secret-env {NAME}" in step["run"]
+        assert '--repo "${{ github.repository }}"' in step["run"]
+        assert "--warn-days 14" in step["run"]
         pipeline = (_ROOT / ".github" / "workflows" / "pr-pipeline.yml").read_text("utf-8")
         assert "secrets.LOVSPOR_CI_PUSH_TOKEN" in pipeline
 
