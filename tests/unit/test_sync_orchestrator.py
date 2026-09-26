@@ -148,6 +148,47 @@ def test_run_sync_mass_reembed_requires_explicit_opt_in() -> None:
     assert parameter.default is False
 
 
+def test_run_sync_does_not_authorize_mass_reembed_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    prior = Manifest(generated_at=datetime(2026, 5, 1, tzinfo=UTC), documents={})
+    received: list[bool] = []
+    embedder = object()
+
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_needs_sprint5_history_migration",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_needs_sprint8_eu_basis_migration",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: ({}, ()))
+    monkeypatch.setattr(orchestrator_module, "_load_embedder", lambda _settings: embedder)
+    monkeypatch.setattr(orchestrator_module, "space_id_of", lambda _embedder: "space")
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_needs_sprint9_embeddings_migration",
+        lambda *_args: True,
+    )
+
+    def capture_migration(*_args: object, allow_mass_reembed: bool, **_kwargs: object) -> Manifest:
+        received.append(allow_mass_reembed)
+        return prior
+
+    monkeypatch.setattr(orchestrator_module, "_run_sprint9_embeddings_migration", capture_migration)
+    monkeypatch.setattr(orchestrator_module, "_ensure_head_attested", lambda *_args: None)
+
+    run_sync(settings)
+
+    assert received == [False]
+
+
 def test_upstream_doc_is_immutable() -> None:
     upstream = _UpstreamDoc(
         doc_id="lov-1",
@@ -1595,6 +1636,11 @@ def test_run_sync_aborts_on_mass_removal(
         pytest.fail("mass-removal sync must not reach commit")
 
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", fail_commit)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "space_id_of",
+        lambda _embedder: pytest.fail("a missing embedder has no embedding space"),
+    )
     monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", fail_commit)
 
     with pytest.raises(MassRemovalError, match="30/30"):
@@ -1620,7 +1666,7 @@ def test_run_sync_noops_without_rewriting_manifest_or_committing(
         "_collect_upstream",
         lambda *_args: (
             {"lov-same": _upstream("lov-same", xml_hash="a" * 64, slug="same")},
-            (),
+            ("mimeType",),
         ),
     )
 
@@ -1655,8 +1701,118 @@ def test_run_sync_noops_without_rewriting_manifest_or_committing(
         changed_count=0,
         removed_count=0,
         unchanged_count=1,
+        unknown_archive_fields=("mimeType",),
     )
     assert (settings.data_dir / "cache" / "archives").is_dir()
+
+
+def test_run_sync_rerender_noop_preserves_record_and_continues_to_later_docs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={
+            "lov-noop": _record("lov-noop", xml_hash="a" * 64, slug="noop"),
+            "lov-write": _record("lov-write", xml_hash="b" * 64, slug="write"),
+        },
+    )
+    upstream = {
+        "lov-noop": _upstream("lov-noop", xml_hash="a" * 64, slug="noop"),
+        "lov-write": _upstream("lov-write", xml_hash="b" * 64, slug="write"),
+    }
+    captured: dict[str, object] = {}
+    noop_times: list[datetime] = []
+    write_times: list[datetime] = []
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+
+    def fake_rerender_is_noop(
+        _settings: Settings,
+        doc: _UpstreamDoc,
+        now: datetime,
+        _prior: ManifestRecord,
+    ) -> bool:
+        noop_times.append(now)
+        return doc.doc_id == "lov-noop"
+
+    monkeypatch.setattr(orchestrator_module, "_rerender_is_noop", fake_rerender_is_noop)
+
+    def fake_write_one(
+        settings: Settings,
+        doc: _UpstreamDoc,
+        now: datetime,
+        _embedder: object,
+    ) -> tuple[ManifestRecord, list[Path]]:
+        write_times.append(now)
+        record = _record(doc.doc_id, xml_hash=doc.xml_hash, slug=doc.slug)
+        return record, [settings.lovverk_repo_path / record.markdown_path]
+
+    monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
+    monkeypatch.setattr(orchestrator_module, "delete_document", lambda _path: None)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_commit_with_history",
+        lambda *_args, **kwargs: captured.update(kwargs),
+    )
+    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", lambda *_args: None)
+
+    report = run_sync(settings, force_rerender=True)
+
+    records = captured["new_records"]
+    assert isinstance(records, dict)
+    assert records["lov-noop"] is prior.documents["lov-noop"]
+    assert records["lov-noop"].last_seen == prior.documents["lov-noop"].last_seen
+    assert records["lov-write"].slug == "write"
+    assert len(noop_times) == 2
+    assert all(timestamp.tzinfo is UTC for timestamp in noop_times)
+    assert len(write_times) == 1
+    assert noop_times == [write_times[0], write_times[0]]
+    assert report.unchanged_count == 1
+
+
+@pytest.mark.parametrize("change_kind", ["changed", "renamed"])
+def test_run_sync_slugless_legacy_record_never_targets_a_named_embedding(
+    change_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    prior_record = _record("lov-legacy", xml_hash="a" * 64, slug="old").model_copy(
+        update={"slug": None},
+    )
+    prior = Manifest(
+        generated_at=datetime(2026, 5, 1, tzinfo=UTC),
+        documents={"lov-legacy": prior_record},
+    )
+    upstream = {
+        "lov-legacy": _upstream(
+            "lov-legacy",
+            xml_hash="b" * 64 if change_kind == "changed" else "a" * 64,
+            slug="new",
+        ),
+    }
+    sidecar_slugs: list[str] = []
+
+    _disable_migrations(monkeypatch)
+    monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
+    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+    monkeypatch.setattr(orchestrator_module, "_write_one", _fake_write_one_slug_path)
+    monkeypatch.setattr(orchestrator_module, "delete_document", lambda _path: None)
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_maybe_delete_old_embeddings",
+        lambda _repo, _dataset, slug, _written: sidecar_slugs.append(slug),
+    )
+    monkeypatch.setattr(orchestrator_module, "_commit_with_history", lambda *_a, **_kw: None)
+    monkeypatch.setattr(orchestrator_module, "_attest_temporal_conformance", lambda *_args: None)
+
+    run_sync(settings)
+
+    assert sidecar_slugs == [""]
 
 
 def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
@@ -1682,19 +1838,20 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
     captured: dict[str, object] = {}
     attested: dict[str, object] = {}
     deleted: list[Path] = []
-    retrieved_at_by_doc: dict[str, datetime | None] = {}
+    write_args_by_doc: dict[str, tuple[datetime, datetime | None]] = {}
 
     def fake_write_one(
         settings: Settings,
         upstream_doc: _UpstreamDoc,
-        _now: datetime,
+        now: datetime,
         _embedder: object,
     ) -> tuple[ManifestRecord, list[Path]]:
-        retrieved_at_by_doc[upstream_doc.doc_id] = upstream_doc.retrieved_at
+        write_args_by_doc[upstream_doc.doc_id] = (now, upstream_doc.retrieved_at)
         path = settings.lovverk_repo_path / "lover" / f"{upstream_doc.slug}.md"
+        sidecar = settings.lovverk_repo_path / "lover" / "embeddings" / f"{upstream_doc.slug}.bin"
         return (
             _record(upstream_doc.doc_id, xml_hash=upstream_doc.xml_hash, slug=upstream_doc.slug),
-            [path],
+            [path, sidecar],
         )
 
     def capture_commit(*_args: object, **kwargs: object) -> None:
@@ -1702,7 +1859,11 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
 
     _disable_migrations(monkeypatch)
     monkeypatch.setattr(orchestrator_module, "_load_or_empty_manifest", lambda _path: prior)
-    monkeypatch.setattr(orchestrator_module, "_collect_upstream", lambda *_args: (upstream, ()))
+    monkeypatch.setattr(
+        orchestrator_module,
+        "_collect_upstream",
+        lambda *_args: (upstream, ("mimeType",)),
+    )
     monkeypatch.setattr(orchestrator_module, "_write_one", fake_write_one)
     monkeypatch.setattr(orchestrator_module, "delete_document", deleted.append)
     monkeypatch.setattr(orchestrator_module, "_commit_with_history", capture_commit)
@@ -1730,6 +1891,7 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
         changed_count=1,
         removed_count=1,
         unchanged_count=2,
+        unknown_archive_fields=("mimeType",),
     )
     assert captured["manifest_path"] == settings.lovverk_repo_path / "manifest.json"
     assert captured["repo"] == settings.lovverk_repo_path
@@ -1748,11 +1910,16 @@ def test_run_sync_builds_actions_for_new_changed_renamed_and_removed_docs(
         ("rename", "lov-renamed", "renamed-new"),
         ("remove", "lov-removed", "removed"),
     ]
-    assert retrieved_at_by_doc == {
-        "lov-new": None,
-        "lov-changed": None,
-        "lov-renamed": prior.documents["lov-renamed"].last_seen,
-    }
+    assert set(write_args_by_doc) == {"lov-new", "lov-changed", "lov-renamed"}
+    assert all(now.tzinfo is UTC for now, _retrieved_at in write_args_by_doc.values())
+    assert all(now is not None for now, _retrieved_at in write_args_by_doc.values())
+    assert write_args_by_doc["lov-new"][1] is None
+    assert write_args_by_doc["lov-changed"][1] is None
+    assert write_args_by_doc["lov-renamed"][1] == prior.documents["lov-renamed"].last_seen
+    assert actions[0].doc_type == "lov"
+    assert actions[0].sidecar_paths == (
+        settings.lovverk_repo_path / "lover" / "embeddings" / "new.bin",
+    )
     assert actions[1].paths == (
         settings.lovverk_repo_path / "lover" / "changed-old.md",
         settings.lovverk_repo_path / "lover" / "changed-new.md",
