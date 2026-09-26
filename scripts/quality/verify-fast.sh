@@ -24,5 +24,8 @@ check ruff-format uv run ruff format --check
 check mypy uv run mypy src/
 check ratchets uv run python scripts/quality/check_ratchets.py
 check boundaries uv run python scripts/quality/check_boundaries.py
+# One named module, never the unit suite: the release contracts (#323 D1/D2)
+# are the cheapest form of two failure classes already shipped once.
+check release-contracts uv run pytest tests/unit/test_release_contracts.py -q -p no:cacheprovider
 
 finish verify-fast
