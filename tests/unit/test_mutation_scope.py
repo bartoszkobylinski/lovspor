@@ -282,6 +282,27 @@ class TestUnmeasuredNotices:
             "unmeasured changed lines: src/lovspor/example.py:34 (decorated class Record)",
         ]
 
+    def test_nested_class_and_async_method_notices_keep_their_qualified_owner(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        source = """\
+class Outer:
+    @dataclass
+    class Record:
+        value: int
+
+    @route.get("/value")
+    async def value(self):
+        return 1
+"""
+
+        notices = mutation_scope.unmeasured_notices("src/lovspor/example.py", {2, 4, 6, 8}, source)
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:2,4 (decorated class Outer.Record)",
+            "unmeasured changed lines: src/lovspor/example.py:6,8 (decorated function Outer.value)",
+        ]
+
     def test_measured_inert_and_comment_lines_raise_no_notice(
         self, mutation_scope: ModuleType
     ) -> None:
