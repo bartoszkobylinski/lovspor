@@ -88,6 +88,11 @@ BUDGET_EXCEEDED = "mutation budget exceeded:"
 # mutmut-pr.sh's own `error:`. Three blocked runs in a row required digging
 # the job logs for exactly this line — the artifact already contains it.
 FAILURE_LINE = re.compile(r"^(?:FAILED |ERROR |error: ).*", re.MULTILINE)
+# `mutation_scope.py --explain` names each changed region no mutant can reach:
+# module-level and class-body statements, decorated functions (every typer
+# command), methods of a decorated class (#289, #292). Anchored at line start
+# so a notice quoted inside a test failure is not read as one.
+UNMEASURED_LINE = re.compile(r"^unmeasured changed lines: (.+)$", re.MULTILINE)
 
 
 COUNT_KEYS = ("total", "killed", "survived", "timeout", "invalid", "skipped", "no_tests")
@@ -122,6 +127,17 @@ def parse_failure_hint(raw: str) -> str | None:
     """First FAILED/ERROR/error: line of the raw log, single line, capped."""
     m = FAILURE_LINE.search(raw)
     return m.group(0)[:300].rstrip() if m else None
+
+
+def parse_unmeasured_lines(raw: str) -> list[str]:
+    """`<path>:<ranges> (<region>)` per scope notice, first occurrence order.
+
+    Reported, never scored: the gate verdict does not read this. Failing on it
+    would block every PR that touches a typer command, since mutmut 3.8.0
+    cannot mutate one — the notice exists so a green score stops implying it
+    measured them.
+    """
+    return list(dict.fromkeys(m.strip() for m in UNMEASURED_LINE.findall(raw)))
 
 
 def _id_only(mutant_id: str, detail_source: str) -> dict[str, object]:
@@ -391,6 +407,7 @@ def build_result(
         "gate": compute_gate(counts, checked),
         "equivalents": {"registered": registered, "refused": refused},
         "failure_hint": parse_failure_hint(raw),
+        "unmeasured_changed_lines": parse_unmeasured_lines(raw),
         "survivors": survivors,
     }
 
