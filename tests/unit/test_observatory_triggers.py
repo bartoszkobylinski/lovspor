@@ -5,6 +5,7 @@ import os
 import plistlib
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -64,6 +65,23 @@ class TestSchedule:
 
 
 class TestScheduledTriggers:
+    def test_the_window_end_uses_oslo_date_not_the_host_timezone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_tz = os.environ.get("TZ")
+        monkeypatch.setenv("TZ", "America/Los_Angeles")
+        time.tzset()
+        try:
+            triggers = scheduled_triggers(_utc(21, 12), _utc(22, 2))
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
+
+        assert triggers == [_utc(22, 1)]
+
     def test_one_trigger_per_day_at_three_oslo_time(self) -> None:
         triggers = scheduled_triggers(_utc(22, 0), _utc(24, 12))
 
@@ -100,6 +118,11 @@ class TestScheduledTriggers:
 
 
 class TestDroppedTriggers:
+    def test_a_running_sweep_does_not_drop_the_trigger_at_its_exact_start(self) -> None:
+        trigger = _utc(26, 1)
+
+        assert dropped_triggers([], trigger, now=_utc(26, 21)) == []
+
     def test_the_real_overrun_of_24_september_dropped_the_25th(self) -> None:
         """The run recorded in production: 24.09 01:00Z to 25.09 04:36Z."""
         run = _run(_utc(24, 1, 0) + timedelta(seconds=30), _utc(25, 4, 36))

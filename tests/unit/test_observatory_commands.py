@@ -10,6 +10,7 @@ real one lands.
 import hashlib
 import json
 import os
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,7 @@ from typer.testing import CliRunner
 import lovspor.observatory.commands as observatory_commands
 import lovspor.observatory.registry_commands as observatory_registry_commands
 import lovspor.observatory.registry_io as observatory_registry_io
+import lovspor.observatory.status_report as observatory_status_report
 from lovspor.cli import app
 from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
@@ -73,6 +75,7 @@ from lovspor.observatory.status_report import (
     _echo_switch,
     _echo_triggers,
     _hm,
+    echo_status_report,
 )
 from lovspor.observatory.storage import (
     ENV_CORPUS_ROOT,
@@ -3808,6 +3811,75 @@ class TestAddressReport:
 
 
 class TestStatus:
+    def test_trigger_stamps_are_utc_independent_of_the_host_timezone(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_tz = os.environ.get("TZ")
+        monkeypatch.setenv("TZ", "America/Los_Angeles")
+        time.tzset()
+        try:
+            held_by = datetime(2026, 9, 24, 3, 0, tzinfo=UTC)
+            _echo_triggers(
+                [
+                    DroppedTrigger(
+                        scheduled_at=datetime(2026, 9, 25, 1, 0, tzinfo=UTC),
+                        held_by=held_by,
+                        still_running=False,
+                    )
+                ],
+                held_by,
+                datetime(2026, 9, 24, 4, 0, tzinfo=UTC),
+            )
+        finally:
+            if original_tz is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original_tz
+            time.tzset()
+
+        output = capsys.readouterr().out
+        assert "running:    since 2026-09-24T03:00:00+00:00" in output
+        assert "held by the sweep started 2026-09-24T03:00:00+00:00" in output
+
+    def test_status_uses_the_newest_run_and_one_clock_read(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        now = datetime(2030, 9, 26, 21, 0, tzinfo=UTC)
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz: object = None) -> datetime:
+                assert tz is UTC
+                return now
+
+        def run(name: str, started: datetime) -> SweepRun:
+            return SweepRun(
+                run_id=name,
+                started_at=started,
+                finished_at=started + timedelta(hours=1),
+                active_sources=1,
+                sources_completed=1,
+                sources_refused=0,
+                captured=0,
+                failed_fetches=0,
+                unchanged=1,
+                status="success",
+            )
+
+        older = run("older", now - timedelta(days=3))
+        newest = run("newest", now - timedelta(hours=18))
+        running = datetime(2030, 9, 25, 0, 0, tzinfo=UTC)
+        monkeypatch.setattr(observatory_status_report, "datetime", FixedDatetime)
+        monkeypatch.delenv(ENV_HEARTBEAT_URL, raising=False)
+
+        state = echo_status_report(SourceRegistry(), [older, newest], running)
+
+        output = capsys.readouterr().out
+        assert state == CadenceState(age=timedelta(hours=18), overdue=False)
+        assert "started:    2030-09-26T03:00:00+00:00" in output
+        assert "started:    2030-09-23T21:00:00+00:00" not in output
+        assert "dropped:    2 in the last 14 days" in output
+
     def test_an_armed_switch_shows_only_its_host(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
