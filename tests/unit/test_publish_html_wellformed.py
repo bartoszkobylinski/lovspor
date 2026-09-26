@@ -12,6 +12,7 @@ its own element stack and refuses any end tag that does not close the element
 on top of it.
 """
 
+import re
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -77,6 +78,25 @@ def _parse(page: Path) -> StrictOutline:
     return parser
 
 
+_ESCAPED = re.compile(r"\\([!-/:-@\[-`{-~])")
+_LINKED = re.compile(r"\[([^\]]*)\]\([^)]+\)")
+_STARRED = re.compile(r"\*{1,3}(.+?)\*{1,3}")
+
+
+def _visible(text: str) -> str:
+    """What a reader sees of a Markdown heading: link labels, not targets;
+    emphasised words, not their stars; an escaped character, not its
+    backslash. Escapes are set aside first so ``\\*`` never opens emphasis."""
+    literals: list[str] = []
+
+    def keep(match: re.Match[str]) -> str:
+        literals.append(match.group(1))
+        return f"\x00{len(literals) - 1}\x00"
+
+    text = _STARRED.sub(r"\1", _LINKED.sub(r"\1", _ESCAPED.sub(keep, text)))
+    return re.sub("\x00(\\d+)\x00", lambda m: literals[int(m.group(1))], text)
+
+
 def _source_outline(markdown: str) -> Outline:
     """``#``, ``##`` and ``###`` lines of the body, in order, read without the renderer."""
     body = markdown.split("\n---\n", 1)[1]
@@ -84,7 +104,7 @@ def _source_outline(markdown: str) -> Outline:
     for line in body.splitlines():
         marks, _, text = line.partition(" ")
         if marks in {"#", "##", "###"}:
-            outline.append((len(marks), text.strip()))
+            outline.append((len(marks), " ".join(_visible(text).split())))
     return outline
 
 
