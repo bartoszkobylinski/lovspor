@@ -291,6 +291,51 @@ class TestUnmeasuredNotices:
 
         assert mutation_scope.unmeasured_notices("src/lovspor/x.py", lines, UNMEASURED_SOURCE) == []
 
+    @pytest.mark.parametrize(
+        ("source", "changed_lines"),
+        [
+            (
+                '''\
+@command()
+def decorated():
+    """Changed function docstring."""
+    return 1
+''',
+                {3},
+            ),
+            (
+                '''\
+@dataclass
+class Decorated:
+    """Changed class docstring."""
+
+    def value(self):
+        return 1
+''',
+                {3},
+            ),
+            (
+                """\
+@command()
+def decorated():
+    import changed_dependency
+
+    return changed_dependency.VALUE
+""",
+                {3},
+            ),
+        ],
+    )
+    def test_inert_lines_nested_in_skipped_regions_raise_no_notice(
+        self,
+        mutation_scope: ModuleType,
+        source: str,
+        changed_lines: set[int],
+    ) -> None:
+        # _is_inert defines imports and docstrings as operator-free "anywhere";
+        # enclosing them in a decorated region must not turn them into code.
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", changed_lines, source) == []
+
     def test_unparseable_source_raises_no_notice(self, mutation_scope: ModuleType) -> None:
         # the whole module is in scope then (`lovspor.x.*`), so nothing is unmeasured
         assert mutation_scope.unmeasured_notices("src/lovspor/x.py", {1}, "def broken(:\n") == []

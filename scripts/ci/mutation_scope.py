@@ -156,8 +156,6 @@ def _region_of(node: ast.stmt, class_name: str) -> Unit | None:
         return Unit(f"decorated function {_qualified(class_name, node.name)}", start, end)
     if isinstance(node, ast.ClassDef):
         return Unit(f"decorated class {_qualified(class_name, node.name)}", start, end)
-    if _is_inert(node):
-        return None
     return Unit(f"class body {class_name}" if class_name else "module level", start, end)
 
 
@@ -193,6 +191,16 @@ def code_lines(source: str) -> set[int]:
     return lines
 
 
+def inert_lines(tree: ast.Module) -> set[int]:
+    """Lines of every import and docstring, at any depth, even inside a
+    decorated region: no mutant could measure them there either."""
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.stmt) and _is_inert(node):
+            lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return lines
+
+
 def _ranges(lines: list[int]) -> str:
     spans: list[list[int]] = []
     for line in sorted(lines):
@@ -209,7 +217,7 @@ def unmeasured_notices(path: str, lines: set[int], source: str) -> list[str]:
         tree = ast.parse(source)
     except SyntaxError:
         return []
-    changed = lines & code_lines(source)
+    changed = (lines & code_lines(source)) - inert_lines(tree)
     notices = []
     for region in unmeasured_regions(tree):
         hit = [line for line in changed if region.contains(line)]
