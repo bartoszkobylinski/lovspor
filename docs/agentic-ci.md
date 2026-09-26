@@ -358,6 +358,19 @@ Two rules follow, and they are pinned by tests:
   `needs-human:pipeline`. Until this existed, both deaths on PR #269 were reported
   as `codex-tests BLOCKED before the tests ran` — the tests had run; the machine
   stopped.
+- **A rejected credential is an operator action, not a pipeline failure (issue
+  #270).** When the lane reached its own failure, `codex-tests-report` also fetches
+  that job's log (`actions: read`) and hands it to the classifier with `--log`. A
+  `##[error]` annotation carrying git's refusal of the credential — `could not read
+  Username for 'https://github.com': terminal prompts disabled`, verbatim from the
+  expired `LOVSPOR_CI_PUSH_TOKEN` of 2026-09-10, or `Authentication failed for
+  'https://github.com/…'` — makes the verdict `credential`. The comment names the
+  job, the failed step, the matched line and the secret the job authenticates with
+  (`LOVSPOR_CI_PUSH_TOKEN` for `codex-tests`, the per-run `GITHUB_TOKEN` otherwise),
+  and gives the `gh secret set` / `gh run rerun` moves. The label stays
+  `needs-human:pipeline`. A log that cannot be fetched is no evidence: the verdict
+  falls back to the old wording. `mutation-remediation.yml` does not pass `--log`
+  and is unchanged.
 - An agent job that dies **with its runner** is reported from outside it.
   Both escalations are steps of that job, and a step cannot run on a runner that
   no longer exists — so no in-job condition can cover the case (issue #193). On

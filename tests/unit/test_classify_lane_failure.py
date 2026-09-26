@@ -178,3 +178,141 @@ def test_the_cli_reads_stdin_and_uses_the_documented_default_lanes(
         "job=codex-tests",
         "step=",
     ]
+
+
+# Issue #270, verbatim from the codex-tests checkout of run 34457835291 (job
+# 102808288828, PR #269, 2026-09-10 08:55 UTC). The push token had expired: git
+# was handed a credential, GitHub refused it, git fell back to asking for a
+# username and GIT_TERMINAL_PROMPT=0 made that fatal. The comment on #270
+# confirms it — renewing LOVSPOR_CI_PUSH_TOKEN was the only change before the
+# next rerun cleared the checkout.
+_EXPIRED_TOKEN_LOG = (
+    "2026-09-10T08:55:12.0000000Z [command]/usr/bin/git -c protocol.version=2 fetch"
+    " --no-tags --prune --no-recurse-submodules --unshallow origin"
+    " +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*\n"
+    "2026-09-10T08:55:13.0000000Z ##[error]fatal: could not read Username for"
+    " 'https://github.com': terminal prompts disabled\n"
+    "2026-09-10T08:55:13.0000000Z The process '/usr/bin/git' failed with exit code 128\n"
+)
+
+_CHECKOUT = "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+
+
+def _checkout_death() -> list[dict[str, Any]]:
+    return [
+        _job(
+            "codex-tests",
+            "failure",
+            [
+                ("Set up job", "completed", "success"),
+                (_CHECKOUT, "completed", "failure"),
+                ("The author lane did not finish", "completed", "skipped"),
+            ],
+        )
+    ]
+
+
+def test_an_expired_token_at_checkout_is_a_credential_failure() -> None:
+    """#270: every PR sat at `codex-tests BLOCKED before the tests ran` for
+    eight hours while the cause was an expired secret. A credential is an
+    operator action; nothing in the diff and no rerun can fix it."""
+    verdict = classify_lane_failure.classify(
+        _checkout_death(), ["codex-author", "codex-tests"], _EXPIRED_TOKEN_LOG
+    )
+
+    assert verdict.kind == "credential"
+    assert verdict.job == "codex-tests"
+    assert verdict.step == _CHECKOUT
+    assert verdict.signature == (
+        "could not read Username for 'https://github.com': terminal prompts disabled"
+    )
+    assert verdict.is_infrastructure is False
+
+
+def test_gits_other_wording_of_a_rejected_token_is_a_credential_failure() -> None:
+    """Not observed in #270: git's own wording for the same refusal when the
+    username-prompt fallback does not happen (a credential helper answered)."""
+    line = "fatal: Authentication failed for 'https://github.com/bartoszkobylinski/lovspor/'"
+    log = f"2026-09-10T08:55:13.0000000Z ##[error]{line}\n"
+
+    verdict = classify_lane_failure.classify(_checkout_death(), ["codex-tests"], log)
+
+    assert verdict.kind == "credential"
+    assert verdict.signature in line
+
+
+def test_a_signature_outside_an_error_annotation_is_not_evidence() -> None:
+    """A failing test that prints its own fixture — this file's, for one — must
+    not turn a code failure into a credential outage. Only the runner's own
+    `##[error]` annotation, right after the timestamp, counts."""
+    log = (
+        '2026-09-10T08:55:13.0000000Z E    log = "##[error]fatal: could not read'
+        " Username for 'https://github.com': terminal prompts disabled\"\n"
+        "2026-09-10T08:55:13.0000000Z could not read Username for"
+        " 'https://github.com': terminal prompts disabled\n"
+    )
+
+    verdict = classify_lane_failure.classify(_checkout_death(), ["codex-tests"], log)
+
+    assert verdict.kind == "in_job"
+    assert verdict.signature == ""
+
+
+def test_a_death_with_the_runner_stays_infrastructure_whatever_the_log_says() -> None:
+    """The log only refines a job that reached its own failure. A step frozen
+    mid-flight is the machine, and a stale auth line earlier in the log does
+    not change which failure ended the job."""
+    jobs = [_job("codex-author", "failure", [("Codex", "in_progress", None)])]
+
+    verdict = classify_lane_failure.classify(jobs, ["codex-author"], _EXPIRED_TOKEN_LOG)
+
+    assert verdict.kind == "infrastructure"
+    assert verdict.signature == ""
+
+
+def test_an_ordinary_failure_with_a_clean_log_keeps_its_verdict() -> None:
+    log = "2026-09-10T08:55:13.0000000Z ##[error]Process completed with exit code 1.\n"
+
+    verdict = classify_lane_failure.classify(_checkout_death(), ["codex-tests"], log)
+
+    assert verdict == classify_lane_failure.Verdict("in_job", job="codex-tests")
+
+
+def test_the_cli_reports_the_credential_and_its_evidence(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The fourth line exists only when a log was handed over, so a caller
+    without `--log` (mutation-remediation.yml) reads the same three lines as
+    before. It carries the matched signature constant, never the raw log line:
+    the workflow interpolates these outputs, and a log is attacker-reachable."""
+    jobs = tmp_path / "jobs.json"
+    jobs.write_text(json.dumps({"jobs": _checkout_death()}), encoding="utf-8")
+    log = tmp_path / "lane.log"
+    log.write_text(_EXPIRED_TOKEN_LOG, encoding="utf-8")
+
+    assert classify_lane_failure.main(["--jobs", str(jobs), "--log", str(log)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "kind=credential",
+        "job=codex-tests",
+        f"step={_CHECKOUT}",
+        "signature=could not read Username for 'https://github.com': terminal prompts disabled",
+    ]
+
+
+def test_an_empty_log_is_no_evidence(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The workflow writes an empty log when the download fails; that must
+    downgrade to the old verdict, not fail the classifier."""
+    jobs = tmp_path / "jobs.json"
+    jobs.write_text(json.dumps({"jobs": _checkout_death()}), encoding="utf-8")
+    log = tmp_path / "lane.log"
+    log.write_text("", encoding="utf-8")
+
+    assert classify_lane_failure.main(["--jobs", str(jobs), "--log", str(log)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "kind=in_job",
+        "job=codex-tests",
+        "step=",
+        "signature=",
+    ]
