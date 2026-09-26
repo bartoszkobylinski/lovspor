@@ -3,6 +3,7 @@
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +54,7 @@ def test_run_metadata_requires_the_confirmatory_analysis_plan_hash() -> None:
 
 def test_aggregate_scoring_cli_requires_a_pair_manifest() -> None:
     result = subprocess.run(
-        ["uv", "run", "python", str(SCORE_RUN_PATH), "--help"],
+        [sys.executable, str(SCORE_RUN_PATH), "--help"],
         check=True,
         capture_output=True,
         text=True,
