@@ -574,6 +574,22 @@ class TestContentRunFold:
 
         assert state.content == {URL: ContentRun(SAME, 0)}
 
+    def test_a_newer_capture_can_extend_the_run_after_a_late_record_reset(self) -> None:
+        """The doubtful late record ends the old run, but must not leave the
+        URL unable to establish a new run from its retained latest bytes."""
+        day_4 = datetime(2026, 8, 20, tzinfo=UTC)
+
+        state = capture_state(
+            [
+                _observation(DAY_2),
+                _observation(DAY_3),
+                _observation(DAY_1),
+                _observation(day_4),
+            ]
+        )
+
+        assert state.content == {URL: ContentRun(SAME, 1)}
+
     def test_a_failure_neither_extends_nor_ends_a_run(self) -> None:
         """A failure carries no bytes, so it says nothing about whether the
         content changed — neither a timeout nor a 404."""
