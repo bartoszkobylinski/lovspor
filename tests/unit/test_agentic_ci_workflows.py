@@ -1390,6 +1390,73 @@ class TestADeadMachineIsNotAVerdictOnTheDiff:
         assert 'gh pr edit "$PR" --add-label "needs-human:pipeline"' in report
 
 
+class TestARejectedCredentialIsAnOperatorAction:
+    """Issue #270, item 2. From 2026-09-10 08:55 UTC every `codex-tests` run
+    died in `actions/checkout` on `fatal: could not read Username for
+    'https://github.com': terminal prompts disabled` — the push token had
+    expired. The pipeline called it a pipeline failure, so the first diagnosis
+    chased the runner's clone, and a rerun reproduced it byte for byte. A
+    rejected credential is an operator action, so the comment names it."""
+
+    JOB = "codex-tests-report"
+    REPORT = "Report a codex-tests job that never reached its own escalation"
+
+    def _steps(self) -> list[dict[str, Any]]:
+        return _steps("pr-pipeline.yml", self.JOB)
+
+    def _report(self) -> dict[str, Any]:
+        return _named_step(self._steps(), self.REPORT)
+
+    def test_the_classifier_reads_the_failed_lane_jobs_log(self) -> None:
+        """The jobs payload says a step failed, never why; the refusal is only
+        in the job's log."""
+        command = _named_step(self._steps(), "Classify the lane failure")["run"]
+
+        assert "/actions/jobs/" in command
+        assert "/logs" in command
+        assert '--log "$RUNNER_TEMP/lane.log"' in command
+        # A failed download leaves an empty log, which is no evidence rather
+        # than a dead classifier (#193 one level up).
+        assert ': > "$RUNNER_TEMP/lane.log"' in command
+        assert command.index(': > "$RUNNER_TEMP/lane.log"') < command.index("/logs")
+
+    def test_the_reporter_may_read_job_logs(self) -> None:
+        assert self._job_permissions()["actions"] == "read"
+
+    def _job_permissions(self) -> dict[str, str]:
+        permissions: dict[str, str] = _workflow("pr-pipeline.yml")["jobs"][self.JOB]["permissions"]
+        return permissions
+
+    def test_a_rejected_credential_is_reported_as_one(self) -> None:
+        command = self._report()["run"]
+
+        assert '"${{ steps.classify.outputs.kind }}" = "credential"' in command
+        assert "REJECTED CREDENTIAL" in command
+        assert "not the diff" in command
+        assert self._report()["env"]["SIGNATURE"] == "${{ steps.classify.outputs.signature }}"
+        assert "$SIGNATURE" in command
+
+    def test_the_comment_names_the_secret_the_failed_checkout_used(self) -> None:
+        """The secret is named from the workflow itself: `codex-tests` checks
+        out with the push token, so that is the one the comment tells the
+        operator to renew."""
+        checkout = _steps("pr-pipeline.yml", "codex-tests")[0]
+        secret = checkout["with"]["token"].removeprefix("${{ secrets.").removesuffix(" }}")
+        command = self._report()["run"]
+
+        assert secret == "LOVSPOR_CI_PUSH_TOKEN"
+        assert f'codex-tests) secret="{secret}"' in command
+        assert "gh secret set $secret --repo ${{ github.repository }}" in command
+
+    def test_the_credential_still_blocks_on_the_retractable_pipeline_label(self) -> None:
+        """Same label as every other lane failure, so `ready` retracts it once
+        the renewed token lets a run through."""
+        command = self._report()["run"]
+
+        assert command.count("--add-label") == 1
+        assert command.index('--add-label "needs-human:pipeline"') < command.index("credential")
+
+
 class TestEveryExpressionResolvesInItsOwnJob:
     """Both defects the independent author caught while the agent lanes were
     being split were the same mistake: a step moved to another job kept an
