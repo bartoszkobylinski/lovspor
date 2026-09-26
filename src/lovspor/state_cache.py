@@ -116,7 +116,7 @@ class ByteBudgetCache[V]:
                 return False
             self._entries[key] = (value, cost)
             self._entries.move_to_end(key)
-            self._evict_for(key)
+            self._evict_to_budget()
             return True
 
     def resize(self, key: str, cost: int) -> bool:
@@ -131,20 +131,23 @@ class ByteBudgetCache[V]:
                 return False
             self._entries[key] = (entry[0], cost)
             self._entries.move_to_end(key)
-            self._evict_for(key)
+            self._evict_to_budget()
             return True
 
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
 
-    def _evict_for(self, keep: str) -> None:
-        """Drop least recently used entries other than ``keep`` until the
-        budget holds. Callers hold the lock and have checked that ``keep``
-        fits on its own, so the loop always ends."""
+    def _evict_to_budget(self) -> None:
+        """Drop least recently used entries until the budget holds.
+
+        The newest entry is never dropped, with no check needed: callers
+        hold the lock, have just moved it to the end and have proven it fits
+        on its own, so dropping every older entry already brings the total
+        within the budget before the loop could reach it.
+        """
         total = sum(cost for _value, cost in self._entries.values())
         for key in list(self._entries):
             if total <= self.budget_bytes:
                 return
-            if key != keep:
-                total -= self._entries.pop(key)[1]
+            total -= self._entries.pop(key)[1]

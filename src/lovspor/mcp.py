@@ -518,7 +518,7 @@ class CorpusReader:
         # a ``git pull`` adds commits but cannot change what an existing
         # commit contains, so these caches can never go stale — only
         # unused. Bounded in bytes, LRU (``lovspor.state_cache``, #223).
-        self._snapshot_states = ByteBudgetCache["_SnapshotData"].from_env()
+        self._snapshot_states: ByteBudgetCache[_SnapshotData] = ByteBudgetCache.from_env()
 
     def _refresh_if_stale(self) -> None:
         """Drop all in-memory caches when ``manifest.json`` changed on disk.
