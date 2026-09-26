@@ -1670,15 +1670,18 @@ class TestADeadRemediationLaneStillEscalates:
         assert "--lane remediate" in classify["run"]
         assert names.index(classify["name"]) < names.index(_DEAD_LANE)
 
-    def test_empty_outputs_still_label_the_open_pr(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("result", ["failure", "cancelled"])
+    def test_empty_outputs_still_label_the_open_pr(self, tmp_path: Path, result: str) -> None:
         env = _dead_lane_sandbox(tmp_path, "250\n", f"{_SHA}\n")
+        env["RESULT"] = result
 
         calls = self._run(tmp_path, env)
 
+        assert "pr list --head fix/x --state open --json number --jq .[0].number" in calls
         assert "pr edit 250 --add-label needs-human:mutation" in calls
         assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "250"]
         body = (tmp_path / "body").read_text()
-        assert "ended 'failure'" in body
+        assert f"ended '{result}'" in body
         assert "unknown" in body
         assert _RUN_URL in body
 
