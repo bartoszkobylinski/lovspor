@@ -2853,3 +2853,53 @@ read a meaning into them. Argued from the protocol and the dependency, hence
 pinned; the same entry exists for survey_probe._body.
 """
 assumption_test = "tests/unit/test_observatory_survey_probe.py::TestWhatTheEquivalentsRegisterAssumes::test_httpx_header_names_are_case_insensitive"
+
+[[equivalent]]
+file = "src/lovspor/observatory/freshness_index.py"
+symbol = "_state_binding"
+registered = "2026-09-26, PR #428, from run 36262522583"
+mutation = """
+-                url: run.model_dump(mode="json") for url, run in sorted(index.content.items())
++                url: run.model_dump(mode=None) for url, run in sorted(index.content.items())
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+pydantic selects the JSON serialiser only for the exact string "json"; None
+takes the Python path. `StoredRun` holds exactly two fields, `sha256: str` and
+`unchanged: int`, both JSON-native, so the Python path returns the same dict of
+the same str and int values and the canonical `json.dumps` bytes, hence the
+binding digest, are identical. Hand-applied on PR #428: the freshness and
+freshness-index suites pass unchanged. The assumption test re-checks every mode
+spelling for StoredRun (including an int beyond 64 bits), so a field type the
+Python path renders differently turns this waiver into a red test.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/freshness_index.py"
+symbol = "_state_binding"
+registered = "2026-09-26, PR #428, from run 36262522583"
+mutation = """
+-                url: run.model_dump(mode="json") for url, run in sorted(index.content.items())
++                url: run.model_dump(mode="XXjsonXX") for url, run in sorted(index.content.items())
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: any mode other than the exact
+string "json" takes pydantic's Python path, whose output for `StoredRun` (str
+and int only) serialises to the same canonical bytes.
+"""
+
+[[equivalent]]
+file = "src/lovspor/observatory/freshness_index.py"
+symbol = "_state_binding"
+registered = "2026-09-26, PR #428, from run 36262522583"
+mutation = """
+-                url: run.model_dump(mode="json") for url, run in sorted(index.content.items())
++                url: run.model_dump(mode="JSON") for url, run in sorted(index.content.items())
+"""
+assumption_test = "tests/unit/test_mutation_equivalents_assumptions.py::test_assumption_a_python_mode_dump_serialises_like_json_mode"
+justification = """
+Same argument as the `mode=None` entry above: pydantic matches the mode string
+case-sensitively, so "JSON" is the Python path, whose output for `StoredRun`
+(str and int only) serialises to the same canonical bytes.
+"""
