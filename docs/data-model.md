@@ -129,7 +129,7 @@ as an error notice rather than legal text, which the corpus withholds rather tha
 publishing (see `lovspor.parsing.placeholder`).
 
 A `removed` record is a **tombstone** — `status` is flipped to
-`"removed"`, `xml_hash` / `markdown_path` / `last_seen` / `slug` / `title` are kept,
+`"removed"`, `doc_type` / `xml_hash` / `markdown_path` / `source_dataset` / `last_seen` / `slug` / `title` are kept,
 `removed_reason` is set as above, and
 `total_changes` / `last_changed` / `eu_basis` / `embedding_hash` / `renderer_version` /
 `embedding_space` / `embedding_space_id` / `embedding_input_hash` revert to `None` — a tombstone claims no

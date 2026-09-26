@@ -1303,11 +1303,11 @@ def _carry_tombstones(
 
 
 def _tombstone(old: ManifestRecord, reason: str | None = None) -> ManifestRecord:
-    """Mark a record as removed. Preserves all original fields so the
-    audit trail remains intact: same xml_hash, same markdown_path,
-    same last_seen (when the content was last observed), same slug and
-    title (for cross-reference and historical INDEX inspection), only
-    status flips.
+    """Mark a record removed; it is rebuilt, not copied (owner decision on #401).
+    Keeps ``doc_type``, ``xml_hash``, ``markdown_path``, ``source_dataset``, ``last_seen``,
+    ``slug``, ``title``. Drops to ``None`` ``total_changes``, ``last_changed``, ``eu_basis``,
+    ``embedding_hash``, ``embedding_space``, ``embedding_space_id``, ``embedding_input_hash``,
+    ``renderer_version``: the removal's audit trail is ``history/<slug>.json``.
 
     ``reason`` is ``None`` for an ordinary removal (the doc left the upstream
     dataset) and set when the corpus withheld a doc upstream still lists — see
