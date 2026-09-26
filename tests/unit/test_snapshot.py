@@ -449,6 +449,32 @@ def test_iter_texts_yields_only_wanted_files_present_in_the_tree(tmp_path: Path)
     assert texts == {"lover/b.md": "B\n"}
 
 
+def test_iter_texts_narrows_archive_to_suffixes_of_present_wanted_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo(tmp_path)
+    (repo / "lover").mkdir()
+    (repo / "lover" / "wanted.md").write_text("wanted\n")
+    (repo / "lover" / "unrelated.txt").write_text("unrelated\n")
+    (repo / "manifest.json").write_text("{}")
+    sha = _commit_all(repo, "mixed suffixes", "2026-05-01T12:00:00Z")
+    commands: list[list[str]] = []
+
+    class RecordingPopen(subprocess.Popen[bytes]):
+        def __init__(self, command: list[str], **kwargs: object) -> None:
+            commands.append(command)
+            super().__init__(command, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(snapshot_module.subprocess, "Popen", RecordingPopen)
+
+    assert dict(CorpusSnapshot(repo, sha).iter_texts({"lover/wanted.md"})) == {
+        "lover/wanted.md": "wanted\n"
+    }
+    archive_commands = [command for command in commands if command[:2] == ["git", "archive"]]
+    assert archive_commands == [["git", "archive", "--format=tar", sha, "--", ":(glob)**/*.md"]]
+
+
 def test_iter_texts_reads_paths_of_every_suffix_and_none(tmp_path: Path) -> None:
     # The archive is narrowed by suffix; a wanted path of another suffix,
     # or of none at all, must still be read rather than silently dropped.
