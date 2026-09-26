@@ -1,10 +1,11 @@
 """What `observatory status` prints, section by section.
 
 Split out of commands.py so the operator report can grow — the dead-man
-switch and the engine commit joined it under issues #347 and #219 — without
-the command module growing with it.
+switch and the engine commit joined it under issues #347 and #219, the
+dropped triggers under #218 — without the command module growing with it.
 """
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -12,7 +13,20 @@ import typer
 
 from lovspor.observatory.heartbeat import heartbeat_url
 from lovspor.observatory.registry import SourceRegistry, domains_claimed_twice
-from lovspor.observatory.sweeps import OBSERVATION_SLA, SWEEP_DEADLINE, CadenceState, SweepRun
+from lovspor.observatory.sweeps import (
+    OBSERVATION_SLA,
+    SWEEP_DEADLINE,
+    CadenceState,
+    SweepRun,
+    cadence_state,
+)
+from lovspor.observatory.triggers import (
+    DROPPED_TRIGGER_LOOKBACK,
+    SCHEDULE_TIME,
+    SCHEDULE_ZONE,
+    DroppedTrigger,
+    dropped_triggers,
+)
 
 
 def _hm(delta: timedelta) -> str:
@@ -112,3 +126,43 @@ def _echo_cadence(state: CadenceState, run: SweepRun | None) -> None:
     typer.echo(f"  age:        {_hm(state.age) if state.age is not None else unknown}")
     typer.echo(f"  deadline:   {_hm(SWEEP_DEADLINE)}")
     typer.echo(f"  state:      {'OVERDUE' if state.overdue else 'OK'}")
+
+
+def _echo_triggers(
+    dropped: Sequence[DroppedTrigger], running: datetime | None, now: datetime
+) -> None:
+    """The scheduled starts launchd refused because a sweep still held the job.
+
+    Nothing else records them: launchd drops a trigger for a running label
+    without a trace, so a multi-day sweep reads as one quiet run (#218).
+    """
+    typer.echo("\nScheduled triggers")
+    typer.echo(f"  schedule:   daily {SCHEDULE_TIME:%H:%M} {SCHEDULE_ZONE.key}")
+    if running is None:
+        typer.echo("  running:    no sweep on this host")
+    else:
+        typer.echo(f"  running:    since {_stamp(running)} ({_hm(now - running)})")
+    typer.echo(f"  dropped:    {len(dropped)} in the last {DROPPED_TRIGGER_LOOKBACK.days} days")
+    for trigger in dropped:
+        held = " (still running)" if trigger.still_running else ""
+        at = trigger.scheduled_at.astimezone(SCHEDULE_ZONE).isoformat(timespec="minutes")
+        typer.echo(f"    {at}  held by the sweep started {_stamp(trigger.held_by)}{held}")
+
+
+def _stamp(moment: datetime) -> str:
+    return moment.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def echo_status_report(
+    registry: SourceRegistry, runs: Sequence[SweepRun], running: datetime | None
+) -> CadenceState:
+    """Every section of `observatory status`; the cadence decides its exit code."""
+    now = datetime.now(UTC)
+    latest = max(runs, key=lambda run: run.started_at, default=None)
+    state = cadence_state(latest, now=now)
+    _echo_sources(registry)
+    _echo_last_sweep(latest)
+    _echo_cadence(state, latest)
+    _echo_triggers(dropped_triggers(runs, running, now=now), running, now)
+    _echo_switch()
+    return state
