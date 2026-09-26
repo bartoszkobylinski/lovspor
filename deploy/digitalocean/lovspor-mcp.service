@@ -30,6 +30,8 @@ Environment=LOVVERK_CORPUS_PATH=/opt/lovspor/.cache/lovverk
 # semantic_search. LOVSPOR_SEMANTIC_QUERY_MAX_TOKENS caps the query before it is
 # embedded (this is what fixes the price of one call) and
 # LOVSPOR_SEMANTIC_QUERY_CACHE_ENTRIES sizes the in-process query-vector cache.
+# LOVSPOR_HISTORICAL_CACHE_MIB (default 256) is the byte budget for cached
+# recorded_at states; it is sized against MemoryMax below (issue #223).
 # See docs/mcp.md § Limits and § What the hosted endpoint costs to run.
 # Read ONLY at start — run `systemctl restart lovspor-mcp` after editing it.
 EnvironmentFile=/etc/lovspor/lovspor.env

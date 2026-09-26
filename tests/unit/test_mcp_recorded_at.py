@@ -29,6 +29,7 @@ from lovspor.mcp import (
     build_server,
 )
 from lovspor.snapshot import HistoryBoundaryError, StateIntegrityError
+from lovspor.state_cache import STATE_OVERHEAD_BYTES, text_bytes
 from lovspor.timetravel import _RevisionEntry
 
 # ---------- fixture: a two-state corpus ----------
@@ -638,16 +639,113 @@ def test_states_for_dates_resolving_to_one_commit_share_caches(
     assert a._data is b._data
 
 
-def test_snapshot_state_cache_is_bounded_fifo(reader: CorpusReader) -> None:
-    reader._snapshot_states.clear()
-    for i in range(4):
-        reader._snapshot_states[f"k{i}"] = object()  # type: ignore[assignment]
+# ---------- byte-budgeted state cache (issue #223) ----------
 
+
+def test_historical_search_keeps_bodies_charged_to_the_state(
+    reader: CorpusReader,
+) -> None:
     state = reader.at_state("2026-05-05")
 
-    assert len(reader._snapshot_states) == 4
-    assert "k0" not in reader._snapshot_states
-    assert state.corpus_commit in reader._snapshot_states
+    state.search_body("tekst")
+
+    kept = state._data.search_bodies
+    assert kept is not None
+    assert reader._snapshot_states.get(state.corpus_commit) is state._data
+    assert reader._snapshot_states.total_bytes == STATE_OVERHEAD_BYTES + text_bytes(kept)
+
+
+def test_bodies_over_the_budget_are_served_but_not_kept(
+    reader: CorpusReader,
+    corpus: tuple[Path, str, str],
+) -> None:
+    # The state fits, its bodies do not: the answer must be the one a
+    # caching reader gives, and nothing more may stay resident.
+    repo, _, _ = corpus
+    expected = CorpusReader(repo).at_state("2026-05-05").search_body("tekst")
+    reader._snapshot_states.budget_bytes = STATE_OVERHEAD_BYTES + 1
+    state = reader.at_state("2026-05-05")
+
+    result = state.search_body("tekst")
+
+    assert result == expected
+    assert result["results"]
+    assert state._data.search_bodies is None
+    assert reader._snapshot_states.get(state.corpus_commit) is state._data
+    assert reader._snapshot_states.total_bytes == STATE_OVERHEAD_BYTES
+
+
+def test_uncached_bodies_are_read_once_per_search(
+    reader: CorpusReader,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Bodies not kept must still be read once per call, not once per doc.
+    reader._snapshot_states.budget_bytes = STATE_OVERHEAD_BYTES + 1
+    reads: list[int] = []
+    real = mcp_module._SnapshotState._load_search_bodies
+
+    def counted(self: object) -> dict[str, str]:
+        reads.append(1)
+        return real(self)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(mcp_module._SnapshotState, "_load_search_bodies", counted)
+    state = reader.at_state("2026-05-05")
+
+    state.search_body("tekst")
+    state.search_body("tekst")
+
+    assert len(reads) == 2
+    assert len(state._slug_index()) > 1
+
+
+def test_a_budget_smaller_than_one_state_serves_every_call_uncached(
+    corpus: tuple[Path, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The operator's setting reaches the reader through the environment.
+    repo, _, _ = corpus
+    expected = CorpusReader(repo).at_state("2026-05-10").search_body("tekst")
+    monkeypatch.setenv("LOVSPOR_HISTORICAL_CACHE_MIB", "1")
+    reader = CorpusReader(repo)
+
+    first = reader.at_state("2026-05-10")
+    result = first.search_body("tekst")
+
+    assert result == expected
+    assert reader._snapshot_states.budget_bytes == 1024 * 1024
+    assert reader._snapshot_states.total_bytes == 0
+    assert reader.at_state("2026-05-10")._data is not first._data
+
+
+def test_a_new_state_evicts_the_least_recently_used_one(
+    reader: CorpusReader,
+    corpus: tuple[Path, str, str],
+) -> None:
+    _, sha1, sha2 = corpus
+    reader._snapshot_states.budget_bytes = STATE_OVERHEAD_BYTES * 3 // 2
+
+    reader.at_state("2026-05-05")
+    reader.at_state("2026-05-10")
+
+    assert reader._snapshot_states.get(sha1) is None
+    assert reader._snapshot_states.get(sha2) is not None
+
+
+def test_searching_a_state_evicts_others_to_keep_its_bodies(
+    reader: CorpusReader,
+    corpus: tuple[Path, str, str],
+) -> None:
+    _, sha1, sha2 = corpus
+    older = reader.at_state("2026-05-05")
+    newer = reader.at_state("2026-05-10")
+    reader._snapshot_states.budget_bytes = reader._snapshot_states.total_bytes + 1
+
+    newer.search_body("tekst")
+
+    assert newer._data.search_bodies is not None
+    assert reader._snapshot_states.get(sha1) is None
+    assert reader._snapshot_states.get(sha2) is newer._data
+    assert older.search_body("tekst")["corpus_commit"] == sha1
 
 
 def test_lineage_cutoff_is_end_of_day_inclusive(
