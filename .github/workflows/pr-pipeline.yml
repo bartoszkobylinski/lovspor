@@ -548,6 +548,9 @@ jobs:
     if: ${{ !cancelled() && (needs.codex-tests.result == 'failure' || needs.codex-author.result == 'failure') }}
     runs-on: ubuntu-latest
     permissions:
+      # Job logs (#270): the refusal of a credential is only in the failed
+      # lane job's log, never in the jobs payload.
+      actions: read
       contents: read
       pull-requests: write
       issues: write
@@ -582,10 +585,24 @@ jobs:
           set -euo pipefail
           gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --paginate > "$RUNNER_TEMP/jobs.json"
-          python3 scripts/ci/classify_lane_failure.py \
-            --jobs "$RUNNER_TEMP/jobs.json" \
-            --lane codex-author \
-            --lane codex-tests >> "$GITHUB_OUTPUT"
+          classify() {
+            python3 scripts/ci/classify_lane_failure.py \
+              --jobs "$RUNNER_TEMP/jobs.json" \
+              --lane codex-author \
+              --lane codex-tests "$@"
+          }
+          # Issue #270: an expired push token kills `actions/checkout`, and only
+          # the failed job's log says so. A log that cannot be fetched stays
+          # empty — no evidence, so the verdict falls back to the old wording.
+          job="$(classify | sed -n 's/^job=//p')"
+          : > "$RUNNER_TEMP/lane.log"
+          if [ -n "$job" ]; then
+            id="$(jq -rn --arg name "$job" \
+              'first(inputs | .jobs[] | select(.name == $name) | .id)' "$RUNNER_TEMP/jobs.json")"
+            gh api "repos/${{ github.repository }}/actions/jobs/$id/logs" \
+              > "$RUNNER_TEMP/lane.log" || : > "$RUNNER_TEMP/lane.log"
+          fi
+          classify --log "$RUNNER_TEMP/lane.log" >> "$GITHUB_OUTPUT"
 
       - name: Report a codex-tests job that never reached its own escalation
         # always(): the classifier above is best-effort, and a skipped reporting
@@ -598,6 +615,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           BLOCKED_LABELS: "needs-implementation-fix needs-human:mutation needs-human:pipeline"
+          SIGNATURE: ${{ steps.classify.outputs.signature }}
         run: |
           set -euo pipefail
           # The in-job escalation runs before `codex-tests` completes, so its
@@ -621,6 +639,33 @@ jobs:
               echo ""
               echo "Nothing here is evidence about the implementation. Check the machine, then re-run:"
               echo "\`gh api repos/${{ github.repository }}/actions/runners\`"
+              echo "\`gh run rerun ${{ github.run_id }} --failed\`"
+              echo ""
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            } > "$RUNNER_TEMP/lane-escalation.md"
+          elif [ "${{ steps.classify.outputs.kind }}" = "credential" ]; then
+            # Issue #270: the only lane that authenticates with a stored secret
+            # is `codex-tests` (its checkout carries the push token); every
+            # other lane runs on the per-run GITHUB_TOKEN.
+            case "${{ steps.classify.outputs.job }}" in
+              codex-tests) secret="LOVSPOR_CI_PUSH_TOKEN" ;;
+              *) secret="GITHUB_TOKEN" ;;
+            esac
+            {
+              echo "codex-tests BLOCKED by a REJECTED CREDENTIAL — an operator action, not the diff."
+              echo ""
+              echo "Job \`${{ steps.classify.outputs.job }}\` failed at step"
+              echo "\`${{ steps.classify.outputs.step }}\` and its log carries:"
+              echo "\`$SIGNATURE\`"
+              echo "GitHub refused the credential that job authenticates with: \`$secret\`."
+              echo "A rerun reproduces this byte for byte, and no change to the code can clear it (#270)."
+              echo ""
+              if [ "$secret" = "GITHUB_TOKEN" ]; then
+                echo "\`GITHUB_TOKEN\` is issued per run: check the job's \`permissions:\` block, then re-run:"
+              else
+                echo "Check the token's expiry at https://github.com/settings/tokens, store the renewed one, then re-run:"
+                echo "\`gh secret set $secret --repo ${{ github.repository }}\`"
+              fi
               echo "\`gh run rerun ${{ github.run_id }} --failed\`"
               echo ""
               echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

@@ -1266,6 +1266,7 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
             "author": "${{ steps.author.outputs.author }}",
             "before_sha": "${{ steps.base.outputs.before_sha }}",
             "patch": "${{ steps.patch.outputs.patch }}",
+            "blocked": "${{ steps.blocked.outputs.message }}",
         }
         assert upload["with"]["name"] == artifact
         assert download["with"]["name"] == artifact
@@ -1388,6 +1389,73 @@ class TestADeadMachineIsNotAVerdictOnTheDiff:
 
         assert "codex-tests BLOCKED and reported nothing itself" in report
         assert 'gh pr edit "$PR" --add-label "needs-human:pipeline"' in report
+
+
+class TestARejectedCredentialIsAnOperatorAction:
+    """Issue #270, item 2. From 2026-09-10 08:55 UTC every `codex-tests` run
+    died in `actions/checkout` on `fatal: could not read Username for
+    'https://github.com': terminal prompts disabled` — the push token had
+    expired. The pipeline called it a pipeline failure, so the first diagnosis
+    chased the runner's clone, and a rerun reproduced it byte for byte. A
+    rejected credential is an operator action, so the comment names it."""
+
+    JOB = "codex-tests-report"
+    REPORT = "Report a codex-tests job that never reached its own escalation"
+
+    def _steps(self) -> list[dict[str, Any]]:
+        return _steps("pr-pipeline.yml", self.JOB)
+
+    def _report(self) -> dict[str, Any]:
+        return _named_step(self._steps(), self.REPORT)
+
+    def test_the_classifier_reads_the_failed_lane_jobs_log(self) -> None:
+        """The jobs payload says a step failed, never why; the refusal is only
+        in the job's log."""
+        command = _named_step(self._steps(), "Classify the lane failure")["run"]
+
+        assert "/actions/jobs/" in command
+        assert "/logs" in command
+        assert '--log "$RUNNER_TEMP/lane.log"' in command
+        # A failed download leaves an empty log, which is no evidence rather
+        # than a dead classifier (#193 one level up).
+        assert ': > "$RUNNER_TEMP/lane.log"' in command
+        assert command.index(': > "$RUNNER_TEMP/lane.log"') < command.index("/logs")
+
+    def test_the_reporter_may_read_job_logs(self) -> None:
+        assert self._job_permissions()["actions"] == "read"
+
+    def _job_permissions(self) -> dict[str, str]:
+        permissions: dict[str, str] = _workflow("pr-pipeline.yml")["jobs"][self.JOB]["permissions"]
+        return permissions
+
+    def test_a_rejected_credential_is_reported_as_one(self) -> None:
+        command = self._report()["run"]
+
+        assert '"${{ steps.classify.outputs.kind }}" = "credential"' in command
+        assert "REJECTED CREDENTIAL" in command
+        assert "not the diff" in command
+        assert self._report()["env"]["SIGNATURE"] == "${{ steps.classify.outputs.signature }}"
+        assert "$SIGNATURE" in command
+
+    def test_the_comment_names_the_secret_the_failed_checkout_used(self) -> None:
+        """The secret is named from the workflow itself: `codex-tests` checks
+        out with the push token, so that is the one the comment tells the
+        operator to renew."""
+        checkout = _steps("pr-pipeline.yml", "codex-tests")[0]
+        secret = checkout["with"]["token"].removeprefix("${{ secrets.").removesuffix(" }}")
+        command = self._report()["run"]
+
+        assert secret == "LOVSPOR_CI_PUSH_TOKEN"
+        assert f'codex-tests) secret="{secret}"' in command
+        assert "gh secret set $secret --repo ${{ github.repository }}" in command
+
+    def test_the_credential_still_blocks_on_the_retractable_pipeline_label(self) -> None:
+        """Same label as every other lane failure, so `ready` retracts it once
+        the renewed token lets a run through."""
+        command = self._report()["run"]
+
+        assert command.count("--add-label") == 1
+        assert command.index('--add-label "needs-human:pipeline"') < command.index("credential")
 
 
 class TestEveryExpressionResolvesInItsOwnJob:
@@ -1588,6 +1656,88 @@ class TestUnmeasuredRunSkipsRemediation:
         assert "non-killable" not in body
         assert "--add-label needs-human:mutation" in (tmp_path / "gh-calls").read_text()
         assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "309"]
+
+
+_BLOCKED_BY = "Say what blocked the gate, should remediation change nothing"
+_NO_CHANGE = "Commit and push, or report BLOCKED"
+
+
+class TestTheNoChangeEscalationNamesWhatBlocked:
+    """Issue #423: on PR #395 remediation changed nothing and the sticky said
+    "survivors classified non-killable" over two timed-out mutants and zero
+    survivors. The words now come from the artifact, read on the agent lane by
+    the default-branch helper, and reach the verifier as a job output."""
+
+    PR_395 = "132/33020  🎉 130 🫥 0  ⏰ 2  🤔 0  🙁 0  🔇 0  🧙 0\n"
+
+    def test_the_agent_lane_reads_the_artifact_before_the_pr_checkout(self) -> None:
+        steps = _steps("mutation-remediation.yml", "remediate")
+        names = [step.get("name") for step in steps]
+        blocked = _named_step(steps, _BLOCKED_BY)
+        pr_checkout = next(
+            i for i, s in enumerate(steps) if s.get("with", {}).get("fetch-depth") == 0
+        )
+
+        assert blocked["if"] == "steps.gate.outputs.run == 'true'"
+        assert names.index(_DECIDE) < names.index(_BLOCKED_BY) < pr_checkout
+
+    def test_the_agent_lane_hands_the_timeout_wording_on(self, tmp_path: Path) -> None:
+        _mutation_artifact(tmp_path, self.PR_395, 4)
+        env = _escalation_sandbox(tmp_path) | {"GITHUB_OUTPUT": str(tmp_path / "out")}
+        step = _named_step(_steps("mutation-remediation.yml", "remediate"), _BLOCKED_BY)
+
+        _run_step(_render(step["run"], {"runner.temp": str(tmp_path)}), tmp_path, env)
+
+        (line,) = (tmp_path / "out").read_text().splitlines()
+        assert line.startswith("message=Mutation remediation made no safe test-only change.")
+        assert "2 timed-out mutant(s) got no verdict" in line
+        assert "non-killable" not in line
+
+    def test_the_output_reaches_the_verifier(self) -> None:
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate"]
+        step = _named_step(_steps("mutation-remediation.yml", "remediate-verify"), _NO_CHANGE)
+
+        assert job["outputs"]["blocked"] == "${{ steps.blocked.outputs.message }}"
+        assert step["env"]["BLOCKED_BY"] == "${{ needs.remediate.outputs.blocked }}"
+        assert "non-killable" not in step["run"]
+
+    @staticmethod
+    def _git(repo: Path, *args: str) -> str:
+        identity = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+        done = subprocess.run(
+            ["git", *identity, *args], cwd=repo, check=True, capture_output=True, text=True
+        )
+        return done.stdout.strip()
+
+    def _no_change_body(self, tmp_path: Path, blocked_by: str) -> str:
+        """A clean tree at BEFORE_SHA: the branch where the agent changed nothing."""
+        env = _escalation_sandbox(tmp_path) | {"BLOCKED_BY": blocked_by}
+        for args in (("init", "-q"), ("add", "-A"), ("commit", "-q", "-m", "head")):
+            self._git(tmp_path, *args)
+        env |= {"BEFORE_SHA": self._git(tmp_path, "rev-parse", "HEAD")}
+        step = _named_step(_steps("mutation-remediation.yml", "remediate-verify"), _NO_CHANGE)
+        values = {
+            "needs.remediate.outputs.pr": "309",
+            "needs.remediate.outputs.count": "0",
+            "needs.remediate.outputs.author || 'codex'": "codex",
+        }
+
+        _run_step(_render(step["run"], values), tmp_path, env)
+
+        return (tmp_path / "body").read_text()
+
+    def test_the_sticky_carries_the_agent_lane_wording(self, tmp_path: Path) -> None:
+        body = self._no_change_body(tmp_path, "Blocked by: 2 timed-out mutant(s).")
+
+        assert body.startswith("Blocked by: 2 timed-out mutant(s). Human review required.")
+        assert f"mutation-result-{_SHA}" in body
+
+    def test_a_lost_output_falls_back_without_claiming_survivors(self, tmp_path: Path) -> None:
+        body = self._no_change_body(tmp_path, "")
+
+        assert body.startswith("Mutation remediation made no safe test-only change.")
+        assert "non-killable" not in body
+        assert "survivors" not in body
 
 
 _DEAD_LANE = "Escalate a remediation lane that died without reporting"
