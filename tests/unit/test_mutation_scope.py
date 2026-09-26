@@ -200,3 +200,316 @@ def untouched():
         changed = mutation_scope.changed_lines(base)
 
         assert changed == {"src/lovspor/example.py": {2}}
+
+
+UNMEASURED_SOURCE = '''\
+"""Module docstring."""
+
+import re
+
+_RELEASE_ID = re.compile(
+    r"\\A[0-9a-f]{64}\\Z"
+)
+
+
+def plain():
+    return 1
+
+
+@app.command("status")
+def status(verbose: bool = False):
+    # operator-facing branch
+    if verbose:
+        return 2
+    return 3
+
+
+class Service:
+    """Class docstring."""
+
+    LIMIT = 5
+
+    def method(self):
+        return 4
+
+
+@dataclass
+class Record:
+    def total(self):
+        return 6
+'''
+
+
+class TestUnmeasuredNotices:
+    """#289 / #292: a changed line no mutant can measure is named, not implied covered."""
+
+    def test_a_changed_module_level_constant_is_named(self, mutation_scope: ModuleType) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {5, 6, 7}, UNMEASURED_SOURCE
+        )
+
+        assert notices == ["unmeasured changed lines: src/lovspor/example.py:5-7 (module level)"]
+
+    def test_a_changed_decorated_function_body_names_the_function(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/cli.py", {15, 17, 18}, UNMEASURED_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/cli.py:15,17-18 (decorated function status)"
+        ]
+
+    def test_a_changed_decorator_line_counts_as_the_decorated_function(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices("src/lovspor/cli.py", {14}, UNMEASURED_SOURCE)
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/cli.py:14 (decorated function status)"
+        ]
+
+    def test_class_attributes_and_decorated_classes_are_named(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {25, 34}, UNMEASURED_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:25 (class body Service)",
+            "unmeasured changed lines: src/lovspor/example.py:34 (decorated class Record)",
+        ]
+
+    def test_nested_class_and_async_method_notices_keep_their_qualified_owner(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        source = """\
+class Outer:
+    @dataclass
+    class Record:
+        value: int
+
+    @route.get("/value")
+    async def value(self):
+        return 1
+"""
+
+        notices = mutation_scope.unmeasured_notices("src/lovspor/example.py", {2, 4, 6, 8}, source)
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:2,4 (decorated class Outer.Record)",
+            "unmeasured changed lines: src/lovspor/example.py:6,8 (decorated function Outer.value)",
+        ]
+
+    def test_measured_inert_and_comment_lines_raise_no_notice(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        # docstrings, an import, blank lines, a comment inside a decorated
+        # body, a mutatable function and a mutatable method
+        lines = {1, 2, 3, 4, 10, 11, 16, 23, 27, 28}
+
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", lines, UNMEASURED_SOURCE) == []
+
+    @pytest.mark.parametrize(
+        ("source", "changed_lines"),
+        [
+            (
+                '''\
+@command()
+def decorated():
+    """Changed function docstring."""
+    return 1
+''',
+                {3},
+            ),
+            (
+                '''\
+@dataclass
+class Decorated:
+    """Changed class docstring."""
+
+    def value(self):
+        return 1
+''',
+                {3},
+            ),
+            (
+                """\
+@command()
+def decorated():
+    import changed_dependency
+
+    return changed_dependency.VALUE
+""",
+                {3},
+            ),
+        ],
+    )
+    def test_inert_lines_nested_in_skipped_regions_raise_no_notice(
+        self,
+        mutation_scope: ModuleType,
+        source: str,
+        changed_lines: set[int],
+    ) -> None:
+        # _is_inert defines imports and docstrings as operator-free "anywhere";
+        # enclosing them in a decorated region must not turn them into code.
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", changed_lines, source) == []
+
+    @pytest.mark.parametrize(
+        ("source", "changed_line", "region"),
+        [
+            (
+                "'module docstring'\n\n'executable string expression'\n",
+                3,
+                "module level",
+            ),
+            (
+                "class Service:\n    'class docstring'\n    'executable string expression'\n",
+                3,
+                "class body Service",
+            ),
+            (
+                "@command()\ndef decorated():\n    'function docstring'\n    'executable string expression'\n",  # noqa: E501
+                4,
+                "decorated function decorated",
+            ),
+        ],
+    )
+    def test_only_actual_docstrings_are_inert(
+        self,
+        mutation_scope: ModuleType,
+        source: str,
+        changed_line: int,
+        region: str,
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices("src/lovspor/x.py", {changed_line}, source)
+
+        assert notices == [f"unmeasured changed lines: src/lovspor/x.py:{changed_line} ({region})"]
+
+    @pytest.mark.parametrize(
+        ("source", "changed_lines", "expected"),
+        [
+            pytest.param(
+                '@command()\ndef decorated():\n    f"not a {docstring}"\n    return 1\n',
+                {3},
+                "3 (decorated function decorated)",
+                id="f-string-in-docstring-position-is-code",
+            ),
+            pytest.param(
+                "from __future__ import annotations\n\n'not a docstring'\n",
+                {1, 3},
+                "3 (module level)",
+                id="future-import-inert-string-after-it-is-not",
+            ),
+            pytest.param(
+                "@command()\ndef outer():\n    def inner():\n"
+                "        'inner docstring'\n        return 1\n    return inner()\n",
+                {3, 4, 5},
+                "3,5 (decorated function outer)",
+                id="nested-def-docstring-inert-its-code-not",
+            ),
+            pytest.param(
+                "class Service:\n    'class docstring'\n\n    @property\n"
+                "    def value(self):\n        'method docstring'\n"
+                "        x = 1\n        'after first statement'\n        return x\n",
+                {2, 6, 7, 8},
+                "7-8 (decorated function Service.value)",
+                id="class-and-method-docstrings-inert-later-string-not",
+            ),
+            pytest.param(
+                "@dataclass\nclass Record:\n    'class docstring'\n\n"
+                "    def total(self):\n        'method docstring'\n        return 6\n",
+                {3, 6, 7},
+                "7 (decorated class Record)",
+                id="decorated-class-docstrings-inert",
+            ),
+            pytest.param(
+                '"""multi\nline\ndocstring"""\nimport os\nLIMIT = (\n    "a"\n)\n',
+                {1, 2, 3, 4, 5, 6, 7},
+                "5-7 (module level)",
+                id="multiline-docstring-and-string-inside-statement",
+            ),
+            pytest.param(
+                "LIMIT = 1\n'attribute docstring'\n",
+                {1, 2},
+                "1 (module level)",
+                id="module-attribute-docstring-inert",
+            ),
+            pytest.param(
+                "class Service:\n    LIMIT: int = 1\n    'attribute docstring'\n",
+                {2, 3},
+                "2 (class body Service)",
+                id="class-attribute-docstring-inert",
+            ),
+            pytest.param(
+                "@command()\ndef decorated():\n    x = 1\n    'no attribute here'\n    return x\n",
+                {3, 4},
+                "3-4 (decorated function decorated)",
+                id="string-after-assignment-in-a-function-is-code",
+            ),
+            pytest.param(
+                "def f():\n    return 1\n'after a def'\n",
+                {3},
+                "3 (module level)",
+                id="string-after-a-def-is-code",
+            ),
+            pytest.param(
+                "A = 1\nB = 2\n\nC = 3\n",
+                {1, 2, 4},
+                "1-2,4 (module level)",
+                id="one-notice-per-region-across-statements",
+            ),
+        ],
+    )
+    def test_docstring_position_decides_what_is_inert(
+        self,
+        mutation_scope: ModuleType,
+        source: str,
+        changed_lines: set[int],
+        expected: str,
+    ) -> None:
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", changed_lines, source) == [
+            f"unmeasured changed lines: src/lovspor/x.py:{expected}"
+        ]
+
+    def test_unparseable_source_raises_no_notice(self, mutation_scope: ModuleType) -> None:
+        # the whole module is in scope then (`lovspor.x.*`), so nothing is unmeasured
+        assert mutation_scope.unmeasured_notices("src/lovspor/x.py", {1}, "def broken(:\n") == []
+
+    def test_explain_prints_the_notice_on_its_own_line(
+        self,
+        mutation_scope: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            mutation_scope, "changed_lines", lambda base: {"src/lovspor/example.py": {5, 11}}
+        )
+        monkeypatch.setattr(mutation_scope, "head_source", lambda path: UNMEASURED_SOURCE)
+        monkeypatch.setattr("sys.argv", ["mutation_scope.py", "--base", "main", "--explain"])
+
+        assert mutation_scope.main() == 0
+
+        captured = capsys.readouterr()
+        assert captured.out.strip() == "lovspor.example.x_plain__mutmut_*"
+        assert (
+            "\nunmeasured changed lines: src/lovspor/example.py:5 (module level)\n" in captured.err
+        )
+
+    def test_without_explain_nothing_but_patterns_is_printed(
+        self,
+        mutation_scope: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setattr(
+            mutation_scope, "changed_lines", lambda base: {"src/lovspor/example.py": {5}}
+        )
+        monkeypatch.setattr(mutation_scope, "head_source", lambda path: UNMEASURED_SOURCE)
+        monkeypatch.setattr("sys.argv", ["mutation_scope.py", "--base", "main"])
+
+        assert mutation_scope.main() == 0
+
+        assert capsys.readouterr() == ("\n", "")

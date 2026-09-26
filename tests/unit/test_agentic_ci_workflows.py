@@ -1306,10 +1306,20 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
 
     def test_the_verifier_only_runs_for_a_cycle_the_gate_allowed(self) -> None:
         """The gate, the cycle count and both BLOCKED paths stay on the agent
-        lane, so the verifier must not start a round the gate refused."""
-        job = _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+        lane, so the verifier must not start a round the gate refused. The job
+        also runs when the agent lane died (#254) — only to report it, so every
+        step of the round itself still waits on the gate's `run`."""
+        steps = _steps("mutation-remediation.yml", "remediate-verify")
+        round_steps = [
+            "Sync dependencies",
+            "Scope guard",
+            "Normalize and lint Codex output",
+            "Run tests on Codex additions",
+            "Commit and push, or report BLOCKED",
+        ]
 
-        assert job["if"] == "${{ !cancelled() && needs.remediate.outputs.run == 'true' }}"
+        for name in round_steps:
+            assert _named_step(steps, name)["if"] == "needs.remediate.outputs.run == 'true'"
         assert self._agent()["outputs"]["run"] == "${{ steps.cycle.outputs.run }}"
 
 
@@ -1578,3 +1588,127 @@ class TestUnmeasuredRunSkipsRemediation:
         assert "non-killable" not in body
         assert "--add-label needs-human:mutation" in (tmp_path / "gh-calls").read_text()
         assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "309"]
+
+
+_DEAD_LANE = "Escalate a remediation lane that died without reporting"
+
+
+def _dead_lane_sandbox(tmp_path: Path, pr: str, view: str) -> dict[str, str]:
+    """scripts/ci as the helper checkout holds it; `gh` answers `pr list` with
+    `pr` and `pr view` with `view` (head SHA, then one label per line)."""
+    env = _escalation_sandbox(tmp_path)
+    (tmp_path / "pr-list").write_text(pr, encoding="utf-8")
+    (tmp_path / "pr-view").write_text(view, encoding="utf-8")
+    (tmp_path / "bin" / "gh").write_text(
+        f'#!/bin/sh\necho "$@" >> "{tmp_path}/gh-calls"\n'
+        f'[ "$2" = list ] && cat "{tmp_path}/pr-list"\n'
+        f'[ "$2" = view ] && cat "{tmp_path}/pr-view"\nexit 0\n'
+    )
+    env |= {"GH_REPO": "o/r", "RUN_URL": _RUN_URL}
+    return env | {"RESULT": "failure", "KIND": "", "STEP": ""}
+
+
+class TestADeadRemediationLaneStillEscalates:
+    """Issue #254. When the self-hosted box dies mid-`remediate`, its in-job
+    escalation dies with it, and the job's outputs are never evaluated — so
+    `run` and `pr` reach the hosted lane empty (inferred from runs 34043549922
+    and #193's evidence, not reproduced). The hosted lane used to wait on
+    `run == 'true'` and so stayed skipped: a red PR with no label, no comment."""
+
+    def _job(self) -> dict[str, Any]:
+        return _workflow("mutation-remediation.yml")["jobs"]["remediate-verify"]
+
+    def _run(self, tmp_path: Path, env: dict[str, str]) -> str:
+        step = _named_step(self._job()["steps"], _DEAD_LANE)
+        _run_step(step["run"], tmp_path, env)
+        calls = tmp_path / "gh-calls"
+        return calls.read_text() if calls.exists() else ""
+
+    def test_the_hosted_lane_runs_when_the_agent_lane_failed_or_hit_its_ceiling(self) -> None:
+        # `!cancelled()`, never `always()`: a run a human cancelled is not a
+        # blocked PR. A job-level timeout is `cancelled` on the job, not the run.
+        assert self._job()["if"] == (
+            "!cancelled() && (needs.remediate.outputs.run == 'true' || "
+            "needs.remediate.result == 'failure' || needs.remediate.result == 'cancelled')"
+        )
+
+    def test_the_helper_is_checked_out_from_the_default_branch_when_no_round_ran(self) -> None:
+        steps = self._job()["steps"]
+        names = [step.get("name") for step in steps]
+        helper = _named_step(steps, "Check out the escalation helper")
+
+        assert helper["if"] == "needs.remediate.outputs.run != 'true'"
+        assert helper["with"] == {
+            "ref": "${{ github.event.repository.default_branch }}",
+            "sparse-checkout": "scripts/ci",
+            "persist-credentials": False,
+        }
+        assert names.index(helper["name"]) < names.index("The remediation lane did not finish")
+        assert names.index(helper["name"]) < names.index(_DEAD_LANE)
+
+    def test_the_escalation_fires_only_where_nothing_else_could_report(self) -> None:
+        step = _named_step(self._job()["steps"], _DEAD_LANE)
+
+        assert step["if"] == (
+            "failure() && needs.remediate.outputs.pr == '' && "
+            "github.event.workflow_run.conclusion == 'failure'"
+        )
+        assert step["env"] == {
+            "RESULT": "${{ needs.remediate.result }}",
+            "KIND": "${{ steps.classify.outputs.kind }}",
+            "STEP": "${{ steps.classify.outputs.step }}",
+            "RUN_URL": "${{ github.server_url }}/${{ github.repository }}"
+            "/actions/runs/${{ github.run_id }}",
+        }
+
+    def test_the_classifier_is_best_effort_and_reads_the_agent_lane(self) -> None:
+        steps = self._job()["steps"]
+        names = [step.get("name") for step in steps]
+        classify = _named_step(steps, "Classify the lane failure")
+
+        assert classify["continue-on-error"] is True
+        assert "--lane remediate" in classify["run"]
+        assert names.index(classify["name"]) < names.index(_DEAD_LANE)
+
+    @pytest.mark.parametrize("result", ["failure", "cancelled"])
+    def test_empty_outputs_still_label_the_open_pr(self, tmp_path: Path, result: str) -> None:
+        env = _dead_lane_sandbox(tmp_path, "250\n", f"{_SHA}\n")
+        env["RESULT"] = result
+
+        calls = self._run(tmp_path, env)
+
+        assert "pr list --head fix/x --state open --json number --jq .[0].number" in calls
+        assert "pr edit 250 --add-label needs-human:mutation" in calls
+        assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "250"]
+        body = (tmp_path / "body").read_text()
+        assert f"ended '{result}'" in body
+        assert "unknown" in body
+        assert _RUN_URL in body
+
+    def test_a_runner_death_is_named_as_infrastructure(self, tmp_path: Path) -> None:
+        env = _dead_lane_sandbox(tmp_path, "250\n", f"{_SHA}\n")
+        env |= {"KIND": "infrastructure", "STEP": "Codex — mutation remediation (tests only)"}
+
+        self._run(tmp_path, env)
+
+        body = (tmp_path / "body").read_text()
+        assert "INFRASTRUCTURE" in body
+        assert "`Codex — mutation remediation (tests only)`" in body
+        assert "gh run rerun 1 --failed" in body
+
+    @pytest.mark.parametrize(
+        ("pr", "view"),
+        [
+            ("", ""),
+            ("250\n", "b" * 40 + "\n"),
+            ("250\n", f"{_SHA}\nneeds-human:mutation\n"),
+        ],
+        ids=["no-open-pr", "head-moved-on", "already-labelled"],
+    )
+    def test_no_label_where_there_is_nothing_to_report(
+        self, tmp_path: Path, pr: str, view: str
+    ) -> None:
+        calls = self._run(tmp_path, _dead_lane_sandbox(tmp_path, pr, view))
+
+        assert "--add-label" not in calls
+        assert not (tmp_path / "sticky-args").exists()

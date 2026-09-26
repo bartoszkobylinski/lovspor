@@ -153,7 +153,7 @@ Local layout:
 | Types | `mypy` strict mode | Wired into CI + the fast gate (pre-commit stage); see §9d |
 | Tests | `pytest` + `pytest-httpx` + `pytest-cov` | Transport mocked only; logic never mocked |
 | Mutation | `mutmut == 3.8.0` | Function-scoped per-PR runs; see §9 and §9c |
-| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + fail-closed security scan + unit suite) |
+| Hooks | `pre-commit` | Transport only (§9d): pre-commit stage runs `scripts/quality/verify-fast.sh` (gitleaks, ruff, format, mypy, ratchets, boundaries, release contracts); pre-push stage runs `scripts/quality/verify-deep.sh` (fast gate + fail-closed security scan + unit suite) |
 | Build | `hatchling` | Default modern backend |
 | HTTP | `httpx` (sync) | Simple and enough for sequential downloads |
 | XML | `lxml` with `resolve_entities=False, huge_tree=False` (when added) | XXE / billion-laughs mitigation |
@@ -276,12 +276,12 @@ Decided 2026-09-15 by the owner, issue #323 (Phase A, decision 1). **No ADR:** d
 | `uv run mypy src/` | 0.2–0.4 s | 0.21–0.25 s warm; 4.86 s first run; 6.33 s with a fresh `--cache-dir` |
 | `uv run pytest tests/unit/ -q` | 255.9 s (6789 passed) | 263.1–273.3 s (6804–6808 passed, on this change's branch) |
 
-The suite was ~99% of the commit's cost, which defeats an agent's edit → gate → repair loop. mypy stays at commit time because even cold it costs seconds. `scripts/quality/verify-fast.sh` as a whole took 0.51 s warm. Wiring in the Phase B ratchet check on 2026-09-16 took the gate to 1.20–1.23 s warm, on a branch where the same gate without it measured 0.33–0.34 s and the ratchet alone 0.79–0.83 s (three runs each, one machine — the 0.51 s above is an earlier measurement, not the baseline for that delta).
+The suite was ~99% of the commit's cost, which defeats an agent's edit → gate → repair loop. mypy stays at commit time because even cold it costs seconds. `scripts/quality/verify-fast.sh` as a whole took 0.51 s warm. Wiring in the Phase B ratchet check on 2026-09-16 took the gate to 1.20–1.23 s warm, on a branch where the same gate without it measured 0.33–0.34 s and the ratchet alone 0.79–0.83 s (three runs each, one machine — the 0.51 s above is an earlier measurement, not the baseline for that delta). Wiring in the architecture boundary check (§9g) on 2026-09-25 took it to 1.36–1.41 s warm, against 1.06–1.17 s for the same gate without it and 0.30–0.31 s for the check alone (three to five runs each, one machine).
 
 **Mechanism.**
 
 - `.pre-commit-config.yaml` names no check. Its pre-commit stage runs `scripts/quality/verify-fast.sh` and its pre-push stage `scripts/quality/verify-deep.sh`. `default_install_hook_types: [pre-commit, pre-push]` makes a plain `pre-commit install` (which `scripts/bootstrap.sh` runs) install both; a clone with hooks installed before this change re-runs it to add pre-push.
-- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/` and the size and complexity ratchets (`scripts/quality/check_ratchets.py`). It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
+- `verify-fast.sh` runs the gitleaks staged scan, `ruff check`, `ruff format --check`, `mypy src/`, the size and complexity ratchets (`scripts/quality/check_ratchets.py`), the architecture boundaries (`scripts/quality/check_boundaries.py`, §9g) and the release contracts (§9h). It runs from any cwd without hooks installed, runs every check even after one fails, ends with one `FAIL <check>: <last output line> (exit N)` line per failure, and exits non-zero if any failed. A new fast check is one line in that script.
 - `verify-deep.sh` runs `verify-fast.sh`, then `uv run pytest tests/unit/ -q -m "not network"` (a test gated on a live third-party credential reports the operator's key, not the change — #359), and does not start the suite when the fast gate failed. Re-running the fast gate at push costs about a second and still catches a commit made before the hooks were installed.
 - Under the hook, pre-commit stashes unstaged changes, so the commit stage checks what is being committed; run by hand, the script checks the working tree.
 - Hook and script cannot drift because the config holds no check to drift. Two test files pin that: `tests/unit/test_quality_hook_config.py` has pre-commit itself resolve which script each stage reaches, and `tests/unit/test_quality_fast_gate.py` runs both scripts against stub tools.
@@ -328,13 +328,38 @@ The interpreter is pinned mechanically: the run is refused below Python 3.12 rat
 
 **Where it runs.** Measured 1.8 s over 142 files, so it belongs to the push-time deep gate rather than the commit loop. CI runs it as a step inside `fast-ci`, which is criterion 12: a bypassed or uninstalled local hook must not produce a false-green PR. A step and not a new job, because the `main-branch-protection` ruleset requires `fast-ci`, `mutation` and the three `test` legs **by name** — a new job would not block a merge until the owner edited that required set, which is the very false-green the gate exists to prevent. `tests/unit/test_quality_fast_gate.py` and `tests/unit/test_agentic_ci_workflows.py` pin both placements, so a refactor cannot quietly drop the gate.
 
+## 9g. Architecture boundaries: the attestation registry has one door
+
+Decided 2026-09-25 under issue #323 (Phases C/D3, split item 5: "one import boundary at the temporal seam"). **No ADR**, for the reason given in §9d — and within the owner's caveat that such a guard may only encode a contract an accepted ADR or an established code seam already draws.
+
+**The contract.** ADR-0012 point 2c (Accepted 2026-09-02) makes the temporal attestation registry contracted state: entries are immutable and append-only, and a registry that cannot be read is a typed operational failure, never a silent `unattested`, because `reconciliation` is a public response field. `src/lovspor/temporal_attestation.py` is where both promises are kept: `record_attestation` refuses to rewrite an entry, and `_read_entries` proves the commit resolves before it may answer "absent". Both guarantees live in that module's code paths, not in the registry itself, so a second caller of `git notes` — say, a convenience read in `mcp.py` that returns `[]` on any non-zero exit — would serve `unattested` for a broken channel while every test of the module still passed. That is the shape D3 names: an unknown state becoming a positive fact at the serving edge.
+
+**Why an argv rule, not an import rule.** The registry is reached through a `git` subprocess, not through a Python import: nothing outside the module imports a notes client, so an import-graph rule here would guard nothing. `scripts/quality/check_boundaries.py` reads argument vectors instead — a list or tuple display holding both literals `"git"` and `"notes"`, or starting with `"notes"` (the shape handed to a helper that prepends `git`) — anywhere under `src/` except the registry module. Sets are not read, so `frozenset({"notes", …})` field lists in `llhb/` pass; so do the ref name as a string and other `git` subcommands. An argv built entirely at runtime is not seen — the rule catches the literal shape every current call uses, not every conceivable one. It is one rule on purpose: Phase C asks for one or two contracts that are important and mechanically enforceable, not a layer model.
+
+**Where it runs.** In the fast gate (§9d), because a call reaching across the seam is one line to move back while it is still the only one. `tests/unit/test_quality_boundaries.py` runs the real checker on built trees — the registry module passes, a read lifted into another module fails naming path, line, the module to use and ADR-0012 point 2c, four argv shapes are caught, four look-alikes pass, an unparseable file exits 2 rather than passing — and on the real repository, so the unit suite and with it CI enforce the boundary wherever it runs. Breaking either branch of the detector turns those tests red (verified before commit).
+
+## 9h. Release contracts in the fast gate
+
+Decided 2026-09-25, issue #323 (Phase D1/D2, step 4 of the owner's 2026-09-15 split). **No ADR**, for the reason given in §9d. The contracts encode no new rule: D1 is the fix already shipped for #316/#317, D2 is the crash table of ADR-0014 Decision 6 as `release/control.py` implements it. (§9g is left to the Phase C/D3 boundary check, PR #398.)
+
+**What runs.** One named module, `tests/unit/test_release_contracts.py`, as the fast gate's `release-contracts` check. Decision 1 moved the *unit suite* out of the commit loop; the issue's fast layer names "selected tiny contract tests", and this is the one selection. The pin in `tests/unit/test_quality_fast_gate.py` says so: the only pytest run the fast gate may make is that module, never `tests/unit/`.
+
+- **D1, path identity.** The fake Caddy hides every imported file by the path it was imported from, and the first test proves it does (a pair adapted at `.next` differs from the one at the active path), so the rest cannot pass vacuously. Commit, the revert after a failed reload, and reconcile's complete and abandon must each end with R equal to the release's pair *at the active fragment's path*.
+- **D2, fail closed.** `situation()` is swept over its whole 108-triple domain (three release ids × two hashes for R and D, three markers): every row other than foreign must show its own evidence, and the partition is pinned (reconciled 6, reloaded 8, staged 16, foreign 78). `live_release`, `commit_release`, `rollback`, `prune` and `reconcile` each refuse a hand-reloaded, a marked-but-not-running and an unobservable host, and leave its files and reload count untouched; `--complete` refuses a disk naming no release.
+
+**Proved against regressions**, each by breaking `src/` and restoring it: the commit, the revert and the abandon comparing R with a pair adapted at `.next` or in the release (1 failure each); an R = D naming nothing beside a marker read as reconciled (10); staged without R naming M's release (33); commit skipping its reconciled check (2); complete accepting a disk naming no release (1).
+
+**Cost.** 131 tests, 1.7–1.9 s inside pytest, 2.2–2.3 s wall. About 1.1 s of it is building the two real envelopes D1 needs, once per module; D2 needs no build. `verify-fast.sh` measured 1.11–1.15 s warm without the check and 3.40–3.63 s with it, on one machine.
+
+**CI stays authoritative.** The module lives in `tests/unit/`, so fast-ci and the Test matrix run it on every PR like any other unit test; the deeper suites (`test_release_control.py`, `test_release_migrate.py`, the real-Caddy rehearsal) are unchanged.
+
 ## 10. Workflow — how Claude works here
 
 Full contract in `CLAUDE.md`. Key points:
 
 1. **Small chunks** — 1 commit = 1 logical change. Every commit independently green and bisectable.
 2. **TDD per chunk** — failing unit test first, then minimal code to green.
-3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy + ratchets) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + fail-closed security scan + unit suite). See §9d, §9e and §9f.
+3. **Local gates mandatory** — commit: the fast gate (`scripts/quality/verify-fast.sh`: gitleaks + ruff + format + mypy + ratchets + boundaries) + `/security-check`; push: the deep gate (`scripts/quality/verify-deep.sh`: fast gate + fail-closed security scan + unit suite). See §9d, §9e, §9f and §9g.
 4. **Feature branches only** — `feat/`, `fix/`, `refactor/`, `test/`, `docs/`. Never commit to `main` except the single bootstrap commit.
 5. **PR → Codex → merge** — Claude opens PR with prepared Codex prompt, STOPS, user runs Codex, Claude fixes any bugs on the same branch, **only the user merges**.
 6. **No AI attribution** in commit messages, PR descriptions, or code comments.

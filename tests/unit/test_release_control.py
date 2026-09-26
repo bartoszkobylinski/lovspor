@@ -8,11 +8,10 @@ Kills are checkpoints that stop the transaction at a named step.
 """
 
 import copy
-import shutil
 import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 import pytest
 
@@ -34,10 +33,7 @@ from lovspor.release.envelope import (
     FRAGMENT_NAME,
     MARKER_NAME,
     Marker,
-    fragment_paths,
-    read_fragment,
     read_marker,
-    write_marker,
 )
 from lovspor.release.errors import (
     CommitRefusedError,
@@ -48,19 +44,10 @@ from lovspor.release.errors import (
     UnreconciledError,
 )
 from lovspor.release.reconcile import ReconcileReport, prune, reconcile
-from tests.unit.caddy_fakes import FakeCaddy, toy_adapt
-from tests.unit.release_fixtures import (
-    World,
-    build,
-    files,
-    make_world,
-    observer,
-    rename_document,
-)
+from tests.unit.caddy_fakes import toy_adapt
+from tests.unit.control_host import PLACEHOLDER, Host, make_host, two_envelopes
+from tests.unit.release_fixtures import World, make_world
 
-LATER = "2026-01-02T00:00:00Z"
-PLACEHOLDER = "handle {\n\troot * /var/www/lovspor\n\tfile_server\n}\n"
-"""An active fragment from before any envelope release: no ``vars``, no release."""
 NON_ASCII_PLACEHOLDER = "# Ørsta kommune sin side\n" + PLACEHOLDER
 """The same, with the kind of comment an operator's editor leaves: bytes outside ASCII."""
 RELOAD_FAILURE = (
@@ -87,79 +74,12 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
 
 @pytest.fixture(scope="module")
 def envelopes(world: World, tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str, str]:
-    """Two finalized envelopes under one releases root: A, then B after a corpus rename."""
-    releases = tmp_path_factory.mktemp("source") / "releases"
-    a = build(world, releases).release_content_id
-    rename_document(world)
-    b = build(world, releases, observe=observer(LATER)).release_content_id
-    assert a != b
-    return releases, a, b
-
-
-class Host(NamedTuple):
-    plane: ControlPlane
-    caddy: FakeCaddy
-    a: str
-    b: str
-
-    @property
-    def releases(self) -> Path:
-        return self.plane.releases
-
-    def fragment_of(self, content_id: str) -> str:
-        return read_fragment(self.releases / content_id)
-
-    def root_of(self, content_id: str) -> str:
-        """The immutable directory the release's own fragment names."""
-        return fragment_paths(self.fragment_of(content_id))[1].removesuffix("/corpus")
-
-    def pair_of(self, content_id: str) -> ConfigPair:
-        """What the composed configuration adapts to with this release's fragment, installed at
-        the active fragment's path — the path Caddy hides it by (#317)."""
-        fragment = self.releases / content_id / FRAGMENT_NAME
-        env = {FRAGMENT_ENV: str(fragment)}
-        installed = {fragment: self.plane.fragment}
-        return config_pair(toy_adapt(self.plane.caddyfile, env, imported_as=installed))
-
-    def running(self) -> ConfigPair:
-        return config_pair(self.caddy.running_config())
-
-    def make_live(self, content_id: str, previous: str | None = None) -> None:
-        """The end state of a completed transaction, written directly."""
-        self.plane.fragment.write_text(self.fragment_of(content_id), encoding="utf-8")
-        self.caddy.restart()
-        write_marker(self.releases, Marker(active=content_id, previous=previous))
-
-    def snapshot(self) -> dict[str, bytes]:
-        etc = files(self.plane.fragment.parent)
-        return {**files(self.releases), **{f"etc/{name}": data for name, data in etc.items()}}
+    return two_envelopes(world, tmp_path_factory.mktemp("source") / "releases")
 
 
 @pytest.fixture
 def host(envelopes: tuple[Path, str, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Host:
-    source, a, b = envelopes
-    releases = tmp_path / "releases"
-    shutil.copytree(source, releases)
-    etc = tmp_path / "etc" / "caddy"
-    etc.mkdir(parents=True)
-    fragment = etc / "lovspor-release.caddy"
-    caddyfile = etc / "Caddyfile"
-    caddyfile.write_text(
-        "{$LOVSPOR_DOMAIN:lovspor.test} {\n"
-        "\tencode zstd gzip\n"
-        "\t@app path /mcp /mcp/* /healthz /readyz\n"
-        "\thandle @app {\n\t\treverse_proxy 127.0.0.1:8000\n\t}\n"
-        f"\timport {{$LOVSPOR_RELEASE_FRAGMENT:{fragment}}}\n"
-        "\theader {\n\t\tX-Content-Type-Options nosniff\n\t}\n"
-        "}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.delenv("LOVSPOR_RELEASE_FRAGMENT", raising=False)
-    fragment.write_text(PLACEHOLDER, encoding="utf-8")
-    caddy = FakeCaddy(caddyfile)
-    caddy.restart()
-    plane = ControlPlane(releases, caddyfile, fragment, runner=caddy, admin=caddy)
-    return Host(plane, caddy, a, b)
+    return make_host(envelopes, tmp_path, monkeypatch)
 
 
 @pytest.fixture
