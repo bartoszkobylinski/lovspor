@@ -301,6 +301,14 @@ place silently resets every open PR's count to zero.
   they can change what a test asserts. A draft ruff cannot read (a syntax error) still
   fails the step, into the pipeline-failure escalation below. Pinned by
   `tests/unit/test_normalize_agent_tests.py`, which runs the real ruff.
+- When remediation changes nothing, the `needs-human:mutation` comment names what
+  blocked the gate, bucket by bucket (`mutation_gate.py --no-change`, read on the agent
+  lane from the default-branch helper and handed to the verifier as the `blocked` job
+  output). "Survivors classified non-killable" is said only when there were survivors:
+  on PR #395 it was said over two timed-out mutants and zero survivors (issue #423). A
+  timed-out mutant is neither killed nor survived — it got no verdict inside mutmut's
+  per-mutant time limit — so the job summary and the gate's log line list survived,
+  timed-out, suspicious, uncovered and no-verdict counts separately too.
 - If the PR branch advances while remediation is running, its rejected push is abandoned
   as superseded — the new head's own pipeline owns mutation from there. Any other
   remediation failure escalates itself: `needs-human:mutation` + a comment linking the

@@ -1266,6 +1266,7 @@ class TestTheRemediationLaneOnlyHoldsTheAgent:
             "author": "${{ steps.author.outputs.author }}",
             "before_sha": "${{ steps.base.outputs.before_sha }}",
             "patch": "${{ steps.patch.outputs.patch }}",
+            "blocked": "${{ steps.blocked.outputs.message }}",
         }
         assert upload["with"]["name"] == artifact
         assert download["with"]["name"] == artifact
@@ -1588,6 +1589,88 @@ class TestUnmeasuredRunSkipsRemediation:
         assert "non-killable" not in body
         assert "--add-label needs-human:mutation" in (tmp_path / "gh-calls").read_text()
         assert (tmp_path / "sticky-args").read_text().split()[:2] == ["mutation", "309"]
+
+
+_BLOCKED_BY = "Say what blocked the gate, should remediation change nothing"
+_NO_CHANGE = "Commit and push, or report BLOCKED"
+
+
+class TestTheNoChangeEscalationNamesWhatBlocked:
+    """Issue #423: on PR #395 remediation changed nothing and the sticky said
+    "survivors classified non-killable" over two timed-out mutants and zero
+    survivors. The words now come from the artifact, read on the agent lane by
+    the default-branch helper, and reach the verifier as a job output."""
+
+    PR_395 = "132/33020  🎉 130 🫥 0  ⏰ 2  🤔 0  🙁 0  🔇 0  🧙 0\n"
+
+    def test_the_agent_lane_reads_the_artifact_before_the_pr_checkout(self) -> None:
+        steps = _steps("mutation-remediation.yml", "remediate")
+        names = [step.get("name") for step in steps]
+        blocked = _named_step(steps, _BLOCKED_BY)
+        pr_checkout = next(
+            i for i, s in enumerate(steps) if s.get("with", {}).get("fetch-depth") == 0
+        )
+
+        assert blocked["if"] == "steps.gate.outputs.run == 'true'"
+        assert names.index(_DECIDE) < names.index(_BLOCKED_BY) < pr_checkout
+
+    def test_the_agent_lane_hands_the_timeout_wording_on(self, tmp_path: Path) -> None:
+        _mutation_artifact(tmp_path, self.PR_395, 4)
+        env = _escalation_sandbox(tmp_path) | {"GITHUB_OUTPUT": str(tmp_path / "out")}
+        step = _named_step(_steps("mutation-remediation.yml", "remediate"), _BLOCKED_BY)
+
+        _run_step(_render(step["run"], {"runner.temp": str(tmp_path)}), tmp_path, env)
+
+        (line,) = (tmp_path / "out").read_text().splitlines()
+        assert line.startswith("message=Mutation remediation made no safe test-only change.")
+        assert "2 timed-out mutant(s) got no verdict" in line
+        assert "non-killable" not in line
+
+    def test_the_output_reaches_the_verifier(self) -> None:
+        job = _workflow("mutation-remediation.yml")["jobs"]["remediate"]
+        step = _named_step(_steps("mutation-remediation.yml", "remediate-verify"), _NO_CHANGE)
+
+        assert job["outputs"]["blocked"] == "${{ steps.blocked.outputs.message }}"
+        assert step["env"]["BLOCKED_BY"] == "${{ needs.remediate.outputs.blocked }}"
+        assert "non-killable" not in step["run"]
+
+    @staticmethod
+    def _git(repo: Path, *args: str) -> str:
+        identity = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+        done = subprocess.run(
+            ["git", *identity, *args], cwd=repo, check=True, capture_output=True, text=True
+        )
+        return done.stdout.strip()
+
+    def _no_change_body(self, tmp_path: Path, blocked_by: str) -> str:
+        """A clean tree at BEFORE_SHA: the branch where the agent changed nothing."""
+        env = _escalation_sandbox(tmp_path) | {"BLOCKED_BY": blocked_by}
+        for args in (("init", "-q"), ("add", "-A"), ("commit", "-q", "-m", "head")):
+            self._git(tmp_path, *args)
+        env |= {"BEFORE_SHA": self._git(tmp_path, "rev-parse", "HEAD")}
+        step = _named_step(_steps("mutation-remediation.yml", "remediate-verify"), _NO_CHANGE)
+        values = {
+            "needs.remediate.outputs.pr": "309",
+            "needs.remediate.outputs.count": "0",
+            "needs.remediate.outputs.author || 'codex'": "codex",
+        }
+
+        _run_step(_render(step["run"], values), tmp_path, env)
+
+        return (tmp_path / "body").read_text()
+
+    def test_the_sticky_carries_the_agent_lane_wording(self, tmp_path: Path) -> None:
+        body = self._no_change_body(tmp_path, "Blocked by: 2 timed-out mutant(s).")
+
+        assert body.startswith("Blocked by: 2 timed-out mutant(s). Human review required.")
+        assert f"mutation-result-{_SHA}" in body
+
+    def test_a_lost_output_falls_back_without_claiming_survivors(self, tmp_path: Path) -> None:
+        body = self._no_change_body(tmp_path, "")
+
+        assert body.startswith("Mutation remediation made no safe test-only change.")
+        assert "non-killable" not in body
+        assert "survivors" not in body
 
 
 _DEAD_LANE = "Escalate a remediation lane that died without reporting"

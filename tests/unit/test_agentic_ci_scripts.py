@@ -1964,6 +1964,103 @@ class TestNothingMeasured:
         assert "```" not in self._unmeasured(tmp_path, capsys)
 
 
+def _gate_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], *flags: str
+) -> tuple[int, str]:
+    with pytest.MonkeyPatch.context() as mp:
+        argv = ["mutation_gate.py", *flags, str(tmp_path / "result.json")]
+        mp.setattr("sys.argv", argv)
+        capsys.readouterr()  # drop what writing the artifact printed
+        status = mutation_gate.main()
+    return status, capsys.readouterr().out
+
+
+class TestTimeoutsAreNotSurvivors:
+    """Issue #423: on PR #395 the gate failed on two timed-out mutants with zero
+    survivors, and the escalation said "survivors classified non-killable". Every
+    report names each bucket that was not killed, and blames the one that blocked."""
+
+    # The PR #395 run: 132 mutants, 130 killed, 2 timed out, nothing survived.
+    PR_395 = "132/33020  🎉 130 🫥 0  ⏰ 2  🤔 0  🙁 0  🔇 0  🧙 0\n"
+
+    def _no_change(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> str:
+        status, out = _gate_output(tmp_path, capsys, "--no-change")
+        assert status == 0
+        return out
+
+    def test_a_timeout_only_escalation_blames_the_timeouts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, self.PR_395, tool_exit_code=4)
+
+        comment = self._no_change(tmp_path, capsys)
+
+        assert "non-killable" not in comment
+        assert "Gate: FAIL (timeout_mutants)" in comment
+        assert "0 survived · 2 timed out · 0 suspicious · 0 without tests" in comment
+        assert "2 timed-out mutant(s) got no verdict" in comment
+        assert "\n" not in comment.strip()
+
+    def test_survivors_are_still_named_as_classified(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, _progress_line(killed=3, survived=2), survivors="7\n8\n", tool_exit_code=2)
+
+        comment = self._no_change(tmp_path, capsys)
+
+        assert "2 survivor(s) classified non-killable" in comment
+        assert "timed-out" not in comment
+
+    def test_suspicious_and_uncovered_mutants_are_named(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, _progress_line(killed=1, suspicious=1, no_tests=3), tool_exit_code=8)
+
+        comment = self._no_change(tmp_path, capsys)
+
+        assert "1 suspicious mutant(s)" in comment
+        assert "3 mutant(s) no test reaches" in comment
+        assert "non-killable" not in comment
+
+    def test_a_gate_failed_on_exit_bits_alone_says_no_bucket_is_on_record(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The last progress line covers only the last file; an earlier file's
+        survivors reach the gate through the exit bits alone."""
+        _run(tmp_path, _progress_line(killed=2), tool_exit_code=2)
+
+        comment = self._no_change(tmp_path, capsys)
+
+        assert "Gate: FAIL (surviving_mutants)" in comment
+        assert "no mutant outside the killed count is on record" in comment
+        assert "non-killable" not in comment
+
+    def test_the_summary_names_every_bucket_that_was_not_killed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, self.PR_395, tool_exit_code=4)
+
+        status, summary = _gate_output(tmp_path, capsys, "--summary")
+
+        assert status == 0
+        assert "Total: 132 · Killed: 130 · Survived: 0 · Timeout: 2 · Score: 98.48" in summary
+        assert (
+            "- Not killed: 0 survived · 2 timed out · 0 suspicious · 0 without tests"
+            " · 0 without a verdict"
+        ) in summary
+
+    def test_the_verdict_line_does_not_reduce_a_timeout_to_zero_survivors(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _run(tmp_path, self.PR_395, tool_exit_code=4)
+
+        status, verdict = _gate_output(tmp_path, capsys)
+
+        assert status == 1
+        assert verdict.startswith("mutation gate FAIL (timeout_mutants); not killed: 0 survived")
+        assert "2 timed out" in verdict
+
+
 UNMEASURED_ENVELOPE = "unmeasured changed lines: src/lovspor/release/envelope.py:56 (module level)"
 UNMEASURED_COMMAND = (
     "unmeasured changed lines: src/lovspor/release/commands.py:590-633 "
