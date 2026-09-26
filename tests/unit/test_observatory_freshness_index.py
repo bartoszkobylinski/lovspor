@@ -173,6 +173,24 @@ class TestIndexedFoldEqualsTheFullFold:
         assert state.content[url] == ContentRun("1" * 64, 0)
         assert state == _full_fold(log)
 
+    def test_an_older_tail_capture_resets_a_cached_run_without_replacing_its_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        """A late record cannot extend the cached run it does not follow.
+        The reset must retain the latest bytes and match a full re-fold."""
+        url = "https://example.invalid/x"
+        log = make_log(tmp_path)
+        log.append(_observation(url, NOW, "0" * 64))
+        log.append(_observation(url, NOW + timedelta(hours=2), "0" * 64))
+        indexed_capture_state(log)
+        log.append(_observation(url, NOW + timedelta(hours=1), "1" * 64))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert state.content[url] == ContentRun("0" * 64, 0)
+        assert state == _full_fold(log)
+
     def test_the_written_index_is_byte_identical_for_one_log_state(self, tmp_path: Path) -> None:
         log = make_log(tmp_path)
         log.append(_observation("https://example.invalid/b"))
