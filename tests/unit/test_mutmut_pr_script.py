@@ -278,3 +278,71 @@ class TestUnmeasuredMutants:
         assert (
             'echo "unmeasured: $unmeasured  — signal-killed (mutmut: segfault), no verdict"' in body
         )
+
+
+EDITABLE_PTH = Path(".venv/lib/python3.12/site-packages/_editable_impl_lovspor.pth")
+TALLY = "1/1  🎉 1 🫥 0  ⏰ 0  🤔 0  🙁 0  🔇 0  🧙 0"
+REPOINTING_MUTMUT = (
+    "#!/bin/sh\n"
+    '[ "$1" = run ] || exit 0\n'
+    f'printf %s "$PWD/mutants/src" > "{EDITABLE_PTH}"\n'
+    f"printf '%s\\n' '{TALLY}'\n"
+)
+REPAIRING_UV = (
+    f'#!/bin/sh\nprintf "%s\\n" "$*" >> uv-calls.log\nprintf %s "$PWD/src" > "{EDITABLE_PTH}"\n'
+)
+BROKEN_UV = '#!/bin/sh\nprintf "%s\\n" "$*" >> uv-calls.log\nexit 1\n'
+
+
+def _run_with_uv(
+    tmp_path: Path, mutmut: str, uv: str
+) -> tuple[Path, subprocess.CompletedProcess[str]]:
+    repo = _repo_with_one_changed_function(tmp_path, mutmut)
+    (repo / EDITABLE_PTH).parent.mkdir(parents=True)
+    (repo / EDITABLE_PTH).write_text(str(repo / "src"), encoding="utf-8")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "uv").write_text(uv, encoding="utf-8")
+    (stubs / "uv").chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/mutmut-pr.sh", "base"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ['PATH']}"},
+        timeout=60,
+        check=False,
+    )
+    return repo, result
+
+
+class TestEditableInstallAfterRun:
+    """Issue #400: a run can re-point .venv's editable install at mutants/src."""
+
+    def test_a_repointed_install_is_repaired_and_said_so(self, tmp_path: Path) -> None:
+        repo, result = _run_with_uv(tmp_path, REPOINTING_MUTMUT, REPAIRING_UV)
+
+        assert (repo / EDITABLE_PTH).read_text(encoding="utf-8") == str(repo / "src")
+        assert (repo / "uv-calls.log").read_text(encoding="utf-8") == (
+            "sync --frozen --reinstall-package lovspor\n"
+        )
+        assert f"re-pointed .venv's editable lovspor install at {repo}/mutants/src" in (
+            result.stderr
+        )
+        assert "repaired: .venv imports lovspor from" in result.stderr
+        assert result.returncode == 0
+
+    def test_an_unrepairable_install_fails_the_run(self, tmp_path: Path) -> None:
+        repo, result = _run_with_uv(tmp_path, REPOINTING_MUTMUT, BROKEN_UV)
+
+        assert f"error: .venv still imports lovspor from {repo}/mutants/src" in result.stderr
+        assert "killed:" not in result.stdout
+        assert result.returncode == 3
+
+    def test_an_intact_install_is_left_alone(self, tmp_path: Path) -> None:
+        intact = REPOINTING_MUTMUT.replace("/mutants/src", "/src")
+        repo, result = _run_with_uv(tmp_path, intact, BROKEN_UV)
+
+        assert not (repo / "uv-calls.log").exists()
+        assert "killed:     1 / 1" in result.stdout
+        assert result.returncode == 0
