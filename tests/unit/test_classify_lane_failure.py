@@ -258,6 +258,21 @@ def test_a_signature_outside_an_error_annotation_is_not_evidence() -> None:
     assert verdict.signature == ""
 
 
+@pytest.mark.parametrize("annotation", ["warning", "notice", "debug"])
+def test_only_an_error_annotation_is_credential_evidence(annotation: str) -> None:
+    """The contract requires the runner's error annotation. Other workflow
+    annotations can quote the same text without proving that authentication
+    ended the lane."""
+    log = (
+        f"2026-09-10T08:55:13.0000000Z ##[{annotation}]fatal: could not read Username for"
+        " 'https://github.com': terminal prompts disabled\n"
+    )
+
+    verdict = classify_lane_failure.classify(_checkout_death(), ["codex-tests"], log)
+
+    assert verdict == classify_lane_failure.Verdict("in_job", job="codex-tests")
+
+
 def test_a_death_with_the_runner_stays_infrastructure_whatever_the_log_says() -> None:
     """The log only refines a job that reached its own failure. A step frozen
     mid-flight is the machine, and a stale auth line earlier in the log does
@@ -315,4 +330,24 @@ def test_an_empty_log_is_no_evidence(tmp_path: Path, capsys: pytest.CaptureFixtu
         "job=codex-tests",
         "step=",
         "signature=",
+    ]
+
+
+def test_the_cli_replaces_malformed_utf8_in_a_downloaded_log(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Job logs are external bytes. One malformed byte elsewhere in the log
+    must not hide a valid credential refusal or silence the fallback job."""
+    jobs = tmp_path / "jobs.json"
+    jobs.write_text(json.dumps({"jobs": _checkout_death()}), encoding="utf-8")
+    log = tmp_path / "lane.log"
+    log.write_bytes(b"invalid: \xff\n" + _EXPIRED_TOKEN_LOG.encode())
+
+    assert classify_lane_failure.main(["--jobs", str(jobs), "--log", str(log)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "kind=credential",
+        "job=codex-tests",
+        f"step={_CHECKOUT}",
+        "signature=could not read Username for 'https://github.com': terminal prompts disabled",
     ]
