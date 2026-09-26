@@ -3212,6 +3212,46 @@ class TestOfflineRollback:
 
         assert stat.S_ISSOCK(droplet.socket_file.lstat().st_mode)
 
+    def test_the_restart_loads_a_caddyfile_caddy_can_read_whatever_the_umask(
+        self, droplet: Droplet, strict_umask: None
+    ) -> None:
+        """The unit runs as ``caddy``, not as the root shell that restores the file."""
+        _migrate(droplet)
+        droplet.caddy.admin_up = False
+        seen: list[int] = []
+
+        def restart(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
+            seen.append(stat.S_IMODE(droplet.plane.caddyfile.stat().st_mode))
+            return droplet.caddy.run(argv, env)
+
+        plane = replace(
+            droplet.plane, runner=Sabotaged(droplet.caddy, ("systemctl", "restart"), restart)
+        )
+
+        offline_rollback(plane, droplet.host)
+
+        assert seen == [0o644]
+        assert stat.S_IMODE(droplet.plane.caddyfile.stat().st_mode) == 0o644
+
+
+class TestEveryRollbackLeavesTheCaddyfileReadable:
+    """Every route back ends in ``_put_files_back``; its write is the file Caddy keeps."""
+
+    @pytest.mark.parametrize("killed_at", [None, "installed"])
+    def test_the_restored_caddyfile_is_world_readable_whatever_the_umask(
+        self, droplet: Droplet, strict_umask: None, killed_at: str | None
+    ) -> None:
+        if killed_at is None:
+            _migrate(droplet)
+        else:
+            with pytest.raises(Killed):
+                _migrate(droplet, _kill_at(killed_at))
+
+        rollback_first_migration(droplet.plane, droplet.host)
+
+        assert droplet.plane.caddyfile.read_text(encoding="utf-8") == OLD_CADDYFILE
+        assert stat.S_IMODE(droplet.plane.caddyfile.stat().st_mode) == 0o644
+
 
 def _dies_at(droplet: Droplet, prefix: tuple[str, ...]) -> ControlPlane:
     def die(argv: Sequence[str], env: Mapping[str, str]) -> Completed:
