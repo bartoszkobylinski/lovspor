@@ -5,6 +5,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from mutmut.mutation.file_mutation import mutate_file_contents
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "ci" / "mutation_scope.py"
 
@@ -19,6 +20,48 @@ def mutation_scope() -> ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+DECORATED_CLASS_SOURCE = """\
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Record:
+    count: int = 1
+
+    def total(self):
+        return self.count + 1
+
+    @property
+    def doubled(self):
+        return self.count * 2
+
+    @staticmethod
+    def half(value):
+        return value / 2
+
+class Outer:
+    @dataclass
+    class Inner:
+        def inner_method(self):
+            return 1 + 1
+
+    def outer_method(self):
+        return 2 + 2
+"""
+
+
+METHODLESS_DECLARATION_SOURCE = """\
+@register
+@dataclass(
+    frozen=1 + 1,
+)
+class Record(
+    make_base(2 + 2),
+):
+    \"\"\"Docstring.\"\"\"
+    count: int = 3 + 3
+"""
 
 
 class TestMutationFunctionScope:
@@ -51,6 +94,38 @@ class Service:
             "xǁServiceǁmethod",
             "xǁServiceǁstatic_method",
         ]
+
+    def test_keyed_units_select_methods_of_a_top_level_decorated_class(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        units = mutation_scope.keyed_units(DECORATED_CLASS_SOURCE)
+
+        assert [unit.key for unit in units] == [
+            "xǁRecordǁtotal",
+            "xǁRecordǁhalf",
+            "xǁOuterǁouter_method",
+        ]
+
+    def test_keyed_units_match_the_functions_mutmut_mutates(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        # #419: the assumption is pinned against the installed mutmut, so a
+        # bump that changes which methods get trampolines turns this red.
+        mutated = mutate_file_contents("x.py", DECORATED_CLASS_SOURCE)
+        mutated_keys = {name.rsplit("__mutmut_", 1)[0] for name in mutated.mutant_names}
+
+        units = mutation_scope.keyed_units(DECORATED_CLASS_SOURCE)
+
+        assert {unit.key for unit in units} == mutated_keys
+
+    def test_a_changed_decorated_class_method_selects_its_pattern(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        patterns = mutation_scope.patterns_for_file(
+            "src/lovspor/example.py", {3, 7, 10}, DECORATED_CLASS_SOURCE
+        )
+
+        assert patterns == ["lovspor.example.xǁRecordǁtotal__mutmut_*"]
 
     def test_patterns_include_only_functions_with_changed_lines(
         self, mutation_scope: ModuleType
@@ -274,12 +349,83 @@ class TestUnmeasuredNotices:
         self, mutation_scope: ModuleType
     ) -> None:
         notices = mutation_scope.unmeasured_notices(
-            "src/lovspor/example.py", {25, 34}, UNMEASURED_SOURCE
+            "src/lovspor/example.py", {25, 31}, UNMEASURED_SOURCE
         )
 
         assert notices == [
             "unmeasured changed lines: src/lovspor/example.py:25 (class body Service)",
-            "unmeasured changed lines: src/lovspor/example.py:34 (decorated class Record)",
+            "unmeasured changed lines: src/lovspor/example.py:31 (class declaration Record)",
+        ]
+
+    def test_a_decorated_class_notices_its_decorator_and_body_not_its_methods(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        # #419: mutmut measures the methods of a top-level decorated class, so
+        # only the decorator and the field lines stay unmeasured.
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {3, 5, 7, 8, 10, 12}, DECORATED_CLASS_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:3 (class declaration Record)",
+            "unmeasured changed lines: src/lovspor/example.py:5 (class body Record)",
+            "unmeasured changed lines: src/lovspor/example.py:10,12"
+            " (decorated function Record.doubled)",
+        ]
+
+    def test_a_decorated_class_notices_its_unmeasured_declaration(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {4}, DECORATED_CLASS_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:4 (class declaration Record)"
+        ]
+
+    @pytest.mark.parametrize(
+        ("changed_lines", "expected"),
+        [
+            pytest.param({1}, ["1 (class declaration Record)"], id="first-of-two-decorators"),
+            pytest.param({3}, ["3 (class declaration Record)"], id="decorator-argument-line"),
+            pytest.param({6}, ["6 (class declaration Record)"], id="multi-line-header-base"),
+            pytest.param({9}, ["9 (class body Record)"], id="field-of-a-class-without-methods"),
+            pytest.param(
+                {2, 7, 9},
+                ["2,7 (class declaration Record)", "9 (class body Record)"],
+                id="declaration-lines-share-one-notice",
+            ),
+        ],
+    )
+    def test_a_decorated_class_declaration_spans_every_decorator_and_its_header(
+        self, mutation_scope: ModuleType, changed_lines: set[int], expected: list[str]
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", changed_lines, METHODLESS_DECLARATION_SOURCE
+        )
+
+        assert notices == [
+            f"unmeasured changed lines: src/lovspor/example.py:{e}" for e in expected
+        ]
+
+    def test_mutmut_mutates_nothing_in_a_decorated_class_without_methods(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        # the declaration and field lines really are unmeasured: the installed
+        # mutmut creates no mutant for decorator arguments, bases or defaults
+        assert mutate_file_contents("x.py", METHODLESS_DECLARATION_SOURCE).mutant_names == []
+        assert mutation_scope.keyed_units(METHODLESS_DECLARATION_SOURCE) == []
+
+    def test_a_nested_decorated_class_stays_unmeasured_as_a_whole(
+        self, mutation_scope: ModuleType
+    ) -> None:
+        notices = mutation_scope.unmeasured_notices(
+            "src/lovspor/example.py", {19, 22}, DECORATED_CLASS_SOURCE
+        )
+
+        assert notices == [
+            "unmeasured changed lines: src/lovspor/example.py:19,22 (decorated class Outer.Inner)"
         ]
 
     def test_nested_class_and_async_method_notices_keep_their_qualified_owner(
@@ -308,7 +454,7 @@ class Outer:
     ) -> None:
         # docstrings, an import, blank lines, a comment inside a decorated
         # body, a mutatable function and a mutatable method
-        lines = {1, 2, 3, 4, 10, 11, 16, 23, 27, 28}
+        lines = {1, 2, 3, 4, 10, 11, 16, 23, 27, 28, 33, 34}
 
         assert mutation_scope.unmeasured_notices("src/lovspor/x.py", lines, UNMEASURED_SOURCE) == []
 
@@ -421,8 +567,8 @@ def decorated():
             pytest.param(
                 "@dataclass\nclass Record:\n    'class docstring'\n\n"
                 "    def total(self):\n        'method docstring'\n        return 6\n",
-                {3, 6, 7},
-                "7 (decorated class Record)",
+                {1, 3, 6},
+                "1 (class declaration Record)",
                 id="decorated-class-docstrings-inert",
             ),
             pytest.param(
