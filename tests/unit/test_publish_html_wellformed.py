@@ -108,6 +108,23 @@ def _source_outline(markdown: str) -> Outline:
     return outline
 
 
+def test_source_outline_compares_visible_heading_text() -> None:
+    markdown = r"""---
+title: Test
+---
+
+# [Linked title](https://example.invalid/target)
+## *Emphasised* and **strong**
+### Escaped \*asterisk\* and \# hash
+"""
+
+    assert _source_outline(markdown) == [
+        (1, "Linked title"),
+        (2, "Emphasised and strong"),
+        (3, "Escaped *asterisk* and # hash"),
+    ]
+
+
 def _built(repo_at: tuple[Path, str], tmp_path: Path) -> tuple[Path, tuple[DocumentPlan, ...]]:
     repo, sha = repo_at
     out = tmp_path / "site"
