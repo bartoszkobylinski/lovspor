@@ -35,7 +35,7 @@ from typing import NamedTuple
 
 SCHEMA_VERSION = 1
 FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
-TOOL = "mutmut 3.7.0 (function-scoped via scripts/mutmut-pr.sh)"
+TOOL = "mutmut 3.8.0 (function-scoped via scripts/mutmut-pr.sh)"
 # Every survivor carries the same keys whether or not the detail step recovered
 # anything, so a consumer never has to distinguish "absent" from "unknown".
 # `detail_source` says which of the two a null means (issue #119).
@@ -90,7 +90,8 @@ BUDGET_EXCEEDED = "mutation budget exceeded:"
 FAILURE_LINE = re.compile(r"^(?:FAILED |ERROR |error: ).*", re.MULTILINE)
 # `mutation_scope.py --explain` names each changed region no mutant can reach:
 # module-level and class-body statements, decorated functions (every typer
-# command), methods of a decorated class (#289, #292). Anchored at line start
+# command), a decorated class's declaration, and a decorated class nested in
+# another class (#289, #292, #419). Anchored at line start
 # so a notice quoted inside a test failure is not read as one.
 UNMEASURED_LINE = re.compile(r"^unmeasured changed lines: (.+)$", re.MULTILINE)
 
