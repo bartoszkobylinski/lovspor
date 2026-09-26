@@ -226,6 +226,12 @@ Invariants, enforced in `tests/unit/test_agentic_ci_workflows.py`:
 
 Both agent lanes keep their own `Escalate…` step: the verifier cannot report a box that
 died before it ever started, and `codex-tests-report` covers the PR lane from outside.
+`remediate-verify` covers the remediation lane the same way (#254): it also runs when
+`remediate` ended `failure` or `cancelled`, because a box that dies mid-job never
+evaluates the job's outputs and `run`/`pr` arrive empty. With no PR to name, it resolves
+the open PR from the branch itself, classifies the death with
+`scripts/ci/classify_lane_failure.py`, and labels `needs-human:mutation` unless the
+pipeline was green, the head moved on, or the label is already there.
 
 Measured on PR #269, the first real PR through the split: the agent job on the box went
 from **877 s** (the old single job) to **225 s**, with the suite moving to a hosted lane
