@@ -212,6 +212,23 @@ class TestThePlan:
 
         assert plan.selected == 3
 
+    def test_selects_the_exact_url_host_not_its_subdomains(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append(artifact("on-requested-host"))
+        log.append(
+            artifact("on-subdomain").model_copy(
+                update={"url": "https://archive.www.arendal.kommune.no/on-subdomain"}
+            )
+        )
+
+        plan = plan_reattribution(log, request(), attribution())
+
+        assert plan.selected == 1
+        assert len(plan.appends) == 2
+        refiled = plan.appends[0]
+        assert isinstance(refiled, RefiledObservation)
+        assert refiled.observation.url == f"{ARENDAL}/on-requested-host"
+
     def test_planning_writes_nothing(self, tmp_path: Path) -> None:
         log = misfiled(tmp_path)
         before = sorted((p.name, p.read_bytes()) for p in tmp_path.rglob("*") if p.is_file())
