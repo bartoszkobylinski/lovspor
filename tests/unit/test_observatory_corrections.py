@@ -4,6 +4,8 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from lovspor.observatory.corrections import CorrectionSet, fold_corrections
 from lovspor.observatory.log import ObservationLog, verify_snapshot
 from lovspor.observatory.model import (
@@ -331,10 +333,20 @@ class TestVerifyAuditsCorrections:
 
         assert verify_snapshot(log).incomplete_corrections == (key_of(original),)
 
-    def test_halves_disagreeing_on_who_or_why_are_not_one_correction(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("reason", "a different reason"),
+            ("corrected_by", "someone else"),
+            ("corrected_at", CORRECTED_AT + timedelta(seconds=1)),
+        ],
+    )
+    def test_halves_disagreeing_on_attribution_are_not_one_correction(
+        self, tmp_path: Path, field: str, value: object
+    ) -> None:
         log, original = self._stored(tmp_path)
         log.append(refiled(original, "4203"))
-        log.append(tombstone(key_of(original)).model_copy(update={"corrected_by": "someone"}))
+        log.append(tombstone(key_of(original)).model_copy(update={field: value}))
 
         report = verify_snapshot(log)
 
