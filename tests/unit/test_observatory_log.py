@@ -1133,6 +1133,49 @@ class TestScanningWithoutHoldingTheLog:
         assert (scan.records_read, scan.complete) == (0, True)
 
 
+class TestScanLines:
+    """ADR-0015 §2: a record's key is its line as stored, so a reader needs it."""
+
+    def test_each_record_arrives_with_its_line_as_stored(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a", url="https://example.invalid/a"), b"a")
+        log.append_artifact(observation(b"b", url="https://example.invalid/b"), b"b")
+        seen: list[tuple[str, bytes]] = []
+
+        scan = log.scan_lines_into(lambda record, line: seen.append((record.url, line)))
+
+        assert scan.records_read == 2
+        assert [line for _, line in seen] == log.log_path.read_bytes().splitlines(keepends=True)
+        assert [url for url, _ in seen] == [
+            "https://example.invalid/a",
+            "https://example.invalid/b",
+        ]
+
+    def test_a_damaged_line_is_reported_and_never_handed_over(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a"), b"a")
+        with log.log_path.open("ab") as handle:
+            handle.write(b"{torn")
+        seen: list[bytes] = []
+
+        scan = log.scan_lines_into(lambda _record, line: seen.append(line))
+
+        assert len(seen) == 1
+        assert scan.incomplete_final_record is True
+        assert scan.clean_through == len(seen[0])
+
+    def test_resumes_at_a_byte_offset(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        log.append_artifact(observation(b"a", url="https://example.invalid/a"), b"a")
+        anchor = log.log_path.stat().st_size
+        log.append_artifact(observation(b"b", url="https://example.invalid/b"), b"b")
+        seen: list[str] = []
+
+        log.scan_lines_into(lambda record, _line: seen.append(record.url), start=anchor)
+
+        assert seen == ["https://example.invalid/b"]
+
+
 class TestTailScans:
     """Issue #201: a scan can resume at a byte offset a previous scan proved.
 

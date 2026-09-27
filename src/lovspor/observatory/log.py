@@ -21,6 +21,7 @@ import fcntl
 import hashlib
 import os
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
@@ -321,44 +322,31 @@ class ObservationLog:
         Trimming it first would be a step whose removal changed nothing, and a
         step nothing can observe is a step nothing can check.
         """
+        return self.scan_lines_into(lambda record, _line: collect(record), start=start)
+
+    def scan_lines_into(
+        self,
+        collect: Callable[[ObservationRecord, bytes], None],
+        *,
+        start: int = 0,
+    ) -> LogScan:
+        """:meth:`scan_into`, handing each record over with its line as stored.
+
+        For the readers that need a record's key (ADR-0015 §2): the key is the
+        hash of the stored bytes, which a re-serialisation of the parsed record
+        does not reproduce for lines written before a field existed.
+        """
         if not self.log_path.exists():
             return LogScan()
-        malformed: list[int] = []
-        read = 0
-        torn_tail = False
-        damaged = False
-        offset = start
-        clean_through = start
+        cursor = _ScanCursor(offset=start, clean_through=start)
         with self.log_path.open("rb") as handle:
             if start:
                 handle.seek(start)
             for number, raw in enumerate(handle, start=1):
-                offset += len(raw)
-                if not raw.strip():
-                    if not damaged:
-                        clean_through = offset
-                    continue
-                try:
-                    record = _RECORD_ADAPTER.validate_json(raw)
-                except ValidationError:
-                    malformed.append(number)
-                    # Only a file's last line can lack its terminator, so a
-                    # malformed line without one is the write that never
-                    # finished. A malformed line that has one is corruption,
-                    # and says so by setting this back to false.
-                    torn_tail = not raw.endswith(b"\n")
-                    damaged = True
-                    continue
-                read += 1
-                if not damaged:
-                    clean_through = offset
-                collect(record)
-        return LogScan(
-            incomplete_final_record=torn_tail,
-            malformed_lines=tuple(malformed[:-1] if torn_tail else malformed),
-            records_read=read,
-            clean_through=clean_through,
-        )
+                record = cursor.read_line(raw, number)
+                if record is not None:
+                    collect(record, raw)
+        return cursor.result()
 
     def scan(self) -> LogScan:
         """Every record the log will give up, plus the damage report.
@@ -397,6 +385,52 @@ class ObservationLog:
                 not this method, decides what it means.
         """
         return self.blob_path(sha256).read_bytes()
+
+
+@dataclass
+class _ScanCursor:
+    """Where a scan stands: bytes read, the resume anchor, the damage seen."""
+
+    offset: int
+    clean_through: int
+    read: int = 0
+    malformed: list[int] = field(default_factory=list)
+    torn_tail: bool = False
+    damaged: bool = False
+
+    def read_line(self, raw: bytes, number: int) -> ObservationRecord | None:
+        """The record on this line, or None for a blank or unreadable one."""
+        self.offset += len(raw)
+        if not raw.strip():
+            self._mark_clean()
+            return None
+        try:
+            record = _RECORD_ADAPTER.validate_json(raw)
+        except ValidationError:
+            self.malformed.append(number)
+            # Only a file's last line can lack its terminator, so a malformed
+            # line without one is the write that never finished. A malformed
+            # line that has one is corruption, and says so by setting this
+            # back to false.
+            self.torn_tail = not raw.endswith(b"\n")
+            self.damaged = True
+            return None
+        self.read += 1
+        self._mark_clean()
+        return record
+
+    def _mark_clean(self) -> None:
+        # Frozen at the first damage: nothing past it is a safe resume point.
+        if not self.damaged:
+            self.clean_through = self.offset
+
+    def result(self) -> LogScan:
+        return LogScan(
+            incomplete_final_record=self.torn_tail,
+            malformed_lines=tuple(self.malformed[:-1] if self.torn_tail else self.malformed),
+            records_read=self.read,
+            clean_through=self.clean_through,
+        )
 
 
 def _discard(record: ObservationRecord) -> None:
