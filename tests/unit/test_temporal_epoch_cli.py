@@ -221,7 +221,12 @@ def test_backfill_boundary_not_before_the_epoch_is_refused(tmp_path: Path) -> No
 
 @pytest.mark.parametrize(
     ("epoch_at", "sync_run"),
-    [("2026-05-09T00:00:00", "1"), ("not a date", "1"), (EPOCH_AT, "run-1")],
+    [
+        ("2026-05-09T00:00:00", "1"),
+        ("2026-05-09T02:00:00+02:00", "1"),
+        ("not a date", "1"),
+        (EPOCH_AT, "run-1"),
+    ],
 )
 def test_backfill_refuses_malformed_input_before_touching_git(
     tmp_path: Path,

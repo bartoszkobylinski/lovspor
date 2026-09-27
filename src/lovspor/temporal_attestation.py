@@ -28,11 +28,12 @@ an existing key is refused. Correcting a gate result means bumping
 import json
 import subprocess
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import Annotated, Literal, NamedTuple
 
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
     ConfigDict,
@@ -95,6 +96,18 @@ class TemporalAttestation(BaseModel):
     attested_at: datetime
 
 
+def _require_utc(value: datetime) -> datetime:
+    # The record format is UTC; an offset elsewhere is a record some
+    # other writer produced, not one of ours read back.
+    if value.utcoffset() != timedelta(0):
+        raise ValueError("must be a UTC instant (offset +00:00 or Z)")
+    return value
+
+
+UtcInstant = Annotated[AwareDatetime, AfterValidator(_require_utc)]
+"""A timezone-aware instant whose offset is zero."""
+
+
 class TemporalGateEpoch(BaseModel):
     """When the reconciliation gate began for one parser version.
 
@@ -107,9 +120,9 @@ class TemporalGateEpoch(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     parser_version: int = Field(ge=1)
-    epoch_at: AwareDatetime
+    epoch_at: UtcInstant
     boundary_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
-    recorded_at: AwareDatetime
+    recorded_at: UtcInstant
     source: Literal["sync-run", "backfill"]
     evidence: str = Field(min_length=1)
 

@@ -15,7 +15,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from lovspor.errors import LovsporError
 from lovspor.snapshot import CorpusStateRef
@@ -25,6 +25,7 @@ from lovspor.temporal_attestation import (
     EPOCH_NOTES_REF,
     AttestationError,
     TemporalGateEpoch,
+    UtcInstant,
     attested_commits,
     check_gate_epoch,
     fetch_attestations,
@@ -122,7 +123,7 @@ class BackfillRequest(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    epoch_at: AwareDatetime
+    epoch_at: UtcInstant
     boundary_commit: str = Field(min_length=4)
     sync_run: str = Field(pattern=r"^[0-9]+$")
     apply: bool = False

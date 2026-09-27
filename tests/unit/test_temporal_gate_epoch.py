@@ -478,3 +478,54 @@ def test_non_commit_anchor_after_a_good_record_is_still_found(tmp_path: Path) ->
 
     with pytest.raises(AttestationError, match="not a commit"):
         read_gate_epochs(repo)
+
+
+def test_writer_refuses_a_boundary_commit_that_does_not_exist(
+    corpus: tuple[Path, str, str],
+) -> None:
+    repo, _boundary, _gated = corpus
+
+    with pytest.raises(AttestationError, match="cannot resolve"):
+        write_gate_epoch(repo, _epoch("0" * 40))
+    assert read_gate_epochs(repo) == {}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[{",
+        "{}",
+        "null",
+        "[]garbage",
+        '[{"parser_version": 2, "epoch_at": "2026-09-04T08:45:36Z"}]',
+    ],
+)
+def test_malformed_or_incomplete_note_is_a_broken_channel(
+    corpus: tuple[Path, str, str],
+    payload: str,
+) -> None:
+    repo, boundary, _gated = corpus
+    _raw_note(repo, boundary, payload)
+
+    with pytest.raises(AttestationError, match="unparseable"):
+        read_gate_epochs(repo)
+
+
+@pytest.mark.parametrize("field", ["epoch_at", "recorded_at"])
+@pytest.mark.parametrize("value", ["2026-09-04T10:45:36+02:00", "2026-09-04T03:45:36-05:00"])
+def test_non_utc_instants_are_refused(field: str, value: str) -> None:
+    with pytest.raises(ValidationError, match="UTC"):
+        _epoch("a" * 40, **{field: value})
+
+
+def test_a_stored_non_utc_record_is_a_broken_channel(corpus: tuple[Path, str, str]) -> None:
+    repo, boundary, _gated = corpus
+    record = {**_epoch(boundary).model_dump(mode="json"), "epoch_at": "2026-09-04T10:45:36+02:00"}
+    _raw_note(repo, boundary, json.dumps([record]))
+
+    with pytest.raises(AttestationError, match="unparseable"):
+        read_gate_epochs(repo)
+
+
+def test_utc_spelled_as_zero_offset_is_the_same_instant() -> None:
+    assert _epoch("a" * 40, epoch_at="2026-09-04T08:45:36+00:00").epoch_at == EPOCH_AT
