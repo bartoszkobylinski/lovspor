@@ -26,8 +26,13 @@ from lovspor.observatory.freshness_index import (
 from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import (
     ArtifactObservation,
+    Correction,
     FetchFailure,
+    RecordTombstone,
+    RefiledObservation,
     RetrievalProvenance,
+    record_key,
+    record_to_json_line,
 )
 from lovspor.observatory.storage import ObservatoryRoot
 
@@ -363,7 +368,9 @@ class TestAnyDoubtRebuilds:
         assert state == _full_fold(log)
 
     def test_the_fold_that_learned_content_runs_has_its_own_version(self) -> None:
-        assert INDEX_DERIVATION_VERSION == 2
+        assert (
+            INDEX_DERIVATION_VERSION >= 2
+        )  # 3 since ADR-0015 moved the fold onto the corrected view
 
 
 class TestDamageNeverAdvancesTheIndex:
@@ -522,3 +529,119 @@ class TestTheBindingIsPinnedByItsBytes:
 
         assert digest == hashlib.sha256(payload).hexdigest()
         assert digest != hashlib.sha256(payload[: 1 << 20]).hexdigest()
+
+
+def _corrected_fold(log: ObservationLog, authority_id: str | None = None) -> CaptureState:
+    state = CaptureState.empty()
+    assert log.scan_corrected_into(collect_capture_state(state, authority_id)).complete
+    return state
+
+
+def _refile(
+    log: ObservationLog, original: ArtifactObservation | FetchFailure, **changes: str
+) -> None:
+    """Append both halves of a correction that re-files ``original`` with ``changes``.
+
+    Only ``authority_id`` is a legal correction, and the register-wide fold
+    does not read it; a changed URL is what makes the fold's use of the
+    corrected view observable here. `verify` would refuse such a correction.
+    """
+    key = record_key(record_to_json_line(original).encode("utf-8"))
+    attribution = {"reason": "test", "corrected_by": "owner", "corrected_at": NOW}
+    log.append(
+        RefiledObservation(
+            observation=original.model_copy(update=changes),
+            correction=Correction(
+                supersedes=key,
+                correction_id="c1",
+                corrected_fields=("authority_id",),
+                previous_values={"authority_id": original.authority_id},
+                **attribution,  # type: ignore[arg-type]
+            ),
+        )
+    )
+    log.append(RecordTombstone(retracts=key, correction_id="c1", **attribution))  # type: ignore[arg-type]
+
+
+class TestTheIndexFoldsTheCorrectedView:
+    """ADR-0015 §5: the index caches the fold of the corrected view, and an
+    index built before a correction landed is rebuilt, not extended."""
+
+    def test_the_derivation_version_moved_past_the_uncorrected_fold(self) -> None:
+        assert INDEX_DERIVATION_VERSION == 3
+
+    def test_a_cold_build_folds_the_corrected_view(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        original = _observation("https://example.invalid/wrong")
+        log.append(original)
+        _refile(log, original, url="https://example.invalid/right")
+
+        state, _ = indexed_capture_state(log)
+
+        assert set(state.observed) == {"https://example.invalid/right"}
+        assert state == _corrected_fold(log)
+
+    def test_a_correction_after_the_index_rebuilds_the_fold(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        original = _observation("https://example.invalid/wrong")
+        log.append(original)
+        indexed_capture_state(log)
+        _refile(log, original, url="https://example.invalid/right")
+
+        state, scan = indexed_capture_state(log)
+
+        assert set(state.observed) == {"https://example.invalid/right"}
+        assert scan.clean_through == log.log_path.stat().st_size
+        assert state == _corrected_fold(log)
+
+    def test_growth_after_a_correction_still_folds_only_the_tail(self, tmp_path: Path) -> None:
+        log = make_log(tmp_path)
+        original = _observation("https://example.invalid/wrong")
+        log.append(original)
+        _refile(log, original, url="https://example.invalid/right")
+        indexed_capture_state(log)
+        log.append(_observation("https://example.invalid/b", NOW + timedelta(hours=1)))
+
+        state, scan = indexed_capture_state(log)
+
+        assert scan.records_read == 1
+        assert state == _corrected_fold(log)
+
+
+class TestTheNarrowedFoldFollowsTheCorrection:
+    """The per-authority fold is where attribution decides a capture."""
+
+    def _misfiled_then_corrected(self, root: Path) -> ObservationLog:
+        log = make_log(root)
+        first = _observation("https://example.invalid/a").model_copy(
+            update={"authority_id": "4202"}
+        )
+        failed = _failure("https://example.invalid/b").model_copy(update={"authority_id": "4202"})
+        log.append(first)
+        log.append(failed)
+        log.append(_observation("https://example.invalid/a", NOW + timedelta(hours=1)))
+        _refile(log, first, authority_id="4203")
+        _refile(log, failed, authority_id="4203")
+        return log
+
+    def test_the_target_sees_the_records_and_the_source_does_not(self, tmp_path: Path) -> None:
+        log = self._misfiled_then_corrected(tmp_path)
+
+        assert set(_capture_state(log, "4203").observed) == {"https://example.invalid/a"}
+        assert set(_capture_state(log, "4203").holds) == {"https://example.invalid/b"}
+        assert _capture_state(log, "4202") == CaptureState.empty()
+
+    def test_equals_the_fold_of_a_log_filed_correctly_from_the_start(self, tmp_path: Path) -> None:
+        corrected = self._misfiled_then_corrected(tmp_path / "corrected")
+        filed_right = make_log(tmp_path / "right")
+        for record in (
+            _observation("https://example.invalid/a").model_copy(update={"authority_id": "4203"}),
+            _failure("https://example.invalid/b").model_copy(update={"authority_id": "4203"}),
+            _observation("https://example.invalid/a", NOW + timedelta(hours=1)),
+        ):
+            filed_right.append(record)
+
+        for authority_id in ("4203", "3201", None):
+            assert _capture_state(corrected, authority_id) == _capture_state(
+                filed_right, authority_id
+            )

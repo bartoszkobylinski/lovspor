@@ -1,10 +1,12 @@
 """Observatory commands that work the archive: capture, sweep, verify, report.
 
 The register's own administration -- registering a source, activating it,
-recording a verdict, replacing a domain -- lives in ``registry_commands``.
-The two halves share ``app`` (the Typer instance both decorate) and
-``registry_io`` (reading and writing the register), so neither imports the
-other and no cycle is possible.
+recording a verdict, replacing a domain -- lives in ``registry_commands``; the
+acts that edit the log itself -- `repair` -- live in ``log_commands``; the
+audits of the archive -- `verify`, `composition` -- in ``audit_commands``.
+All four share ``app`` (the Typer instance each decorates) and
+``registry_io`` (reading and writing the register), so none imports another
+and no cycle is possible.
 """
 
 import os
@@ -21,9 +23,10 @@ from lovspor.errors import (
 )
 from lovspor.exclusive_workload import ExclusiveWorkloadHeldError, exclusive_workload
 
-# Imported for its registrations: the module decorates `observatory_app` with
-# the registry-administration commands, and nothing here refers to its names.
-from lovspor.observatory import registry_commands  # noqa: F401
+# Imported for their registrations: the modules decorate `observatory_app` with
+# the registry, log-editing and audit commands, and nothing here refers to
+# their names.
+from lovspor.observatory import audit_commands, log_commands, registry_commands  # noqa: F401
 from lovspor.observatory.addresses import (
     AddressReport,
     SharedAddress,
@@ -41,9 +44,8 @@ from lovspor.observatory.freshness import (
 )
 from lovspor.observatory.freshness_index import indexed_capture_state
 from lovspor.observatory.heartbeat import heartbeat_url, send_heartbeat
-from lovspor.observatory.log import ObservationLog, SnapshotVerification, verify_snapshot
+from lovspor.observatory.log import ObservationLog
 from lovspor.observatory.model import ArtifactObservation
-from lovspor.observatory.outcomes import ArchiveComposition, collect_composition
 from lovspor.observatory.registry import (
     SourceRecord,
     registry_path,
@@ -68,111 +70,6 @@ from lovspor.observatory.triggers import running_sweep
 # `observatory_app` is defined in `app` and re-exported here: `cli.py` imports it
 # from this module, and both command modules decorate the same instance.
 __all__ = ["observatory_app"]
-
-
-# Each pairs a defect list with what its presence means. Kept together so the
-# report cannot drift from the model: a field added to SnapshotVerification and
-# not added here would be counted by `ok` and never explained to anyone.
-def _defects(result: SnapshotVerification) -> list[str]:
-    counted = (
-        (result.missing_blobs, "blobs gone with no tombstone"),
-        (result.hash_mismatches, "blobs that no longer hash to their record"),
-        (result.orphan_blobs, "blobs no record mentions"),
-        (result.unremoved_tombstones, "tombstoned blobs still on disk"),
-        (result.tombstones_without_observation, "tombstones for hashes never observed"),
-        (result.observations_after_tombstone, "observations appended after their tombstone"),
-    )
-    return [f"{len(found)} {label}" for found, label in counted if found]
-
-
-def _log_damage(result: SnapshotVerification) -> list[str]:
-    """The two log defects, each with the action it calls for.
-
-    They call for opposite actions, which is the whole reason the audit
-    separates them: one line may be dropped, the other must not be touched.
-    """
-    damage = []
-    if result.incomplete_final_record:
-        damage.append(
-            "the final record was never finished — an interrupted run leaves exactly this, "
-            "and the fetch it describes was never recorded. `observatory repair` removes that "
-            "one line and keeps the log as it stood."
-        )
-    if result.malformed_lines:
-        numbers = ", ".join(str(number) for number in result.malformed_lines)
-        damage.append(
-            f"line(s) {numbers} are corrupted — an interrupted append cannot produce this, "
-            "so the storage itself is suspect. Do not truncate: restore from backup."
-        )
-    return damage
-
-
-@observatory_app.command("verify")
-def verify() -> None:
-    """Audit the snapshot: the log and the stored bytes must account for each other.
-
-    Exits non-zero when they do not, so a scheduled run can act on it. A
-    tombstoned blob is not a defect — a recorded, explained removal is the
-    sanctioned way for bytes to disappear.
-    """
-    result = verify_snapshot(ObservationLog(_root()))
-    typer.echo(f"artifacts checked: {result.artifacts_checked}")
-    if result.tombstoned:
-        typer.echo(f"removed under a tombstone: {len(result.tombstoned)} (sanctioned)")
-    for line in _log_damage(result):
-        typer.echo(f"  {line}")
-    for line in _defects(result):
-        typer.echo(f"  {line}")
-    if result.ok:
-        typer.echo("snapshot ok")
-        return
-    typer.echo("snapshot NOT ok")
-    raise typer.Exit(1)
-
-
-@observatory_app.command("composition")
-def composition() -> None:
-    """What the archive is made of, and the failure rate it actually has.
-
-    The log files a followed redirect as a `fetch_failure`, because that hop
-    returned no bytes — and 75% of everything it calls a failure is one. Read
-    by `kind` alone the archive reports a failure rate four times its real one
-    (issue #188), and until this command there was nowhere to read it any other
-    way: every summary the engine prints is derived from what a fetch returned,
-    not from the log, so an auditor opening the archive wrote their own query
-    and got the wrong number.
-
-    One streamed pass. The counts are the answer, not the archive, so the
-    memory this needs is the size of the report (issue #199).
-    """
-    log = ObservationLog(_root())
-    found = ArchiveComposition()
-    if not log.scan_into(collect_composition(found)).complete:
-        typer.echo(
-            "Refused: the observation log is damaged. Run `observatory verify` first.", err=True
-        )
-        raise typer.Exit(1)
-    _echo_composition(found)
-
-
-def _echo_composition(found: ArchiveComposition) -> None:
-    """The composition, with both rates side by side.
-
-    The wrong figure is printed next to the right one on purpose: somebody has
-    already quoted it, and a report that silently replaces it leaves them
-    unable to tell which number they had.
-    """
-    typer.echo(f"records:          {found.records}")
-    typer.echo(f"  artifacts:      {found.artifacts}")
-    typer.echo(f"  redirect hops:  {found.hops}  (recorded as fetch_failure, not failures)")
-    typer.echo(f"  lost documents: {found.lost}")
-    typer.echo(f"  tombstones:     {found.tombstones}")
-    typer.echo(f"\nlost documents:   {found.loss_rate:.2%} of all records")
-    typer.echo(f"counting kind alone: {found.naive_failure_rate:.2%} — the #188 figure, overstated")
-    if found.by_outcome:
-        typer.echo("\nfailures by outcome")
-        for outcome, count in found.by_outcome.most_common():
-            typer.echo(f"  {outcome:32} {count}")
 
 
 @observatory_app.command("addresses")
@@ -368,66 +265,6 @@ def discover(
     _report_discovery(result)
 
 
-def _remove_unfinished_record(log: ObservationLog, raw: bytes) -> None:
-    """Back the log up, then drop its unfinished final record.
-
-    The backup is written before anything is truncated, so an interruption
-    here leaves the original intact rather than half-repaired. It refuses to
-    overwrite an existing backup: a second repair silently clobbering the
-    evidence from the first is the failure this command exists to avoid.
-    """
-    backup = log.log_path.with_name(log.log_path.name + ".bak")
-    if backup.exists():
-        typer.echo(f"Refused: {backup} already exists — move it aside first.", err=True)
-        raise typer.Exit(1)
-    backup.write_bytes(raw)
-    body, separator, _ = raw.rpartition(b"\n")
-    log.log_path.write_bytes(body + separator)
-    typer.echo(f"removed. The log as it stood is kept at {backup}")
-
-
-@observatory_app.command("repair")
-def repair(
-    apply: Annotated[
-        bool, typer.Option("--apply", help="Actually remove it. Without this, nothing is written.")
-    ] = False,
-) -> None:
-    """Drop an unfinished final record left by an interrupted run.
-
-    Only that. The command refuses every other kind of damage, because only
-    this one is safe to fix by deleting: an append that never finished
-    describes a fetch that was never recorded, so the line carries nothing a
-    reader could otherwise recover. A corrupted line anywhere else was written
-    in full and then damaged — cutting it would destroy a record nobody has
-    been told about, and it means the storage is failing rather than a run
-    being interrupted.
-
-    Reports without writing unless ``--apply`` is given. This edits evidence;
-    it should take two deliberate steps, and a dry run has to be possible on a
-    machine where the answer is "do not touch this".
-    """
-    log = ObservationLog(_root())
-    scan = log.scan_damage()
-    if scan.malformed_lines:
-        numbers = ", ".join(str(number) for number in scan.malformed_lines)
-        typer.echo(
-            f"Refused: line(s) {numbers} are corrupted, which an interrupted append cannot "
-            "produce. The storage is suspect — restore from backup rather than truncating.",
-            err=True,
-        )
-        raise typer.Exit(1)
-    if not scan.incomplete_final_record:
-        typer.echo("nothing to repair")
-        return
-    raw = log.log_path.read_bytes()
-    unfinished = raw.rpartition(b"\n")[2]
-    typer.echo(f"unfinished final record: {len(unfinished)} bytes, {scan.records_read} intact")
-    if not apply:
-        typer.echo("dry run — nothing written. Re-run with --apply to remove it.")
-        return
-    _remove_unfinished_record(log, raw)
-
-
 class _CaptureCounts(NamedTuple):
     """What one source's pass did, and whether the limit cut it short.
 
@@ -614,7 +451,7 @@ def _capture_state(log: ObservationLog, authority_id: str | None) -> CaptureStat
         state, scan = indexed_capture_state(log)
     else:
         state = CaptureState.empty()
-        scan = log.scan_into(collect_capture_state(state, authority_id))
+        scan = log.scan_corrected_into(collect_capture_state(state, authority_id))
     if not scan.complete:
         typer.echo(
             "Refused: the observation log is damaged. Run `observatory verify` first.", err=True

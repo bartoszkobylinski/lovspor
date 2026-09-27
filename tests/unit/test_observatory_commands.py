@@ -32,6 +32,7 @@ from lovspor.cli import app
 from lovspor.errors import AmbiguousSourceError
 from lovspor.exclusive_workload import default_lock_path, exclusive_workload
 from lovspor.observatory.addresses import SharedAddress, SourceAddresses
+from lovspor.observatory.audit_commands import _defects
 from lovspor.observatory.commands import (
     ENV_REQUIRE_PINNED_ENGINE,
     OBSERVATORY_WORKLOAD,
@@ -52,10 +53,11 @@ from lovspor.observatory.events import (
 from lovspor.observatory.freshness import CaptureState, FailureHold
 from lovspor.observatory.heartbeat import ENV_HEARTBEAT_URL, FAIL_SUFFIX
 from lovspor.observatory.listing import LISTING_METHOD
-from lovspor.observatory.log import ObservationLog
+from lovspor.observatory.log import ObservationLog, SnapshotVerification
 from lovspor.observatory.model import (
     ArtifactObservation,
     FetchFailure,
+    RecordTombstone,
     RetrievalProvenance,
     Tombstone,
 )
@@ -1006,6 +1008,7 @@ class TestComposition:
 
         assert result.exit_code == 0, result.output
         assert "  tombstones:     0\n" in result.output
+        assert "corrections:      0 re-filed, 0 record tombstones" in result.output
 
     def test_an_empty_archive_reports_zero_rather_than_dividing_by_it(self, root: Path) -> None:
         result = runner.invoke(app, ["observatory", "composition"])
@@ -1030,6 +1033,21 @@ class TestComposition:
 class TestVerify:
     """The audit an operator runs after an interrupted run. Its whole value is
     that it answers "how bad is it?" precisely when the archive is damaged."""
+
+    @pytest.mark.parametrize(
+        ("field", "label"),
+        [
+            ("corrections_without_record", "corrections naming no record in the log"),
+            ("refiled_mismatches", "re-filed records that do not restate their original"),
+            ("multiply_corrected", "records corrected more than once"),
+        ],
+    )
+    def test_each_correction_defect_has_its_exact_operator_facing_label(
+        self, field: str, label: str
+    ) -> None:
+        report = SnapshotVerification.model_validate({"artifacts_checked": 0, field: ("a" * 64,)})
+
+        assert _defects(report) == [f"1 {label}"]
 
     def test_an_intact_archive_passes(self, root: Path) -> None:
         _archive(root)
@@ -1166,6 +1184,26 @@ class TestVerify:
 
         assert result.exit_code == 1
         assert "1 tombstones for hashes never observed" in result.output
+
+    def test_a_half_written_correction_fails_the_audit(self, root: Path) -> None:
+        """ADR-0015 §6: the nightly preflight runs verify, so a correction a
+        crash left half-applied stays red until the command is re-run."""
+        log = _archive(root)
+        original = log.log_path.read_bytes().removesuffix(b"\n")
+        log.append(
+            RecordTombstone(
+                retracts=hashlib.sha256(original).hexdigest(),
+                correction_id="c1",
+                reason="misattributed",
+                corrected_by="owner",
+                corrected_at=datetime(2026, 9, 27, tzinfo=UTC),
+            )
+        )
+
+        result = runner.invoke(app, ["observatory", "verify"])
+
+        assert result.exit_code == 1
+        assert "1 incomplete corrections (one half only)" in result.output
 
     def test_an_observation_after_its_tombstone_is_reported(self, root: Path) -> None:
         """The public API refuses to write this; only a hand-edited log can
